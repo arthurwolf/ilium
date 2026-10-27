@@ -666,6 +666,22 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 <td>PKG-023</td>
 </tr>
 <tr>
+<td><code>data_use</code></td>
+<td>list of object</td>
+<td>no</td>
+<td>none</td>
+<td>At most 8 entries <code>{ "what", "where", "purpose", "opt_in" }</code>, strings of at most 200 characters, <code>opt_in</code> boolean</td>
+<td>SEC-267</td>
+</tr>
+<tr>
+<td><code>security_contact</code></td>
+<td>string</td>
+<td>no</td>
+<td>none</td>
+<td>An email address or an <code>https://</code> address, at most 200 characters</td>
+<td>SEC-268</td>
+</tr>
+<tr>
 <td><code>server</code>, <code>client</code>, <code>scene</code></td>
 <td>object</td>
 <td>at least one</td>
@@ -813,13 +829,13 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tr>
 <tr>
 <td>[PKG-019]</td>
-<td><code>license</code> is shown and stored. The host checks only the length. A registry publish may require a known SPDX expression.</td>
+<td><code>license</code> is shown and stored. The host refuses an empty value or one over 128 characters. A registry publish may require a known SPDX expression.</td>
 <td><code>manifest.schema</code></td>
 </tr>
 <tr>
 <td>[PKG-020]</td>
 <td>An icon name that the client does not know is drawn as the default plugin icon. It is a warning in <code>check</code> and never an install error.</td>
-<td><code>manifest.schema</code></td>
+<td>none (warning only)</td>
 </tr>
 <tr>
 <td>[PKG-021]</td>
@@ -828,7 +844,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tr>
 <tr>
 <td>[PKG-022]</td>
-<td><code>keywords</code> feed search only.</td>
+<td><code>keywords</code> feed search only. More than 8 items, or an item outside 1 to 24 characters, is refused.</td>
 <td><code>manifest.schema</code></td>
 </tr>
 <tr>
@@ -1151,7 +1167,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tbody>
 </table>
 <h2 id="release-information-the-manifest-does-not-carry">Release information the manifest does not carry</h2>
-<p>The manifest has no key for a home page, a repository, a support address, a changelog, a deprecation notice or a replacement name in <code>ilium:plugin@0.1.0</code>. The keys that describe a plugin to a person are <code>name</code>, <code>publisher</code>, <code>description</code> (one paragraph, at most 280 characters according to <code>lint.description-missing</code>), <code>license</code> and <code>icon</code>. An author MUST put the support contact, the home page and the changelog in <code>README.md</code> and in the <code>description</code>, and MUST NOT add other metadata keys, because an unknown key is refused with <code>manifest.unknown-key</code>. [AUT-321] Deprecation and a successor are properties of a registry entry, not of the manifest. See <a href="/pages/guide-publishing-and-support/">Publishing and support</a>.</p>
+<p>The manifest has no key for a home page, a repository, a support address, a changelog, a deprecation notice or a replacement name in <code>ilium:plugin@0.1.0</code>. The keys that describe a plugin to a person are <code>name</code>, <code>publisher</code>, <code>description</code> (one paragraph; the hard limit is 500 characters, and <code>lint.description-missing</code> warns above 280 characters), <code>license</code> and <code>icon</code>. An author MUST put the support contact, the home page and the changelog in <code>README.md</code> and in the <code>description</code>, and MUST NOT add other metadata keys, because an unknown key is refused with <code>manifest.unknown-key</code>. [AUT-321] Deprecation and a successor are properties of a registry entry, not of the manifest. See <a href="/pages/guide-publishing-and-support/">Publishing and support</a>.</p>
 <h2 id="activation-triggers">Activation triggers</h2>
 <p>Without <code>activation</code>, a plugin starts on the first use of any contribution (lazy).</p>
 <table>
@@ -1367,7 +1383,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 <tr>
 <td><code>jobs</code></td>
 <td><code>kind</code>, <code>deadline_ms</code>, <code>memory_mib</code></td>
-<td>Override the job limits, within the ceilings</td>
+<td>Override the job limits, within the ceilings. <code>deadline_ms</code> is the CPU-time limit of the job (the <code>job-runner.run</code> CPU row of the scheduling table); the wall-time limit is not a manifest key</td>
 </tr>
 <tr>
 <td><code>onboarding_steps</code></td>
@@ -1427,10 +1443,10 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 <p>A chord is <code>*(modifier "+") key</code> in lower case. Modifiers are <code>ctrl</code>, <code>alt</code>, <code>shift</code> and <code>super</code>, in any order. The key is one printable character, or <code>enter</code>, <code>escape</code>, <code>tab</code>, <code>backspace</code>, <code>delete</code>, <code>insert</code>, <code>home</code>, <code>end</code>, <code>page-up</code>, <code>page-down</code>, <code>up</code>, <code>down</code>, <code>left</code>, <code>right</code> or <code>f1</code> to <code>f24</code>. Write <code>+</code> as <code>plus</code>. Shift+A is <code>shift+a</code>.</p>
 <p>On a clash the user's remap wins, then kernel built-ins, then T1, then T2 and T3 plugins. Within a rank, the first installed plugin wins. The losing binding is inactive and listed in Settings &gt; Keys.</p>
 <h3 id="the-when-expression">The when expression</h3>
-<p><code>when</code> joins comparisons with <code>&amp;&amp;</code>, <code>||</code>, <code>!</code> and parentheses. A comparison is <code>key == "text"</code> or <code>key != "text"</code>. The keys are <code>pane.primitive</code> (<code>basic</code>, <code>terminal</code>, <code>agent</code>, <code>editor</code>, <code>none</code>), <code>pane.kind</code> and <code>agent.activity</code>. A key with no pane in scope is false. <code>when</code> only hides entries. It never blocks <code>commands.invoke</code>.</p>
+<p><code>when</code> joins comparisons with <code>&amp;&amp;</code>, <code>||</code>, <code>!</code> and parentheses. A comparison is <code>key == "text"</code> or <code>key != "text"</code>. The keys are <code>pane.primitive</code> (<code>basic</code>, <code>terminal</code>, <code>agent</code>, <code>editor</code>, <code>none</code>), <code>pane.kind</code>, <code>agent.activity</code>, <code>node.kind</code>, <code>node.file_extension</code>, <code>agent.signature</code>, <code>view.focused</code> and <code>display_mode</code>. All eight are valid in <code>commands</code>, <code>toolbar_buttons</code>, <code>context_menu</code>, <code>row_actions</code> and <code>tree_toolbar</code>; see <a href="/pages/api-commands/">the <code>when</code> keys table</a>. A key with no pane in scope is false. <code>when</code> only hides entries. It never blocks <code>commands.invoke</code>.</p>
 <h3 id="settings-schema-subset">Settings schema subset</h3>
 <p>Command <code>arguments_schema</code> uses JSON Schema draft 2020-12, restricted to: <code>type</code> (<code>object</code>, <code>boolean</code>, <code>integer</code>, <code>number</code>, <code>string</code>), <code>properties</code>, <code>required</code>, <code>enum</code>, <code>title</code>, <code>description</code>, <code>default</code>, <code>minimum</code>, <code>maximum</code>, <code>pattern</code>, <code>maxLength</code>, and the Ilium keywords <code>help</code>, <code>step</code>, <code>unit</code>, <code>secret</code>, <code>multiline</code>, <code>enum_titles</code> and <code>picker</code> (<code>file</code> or <code>directory</code>, with <code>extensions</code>). Other keywords are refused with <code>manifest.schema-keyword</code>.</p>
-<p>Settings rows do not carry a schema of their own. Each value row (<code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text</code>, <code>text-area</code>, <code>path</code>, <code>color</code>, <code>keybinding</code>, <code>list</code>) compiles to a property of the plugin's settings schema, which uses the same keywords and also <code>type: array</code> with <code>items</code> and <code>maxItems</code> (at most 64) for <code>list</code> rows. The row fields and their compiled form are in the <a href="/pages/reference-settings-schema/">settings schema reference</a>.</p>
+<p>Settings rows do not carry a schema of their own. Each value row (<code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text</code>, <code>text-area</code>, <code>path</code>, <code>color</code>, <code>keybinding</code>, <code>list</code>, <code>location</code>, <code>map</code>, <code>multi-choice</code>) compiles to a property of the plugin's settings schema, which uses the same keywords and also <code>type: array</code> with <code>items</code> and <code>maxItems</code> (at most 64) for <code>list</code> rows. The row fields and their compiled form are in the <a href="/pages/reference-settings-schema/">settings schema reference</a>.</p>
 <h3 id="signature-entries">Signature entries</h3>
 <p><code>id</code> is 1 to 64 characters from <code>[a-z0-9-]</code>. <code>process_names</code> holds 1 to 32 non-empty names of at most 255 bytes, without <code>/</code> unless absolute. <code>aliases</code> holds at most 32 entries. <code>actions</code> holds at most 32, each with <code>keys</code> of at most 1 KiB. The global id is <code>&lt;plugin-id&gt;.&lt;id&gt;</code>.</p>
 <h2 id="chrome-and-contribution-keys">Chrome and contribution keys</h2>
@@ -1610,7 +1626,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 }
 </code></pre>
 <h3 id="filling-a-segment-at-run-time">Filling a segment at run time</h3>
-<p>The manifest reserves the place. The plugin fills it with an intent at run time. The Rust and TypeScript listings for <code>set-status-segment</code>, the <code>row-action</code> click and the other chrome intents are on <a href="/pages/api-intent-chrome/">Chrome intents</a> and <a href="/pages/api-tree-chrome/">Tree chrome</a>. The filled segment is cleared when the plugin stops, and the host drops updates above 10 per second per segment.</p>
+<p>The manifest reserves the place. The plugin fills it with an intent at run time. The Rust and TypeScript listings for <code>set-status-segment</code>, the <code>row-action</code> click and the other chrome intents are on <a href="/pages/api-intent-chrome/">Chrome intents</a> and <a href="/pages/api-tree-chrome/">Tree chrome</a>. The filled segment is cleared when the plugin stops, and the host drops updates above 10 per second per slot (the segment id is the slot).</p>
 <h3 id="services">Services</h3>
 <p>A service is a typed function set that one plugin offers and others call. The call contract is in <a href="/pages/api-services/">Services</a>. The manifest side is here.</p>
 <p><strong>Provider.</strong> <code>contributes.services.provides</code> lists up to 16 objects.</p>
@@ -1644,7 +1660,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tr>
 </tbody>
 </table>
-<p><strong>Caller.</strong> <code>requires.services</code> lists strings of the form <code>&lt;name&gt;@&lt;version&gt;</code> with a full <code>major.minor.patch</code> version, which means the minimum compatible version. Caret, tilde and ranges are refused with <code>manifest.service-version</code>. The grant is <code>services.use:&lt;name&gt;</code>; the provider's grant is <code>services.provide:&lt;name&gt;</code>. A grant never carries a version. A cycle of service requirements is refused with <code>manifest.service-cycle</code> [PKG-079].</p>
+<p><strong>Caller.</strong> <code>requires.services</code> lists strings of the form <code>&lt;name&gt;@&lt;version&gt;</code> with a full <code>major.minor.patch</code> version, which means the minimum compatible version. Caret, tilde and ranges are refused with <code>manifest.service-version</code>. The grant is <code>services.use:&lt;name&gt;</code>; the provider's grant is <code>services.provide:&lt;name&gt;</code>. A grant never carries a version. A cycle of service requirements is refused with <code>manifest.service-cycle</code> [PKG-654].</p>
 <table>
 <thead>
 <tr>
@@ -1711,7 +1727,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 <tr>
 <td><code>deadline_ms</code></td>
 <td>hook</td>
-<td>5 to 50, default 20</td>
+<td>5 to 50 for every tier, default 20</td>
 </tr>
 <tr>
 <td><code>max_handlers</code></td>
@@ -1756,7 +1772,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 <tbody>
 <tr>
 <td><code>point</code></td>
-<td><code>&lt;plugin-id&gt;/&lt;id&gt;</code>, optionally <code>&lt;plugin-id&gt;/&lt;id&gt;@&lt;minimum-version&gt;</code>. Without <code>@version</code> the contribution matches any owner version. With it, the rule is: same major; minor at least the requested one; for major 0 the minor must be equal; patch ignored</td>
+<td><code>&lt;plugin-id&gt;/&lt;id&gt;</code>, optionally <code>&lt;plugin-id&gt;/&lt;id&gt;@&lt;minimum-version&gt;</code>. Without <code>@version</code> the contribution matches any owner version. With it, the version is a bare version and so a caret range (PKG-317, PKG-318, PKG-328 in <a href="/pages/reference-dependency-resolution/">Dependency resolution</a>): <code>@1.2.0</code> accepts <code>&gt;=1.2.0 &lt;2.0.0</code>, <code>@0.1.0</code> accepts <code>&gt;=0.1.0 &lt;0.2.0</code></td>
 </tr>
 <tr>
 <td><code>id</code></td>
@@ -2249,7 +2265,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tr>
 <tr>
 <td>[PKG-074]</td>
-<td>The user may set the same keys under <code>[plugins.limits]</code> or <code>[plugins."&lt;id&gt;".limits]</code>. The effective value is <code>min(ceiling, first set of [plugins."&lt;id&gt;".limits] value, [plugins.limits] value, manifest value, default)</code>; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it (LIF-143).</td>
+<td>The user may set the same keys under <code>[plugins.limits]</code> or <code>[plugins."&lt;id&gt;".limits]</code>. The effective value is <code>min(ceiling, v)</code>, where <code>v</code> is the first set of the <code>[plugins."&lt;id&gt;".limits]</code> value, the <code>[plugins.limits]</code> value, the manifest value and the default, in that order; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it (LIF-143).</td>
 <td>none</td>
 </tr>
 </tbody>
@@ -2272,7 +2288,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tr>
 <tr>
 <td>[PKG-076]</td>
-<td>Every error carries a <code>code</code>, a <code>message</code> from the template of the catalogue, and a JSON pointer to the value.</td>
+<td>Every error carries a <code>code</code>, a <code>message</code> from the template of the catalogue, and, when the error has a place in the document, a pointer (RFC 6901) or a path to it.</td>
 </tr>
 <tr>
 <td>[PKG-077]</td>
@@ -2452,7 +2468,7 @@ A capability listed in `capabilities` appears in the review dialog at install ti
 </tr>
 <tr>
 <td><code>exports</code> lists a name that the side does not have</td>
-<td><code>manifest.schema</code> at the list entry</td>
+<td><code>manifest.exports-mismatch</code></td>
 </tr>
 <tr>
 <td><code>exports</code> is empty but the component has <code>detector</code></td>

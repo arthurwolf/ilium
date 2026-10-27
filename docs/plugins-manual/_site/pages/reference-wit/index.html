@@ -1639,7 +1639,7 @@ interface ids {
   record journal-entry { at: epoch-ms, pane: option&lt;node-id&gt;, source: string, kind: string, payload-json: string }
   /// payload-json is at most 4 KiB. The oldest entries are trimmed at limits.journal_entries.
   log-event: func(pane: option&lt;node-id&gt;, kind: string, payload-json: string) -&gt; result&lt;_, plugin-error&gt;;
-  /// Own entries, newest last. limit is at most 1,000.
+  /// Own entries, newest last. limit is at most 1,000; a larger limit is clamped to 1,000.
   read: func(pane: option&lt;node-id&gt;, since: epoch-ms, limit: u32) -&gt; list&lt;journal-entry&gt;;
 }
 </code></pre>
@@ -1843,7 +1843,7 @@ interface ids {
   record http-request { method: string, url: string, headers: list&lt;header&gt;, body: option&lt;list&lt;u8&gt;&gt;, timeout-millis: u32 }
   record http-response { status: u16, headers: list&lt;header&gt;, body: list&lt;u8&gt; }
   enum stream-framing { raw, lines, server-sent-events, ndjson }
-  /// max-chunk-bytes at most 1 MiB.
+  /// max-chunk-bytes at most 64 KiB.
   record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
   /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
   fetch: func(request: http-request) -&gt; result&lt;request-id, plugin-error&gt;;
@@ -1975,6 +1975,7 @@ interface ids {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Async, take-reply. A call to the plugin's own service is queued, see Runtime model.
+  // @unstable(feature = plugin-services)
   call: func(service: string, method: string, payload-json: string) -&gt; result&lt;request-id, plugin-error&gt;;
   take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
   /// Provider side, for deferred replies. Errors: not-found for an unknown call id.
@@ -2004,6 +2005,7 @@ interface ids {
   display-width: func(text: string) -&gt; u16;
   theme: func() -&gt; theme-tokens;
   theme-extras: func() -&gt; theme-extras;
+  /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
   /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
   /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
   write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
@@ -2084,7 +2086,7 @@ interface ids {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   record audio-device { id: string, name: string, is-input: bool, is-default: bool }
-  /// Needs any audio grant.
+  /// Needs any audio grant; with none held it returns an empty list (no error code).
   devices: func() -&gt; list&lt;audio-device&gt;;
   /// Delivers audio-frames. sample-rate 8,000 to 48,000. channels 1 or 2.
   open-capture: func(device: option&lt;string&gt;, sample-rate: u32, channels: u8) -&gt; result&lt;u64, plugin-error&gt;;
@@ -2310,7 +2312,7 @@ interface ids {
   record foreground-process { name: string, command-line: list&lt;string&gt;, cwd: option&lt;string&gt; }
   record history-match { row: u32, column: u16, length: u16 }
 
-  /// terminal.read-screen. Sync. max-rows at most 1,000.
+  /// terminal.read-screen. Sync. max-rows is clamped to 10,000.
   read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -&gt; option&lt;screen&gt;;
   selection: func(pane: node-id) -&gt; option&lt;selection&gt;;
   /// terminal.output-filter. regex is a bounded RE2-style expression. At most 8 filters per pane per plugin.
@@ -2339,6 +2341,7 @@ interface ids {
   take-matches: func(request: request-id) -&gt; option&lt;list&lt;history-match&gt;&gt;;
   /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.
   lock-input: func(pane: node-id, millis: u16) -&gt; result&lt;_, plugin-error&gt;;
+  /// Releases this plugin's lock. No result: a no-op when no lock is held or the pane is missing.
   unlock-input: func(pane: node-id);
 }
 </code></pre>
@@ -2409,6 +2412,7 @@ interface ids {
   take-buffer: func(request: request-id) -&gt; option&lt;buffer-id&gt;;
   /// editor.edit plus fs.write. Async, request-completed ok.
   save-buffer: func(buffer: buffer-id, path: option&lt;fs-path&gt;) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Grant: editor.edit. Closes a buffer and frees its quota slot.
   close-buffer: func(buffer: buffer-id);
   viewport: func(pane: node-id) -&gt; option&lt;editor-viewport&gt;;
   /// At most 4,096 marks per layer.
@@ -2459,8 +2463,9 @@ interface ids {
   resource frame-surface {
     /// Width and height in pixels.
     size: func() -&gt; tuple&lt;u32, u32&gt;;
+    /// Rows are top to bottom. Rows that fall at or past the height are ignored.
     /// Rows are top to bottom. first-row plus the rows written must be within the height.
-    /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+    /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
     write-rows: func(first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
     /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
     write-cell-colors: func(first-row: u32, colors: list&lt;u32&gt;) -&gt; result&lt;_, plugin-error&gt;;
@@ -2920,7 +2925,7 @@ world with-jobs { export ilium:exports/job-runner@0.1.0; }
 <li><strong>[ABI-051]</strong> Every WIT function that returns <code>request-id</code> MUST have an awaiting wrapper with the WIT name and a starting wrapper with the suffix <code>_request</code> in Rust and <code>Request</code> in TypeScript. A WIT name that ends in <code>-json</code> MUST keep the suffix as <code>_json</code> in Rust and <code>Json</code> in TypeScript.</li>
 </ul>
 <h2 id="11-where-each-name-is-defined">11. Where each name is defined</h2>
-<p>Every type is defined once. This index names the owner of each group of names. A page that needs a type links to the section.</p>
+<p>Every type is defined once, with two deliberate exceptions: <code>minimap-mark</code> is declared in <code>ilium:types/ui</code> (for <code>minimap-spec</code>) and in the <code>editor</code> primitive interface (for <code>set-minimap-marks</code>), and <code>menu-entry</code> is declared in <code>ilium:types/ui</code> (for <code>menu-spec</code>) and in the <code>menu-provider</code> export interface (for <code>menu-items</code>). A package cannot use a type from a package that depends on it, so each pair stays as two records with identical fields, and an SDK exposes each pair as one type. This index names the owner of each group of names. A page that needs a type links to the section.</p>
 <table>
 <thead>
 <tr>

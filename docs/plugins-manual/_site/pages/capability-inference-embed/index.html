@@ -487,7 +487,7 @@
 </tr>
 </tbody>
 </table>
-<p>See <a href="/pages/api-inference/">Inference</a> and the entry limits in <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p>See <a href="/pages/api-inference/">Inference</a> and the vector entry limits in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h3 id="manifest">Manifest</h3>
 <p>The grant goes into <code>manifest.json</code> under <code>capabilities</code>, in the list of the side that uses it (server or client).</p>
 <pre><code class="language-json">{
@@ -589,6 +589,11 @@ export const { lifecycle, handler } = definePlugin({
 <td>Split the batch.</td>
 </tr>
 <tr>
+<td><code>k</code> above 100 in <code>top-k</code></td>
+<td><code>invalid-argument</code></td>
+<td>Ask for at most 100 results and page by query.</td>
+</tr>
+<tr>
 <td>Wrong vector dimension for the index</td>
 <td><code>invalid-argument</code></td>
 <td>Create a new index.</td>
@@ -602,6 +607,26 @@ export const { lifecycle, handler } = definePlugin({
 <td>Provider unreachable</td>
 <td><code>network</code></td>
 <td>Retry later.</td>
+</tr>
+<tr>
+<td><code>top-k</code>, <code>remove-entries</code> or <code>drop-index</code> names an index id that does not exist (never created, already dropped or owned by another plugin)</td>
+<td><code>not-found</code></td>
+<td>Create the index again and re-embed.</td>
+</tr>
+<tr>
+<td><code>top-k</code> query vector has the wrong dimension</td>
+<td><code>invalid-argument</code></td>
+<td>Fix the call.</td>
+</tr>
+<tr>
+<td><code>remove-entries</code> lists an id that is not in the index</td>
+<td>Ignored, the other ids are removed</td>
+<td>Nothing.</td>
+</tr>
+<tr>
+<td><code>drop-index</code> on an index twice</td>
+<td><code>not-found</code> on the second call</td>
+<td>Treat as done.</td>
 </tr>
 </tbody>
 </table>

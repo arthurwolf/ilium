@@ -513,6 +513,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             let view = text_trigger_view(app, state.selected_row, layout.content_area.width);
             render_scrollable(frame, layout.content_area, view.lines, state.scroll);
         }
+        SettingsTab::CustomAgents => {
+            render_scrollable(
+                frame,
+                layout.content_area,
+                custom_agent_lines(app, state),
+                state.scroll,
+            );
+        }
         SettingsTab::Appearance => {
             let lines = appearance_view(
                 &app.ui_settings,
@@ -1000,6 +1008,14 @@ pub fn settings_help_anchors(
                 state.selected_row == app.text_trigger_settings.triggers.len(),
             );
         }
+        SettingsTab::CustomAgents => push_help_anchor(
+            &mut anchors,
+            layout,
+            "CUSTOMAGENT-01",
+            1,
+            state.scroll,
+            true,
+        ),
         SettingsTab::Appearance => {
             let view = appearance_view(
                 &app.ui_settings,
@@ -1351,6 +1367,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Titles => "≔",
         SettingsTab::Triggers => "⚑",
         SettingsTab::TextTriggers => "¶",
+        SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
         SettingsTab::Api => "⇄",
         SettingsTab::About => "ⓘ",
@@ -1588,6 +1605,131 @@ struct TextTriggerView {
     add_line: usize,
 }
 
+fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
+    use crate::custom_agent_editor::EditorRow;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "CUSTOM AGENTS",
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Values are plaintext in Ilium's owner-only configuration file."),
+        Line::from("Changes apply on the next launch or restart."),
+        Line::from(""),
+    ];
+    if let Some(editor) = &state.custom_agent_editor {
+        for (index, row) in editor.rows().into_iter().enumerate() {
+            let (label, value) = match row {
+                EditorRow::Name => ("Name".to_owned(), editor.draft.name.clone()),
+                EditorRow::Icon => ("Icon".to_owned(), editor.draft.icon.clone()),
+                EditorRow::Provider => (
+                    "Base".to_owned(),
+                    format!("{:?}", editor.draft.base_provider),
+                ),
+                EditorRow::EnvironmentKey(index) => (
+                    format!("Variable {} name", index + 1),
+                    editor.draft.environment[index].key.clone(),
+                ),
+                EditorRow::EnvironmentValue(index) => (
+                    format!("Variable {} value", index + 1),
+                    editor.displayed_value(index).unwrap_or_default(),
+                ),
+                EditorRow::RemoveEnvironment(index) => (
+                    format!("Remove variable {}", index + 1),
+                    "[ Remove ]".to_owned(),
+                ),
+                EditorRow::AddEnvironment => ("Add variable".to_owned(), "[ Add ]".to_owned()),
+                EditorRow::RevealValues => (
+                    "Show values".to_owned(),
+                    if editor.reveal_values { "On" } else { "Off" }.to_owned(),
+                ),
+                EditorRow::Save => (
+                    "Save profile".to_owned(),
+                    if state.custom_agent_save_pending {
+                        "Saving…"
+                    } else {
+                        "[ Save ]"
+                    }
+                    .to_owned(),
+                ),
+                EditorRow::Cancel => ("Cancel".to_owned(), "[ Cancel ]".to_owned()),
+            };
+            let value = value
+                .chars()
+                .map(|character| match character {
+                    '\n' => "\\n".to_owned(),
+                    '\r' => "\\r".to_owned(),
+                    '\t' => "\\t".to_owned(),
+                    other if other.is_control() => "�".to_owned(),
+                    other => other.to_string(),
+                })
+                .collect::<String>();
+            let selected = index == state.selected_row;
+            let padding = 30usize.saturating_sub(label.chars().count());
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} {label}", if selected { "›" } else { " " }),
+                    if selected {
+                        theme::selected_style()
+                    } else {
+                        Style::new()
+                    },
+                ),
+                leader_span(padding),
+                Span::raw(value),
+            ]));
+        }
+        lines.push(Line::from(if state.custom_agent_editing {
+            "Type to edit; Enter finishes; Esc cancels editing."
+        } else {
+            "Enter edits or activates; arrows navigate; Esc cancels."
+        }));
+    } else {
+        for (index, profile) in app.custom_agents.profiles.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} {} {}  ({:?}, {} variables)  [Delete]",
+                if index == state.selected_row {
+                    "›"
+                } else {
+                    " "
+                },
+                profile.icon,
+                profile.name,
+                profile.base_provider,
+                profile.environment.len()
+            )));
+        }
+        let missing = crate::custom_agent_settings::missing_profiles(app);
+        for (index, identity) in missing.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} [ Restore missing profile {} ({:?}) ]",
+                if state.selected_row == app.custom_agents.profiles.len() + index {
+                    "›"
+                } else {
+                    " "
+                },
+                identity.profile_id,
+                identity.base_provider
+            )));
+        }
+        lines.push(Line::from(format!(
+            "{} [ Add custom agent ]",
+            if state.selected_row == app.custom_agents.profiles.len() + missing.len() {
+                "›"
+            } else {
+                " "
+            }
+        )));
+        lines.push(Line::from(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." }));
+    }
+    lines
+}
+
+pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Rect) -> u16 {
+    (custom_agent_lines(app, state).len().min(u16::MAX as usize) as u16).saturating_sub(area.height)
+}
+
 /// Readable, measured list surface for server-executed regexp responses.
 /// Each rule has a distinct status/target heading and wrapped match/reply rows.
 fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerView {
@@ -1769,6 +1911,10 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::TextTriggers => text_trigger_view(app, selected_row, content_area.width)
             .lines
             .len() as u16,
+        SettingsTab::CustomAgents => match &app.mode {
+            crate::app::Mode::Settings(state) => custom_agent_lines(app, state).len() as u16,
+            _ => 0,
+        },
         SettingsTab::Appearance => {
             appearance_view(&app.ui_settings, selected_row, content_area.width)
                 .lines
@@ -2121,6 +2267,11 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             &app.tree,
             &mut preview_tree_state,
             crate::tree_ui::TreeRenderOptions {
+                custom_toolbar_profiles: None,
+                custom_toolbar_selected: None,
+                custom_toolbar_hovered: None,
+                custom_toolbar_pending: None,
+                custom_agent_labels: None,
                 focused: false,
                 elapsed_ms: app.started_at.elapsed().as_millis(),
                 terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),

@@ -336,7 +336,7 @@ pub struct ServerState {
     /// server. Cooperating processes additionally take the repository lease.
     /// This mutex does not exclude arbitrary external file access or tree edits.
     /// Acquire after a workspace repository lock, before tree/pane locks.
-    pub(crate) workspace_spawn_lock: Mutex<()>,
+    pub(crate) workspace_spawn_lock: Arc<Mutex<()>>,
     /// Pane IDs currently undergoing replacement. The standard mutex is held
     /// only for set membership changes, never across an await.
     pub(crate) replacing_panes: std::sync::Mutex<HashSet<NodeId>>,
@@ -581,7 +581,7 @@ impl ServerState {
             repo_discovery_cache: Default::default(),
             repo_facts_cache: Default::default(),
             workspace_repository_locks: Mutex::new(HashMap::new()),
-            workspace_spawn_lock: Mutex::new(()),
+            workspace_spawn_lock: Arc::new(Mutex::new(())),
             replacing_panes: std::sync::Mutex::new(HashSet::new()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),

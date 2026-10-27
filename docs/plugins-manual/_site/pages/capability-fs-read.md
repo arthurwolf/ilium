@@ -95,7 +95,7 @@ Limits:
 | `scan` `max-entries` | 1 to 65,536 | `invalid-argument`; more matches complete as `failed(quota-exceeded)` |
 | `read-all` file size | 64 MiB by default (`fs_read_all_mib`) | `failed(quota-exceeded)` |
 
-See [errors and limits](/pages/errors-and-limits/) for the full table.
+See [errors and limits](/pages/reference-errors-and-limits/) for the full table.
 
 Glob grammar for `scan`: `*` matches any run of characters inside one segment. A whole `**` segment matches zero or more folders. `?` matches one character inside a segment. Braces, character classes and escapes are not supported. A leading `/`, a `..` segment or a backslash is `invalid-argument`.
 
@@ -277,7 +277,7 @@ The diagram shows how a path becomes an allowed read:
 
 ## Declined and revoked grants
 
-When the user declines a scope, or the grant is revoked, the scope is removed from `roots()` and every call on it returns `not-permitted`. Each refused call writes one refusal line to the plugin log, which `ilium plugin logs` shows. The line names the scope and the function, and gives the reason: `declined`, or `not-requested` when the manifest never asked for that scope.
+When the user declines a scope, or the grant is revoked, the scope is removed from `roots()` and every call on it returns `not-permitted`. Each refused call writes one refusal line to the plugin log, which `ilium plugin logs` shows. The line names the scope and the function, and gives the reason: `declined` or `revoked`, `not-granted` when the argument is outside the grant (the manifest asked for `fs.read` but never for that scope), or `scope` when a path lies outside the granted scope. A call of `fs.read` itself without any `fs.read` request is not a refusal: it traps with `host.capability-not-requested`. See the [refusal reasons](/pages/reference-errors-and-limits/#refusal-reasons).
 
 ## See also
 
@@ -285,7 +285,7 @@ When the user declines a scope, or the grant is revoked, the scope is removed fr
 - [fs.watch](/pages/capability-fs-watch/) for change events on the same scopes.
 - [fs.pick](/pages/capability-fs-pick/) for how `picked/<n>` scopes are created.
 - [always-granted set](/pages/capability-always-granted/) for the reads that need no grant.
-- [errors and limits](/pages/errors-and-limits/) for every size cap.
+- [errors and limits](/pages/reference-errors-and-limits/) for every size cap.
 - [panes.provide-kind](/pages/capability-panes-provide-kind/) for a file explorer, which reads the project through this grant.
 
 Checked against the API version `ilium:plugin@0.1.0`.

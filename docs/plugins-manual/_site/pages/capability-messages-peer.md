@@ -11,7 +11,7 @@ A plugin reaches its own other side without any grant. A server half sends to it
 - A grant `messages.peer:<plugin-id>` for each other plugin that the sending side messages. Grants are per side, so the grant goes in `capabilities.server` or `capabilities.client`, whichever side sends.
 - The id of the receiving plugin, exactly as its manifest `id` writes it.
 - The Rust crate `ilium-plugin-sdk` or the npm package `@ilium/plugin-sdk`, both for `ilium:plugin@0.1.0`.
-- Nothing extra on the receiver. A `message` event from another plugin needs no grant on the receiving side.
+- On the receiver, no grant, but its manifest must list the sending plugin in `accepts_messages_from` ([PKG-579]). A message from an id not on that list, or to a plugin that declares none, is dropped and the sender gets `not-permitted`.
 
 The receiver must be installed and enabled. If it is installed but not active, the host activates it first and delivers the message after `activate` returns.
 
@@ -53,7 +53,7 @@ The submission also carries `correlation` and an optional `dedup-key`. A `messag
 | `channel` | `string` | the channel name, as sent |
 | `payload` | `list<u8>` | the bytes, unchanged |
 
-Message events are never dropped by the host.
+Message events that reach the receiver are never dropped by the host. A message from a sender not on the receiver's `accepts_messages_from` list is refused at send with `not-permitted` and is never queued.
 
 **Binding names:**
 
@@ -104,7 +104,7 @@ A missing grant refuses the whole batch. The offending submission completes as `
 
 ### Review and risk
 
-- Section 3 of the API does not mark `messages.peer` as high risk. A plugin with this grant is installed with it checked by default in the review dialog.
+- The [grant risk table](/pages/reference-capabilities/) does not mark `messages.peer` as high risk. A plugin with this grant is installed with it checked by default in the review dialog.
 - The grant names the receiver, so a sender cannot reach a plugin that was not granted. The review dialog shows each receiver id before the user allows it.
 - A T2 or T3 package shows every receiver id in the review dialog. T1 bundled plugins take the grant from their manifest ceiling.
 
@@ -243,7 +243,7 @@ The matching send from a TypeScript sender is one literal submission. The intent
 | Receiver's `activate` returns an error | the message is discarded, the error is logged at level `error` under the receiver, and the sender is not told |
 | Channel empty, longer than 64 characters, or with other characters | `refused(invalid-argument)` |
 | Payload over 1 MiB | `refused(invalid-argument)` |
-| Batch with more than 256 submissions | the whole batch is refused as malformed |
+| Batch with more than 256 submissions | the plugin traps and none of the batch is applied |
 | Same `dedup-key` within 10 minutes | `duplicate(original)`, no second delivery |
 | Message to the plugin's own other side | allowed with no grant; `from` is the plugin's own id |
 
@@ -251,7 +251,7 @@ A `message` is not a request. An `ok` outcome means the host queued the message,
 
 ### Who requests it
 
-No first-party plugin in `feature-mapping.md` lists `messages.peer` in its capability column. Feature 52 (`ilium voice say`) sends an intent `message` to the plugin's own client side, which needs no grant.
+No first-party plugin in [feature traceability](/pages/reference-feature-traceability/) lists `messages.peer` in its capability column. Feature 52 (`ilium voice say`) sends an intent `message` to the plugin's own client side, which needs no grant.
 
 ### See also
 
@@ -262,4 +262,4 @@ No first-party plugin in `feature-mapping.md` lists `messages.peer` in its capab
 
 ### Security
 
-A receiver MAY restrict senders with `accepts_messages_from` ([SEC-050]). Cross-plugin data flows are discussed in [Threat model](/pages/reference-threat-model/).
+A receiver MUST declare `accepts_messages_from`, a list of plugin ids ([SEC-007], [SEC-050]); a peer message from an id not on the list, or to a plugin that declared none, is refused at send: the sender gets `refused(not-permitted)` and nothing is queued. Cross-plugin data flows are discussed in [Threat model](/pages/reference-threat-model/).

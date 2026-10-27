@@ -1744,3 +1744,161 @@ async fn two_actual_small_encoder_callbacks_can_be_active_before_either_publishe
         .unwrap();
     fixture.finish().await;
 }
+
+// Real connection regression: the reader must close a failed attach even if
+// its writer cannot admit an event selected before the attach request arrived.
+struct AttachBlockedTransport {
+    requests: tokio::io::DuplexStream,
+    replies: FlushGate,
+    reading: Arc<Notify>,
+}
+
+impl AsyncRead for AttachBlockedTransport {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        this.reading.notify_one();
+        Pin::new(&mut this.requests).poll_read(context, buffer)
+    }
+}
+
+impl AsyncWrite for AttachBlockedTransport {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        bytes: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.get_mut().replies).poll_write(context, bytes)
+    }
+    fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().replies).poll_flush(context)
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().replies).poll_shutdown(context)
+    }
+}
+
+#[tokio::test]
+async fn attach_barrier_deadline_cancels_output_admission_and_releases_journal_cursor() {
+    let fixture = Fixture::new();
+    assert!(fixture
+        .state
+        .events
+        .initialize_journal(fixture.quota.clone()));
+    // Spend the unchanged output pool without allocating synthetic payloads.
+    // This blocks before encoding and before the independent frame timeout.
+    let output_quota = fixture.output.storage.quota_group();
+    let output_limit = output_quota.snapshot().limits.worker_bytes;
+    let output_pressure = output_quota.reserve_external_storage(output_limit).unwrap();
+    let metadata_quota = fixture.output.metadata.quota_group();
+    let initial_metadata_bytes = metadata_quota.snapshot().worker_bytes;
+    let (requests, mut client) = tokio::io::duplex(4096);
+    let replies = FlushGate::new();
+    let reading = Arc::new(Notify::new());
+    let connection = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(handle(
+        Arc::clone(&fixture.state),
+        AttachBlockedTransport {
+            requests,
+            replies: replies.clone(),
+            reading: Arc::clone(&reading),
+        },
+    )));
+    // The real handler subscribes its journal before it starts reading frames.
+    tokio::time::timeout(WAIT, reading.notified())
+        .await
+        .expect("connection starts reading after journal subscription");
+    fixture
+        .state
+        .events
+        .try_publish_ordered(
+            ServerEvent::NodeActivityChanged {
+                node_id: ilium_core::NodeId(17),
+                activity_revision: 1,
+            },
+            64,
+        )
+        .expect("first retained journal entry");
+    tokio::time::timeout(WAIT, async {
+        // Envelope acquisition precedes the output-storage wait within one
+        // writer poll. Observing its charge proves the event was selected
+        // before the attach control can be enqueued; no test-only hook needed.
+        while metadata_quota.snapshot().worker_bytes == initial_metadata_bytes {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("real writer reaches pre-encoding output admission");
+    assert_eq!(output_quota.snapshot().worker_bytes, output_limit);
+    assert_eq!(fixture.encoder.foundation.usage().jobs, 0);
+    assert!(replies
+        .state
+        .lock()
+        .expect("transport state")
+        .bytes
+        .is_empty());
+    // Fill the existing journal gate, without lowering its production limit.
+    // Its cursor cannot advance while the first event waits for output admission.
+    for revision in 2..=crate::state::MAXIMUM_ORDERED_EVENT_ENTRIES {
+        fixture
+            .state
+            .events
+            .try_publish_ordered(
+                ServerEvent::NodeActivityChanged {
+                    node_id: ilium_core::NodeId(17),
+                    activity_revision: revision as u64,
+                },
+                64,
+            )
+            .expect("production journal capacity remains available");
+    }
+    assert!(fixture.state.events.reserve_ordered(64).is_err());
+    let attach_started = tokio::time::Instant::now();
+    ilium_ipc::write_frame(
+        &mut client,
+        &ClientRequest::AttachInteractive {
+            session: fixture.state.session_name.clone(),
+            hello: ilium_ipc::plugin::PluginHello::default(),
+        },
+    )
+    .await
+    .expect("deliver attach to the real connection reader");
+    // No mutation handler has started. This tests the actual 30 s production
+    // barrier deadline, with a finite allowance for shared-host scheduling.
+    tokio::time::timeout(Duration::from_secs(35), connection.join())
+        .await
+        .expect("failed attach must not wait forever for its blocked writer")
+        .expect("connection exits without panic");
+    assert!(
+        attach_started.elapsed() >= Duration::from_secs(30),
+        "an unrelated immediate close must not satisfy the barrier regression"
+    );
+    assert_eq!(
+        output_quota.snapshot().worker_bytes,
+        output_limit,
+        "the test never releases output pressure to manufacture progress"
+    );
+    assert!(
+        replies
+            .state
+            .lock()
+            .expect("transport state")
+            .bytes
+            .is_empty(),
+        "no frame timeout can rescue the old code before encoding starts"
+    );
+    // With no surviving cursor, even a formerly full journal accepts another
+    // reservation. This verifies resource release, not just task termination.
+    drop(
+        fixture
+            .state
+            .events
+            .reserve_ordered(64)
+            .expect("closing the failed attach reclaims the blocked journal cursor"),
+    );
+    drop(client);
+    drop(output_pressure);
+    fixture.finish().await;
+}

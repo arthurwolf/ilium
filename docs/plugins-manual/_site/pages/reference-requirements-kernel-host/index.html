@@ -690,7 +690,7 @@
 </tr>
 <tr>
 <td>HST-051</td>
-<td>A Wasmtime security release that fixes a vulnerability reachable from guest code MUST be taken into a point release of Ilium within 14 days of the Wasmtime announcement, and within 7 days when the advisory rates it critical or high.</td>
+<td>A Wasmtime security release that fixes a vulnerability reachable from guest code MUST be taken into a point release of Ilium within 14 days of the upstream fix (see [SEC-171]), and within 48 hours when the vulnerability is exploited in the wild.</td>
 <td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
 <td>Manual check: release checklist: advisory-to-release time recorded in release notes</td>
 </tr>
@@ -840,7 +840,7 @@
 </tr>
 <tr>
 <td>HST-076</td>
-<td>The host MUST link WASI Preview 2 with captured stdout and stderr, an empty environment, no stdin, <code>wasi:cli/exit</code> as a trap, and preopens only from <code>fs</code> grants.</td>
+<td>The host MUST link WASI Preview 2 with captured stdout and stderr, an empty environment, no stdin, <code>wasi:cli/exit</code> as a trap, and preopens only from <code>fs.*</code> grants.</td>
 <td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
 <td>Conformance fixture: WASI fixture: stdout to log, env empty, exit traps, no preopen without grant</td>
 </tr>
@@ -882,9 +882,9 @@
 </tr>
 <tr>
 <td>HST-083</td>
-<td>A trap caused by an epoch deadline MUST carry the error <code>host.deadline</code> with the call class and the limit in milliseconds, and MUST be logged once.</td>
+<td>A trap caused by an epoch deadline MUST carry the error <code>trap.deadline</code> with the call class and the limit in milliseconds, and MUST be logged once.</td>
 <td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
-<td>Unit test in ilium-plugin-host: deadline trap carries host.deadline, class and limit</td>
+<td>Unit test in ilium-plugin-host: deadline trap carries trap.deadline, class and limit</td>
 </tr>
 <tr>
 <td>HST-084</td>
@@ -1440,7 +1440,7 @@
 </tr>
 <tr>
 <td>HST-251</td>
-<td>A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after <code>ui.invalidate</code>, after a change of the view's area (a resize), and after a theme change.</td>
+<td>A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after <code>ui.invalidate</code>, after a change of the view's area (a resize), after a theme change, and after a user action in the view.</td>
 <td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
 <td>Integration test: views.render only on listed triggers</td>
 </tr>
@@ -1482,7 +1482,7 @@
 </tr>
 <tr>
 <td>HST-258</td>
-<td>A tree over a cap, or any other invalid tree, MUST trap the instance with the named <code>ui.*</code> code (<code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code>, <code>ui.render-timeout</code>), MUST NOT be shown, and the previous tree MUST stay on screen, marked stale.</td>
+<td>A tree over a cap, or any other invalid tree, MUST trap the instance with <code>trap.invalid-ui-tree</code>, whose logged detail reason is the named <code>ui.*</code> code (<code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code>, <code>ui.render-timeout</code>), MUST NOT be shown, and the previous tree MUST stay on screen, marked stale.</td>
 <td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
 <td>Unit test in ilium-plugin-host: ui-tree over caps traps with named error; previous tree stays stale</td>
 </tr>
@@ -1608,9 +1608,9 @@
 </tr>
 <tr>
 <td>HST-306</td>
-<td>The release gate MUST include B1 to B9 and B16 to B20 on the reference machine, and MUST fail when any budget is missed.</td>
+<td>The release gate MUST include B1 to B9, B16 to B20 and B23 on the reference machine, and MUST fail when any budget is missed.</td>
 <td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
-<td>CI check: release gate includes B1-B9 and B16-B20</td>
+<td>CI check: release gate includes B1-B9, B16-B20 and B23</td>
 </tr>
 <tr>
 <td>HST-307</td>
@@ -1956,9 +1956,9 @@
 </tr>
 <tr>
 <td>HST-476</td>
-<td>The client MUST call all menu providers of one opening at once, MUST open the menu when all have answered or after 25 ms, and MUST drop the entries of a late provider for that opening.</td>
+<td>The client MUST call all menu providers of one opening at once, MUST open the menu when all have answered or after 20 ms, and MUST drop the entries of a late provider for that opening.</td>
 <td><a href="/pages/api-menu-provider/">menu provider</a></td>
-<td>Integration test: menu providers called in parallel; 25 ms wait; late entries dropped</td>
+<td>Integration test: menu providers called in parallel; 20 ms wait; late entries dropped</td>
 </tr>
 <tr>
 <td>HST-477</td>
@@ -2010,9 +2010,9 @@
 </tr>
 <tr>
 <td>HST-496</td>
-<td><code>retry-after-ms</code> on a <code>quota-exceeded</code> from the <code>ilium-execution</code> group MUST equal max(100, ceil((100 - bucket_ms) / 0.5 / 10) * 10).</td>
+<td><code>retry-after-ms</code> on a <code>quota-exceeded</code> from the <code>ilium-execution</code> group MUST equal max(100, ceil_10(-balance_ms * 2)), where <code>ceil_10</code> rounds up to the next 10 ms, as in [HST-207].</td>
 <td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
-<td>Unit test in ilium-plugin-host: drain the bucket, read retry-after-ms, expect 100 to 400</td>
+<td>Unit test in ilium-plugin-host: drain the bucket, read retry-after-ms: balance -100 ms gives 200, balance 0 gives 100</td>
 </tr>
 <tr>
 <td>HST-497</td>
@@ -2028,7 +2028,7 @@
 </tr>
 <tr>
 <td>HST-499</td>
-<td>The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns <code>timed-out</code> to the caller.</td>
+<td>The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, sessions send reply 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns <code>timed-out</code> to the caller.</td>
 <td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
 <td>Integration test with a silent provider for each reply kind</td>
 </tr>

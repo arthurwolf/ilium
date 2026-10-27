@@ -577,13 +577,13 @@
 </tr>
 <tr>
 <td>LIF-030</td>
-<td>The third counted failure in a window MUST stop that side with the instance state <code>stopped-by-failure</code> and MUST NOT schedule a restart. The package state stays <code>installed-enabled</code>.</td>
+<td>The third counted failure in a window MUST stop that side with the instance state <code>stopped-by-failure</code> and MUST NOT schedule a restart, except for an essential core plugin (LIF-042). The package state stays <code>installed-enabled</code>.</td>
 <td>trap three times within 10 minutes and assert no activation follows.</td>
 <td><a href="/pages/lifecycle/">Lifecycle</a></td>
 </tr>
 <tr>
 <td>LIF-031</td>
-<td>The host MUST NOT use any other restart delay. There is no step after the second, because the third failure stops the side.</td>
+<td>Except for essential core plugins (LIF-042), the host MUST NOT use any other restart delay. There is no step after the second, because the third failure stops the side.</td>
 <td>after a stop, advance the clock one hour and assert the side is still stopped.</td>
 <td><a href="/pages/lifecycle/">Lifecycle</a></td>
 </tr>
@@ -812,7 +812,7 @@
 </tr>
 <tr>
 <td>LIF-072</td>
-<td>Installing the same id and version again MUST succeed without change when the manifest hash is equal, and MUST fail with <code>install.same-version-different-content</code> when it differs.</td>
+<td>Installing the same id and version again MUST succeed without change when the manifest hash is equal, and MUST fail with <code>package.version-reused</code> when it differs.</td>
 <td>install a package twice, then a modified copy with the same version.</td>
 <td><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></td>
 </tr>
@@ -1247,7 +1247,7 @@
 </tr>
 <tr>
 <td>LIF-143</td>
-<td>The effective limit MUST be <code>min(ceiling, first set of [plugins."&lt;id&gt;".limits] value, [plugins.limits] value, manifest value, default)</code>; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them.</td>
+<td>The effective limit MUST be <code>min(ceiling, v)</code>, where <code>v</code> is the first set of the <code>[plugins."&lt;id&gt;".limits]</code> value, the <code>[plugins.limits]</code> value, the manifest value and the default, in that order; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them; a value above the current session value is clamped to it and the host logs a warning.</td>
 <td>the three cases of the example.</td>
 <td><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></td>
 </tr>
@@ -1473,7 +1473,7 @@
 </tr>
 <tr>
 <td>LIF-183</td>
-<td>The essential set MUST be exactly the four plugins above in 0.1.0, and MUST load in <code>all-optional</code> mode.</td>
+<td>The essential set MUST be exactly the four plugins <code>ilium.core.tree</code>, <code>ilium.core.layout</code>, <code>ilium.core.settings</code> and <code>ilium.core.sessions</code> in 0.1.0, and MUST load in <code>all-optional</code> mode.</td>
 <td>list running plugins in that mode.</td>
 <td><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></td>
 </tr>
@@ -1493,6 +1493,12 @@
 <td>LIF-186</td>
 <td>Three crashes during start within 5 minutes MUST cause the next start to use <code>third-party</code> safe mode.</td>
 <td>write three crash marks.</td>
+<td><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></td>
+</tr>
+<tr>
+<td>LIF-187</td>
+<td>A bisect that ends without a <code>found</code> plugin MUST say so (<code>found</code> null, <code>reason</code> <code>not-a-plugin</code>) and MUST NOT name a plugin.</td>
+<td>answer <code>bad</code> at every step on a profile where the fault is in the kernel, then read the final record.</td>
 <td><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></td>
 </tr>
 </tbody>
@@ -1528,8 +1534,8 @@
 </tr>
 <tr>
 <td>LIF-193</td>
-<td>A plugin blocked by policy MUST show "Blocked by policy" with the code and MUST keep its data.</td>
-<td>add its id to <code>denied_ids</code>.</td>
+<td>A plugin blocked by policy MUST show "Blocked by policy" with the policy code of the rule that blocked it (for example <code>policy.id-denied</code>, <code>policy.third-party-denied</code>; codes in <a href="/pages/reference-plugin-policy/">Plugin policy</a>) and MUST keep its data.</td>
+<td>add its id to <code>plugins.deny_ids</code> and assert the row text and the code.</td>
 <td><a href="/pages/user-managing-plugins/">Managing plugins</a></td>
 </tr>
 </tbody>
@@ -1547,7 +1553,7 @@
 <tbody>
 <tr>
 <td>LIF-220</td>
-<td><code>ilium plugin dev</code> MUST attach to the session of <code>--cwd</code> (the current directory by default), or to the session named by <code>--session &lt;name&gt;</code>. When no server runs for it, the command MUST exit with code 2 and the error code <code>dev.no-server</code>, unless <code>--start-server</code> is given.</td>
+<td><code>ilium plugin dev</code> MUST attach to the session of <code>--cwd</code> (the current directory by default), or to the session named by <code>--session &lt;name&gt;</code>. When no server runs for it, the command MUST fail with <code>session.unreachable</code> and exit code 6, and MUST NOT start a session itself [DEV-180].</td>
 <td>run it with no server.</td>
 <td><a href="/pages/lifecycle/">Lifecycle</a></td>
 </tr>
@@ -1613,7 +1619,7 @@
 </tr>
 <tr>
 <td>LIF-271</td>
-<td>On a trap or stop the host MUST release every effect listed in the stop-effects paragraph of this page, for the dead instance as well.</td>
+<td>On a trap or stop the host MUST release every effect listed in the stop-effects sentence of <a href="/pages/lifecycle/#durable-timers-and-further-triggers">Durable timers and further triggers</a>, for the dead instance as well.</td>
 <td>trap a plugin holding an input lock, a stream and a child process.</td>
 <td><a href="/pages/lifecycle/">Lifecycle</a></td>
 </tr>
@@ -1643,14 +1649,14 @@
 </tr>
 <tr>
 <td>LIF-276</td>
-<td>The Plugins screen MUST not offer a disable switch for the four essential plugins.</td>
+<td>The Plugins screen MUST not offer a disable switch for the four essential plugins (<code>ilium.core.tree</code>, <code>ilium.core.layout</code>, <code>ilium.core.settings</code>, <code>ilium.core.sessions</code>; see <a href="/pages/user-safe-mode-and-troubleshooting/#the-essential-set">Safe mode and recovery</a>).</td>
 <td>render the list and press Space on each.</td>
 <td><a href="/pages/core-plugins/">Core plugins</a></td>
 </tr>
 <tr>
 <td>LIF-277</td>
-<td><code>data_version</code> MUST be an integer from 0 to 4,294,967,295, and a stored version above the manifest value MUST follow the downgrade rule of the migration guide.</td>
-<td><code>-1</code> is refused with <code>manifest.schema</code>; a stored 3 with manifest 2 is handled as a downgrade.</td>
+<td><code>data_version</code> MUST be an integer from 1 to 4,294,967,295 (0, negative, fractional and larger values are refused with <code>manifest.data-version</code>, as in LIF-100), and a stored version above the manifest value MUST follow the downgrade rule of the migration guide.</td>
+<td><code>-1</code> and <code>0</code> are refused with <code>manifest.data-version</code>; a stored 3 with manifest 2 is handled as a downgrade.</td>
 <td><a href="/pages/reference-manifest/">Manifest reference</a></td>
 </tr>
 <tr>
@@ -1700,6 +1706,36 @@
 <td>The failure window is per plugin, per side, per scope and per version. It MUST be emptied when the active version changes, on <code>ilium plugin dev</code> reload and on a manual enable. The first activation failure of an update candidate is not counted (LIF-075), and a manual <code>ilium plugin restart &lt;id&gt;</code> neither counts nor empties the window.</td>
 <td>trap twice, change the active version and trap again and assert 1 failure; repeat for dev reload and enable; fail a candidate's first activation and assert the window is empty; restart manually and assert the count is unchanged.</td>
 <td><a href="/pages/lifecycle/">Lifecycle</a></td>
+</tr>
+<tr>
+<td>LIF-290</td>
+<td>The host MUST provide <code>ilium plugin export &lt;id&gt; --out &lt;file&gt;</code>, which writes one archive holding the plugin's data directory, buckets and settings values for the current project scope. The archive MUST NOT contain grants, first-use answers, trusted keys, logs or the package itself. It MUST work while the plugin is enabled or disabled and MUST NOT change any plugin data.</td>
+<td>export an installed plugin, list the archive and assert the data, bucket and settings entries and none of grants, keys, logs or package files; compare the plugin data before and after and assert no change.</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a></td>
+</tr>
+<tr>
+<td>LIF-291</td>
+<td><code>ilium plugin export</code> MUST write a consistent snapshot: no bucket batch (a <code>storage.batch</code> call) appears half applied. It MUST create the file owner-only, MUST refuse an existing file with <code>export.exists</code> unless <code>--force</code> is given, and MUST fail with <code>export.unknown-plugin</code> for an id that is not installed, leaving no partial file.</td>
+<td>export during a running batch and assert all or none of its keys; export twice to one path and assert <code>export.exists</code>, then again with <code>--force</code>; export an unknown id and assert the error and no file; assert the file mode is 0600.</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a></td>
+</tr>
+<tr>
+<td>LIF-292</td>
+<td><code>ilium plugin import &lt;id&gt; --from &lt;file&gt;</code> MUST restore an archive made by <code>ilium plugin export</code> into the installed plugin with the same id, replacing its data, buckets and settings values. It MUST refuse an archive for another id with <code>import.id-mismatch</code> and an archive of an unknown format version with <code>import.format-unsupported</code>, and then MUST leave the existing data untouched.</td>
+<td>export on one root, install the same id on a second root, import and read the keys back; import an archive of another id and one with a bumped format and assert the error codes and unchanged data.</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a></td>
+</tr>
+<tr>
+<td>LIF-293</td>
+<td>A <code>ilium plugin uninstall &lt;id&gt; --purge</code> on a TTY MUST print one line before it deletes, naming <code>ilium plugin export &lt;id&gt;</code> as the way to keep a copy. Without a TTY it MUST print no such prompt and MUST NOT ask a question (LIF-082). The line MUST NOT delay or block the purge.</td>
+<td>run the purge on a TTY and assert the hint line and the purge; run it with standard input closed and assert no prompt and the purge.</td>
+<td><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a></td>
+</tr>
+<tr>
+<td>LIF-294</td>
+<td>The crash-loop guard MUST clear all crash marks once a start has stayed up for 5 minutes after startup completed. A stop before that point MUST leave the marks in place.</td>
+<td>write three crash marks, start, advance 4 minutes 59 seconds and stop (marks remain), start again, advance 5 minutes and stop, then assert the next start is not in safe mode.</td>
+<td><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></td>
 </tr>
 </tbody>
 </table>

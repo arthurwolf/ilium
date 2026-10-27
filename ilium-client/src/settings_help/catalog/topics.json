@@ -1,5 +1,15 @@
 [
   {
+    "id": "CUSTOMAGENT-01",
+    "title": "Custom agent profiles",
+    "explanation": "Create named Claude or Codex profiles with their own icon and environment variables.",
+    "specimen": "Profile: Work\nProvider: Claude\nEnvironment: TOKEN = ••••••••",
+    "states": "Values are masked until revealed. Changes affect future launches and restarts; running processes keep their existing environment.",
+    "frames": ["Profile: Work\nProvider: Claude\nEnvironment: TOKEN = ••••••••"],
+    "motion": "None.",
+    "caveat": "Values are stored as plaintext in an owner-only configuration file, not encrypted. Deleting a profile prevents its panes from restarting until the profile is restored or reassigned."
+  },
+  {
     "id": "AM-01",
     "title": "Display mode",
     "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",

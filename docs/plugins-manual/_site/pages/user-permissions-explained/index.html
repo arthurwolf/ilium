@@ -892,7 +892,7 @@
 </tr>
 <tr>
 <td><code>cli.contribute</code></td>
-<td>Add its own <code>ilium</code> command</td>
+<td>Add <code>ilium</code> commands of its own</td>
 <td>normal</td>
 </tr>
 <tr>
@@ -916,6 +916,11 @@
 <td>HIGH</td>
 </tr>
 <tr>
+<td><code>settings.write-kernel:&lt;tab&gt;</code></td>
+<td>Change the values of one built-in Settings tab. Bundled plugins only, one holder per tab</td>
+<td>HIGH</td>
+</tr>
+<tr>
 <td><code>plugins.manage</code></td>
 <td>Install, remove and turn plugins on and off. Bundled plugins only</td>
 <td>HIGH</td>
@@ -932,7 +937,7 @@
 </tr>
 </tbody>
 </table>
-<p>Rows marked bundled-only or development-only are never shown to you for third-party plugins. A third-party package that asks for them fails to install with <code>manifest.grant-tier</code>.</p>
+<p>Rows marked bundled-only or development-only are never shown to you for third-party plugins. A third-party package that asks for them fails to install with <code>manifest.grant-tier</code> for a bundled-only row, or with <code>manifest.grant-unknown</code> for <code>gpu.kernels</code>, which does not exist in a release build.</p>
 <ul>
 <li>[USR-080] The Capabilities tab MUST show the plain wording, the grant string, the risk and the state (granted, declined, revoked) of every permission the plugin requests. Test: open the tab for a plugin with ten requested grants and compare.</li>
 <li>[USR-081] A package that requests a bundled-only grant MUST fail to install with <code>manifest.grant-tier</code>. Test: request <code>plugins.manage</code> in a T2 package.</li>
@@ -1055,7 +1060,7 @@ ilium plugin grants com.example.notes --grant clipboard.read
 </tr>
 <tr>
 <td>Your administrator forbids a permission</td>
-<td>The row shows "Blocked by your administrator", off and locked. See <a href="/pages/reference-plugin-policy/">Plugin policy</a></td>
+<td>The grant row in the review dialog and in the Capabilities tab shows "Blocked by your administrator", off and locked. A whole plugin that the policy blocks shows "Blocked by policy" in the plugin list. See <a href="/pages/reference-plugin-policy/">Plugin policy</a></td>
 </tr>
 <tr>
 <td>You uninstall, then reinstall</td>

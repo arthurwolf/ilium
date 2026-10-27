@@ -418,7 +418,7 @@
 <p>The grant has no functions. It opens four intents, each returned as a submission. The WIT records below are the payloads.</p>
 <pre><code class="language-wit">record submission { intent: intent, correlation: u64, dedup-key: option&lt;string&gt; }
 enum placement { before, after, inside-first, inside-last }
-record rename-node-spec { node: node-id, title: string }
+record rename-node-spec { node: node-id, title: string, source: title-source, expected-revision: option&lt;u64&gt; }
 record move-node-spec { node: node-id, target: node-id, placement: placement }
 record set-node-locked-spec { node: node-id, locked: bool }
 </code></pre>
@@ -434,7 +434,7 @@ record set-node-locked-spec { node: node-id, locked: bool }
 <tbody>
 <tr>
 <td><code>rename-node</code></td>
-<td><code>rename-node-spec</code>: <code>node</code>, <code>title</code> (string)</td>
+<td><code>rename-node-spec</code>: <code>node</code>, <code>title</code> (string), <code>source</code> (<code>plugin</code> or <code>inferred</code>), <code>expected-revision</code> (optional)</td>
 <td>Sets the title of a node. The title is 1 to 256 characters.</td>
 <td><code>refused(not-found)</code>; <code>refused(conflict)</code> when the user named the node by hand; <code>refused(invalid-argument)</code> for a title of the wrong length</td>
 </tr>
@@ -506,7 +506,7 @@ record set-node-locked-spec { node: node-id, locked: bool }
 <h2 id="manual-titles-stay-with-the-user">Manual titles stay with the user</h2>
 <p>When the user types a title for a node, the kernel marks the node as named by hand. From then on, a <code>rename-node</code> on that node returns <code>refused(conflict)</code>, whatever plugin sends it. The mark is removed when the user clears the title, which returns the node to automatic naming.</p>
 <p>The plugin cannot read the mark, because <code>node-view</code> has no field for it. It learns of the mark only from the outcome:</p>
-<pre><code class="language-text">rename-node { node: 42, title: &quot;Build server&quot; }
+<pre><code class="language-text">rename-node { node: 42, title: &quot;Build server&quot;, source: plugin }
 -&gt; refused(plugin-error { code: conflict,
                           message: &quot;node 42 was named manually&quot;,
                           retry-after-ms: none })
@@ -561,7 +561,7 @@ export const { lifecycle, handler } = definePlugin({
     for (const event of batch) {
       if (event.tag === 'pane-created' &amp;&amp; event.val.contentKind === 'ilium.terminal') {
         submissions.push({
-          intent: { tag: 'rename-node', val: { node: event.val.node, title: 'Shell' } },
+          intent: { tag: 'rename-node', val: { node: event.val.node, title: 'Shell', source: 'plugin' } },
           correlation: event.val.node,
           dedupKey: `shell-title:${event.val.node}`,
         });
@@ -687,7 +687,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/api-tree/">api-tree</a> for the <code>node-view</code> fields.</li>
 <li><a href="/pages/api-intents/">api-intents</a> for the full intent catalogue and the dedup rules.</li>
 <li><a href="/pages/api-events/">api-events</a> for <code>request-completed</code>, <code>tree-changed</code> and <code>pane-created</code>.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the error codes.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-tree-read/"><small>Previous</small>tree.read</a><a class="next" href="/pages/capability-ui-panels/"><small>Next</small>ui.panels</a></nav>

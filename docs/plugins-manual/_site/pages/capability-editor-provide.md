@@ -94,7 +94,7 @@ The record `adopted-buffer` has the fields `buffer: buffer-id`, `path: option<fs
 
 The record `text-edit` has the fields `range: text-range` and `replacement: string`.
 
-In Rust, the trait is `ilium_plugin_sdk::exports::EditorProvider`, with the same twelve methods in snake_case (`read_lines`, `apply_edits` and so on). In TypeScript, the methods sit flat in the `definePlugin` object beside `lifecycle` and `handler`, in camelCase.
+In Rust, the trait is `ilium_plugin_sdk::exports::EditorProvider`, with the same fourteen methods as the table above in snake_case (`read_lines`, `apply_edits` and so on). In TypeScript, the methods sit flat in the `definePlugin` object beside `lifecycle` and `handler`, in camelCase.
 
 ## Lifecycle of a provider
 
@@ -108,7 +108,7 @@ In Rust, the trait is `ilium_plugin_sdk::exports::EditorProvider`, with the same
 
 ## Worked example: Rust
 
-This provider keeps the adopted buffers in memory. It implements `adopt`, `release` and `read_lines`. The other methods listed above follow the same pattern. The trait does not compile until all twelve exist.
+This provider keeps the adopted buffers in memory. It implements `adopt`, `release` and `read_lines`. The other methods listed above follow the same pattern. The trait does not compile until all fourteen exist.
 
 **Rust**
 
@@ -165,7 +165,7 @@ impl EditorProvider for BufferKeeper {
         }
         let entry = self.find(buffer)?;
         let line_total = entry.text.lines().count();
-        if first_line as usize > line_total {
+        if first_line as usize >= line_total {
             return Err(error(ErrorCode::InvalidArgument, "line past the end of the buffer"));
         }
         let lines = entry.text.lines().skip(first_line as usize).take(count as usize);
@@ -217,7 +217,9 @@ export const { lifecycle, handler, editorProvider } = definePlugin({
       throw new PluginError('invalid-argument', 'at most 10,000 lines per call');
     }
     const lines = requireBuffer(buffer).text.split('\n');
-    if (firstLine > lines.length) {
+    // Match Rust `str::lines`: a trailing newline does not start another line.
+    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    if (firstLine >= lines.length) {
       throw new PluginError('invalid-argument', 'line past the end of the buffer');
     }
     return lines.slice(firstLine, firstLine + count);
@@ -243,7 +245,7 @@ Install errors:
 |---|---|
 | `manifest.grant-tier` | A T2 or T3 package asks for the grant. |
 | `manifest.grant-side` | The grant or export is on the server side. |
-| `manifest.grant-unknown` | The `api` key names an unknown API version. |
+| `manifest.grant-unknown` | The grant name is not a capability of this API version (for `editor.provide`, it is reserved in `ilium:plugin@0.1.0`). An unknown `api` version is a different error. |
 | `manifest.export-grant` | `editor-provider` is listed without the grant. |
 
 A second provider does not start. It logs a warn line, and the user frees the role by disabling the other plugin in settings.
@@ -275,7 +277,7 @@ A T2 package that asks for the grant fails at install instead of showing a promp
       bundled plugins only
 </pre>
 
-The user can check the grants of an installed plugin with `ilium plugin grants <id>`. Grants are per side and per session (see [Capabilities reference](/pages/reference-capabilities/)).
+The user can check the grants of an installed plugin with `ilium plugin grants <id>`. Grants are recorded per plugin, per side and per user configuration (see [Capabilities reference](/pages/reference-capabilities/)).
 
 ## See also
 

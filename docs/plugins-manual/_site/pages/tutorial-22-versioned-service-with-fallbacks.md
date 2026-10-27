@@ -266,7 +266,9 @@ impl ServiceProvider for GlossaryV11 {
 }
 
 impl GlossaryV11 {
-    /// Called when the slow source has an answer. A late call gets `not-found`, which is ignored.
+    /// Called from the plugin's event handler when the slow source reports that it is done
+    /// (in the demo, the `timer-fired` event of a timer started when `waiting` was filled).
+    /// A late call gets `not-found`, which is ignored.
     fn finish(&mut self, call: u64) {
         if let Some(term) = self.waiting.remove(&call) {
             let _ = services::reply(call, Ok(define_in(&term, "en").to_string()));
@@ -296,6 +298,7 @@ export function defineIn(term: string, lang: string) {
 /** Calls waiting for a slow source, keyed by the host's call number. */
 const waiting = new Map<bigint, string>();
 
+// Wired as `handle` in definePlugin, as in version 1.0.0: definePlugin({ side: 'server', handle: handleCall }).
 export function handleCall(call: ServiceCall): ServiceReply {
   const params = JSON.parse(call.payloadJson) as { term?: string; lang?: string; slow?: boolean };
   if (params.slow === true) {
@@ -305,7 +308,11 @@ export function handleCall(call: ServiceCall): ServiceReply {
   return { tag: 'done', val: JSON.stringify(defineIn(params.term ?? '', params.lang ?? 'en')) };
 }
 
-/** Called when the slow source has an answer. A late call gets `not-found`, which is ignored. */
+/**
+ * Called from the plugin's event handler when the slow source reports that it is done
+ * (in the demo, the `timer-fired` event of a timer started when `waiting` was filled).
+ * A late call gets `not-found`, which is ignored.
+ */
 export function finish(call: bigint): void {
   const term = waiting.get(call);
   if (term === undefined) return;
@@ -317,6 +324,8 @@ export function finish(call: bigint): void {
   }
 }
 ```
+
+Nothing calls `finish` by itself: the plugin's event handler must call it with the call number stored in the pending map when the slow source completes. If it never does, the caller gets `timed-out` after 30 s, so the handler for the timeout must also remove the entry from the map.
 
 Points to notice:
 
@@ -357,7 +366,7 @@ The consumer asks for the lowest version it can live with. It does not require 1
 
 `requires.services` makes the host wait at activation. It waits for a compatible provider, 2 s by default and 5 s at most. If none shows up, the consumer still activates and its first call fails with `not-found`. Install never fails because a provider is missing.
 
-The consumer must handle six outcomes. Write them as one pure function, so each can be tested alone.
+The consumer must handle eight outcomes. Write them as one pure function, so each can be tested alone.
 
 | Outcome | Cause | What the consumer shows |
 |---|---|---|
@@ -366,6 +375,8 @@ The consumer must handle six outcomes. Write them as one pure function, so each 
 | `not-found` | No provider, or it is off, or the call was late | `Glossary is not available.` |
 | `unsupported` | The provider is older than the method needs | `Glossary is too old.` |
 | `timed-out` | The provider took over 30 s | `Glossary did not answer.` |
+| `busy` | The caller already has 64 pending calls | `Glossary is busy.` |
+| `cancelled` | The provider restarted with the call open | `Glossary is not available.` (the fallback) |
 | `invalid-argument` or garbage | A broken schema or a broken result | `Glossary gave an unusable answer.` |
 
 Garbage matters most. A provider is a different author's code. Read the result like any untrusted input. Check the type of every field and cap the length before you show it.
@@ -393,6 +404,8 @@ pub fn describe(term: &str, outcome: Result<String, String>) -> String {
                 "not-found" => "Glossary is not available.".to_string(),
                 "unsupported" => "Glossary is too old.".to_string(),
                 "timed-out" => "Glossary did not answer.".to_string(),
+                "busy" => "Glossary is busy.".to_string(),
+                "cancelled" => "Glossary is not available.".to_string(),
                 _ => "Glossary gave an unusable answer.".to_string(),
             };
         }
@@ -472,6 +485,8 @@ export function describe(term: string, outcome: Outcome): string {
       case 'not-found': return 'Glossary is not available.';
       case 'unsupported': return 'Glossary is too old.';
       case 'timed-out': return 'Glossary did not answer.';
+      case 'busy': return 'Glossary is busy.';
+      case 'cancelled': return 'Glossary is not available.';
       default: return 'Glossary gave an unusable answer.';
     }
   }
@@ -544,7 +559,7 @@ The requirement `example.glossary/lookup@1.0.0` is satisfied by a provider at 1.
 | Who may answer | Only a plugin that holds `services.provide:<name>`. |
 | What the caller sends | Text. Do not send secrets to a service you do not own. A provider is another author's code. |
 | What the provider returns | Untrusted. Check types and cap lengths before you use or show them. |
-| Pending calls | At most 64 per provider. More give `busy`. |
+| Pending calls | At most 64 per caller. More give `busy`. |
 | Time | 30 s from the call. Then `timed-out`. |
 
 ### Step 6: test each failure
@@ -585,6 +600,8 @@ mod tests {
     #[test]
     fn provider_slow() {
         assert_eq!(describe("x", err("timed-out")), "Glossary did not answer.");
+        assert_eq!(describe("x", err("busy")), "Glossary is busy.");
+        assert_eq!(describe("x", err("cancelled")), "Glossary is not available.");
     }
 
     #[test]
@@ -622,6 +639,8 @@ test('provider absent, old and slow', () => {
   expect(describeOutcome('x', err('not-found'))).toBe('Glossary is not available.');
   expect(describeOutcome('x', err('unsupported'))).toBe('Glossary is too old.');
   expect(describeOutcome('x', err('timed-out'))).toBe('Glossary did not answer.');
+  expect(describeOutcome('x', err('busy'))).toBe('Glossary is busy.');
+  expect(describeOutcome('x', err('cancelled'))).toBe('Glossary is not available.');
 });
 test('provider returns garbage', () => {
   expect(describeOutcome('x', ok('not json'))).toBe('Glossary gave an unusable answer.');
@@ -672,7 +691,7 @@ With the provider off, the same command shows the fallback.
 | `not-permitted` | The consumer lacks `services.use:<name>` | Add the grant. A version in the grant is wrong. |
 | `invalid-argument` | Params do not match the schema, or a `done` result does not match the result schema | Fix the payload. Fix the provider's result. |
 | `unsupported` | The provider has no such method | Ask for a higher version, or fall back. |
-| `busy` | The provider has 64 pending calls | Retry later. Cache answers. |
+| `busy` | The caller already has 64 pending calls | Retry later. Cache answers. |
 | `timed-out` | No reply in 30 s | Show the fallback. The provider should defer less. |
 | `cancelled` | The provider restarted with a deferred call open | Show the fallback. Retry once if it is safe. |
 | Second provider idle | One provider per name | Pick the owner on the Surface view. |

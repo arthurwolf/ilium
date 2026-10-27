@@ -84,6 +84,13 @@ pub enum NewPaneKind {
     /// command has exited. Used by `ilium new-pane` unless `--keep-open` is
     /// given. Appended so existing bincode variant indexes remain stable.
     CommandClosingOnExit(String),
+    /// Resolve the profile server-side at launch. Only non-secret identity and
+    /// optional initial input cross the wire; environment values stay in the
+    /// private configuration and in the spawned process environment.
+    CustomAgent {
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        initial_input: Option<String>,
+    },
 }
 
 /// Server-side starting-directory strategy for a newly spawned terminal.
@@ -1064,6 +1071,15 @@ pub enum ClientRequest {
         before_sequence: u64,
         max_bytes: u32,
     },
+    /// Create a profile-backed agent in a new or existing workspace.
+    /// Only identity crosses IPC; environment values are resolved by the server.
+    CreateCustomAgentInWorkspace {
+        request_id: u64,
+        parent_group: NodeId,
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        spec: WorkspaceCreateSpec,
+        initial_input: Option<String>,
+    },
 }
 
 /// Which client path produced a stored recap.
@@ -1157,6 +1173,7 @@ impl ClientRequest {
             Self::UpdateAntigravityStatusline { .. } => "update_antigravity_statusline",
             Self::QueryRepoFacts { .. } => "query_repo_facts",
             Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
+            Self::CreateCustomAgentInWorkspace { .. } => "create_custom_agent_in_workspace",
             Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
             Self::RemoveWorkspace { .. } => "remove_workspace",
             Self::ClosePaneWithWorkspaceDisposition { .. } => {
@@ -1644,5 +1661,10 @@ pub enum ServerEvent {
         #[serde(with = "crate::terminal_bytes")]
         bytes: Vec<u8>,
         reaches_journal_start: bool,
+    },
+    /// Non-secret profile identity for a pane, or None when conversion clears it.
+    PaneCustomAgentIdentity {
+        pane_id: NodeId,
+        identity: Option<ilium_core::custom_agent::CustomAgentIdentity>,
     },
 }

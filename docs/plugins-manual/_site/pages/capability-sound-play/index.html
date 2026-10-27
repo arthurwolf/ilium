@@ -480,7 +480,7 @@
 <td><code>catalog</code></td>
 <td>host function, always granted</td>
 <td><code>ilium_plugin_sdk::host::sounds::catalog() -&gt; Vec&lt;String&gt;</code></td>
-<td><code>catalog(): string[]</code> from <code>@ilium/plugin-sdk/host/sound</code></td>
+<td><code>catalog(): string[]</code> from <code>@ilium/plugin-sdk/host/sounds</code></td>
 <td>Returns the sound ids this plugin may play. It is synchronous and has no error code.</td>
 </tr>
 <tr>
@@ -506,7 +506,7 @@
 <li><strong>Contributed ids.</strong> Each <code>contributes.sounds</code> entry adds one id. The id is the plain string you write, such as <code>done</code>.</li>
 <li><strong>Catalogue scope.</strong> <code>catalog()</code> and <code>play-sound</code> see the bundled ids and the plugin's own ids. A plugin cannot play another plugin's sounds. Such an id is refused with <code>not-found</code>.</li>
 <li><strong>Id rules.</strong> An id must be unique within the manifest, and it must not be <code>chirping</code>. A repeated id or a clash with <code>chirping</code> fails the package check at install with <code>manifest.sound-id-taken</code>.</li>
-<li><strong>File format.</strong> A sound file must be WAV with PCM samples, or OGG Vorbis. A file that is missing or in another format fails the package check at install, and the plugin is not installed.</li>
+<li><strong>File format.</strong> A sound file must be WAV with PCM samples, or OGG Vorbis. A file that is missing or in another format fails the package check at install with <code>manifest.sound-format</code>, and the plugin is not installed.</li>
 </ul>
 <p>The manifest for both examples below:</p>
 <pre><code class="language-json">{
@@ -665,12 +665,37 @@ export const { lifecycle, handler } = definePlugin({
 <figcaption>Illustrative, not generated. A refused <code>play-sound</code> in the plugin log.</figcaption>
 </figure>
 
+<h3 id="sound-is-never-the-only-signal">Sound is never the only signal</h3>
+<p>A sound cannot be heard by every user, on every terminal or in every room. A plugin that plays a sound MUST also show the same event as text.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Rule</th>
+<th>Exact value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CAP-880</td>
+<td>Visible pair for every sound</td>
+<td>Every <code>play-sound</code> for an event MUST be accompanied, in the same batch, by a visible text signal for that event (panel row, status line or toast). A batch with a <code>play-sound</code> and no visible signal for the event is rejected by the plugin check with <code>a11y.sound-only</code></td>
+<td><code>src/docs/notifications.md</code></td>
+</tr>
+<tr>
+<td>CAP-881</td>
+<td>Failed sound keeps the visible signal</td>
+<td><code>failed(io)</code>, <code>refused(rate-limited)</code> and a muted sound setting MUST NOT suppress or delay the paired visible signal</td>
+<td><code>src/docs/notifications.md</code></td>
+</tr>
+</tbody>
+</table>
 <h3 id="who-requests-it">Who requests it</h3>
 <p>First-party plugins from the feature mapping:</p>
 <ul>
-<li>47 Sound alerts, which play a sound when an agent finishes or needs approval.</li>
-<li>56 Text triggers, which play a sound when terminal output matches a filter.</li>
-<li>59 Progress monitor, which plays a sound when a monitored task finishes.</li>
+<li>47 Sound alerts, which play a sound when an agent finishes or needs approval.
+The Text triggers and Progress monitor plugins do not hold <code>sound.play</code> and play no sounds.</li>
 </ul>
 <h3 id="wit">WIT</h3>
 <p>The contract below is an excerpt. The owner is the <a href="/pages/reference-wit/">WIT reference</a>, and that page wins if the two differ.</p>
@@ -683,14 +708,14 @@ catalog: func() -&gt; list&lt;string&gt;;
 <li><a href="/pages/capability-notify-desktop/">notify.desktop</a> shows a desktop notification. Its <code>sound</code> field plays a sound with the notice and needs only <code>notify.desktop</code>.</li>
 <li><a href="/pages/capability-fs-read/">fs.read</a> reads the sound files that a plugin reads for itself.</li>
 <li><a href="/pages/events-and-intents/">Events and intents</a> describes the intent batch and the outcome model.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> lists the error codes and the rate budgets.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> lists the error codes and the rate budgets.</li>
 </ul>
 <p>Contract: <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-settings-all/"><small>Previous</small>Capability: settings.read-all and settings.write-all</a><a class="next" href="/pages/capability-terminal-output-filter/"><small>Next</small>terminal.output-filter</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#soundplay">sound.play</a></li><li class="l3"><a href="#what-you-need">What you need</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#the-surface">The surface</a></li><li class="l3"><a href="#sound-ids-and-files">Sound ids and files</a></li><li class="l3"><a href="#worked-example-1-rust-client-side">Worked example 1: Rust, client side</a></li><li class="l3"><a href="#worked-example-2-typescript-client-side">Worked example 2: TypeScript, client side</a></li><li class="l3"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#rate-and-dedup-rules">Rate and dedup rules</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#wit">WIT</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#soundplay">sound.play</a></li><li class="l3"><a href="#what-you-need">What you need</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#the-surface">The surface</a></li><li class="l3"><a href="#sound-ids-and-files">Sound ids and files</a></li><li class="l3"><a href="#worked-example-1-rust-client-side">Worked example 1: Rust, client side</a></li><li class="l3"><a href="#worked-example-2-typescript-client-side">Worked example 2: TypeScript, client side</a></li><li class="l3"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#rate-and-dedup-rules">Rate and dedup rules</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#sound-is-never-the-only-signal">Sound is never the only signal</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#wit">WIT</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

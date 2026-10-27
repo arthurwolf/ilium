@@ -215,7 +215,7 @@ fn rendered(terminal: &Terminal<TestBackend>) -> String {
         .join("\n")
 }
 
-fn draw(fixture: &Fixture) -> String {
+fn draw_terminal(fixture: &Fixture) -> Terminal<TestBackend> {
     let area = fixture.app.layout.screen_area;
     let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
     terminal
@@ -223,7 +223,28 @@ fn draw(fixture: &Fixture) -> String {
             crate::settings_ui::render(frame, frame.area(), &fixture.app, fixture.state());
         })
         .unwrap();
-    rendered(&terminal)
+    terminal
+}
+
+fn draw(fixture: &Fixture) -> String {
+    rendered(&draw_terminal(fixture))
+}
+
+/// Read actual content cells in display order, treating wrapped row boundaries
+/// as whitespace. Navigation and frame glyphs must not interrupt a diagnostic.
+fn draw_content_words(fixture: &Fixture) -> String {
+    let terminal = draw_terminal(fixture);
+    let buffer = terminal.backend().buffer();
+    let content = fixture.content();
+    let rows = (content.y..content.bottom())
+        .map(|row| {
+            (content.x..content.right())
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    rows.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 // ------------------------------------------------------------- opening
@@ -278,7 +299,7 @@ fn a_missing_configuration_file_reads_as_not_set() {
         fixture.app.optimization.panel(AgentKind::Codex).current,
         CurrentSetting::NoFile
     );
-    assert!(draw(&fixture).contains("does not exist"));
+    assert!(draw_content_words(&fixture).contains("does not exist"));
 }
 
 #[test]
@@ -672,7 +693,7 @@ fn a_stale_file_is_reported_in_the_tab_and_nothing_is_written() {
         .panel(AgentKind::Codex)
         .record
         .is_none());
-    assert!(draw(&fixture).contains("changed since it was read"));
+    assert!(draw_content_words(&fixture).contains("changed since it was read"));
 }
 
 #[test]

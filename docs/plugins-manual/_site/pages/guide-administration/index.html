@@ -565,7 +565,7 @@ ilium plugin install notes.iliumpkg --yes --grant terminal.history
 <li><strong>Block its key.</strong> If a whole publisher is at fault, remove its fingerprint from <code>publishers.allow</code>.</li>
 <li><strong>Find who has it.</strong> Search the audit log for the plugin id.</li>
 <li><strong>Clean up.</strong> Ask users to run <code>ilium plugin uninstall &lt;id&gt; --purge</code>. The policy does not delete anything on its own.</li>
-<li><strong>Remove the key.</strong> Users can run <code>ilium plugin trust remove &lt;publisher&gt;</code>. Plugins signed with it then show <code>untrusted</code>.</li>
+<li><strong>Remove the key.</strong> Users can run <code>ilium plugin trust remove &lt;key_id&gt; --force</code>. Without <code>--force</code> the command refuses with <code>trust.in-use</code> while an installed plugin is signed with the key. Plugins signed with it then show <code>untrusted</code>.</li>
 </ol>
 <p>Users see "Blocked by policy" and the detail code, for example <code>policy.id-denied</code>. See <a href="/pages/user-troubleshooting/">Troubleshooting plugins</a>.</p>
 <h3 id="roll-out-a-change">Roll out a change</h3>

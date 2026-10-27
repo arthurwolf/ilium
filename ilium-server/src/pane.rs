@@ -263,6 +263,13 @@ pub enum TerminalOrigin {
     /// A stopped agent whose resume command is retained for an explicit
     /// unfreeze. Restarting Ilium restores the pane without launching it.
     Frozen { resume_command: String },
+    /// A profile identity and its non-secret provider command survive restarts.
+    /// Environment values are resolved from configuration at each launch.
+    CustomAgent {
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        command_line: String,
+        frozen: bool,
+    },
 }
 
 impl TerminalOrigin {
@@ -275,6 +282,7 @@ impl TerminalOrigin {
             TerminalOrigin::PlainShell => "shell",
             TerminalOrigin::Command(command_line) => command_line,
             TerminalOrigin::Frozen { .. } => "frozen agent",
+            TerminalOrigin::CustomAgent { identity, .. } => &identity.profile_id,
         }
     }
 
@@ -291,6 +299,7 @@ impl TerminalOrigin {
                 .unwrap_or_else(|| self.default_pane_name()),
             TerminalOrigin::PlainShell => self.default_pane_name(),
             TerminalOrigin::Frozen { .. } => self.default_pane_name(),
+            TerminalOrigin::CustomAgent { .. } => self.default_pane_name(),
         }
     }
 }
@@ -1456,6 +1465,24 @@ fn terminal_launch_plan(
     origin: &TerminalOrigin,
     claude_transcript_exists: impl FnOnce(&str) -> bool,
 ) -> TerminalLaunchPlan {
+    if let TerminalOrigin::CustomAgent {
+        command_line,
+        frozen,
+        ..
+    } = origin
+    {
+        return if *frozen {
+            TerminalLaunchPlan {
+                command_line: None,
+                session_id: None,
+            }
+        } else {
+            terminal_launch_plan(
+                &TerminalOrigin::Command(command_line.clone()),
+                claude_transcript_exists,
+            )
+        };
+    }
     if let TerminalOrigin::Command(command_line) = origin {
         if let Some(session_id) = generated_claude_session_id(command_line) {
             return if claude_transcript_exists(session_id) {
@@ -1497,6 +1524,7 @@ fn terminal_launch_plan(
             command_line: Some(command_line.clone()),
             session_id: None,
         },
+        TerminalOrigin::CustomAgent { .. } => unreachable!("custom origins are handled above"),
     }
 }
 
@@ -1546,11 +1574,14 @@ pub struct PaneIdentityEnv<'a> {
     pub worktree_root: Option<&'a Path>,
 }
 
-pub fn spawn_terminal_session(
+/// Spawn with validated profile variables as structured process environment.
+/// Values never enter the shell command or the durable terminal origin.
+pub(crate) fn spawn_terminal_session_with_environment(
     origin: &TerminalOrigin,
     cwd: &Path,
     identity: &PaneIdentityEnv<'_>,
     quota: &ilium_execution::QuotaGroup,
+    environment: &[ilium_core::custom_agent::EnvironmentEntry],
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin, |session_id| {
@@ -1564,6 +1595,9 @@ pub fn spawn_terminal_session(
             .arg(command_flag)
             .arg(command_line),
     };
+    let command = environment.iter().fold(command, |command, entry| {
+        command.env(&entry.key, &entry.value)
+    });
     let mut command = command
         .env(ilium_ipc::pane_env::PANE_ID, identity.pane_id.0.to_string())
         .env(ilium_ipc::pane_env::SESSION_NAME, identity.session_name)
@@ -1624,6 +1658,25 @@ mod tests {
             .automated_agent_input_rejection(&status, None)
             .is_some());
         runtime.session.kill().expect("close fixture");
+    }
+
+    #[test]
+    fn custom_claude_uses_the_same_session_id_launch_as_the_base_provider() {
+        let origin = TerminalOrigin::CustomAgent {
+            identity: ilium_core::custom_agent::CustomAgentIdentity {
+                profile_id: "work".into(),
+                base_provider: BuiltinAgentProvider::Claude,
+            },
+            command_line: "claude".into(),
+            frozen: false,
+        };
+        let plan = terminal_launch_plan(&origin, |_| false);
+        let session_id = plan.session_id.unwrap();
+        assert!(uuid::Uuid::parse_str(&session_id).is_ok());
+        assert_eq!(
+            plan.command_line,
+            Some(format!("claude --session-id {session_id}"))
+        );
     }
 
     #[test]

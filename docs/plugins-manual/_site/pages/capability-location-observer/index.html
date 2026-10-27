@@ -591,21 +591,21 @@ export function observerLabel(): string {
 <figcaption>The review dialog for a package that requests location.observer, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
 </figure>
 
-<p>A bundled T1 plugin is not shown the review dialog. It is activated first without the grant. On its first activation the host asks once:</p>
+<p>A bundled T1 plugin is not shown the review dialog. It is activated first without the grant. On its first activation the host shows a prompt. <code>Not now</code> asks again at the next server start, at most three prompts in total, and then the user grants it in Settings &gt; Plugins:</p>
 <figure>
 
 <pre class="term"><span class="t-hi">Plugin com.example.scenes asks for:</span>
   <span class="t-err">HIGH</span> [ ] Know your configured location  location.observer
 <span class="t-dim">[Allow selected]  [Not now]</span></pre>
 
-<figcaption>Illustrative, not generated. The first-activation prompt for a bundled plugin. Choosing Not now asks again at the next server start, up to three times in total.</figcaption>
+<figcaption>Illustrative, not generated. The first-activation prompt for a bundled plugin. Choosing Not now asks again at the next server start, at most three prompts in total.</figcaption>
 </figure>
 
 <p>The user can change a grant at any time in Settings &gt; Plugins &gt; <plugin> &gt; Capabilities, or with <code>ilium plugin grants &lt;id&gt; --revoke location.observer</code>.</p>
 <p>When the host refuses a call, it writes a refusal line to the plugin log. Run <code>ilium plugin logs &lt;id&gt;</code> to see it. A declined grant writes this line:</p>
 <pre><code class="language-json">{
   &quot;type&quot;: &quot;refusal&quot;,
-  &quot;capability&quot;: &quot;location.observer&quot;,
+  &quot;grant&quot;: &quot;location.observer&quot;,
   &quot;function&quot;: &quot;location.current&quot;,
   &quot;reason&quot;: &quot;declined&quot;
 }
@@ -613,7 +613,7 @@ export function observerLabel(): string {
 <h3 id="risk-and-tier-rules">Risk and tier rules</h3>
 <ul>
 <li><code>location.observer</code> is high risk (H). It always needs an explicit grant, even for a T1 bundled plugin.</li>
-<li><strong>T1 bundled plugins</strong> show one prompt per plugin at first activation: <code>Plugin &lt;name&gt; asks for: &lt;list&gt;</code>, with the buttons <code>Allow selected</code> and <code>Not now</code>.</li>
+<li><strong>T1 bundled plugins</strong> show a prompt per plugin at first activation (repeated at the next start after Not now, at most three prompts in total): <code>Plugin &lt;name&gt; asks for: &lt;list&gt;</code>, with the buttons <code>Allow selected</code> and <code>Not now</code>.</li>
 <li><strong>T2 and T3 packages</strong> show the grant in the review dialog. The user checks each high risk row.</li>
 <li><strong>Client and scene worlds only.</strong> The grant is available on the client side (<code>C</code>) and the animation world (<code>A</code>). It is not available on the server side.</li>
 <li><strong>Per side and per plugin.</strong> The grant is recorded per plugin, per side and per user configuration, not per project.</li>

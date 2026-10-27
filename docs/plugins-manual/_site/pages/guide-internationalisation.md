@@ -80,7 +80,7 @@ export function fit(text: string, maxCells: number): string {
 }
 ```
 
-The call to `display-width` crosses into the host. A plugin SHOULD NOT call it once per character for a long text. Measure once, and cut only when the text is too wide. [AUT-604]
+The call to `display-width` crosses into the host. A plugin SHOULD NOT call `display-width` once per character for a long text. Measure once, and cut only when the text is too wide. [AUT-604]
 
 ### Label and value pairs
 
@@ -127,7 +127,15 @@ Do not build sentences by joining pieces. Word order differs between languages.
 | A plural by adding `s` | One message for each plural form the language needs |
 | A translated word inside a command id | Keep command ids, keys and codes in English |
 
-Command ids, setting keys, error codes and event names are identifiers. A plugin MUST NOT translate them. [AUT-610] Titles shown to people, such as a command `title`, are text and MAY be in any language.
+Command ids, setting keys, error codes and event names are identifiers. A plugin MUST NOT translate command ids, setting keys, error codes and event names. [AUT-610] Titles shown to people, such as a command `title`, are text and MAY be in any language.
+
+## Text on capability surfaces
+
+Toasts, notices and the grant-review dialog are drawn by the host, but part of their text comes from the plugin. The host does not translate text a plugin supplies, and a plugin does not control the host's own words. The sections below say who owns which text.
+
+A plugin MUST pass a toast or notice body already in the language it chose, and the host MUST show it unchanged apart from escape removal and the width cut. [AUT-618] The host's fixed words around it (a `Show toasts` row, a button, a grant label) are not in the plugin's language and a plugin MUST NOT rely on them matching its own. [AUT-619]
+
+The one-line reason a plugin gives for a grant in its manifest has one value. The review dialog shows it verbatim, as data, cut at the dialog width with `…`, and never mixes it into a host sentence. [AUT-620] A plugin SHOULD write that reason in a language its users read and SHOULD keep it short enough to fit 60 cells after a translation. [AUT-621] Grant ids, the plugin id and capability names in the dialog are identifiers and are never translated. [AUT-622] See [Grant review and consent](/pages/reference-grant-review-and-consent/).
 
 ## Time
 
@@ -141,17 +149,19 @@ Command ids, setting keys, error codes and event names are identifiers. A plugin
 
 A plugin that shows a time MUST write the zone or say that it is relative, and MUST store times as UTC milliseconds, never as local text. [AUT-611]
 
-The manual uses the form `YYYY-MM-DD HH:mm:ss` for dates, which has the same order in every language. A plugin SHOULD use it for absolute times unless the user chooses another form. [AUT-612]
+The manual uses the form `YYYY-MM-DD HH:mm:ss` for dates, which has the same order in every language. A plugin SHOULD use `YYYY-MM-DD HH:mm:ss` for absolute times unless the user chooses another form. [AUT-612]
 
 ```rust
-/// Format UTC milliseconds as `YYYY-MM-DD HH:mm:ss` plus an offset in minutes.
+/// Format UTC milliseconds as `YYYY-MM-DD HH:mm:ss` plus the zone as `UTC+HH:MM`, so the zone is always written.
 fn format_time(unix_millis: u64, offset_minutes: i64) -> String {
     let seconds = (unix_millis / 1000) as i64 + offset_minutes * 60;
     let days = seconds.div_euclid(86_400);
     let rest = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
-        rest / 3600, (rest % 3600) / 60, rest % 60)
+    let sign = if offset_minutes < 0 { '-' } else { '+' };
+    let offset = offset_minutes.abs();
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC{sign}{:02}:{:02}",
+        rest / 3600, (rest % 3600) / 60, rest % 60, offset / 60, offset % 60)
 }
 ```
 

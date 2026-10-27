@@ -7,7 +7,7 @@ The glyph plane and frame receipts are part of the surface of the single contrac
 ### What you need
 
 - **Grant.** None for the surface. Video from bytes needs `media.video` (see [media](/pages/api-media/)).
-- **Manifest.** In `contributes.scenes`: `glyph_plane: true` for the glyph plane, and `prerender: { frames, fps, cache_mib }` for a looped scene. `prerender` and `wants-pointer` exclude each other (`manifest.scene-prerender`).
+- **Manifest.** In `contributes.scenes`: `glyph_plane: true` for the glyph plane, and `prerender: { frames, fps, cache_mib }` for a looped scene. A `prerender` scene gets no pointer: if it answers `true` from `wants-pointer` at runtime, `pointer` returns `none` and the host logs a warning.
 - **Sides.** The scene (A) world. Fonts are always available there.
 
 ```json
@@ -142,7 +142,7 @@ With `prerender: { frames, fps, cache_mib }` the host calls `render` for the dec
 | More than 131,072 glyph cells per frame | `quota-exceeded` |
 | `write-glyphs` without `glyph_plane` | `unsupported` |
 | Font asset over 4 MiB | `manifest.asset-size` |
-| `prerender` out of range or with `wants-pointer` | `manifest.scene-prerender` |
+| `prerender` out of range | `manifest.scene-prerender` |
 
 ### See also
 

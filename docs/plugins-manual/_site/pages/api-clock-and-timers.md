@@ -327,7 +327,7 @@ Timers draw nothing. The status poll writes only to the plugin log, which `ilium
 |---|---|
 | `after-millis` or `repeat-millis` under 50, including 0 | `invalid-argument`. No timer is armed. |
 | The plugin already holds its limit of timers | `quota-exceeded`. Cancel an unused timer and retry. |
-| `set` returns `internal`, `revoked` or `not-permitted` | The plugin has no timer. Treat the failure like any other host error. |
+| `set` returns `internal` | The plugin has no timer. Treat the failure like any other host error. |
 | `cancel` with an unknown or finished id | Nothing happens. No error is returned. |
 | Clock functions | Never fail. |
 | `handler` runs past the event deadline | The plugin traps. Move slow work to a request. |
@@ -343,7 +343,7 @@ Illustrative, not generated. A plugin that asks for a 20 ms interval logs the re
 
 ### Time zones and locale
 
-`now-unix-millis` is UTC. `ilium:plugin@0.1.0` has no function for the user's UTC offset, time zone or locale, and a clock import does not add one. A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time. [AUT-616] Patterns for formatting are in [Internationalisation](/pages/guide-internationalisation/). The test clock starts at 2030-01-01 00:00:00 UTC and moves only with `advance_clock`. See [Patterns cookbook](/pages/guide-patterns-cookbook/) for debounce, throttle and retry built on timers.
+`now-unix-millis` is UTC. `ilium:plugin@0.1.0` has no function for the user's UTC offset, time zone or locale, and a clock import does not add one. A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time. Test: render the view with the test clock fixed and assert the text carries the zone name or a relative phrase such as `5 min ago`. [AUT-616] Patterns for formatting are in [Internationalisation](/pages/guide-internationalisation/). The test clock starts at 2030-01-01 00:00:00 UTC and moves only with `advance_clock`. See [Patterns cookbook](/pages/guide-patterns-cookbook/) for debounce, throttle and retry built on timers.
 
 ### Used by
 
@@ -361,7 +361,7 @@ Times are `epoch-ms` (`u64`, milliseconds since the Unix epoch, UTC) and duratio
 - [Events](/pages/api-events/) for the `timer-fired` delivery policy.
 - [Lifecycle](/pages/lifecycle/) for `activate` and `deactivate`, where timers are armed and cancelled.
 - [Durable timers and input journal](/pages/api-durable-timers/) for timers that survive a restart.
-- [Errors and limits](/pages/errors-and-limits/) for the event deadline and the full error code list.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the event deadline and the full error code list.
 - [Rust SDK reference](/pages/rust-sdk/) and [TypeScript SDK reference](/pages/typescript-sdk/) for the binding rules.
 
 Contract: `ilium:plugin@0.1.0`.

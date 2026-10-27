@@ -254,7 +254,7 @@ The progress monitor (feature 59) publishes `ilium.progress/finished`. It needs 
 - [messages.peer](/pages/capability-messages-peer/) for messages sent to one named plugin.
 - [services.use](/pages/capability-services/) for a request that expects a reply.
 - [Events](/pages/api-events/) for every event and its delivery policy.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and rate rules.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and rate rules.
 - [Lifecycle](/pages/lifecycle/) for activation triggers and deactivation reasons.
 
 Surface: `ilium:plugin@0.1.0`.

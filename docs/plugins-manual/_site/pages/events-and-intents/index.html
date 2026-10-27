@@ -397,8 +397,8 @@
 <h2 id="you-will-need">You will need</h2>
 <ul>
 <li>The grants for each event and intent you use. The tables below name them. See <a href="/pages/capabilities/">Capabilities</a>.</li>
-<li>A server or client side. In Rust, <code>#[ilium_plugin(side = "server")]</code> or <code>side = "client"</code>. In TypeScript, <code>side: 'server'</code> or <code>side: 'client'</code> in <code>definePlugin</code>. A scene plugin exports <code>renderer</code> instead of <code>handler</code>.</li>
-<li>The <code>lifecycle</code> and <code>handler</code> exports. Both are required, so the manifest never lists them in <code>exports</code>.</li>
+<li>A server or client side. In Rust, <code>#[ilium_plugin(side = "server")]</code> or <code>side = "client"</code>. In TypeScript, <code>side: 'server'</code> or <code>side: 'client'</code> in <code>definePlugin</code>. A scene plugin also exports <code>renderer</code>.</li>
+<li>The <code>lifecycle</code> and <code>handler</code> exports (and <code>renderer</code> for a scene plugin). They are required, so the manifest never lists them in <code>exports</code>.</li>
 <li>Rust stable 1.90 or later with the <code>wasm32-wasip2</code> target, or Bun 1.2 or later for TypeScript.</li>
 <li>Background from <a href="/pages/worlds-and-sides/">Worlds and sides</a>.</li>
 </ul>
@@ -427,7 +427,7 @@
 </tbody>
 </table>
 <p>An instance runs one call at a time, so a handler never re-enters itself.</p>
-<p>The <code>on-events</code> deadline is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A breach traps the instance, which follows the <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">restart and disable rule</a>: restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p>The <code>on-events</code> deadline is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A breach traps the instance, which follows the <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">restart and disable rule</a>: restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h2 id="event-catalogue">Event catalogue</h2>
 <p>An event reaches a plugin only when the plugin holds the listed grant. Lazily activated plugins receive events only after activation.</p>
 <table>
@@ -520,7 +520,7 @@
 </tr>
 <tr>
 <td><code>pointer</code></td>
-<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, drag, wheel), <code>button</code></td>
+<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), <code>button</code></td>
 <td><code>terminal.pointer</code>, while claimed</td>
 <td>Coalesced (drag)</td>
 </tr>
@@ -557,7 +557,7 @@
 <tr>
 <td><code>request-completed</code></td>
 <td><code>request-result</code></td>
-<td>always (own)</td>
+<td>none (own timers)</td>
 <td>Never dropped</td>
 </tr>
 <tr>
@@ -771,7 +771,7 @@
 <tr>
 <td><code>durable-timer-fired</code></td>
 <td><code>timer</code>, <code>name</code>, <code>late-by-millis</code></td>
-<td>always (own)</td>
+<td>none (own timers)</td>
 <td>Never dropped</td>
 </tr>
 <tr>
@@ -894,7 +894,7 @@
   <line x1="150" y1="96" x2="150" y2="114" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
   <rect x="20" y="114" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
   <text x="150" y="135" font-size="11" text-anchor="middle" fill="currentColor">Per submission: dedup-key</text>
-  <text x="296" y="135" font-size="10" fill="currentColor">duplicate(original)</text>
+  <text x="296" y="135" font-size="10" fill="currentColor">duplicate(request-ref)</text>
   <line x1="150" y1="148" x2="150" y2="166" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
   <rect x="20" y="166" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
   <text x="150" y="187" font-size="11" text-anchor="middle" fill="currentColor">Per submission: target checks</text>
@@ -918,7 +918,7 @@
 <p>The SDK helper <code>dedup::key_for(parts: &amp;[&amp;str])</code> joins its parts with <code>:</code> and replaces disallowed characters with <code>-</code>. It returns a key such as <code>finish:42:7</code>.</p>
 <p>For <code>send-input</code>, two checks run at batch level before this list (see Batch checks): shape (key present, total text across all stages at most 65,536 bytes, otherwise <code>refused(invalid-argument)</code>) and the grant <code>terminal.write</code> (otherwise <code>refused(not-permitted)</code>). The kernel then checks each submission in this order. The first failing check decides the outcome.</p>
 <ol>
-<li>Dedup key already reserved. Then <code>duplicate(original)</code>.</li>
+<li>Dedup key already reserved. Then <code>duplicate(request-ref)</code>.</li>
 <li>Pane exists and is a terminal pane. Otherwise <code>refused(not-found)</code> or <code>refused(unsupported)</code>.</li>
 <li>The pane is restored, which means its process has started. Otherwise <code>refused(pane-not-ready)</code>.</li>
 <li>The rate limit has room. Otherwise <code>refused(rate-limited)</code>.</li>
@@ -977,7 +977,7 @@
 </tr>
 <tr>
 <td><code>send-input</code></td>
-<td><code>pane</code>, <code>text</code>, <code>delivery</code> (Typed, Submitted, Pasted), <code>prompt-epoch</code></td>
+<td><code>pane</code>, <code>text</code>, <code>delivery</code> (Typed, Submitted, Pasted), <code>prompt-epoch</code>, <code>stages</code> (at most 16, total delay at most 10 s), <code>raw</code> and <code>mouse</code> (need <code>terminal.raw-input</code>), <code>if-current</code>, <code>lock-user-input</code> (at most 2 s, needs <code>terminal.input-lock</code>), <code>journal</code></td>
 <td><code>terminal.write</code></td>
 <td><code>refused(pane-not-ready)</code>, <code>refused(rate-limited)</code>, <code>refused(conflict)</code></td>
 </tr>
@@ -1044,7 +1044,7 @@
 <tr>
 <td><code>editor-open</code></td>
 <td><code>path</code>, <code>line</code>, <code>placement</code> (new pane, split, replace)</td>
-<td><code>editor.edit</code></td>
+<td><code>editor.edit</code>, <code>fs.read</code></td>
 <td><code>ok-node</code>; <code>refused(not-permitted)</code>, <code>failed(not-found)</code>, <code>failed(io)</code></td>
 </tr>
 </tbody>
@@ -1168,6 +1168,12 @@ let submission = Submission::keyed(
         text: &quot;/compact&quot;.into(),
         delivery: Delivery::Submitted,
         prompt_epoch: None,
+        stages: Vec::new(),
+        raw: None,
+        mouse: None,
+        if_current: None,
+        lock_user_input: false,
+        journal: true,
     }),
     key,
 );
@@ -1217,7 +1223,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
 <li><a href="/pages/retained-mode/">Retained mode</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
 <li><a href="/pages/reference-events-and-intents/">Reference: events and intents</a></li>
 </ul>

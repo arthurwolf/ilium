@@ -767,6 +767,11 @@ pub struct TreeHoverState {
 /// All transient presentation state for one tree render. Grouping it keeps
 /// the renderer's stable tree/state inputs distinct from redraw-only UI data.
 pub struct TreeRenderOptions<'a> {
+    pub custom_toolbar_profiles: Option<&'a [ilium_core::custom_agent::CustomAgentProfile]>,
+    pub custom_toolbar_selected: Option<&'a str>,
+    pub custom_toolbar_hovered: Option<&'a str>,
+    pub custom_toolbar_pending: Option<&'a HashSet<String>>,
+    pub custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     pub focused: bool,
     pub elapsed_ms: u128,
     /// Real animation-clock offset even when decorative motion is disabled.
@@ -896,6 +901,7 @@ fn layout_tree_row(
 /// together prevents each new presentation concern from widening every
 /// recursive helper's signature independently.
 struct TreeItemBuildContext<'a> {
+    custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     layout: Option<&'a RowLayoutBuild<'a>>,
     elapsed_ms: u128,
     terminal_activity_elapsed_ms: u128,
@@ -1245,6 +1251,14 @@ fn build_item(
                     display_title(node, context.panel_width),
                     prompt_queue.len()
                 )
+            };
+            let display_name = if let Some((icon, name)) = context
+                .custom_agent_labels
+                .and_then(|labels| labels.get(&node.id))
+            {
+                format!("{icon} {name} · {display_name}")
+            } else {
+                display_name
             };
             // A pending scheduled input's countdown is a number, so it belongs
             // in the text; the long-term slot carries its marker only when no
@@ -2428,6 +2442,42 @@ pub fn toolbar_area(area: Rect) -> Rect {
     vertical_sections(area)[2]
 }
 
+/// A transient hit target; activation resolves the index to its stable profile ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CustomToolbarHit {
+    Previous,
+    Profile(usize),
+    Next,
+}
+
+/// A scrolling second toolbar row keeps all profiles reachable in narrow trees.
+pub(crate) fn custom_toolbar_buttons(
+    area: Rect,
+    profiles: &[ilium_core::custom_agent::CustomAgentProfile],
+    selected: Option<&str>,
+) -> Vec<(CustomToolbarHit, Rect)> {
+    let toolbar = toolbar_area(area);
+    if profiles.is_empty() || toolbar.height < 2 || toolbar.width < 7 {
+        return Vec::new();
+    }
+    let y = toolbar.y + 1;
+    let selected = selected
+        .and_then(|id| profiles.iter().position(|profile| profile.id == id))
+        .unwrap_or(0);
+    let capacity = usize::from((toolbar.width - 4) / 3).max(1);
+    let start = selected.saturating_sub(capacity - 1);
+    let mut buttons = vec![(CustomToolbarHit::Previous, Rect::new(toolbar.x, y, 2, 1))];
+    for index in start..profiles.len().min(start + capacity) {
+        let x = toolbar.x + 2 + u16::try_from(index - start).unwrap_or(0) * 3;
+        buttons.push((CustomToolbarHit::Profile(index), Rect::new(x, y, 3, 1)));
+    }
+    buttons.push((
+        CustomToolbarHit::Next,
+        Rect::new(toolbar.right() - 2, y, 2, 1),
+    ));
+    buttons
+}
+
 /// Returns the toolbar action at a terminal coordinate, if any.
 pub fn toolbar_action_at(area: Rect, position: Position) -> Option<TreeToolbarAction> {
     toolbar_button_rects(area)
@@ -2730,6 +2780,7 @@ impl TreeItemCache {
             self.items = build_tree_items(
                 tree,
                 TreeItemBuildContext {
+                    custom_agent_labels: None,
                     layout: None,
                     elapsed_ms: 0,
                     terminal_activity_elapsed_ms: 0,
@@ -2835,6 +2886,7 @@ pub(crate) fn render(
     let items = build_tree_items(
         tree,
         TreeItemBuildContext {
+            custom_agent_labels: options.custom_agent_labels,
             layout: Some(&layout),
             elapsed_ms: options.elapsed_ms,
             terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
@@ -2900,6 +2952,7 @@ pub(crate) fn render(
         let presentation_items = build_tree_items(
             presentation_tree,
             TreeItemBuildContext {
+                custom_agent_labels: options.custom_agent_labels,
                 layout: Some(&layout),
                 elapsed_ms: options.elapsed_ms,
                 terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
@@ -3041,6 +3094,64 @@ pub(crate) fn render(
             options.terminal_activity_elapsed_ms,
             options.icons,
         );
+        if let Some(profiles) = options
+            .custom_toolbar_profiles
+            .filter(|profiles| !profiles.is_empty())
+        {
+            let toolbar = toolbar_area(area);
+            if toolbar.height >= 2 {
+                frame.render_widget(
+                    Paragraph::new(" ".repeat(usize::from(toolbar.width))),
+                    Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1),
+                );
+            }
+            for (hit, button) in
+                custom_toolbar_buttons(area, profiles, options.custom_toolbar_selected)
+            {
+                let (text, selected) = match hit {
+                    CustomToolbarHit::Previous => ("‹".to_string(), false),
+                    CustomToolbarHit::Next => ("›".to_string(), false),
+                    CustomToolbarHit::Profile(index) => {
+                        let profile = &profiles[index];
+                        let pending = options
+                            .custom_toolbar_pending
+                            .is_some_and(|ids| ids.contains(&profile.id));
+                        let glyph = if pending {
+                            SPINNER_FRAMES[(options.terminal_activity_elapsed_ms / SPINNER_FRAME_MS)
+                                as usize
+                                % SPINNER_FRAMES.len()]
+                            .to_string()
+                        } else {
+                            profile.icon.clone()
+                        };
+                        (
+                            glyph,
+                            options.custom_toolbar_selected == Some(profile.id.as_str()),
+                        )
+                    }
+                };
+                let style = if selected {
+                    theme::selected_style()
+                } else {
+                    Style::new().fg(Color::Cyan)
+                };
+                frame.render_widget(
+                    Paragraph::new(Span::styled(format!(" {text}"), style)),
+                    button,
+                );
+            }
+            if let Some(profile) = options
+                .custom_toolbar_hovered
+                .and_then(|id| profiles.iter().find(|profile| profile.id == id))
+            {
+                let caption = Rect::new(toolbar.x, toolbar.y, toolbar.width, 1);
+                frame.render_widget(
+                    Paragraph::new(format!(" {} {}", profile.icon, profile.name))
+                        .style(Style::new().fg(Color::Cyan)),
+                    caption,
+                );
+            }
+        }
     }
     painted
 }
@@ -3440,6 +3551,39 @@ fn draw_toolbar(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn custom_toolbar_scrolls_to_each_stable_profile_in_a_narrow_tree() {
+        use ilium_core::custom_agent::CustomAgentProfile;
+        use ilium_core::BuiltinAgentProvider;
+        let profiles: Vec<_> = (0..24)
+            .map(|index| CustomAgentProfile {
+                id: format!("profile-{index}"),
+                name: format!("Agent {index}"),
+                icon: "✦".into(),
+                base_provider: BuiltinAgentProvider::Claude,
+                environment: Vec::new(),
+            })
+            .collect();
+        let area = ratatui::layout::Rect::new(0, 0, 16, 12);
+        for (index, profile) in profiles.iter().enumerate() {
+            let buttons = super::custom_toolbar_buttons(area, &profiles, Some(&profile.id));
+            assert!(buttons
+                .iter()
+                .any(|(hit, _)| *hit == super::CustomToolbarHit::Profile(index)));
+            assert!(buttons
+                .iter()
+                .any(|(hit, _)| *hit == super::CustomToolbarHit::Previous));
+            assert!(buttons
+                .iter()
+                .any(|(hit, _)| *hit == super::CustomToolbarHit::Next));
+            for (position, (_, first)) in buttons.iter().enumerate() {
+                for (_, second) in buttons.iter().skip(position + 1) {
+                    assert!(first.intersection(*second).is_empty());
+                }
+            }
+        }
+    }
+
     #[test]
     fn custom_tree_row_layout_blocking_warning_is_clipped_and_keeps_tooltip() {
         use crate::status_icons::{StatusSlot, TooltipContent};
@@ -4037,6 +4181,11 @@ mod tests {
                     tree,
                     state,
                     TreeRenderOptions {
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms,
                         terminal_activity_elapsed_ms: elapsed_ms,
@@ -5276,6 +5425,11 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -5332,6 +5486,11 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -5416,6 +5575,11 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -6261,6 +6425,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6421,6 +6586,7 @@ mod tests {
         let root_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6462,6 +6628,7 @@ mod tests {
         let first_level_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6503,6 +6670,7 @@ mod tests {
         let deep_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6567,6 +6735,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6824,6 +6993,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -7124,6 +7294,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -7379,6 +7550,11 @@ mod cost_indicator_tests {
                     tree,
                     &mut state,
                     TreeRenderOptions {
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,

@@ -8,11 +8,11 @@ This interface is `@unstable(feature = gpu-kernels)`. It exists only in developm
 
 </div>
 
-The `gpu` import lets a scene run a small fixed set of image kernels on the graphics card: blur, threshold, palette mapping, ordered dithering and scaling. The kernels belong to the host. A plugin never ships shader code, and it never sees a graphics device; it hands over pixels and gets pixels back. Without a graphics card, every kernel runs on a CPU fallback and returns the same result, only slower. The specification is section 6.35. It exists so animation scenes such as clouds, dithered waves and pattern fields can offload their heaviest per-pixel step.
+The `gpu` import lets a scene run a small fixed set of image kernels on the graphics card: blur, threshold, palette mapping, ordered dithering and scaling. The kernels belong to the host. A plugin never ships shader code, and it never sees a graphics device; it hands over pixels and gets pixels back. Without a graphics card, every kernel runs on a CPU fallback and returns the same result, only slower. It exists so animation scenes such as clouds, dithered waves and pattern fields can offload their heaviest per-pixel step.
 
 ### What you need
 
-- The grant `gpu.kernels`, in the `capabilities.scene` list of a scene plugin. The scene world (`ilium:anim`) is the only world that has this import.
+- The grant `gpu.kernels`, in the `capabilities.scene` list of a scene plugin. The scene world (`ilium:anim/base`) is the only world that has this import.
 - A host build with the feature `gpu-kernels` enabled. A package that asks for the grant installs on such a build only.
 - Nothing else: the call needs no filesystem or network access.
 
@@ -47,7 +47,15 @@ The call is synchronous and runs inside the frame budget of the scene's `rendere
 | `dither-ordered` | Ordered (matrix) dithering. | Preparing a tone raster for cells. |
 | `scale` | Resamples to another size. | Fitting a pre-rendered field to the surface. |
 
-The kernel parameters travel in `params-json`, a JSON object whose keys depend on the kernel. A kernel the host does not offer returns `unsupported`. Bad dimensions or malformed parameters return `invalid-argument`.
+| Kernel | `params-json` keys (defaults) |
+|---|---|
+| `blur` | `radius` (integer cells of pixels, 1 to 64, default 2) |
+| `threshold` | `level` (integer 0 to 255, default 128) |
+| `palette-map` | `palette` (array of 2 to 256 `[r,g,b]` triples, required) |
+| `dither-ordered` | `matrix` (`"bayer2"`, `"bayer4"` or `"bayer8"`, default `"bayer4"`), `levels` (integer 2 to 256, default 2) |
+| `scale` | `out-width` and `out-height` (integers 1 to 8192, required) |
+
+The kernel parameters travel in `params-json`, a JSON object whose keys depend on the kernel, listed below. Unknown keys are ignored; a missing key takes the default shown. A kernel the host does not offer returns `unsupported`. Bad dimensions or malformed parameters return `invalid-argument`.
 
 The shared look, dithering and frame pacing of the surface stay in the kernel and apply to whatever the scene draws, so a scene should use `dither-ordered` only for its own intermediate step, not to replace the global dither setting.
 
@@ -157,7 +165,7 @@ Illustrative, not generated. A scene on a host without a graphics device: the ca
 | `unsupported` | The kernel is not one the host offers. |
 | `invalid-argument` | `width` or `height` is zero, `input` does not match the size, or `params-json` is not valid for the kernel. |
 
-`available` never fails. There is no new requestable limit; the call counts against the scene's frame budget and the usual CPU budget of the plugin.
+`available` never fails. If the graphics device faults during `run`, the host reruns the kernel on the CPU fallback and returns the same result; if that also fails, `run` returns `internal` and the scene keeps its previous frame. There is no new requestable limit; the call counts against the scene's frame budget and the usual CPU budget of the plugin.
 
 ### See also
 
@@ -165,4 +173,4 @@ Illustrative, not generated. A scene on a host without a graphics device: the ca
 - [media](/pages/api-media/) for decoded video frames, another source of pixels.
 - [codec](/pages/api-codec/) for decoding images before a kernel runs on them.
 - [jobs](/pages/api-jobs/) for work that is too heavy for a frame.
-- [Errors and limits](/pages/errors-and-limits/) for the shared codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the shared codes.

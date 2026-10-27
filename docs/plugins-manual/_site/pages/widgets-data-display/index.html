@@ -470,7 +470,7 @@
 <tr>
 <td><code>calendar</code></td>
 <td>One month (unstable)</td>
-<td><code>selected</code> (a day)</td>
+<td><code>selected</code> (a day); focusable by default</td>
 </tr>
 <tr>
 <td><code>progress-row</code></td>
@@ -842,7 +842,7 @@
 <td><code>render</code></td>
 <td></td>
 <td><code>braille</code> or <code>text-line</code></td>
-<td>The render. Default <code>braille</code>.</td>
+<td>The render. Default <code>braille</code>. Where the terminal cannot draw Braille, the host falls back to <code>text-line</code>.</td>
 </tr>
 <tr>
 <td><code>y-label-width</code></td>
@@ -1157,17 +1157,17 @@ let topology = tree
 </tr>
 </tbody>
 </table>
-<p>Actions: <code>activated</code> with <code>none</code>, on Enter or on a click. Roles: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error, <code>warning</code> for a degraded monitor, and <code>muted</code> for waiting. Glyphs: <code>▶</code> running, <code>✓</code> done, <code>✕</code> error, <code>!</code> degraded, <code>○</code> waiting, and a bar of <code>█</code> over <code>░</code>.</p>
+<p>Actions: <code>activated</code> with <code>none</code>, on Enter or on a click. Roles: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error, and <code>muted</code> for waiting. The state set is closed (<code>progress-state</code> in the WIT has no degraded state). Glyphs: <code>▶</code> running, <code>✓</code> done, <code>✕</code> error, <code>○</code> waiting, and a bar of <code>█</code> over <code>░</code>.</p>
 <figure>
 <pre class="term">╭─ Progress ─────────────────────────────────────────────╮
 │ <span class="t-hi">▶ RUNNING  42%</span>  <span class="t-hi">████████</span><span class="t-dim">░░░░░░░░░░░░</span>  152 of 412       │
 │ <span class="t-ok"><span class="w2">✓</span> DONE  100%</span>  <span class="t-ok">████████████████████</span><span class="t-dim"></span>                     │
 │ <span class="t-err"><span class="w2">✕</span> ERROR  17%</span>  <span class="t-err">███</span><span class="t-dim">░░░░░░░░░░░░░░░░░</span>  3 failed           │
-│ <span class="t-warn">! MONITOR FAILED  0%</span>  <span class="t-dim">░░░░░░░░░░░░░░░░░░░░</span>             │
+│ <span class="t-err"><span class="w2">✕</span> MONITOR FAILED  0%</span>  <span class="t-dim">░░░░░░░░░░░░░░░░░░░░</span>             │
 │ <span class="t-dim">○ NOT STARTED</span>                                          │
 ╰────────────────────────────────────────────────────────╯
 </pre>
-<figcaption>Rendered at 58 columns. Five <code>progress-row</code> states. The status prefix is bold in the state colour: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error and <code>warning</code> for a degraded monitor. The bar is <code>█</code> filled and <code>░</code> unfilled.</figcaption>
+<figcaption>Rendered at 58 columns. Five <code>progress-row</code> states. The status prefix is bold in the state colour: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error and <code>muted</code> for waiting. The bar is <code>█</code> filled and <code>░</code> unfilled.</figcaption>
 </figure>
 
 <p><strong>Rust</strong></p>
@@ -1490,7 +1490,7 @@ export const { lifecycle, handler, views } = definePlugin({
 </table>
 <p>A trap ends the plugin instance, and the host applies the <a href="/pages/reference-errors-and-limits/#restart-and-disable-rule">restart and disable rule</a>: restart after 1 s, then 5 s, and disable at the third failure in 10 minutes.</p>
 <h2 id="what-the-user-sees">What the user sees</h2>
-<p>The view repaints when the plugin returns a new tree. Most data widgets take no key input of their own and send nothing back, so a key press on them does nothing unless the plugin sets the <code>focusable</code> flag or the widget has an action of its own. Colours come from the theme and the shared look, and the user can switch to stable glyphs. Under reduced motion the plugin should avoid redrawing a chart faster than the data changes.</p>
+<p>The view repaints when the plugin returns a new tree. Most data widgets take no key input of their own and send nothing back, so a key press on them does nothing unless the plugin sets the <code>focusable</code> flag or the widget has an action of its own. Colours come from the theme and the shared look, and the user can switch to stable glyphs. Under reduced motion this is guidance, not a tested rule: a plugin should avoid redrawing a chart more often than its data changes.</p>
 <p>Requirement ids for this page: [WID-022], [WID-023], [WID-024]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
 <h2 id="see-also">See also</h2>
 <ul>
@@ -1499,7 +1499,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><a href="/pages/widgets-media-and-embedded/">Media and embedded</a> for <code>surface</code>, <code>image</code> and <code>video</code></li>
 <li><a href="/pages/ui-model/">The UI model</a></li>
 <li><a href="/pages/accessibility-and-theming/">Accessibility and theming</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 </ul>
 <p>API version: <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-collections/"><small>Previous</small>Collections</a><a class="next" href="/pages/widgets-index/"><small>Next</small>Widget catalogue</a></nav>

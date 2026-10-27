@@ -24,7 +24,7 @@ Tutorial plugin: `example.clipboard-history`, version 0.1.0, API `ilium:plugin@0
 | Manifest row field | `visible_when`, `scope: "project"`, `applies: "restart"` | Hide a row, store a value per project, mark a value that applies after restart. |
 | Host | `settings::get_json()` / `getJson()` | Every own key, with the defaults filled in. |
 | Export | `settings-validate` | Optional. Declared in `client.exports`. 100 ms, user and reset origins only. |
-| Event | `settings-changed` | `SettingsChange { keys, origin, scope }`. |
+| Event | `settings-changed` | `SettingsChange { keys, origin, side }`. |
 
 `origin` is `user`, `plugin`, `reset`, `other-plugin` or `file`. `keys` is sorted and has no duplicates.
 
@@ -49,7 +49,7 @@ A row on the page is saved by the host, not by the plugin. The host checks the v
   <text x="200" y="153" font-size="11" text-anchor="middle" fill="currentColor">3. Host saves the value in config.toml</text>
   <line x1="200" y1="166" x2="200" y2="188" stroke="currentColor" marker-end="url(#arrow-value-flow)"/>
   <rect x="10" y="190" width="380" height="36" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
-  <text x="200" y="213" font-size="11" text-anchor="middle" fill="currentColor">4. Event: settings-changed (keys, origin, scope)</text>
+  <text x="200" y="213" font-size="11" text-anchor="middle" fill="currentColor">4. Event: settings-changed (keys, origin, side)</text>
   <line x1="200" y1="226" x2="200" y2="248" stroke="currentColor" marker-end="url(#arrow-value-flow)"/>
   <rect x="10" y="250" width="380" height="36" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
   <text x="200" y="273" font-size="11" text-anchor="middle" fill="currentColor">5. Plugin reads the values and refreshes its state</text>

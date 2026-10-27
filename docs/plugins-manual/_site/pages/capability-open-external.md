@@ -2,7 +2,7 @@
 
 ## open-external
 
-The `open-external` capability lets a plugin ask the host to open something outside Ilium: a web address in the default browser, a file with its desktop handler, a mail link, or an Ilium settings page with an `ilium://settings/...` link. The plugin never starts the handler itself. The host checks the target, and it asks the user to confirm the first open for each target origin (decision D25).
+The `open-external` capability lets a plugin ask the host to open something outside Ilium: a web address in the default browser, a file with its desktop handler, a mail link, or an Ilium settings page with an `ilium://settings/...` link. The plugin never starts the handler itself. The host checks the target, and it asks the user to confirm the first open for each target origin (SEC-043). The origin of a web target is scheme, host and port; of a `mailto` target the scheme `mailto`; of a file target the granted scope root that contains the path, so one confirmation covers every file below that root.
 
 **You will need:**
 
@@ -130,10 +130,10 @@ Both submissions are independent. If the user declines the first open of `status
 |---|---|---|
 | Grant missing or declined | `refused(not-permitted)` | Show the address as text the user can copy. |
 | User declines the origin confirmation | `refused(not-permitted)` | Do not ask again in a loop. |
-| Scheme other than http, https or mailto in a `url` | `refused(invalid-argument)` | Use `file` or `settings` targets for those. |
+| Scheme other than http, https or mailto in a `url` | `refused(not-permitted)` ([SEC-043]) | Use `file` or `settings` targets for those. |
 | Settings link to an unknown tab | `refused(not-found)` | Use a tab id from the settings reference. |
 | No desktop handler | `refused(unsupported)` | Show the target as text. |
-| Rate limit | `refused(rate-limited)` | Open once per user action. |
+| More than 10 opens in 60 seconds for one plugin (sliding window) | `refused(rate-limited)` with `retry-after-ms` | Open once per user action. |
 
 `ok` means that the handler started, not that the page loaded.
 
@@ -179,4 +179,4 @@ The user can change the grant at any time in Settings > Plugins > com.example.li
 
 ### Security
 
-**[SEC-043]** `open-external` accepts only `https`, `http`, `mailto` and file paths inside granted scopes; each origin needs consent (D25). See [Network egress](/pages/reference-network-egress/).
+**[SEC-043]** `open-external` accepts only `https`, `http`, `mailto` and file paths inside granted scopes; each origin needs consent (SEC-043). See [Network egress](/pages/reference-network-egress/).

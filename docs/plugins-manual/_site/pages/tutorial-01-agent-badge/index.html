@@ -928,7 +928,7 @@ ilium-plugin-sdk = { version = &quot;0.1&quot;, features = [&quot;testing&quot;]
 <li>Clearing a slot that has no decoration is accepted and changes nothing.</li>
 <li>A badge longer than 12 cells is cut, and the cut text ends with an ellipsis. The labels in this step are shorter.</li>
 <li>Decorations from <code>persist: false</code> are dropped when the server restarts. This step does not read agent state on start, so a row gets its badge back when its activity next changes.</li>
-<li>After a crash restart, the plugin keeps its decorations, marked stale.</li>
+<li>When only the plugin restarts after a crash (the server keeps running), the plugin keeps its decorations, marked stale. A server restart is the case of the previous item.</li>
 <li>If <code>tree.decorate</code> is revoked, the plugin receives <code>deactivate(revoked)</code>, and its decorations are withdrawn.</li>
 </ul>
 <h3 id="test-it">Test it</h3>

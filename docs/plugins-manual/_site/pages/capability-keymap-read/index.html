@@ -559,7 +559,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Server side requests the grant</td>
-<td>install refused, the grant is client-only</td>
+<td>install refused with <code>manifest.grant-side</code>, the grant is client-only</td>
 <td>Move the code to the client side.</td>
 </tr>
 <tr>
@@ -579,7 +579,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 </tbody>
 </table>
-<p>Bindings that conflict with another plugin's chord follow the keymap conflict rule; the user's remap always wins.</p>
+<p>Bindings that conflict with another plugin's chord are resolved by the kernel, not by this grant: a plugin chord grab that another plugin already holds in the same scope fails with <code>conflict</code> (see <a href="/pages/api-keys/">Keys</a>), and a binding the user remaps always wins over a plugin's. <code>bindings()</code> reports the chord in effect after that resolution.</p>
 <h3 id="what-the-user-sees">What the user sees</h3>
 <p>The review dialog lists the grant when a package is installed or first activated. The line states that the plugin reads key bindings.</p>
 <figure>

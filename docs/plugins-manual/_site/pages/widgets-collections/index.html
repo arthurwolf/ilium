@@ -1431,7 +1431,7 @@ impl Handler for Agents {
 <tbody>
 <tr>
 <td>More than 256 <code>check-list</code> items, or more than <code>max-items</code> in a <code>list-editor</code></td>
-<td><code>invalid-argument</code> on render.</td>
+<td>The render traps with <code>ui.invalid-tree</code>; the previous tree stays, marked stale.</td>
 </tr>
 <tr>
 <td>More than 64 menu entries, or a submenu deeper than two levels</td>
@@ -1439,7 +1439,7 @@ impl Handler for Agents {
 </tr>
 <tr>
 <td>Two items with the same <code>id</code></td>
-<td>The tree is invalid and the instance traps.</td>
+<td>The tree is invalid and the render traps with <code>ui.duplicate-key</code>.</td>
 </tr>
 <tr>
 <td>An invalid item in a <code>list-editor</code></td>
@@ -1451,11 +1451,15 @@ impl Handler for Agents {
 </tr>
 <tr>
 <td><code>menu</code> or <code>list-editor</code> in a settings page</td>
-<td><code>invalid-argument</code> on render.</td>
+<td>The render traps with <code>ui.widget-not-allowed</code>.</td>
 </tr>
 <tr>
 <td><code>set-widget-state</code> with a case the widget does not take</td>
 <td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>A <code>disabled-reason</code> longer than 40 characters</td>
+<td>The text is cut at 40 characters and ends with <code>…</code>; the entry stays disabled and the render succeeds.</td>
 </tr>
 </tbody>
 </table>

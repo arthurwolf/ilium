@@ -120,7 +120,7 @@ A package is reproducible when two builds from the same commit give the same byt
 
 - **[DEV-770]** A release build MUST be reproducible on the same toolchain version and the same `ilium` version. `dist/build.json` records `toolchain` and `input_hash` so a reviewer can pick the same versions.
 - **[DEV-771]** A build MUST NOT read the wall clock, the user name, the absolute path of the project or environment variables other than those listed in [Plugin command-line reference](/pages/reference-plugin-cli/). Package time stamps are fixed.
-- **[DEV-772]** The lock file (`Cargo.lock` or `bun.lock`) MUST be committed, and CI MUST build with `--locked` (Rust) or `--frozen-lockfile` (Bun). `build` SHOULD pass the flag by itself when the lock file exists, and MUST fail with `toolchain.lockfile-missing` when it does not exist and `--release` is set.
+- **[DEV-772]** The lock file (`Cargo.lock` or `bun.lock`) MUST be committed, and CI MUST build with `--locked` (Rust) or `--frozen-lockfile` (Bun). `build` SHOULD pass the flag by itself when the lock file exists, and MUST fail with `toolchain.lockfile-missing` when it does not exist and `--release` is set without `--locked` (exit 4). When `--locked` is also given, the missing lock file is reported as `build.lockfile-missing` (exit 1, see DEV-053), so one missing file never yields two codes.
 - **[DEV-773]** A reviewer check is `ilium plugin build --release && ilium plugin pack` followed by `sha256sum dist/*.iliumpkg`. Two runs MUST give the same hash.
 
 ## Signing in CI

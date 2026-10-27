@@ -552,7 +552,7 @@
 <p>Points to notice:</p>
 <ul>
 <li>Each extension needs its own grant, and each grant names one point. There is no "contribute to any" grant, and a wildcard fails with <code>manifest.grant-wildcard</code>. A missing grant fails with <code>manifest.grant-missing-extension</code>.</li>
-<li><code>point</code> carries <code>@0.1.0</code>. The owner must offer that version or a newer minor in the same major. Otherwise the entry stays dormant.</li>
+<li><code>point</code> carries <code>@0.1.0</code>. The version is a caret range: the owner must offer <code>&gt;=0.1.0 &lt;0.2.0</code>. Otherwise the entry stays dormant.</li>
 <li><code>priority</code> is left out. The default is 50. Collect entries are listed in priority order, so priority matters only when two entries compete, such as two recognisers that match the same text.</li>
 <li>Backslashes in a JSON string are doubled. The Text Triggers pattern <code>Run the tests\\? \\(y/n\\)</code> reaches the owner as <code>Run the tests\? \(y/n\)</code>.</li>
 <li>The trigger rule is <code>enabled: false</code>. A rule pack is a set the user turns on. It never starts sending text by itself.</li>
@@ -587,7 +587,7 @@
 }
 </code></pre>
 <p>The code has three parts. A pure function turns the file text into entries. A function registers the entries through a callback, so a test can replace the host call. The handler runs both on start and on the command.</p>
-<p>Two facts matter. First, <code>register</code> works only on a point that is <code>dynamic</code>. If the Text Triggers point is static, <code>register</code> returns <code>not-dynamic</code>. The plugin does not crash. It logs one line and keeps the static entries. Second, <code>register</code> validates the entry again, so a bad rule in the file gives <code>schema-mismatch</code> for that pack only, and the other packs still register.</p>
+<p>Two facts matter. First, <code>register</code> works only on a point that is <code>dynamic</code>. If the Text Triggers point is static, <code>register</code> fails with <code>extension.not-dynamic</code> (the WIT case <code>not-dynamic</code>, <code>NotDynamic</code> in Rust). The plugin does not crash. It logs one line and keeps the static entries. Second, <code>register</code> validates the entry again, so a bad rule in the file gives <code>schema-mismatch</code> for that pack only, and the other packs still register.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">// src/lib.rs
 use ilium_plugin_sdk::host::extensions;
@@ -630,7 +630,7 @@ pub fn register_packs(
     for (extension, entry_json) in packs {
         match register(extension, entry_json) {
             Ok(()) =&gt; accepted += 1,
-            Err(reason) if reason.contains(&quot;NotDynamic&quot;) =&gt; {
+            Err(reason) if reason.contains(&quot;NotDynamic&quot;) || reason.contains(&quot;not-dynamic&quot;) =&gt; {
                 log::log(Level::Warn, &quot;rule-packs is not dynamic; project rules skipped&quot;);
                 break;
             }

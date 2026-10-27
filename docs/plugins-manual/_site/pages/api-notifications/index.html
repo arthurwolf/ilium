@@ -420,7 +420,7 @@
 <tr>
 <td><code>sound.catalog</code></td>
 <td><code>host::sounds::catalog() -&gt; Vec&lt;String&gt;</code></td>
-<td><code>catalog(): string[]</code> from <code>@ilium/plugin-sdk/host/sound</code></td>
+<td><code>catalog(): string[]</code> from <code>@ilium/plugin-sdk/host/sounds</code></td>
 <td>none</td>
 <td>sync</td>
 <td>Lists the bundled sound ids and the sound ids the plugins contribute. Never fails.</td>
@@ -460,8 +460,8 @@
 </tr>
 <tr>
 <td><code>body</code></td>
-<td>string</td>
-<td>The second line of the notice.</td>
+<td>option of string</td>
+<td>The second line of the notice. <code>None</code> or <code>undefined</code> shows a title-only notice.</td>
 </tr>
 <tr>
 <td><code>urgency</code></td>
@@ -509,9 +509,9 @@
 <h3 id="dedup-keys">Dedup keys</h3>
 <p>Every submission may carry a <code>dedup-key</code>. Rust sets it with <code>Submission::keyed(intent, key)</code>. <code>Submission::new(intent)</code> sends no key. TypeScript sets the field <code>dedupKey</code> on the submission literal.</p>
 <ul>
-<li><strong>Format.</strong> From 1 to 128 characters from <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code>, <code>:</code>, <code>/</code> and <code>-</code>. Any other character makes the submission malformed.</li>
+<li><strong>Format.</strong> From 1 to 128 characters from <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code>, <code>:</code>, <code>/</code> and <code>-</code>. A key over 128 characters or with any other character is refused as <code>refused(invalid-argument)</code> for the lowest-index offender of the batch; every other submission completes as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code> ([ABI-009]).</li>
 <li><strong>Scope.</strong> The pair of plugin id and key. The server and each client keep separate tables, so a server notice and a client notice with the same key do not suppress each other.</li>
-<li><strong>Window.</strong> 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it.</li>
+<li><strong>Window.</strong> 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it, except that from Phase 5 the keys of <code>send-input</code> and <code>agent-action</code> are journaled in the snapshot and survive.</li>
 <li><strong>Outcome.</strong> A repeat completes as <code>duplicate(original)</code>, where <code>original</code> names the submission that reserved the key. Nothing is shown or played. A duplicate is not an error.</li>
 <li><strong>Reservation.</strong> A key is reserved only after the submission passes its checks. A refused submission does not reserve its key, so a retry with the same key is valid.</li>
 <li><strong>Batches.</strong> The first submission in a batch that reserves a key blocks every later submission in the same batch with that key. Use a different key for the notice and for the sound, as the examples do.</li>
@@ -574,7 +574,7 @@ impl Handler for ApprovalNotice {
             submissions.push(Submission::keyed(
                 Intent::Notify(NotifySpec {
                     title: &quot;Agent needs approval&quot;.to_string(),
-                    body: format!(&quot;Pane {node} is waiting for you&quot;),
+                    body: Some(format!(&quot;Pane {node} is waiting for you&quot;)),
                     urgency: Urgency::High,
                     sound: None,
                 }),
@@ -675,8 +675,8 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Dedup key with a disallowed character or over 128 characters</td>
-<td><code>refused(invalid-argument)</code></td>
-<td>The whole batch is refused.</td>
+<td><code>refused(invalid-argument)</code> for the lowest-index offender</td>
+<td>Every other submission completes as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code> ([ABI-009]).</td>
 </tr>
 <tr>
 <td>More than 6 <code>notify</code> submissions per minute per plugin</td>
@@ -695,7 +695,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Manifest sound file missing or in another format</td>
-<td>Package check fails at install</td>
+<td>Package check fails at install with <code>manifest.sound-format</code></td>
 <td>The plugin is not installed.</td>
 </tr>
 </tbody>
@@ -725,7 +725,7 @@ export const { lifecycle, handler } = definePlugin({
 <li>Text triggers (feature 56) play a sound and show a notice when an output filter matches.</li>
 </ul>
 <h3 id="coalescing-and-toasts">Coalescing and toasts</h3>
-<p>The <code>notify</code> intent gains two optional fields. Notifications with the same <code>coalesce-key</code> inside <code>coalesce-window-ms</code> replace each other, so a burst of "build finished" events shows one notice with the latest text.</p>
+<p>The <code>notify</code> intent gains two fields: <code>coalesce-key</code> is optional, and <code>coalesce-window-ms</code> is a plain <code>u32</code> that is <code>0</code> when unused. Notifications with the same <code>coalesce-key</code> inside <code>coalesce-window-ms</code> replace each other, so a burst of "build finished" events shows one notice with the latest text.</p>
 <pre><code class="language-wit">// Excerpt of ilium:types/intents in reference-wit
 record notify-spec {
   title: string, body: option&lt;string&gt;, urgency: urgency, sound: option&lt;string&gt;,
@@ -796,7 +796,7 @@ return [{ intent: { tag: 'notify', val: notice }, correlation: 1n, dedupKey: und
 <li><a href="/pages/api-events/">Events</a> for <code>agent-activity-changed</code> and <code>pane-exited</code>.</li>
 <li><a href="/pages/capability-notify-desktop/">Desktop notifications capability</a> for the per-platform behaviour.</li>
 <li><a href="/pages/capability-sound-play/">Sound capability</a> for the <code>sound.play</code> grant.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error code table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error code table.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-messages-and-topics/"><small>Previous</small>Messages and topics</a><a class="next" href="/pages/api-panes/"><small>Next</small>panes</a></nav>

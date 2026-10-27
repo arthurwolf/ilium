@@ -399,10 +399,10 @@ This interface is `@unstable(feature = gpu-kernels)`. It exists only in developm
 
 </div>
 
-<p>The <code>gpu</code> import lets a scene run a small fixed set of image kernels on the graphics card: blur, threshold, palette mapping, ordered dithering and scaling. The kernels belong to the host. A plugin never ships shader code, and it never sees a graphics device; it hands over pixels and gets pixels back. Without a graphics card, every kernel runs on a CPU fallback and returns the same result, only slower. The specification is section 6.35. It exists so animation scenes such as clouds, dithered waves and pattern fields can offload their heaviest per-pixel step.</p>
+<p>The <code>gpu</code> import lets a scene run a small fixed set of image kernels on the graphics card: blur, threshold, palette mapping, ordered dithering and scaling. The kernels belong to the host. A plugin never ships shader code, and it never sees a graphics device; it hands over pixels and gets pixels back. Without a graphics card, every kernel runs on a CPU fallback and returns the same result, only slower. It exists so animation scenes such as clouds, dithered waves and pattern fields can offload their heaviest per-pixel step.</p>
 <h3 id="what-you-need">What you need</h3>
 <ul>
-<li>The grant <code>gpu.kernels</code>, in the <code>capabilities.scene</code> list of a scene plugin. The scene world (<code>ilium:anim</code>) is the only world that has this import.</li>
+<li>The grant <code>gpu.kernels</code>, in the <code>capabilities.scene</code> list of a scene plugin. The scene world (<code>ilium:anim/base</code>) is the only world that has this import.</li>
 <li>A host build with the feature <code>gpu-kernels</code> enabled. A package that asks for the grant installs on such a build only.</li>
 <li>Nothing else: the call needs no filesystem or network access.</li>
 </ul>
@@ -478,7 +478,37 @@ available: func() -&gt; bool;
 </tr>
 </tbody>
 </table>
-<p>The kernel parameters travel in <code>params-json</code>, a JSON object whose keys depend on the kernel. A kernel the host does not offer returns <code>unsupported</code>. Bad dimensions or malformed parameters return <code>invalid-argument</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Kernel</th>
+<th><code>params-json</code> keys (defaults)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>blur</code></td>
+<td><code>radius</code> (integer cells of pixels, 1 to 64, default 2)</td>
+</tr>
+<tr>
+<td><code>threshold</code></td>
+<td><code>level</code> (integer 0 to 255, default 128)</td>
+</tr>
+<tr>
+<td><code>palette-map</code></td>
+<td><code>palette</code> (array of 2 to 256 <code>[r,g,b]</code> triples, required)</td>
+</tr>
+<tr>
+<td><code>dither-ordered</code></td>
+<td><code>matrix</code> (<code>"bayer2"</code>, <code>"bayer4"</code> or <code>"bayer8"</code>, default <code>"bayer4"</code>), <code>levels</code> (integer 2 to 256, default 2)</td>
+</tr>
+<tr>
+<td><code>scale</code></td>
+<td><code>out-width</code> and <code>out-height</code> (integers 1 to 8192, required)</td>
+</tr>
+</tbody>
+</table>
+<p>The kernel parameters travel in <code>params-json</code>, a JSON object whose keys depend on the kernel, listed below. Unknown keys are ignored; a missing key takes the default shown. A kernel the host does not offer returns <code>unsupported</code>. Bad dimensions or malformed parameters return <code>invalid-argument</code>.</p>
 <p>The shared look, dithering and frame pacing of the surface stay in the kernel and apply to whatever the scene draws, so a scene should use <code>dither-ordered</code> only for its own intermediate step, not to replace the global dither setting.</p>
 <figure>
 <svg viewBox="0 0 440 150" role="img" aria-label="Scene calls a host kernel which runs on GPU or CPU fallback" width="660" height="225">
@@ -589,14 +619,14 @@ export function soften(
 </tr>
 </tbody>
 </table>
-<p><code>available</code> never fails. There is no new requestable limit; the call counts against the scene's frame budget and the usual CPU budget of the plugin.</p>
+<p><code>available</code> never fails. If the graphics device faults during <code>run</code>, the host reruns the kernel on the CPU fallback and returns the same result; if that also fails, <code>run</code> returns <code>internal</code> and the scene keeps its previous frame. There is no new requestable limit; the call counts against the scene's frame budget and the usual CPU budget of the plugin.</p>
 <h3 id="see-also">See also</h3>
 <ul>
 <li><a href="/pages/api-scenes/">Scenes</a> for the <code>renderer</code> export and the surface the result is drawn on.</li>
 <li><a href="/pages/api-media/">media</a> for decoded video frames, another source of pixels.</li>
 <li><a href="/pages/api-codec/">codec</a> for decoding images before a kernel runs on them.</li>
 <li><a href="/pages/api-jobs/">jobs</a> for work that is too heavy for a frame.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the shared codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the shared codes.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-http-streams/"><small>Previous</small>http streams</a><a class="next" href="/pages/api-vector/"><small>Next</small>vector and embeddings</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

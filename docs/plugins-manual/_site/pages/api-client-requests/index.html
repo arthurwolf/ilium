@@ -464,8 +464,8 @@
 <tr>
 <td><code>timeout_ms</code></td>
 <td>integer, 1 to 30,000</td>
-<td>5,000</td>
-<td>The timeout used when a caller does not pass its own.</td>
+<td>none</td>
+<td>A ceiling for this kind. The caller always passes its own <code>timeout-millis</code>, so there is no default.</td>
 </tr>
 </tbody>
 </table>
@@ -744,6 +744,16 @@ export function answerClipboard(call: bigint): void {
 <td>Returns <code>none</code> when the answer was already taken or the request failed.</td>
 </tr>
 <tr>
+<td><code>respond</code></td>
+<td><code>not-found</code></td>
+<td>The call id is unknown, already answered, or the request timed out or was cancelled. The answer is dropped and <code>respond</code> returns the error to the client plugin.</td>
+</tr>
+<tr>
+<td><code>respond</code></td>
+<td><code>invalid-argument</code></td>
+<td>The outcome text is not valid JSON.</td>
+</tr>
+<tr>
 <td>manifest</td>
 <td><code>manifest.client-request-unknown</code></td>
 <td>The sides disagree about an export or a <code>client_requests</code> entry.</td>
@@ -804,7 +814,7 @@ export function answerClipboard(call: bigint): void {
 <li><a href="/pages/api-clipboard/">clipboard</a> for the call used in the clipboard example.</li>
 <li><a href="/pages/api-cli/">cli</a> for the server-side commands that ask a client.</li>
 <li><a href="/pages/lifecycle/">Lifecycle</a> for activation triggers.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the common error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the common error codes.</li>
 </ul>
 <p>Interface version: <code>ilium:host/client-requests</code>, version 0.1.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-catalogs/"><small>Previous</small>Catalogs</a><a class="next" href="/pages/api-command-palette/"><small>Next</small>Command palette</a></nav>

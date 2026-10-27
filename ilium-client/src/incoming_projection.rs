@@ -44,6 +44,7 @@ enum Slot {
     Status,
     Evidence,
     Session,
+    CustomAgentIdentity,
     EditorPath,
     LastPrompt,
     Progress,
@@ -134,6 +135,7 @@ impl ProjectionRetention {
                 (Slot::Evidence, Some(*pane_id))
             }
             PaneSessionIdResolved { pane_id, .. } => (Slot::Session, Some(*pane_id)),
+            PaneCustomAgentIdentity { pane_id, .. } => (Slot::CustomAgentIdentity, Some(*pane_id)),
             PaneSessionIdCleared { pane_id, .. } => {
                 update.clear_session = Some(*pane_id);
                 return update;
@@ -377,6 +379,11 @@ pub(crate) fn projection_metadata_bytes(event: &ServerEvent) -> usize {
         .saturating_mul(2)
         .saturating_mul(std::mem::size_of::<Key>())
         .saturating_add(512)
+}
+
+#[cfg(test)]
+pub(crate) fn registry_metadata_bytes_for_test(keys: usize) -> Option<usize> {
+    metadata_layout(keys)
 }
 
 #[cfg(test)]

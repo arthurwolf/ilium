@@ -48,7 +48,7 @@ Use `--lang typescript` for the TypeScript version.
 |---|---|---|---|
 | `agent-activity-changed` | event | `node: node-id`, `previous`, `current: agent-activity`, `revision: u64` | Fires on every activity change. Needs `agent.read`. |
 | `toast` | intent | `id`, `tone`, `title` (60 characters), `body` (200), `actions` (2), `duration-ms` | Shows or replaces a toast. Needs `notify.toast`. |
-| `set-status-segment` | intent | `segment`, `content: rich-text`, `tooltip`, `tone` | Fills a segment. Needs `ui.chrome`. At most 10 per second per segment. |
+| `set-status-segment` | intent | `segment`, `content: rich-text`, `tooltip`, `tone` | Fills a segment. Needs `ui.chrome`. At most 10 per second per slot (the segment id is the slot). |
 | `clear-status-segment` | intent | `segment` | Removes the segment. |
 | `status_segments` | manifest key | `id`, `priority` (0 to 100), `max_width` (4 to 40 cells, default 24) | Declares a segment. At most 2 per plugin. |
 | `dedup-key` | submission field | 1 to 128 characters from `A-Z a-z 0-9 . _ : / -` | A repeat within 10 minutes completes as `duplicate`. |
@@ -220,7 +220,7 @@ export const { lifecycle, handler } = definePlugin({
 The smallest version has three flaws.
 
 - **A stale segment.** At zero nothing clears the segment.
-- **Too many updates.** Ilium accepts at most 10 `set-status-segment` intents per second for one segment. A burst of events would trip `rate-limited` and the extra updates would be refused.
+- **Too many updates.** Ilium accepts at most 10 `set-status-segment` intents per second for one segment (the segment id is the slot). A burst of events would trip `rate-limited` and the extra updates would be refused.
 - **A repeated toast.** If the same finish is delivered twice, the user sees two toasts.
 
 The fix is small. Update the segment once per batch, and only when the count changed. Clear the segment at zero. Put a dedup key on the toast, built from the node and the `revision` that the event carries. The revision grows with every change, so a new finish has a new key.
@@ -317,6 +317,9 @@ A segment never grows past its `max_width`. Longer text is cut with `…`. When 
 
 ### Points to notice
 
+- The toast is fire-and-forget: it needs no reply, and a failed toast never stops the status-bar update.
+- The segment is set again on every change and removed with a clear call when the count reaches 0, so no stale `0 working` text stays.
+- Text longer than `max_width` is cut with `…` and the lowest `priority` leaves first; none of this is an error.
 
 ### Edge cases and errors
 

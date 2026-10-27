@@ -33,10 +33,10 @@ open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-option
 
 ### Behaviour
 
-- **Hover.** The enter delay (500 ms), the leave grace (150 ms) and the tooltip delay are one host setting for all widgets; a plugin cannot change them. A tooltip is placed below, or above when there is no room, and never covers the pointer cell.
+- **Hover.** The enter delay (500 ms), the leave grace (150 ms) are one host setting for all widgets; a plugin cannot change them. A tooltip's own `delay-ms` (0..2000) overrides only the default 500 ms show delay of that one tooltip; a value above 2000 is clamped to 2000. A tooltip is placed below, or above when there is no room, and never covers the pointer cell.
 - **Pinnable.** `pinnable` adds a pin glyph to the popup title. The pin keeps it open until Escape or a click on the pin.
 - **Dismiss on leave.** With `dismiss-on-leave` the popup closes when the pointer leaves both the popup and its anchor for longer than the grace time.
-- **Focus.** Focus moves into an opened popup and returns to the anchor on close. Escape closes the topmost popup and sends `closed`.
+- **Focus.** Focus moves into an opened popup and returns to the anchor on close. Escape closes the topmost popup and sends `closed` only when that popup has `close-on-escape` true; with false, Escape is ignored by the popup and the popup stays open until another dismissal. A `modal` popup blocks pointer and key input to every widget outside it until it closes (pointer clicks outside are swallowed and do not dismiss it unless `dismiss-on-leave` applies); a non-modal popup leaves the rest of the UI interactive.
 - **Stack.** At most 4 popups per view; a fifth is `quota-exceeded`.
 - **Disabled.** A node with `disabled-reason` is drawn muted, takes no input, and its reason shows as the tooltip.
 

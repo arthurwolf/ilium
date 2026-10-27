@@ -107,6 +107,8 @@ pub enum ServerError {
 /// file, why it failed) stay independently testable.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoadError {
+    #[error("configuration is not valid TOML; values are omitted from this error")]
+    PrivateConfigParse,
     #[error("failed to read config file: {0}")]
     Read(#[from] std::io::Error),
     #[error("failed to parse config file as TOML: {0}")]

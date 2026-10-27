@@ -31,6 +31,45 @@ pub(crate) struct IncludeCopyError {
     created_files: Vec<(PathBuf, fs::File)>,
 }
 
+impl IncludeCopyReport {
+    /// Heap capacity retained with the original rollback handles. File values
+    /// occupy the vector's inline slots; copied file contents stay on disk.
+    pub(crate) fn retained_backing_bytes(&self) -> Option<usize> {
+        created_entries_backing_bytes(&self.created_paths, &self.created_files)
+    }
+}
+
+impl IncludeCopyError {
+    pub(crate) fn retained_backing_bytes(&self) -> Option<usize> {
+        created_entries_backing_bytes(&self.created_paths, &self.created_files)?
+            .checked_add(self.reason.capacity())
+    }
+}
+
+fn created_entries_backing_bytes(
+    created_paths: &Vec<PathBuf>,
+    created_files: &Vec<(PathBuf, fs::File)>,
+) -> Option<usize> {
+    let vector_bytes = created_paths
+        .capacity()
+        .checked_mul(std::mem::size_of::<PathBuf>())?
+        .checked_add(
+            created_files
+                .capacity()
+                .checked_mul(std::mem::size_of::<(PathBuf, fs::File)>())?,
+        )?;
+    let path_bytes = created_paths.iter().try_fold(vector_bytes, |bytes, path| {
+        bytes.checked_add(path.capacity())
+    })?;
+    // A copied file keeps its own path in each vector. They are distinct
+    // allocations even when the names compare equal.
+    created_files
+        .iter()
+        .try_fold(path_bytes, |bytes, (path, _)| {
+            bytes.checked_add(path.capacity())
+        })
+}
+
 fn failure(reason: impl Into<String>, report: IncludeCopyReport) -> IncludeCopyError {
     IncludeCopyError {
         reason: reason.into(),
@@ -466,6 +505,60 @@ mod tests {
         let source = ilium_platform::paths::canonicalize(&source).expect("canonical source");
         let target = ilium_platform::paths::canonicalize(&target).expect("canonical target");
         (temp, source, target)
+    }
+
+    #[test]
+    fn retained_include_storage_counts_private_spare_capacity_and_error_backing() {
+        let (_temp, source, target) = roots();
+        fs::write(source.join(".worktreeinclude"), b"a\n").expect("include selection");
+        fs::write(source.join("a"), b"copied content").expect("include source");
+        let mut report = copy_worktree_includes(&source, &target).expect("actual copy");
+        let before = report.retained_backing_bytes().expect("report storage");
+        let old_capacity = report.created_files[0].0.capacity();
+        report.created_files[0].0.reserve(old_capacity + 4096);
+        let private_path_growth = report.created_files[0].0.capacity() - old_capacity;
+        let after_private_path = report
+            .retained_backing_bytes()
+            .expect("private path storage");
+        assert!(
+            after_private_path >= before + private_path_growth,
+            "the second path allocation, stored with the rollback handle, must remain charged"
+        );
+        let old_capacity = report.created_paths[0].capacity();
+        report.created_paths[0].reserve(old_capacity + 4096);
+        let public_path_growth = report.created_paths[0].capacity() - old_capacity;
+        let after_public_path = report
+            .retained_backing_bytes()
+            .expect("public path storage");
+        assert!(after_public_path >= after_private_path + public_path_growth);
+        let old_capacity = report.created_files.capacity();
+        report.created_files.reserve(old_capacity + 8);
+        let file_slots_growth = (report.created_files.capacity() - old_capacity)
+            * std::mem::size_of::<(PathBuf, fs::File)>();
+        let after_file_slots = report
+            .retained_backing_bytes()
+            .expect("file vector storage");
+        assert!(
+            after_file_slots >= after_public_path + file_slots_growth,
+            "unused file/vector slots occupy memory too"
+        );
+        let old_capacity = report.created_paths.capacity();
+        report.created_paths.reserve(old_capacity + 8);
+        let path_slots_growth =
+            (report.created_paths.capacity() - old_capacity) * std::mem::size_of::<PathBuf>();
+        let after_path_slots = report
+            .retained_backing_bytes()
+            .expect("path vector storage");
+        assert!(after_path_slots >= after_file_slots + path_slots_growth);
+        let mut reason = String::with_capacity(64 * 1024);
+        reason.push_str("fixture copy failure");
+        let error = report_as_error(reason, report);
+        assert!(
+            error.retained_backing_bytes().expect("error storage") >= after_path_slots + 64 * 1024,
+            "error String spare capacity survives with the original report"
+        );
+        remove_created_files(&target, &error).expect("original file identity remains usable");
+        assert!(!target.join("a").exists());
     }
 
     #[test]

@@ -231,6 +231,6 @@ The grant changes no pane. The user sees the plugin's log lines with `ilium plug
 - [panes.create](/pages/capability-panes-create/) for starting panes.
 - [panes.signal](/pages/capability-panes-signal/) for stopping them.
 - [terminal.read-screen](/pages/capability-terminal-read-screen/) for what is shown on a terminal pane.
-- [errors-and-limits](/pages/errors-and-limits/) for the error codes and limits shared by all grants.
+- [errors-and-limits](/pages/reference-errors-and-limits/) for the error codes and limits shared by all grants.
 
 Checked against the API version `ilium:plugin@0.1.0`.

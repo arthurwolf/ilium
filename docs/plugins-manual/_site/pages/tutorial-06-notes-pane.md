@@ -5,7 +5,7 @@
 This step adds a pane kind to the plugin. A notes pane is a basic pane: the kernel draws its frame,
 title and footer line, and the plugin draws the body with `render`. Each note is one row. A row can be
 dragged onto another row to change the order, and a text input at the bottom adds notes. The notes are
-kept in node metadata, so they survive a restart. A command opens a new notes pane. While a note is dragged, the plugin tells the host which side of a row accepts the drop, and the host draws the insertion line.
+kept in node metadata, so they survive a restart. A command opens a new notes pane. While a note is dragged, the host works out which side of a row accepts the drop and draws the insertion line.
 
 ### You will need
 
@@ -435,7 +435,7 @@ Event::CommandInvoked(invocation) if invocation.command == NEW_NOTES_COMMAND => 
 **TypeScript**
 
 ```ts
-// server/src/main.ts. New branch of onEvents.
+// server/src/server.ts. New branch of onEvents.
 const NEW_NOTES_COMMAND = 'example.agent-tools/new-notes';
 const NOTES_PANE_KIND = 'example.agent-tools.notes';
 
@@ -462,12 +462,12 @@ for (const event of batch) {
 
 ### Drag feedback
 
-The host owns the drag, but the plugin decides what a drop would mean. While a drag hovers a row with `DROP_TARGET`, the host sends one `ui-action` of kind `drag-over` per change of target. Its value is a `drag-over-value` with `source-key`, `target-key`, `index` and `accept`. The plugin answers on the next render by setting the target's `accept` prop to `before`, `after`, `inside` or `none`. The host draws the insertion line (`before`, `after`) or the inside highlight, and scrolls the list near its edges. The event is coalesced per target.
+The host owns the drag and decides the drop position: it computes `accept` from the pointer row ([the UI model](/pages/ui-model/)), and the plugin has no prop that overrides it. While a drag hovers a row with `DROP_TARGET`, the host sends one `ui-action` of kind `drag-over` per change of target. Its value is a `drag-over-value` with `source-key`, `target-key`, `index` and `accept`. The plugin reads `accept` (`before`, `after`, `inside` or `none`) to preview the move, for example in a status line. The host draws the insertion line (`before`, `after`) or the inside highlight, and scrolls the list near its edges. The event is coalesced per target.
 
 | Name | Rust | TypeScript | Meaning |
 |---|---|---|---|
 | `drag-over` | `ActionKind::DragOver`, `ActionValue::DragOver(DragOverValue)` | `'drag-over'`, `{ tag: 'drag-over', val }` | A dragged row is held over a target |
-| `drop-accept` | `DropAccept::{None, Before, After, Inside}` | `'none'`, `'before'`, `'after'`, `'inside'` | The plugin's answer for that target |
+| `drop-accept` | `DropAccept::{None, Before, After, Inside}` | `'none'`, `'before'`, `'after'`, `'inside'` | The host's computed drop position for that target |
 | `pointer-events` | `NodeFlags::POINTER_EVENTS` | `{ pointerEvents: true }` | Opt-in for `pointer` actions with sub-cell positions. This step does not need it. |
 
 The rule for the answer is pure, so it goes in the core crate and is tested like the rest. A row dragged downward lands after the target, a row dragged upward lands before it, and the row itself accepts nothing.
@@ -503,7 +503,7 @@ function dropSide(list: NoteList, sourceKey: string, targetKey: string): DropSid
 }
 ```
 
-The client calls `drop_side` from the `drag-over` arm of its action handler, keeps the answer with the target key, and invalidates the pane. `render` then sets the answer as the target row's `accept` prop. The SDK pages do not yet name the builder call that sets that prop, so this step stops at the pure rule and the event arm.
+The client calls `drop_side` from the `drag-over` arm of its action handler, keeps the answer with the target key, and invalidates the pane. `render` shows the answer as preview text; it sets no row prop, because the host owns the insertion line. The final move happens on the `dropped` action.
 
 ### Errors and edge cases
 
@@ -572,7 +572,7 @@ At normal width, each note is one row with the input below. At a narrow width, l
 <span class="t-hi">│</span> ╰──────────────────────────────────────────────────────────╯ <span class="t-hi">│</span>
 <span class="t-hi">╰──────────────────────────────────────────────────────────────╯</span>
 </pre>
-<figcaption>Illustrative, not generated. A drag is in progress: the third note (dimmed) is over the first note, and the host draws the insertion line after it because the plugin answered <code>drag-over</code> with <code>accept</code> set to <code>after</code>. The drop will send <code>dropped</code> with index 1.</figcaption>
+<figcaption>Illustrative, not generated. A drag is in progress: the third note (dimmed) is over the first note, and the host draws the insertion line after it because the host sent <code>drag-over</code> with <code>accept</code> set to <code>after</code>. The drop will send <code>dropped</code> with index 1.</figcaption>
 </figure>
 
 

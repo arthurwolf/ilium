@@ -62,6 +62,8 @@ pub struct WorktreeDialogState {
     pub project_id: NodeId,
     pub parent_group: NodeId,
     pub provider: BuiltinAgentProvider,
+    /// Profile identity, if this dialog was opened from a custom launcher.
+    pub custom_agent: Option<ilium_core::custom_agent::CustomAgentIdentity>,
     pub mode: WorktreeDialogMode,
     pub focus: WorktreeDialogFocus,
     pub prompt: TextArea<'static>,
@@ -116,6 +118,7 @@ impl WorktreeDialogState {
             project_id,
             parent_group,
             provider,
+            custom_agent: None,
             mode,
             focus: WorktreeDialogFocus::Prompt,
             prompt,

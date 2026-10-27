@@ -12,7 +12,7 @@ The Smart Copy plugin (`ilium.core.smart-copy`, side both) owns selection and co
 
 ### See it
 
-<figure><img src="/assets/demos/04-smart-copy.gif" alt="A region of terminal output is selected and copied with Smart Copy" loading="lazy"><figcaption>Smart Copy in a terminal pane. The right-click menu offers the recognised regions.</figcaption></figure>
+<figure><img src="/assets/demos/04-smart-copy.gif" alt="Ilium Smart Copy selects a complete recalled lot code in a local fixture ledger" loading="lazy"><figcaption>Smart Copy highlights and copies a complete source lot code. The terminal and inference use disclosed local fixtures; the private clipboard is verified against the source bytes.</figcaption></figure>
 
 ### What the user sees
 
@@ -77,7 +77,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "name": "Smart copy",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and ",
+  "description": "The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and Smart Copy with the inference model choosing semantic regions.",
   "license": "MIT",
   "server": {
     "entry": "server.wasm",
@@ -101,7 +101,6 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "service:copy",
     "command:smart-copy"
   ],
   "contributes": {
@@ -114,6 +113,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       }
     ]
   },
+  "replaceable": true,
+  "surface": [
+    "points:recognisers",
+    "points:after-copy",
+    "topics:copied",
+    "commands:smart-copy"
+  ],
   "limits_tier": "first-party"
 }
 ```
@@ -355,7 +361,7 @@ async fn rank(screen: String) -> Vec<String> {
     };
     match inference::complete(request).await {
         Ok(completion) => completion.text.lines().take(3).map(str::to_string).collect(),
-        Err(_) => Vec::new(), // fall back to the light candidates
+        Err(_) => Vec::new(), // inference failed: the picker stays empty
     }
 }
 
@@ -391,7 +397,7 @@ async function rank(screen: string): Promise<string[]> {
     });
     return completion.text.split('\n').slice(0, 3);
   } catch {
-    return []; // fall back to the light candidates
+    return []; // inference failed: the picker stays empty
   }
 }
 
@@ -410,13 +416,13 @@ Other plugins change what `ilium.core.smart-copy` does through the points below.
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
 | `recognisers` | collect | Teach Smart Copy a new kind of structure to select. | entry: id, kind, regex, multiline, label | standard |
-| `after-copy` | hook (transform) | Change the copied text before it reaches the clipboard, for example to remove secrets. | text, kind, pane; reply: text | standard |
+| `after-copy` | hook (transform) | Change the copied text before it reaches the clipboard, for example to remove secrets. | text, kind, pane; reply: text | high |
 
 **Topics** (list under `contributes.topics.subscribes`):
 
 - `ilium.core.smart-copy/copied`: { kind, length } after text is copied
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.smart-copy"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.smart-copy"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Replaces anything that looks like an API token with `[removed]` before the copy
 

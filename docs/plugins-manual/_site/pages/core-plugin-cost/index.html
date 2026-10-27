@@ -404,7 +404,7 @@
 <li>Reset planning, the reset forecasts (see Automation, "Reset forecasts", and Settings, "Reset planning").</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/06-cost-and-stats.gif" alt="The statistics panel shows spend over time, a bar per model and a table of sessions" loading="lazy"><figcaption>The session statistics panel and the spend indicators in the tree.</figcaption></figure>
+<figure><img src="/assets/demos/06-cost-and-stats.gif" alt="Historical Costs and Stats capture from an older Ilium build; current-build live-resume acceptance remains unverified." loading="lazy"><figcaption>Historical capture; a current-build replacement has not passed its real-idle check.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -440,7 +440,8 @@
   &quot;id&quot;: &quot;ilium.core.cost&quot;,
   &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
               &quot;exports&quot;: [&quot;service-provider&quot;] },
-  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot; },
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+              &quot;exports&quot;: [&quot;views&quot;] },
   &quot;contributes&quot;: {
     &quot;decoration_slots&quot;: [ { &quot;id&quot;: &quot;cost&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 40, &quot;trailing&quot;: true } ],
     &quot;tree_orderings&quot;: [ { &quot;id&quot;: &quot;by-cost&quot;, &quot;title&quot;: &quot;Cost, highest first&quot;, &quot;slot&quot;: &quot;cost&quot; } ],
@@ -496,7 +497,10 @@
   },
   &quot;client&quot;: {
     &quot;entry&quot;: &quot;client.wasm&quot;,
-    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;views&quot;
+    ]
   },
   &quot;capabilities&quot;: {
     &quot;server&quot;: [
@@ -999,7 +1003,7 @@ function contextWindow(pane: string): number | undefined {
 <ul>
 <li><code>ilium.core.cost/usage-changed</code>: { pane, total } when the total of a pane changes</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.cost"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.cost"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-prices-a-local-model-at-zero">Example: Prices a local model at zero</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

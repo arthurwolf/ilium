@@ -609,7 +609,7 @@ names the field path, for example <code>process_names[2]: empty name</code>.</p>
     &quot;process_names&quot;: [&quot;example-agent&quot;],
     &quot;aliases&quot;: [&quot;ea&quot;],
     &quot;icon&quot;: &quot;robot&quot;,
-    &quot;actions&quot;: { &quot;compact&quot;: { &quot;keys&quot;: &quot;/compact\r&quot;, &quot;allowed_when&quot;: [&quot;idle&quot;, &quot;done&quot;] } },
+    &quot;actions&quot;: [{ &quot;id&quot;: &quot;compact&quot;, &quot;keys&quot;: &quot;/compact\r&quot;, &quot;allowed_when&quot;: [&quot;idle&quot;, &quot;done&quot;] }],
     &quot;resume&quot;: [&quot;example-agent&quot;, &quot;--resume&quot;, &quot;{session}&quot;],
     &quot;session_scope&quot;: &quot;agent-sessions:claude&quot;
   }],
@@ -810,7 +810,7 @@ key, so a retry with the same key after fixing the cause is valid.</p>
 </tr>
 <tr>
 <td>Activity allowed by <code>allowed_when</code></td>
-<td><code>refused(conflict)</code> with the message <code>agent is working</code></td>
+<td><code>refused(conflict)</code> with a message named after the current activity, for example <code>agent is working</code></td>
 </tr>
 <tr>
 <td>Rate: 20 per second per pane per plugin</td>
@@ -911,10 +911,10 @@ through <code>node-view.agent</code>.</p>
 <li><a href="/pages/capability-agent-read/">Agent read</a>, <a href="/pages/capability-agent-read-prompts/">agent read prompts</a>,
   <a href="/pages/capability-agent-control/">agent control</a> and <a href="/pages/capability-agent-signatures/">agent signatures</a>
   for the grants.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the codes and the restart rule.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the codes and the restart rule.</li>
 </ul>
 <h3 id="security">Security</h3>
-<p><strong>[SEC-042]</strong> Signature registration needs the high-risk <code>agent.signatures</code> grant. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
+<p><strong>[SEC-042]</strong> Signature registration needs the normal-risk <code>agent.signatures</code> grant. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-surface-glyph-plane/"><small>Previous</small>Glyph plane and frame receipts</a><a class="next" href="/pages/primitives-basic/"><small>Next</small>Basic primitive</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

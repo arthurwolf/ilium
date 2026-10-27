@@ -28,7 +28,7 @@ use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 /// event is modal or otherwise cannot safely pass an earlier deferred event.
 pub(crate) fn editor_loan_event_target(app: &App, event: &Event) -> Option<Option<NodeId>> {
     if app.diagnostic_view.is_some()
-        || matches!(event, Event::Key(key) if key.code == KeyCode::F(9) && crate::diagnostic::current_text(app).is_some())
+        || matches!(event, Event::Key(key) if key.code == KeyCode::F(9) && (crate::diagnostic::requests_runtime_report(key) || crate::diagnostic::current_text(app).is_some()))
     {
         return Some(None);
     }
@@ -2571,6 +2571,29 @@ const SETTINGS_PAGE_SCROLL_LINES: u16 = 5;
 /// `crate::settings_ui`'s module doc comment for the design this mirrors.
 fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event) {
     let selected_before = state.selected_row;
+    if state.tab == SettingsTab::CustomAgents
+        && state.icon_picker.is_none()
+        && crate::custom_agent_settings::handle(app, &mut state, event)
+    {
+        if state.selected_row != selected_before {
+            let content =
+                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state)
+                    .content_area;
+            let line = state.selected_row.saturating_add(4).min(u16::MAX as usize) as u16;
+            if line < state.scroll {
+                state.scroll = line;
+            } else if line >= state.scroll.saturating_add(content.height) {
+                state.scroll = line.saturating_sub(content.height.saturating_sub(1));
+            }
+            state.scroll = state
+                .scroll
+                .min(crate::settings_ui::custom_agent_max_scroll(
+                    app, &state, content,
+                ));
+        }
+        app.mode = Mode::Settings(Box::new(state));
+        return;
+    }
     let Event::Key(key) = event else {
         app.mode = Mode::Settings(Box::new(state));
         return;
@@ -2929,7 +2952,13 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 if let Some(entry) = picker.search_results.entry(picker.selected_entry) {
-                    app.settings_set_icon(picker.target, entry.glyph.to_string());
+                    if state.tab == SettingsTab::CustomAgents {
+                        if let Some(editor) = &mut state.custom_agent_editor {
+                            editor.draft.icon = entry.glyph.to_string();
+                        }
+                    } else {
+                        app.settings_set_icon(picker.target, entry.glyph.to_string());
+                    }
                 }
                 app.mode = Mode::Settings(Box::new(state));
                 return;

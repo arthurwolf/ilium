@@ -182,6 +182,11 @@ pub(crate) fn describe_resource(resource: &crate::pane::PaneResource) -> String 
             TerminalOrigin::PlainShell => "shell".into(),
             TerminalOrigin::Command(command) => format!("command: {command}"),
             TerminalOrigin::Frozen { resume_command } => format!("frozen: {resume_command}"),
+            TerminalOrigin::CustomAgent {
+                identity, frozen, ..
+            } => {
+                format!("custom agent: {} (frozen: {frozen})", identity.profile_id)
+            }
         }
     }
     match resource {

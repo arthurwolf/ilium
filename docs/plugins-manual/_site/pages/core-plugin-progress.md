@@ -13,7 +13,7 @@ Progress monitors let a long task show how far it is. An agent or a script regis
 
 ### See it
 
-<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A progress monitor row fills while a long task runs and ends as done" loading="lazy"><figcaption>A registered monitor appears in the tree footer, updates on each probe run and settles when the task ends.</figcaption></figure>
+<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A local Codex-shaped fixture runs a monitored five-card census task and receives its completed result" loading="lazy"><figcaption>A local script acts as the Codex-shaped fixture. Ilium registers its monitor, shows progress, and posts the result; no provider request is made.</figcaption></figure>
 
 ### What the user sees
 
@@ -53,7 +53,7 @@ Field order and names equal the baseline; extra fields are not allowed. The reco
 
 | Id | Rule | Exact value or text | Baseline source |
 |---|---|---|---|
-| progress-B01 | Exit status of `progress set --wait` and `progress wait` | 0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed | `src/docs/cli-reference.md#progress-wait` |
+| progress-B01 | Exit status of `progress set --wait` and `progress wait` | 0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed while the task is still running (`outcome` `still-running`) | `src/docs/cli-reference.md#progress-wait` |
 | progress-B02 | `outcome` for each exit | 0 `done`, 3 `error`, 4 `monitor-failed`, 5 `cleared` or `no-monitor`, 6 `still-running` | `src/docs/cli-reference.md#progress-wait` |
 | progress-B03 | Text of `next` | `done`: "The task finished. Verify its output, then continue." `error`: "The task reported failure. Inspect its log or error, fix, and retry." `monitor-failed`: "The probe stopped working, so the task outcome is unknown. Check the task directly; do not assume success." `cleared`: "The monitor was cleared, or is not registered on this pane. Check `ilium progress status`." `no-monitor`: "This pane has no progress monitor. Register one with `ilium progress set`." `still-running`: "The task is still running. Run the same wait command again to keep waiting." A settled outcome adds " When you have handled it, remove this monitor with `ilium progress clear --monitor-id <id>`." | `ilium/src/progress_wait.rs` |
 | progress-B04 | `composer_notice` | `suppressed` while a wait takes the outcome, `may-also-arrive` for a settled outcome without a wait, `none` otherwise | `src/docs/cli-reference.md#progress-wait` |
@@ -65,7 +65,7 @@ Field order and names equal the baseline; extra fields are not allowed. The reco
 | progress-B10 | CLI reply wait | The CLI waits up to 45 s for the server reply | `src/docs/cli-reference.md#progress-status` |
 | progress-B11 | Same probe twice | Registering the same probe command again in the same pane while its monitor runs returns the existing monitor id | `src/docs/automation.md#progress-monitor` |
 | progress-B12 | Restore after restart | A monitor is re-established only after one preflight probe returns the same `job_id`, and it gets a fresh monitor id | `ilium-server/src/persistence.rs` |
-| progress-B13 | Delivery states | `not-queued`, `queued`, `attempted`, `delivered-to-pty`, `uncertain`, `not-deliverable`, `collected-by-waiter`. Only `queued` is retried after a restart. Undelivered outcomes are re-sent every 20 s | `ilium-server/src/agent_delivery.rs` |
+| progress-B13 | Delivery states | `not-queued`, `queued`, `attempted`, `delivered-to-pty`, `uncertain`, `not-deliverable`, `collected-by-waiter`. Only `queued` is retried after a restart. A settled outcome whose delivery is `not-deliverable`, or `uncertain` after a server restart, is re-sent by the 20 s reconciler, at most 5 times per monitor generation; it then stops. A re-sent notice carries a possible-duplicate prefix instead of a dedup key, so the agent may see it twice and ignores it if already handled | `ilium-server/src/agent_delivery.rs` |
 | progress-B14 | Terminal result | Typed into the agent composer once (`composer_notice`); not typed when a running wait collected it | `src/docs/automation.md#progress-monitor` |
 | progress-B15 | Rejection codes | `disabled`, `invalid-request`, `invalid-probe-report`, `probe-spawn-failed`, `probe-timed-out`, `probe-exited-non-zero`, `probe-output-too-large`, `probe-io-failed`, `pane-not-found`, `stale-monitor`, `too-many-monitors`, `monitor-ambiguous` | `src/docs/cli-reference.md#progress-status` |
 
@@ -78,7 +78,7 @@ The plugin owns no tab. It reads four keys of the User Interface table that the 
 | `[ui] progress_monitor_enabled` | true | true or false. Off stops observation and rejects new registrations with `disabled` | `src/docs/automation.md#progress-monitor` |
 | `[ui] progress_max_lines` | 4 | Footer lines, 1 to 20 | `src/docs/automation.md#progress-monitor` |
 | `[ui] completed_progress_hide_after_seconds` | 60 | Steps of 30; 0 means never hide | `src/docs/automation.md#progress-monitor` |
-| `[ui] task_progress_frames` | a preset | 2 to 13 printable frames, all one cell wide or all two cells wide | `src/docs/automation.md#progress-monitor` |
+| `[ui] task_progress_frames` | the built-in preset 0 of the Agent Monitoring tab frame picker (the client default; the other presets are bars, moon phases and quarter circles) | 2 to 13 printable frames, all one cell wide or all two cells wide | `src/docs/automation.md#progress-monitor` |
 
 All four are written by the Agent Monitoring tab ([config and data migration](/pages/reference-config-and-data-migration/)); this plugin never writes them.
 
@@ -92,10 +92,10 @@ The contract version is 0.1. The plugin declares one subcommand, `progress`, wit
 {
   "id": "ilium.core.progress",
   "capabilities": {
-    "server": ["cli.contribute", "process.run:sh", "process.long-lived", "settings.read-kernel:agent-monitoring"],
+    "server": ["cli.contribute", "process.run:sh", "process.long-lived", "http-api.route:/progress.json", "settings.read-kernel:agent-monitoring"],
     "client": ["ui.chrome", "settings.read-kernel:agent-monitoring"]
   },
-  "contributes": { "cli": { "name": "progress", "summary": "Progress monitors", "output": "jsonl", "requires_server": true, "aliases": ["wait"] } }
+  "contributes": { "cli": [{ "name": "progress", "summary": "Progress monitors", "output": "jsonl", "requires_server": true, "aliases": ["wait"] }] }
 }
 ```
 
@@ -125,6 +125,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "cli.contribute",
       "process.run:sh",
       "process.long-lived",
+      "http-api.route:/progress.json",
       "settings.read-kernel:agent-monitoring"
     ],
     "client": [
@@ -136,13 +137,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "startup"
   ],
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "progress",
       "summary": "Progress monitors",
       "output": "jsonl",
       "requires_server": true,
       "aliases": ["wait"]
-    }
+    }]
   },
   "limits_tier": "first-party"
 }
@@ -220,7 +221,7 @@ export const { handler } = definePlugin({
 
 #### Run the probe
 
-A repeating timer fires on the probe interval. The plugin runs the probe command, parses the JSON object it prints and stores the status and percent. A non-zero exit is not a plugin error, it is a probe result. See [process control](/pages/api-process-control/), [process.run](/pages/capability-process-run/) and [events](/pages/api-events/).
+A repeating timer fires on the probe interval. The plugin runs the probe command, parses the JSON object it prints and stores the status and percent. A non-zero exit is not a plugin error and updates no status or percent. It counts as one probe failure toward the three-failure rule (progress-B09), and the probe is reported with the rejection code `probe-exited-non-zero` when a registration or a `progress check` run exits non-zero. The third consecutive failure sets the monitor health to `failed`. See [process control](/pages/api-process-control/), [process.run](/pages/capability-process-run/) and [events](/pages/api-events/).
 
 **Rust**
 
@@ -270,7 +271,7 @@ export async function runProbe(command: string, projectRoot: string): Promise<Pr
 
 #### Long-lived watcher
 
-New in the plugin build, not covered by COR-041. A watcher is a child process that stays alive and prints one JSON line per progress step. Each line is a probe-format JSON object (`job_id`, `status`, `percent`, `message`, `details`, `error`), at most 64 KiB long, and at most 10 lines per second are applied; extra lines are coalesced to the latest. An invalid line counts as one probe failure. The plugin parses each `child-output` line and settles the monitor on `child-exited`. See [process.long-lived](/pages/capability-process-long-lived/), [process control](/pages/api-process-control/) and [events](/pages/api-events/).
+New in the plugin build, not covered by COR-041. A watcher is a child process that stays alive and prints one JSON line per progress step. Its program is always `sh`, the only program the plugin holds a `process.run:<program>` grant for; `process.long-lived` alone is not enough, and any other program makes `spawn` fail with `not-permitted` (see [process.long-lived](/pages/capability-process-long-lived/)). Each line is a probe-format JSON object (`job_id`, `status`, `percent`, `message`, `details`, `error`), at most 64 KiB long, and at most 10 lines per second are applied; extra lines are coalesced to the latest. An invalid line counts as one probe failure. The plugin parses each `child-output` line and settles the monitor on `child-exited`. See [process.long-lived](/pages/capability-process-long-lived/), [process control](/pages/api-process-control/) and [events](/pages/api-events/).
 
 **Rust**
 
@@ -282,7 +283,7 @@ fn start_watcher(&mut self, monitor: u64, program: &str) -> Result<(), PluginErr
     let child = process::spawn(&SpawnSpec {
         process: ProcessSpec {
             program: program.to_string(), arguments: Vec::new(), cwd: None,
-            stdin: None, environment: Vec::new(), timeout_millis: 0,
+            stdin: None, environment: Vec::new(), timeout_millis: 1_000,
         },
         stdin_open: false,
         line_mode: true,
@@ -307,7 +308,7 @@ const children = new Map<bigint, Child>();
 export function startWatcher(monitor: bigint, program: string): void {
   children.set(monitor, process.spawn({
     process: { program, arguments: [], cwd: undefined, stdin: undefined,
-      environment: [], timeoutMillis: 0 },
+      environment: [], timeoutMillis: 1_000 },
     stdinOpen: false,
     lineMode: true,
   }));
@@ -370,7 +371,7 @@ export function statusSegment(running: number): Submission {
 
 #### Status route on the loopback listener
 
-New in the plugin build, not covered by COR-041. The plugin answers `GET /progress.json` on the loopback HTTP listener. Each `http-called` event is one request, and `respond` answers exactly that request, so a script can read progress without the terminal. The body is `{"monitors":[<progress object>]}`, where each element has the same shape as the `progress` field of a `progress status` record.
+New in the plugin build, not covered by COR-041. The plugin holds the grant `http-api.route:/progress.json` and answers `GET /progress.json` on the loopback HTTP listener. A request for any other path never reaches the plugin and gets `404 Not Found` from the kernel; another method on `/progress.json` gets `405 Method Not Allowed` from the plugin. Each `http-called` event is one request, and `respond` answers exactly that request, so a script can read progress without the terminal. The body is `{"monitors":[<progress object>]}`, where each element has the same shape as the `progress` field of a `progress status` record.
 
 **Rust**
 
@@ -382,7 +383,11 @@ impl Handler for StatusRoute {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         for event in batch {
             let Event::HttpCalled(call) = event else { continue };
-            if call.method != "GET" || call.path != "/progress.json" { continue; }
+            if call.path != "/progress.json" { continue; }
+            if call.method != "GET" {
+                let _ = http_api::respond(call.call, 405, &[("allow".into(), "GET".into())], &[]);
+                continue;
+            }
             let body = serde_json::to_vec(&self.snapshot()).unwrap_or_default();
             let _ = http_api::respond(call.call, 200, &[("content-type".into(), "application/json".into())], &body);
         }
@@ -400,7 +405,11 @@ export function onEvents(events: Event[]): Submission[] {
   for (const event of events) {
     if (event.tag !== 'http-called') continue;
     const { call, method, path } = event.val;
-    if (method !== 'GET' || path !== '/progress.json') continue;
+    if (path !== '/progress.json') continue;
+    if (method !== 'GET') {
+      respond(call, 405, [['allow', 'GET']], new Uint8Array());
+      continue;
+    }
     respond(call, 200, [['content-type', 'application/json']], encode(snapshot()));
   }
   return [];
@@ -424,7 +433,9 @@ Other plugins change what `ilium.core.progress` does through the points below. T
 
 - `ilium.core.progress/changed`: { monitor, status, percent }
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.progress"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+A job that ends is announced on the separate kernel topic `ilium.progress/finished`, which belongs to the reserved kernel namespace `ilium.progress` (see [Messages and topics](/pages/api-messages-and-topics/#topic-names-and-patterns)). This plugin does not publish it, so its own topics all start with `ilium.core.progress/`.
+
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.progress"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds a probe template for a CI run
 

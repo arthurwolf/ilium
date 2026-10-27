@@ -164,7 +164,7 @@ The payload is checked against `params` before the provider runs, and a failing 
 
 ## Activation order
 
-At startup the kernel starts service providers before the consumers that require them. A provider that is installed but not running is started by the first call to its service, through the trigger `service:<name>`. The call waits up to the provider's activation deadline, then for the reply. At shutdown, services stop in their declared order. A cycle, where two plugins each require the other, is refused at install.
+At startup the kernel starts service providers before the consumers that require them. A provider that is installed but not running is started by the first call to its service, through the trigger `service:<name>`. The call waits up to the provider's activation deadline, then for the reply. At shutdown, a provider stops after its consumers, in reverse activation order. A cycle, where two plugins each require the other, is refused at install.
 
 <pre class="term">
 <span class="t-prompt">$</span> ilium plugin logs com.example.notes-ui

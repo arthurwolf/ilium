@@ -5,7 +5,7 @@
 A service is a named interface that one plugin provides and other plugins call. A caller sends a method name and a JSON payload. The provider answers with a JSON string, either at once or later, and the kernel delivers the answer to the caller as a `request-completed` event. Services let a feature in one plugin use a feature in another without knowing its code. The kernel checks both grants, the payload schema and the deadlines on every call.
 
 <div class="warn">
-<p>Plugin-defined services are unstable (<code>@unstable</code>) and may change in a later release. Build on one only with a plan to update it. The kernel-known services <code>ilium:inference/provider</code> and the editor provider have typed interfaces instead, see the <a href="/pages/api-inference/">inference</a> page.</p>
+<p>Plugin-defined services are unstable (<code>@unstable</code>) and may change in a later release. Build on one only with a plan to update it. Both the provider and the caller list <code>"plugin-services"</code> in the manifest <code>unstable</code> array, including core plugins that provide a service. The kernel-known services <code>ilium:inference/provider</code> and the editor provider have typed interfaces instead, see the <a href="/pages/api-inference/">inference</a> page.</p>
 </div>
 
 ### What you need
@@ -21,10 +21,11 @@ A service is a named interface that one plugin provides and other plugins call. 
 |---|---|---|
 | Plugin-defined service name | `<plugin-id>/<name>`; `<name>` is 1 to 64 characters from `a-z`, `0-9` and `-` | `com.example.titles/suggest` |
 | Kernel-known service name | `ilium:<package>/<interface>` | `ilium:inference/provider` |
+| First-party plugin service name | the plugin-defined form, with the providing plugin's dotted id before the slash | `ilium.instructions/inputs`, `ilium.compact/trigger` |
 | Caller grant | `services.use:<name>` | `services.use:com.example.titles/suggest` |
 | Provider grant | `services.provide:<name>` | `services.provide:com.example.titles/suggest` |
 | Provider manifest entry | object in `contributes.services.provides`; fields in [Manifest reference, services](/pages/reference-manifest/#services) | `{ "name": "com.example.titles/suggest", "version": "0.1.0", "schema": "schemas/suggest.json" }` |
-| Caller manifest entry | `requires.services` with a range | `"requires": { "services": ["com.example.titles/suggest@^0.1.0"] }` |
+| Caller manifest entry | `requires.services` with a minimum version | `"requires": { "services": ["com.example.titles/suggest@0.1.0"] }` |
 
 A version appears in `requires` and `provides` only. A grant never carries a version. The prefix of a plugin-defined name is the id of the providing plugin.
 
@@ -319,7 +320,7 @@ Further edge cases:
 - Two calls to the same service return two request ids. Each completion carries its own request, so take each reply by its id.
 - `take-reply` gives the JSON once. A second call for the same request returns `None` or `undefined`.
 - A deferred reply that arrives after 30 seconds returns `not-found`. The provider should log it and drop the work.
-- A provider that restarts after a failure (see the restart and disable rule) loses its deferred calls. Their callers receive `failed(cancelled)`. If the restart was caused by the provider breaching its 50 ms call deadline, the caller of the breaching call receives `failed(timed-out)` and every other deferred caller receives `failed(cancelled)`.
+- A provider that restarts after a failure (see the restart and disable rule) loses its deferred calls. Their callers receive `failed(cancelled)`. If the restart was caused by the provider breaching its per-export call deadline (20 ms, or 10 ms for `tokens`), the caller of the breaching call receives `failed(internal)` (the deadline breach is a trap, not a missing reply, so it is never `timed-out`) and every other deferred caller receives `failed(cancelled)`.
 
 ### When to use extension points instead
 
@@ -376,7 +377,7 @@ Requirement ids for this page: [SVC-001], [SVC-005], [SVC-007], [SVC-008], [SVC-
 - [capability: services](/pages/capability-services/) for the grant rules and the review dialog.
 - [extension points](/pages/api-extension-points/) for the many-contributors alternative.
 - [requests and outcomes](/pages/requests-and-outcomes/) for the completion event and `request-result`.
-- [errors and limits](/pages/errors-and-limits/) and [reference: errors and limits](/pages/reference-errors-and-limits/) for the full code table.
+- [errors and limits](/pages/reference-errors-and-limits/) and [reference: errors and limits](/pages/reference-errors-and-limits/) for the full code table.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the module layout of each language.
 - [packages](/pages/packages/) and [reference: manifest](/pages/reference-manifest/) for the manifest keys used above.
 

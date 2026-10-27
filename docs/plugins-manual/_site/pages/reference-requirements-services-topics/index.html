@@ -527,9 +527,9 @@
 </tr>
 <tr>
 <td>[SVC-026]</td>
-<td>A full queue for topic-published MUST drop the oldest event and count it. A full queue for message MUST NOT drop and MUST restart the plugin.</td>
+<td>A full queue for topic-published MUST drop the oldest event and count it. A full queue for message MUST NOT drop and MUST complete the intent as refused(busy) without restarting the plugin (see SVC-030).</td>
 <td><a href="/pages/api-messages-and-topics/#edge-cases-and-errors">edge cases and errors</a></td>
-<td>(event-delivery) overflow each queue -&gt; events-dropped for topics, a restart for messages.</td>
+<td>(event-delivery) overflow each queue -&gt; events-dropped for topics, refused(busy) for messages.</td>
 </tr>
 <tr>
 <td>[SVC-027]</td>

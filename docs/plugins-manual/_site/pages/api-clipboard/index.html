@@ -414,7 +414,7 @@
 </tr>
 <tr>
 <td>Grant to read</td>
-<td><code>clipboard.read</code>, high risk. The user allows it once in the review dialog.</td>
+<td><code>clipboard.read</code>, high risk. A T2 or T3 plugin asks in the install review dialog; a T1 bundled plugin asks at its first activation.</td>
 </tr>
 <tr>
 <td>Rust</td>
@@ -479,7 +479,7 @@ write-text: func(text: string) -&gt; result&lt;_, plugin-error&gt;;  // clipboar
 <li><strong>Route.</strong> The client writes through the system clipboard when it runs on the user's desktop. When it runs in a terminal that supports OSC 52, it writes through an OSC 52 sequence. With neither route, <code>write-text</code> returns <code>unsupported</code> and <code>read-text</code> returns nothing.</li>
 <li><strong>Logging.</strong> Every successful read writes an info line to the plugin log that records only the length, never the text. The same line goes to the privacy log. The user is not asked before each read.</li>
 <li><strong>Footer.</strong> After each read, the client footer shows <code>clipboard read by &lt;plugin name&gt;</code> for 3 s.</li>
-<li><strong>Prompts.</strong> The review dialog lists <code>Read the clipboard</code> for <code>clipboard.read</code> and <code>Write to the clipboard</code> for <code>clipboard.write</code>. The high-risk grant is asked once, when the plugin first activates. There is no prompt per call.</li>
+<li><strong>Prompts.</strong> The review dialog lists <code>Read the clipboard</code> for <code>clipboard.read</code> and <code>Write to the clipboard</code> for <code>clipboard.write</code>. A T2 or T3 plugin asks for the high-risk grant in the install review dialog; a T1 plugin asks at its first activation. There is no prompt per call.</li>
 </ul>
 <figure>
 <svg viewBox="0 0 400 200" role="img" aria-label="Copy flow from terminal selection to the clipboard" width="600" height="300">
@@ -562,7 +562,7 @@ write-text: func(text: string) -&gt; result&lt;_, plugin-error&gt;;  // clipboar
 </tr>
 <tr>
 <td>Grant never requested in the manifest</td>
-<td>Traps. The plugin fails and is restarted under the rules in <a href="/pages/errors-and-limits/">errors and limits</a>.</td>
+<td>Traps. The plugin fails and is restarted under the rules in <a href="/pages/reference-errors-and-limits/">errors and limits</a>.</td>
 <td>Traps, the same as an audio call without an audio grant.</td>
 </tr>
 </tbody>
@@ -788,7 +788,6 @@ export function pasteClipboard(pane: bigint): Submission | undefined {
 <ul>
 <li>Text selection and right-click menu (feature 16) writes the selection with <code>clipboard.write-text</code>.</li>
 <li>Smart Copy light (feature 65) writes the selection on key release. It uses <code>clipboard.write-text</code> with a grab from the keys import.</li>
-<li>Agent toolbar (feature 35) copies text with <code>clipboard.write</code>.</li>
 </ul>
 <h3 id="see-also">See also</h3>
 <ul>
@@ -798,7 +797,7 @@ export function pasteClipboard(pane: bigint): Submission | undefined {
 <li><a href="/pages/api-clock-and-timers/">clock and timers</a> for <code>now-unix-millis</code>.</li>
 <li><a href="/pages/api-client-requests/">client requests</a> for reading the clipboard from the server side.</li>
 <li><a href="/pages/capability-clipboard/">capability: clipboard</a> for the grants, the logging and the review dialog.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the trap and restart rules.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the trap and restart rules.</li>
 </ul>
 <p>Contract: <code>ilium:host/clipboard</code>. The server side reaches it through client requests.</p>
 <h3 id="security">Security</h3>

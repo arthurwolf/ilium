@@ -486,11 +486,11 @@ list-virtual-children: func(row-kind: string, parent: string, cursor: option&lt;
 <h3 id="how-the-call-behaves">How the call behaves</h3>
 <ul>
 <li><strong>When.</strong> The host calls the export when the user expands a row of a kind declared with <code>children: "provider"</code>. <code>parent</code> is the id of the expanded row, and the first call has <code>cursor</code> unset. The host asks again with the returned cursor when the user chooses the row <code>Load more</code>.</li>
-<li><strong>Deadline.</strong> 20 ms per call. A page that is not ready in time is shown as a row <code>…</code> with a spinner. A plugin that needs longer returns what it has cached and sends a fresh <code>set-virtual-rows</code> when the data arrives.</li>
+<li><strong>Deadline.</strong> 20 ms per call. While a page is pending the host shows a row <code>…</code> with a spinner. A page that misses the deadline with no cached page ends as the row <code>Could not load</code> (see Errors). A plugin that needs longer returns what it has cached and sends a fresh <code>set-virtual-rows</code> when the data arrives.</li>
 <li><strong>Page size.</strong> At most 256 children per page.</li>
 <li><strong>Expansion state.</strong> The host keeps which rows are expanded. The plugin may change it with <code>set-expanded</code>.</li>
 <li><strong>Cancel.</strong> Collapsing a row discards its pending page. A late result for a collapsed row is dropped.</li>
-<li><strong>Errors.</strong> The contract does not define how a failed page is drawn. Return a page whose first child explains the problem when the user must see it.</li>
+<li><strong>Errors.</strong> When the export returns an error or misses its deadline without a cached page, the host draws one dim row <code>Could not load</code> with the error code in place of the page, and the <code>Load more</code> row stays so the user can retry; the expansion state is kept. A late page for the same cursor replaces that row. Test: make the export return <code>internal</code> and assert the row <code>Could not load</code> is shown under the expanded parent.</li>
 </ul>
 <figure>
 <svg viewBox="0 0 420 220" role="img" aria-label="Sequence of expanding a provider virtual row" width="630" height="330">
