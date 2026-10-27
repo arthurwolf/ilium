@@ -609,6 +609,7 @@ mod tests {
         }));
         send_key(app, code);
         assert!(matches!(app.mode, crate::app::Mode::ValueDialog(_)));
+        app.settle_filesystem_for_test();
     }
 
     #[test]
@@ -639,6 +640,7 @@ mod tests {
 
         send_key(&mut app, KeyCode::Char(' '));
         assert!(matches!(app.mode, crate::app::Mode::ValueDialog(_)));
+        app.settle_filesystem_for_test();
         if let crate::app::Mode::ValueDialog(host) = &app.mode {
             let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
                 panic!("Space must open the shared number editor");

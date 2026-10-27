@@ -10,3 +10,6 @@
 - Global animation settings honor the same explicit configuration-directory override as other settings, keeping isolated runs inside their own configuration on every platform.
 - Agent Cost medal scope uses the shared arrows and full choice catalog, including retained selection and retry when a configuration save fails.
 - Appearance keyboard navigation scrolls the selected control into view at compact terminal heights, including sizing cards and mode-dependent rows.
+- Terminal input retains simultaneous resize and wakeup notifications when returning a key, preventing rapid resize and navigation from leaving settings drawn at stale dimensions.
+- Preserve invalid numeric paste for validation instead of stripping punctuation or executing delay shortcuts, and keep empty provider models unselected while enabling the first discovered choice.
+- Numeric Settings and Cost editors load the saved field when reopened, preserve typed drafts during loading, and block confirmation when saved values cannot be read; a failed save no longer makes an unacknowledged runtime preview appear persisted.

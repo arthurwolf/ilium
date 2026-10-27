@@ -5074,11 +5074,7 @@ pub(crate) fn settings_choice_control(
         let first = models.iter().find(|model| !model.trim().is_empty());
         let can_step = fallback
             || if value.trim().is_empty() {
-                first.is_some_and(|first| {
-                    models
-                        .iter()
-                        .any(|model| !model.trim().is_empty() && model != first)
-                })
+                first.is_some()
             } else {
                 models
                     .iter()
@@ -6798,7 +6794,7 @@ mod number_control_tests {
     }
 
     #[test]
-    fn empty_model_with_one_distinct_discovered_option_disables_cycle_but_keeps_catalog() {
+    fn empty_model_with_one_distinct_discovered_option_enables_initial_selection() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("synthetic-single-model".into(), directory.path().into());
         app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
@@ -6825,14 +6821,14 @@ mod number_control_tests {
                 Position::new(geometry.previous.x, geometry.previous.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::PreviousChoice)
         );
         assert_eq!(
             control.hit(
                 Position::new(geometry.next.x, geometry.next.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::NextChoice)
         );
         assert_eq!(
             control.hit(
@@ -6841,6 +6837,17 @@ mod number_control_tests {
             ),
             Some(ControlAction::OpenChoices)
         );
+        // Once selected, the single distinct model has nowhere to cycle.
+        app.inference_settings.ollama.model = "synthetic-only-model".into();
+        let (_, selected_control) =
+            settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
+        let selected = selected_control.geometry();
+        for point in [selected.previous, selected.next] {
+            assert_eq!(
+                selected_control.hit(Position::new(point.x, point.y), PointerButton::Left),
+                None
+            );
+        }
         app.ollama_models.push("synthetic-second-model".into());
         let (_, control) =
             settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();

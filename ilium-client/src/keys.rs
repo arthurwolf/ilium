@@ -335,6 +335,13 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
 /// editor focus use this path too; terminal panes are intercepted earlier as
 /// one native paste. Leader prefixes stay direct so paste cancels them whole.
 pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
+    // A numeric paste is data, including punctuation; it must never execute
+    // the delay row's +/-/* shortcuts or discard invalid characters.
+    if matches!(&app.mode, Mode::TextTriggerDialog(state)
+        if state.focus == crate::text_trigger_dialog::TextTriggerFocus::Delay)
+    {
+        return false;
+    }
     !matches!(
         &app.mode,
         Mode::LeaderPending
@@ -1683,6 +1690,16 @@ fn handle_text_trigger_dialog_event(
     event: &Event,
 ) {
     use crate::text_trigger_dialog::TextTriggerFocus;
+    if let Event::Paste(pasted) = event {
+        if state.focus == TextTriggerFocus::Delay {
+            for character in pasted.chars() {
+                let _ = crate::text_prompt::handle_key(&mut state.delay, KeyCode::Char(character));
+            }
+            state.save_error = None;
+        }
+        app.mode = Mode::TextTriggerDialog(state);
+        return;
+    }
     let Event::Key(key) = event else {
         app.mode = Mode::TextTriggerDialog(state);
         return;
@@ -5206,11 +5223,11 @@ mod indent_outdent_tests {
     fn cost_star_retains_exact_number_after_disk_failure_then_retries_durably() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "[cost\n").unwrap();
         let mut app = App::new("cost-value-test".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 50));
         app.cost_settings.calibration = crate::cost_model::Calibration::Budget;
+        crate::config::save_cost_settings(directory.path(), &app.cost_settings).unwrap();
         let row = crate::cost_settings_ui::rows(&app)
             .iter()
             .position(|row| *row == crate::cost_settings::CostRow::Budget)
@@ -5221,6 +5238,8 @@ mod indent_outdent_tests {
             ..SettingsState::default()
         }));
         press(&mut app, KeyCode::Char('*'));
+        app.settle_filesystem_for_test();
+        std::fs::write(&path, "[cost\n").unwrap();
         let Mode::ValueDialog(host) = &mut app.mode else {
             panic!("number dialog");
         };
@@ -5339,6 +5358,7 @@ mod indent_outdent_tests {
         }));
 
         press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
         let Mode::ValueDialog(host) = &app.mode else {
             panic!("exact window dialog");
         };
@@ -5386,6 +5406,7 @@ mod indent_outdent_tests {
         );
 
         press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
         press(&mut app, KeyCode::Char('9'));
         press(&mut app, KeyCode::Esc);
         assert_eq!(
@@ -5477,6 +5498,52 @@ mod indent_outdent_tests {
                 ..
             }] if command == "claude"
         ));
+    }
+
+    #[test]
+    fn universal_review_scheduled_numeric_paste_rejects_without_sending_and_can_correct() {
+        for pasted in ["-1", "1.5", "1e2", "1s", "99999999999999999999999"] {
+            let mut app = App::new("schedule-paste".into(), std::env::temp_dir());
+            let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+            let pane_id = app
+                .tree
+                .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+                .unwrap();
+            let mut state = ScheduledInputDialogState::new(pane_id);
+            state.focus = ScheduledInputFocus::Seconds;
+            state.seconds = TextPromptState::new("");
+            app.mode = Mode::SchedulePaneInput(Box::new(state));
+            handle_event(&mut app, Event::Paste(pasted.into()));
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+            );
+            let Mode::SchedulePaneInput(state) = &app.mode else {
+                panic!("invalid paste submitted {pasted}")
+            };
+            assert_eq!(state.seconds.buf, pasted);
+            assert!(app.status_message.is_some());
+            assert!(app.take_outbound_requests().is_empty());
+            for _ in pasted.chars() {
+                handle_event(
+                    &mut app,
+                    Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+                );
+            }
+            handle_event(&mut app, Event::Paste("17".into()));
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+            );
+            assert!(matches!(
+                app.take_outbound_requests().as_slice(),
+                [ClientRequest::SchedulePaneInput {
+                    delay_seconds: 17,
+                    ..
+                }]
+            ));
+            assert!(matches!(app.mode, Mode::Normal));
+        }
     }
 
     #[test]
@@ -6003,8 +6070,16 @@ mod text_trigger_retry_and_delete_tests {
     }
 
     #[test]
-    fn text_trigger_invalid_delay_retains_draft_and_never_saves_a_substitute() {
-        for invalid in ["86401", "99999999999999999999", "-1", "not a number"] {
+    fn universal_review_text_trigger_paste_never_saves_a_substitute() {
+        for invalid in [
+            "86401",
+            "99999999999999999999",
+            "-1",
+            "1.5",
+            "1e2",
+            "1s",
+            "not a number",
+        ] {
             let directory = tempfile::tempdir().unwrap();
             let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
             app.config_dir = Some(directory.path().to_path_buf());
@@ -6018,7 +6093,12 @@ mod text_trigger_retry_and_delete_tests {
             };
             editor.regexp.buf = "synthetic-ready".into();
             editor.message.buf = "synthetic-continue".into();
-            editor.delay.buf = invalid.into();
+            editor.delay = crate::text_prompt::TextPromptState::new("");
+            editor.focus = TextTriggerFocus::Delay;
+            handle_event(&mut app, Event::Paste(invalid.into()));
+            let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+                panic!("paste closed the editor")
+            };
             editor.focus = TextTriggerFocus::Save;
             handle_event(
                 &mut app,
@@ -6039,6 +6119,29 @@ mod text_trigger_retry_and_delete_tests {
                 .text_triggers
                 .triggers
                 .is_empty());
+            // Correction uses the real paste and save dispatch, not a replacement
+            // buffer that could bypass the original input bug.
+            for _ in invalid.chars() {
+                handle_event(
+                    &mut app,
+                    Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+                );
+            }
+            handle_event(&mut app, Event::Paste("17".into()));
+            let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+                panic!("correction lost draft")
+            };
+            editor.focus = TextTriggerFocus::Save;
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            );
+            app.settle_filesystem_for_test();
+            let saved = crate::config::load(directory.path()).unwrap().text_triggers;
+            assert_eq!(saved.triggers.len(), 1);
+            assert_eq!(saved.triggers[0].delay_seconds, 17);
+            assert!(matches!(app.take_outbound_requests().as_slice(),
+                [ClientRequest::UpdateTextTriggers { settings }] if settings == &saved));
         }
     }
 

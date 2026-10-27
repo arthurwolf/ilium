@@ -6,6 +6,7 @@ use crate::cost_settings::{
 };
 use crate::value_dialog::{ChoiceDialogState, ChoiceOption, NumberDialogState, ValueDialogState};
 
+#[derive(Clone)]
 pub struct CostValueTarget {
     pub row: CostRow,
     metric: CostMetric,

@@ -126,6 +126,50 @@ async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool 
     wait_until_polling(condition, timeout, Duration::from_millis(20)).await
 }
 
+// Capture current parser state without waiting for a frame or changing input.
+fn compact_reload_probe(
+    session: &PtySession,
+    started: std::time::Instant,
+    phase: &str,
+    presentation_match: Option<&str>,
+) -> serde_json::Value {
+    let owner_status = format!("{:?}", session.input_handle().status());
+    let current = session.try_with_screen(|screen| {
+        let (rows, columns) = screen.size();
+        let generation = session.screen_generation();
+        let journal = session.output_replay_estimate();
+        serde_json::json!({
+            "size_rows_columns": [rows, columns],
+            "cursor": screen.cursor_position(),
+            "generation": generation,
+            "through_sequence": journal.through_sequence,
+            "journal_complete": journal.is_complete,
+            "numbered_rows": screen.rows(0, columns).enumerate().collect::<Vec<_>>(),
+        })
+    });
+    serde_json::json!({
+        "phase": phase,
+        "elapsed_ms": started.elapsed().as_millis(),
+        "pid": session.process_id(),
+        "owner_status_separate_sample": owner_status,
+        "presentation_match": presentation_match,
+        "current": current,
+    })
+}
+
+fn compact_reload_report(
+    session: &PtySession,
+    started: std::time::Instant,
+    observations: &[serde_json::Value],
+    phase: &str,
+) -> serde_json::Value {
+    let current = compact_reload_probe(session, started, phase, None);
+    serde_json::json!({
+        "observations": observations,
+        "final_observation": current,
+    })
+}
+
 /// Waits for a condition that is only true for one *transient* frame, such as
 /// a mid-animation label position.
 ///
@@ -2700,6 +2744,14 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     first_client
         .write(b"*")
         .expect("reopen exact Tail tokens entry");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 20000"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "reopened Tail tokens editor must load the saved value before editing"
+    );
     first_client
         .write(b"\x7f\x7f\x7f\x7f\x7f23456\r")
         .expect("enter a valid value between the step-ladder entries");
@@ -2712,6 +2764,18 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .await,
         "exact off-ladder value was not persisted: {:?}",
         ilium_client::config::load(&xdg.ilium_config_dir)
+    );
+
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Verbatim tail") && !screen.contains("Value: 23456")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Tail token save acknowledgement did not close the editor"
     );
 
     first_client
@@ -2730,8 +2794,19 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         first_client.screen_text()
     );
     first_client
-        .write(b"j*\x7f\x7f\x7f150")
-        .expect("open width-dependent Padding draft and enter a valid unsaved threshold");
+        .write(b"j*")
+        .expect("open width-dependent Padding draft");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 200"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Padding editor must load the saved threshold before editing"
+    );
+    first_client
+        .write(b"\x7f\x7f\x7f150")
+        .expect("enter a valid unsaved threshold");
     assert!(
         wait_until(
             || first_client.screen_text().contains("Value: 150"),
@@ -2765,7 +2840,18 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "cancelling the valid draft must retain the saved threshold"
     );
     first_client
-        .write(b"*\x7f\x7f\x7f150\r")
+        .write(b"*")
+        .expect("reopen the exact width-dependent threshold");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 200"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "reopened Padding editor must load the saved threshold before editing"
+    );
+    first_client
+        .write(b"\x7f\x7f\x7f150\r")
         .expect("enter and accept the exact width-dependent threshold");
     assert!(
         wait_until(
@@ -2784,6 +2870,17 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             .mode,
         ilium_client::padding::PaddingMode::WidthDependent,
         "threshold entry must retain the seeded Width-dependent mode"
+    );
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Terminal columns:") && !screen.contains("Value: 150")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Padding save acknowledgement did not close the editor"
     );
     first_client
         .write(b"h")
@@ -2948,6 +3045,21 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .expect("select the actual OpenStreetMap scene row");
     assert!(
         wait_until(
+            || {
+                first_client.with_screen(|screen| {
+                    animation_scene_label_cell(screen, osm_label)
+                        .and_then(|(column, row)| screen.cell(row, column))
+                        .is_some_and(vt100::Cell::inverse)
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "the OpenStreetMap list row should show pointer selection before persistence is checked: {:?}",
+        first_client.screen_text()
+    );
+    assert!(
+        wait_until(
             || ilium_client::project_config::load(&animation_home).is_ok_and(|config| {
                 config.animation.kind
                     == ilium_client::background_animation::AnimationKind::OpenStreetMap
@@ -2955,7 +3067,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             WAIT_TIMEOUT
         )
         .await,
-        "OpenStreetMap scene selection did not persist"
+        "OpenStreetMap scene selection did not persist: {:?}",
+        first_client.screen_text()
     );
     first_client
         .write(b"\r")
@@ -3049,7 +3162,12 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     );
     assert!(
         wait_until(
-            || first_client.screen_text().contains(chosen_city_label),
+            || {
+                let screen = first_client.screen_text();
+                // Disk persistence precedes the client save receipt. The
+                // saving catalog still owns keys until it visibly closes.
+                screen.contains(chosen_city_label) && !screen.contains("Search:")
+            },
             WAIT_TIMEOUT
         )
         .await,
@@ -3107,6 +3225,20 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .await,
         "exact off-step duration did not persist"
     );
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Place duration")
+                    && screen.contains("137s")
+                    && !screen.contains("Value: 137")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "the saved duration editor must close before reopening: {:?}",
+        first_client.screen_text()
+    );
     first_client
         .write(b"*")
         .expect("reopen the saved exact duration");
@@ -3126,7 +3258,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // A second real client loads its own settings from disk while the first
     // client and its isolated server remain alive. No provider or agent CLI is
     // started by this interaction.
-    let mut fresh_client = PtySession::spawn(attach(false, 24, 80))
+    let fresh_command = attach(false, 24, 80);
+    let mut fresh_client = PtySession::spawn(fresh_command)
         .expect("spawn fresh client against the same isolated server");
     assert!(
         wait_until(
@@ -3219,6 +3352,20 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     fresh_client
         .write(b"\x1b")
         .expect("close the compact Tail tokens editor without changing it");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Verbatim tail")
+                    && screen.contains("23456 tokens")
+                    && !screen.contains("Value: 23456")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Tail tokens editor must close before the next settings-tab keys: {:?}",
+        fresh_client.screen_text()
+    );
 
     fresh_client
         .write(&settings_tab_keys(
@@ -3286,6 +3433,18 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     fresh_client
         .write(b"\x1b")
         .expect("cancel unchanged compact Padding entry");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Columns:") && !screen.contains("Value: 151")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Padding editor must close before continuing the fresh-client reload: {:?}",
+        fresh_client.screen_text()
+    );
     let reloaded_padding = ilium_client::config::load(&xdg.ilium_config_dir)
         .expect("authoritative Padding read after fresh-client reload")
         .padding;
@@ -3313,18 +3472,44 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // Inspect the global look with room for its pane, then return to the
     // supported compact size for the persisted scene controls. Crossing scene
     // rows with arrows would preview and save unrelated animations.
+    let compact_started = std::time::Instant::now();
+    let mut compact_observations: Vec<serde_json::Value> = Vec::with_capacity(8);
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "before_wide_resize",
+        None,
+    ));
     fresh_client
         .resize(44, 120)
         .expect("show the global look pane for the fresh-client palette check");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "wide_resize_receipt",
+        None,
+    ));
     assert!(
         wait_until(
             || fresh_client.screen_text().contains(chosen_palette_label),
             WAIT_TIMEOUT
         )
         .await,
-        "fresh client should render the reloaded full-catalog palette: {:?}",
-        fresh_client.screen_text()
+        "fresh client should render the reloaded full-catalog palette: {:?}\nresize23={}",
+        fresh_client.screen_text(),
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "palette_timeout",
+        )
     );
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "palette_predicate_passed",
+        None,
+    ));
     let (loaded_scene_column, loaded_scene_row) = fresh_client
         .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
         .expect("persisted OpenStreetMap scene is visible");
@@ -3334,35 +3519,94 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     fresh_client
         .write(b"\r")
         .expect("open persisted OpenStreetMap controls in compact client");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "before_compact_resize",
+        None,
+    ));
     fresh_client
         .resize(24, 80)
         .expect("restore compact size for city and duration reload acceptance");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "compact_resize_receipt",
+        None,
+    ));
     fresh_client
         .write(b"\x1b[B".repeat(place_offset).as_slice())
         .expect("scroll to the persisted city selector in compact client");
+    let mut city_presentation_match: Option<String> = None;
     assert!(
         wait_until(
-            || fresh_client.screen_text().contains(chosen_city_label),
+            || {
+                let screen = fresh_client.screen_text();
+                if !screen.contains(chosen_city_label) {
+                    return false;
+                }
+                city_presentation_match = Some(screen);
+                true
+            },
             WAIT_TIMEOUT
         )
         .await,
-        "compact client should render the saved city after reload: {:?}",
-        fresh_client.screen_text()
+        "compact client should render the saved city after reload: {:?}\nresize23={}",
+        fresh_client.screen_text(),
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "city_timeout",
+        )
     );
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "city_predicate_passed",
+        city_presentation_match.as_deref(),
+    ));
     fresh_client
         .write(b"\x1b[B".repeat(dwell_offset - place_offset).as_slice())
         .expect("scroll to the exact numeric duration in compact client");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "before_dwell_star",
+        None,
+    ));
     fresh_client
         .write(b"*")
         .expect("open persisted exact duration in compact client");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "dwell_star_written",
+        None,
+    ));
     assert!(
         wait_until(
             || fresh_client.screen_text().contains("Value: 137"),
             WAIT_TIMEOUT
         )
         .await,
-        "compact client should reload the exact off-step scene number: {:?}",
-        fresh_client.screen_text()
+        "compact client should reload the exact off-step scene number: {:?}\nresize23={}",
+        fresh_client.screen_text(),
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "number_timeout",
+        )
+    );
+    eprintln!(
+        "resize23={}",
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "number_visible",
+        )
     );
     fresh_client
         .write(b"\x1b")

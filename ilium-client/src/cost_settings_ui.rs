@@ -1416,6 +1416,7 @@ mod tests {
         );
         app.config_dir = Some(directory.path().to_owned());
         app.cost_settings.calibration = Calibration::Budget;
+        crate::config::save_cost_settings(directory.path(), &app.cost_settings).unwrap();
         app.set_screen_area(Rect::new(0, 0, 130, 260));
         app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
@@ -1456,6 +1457,7 @@ mod tests {
             ValueTarget::Cost { target, .. } if target.row == row
         ));
         assert!(matches!(&host.dialog, ValueDialogState::Number(_)));
+        app.settle_filesystem_for_test();
 
         let draft_length = match &app.mode {
             Mode::ValueDialog(host) => match &host.dialog {
