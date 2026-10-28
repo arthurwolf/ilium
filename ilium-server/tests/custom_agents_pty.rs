@@ -341,7 +341,18 @@ async fn custom_agent_real_pty_preserves_literal_environment_for_both_providers(
     assert!(
         common::wait_until(
             || std::fs::read_to_string(&snapshot)
-                .is_ok_and(|text| profiles.iter().all(|profile| text.contains(&profile.id))),
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .and_then(|snapshot| snapshot
+                    .get("panes")
+                    .and_then(|panes| panes.as_array())
+                    .cloned())
+                .is_some_and(|panes| {
+                    panes.iter().any(|pane| {
+                        pane.get("node_id").and_then(serde_json::Value::as_u64)
+                            == Some(replacement_pane.0)
+                    })
+                }),
             Duration::from_secs(15)
         )
         .await

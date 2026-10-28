@@ -399,7 +399,8 @@ fn validate_next_report(
 struct RawProgressReport {
     job_id: String,
     status: ProgressTaskStatus,
-    percent: f64,
+    #[serde(default)]
+    percent: Option<f64>,
     #[serde(default)]
     message: String,
     #[serde(default)]
@@ -557,7 +558,8 @@ async fn run_probe(
             format!("progress probe did not emit exactly one valid JSON report: {error}"),
         )
     })?;
-    if !raw.percent.is_finite() || !(0.0..=100.0).contains(&raw.percent) {
+    let percent = raw.percent.unwrap_or(0.0);
+    if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
         return Err(probe_error(
             ProgressProbeFailureKind::InvalidReport,
             "progress percent must be finite and in 0..=100",
@@ -566,14 +568,14 @@ async fn run_probe(
     ProgressTaskReport::new(
         raw.job_id,
         raw.status,
-        raw.percent as f32,
+        percent as f32,
         raw.message,
         raw.details,
         raw.error,
     )
     .and_then(|report| report.with_eta_seconds(raw.eta_seconds))
     .map(|mut report| {
-        report.indeterminate = raw.indeterminate;
+        report.indeterminate = raw.indeterminate || raw.percent.is_none();
         report
     })
     .map_err(|error| {
@@ -919,6 +921,26 @@ mod tests {
         let plain = r#"{"job_id":"job","status":"running","percent":0,"message":"m"}"#;
         let parsed = preflight(&test_probes::emit_text(plain)).await.unwrap();
         assert!(!parsed.report.indeterminate);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_without_percentage_is_accepted_as_indeterminate() {
+        let json = r#"{"job_id":"job","status":"running","message":"waiting"}"#;
+        let parsed = preflight(&test_probes::emit_text(json)).await.unwrap();
+        assert!(parsed.report.indeterminate);
+        let finished = r#"{"job_id":"job","status":"done","message":"finished"}"#;
+        let parsed = preflight(&test_probes::emit_text(finished)).await.unwrap();
+        assert_eq!(parsed.report.percent, 100.0);
+        assert!(parsed.report.indeterminate);
+        let invalid = r#"{"job_id":"job","status":"running","percent":101}"#;
+        assert_eq!(
+            preflight(&test_probes::emit_text(invalid))
+                .await
+                .unwrap_err()
+                .kind,
+            ProgressProbeFailureKind::InvalidReport
+        );
     }
 
     #[tokio::test]

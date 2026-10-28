@@ -316,6 +316,46 @@ fn render_gauge(
         None => status_label.to_string(),
     };
     let left = format!("{icon} {label_text}");
+    if !progress.has_measurable_progress() {
+        let pad = side_padding(area.width);
+        let base = Style::new().bg(theme::muted_accent_bg(scheme));
+        let label = Span::styled(left, base.fg(status_color).add_modifier(Modifier::BOLD));
+        let unread = if progress.has_unread_outcome() {
+            "  ● unread"
+        } else {
+            ""
+        };
+        let available = usize::from(area.width.saturating_sub(2 * pad))
+            .saturating_sub(UnicodeWidthStr::width(label.content.as_ref()))
+            .saturating_sub(UnicodeWidthStr::width(unread))
+            .saturating_sub(TIME_BOX_DIVIDER_WIDTH);
+        let mut spans = vec![
+            Span::styled(" ".repeat(usize::from(pad)), base),
+            label,
+            Span::styled(unread, base.fg(status_color)),
+        ];
+        if let Some((segments, _)) = crate::progress_time::fit_time_box(
+            crate::progress_time::time_box_variants(progress, now_unix_millis),
+            available,
+        ) {
+            let dim = base.add_modifier(Modifier::DIM);
+            spans.push(Span::styled(" \u{2502} ", dim));
+            for (index, segment) in segments.iter().enumerate() {
+                if index > 0 {
+                    spans.push(Span::styled(crate::progress_time::segment_separator(), dim));
+                }
+                let style = if segment.warn {
+                    base.fg(tone_color(DetailTone::Warning, scheme))
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    dim
+                };
+                spans.push(Span::styled(segment.text.clone(), style));
+            }
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
+        return;
+    }
     let percent_text = format!("{percent:>3.0}%");
     // Mirrors the sidebar's bold/dim result glyph: an outcome nobody has
     // looked at yet says so until the pane is focused or typed into.
@@ -458,10 +498,12 @@ pub fn summary_tooltip(
     owner: Option<&str>,
 ) -> crate::status_icons::TooltipContent {
     let (_, status_label, _) = status_presentation(progress);
-    let title = if progress.report.message.is_empty() {
+    let title = if !progress.report.message.is_empty() {
+        progress.report.message.clone()
+    } else if progress.has_measurable_progress() {
         format!("{status_label}  {:.0}%", progress.report.percent)
     } else {
-        progress.report.message.clone()
+        status_label.to_string()
     };
     let timing = crate::progress_time::popover_lines(progress, now_unix_millis, owner).join("\n");
     let mut body = if progress.report.details.is_empty() {
@@ -482,10 +524,17 @@ pub fn summary_tooltip(
     crate::status_icons::TooltipContent {
         title,
         body,
-        reason: Some(format!(
-            "{status_label} {:.0}% \u{b7} job {} \u{b7} monitor #{}",
-            progress.report.percent, progress.report.job_id, progress.monitor_id
-        )),
+        reason: Some(if progress.has_measurable_progress() {
+            format!(
+                "{status_label} {:.0}% \u{b7} job {} \u{b7} monitor #{}",
+                progress.report.percent, progress.report.job_id, progress.monitor_id
+            )
+        } else {
+            format!(
+                "{status_label} \u{b7} job {} \u{b7} monitor #{}",
+                progress.report.job_id, progress.monitor_id
+            )
+        }),
     }
 }
 
@@ -952,6 +1001,29 @@ mod tests {
     }
 
     #[test]
+    fn indeterminate_monitor_keeps_status_without_a_gauge_or_percentage() {
+        let mut unknown = monitor(1, "unknown", 0.0);
+        unknown.report.indeterminate = true;
+        let measured = monitor(2, "measured", 50.0);
+        let single = rendered_rows(&unknown, 80, 2);
+        assert!(single[0].contains("RUNNING"), "{single:?}");
+        assert!(!single[0].contains('%'), "{single:?}");
+        assert!(!single[0].contains('\u{2588}'), "{single:?}");
+        unknown.report.indeterminate = false;
+        let zero_without_eta = rendered_rows(&unknown, 80, 2);
+        assert!(!zero_without_eta[0].contains('%'), "{zero_without_eta:?}");
+        unknown.report.eta_seconds = Some(30);
+        let zero_with_eta = rendered_rows(&unknown, 80, 2);
+        assert!(zero_with_eta[0].contains("0%"), "{zero_with_eta:?}");
+        unknown.report.indeterminate = true;
+        unknown.report.eta_seconds = None;
+        let multiple = rendered_monitor_rows(&[&unknown, &measured], 80, 3);
+        assert!(multiple[0].contains("unknown"), "{multiple:?}");
+        assert!(!multiple[0].contains('%'), "{multiple:?}");
+        assert!(multiple[1].contains("50%"), "{multiple:?}");
+    }
+
+    #[test]
     fn wide_gauge_row_shows_started_and_eta_beside_the_bar() {
         let mut progress = monitor(1, "build", 40.0);
         progress.timing = steady_timing();
@@ -1023,6 +1095,31 @@ mod tests {
             .collect();
         assert!(row.contains("no probe report"), "{row}");
         assert!(!row.contains("ETA"), "{row}");
+    }
+
+    #[test]
+    fn indeterminate_monitor_preserves_no_probe_report_warning() {
+        let mut progress = monitor(1, "build", 0.0);
+        progress.report.indeterminate = true;
+        progress.timing = steady_timing();
+        let mut terminal = Terminal::new(TestBackend::new(100, 2)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Some(&progress),
+                    1,
+                    ColorScheme::Dark,
+                    40 * 60_000,
+                );
+            })
+            .unwrap();
+        let row: String = (0..100)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect();
+        assert!(row.contains("no probe report"), "{row}");
+        assert!(!row.contains('%'), "{row}");
     }
 
     fn steady_timing() -> ilium_core::ProgressTiming {

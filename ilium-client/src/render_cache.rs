@@ -204,12 +204,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 return None;
             }
             if let Err(event) = app.submit_terminal_event(event) {
-                app.pending_terminal_events.push_front(
-                    crate::connection::Received::with_retention(
-                        *event,
-                        app.processing_event_retention.clone(),
-                    ),
-                );
+                if !app.release_refused_hidden_terminal_event(&event) {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(
+                            *event,
+                            app.processing_event_retention.clone(),
+                        ),
+                    );
+                }
             }
             None
         }
@@ -276,12 +278,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 return None;
             }
             if let Err(event) = app.submit_terminal_event(event) {
-                app.pending_terminal_events.push_front(
-                    crate::connection::Received::with_retention(
-                        *event,
-                        app.processing_event_retention.clone(),
-                    ),
-                );
+                if !app.release_refused_hidden_terminal_event(&event) {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(
+                            *event,
+                            app.processing_event_retention.clone(),
+                        ),
+                    );
+                }
             }
             None
         }
@@ -761,6 +765,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         // Plugin traffic is consumed by the client plugin host, not by the render cache.
         ServerEvent::Plugin(_) | ServerEvent::Contributions(_) | ServerEvent::Rejected(_) => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
+        ServerEvent::ScreenPreview {
+            pane_id,
+            through_sequence,
+            bytes,
+        } => {
+            app.apply_screen_preview(pane_id, through_sequence, &bytes);
+            None
+        }
         ServerEvent::VoiceTextOffered {
             request_id,
             sentences,
