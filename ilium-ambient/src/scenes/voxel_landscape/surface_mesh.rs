@@ -278,8 +278,16 @@ impl BoundModel {
             .iter()
             .map(|(_, model)| model.origins.len())
             .sum();
+        // Retained bytes per bound model: the struct itself (its real size, with
+        // room for the Arc counts and allocator rounding) is charged once per
+        // distinct model. Each quad is charged 512 bytes, which covers a
+        // BoundQuad plus Vec doubling slack because quads are pushed one at a
+        // time. Each origin keeps its strings and is charged 4 KiB, a bound
+        // the origin strings have not been measured against.
         let reservation = budget.reserve(
-            32768 + count as u64 * 512 + origin_count as u64 * 4096,
+            (std::mem::size_of::<BoundModel>() + 256) as u64
+                + count as u64 * 512
+                + origin_count as u64 * 4096,
             cancel,
         )?;
         let mut quads = Vec::new();
