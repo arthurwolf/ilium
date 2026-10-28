@@ -104,7 +104,9 @@ async fn decode_rpc(
     })
     .await
 }
-async fn catalog_access(state: &ServerState) -> Result<tokio::sync::MutexGuard<'_, ()>, ResourceError> {
+async fn catalog_access(
+    state: &ServerState,
+) -> Result<tokio::sync::MutexGuard<'_, ()>, ResourceError> {
     // Queue local observers and commands fairly before taking the shared file
     // lock. Admission is finite/cancellable and owns no worker or tree guard.
     tokio::time::timeout(
@@ -112,7 +114,12 @@ async fn catalog_access(state: &ServerState) -> Result<tokio::sync::MutexGuard<'
         service(state)?.catalog_access.lock(),
     )
     .await
-    .map_err(|_| err("busy", "Local catalog admission busy; retry the same request key"))
+    .map_err(|_| {
+        err(
+            "busy",
+            "Local catalog admission busy; retry the same request key",
+        )
+    })
 }
 async fn read(state: &ServerState) -> Result<Catalog, ResourceError> {
     let _access = catalog_access(state).await?;

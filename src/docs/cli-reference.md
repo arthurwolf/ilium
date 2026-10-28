@@ -299,7 +299,8 @@ The probe is a shell command line (at most 16 KiB). It must print exactly one JS
 | --- | --- | --- |
 | `job_id` | yes | A stable, non-empty identifier of the task, at most 256 bytes. It must not change between probes of one monitor. |
 | `status` | yes | One of `not-started-yet`, `running`, `error`, `done`. |
-| `percent` | yes | A finite number from 0 to 100. `done` is shown as exactly 100; any other value for `done` is rejected. |
+| `percent` | no | A finite number from 0 to 100 when progress is measurable. Omit it when progress is unavailable; `done` is shown as exactly 100. |
+| `indeterminate` | no | Set to `true` when progress cannot be measured. The gauge and estimate are hidden. |
 | `message` | recommended | One line, at most 2048 bytes, always visible in the pane footer. It should make sense to someone who has not read the agent's session. |
 | `details` | optional | Multi-line text, at most 8192 bytes, shown when the user hovers the footer. |
 | `eta_seconds` | optional | Whole seconds the task still needs (at most 315360000). Replaces the pace-based ETA in the footer when present. |

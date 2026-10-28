@@ -377,6 +377,10 @@ fn task_span(task: TaskSignal, icons: &IconSettings, use_stable_glyphs: bool) ->
                 .to_string(),
             Style::new().fg(Color::Gray),
         ),
+        TaskSignal::RunningUnmeasured { degraded } => Span::styled(
+            "▶".to_string(),
+            Style::new().fg(if degraded { Color::Yellow } else { Color::Cyan }),
+        ),
         TaskSignal::Running { bucket, degraded } => Span::styled(
             task_progress_frame(icons, bucket).to_string(),
             Style::new().fg(if degraded { Color::Yellow } else { Color::Cyan }),
@@ -550,6 +554,14 @@ fn task_explanation(task: TaskSignal) -> StatusExplanation {
         TaskSignal::Pending => StatusExplanation {
             title: "Task registered, not started yet",
             body: "A long-running task has an Ilium progress monitor, and the task's own probe reports that it has not started. Ilium polls it; the pane's process does not.",
+        },
+        TaskSignal::RunningUnmeasured { degraded: false } => StatusExplanation {
+            title: "Task running",
+            body: "An Ilium progress monitor is watching this task, but no completion measurement is available.",
+        },
+        TaskSignal::RunningUnmeasured { degraded: true } => StatusExplanation {
+            title: "Task running, observation degraded",
+            body: "The latest monitor checks failed; Ilium is retrying. No completion measurement is available.",
         },
         TaskSignal::Running {
             degraded: false, ..

@@ -5,14 +5,47 @@ use super::*;
 // to their own per-pane quota (bounded only by the owned-worker slot table),
 // not to the shared replay/output pool. Never lower this count to make the
 // gate pass: a lowered gate hid the capacity cut that dropped 22 panes on
-// 2026-10-09.
-const PANE_COUNT: usize = 128;
-const BURST_LINES: usize = 1024;
+// 2026-10-09. The product target is at least 200 panes.
+const PANE_COUNT: usize = 200;
+// 16384 lines of 257 bytes is about 4 MiB of retained output per pane, the
+// scale of a long agent transcript, not a token burst.
+const BURST_LINES: usize = 16384;
 const BURST_LINE_WIDTH: usize = 256;
 const BURST_BYTES_PER_PANE: usize = BURST_LINES * (BURST_LINE_WIDTH + 1);
+// The first HEAVY_PANE_COUNT panes retain 128000 lines of 257 bytes, about
+// 32 MiB, which is the per-pane retained window of the PTY journal
+// (`MAX_RETAINED_BYTES` in ilium-pty/src/session.rs). Only a finite pool
+// evicts hidden panes, so these panes are what a re-selection must replay.
+const HEAVY_PANE_COUNT: usize = 8;
+const HEAVY_BURST_LINES: usize = 128_000;
+const HEAVY_BURST_BYTES_PER_PANE: usize = HEAVY_BURST_LINES * (BURST_LINE_WIDTH + 1);
+// The noise ends with a complete CSI (ESC [ 0 m) so the last ESC cannot swallow
+// the first byte of the marker that follows.
 const LARGE_FIRST_PANE_NOISE_BYTES: usize = 24 * 1024 * 1024;
 const SELECTION_LIMIT: Duration = Duration::from_secs(5);
+// Bounded window that records how late a missed marker arrived; it never counts as a pass.
+const LATE_DISPLAY_DIAGNOSTIC_WINDOW: Duration = Duration::from_secs(20);
 
+/// Each selection is appended as one JSON line beside the receipt, so a run that
+/// stops early still shows every measurement it completed.
+fn progress_receipt_path() -> Option<std::path::PathBuf> {
+    let mut path = std::env::var_os("ILIUM_PANE_LATENCY_RECEIPT")?;
+    path.push(".progress.jsonl");
+    Some(std::path::PathBuf::from(path))
+}
+fn append_progress_sample(path: Option<&std::path::Path>, sample: &serde_json::Value) {
+    let Some(path) = path else {
+        return;
+    };
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap();
+    writeln!(file, "{sample}").unwrap();
+    file.sync_data().unwrap();
+}
 fn shell_quote(argument: &str) -> String {
     let mut quoted = String::from("'");
     for character in argument.chars() {
@@ -61,8 +94,12 @@ async fn select_and_measure(
         .await,
         "sidebar hover diagnostic did not close before pane navigation"
     );
+    // The sidebar holds PANE_COUNT rows plus group rows, so one pass in a
+    // single direction can miss a title that sits above the viewport after a
+    // selection moved the list. Search both directions with a budget that
+    // covers the whole tree twice; the bound is a harness limit, not a timing one.
     let mut row = None;
-    for _ in 0..PANE_COUNT {
+    for step in 0..(PANE_COUNT * 4) {
         row = tui.with_screen(|screen| {
             rows_containing_before_column(screen, &title, TREE_TEXT_COLUMNS)
                 .into_iter()
@@ -71,8 +108,9 @@ async fn select_and_measure(
         if row.is_some() {
             break;
         }
-        tui.write(&sgr_mouse_down(if backwards { 64 } else { 65 }, 8, 15))
-            .expect("scroll isolated tree");
+        let scroll_up = backwards != (step / PANE_COUNT % 2 == 1);
+        tui.write(&sgr_mouse_down(if scroll_up { 64 } else { 65 }, 8, 15))
+            .unwrap_or_else(|error| panic!("scroll isolated tree: {error:?}"));
         tui.write(&sgr_mouse_move(100, 40)).unwrap();
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
@@ -98,20 +136,30 @@ async fn select_and_measure(
     tui.write(&sgr_mouse_down(0, 8, row)).unwrap();
     tui.write(&sgr_mouse_up(8, row)).unwrap();
     tui.write(b"\r").unwrap();
+    let buffered_tag = format!("BUFFERED-LINE-{number:03}");
     let first_content_ms = if number == 0 && pass == "burst-forward" {
+        // The current screen (the final marker) may appear before the first
+        // line: the replay's tail is previewed first. Either counts as content
+        // within the same selection limit.
         let appeared = wait_until(
-            || {
-                inner_marker_visible(tui, "FIRST-CONTENT-000")
-                    && !inner_marker_visible(tui, &marker)
-            },
+            || inner_marker_visible(tui, "FIRST-CONTENT-000") || inner_marker_visible(tui, &marker),
             SELECTION_LIMIT.saturating_sub(started.elapsed()),
         )
         .await;
         assert!(
             appeared,
-            "the selected large-output pane showed no first content before completion"
+            "the selected large-output pane showed no content within the selection limit"
         );
         Some(started.elapsed().as_secs_f64() * 1000.0)
+    } else if number != 0 {
+        // Every other pane shows buffered transcript lines before, or together
+        // with, its final marker; measure when the first pane content appears.
+        let appeared = wait_until(
+            || inner_marker_visible(tui, &buffered_tag) || inner_marker_visible(tui, &marker),
+            SELECTION_LIMIT.saturating_sub(started.elapsed()),
+        )
+        .await;
+        appeared.then(|| started.elapsed().as_secs_f64() * 1000.0)
     } else {
         None
     };
@@ -121,15 +169,42 @@ async fn select_and_measure(
     )
     .await;
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+    // When the 5-second check misses, keep watching for the marker for a
+    // bounded window and record when it arrived. The receipt then shows how
+    // late a failing pane was. The pass criterion is still the 5-second limit
+    // asserted below; this window never turns a miss into a pass.
+    let late_display_ms = if displayed {
+        None
+    } else {
+        let appeared = wait_until(
+            || inner_marker_visible(tui, &marker),
+            LATE_DISPLAY_DIAGNOSTIC_WINDOW,
+        )
+        .await;
+        appeared.then(|| started.elapsed().as_secs_f64() * 1000.0)
+    };
     let result = serde_json::json!({
         "type": "measurement", "pass": pass, "pane": number,
         "marker": marker, "displayed": displayed, "elapsed_ms": elapsed_ms,
+        "late_display_ms": late_display_ms,
         "first_content_ms": first_content_ms,
         "burst_age_ms": burst_released_at.elapsed().as_secs_f64() * 1000.0,
         "already_visible_before_click": already_visible,
         "screen": tui.screen_text(),
     });
     println!("{result}");
+    if let Some(path) = std::env::var_os("ILIUM_PANE_LATENCY_RECEIPT") {
+        // Incremental JSONL so an interrupted run still leaves evidence.
+        let mut jsonl = path;
+        jsonl.push(".jsonl");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(jsonl)
+        {
+            let _ = std::io::Write::write_all(&mut file, format!("{result}\n").as_bytes());
+        }
+    }
     assert!(displayed, "inner content absent for {title}: {result}");
     assert!(
         elapsed_ms <= SELECTION_LIMIT.as_secs_f64() * 1000.0,
@@ -140,8 +215,24 @@ async fn select_and_measure(
 
 #[cfg(unix)]
 #[tokio::test]
-#[ignore = "explicit 128-pane release runtime qualification"]
-async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
+#[ignore = "explicit 200-pane release runtime qualification"]
+async fn no_pool_release_renders_200_panes_and_measures_click_latency() {
+    run_click_latency_gate(0).await;
+}
+
+// Finite pool: hidden panes lose their parser engines under pressure, so a
+// selection after the 200-pane load must rebuild from retained history. This
+// is the path a user with a finite `engine_memory_budget_mib` takes; the
+// minimum valid budget (256 MiB) forces eviction across the 200 panes.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "explicit 200-pane release runtime qualification with a finite 256 MiB parser pool"]
+async fn finite_pool_256_mib_renders_200_panes_and_measures_click_latency() {
+    run_click_latency_gate(256).await;
+}
+
+#[cfg(unix)]
+async fn run_click_latency_gate(engine_memory_budget_mib: u32) {
     if cfg!(debug_assertions) {
         panic!("release qualification must launch the optimized client binary");
     }
@@ -193,20 +284,46 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
     let project_dir = temp_root.path().join("no-pool-runtime");
     std::fs::create_dir_all(&project_dir).unwrap();
     seed_project_config(&xdg, &project_dir);
-    assert_eq!(
-        ilium_client::config::load(&xdg.ilium_config_dir)
-            .unwrap()
-            .terminal
-            .engine_memory_budget_mib,
-        0,
-        "qualification must exercise the omitted-setting no-pool default"
-    );
+    let config_path = xdg.ilium_config_dir.join("config.toml");
+    let config = std::fs::read_to_string(&config_path).unwrap();
+    if engine_memory_budget_mib == 0 {
+        assert_eq!(
+            ilium_client::config::load(&xdg.ilium_config_dir)
+                .unwrap()
+                .terminal
+                .engine_memory_budget_mib,
+            0,
+            "qualification must exercise the omitted-setting no-pool default"
+        );
+    }
+    let config = if engine_memory_budget_mib == 0 {
+        config
+    } else {
+        // Insert into an existing [terminal] table when one was saved, so the
+        // TOML never gains a duplicate table; the load check below proves it.
+        let budget_line = format!("engine_memory_budget_mib = {engine_memory_budget_mib}");
+        if config.contains("[terminal]\n") {
+            config.replacen("[terminal]\n", &format!("[terminal]\n{budget_line}\n"), 1)
+        } else {
+            format!("{config}\n[terminal]\n{budget_line}\n")
+        }
+    };
+    std::fs::write(&config_path, &config).unwrap();
+    if engine_memory_budget_mib != 0 {
+        std::fs::write(&config_path, &config).unwrap();
+        assert_eq!(
+            ilium_client::config::load(&xdg.ilium_config_dir)
+                .unwrap()
+                .terminal
+                .engine_memory_budget_mib,
+            engine_memory_budget_mib,
+            "finite pool budget must load before the client starts"
+        );
+    }
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     assert_ne!(port, 8872);
     drop(listener);
-    let config_path = xdg.ilium_config_dir.join("config.toml");
-    let config = std::fs::read_to_string(&config_path).unwrap();
     assert!(!config.contains("[api]"));
     std::fs::write(&config_path, format!("{config}\n[api]\nport = {port}\n")).unwrap();
     let mut cleanup = KillSessionOnDrop {
@@ -263,6 +380,13 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
     let first_pane_output_complete = temp_root.path().join("first-pane-output-complete");
     for number in 0..PANE_COUNT {
         let marker = format!("INNER-PANE-{number:03}");
+        // Heavy panes retain the full per-pane window, so a later selection
+        // must replay that much history through the serial parser.
+        let burst_lines = if number < HEAVY_PANE_COUNT {
+            HEAVY_BURST_LINES
+        } else {
+            BURST_LINES
+        };
         let script = if number == 0 {
             // CAN terminates the deliberately unfinished escape run. A newline
             // alone leaves ESC pending and consumes the marker's initial `I`.
@@ -272,15 +396,16 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
             )
         } else {
             format!(
-                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; i=0; while [ \"$i\" -lt {BURST_LINES} ]; do printf \"%{BURST_LINE_WIDTH}s\\n\" \"\"; i=$((i + 1)); done; printf \"\\n\\n\\n%s\\n\" \"$2\"; exec /bin/cat"
+                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; /usr/bin/yes \"$4 $(printf '%{BURST_LINE_WIDTH}s' '')\" | /usr/bin/head -n {burst_lines}; printf \"\\n\\n\\n%s\\n\" \"$2\"; exec /bin/cat"
             )
         };
         let command = format!(
-            "/bin/sh -c {} ilium-pane-fixture {} {} {}",
+            "/bin/sh -c {} ilium-pane-fixture {} {} {} {}",
             shell_quote(&script),
             shell_quote(&release_file.to_string_lossy()),
             shell_quote(&marker),
             shell_quote(&first_pane_output_complete.to_string_lossy()),
+            shell_quote(&format!("BUFFERED-LINE-{number:03}")),
         );
         connection
             .requests
@@ -311,7 +436,7 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
             .unwrap();
         receive_tree_snapshot(&mut connection, "name isolated marker pane").await;
     }
-    // Keep all PTYs alive but silent until the full 128-pane load exists, then
+    // Keep all PTYs alive but silent until the full 200-pane load exists, then
     // release their first output together before timing the initial reveal pass.
     let burst_released_at = std::time::Instant::now();
     std::fs::write(&release_file, b"release").unwrap();
@@ -320,41 +445,42 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         "the large first-pane journal fixture did not finish before selection"
     );
     let mut measurements = Vec::with_capacity(PANE_COUNT * 3);
+    let progress_path = progress_receipt_path();
     for number in 0..PANE_COUNT {
-        measurements.push(
-            select_and_measure(
-                &mut tui,
-                number,
-                number == 0,
-                "burst-forward",
-                burst_released_at,
-            )
-            .await,
-        );
+        let sample = select_and_measure(
+            &mut tui,
+            number,
+            number == 0,
+            "burst-forward",
+            burst_released_at,
+        )
+        .await;
+        append_progress_sample(progress_path.as_deref(), &sample);
+        measurements.push(sample);
     }
     for number in (0..PANE_COUNT).rev() {
-        measurements.push(
-            select_and_measure(
-                &mut tui,
-                number,
-                true,
-                "initialized-reverse",
-                burst_released_at,
-            )
-            .await,
-        );
+        let sample = select_and_measure(
+            &mut tui,
+            number,
+            true,
+            "initialized-reverse",
+            burst_released_at,
+        )
+        .await;
+        append_progress_sample(progress_path.as_deref(), &sample);
+        measurements.push(sample);
     }
     for number in 0..PANE_COUNT {
-        measurements.push(
-            select_and_measure(
-                &mut tui,
-                number,
-                false,
-                "initialized-forward",
-                burst_released_at,
-            )
-            .await,
-        );
+        let sample = select_and_measure(
+            &mut tui,
+            number,
+            false,
+            "initialized-forward",
+            burst_released_at,
+        )
+        .await;
+        append_progress_sample(progress_path.as_deref(), &sample);
+        measurements.push(sample);
     }
     let mut summaries = Vec::new();
     for pass in [
@@ -387,8 +513,12 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         "binary": ilium_binary(), "server_pid": server_pid,
         "isolated_http_port": port, "pane_count": PANE_COUNT,
         "burst_bytes_per_pane": BURST_BYTES_PER_PANE,
-        "burst_bytes_total": BURST_BYTES_PER_PANE * PANE_COUNT,
-        "pool_default_mib": 0, "measurements": measurements,
+        "heavy_pane_count": HEAVY_PANE_COUNT,
+        "heavy_burst_bytes_per_pane": HEAVY_BURST_BYTES_PER_PANE,
+        "burst_bytes_total": HEAVY_PANE_COUNT * HEAVY_BURST_BYTES_PER_PANE
+            + (PANE_COUNT - HEAVY_PANE_COUNT) * BURST_BYTES_PER_PANE,
+        "engine_memory_budget_mib": engine_memory_budget_mib,
+        "measurements": measurements,
         "latency_summaries": summaries, "selection_limit_ms": 5000,
         "latency_accepted": latency_accepted,
         "user_incident_attribution_proven": false,

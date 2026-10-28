@@ -1384,6 +1384,16 @@ fn ordered_output_slice_end(bytes: &[u8], start: usize) -> usize {
 }
 
 impl TerminalState {
+    /// Screen a replay ends on, rebuilt from only the replay's final `tail`
+    /// bytes. It is a visible preview while the full history is still being
+    /// parsed; the completed replay publishes the exact state and replaces it.
+    pub(crate) fn tail_preview(rows: u16, cols: u16, tail: &[u8]) -> TerminalSnapshot {
+        let mut state = Self::with_scrollback_budget_mib(rows, cols, 0);
+        state.parser.process(tail);
+        state.refresh_scrollback_total();
+        state.refresh_visible_text_fingerprint();
+        state.publish()
+    }
     pub(crate) fn publish(&self) -> TerminalSnapshot {
         TerminalSnapshot {
             visible: Arc::new(self.with_screen(Clone::clone)),
@@ -1549,6 +1559,15 @@ impl TerminalState {
                 self.osc_allocation = OscAllocation::default();
             }
             self.scrollback_total = 0;
+            // The fresh segment is uniquely owned, so its exact size is reserved here.
+            // Growing it by doubling would charge up to twice the replay's history.
+            if let Some(segment) = self
+                .history_segments
+                .back_mut()
+                .and_then(|segment| Arc::get_mut(&mut segment.bytes))
+            {
+                segment.reserve_exact(bytes.len());
+            }
             cursor.replay_started = true;
         }
         while cursor.consumed < bytes.len() {
@@ -2595,6 +2614,21 @@ impl TerminalView {
         if !self.can_evict_parser() {
             return false; // Never cancel admitted work to recover cache capacity.
         }
+        self.release_parser();
+        true
+    }
+    /// Releases a hidden pane's parser even when it still has queued output.
+    /// Used only when that output blocks the shared intake: queued commands of
+    /// the released generation are dropped when popped (its frontend marks the
+    /// target dead), and the server journal rebuilds the pane on redisplay.
+    pub(crate) fn force_evict_hidden_parser(&mut self) -> bool {
+        if self.frontend.is_none() {
+            return false;
+        }
+        self.release_parser();
+        true
+    }
+    fn release_parser(&mut self) {
         if let Some(charge) = &self.snapshot.allocation_charge {
             charge.retire_live();
         }
@@ -2606,7 +2640,6 @@ impl TerminalView {
         *self.render_cache.get_mut() = None;
         self.admission_error = None;
         self.admission_pressure = None;
-        true
     }
     pub(crate) fn is_confirmed_removed(&self) -> bool {
         self.frontend
@@ -2652,9 +2685,15 @@ impl TerminalView {
                 charge.retire_live();
             }
         }
+        let parsed_sequence = snapshot.sequence;
         self.snapshot = snapshot;
         if let Some(frontend) = &self.frontend {
-            frontend.clear_progress_preview();
+            // A held server screen stays on display until the parsed state
+            // reaches the sequence that screen reflects.
+            frontend.release_screen_preview_hold_if_reached(parsed_sequence);
+            if !frontend.screen_preview_hold_active() {
+                frontend.clear_progress_preview();
+            }
         }
         *self.render_cache.get_mut() = None;
         self.admission_error = None;

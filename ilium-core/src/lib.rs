@@ -249,6 +249,13 @@ pub enum ProgressAttention {
 }
 
 impl PaneProgress {
+    /// A zero with no estimate is commonly a placeholder; wait for actual
+    /// movement or a probe-supplied estimate before presenting it as a gauge.
+    pub fn has_measurable_progress(&self) -> bool {
+        !self.report.indeterminate
+            && (self.report.percent > 0.0 || self.report.eta_seconds.is_some())
+    }
+
     pub fn new(
         monitor_id: u64,
         report: ProgressTaskReport,
@@ -1005,6 +1012,7 @@ pub const TASK_PROGRESS_BUCKETS: u8 = 12;
 pub enum TaskSignal {
     Pending,
     Running { bucket: u8, degraded: bool },
+    RunningUnmeasured { degraded: bool },
     Done { unread: bool },
     Error { unread: bool },
     MonitorFailed { unread: bool },
@@ -1018,6 +1026,14 @@ impl TaskSignal {
             (ProgressTaskStatus::Error, _) => Self::Error { unread },
             (_, true) => Self::MonitorFailed { unread },
             (ProgressTaskStatus::NotStartedYet, false) => Self::Pending,
+            (ProgressTaskStatus::Running, false) if !progress.has_measurable_progress() => {
+                Self::RunningUnmeasured {
+                    degraded: matches!(
+                        progress.monitor_health,
+                        ProgressMonitorHealth::Degraded { .. }
+                    ),
+                }
+            }
             (ProgressTaskStatus::Running, false) => Self::Running {
                 bucket: task_progress_bucket(progress.report.percent),
                 degraded: matches!(
@@ -1211,8 +1227,16 @@ fn project_objective_signal(
     if let Some(goal @ (GoalState::Blocked | GoalState::UsageLimited)) = goal {
         return (ObjectiveSignal::Goal(goal), "B3");
     }
-    if let Some(task @ (TaskSignal::Pending | TaskSignal::Running { .. })) = task {
-        let rule = if matches!(task, TaskSignal::Running { .. }) {
+    if let Some(
+        task @ (TaskSignal::Pending
+        | TaskSignal::Running { .. }
+        | TaskSignal::RunningUnmeasured { .. }),
+    ) = task
+    {
+        let rule = if matches!(
+            task,
+            TaskSignal::Running { .. } | TaskSignal::RunningUnmeasured { .. }
+        ) {
             "B4"
         } else {
             "B5"
@@ -8088,6 +8112,25 @@ mod pane_signal_tests {
     }
 
     #[test]
+    fn unavailable_progress_has_a_non_gauge_running_signal() {
+        let mut progress = running(0.0);
+        assert!(matches!(
+            TaskSignal::from_progress(&progress),
+            TaskSignal::RunningUnmeasured { degraded: false }
+        ));
+        progress.report.percent = 25.0;
+        assert!(matches!(
+            TaskSignal::from_progress(&progress),
+            TaskSignal::Running { .. }
+        ));
+        progress.report.indeterminate = true;
+        assert!(matches!(
+            TaskSignal::from_progress(&progress),
+            TaskSignal::RunningUnmeasured { .. }
+        ));
+    }
+
+    #[test]
     fn running_task_outweighs_an_active_goal_but_not_a_blocked_goal() {
         let status = PaneStatus::from_activity(
             AgentClass::Codex,
@@ -8233,7 +8276,9 @@ mod pane_signal_tests {
                 ObjectiveSignal::Goal(GoalState::UsageLimited) => 4,
                 ObjectiveSignal::Goal(GoalState::Reached) => 5,
                 ObjectiveSignal::Task(TaskSignal::Pending) => 6,
-                ObjectiveSignal::Task(TaskSignal::Running { .. }) => 7,
+                ObjectiveSignal::Task(
+                    TaskSignal::Running { .. } | TaskSignal::RunningUnmeasured { .. },
+                ) => 7,
                 ObjectiveSignal::Task(TaskSignal::Done { .. }) => 8,
                 ObjectiveSignal::Task(TaskSignal::Error { .. }) => 9,
                 ObjectiveSignal::Task(TaskSignal::MonitorFailed { .. }) => 10,

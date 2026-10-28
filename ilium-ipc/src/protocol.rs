@@ -1280,6 +1280,18 @@ pub enum ServerEvent {
         #[serde(with = "crate::terminal_bytes")]
         bytes: Vec<u8>,
     },
+    /// The current screen of `pane_id` as a self-contained formatted byte
+    /// stream, sent ahead of a large history replay. A receiver shows it
+    /// while the replay is still arriving; it never changes the receiver's
+    /// retained history, and the next replay or update replaces it.
+    ScreenPreview {
+        pane_id: NodeId,
+        /// Journal sequence the screen reflects. The receiver keeps this
+        /// screen on display until its parser reaches this sequence.
+        through_sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
+        bytes: Vec<u8>,
+    },
     /// A pane's detected status changed (agent identity/activity, or
     /// editor dirty state).
     PaneStatusChanged {

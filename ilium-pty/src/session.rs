@@ -614,6 +614,11 @@ struct OutputJournal {
 }
 
 impl OutputJournal {
+    /// Sequence of the newest chunk appended so far (0 before any output).
+    fn head_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
     /// A hard byte ceiling prevents a pane that streams binary data forever
     /// from consuming unbounded server memory. It is deliberately much larger
     /// than ordinary 10,000-line agent transcripts.
@@ -1269,6 +1274,24 @@ impl PtySession {
 
     pub fn screen_text(&self) -> String {
         self.with_screen(|screen| screen.contents())
+    }
+
+    /// The live screen as one self-contained formatted byte stream, without
+    /// any scrollback. Lets a receiver show the current screen while the full
+    /// retained history is still on its way; it carries no history.
+    /// Journal position of the newest output chunk. Read after the screen
+    /// preview, so the screen never reflects output beyond this sequence.
+    pub fn output_head_sequence(&self) -> u64 {
+        // A poisoned journal lock reports 0: the client then releases any
+        // screen-preview hold at once instead of keeping a stale screen.
+        self.output_journal
+            .lock()
+            .map(|journal| journal.head_sequence())
+            .unwrap_or(0)
+    }
+    pub fn current_screen_preview(&self) -> Vec<u8> {
+        self.screen_reader
+            .with_frame(|screen, _| screen.contents_formatted())
     }
 
     /// Text, cursor, attributes and generation always belong to one frame.

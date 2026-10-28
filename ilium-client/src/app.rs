@@ -12317,6 +12317,49 @@ impl App {
             .find(|(pane, _)| *pane == id)
             .map(|(_, source)| source)
     }
+    /// Applies a server's live-screen preview to one pane's display. The
+    /// history is not touched; the replay that follows replaces the preview.
+    pub(crate) fn apply_screen_preview(
+        &mut self,
+        pane_id: ilium_core::NodeId,
+        through_sequence: u64,
+        bytes: &[u8],
+    ) {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return;
+        };
+        let (rows, columns) = view.with_screen(|screen| screen.size());
+        if let Some(frontend) = &view.frontend {
+            frontend.show_screen_preview(rows, columns, bytes, through_sequence);
+        }
+    }
+    /// A hidden pane whose parser refuses output keeps its event at the head of
+    /// the pending list, and that event blocks every pane queued behind it. Its
+    /// parser is released and the event dropped instead; the server journal
+    /// rebuilds the pane when it is displayed again. Returns false (keep the
+    /// event pending) for displayed panes.
+    pub(crate) fn release_refused_hidden_terminal_event(
+        &mut self,
+        event: &ilium_ipc::ServerEvent,
+    ) -> bool {
+        let (ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. }
+        | ilium_ipc::ServerEvent::TerminalReplay { pane_id, .. }) = event
+        else {
+            return false;
+        };
+        let pane_id = *pane_id;
+        if self.is_pane_displayed(pane_id) {
+            return false;
+        }
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return false;
+        };
+        if !view.force_evict_hidden_parser() {
+            return false;
+        }
+        self.pending_terminal_discards.push(pane_id);
+        true
+    }
     pub(crate) fn submit_terminal_event(
         &mut self,
         event: ilium_ipc::ServerEvent,
@@ -12586,8 +12629,10 @@ impl App {
         // Publish a focus change to the parser before draining its result
         // queue. Applying a large batch of old pane results must not postpone
         // the newly selected pane's priority update.
+        // The parser's top priority follows the pane the right panel shows, not
+        // keyboard focus: a tree click shows the pane but leaves focus on the tree.
         let focused = self
-            .focused_pane_id()
+            .active_pane_id()
             .filter(|pane_id| self.displayed_pane_slots().contains(&Some(*pane_id)));
         if let Some(pane_id) = focused {
             if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
@@ -12736,7 +12781,7 @@ impl App {
         // ordered negotiated-mode barrier before terminal delivery.
         let input_targets = self.terminal_input.pending_panes();
         let focused = self
-            .focused_pane_id()
+            .active_pane_id()
             .filter(|pane_id| displayed.contains(pane_id));
         let parser_retry_priority: Vec<NodeId> = self
             .visible_pane_stream_order()
@@ -12774,14 +12819,28 @@ impl App {
         }
         // Configured pool pressure and the hard app-wide storage ceiling both
         // reclaim only hidden idle engines. Retiring targets keep their claims.
+        // A displayed pane whose output is refused (queue full or storage
+        // pressure) must not wait behind hidden panes that hold the queue.
         let is_displayed_refused = self.panes.iter().any(|(id, pane)| {
                 displayed.contains(id)
                     && matches!(pane, PaneRuntime::Terminal(view)
-                        if view.parser_pressure().is_some_and(|pressure| pressure.can_reclaim_hidden_engine()))
+                        if view.has_suspended_output()
+                            || view.parser_pressure().is_some_and(|pressure| pressure.can_reclaim_hidden_engine()))
             });
+        if is_displayed_refused {
+            // Queued output of released panes keeps their engine claims alive; drop it first.
+            parsing.purge_released_commands();
+        }
         if is_displayed_refused && parsing.engine_claims() <= engines_held {
             let tree = &self.tree;
-            let victim = self
+            let least_recently_focused = |candidate: &&NodeId| {
+                (
+                    tree.get(**candidate)
+                        .and_then(|node| node.last_focus_activity_revision),
+                    **candidate,
+                )
+            };
+            let idle_victim = self
                 .panes
                 .iter()
                 .filter(|(id, pane)| {
@@ -12789,19 +12848,35 @@ impl App {
                         && !input_targets.contains(id)
                         && matches!(pane, PaneRuntime::Terminal(view) if view.can_evict_parser())
                 })
-                .min_by_key(|(id, _)| {
-                    (
-                        tree.get(**id)
-                            .and_then(|node| node.last_focus_activity_revision),
-                        **id,
-                    )
-                })
-                .map(|(id, _)| *id);
-            if let Some(victim) = victim {
+                .map(|(id, _)| id)
+                .min_by_key(least_recently_focused)
+                .copied();
+            if let Some(victim) = idle_victim {
                 if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&victim) {
                     if view.evict_parser() {
                         self.pending_terminal_discards.push(victim);
                         changed = true;
+                    }
+                }
+            } else {
+                // Every hidden parser has queued output, so none is idle. Release
+                // the least recently focused one; its queued commands are dropped.
+                let forced_victim = self
+                    .panes
+                    .iter()
+                    .filter(|(id, pane)| {
+                        !displayed.contains(id)
+                            && matches!(pane, PaneRuntime::Terminal(view) if view.frontend.is_some())
+                    })
+                    .map(|(id, _)| id)
+                    .min_by_key(least_recently_focused)
+                    .copied();
+                if let Some(victim) = forced_victim {
+                    if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&victim) {
+                        if view.force_evict_hidden_parser() {
+                            self.pending_terminal_discards.push(victim);
+                            changed = true;
+                        }
                     }
                 }
             }

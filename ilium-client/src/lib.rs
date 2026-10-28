@@ -312,7 +312,7 @@ const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
-const MAX_PENDING_SERVER_EVENTS: usize = 256;
+pub(crate) const MAX_PENDING_SERVER_EVENTS: usize = 256;
 /// Byte ceiling for a same-pane raw-output run merged in one client turn.
 /// Event count alone is insufficient because a server frame can itself carry
 /// a large burst.

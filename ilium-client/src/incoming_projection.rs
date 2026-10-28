@@ -178,6 +178,7 @@ impl ProjectionRetention {
             ProjectRestructureRejected { project_id, .. } => (global, Some(*project_id)),
             PaneRecapScreen { .. }
             | ScreenUpdate { .. }
+            | ScreenPreview { .. }
             | TerminalReplay { .. }
             | TerminalSnapshot { .. }
             | TerminalHistory { .. }

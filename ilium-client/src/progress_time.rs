@@ -120,17 +120,15 @@ pub fn time_box_variants(progress: &PaneProgress, now_unix_millis: u64) -> Vec<V
         ),
         warn: true,
     });
-    let eta =
-        (is_running(progress) && stalled.is_none() && !progress.report.indeterminate).then(|| {
-            TimeSegment {
-                text: timing
-                    .estimate(now_unix_millis, progress.report.percent)
-                    .map_or_else(
-                        || "ETA \u{2014}".to_string(),
-                        |estimate| format!("ETA {}", human_in(estimate.expected_millis)),
-                    ),
-                warn: false,
-            }
+    let eta = (is_running(progress) && stalled.is_none() && progress.has_measurable_progress())
+        .then(|| TimeSegment {
+            text: timing
+                .estimate(now_unix_millis, progress.report.percent)
+                .map_or_else(
+                    || "ETA \u{2014}".to_string(),
+                    |estimate| format!("ETA {}", human_in(estimate.expected_millis)),
+                ),
+            warn: false,
         });
     let tail = stalled.clone().or(eta);
 
@@ -210,8 +208,8 @@ pub fn popover_lines(
     } else if let Some(elapsed) = timing.elapsed_millis(now_unix_millis) {
         lines.push(format!("Elapsed: {}", human_duration(elapsed)));
     }
-    if is_running(progress) && progress.report.indeterminate {
-        lines.push("Progress: not measurable (the probe reports an indeterminate task)".into());
+    if is_running(progress) && !progress.has_measurable_progress() {
+        lines.push("Progress: not measurable".into());
     } else if is_running(progress) && !is_stalled(progress, now_unix_millis) {
         match timing.rate(progress.report.percent) {
             Some(rate) => {

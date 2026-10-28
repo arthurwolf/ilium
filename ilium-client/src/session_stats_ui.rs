@@ -548,7 +548,13 @@ impl Canvas {
     ) {
         let value_width = UnicodeWidthStr::width(value);
         let share_text = share.map_or_else(String::new, percent_label);
-        let trailing = value_width + 2 + share_text.len().max(5) + 1;
+        let trailing = 2
+            + value_width
+            + if share_text.is_empty() {
+                0
+            } else {
+                2 + share_text.len().max(5)
+            };
         let bar_width = usize::from(self.width)
             .saturating_sub(label_width + 2 + trailing)
             .max(6);
@@ -2274,6 +2280,29 @@ mod tests {
                 );
             }
             assert!(layout.close.right() < layout.area.right());
+        }
+    }
+
+    #[test]
+    fn statistics_bar_keeps_value_and_percentage_inside_canvas() {
+        for width in [36, 100] {
+            let mut canvas = Canvas::new(
+                width,
+                Style::default(),
+                palette(ColorScheme::Dark),
+                StatsScale::default(),
+                None,
+            );
+            canvas.bar_row("fresh input", 12, 1.0, Color::Green, "15.0k ", Some(0.74));
+            let row: String = (0..width).map(|x| canvas.buffer[(x, 0)].symbol()).collect();
+            assert!(
+                row.contains("15.0k"),
+                "missing value at width {width}: {row}"
+            );
+            assert!(
+                row.contains("74%"),
+                "missing percentage at width {width}: {row}"
+            );
         }
     }
 
