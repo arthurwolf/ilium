@@ -106,9 +106,9 @@ The blocked/waiting-for-approval state wasn't explicitly requested but falls out
 
 Claude activity classification treats the latest recognized completed-turn summary as a boundary: earlier working and background-wait rows belong to the previous turn. The summary's own still-running suffix and newer activity stay eligible; approval checks retain the full screen. Goal completion remains independent of current activity.
 
-Terminal panes reserve configured space for enabled prompt and progress displays before input begins, including plain shells that may later start an agent. Metadata arrival, wrapping, clearing, detection changes and visibility changes keep that allocation fixed; explicit settings, split changes and outer-terminal resizing may change the child dimensions. Editors and boards do not reserve terminal metadata space, and small panes preserve a terminal cell where physically possible.
+Terminal panes allocate prompt and progress sections only while their content is visible. The shared viewport drives rendering, hit testing and child terminal dimensions; appearance, removal, expiry and settings changes resize the affected terminals. Editors and boards do not reserve terminal metadata space, and small panes preserve a terminal cell where physically possible.
 
-Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output; their text disappears while the reserved rows remain. Expiry does not resize the child, clear reports, acknowledge results, change sidebar signals or affect queued notification delivery.
+Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output; expiry releases their rows and resizes the child without clearing reports, acknowledging results, changing sidebar signals or affecting queued notification delivery.
 
 ## Form row leaders
 

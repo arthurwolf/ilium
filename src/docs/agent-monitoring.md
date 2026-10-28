@@ -250,7 +250,7 @@ Hide-after behaviour: the delay starts from the server's final observation and d
 
 ## Reserved terminal space
 
-Enabled prompt, progress and agent-toolbar displays reserve their rows **before** terminal interaction begins, including in plain shells that might later start an agent. Updating, wrapping, clearing or hiding their text leaves the child terminal's dimensions unchanged, so a running program never sees its window jump.
+The prompt banner and progress footer occupy rows only while they have visible content. When either appears or disappears, Ilium resizes the child terminal to match the available space. The agent toolbar has its own reserved row when enabled.
 
 To reclaim or change the space, turn a display off or lower its row limit in Settings. The child can still be resized by explicit settings changes, split changes and resizing the outer terminal. Editors and boards reserve no terminal metadata space, and tiny panes keep at least one terminal cell where physically possible.
 

@@ -763,6 +763,11 @@ impl TerminalState {
         self.observe_osc8_links(bytes);
     }
 
+    /// Returns the live screen geometry, independent of any historical viewport.
+    pub(crate) fn live_size(&self) -> (u16, u16) {
+        self.parser.screen().size()
+    }
+
     /// Resizes the authoritative live screen to match a `ResizePane` request
     /// just sent to the server, so the client's own rendering never waits on
     /// a round trip before reflowing. An active historical viewport retains
