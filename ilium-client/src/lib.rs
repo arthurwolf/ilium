@@ -292,7 +292,7 @@ const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
-const MAX_PENDING_SERVER_EVENTS: usize = 256;
+pub(crate) const MAX_PENDING_SERVER_EVENTS: usize = 256;
 /// Byte ceiling for a same-pane raw-output run merged in one client turn.
 /// Event count alone is insufficient because a server frame can itself carry
 /// a large burst.
@@ -1682,7 +1682,7 @@ async fn run_inner(
         smart_copy_workers.collect();
         needs_redraw |= app.collect_terminal_parsing();
         if app.projection_admission_wake.is_none() {
-        if let Some(event)=app.pending_terminal_events.pop_front() {
+        if let Some(event)=app.pop_next_pending_terminal_event() {
             let damage=apply_server_events(&mut app,&mut connection.events,event,&mut naming_workers,&mut icon_search_workers,&mut trigger_execution_lease,home_dir.as_deref());
             needs_redraw|=damage.needs_redraw;needs_immediate_redraw|=damage.needs_immediate_redraw;
         }
@@ -1999,7 +1999,7 @@ async fn run_inner(
                 return Err(ClientError::TerminalSetup(std::io::Error::other(format!("unrecoverable incoming projection admission failure: {reason:?}"))));
             }
             let event = if app.projection_admission_wake.is_none() {
-                app.pending_terminal_events.pop_front().or_else(|| connection.events.try_recv().ok())
+                app.pop_next_pending_terminal_event().or_else(|| connection.events.try_recv().ok())
             } else { None };
             if let Some(event) = event {
                 apply_server_events(&mut app, &mut connection.events, event,
@@ -4036,7 +4036,7 @@ fn apply_server_events(
     for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
         let received = match next
             .take()
-            .or_else(|| app.pending_terminal_events.pop_front())
+            .or_else(|| app.pop_next_pending_terminal_event())
         {
             Some(event) => event,
             None => match events_rx.try_recv() {

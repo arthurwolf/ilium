@@ -763,7 +763,7 @@ pub async fn handle_request(
             }
         },
         ClientRequest::SetPaneFocus { pane_id, focused } => {
-            handle_set_pane_focus(state, pane_id, focused).await;
+            handle_set_pane_focus(state, pane_id, focused, direct_tx).await;
             false
         }
         ClientRequest::RestartServer => {
@@ -1779,6 +1779,35 @@ pub(crate) async fn terminal_output_sequence(state: &ServerState, pane_id: NodeI
     Some(runtime.session.output_replay_estimate().through_sequence)
 }
 
+/// Current screen of a terminal pane, sent before its history replay so a
+/// selected pane shows content while the replayed backlog parses.
+pub(crate) async fn terminal_screen_preview(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Option<ServerEvent> {
+    let panes = state.panes.read().await;
+    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+        return None;
+    };
+    Some(screen_preview_event(pane_id, &runtime.session))
+}
+
+/// The live screen with the journal position it reflects. The position is
+/// read after the screen, so the screen is never newer than the sequence the
+/// client waits to parse through.
+pub(crate) fn screen_preview_event(
+    pane_id: NodeId,
+    session: &ilium_pty::PtySession,
+) -> ServerEvent {
+    let bytes = session.current_screen_preview();
+    let through_sequence = session.output_head_sequence();
+    ServerEvent::ScreenPreview {
+        pane_id,
+        through_sequence,
+        bytes,
+    }
+}
+
 async fn reserve_connection_event_storage(
     state: &ServerState,
     payload_bytes: usize,
@@ -1951,7 +1980,14 @@ async fn admitted_state_synchronization_events(
                                     &runtime.session,
                                     estimate,
                                 ) {
-                                    Some(event) => replay_events.push(event),
+                                    Some(event) => {
+                                        if let Some(preview) =
+                                            screen_preview_before_replay(*pane_id, runtime, &event)
+                                        {
+                                            replay_events.push(preview);
+                                        }
+                                        replay_events.push(event);
+                                    }
                                     None => {
                                         stale = true;
                                         break;
@@ -2090,6 +2126,11 @@ async fn state_synchronization_events(
                     if let Some(event) =
                         terminal_output_synchronization.event_for(*pane_id, &runtime.session)
                     {
+                        if let Some(preview) =
+                            screen_preview_before_replay(*pane_id, runtime, &event)
+                        {
+                            events.push(preview);
+                        }
                         events.push(event);
                     }
                     if let Some(session_id) = runtime.session_id.clone() {
@@ -4243,7 +4284,12 @@ async fn save_agent_detection_settings_reserved(
 /// unread-work indicator, so it must clear after the user opens that pane. No
 /// error is surfaced for a missing pane because focus can harmlessly race pane
 /// closure.
-async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focused: bool) {
+async fn handle_set_pane_focus(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    focused: bool,
+    direct_tx: &DirectEventSender,
+) {
     let focus_checkpoint = {
         let mut tree = state.tree.write().await;
         match tree.mark_node_focused(pane_id) {
@@ -4265,24 +4311,34 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
         state.request_snapshot_save();
     }
 
-    let (detection_was_forced, is_terminal) = {
+    // The focused pane's current screen goes out on the direct channel, which
+    // the connection writer serves ahead of the ordered output backlog, so a
+    // selected pane shows its content without waiting for the backlog of
+    // every other pane's retained output to drain.
+    let (detection_was_forced, is_terminal, focus_screen_preview) = {
         let mut panes = state.panes.write().await;
         match panes.get_mut(&pane_id) {
             Some(PaneResource::Terminal(runtime)) => {
                 runtime.detection_schedule.client_focused = focused;
+                let focus_screen_preview =
+                    focused.then(|| screen_preview_event(pane_id, &runtime.session));
                 (
                     crate::detection::force_check(
                         &mut runtime.detection_schedule,
                         std::time::Instant::now(),
                     ),
                     true,
+                    focus_screen_preview,
                 )
             }
             Some(PaneResource::Editor { .. } | PaneResource::Unrestored(_)) | None => {
-                (false, false)
+                (false, false, None)
             }
         }
     };
+    if let Some(event) = focus_screen_preview {
+        send_direct(direct_tx, event).await;
+    }
 
     // The server remains authoritative for the acknowledgement. A client must
     // wait for this broadcast rather than mutating its cached tree locally, so
@@ -5861,6 +5917,9 @@ async fn broadcast_terminal_recovery_after(
         } => *through_sequence,
         _ => return None,
     };
+    if let Some(preview) = screen_preview_before_replay(pane_id, runtime, &event) {
+        state.broadcast(preview);
+    }
     state.broadcast(event);
     Some(through_sequence)
 }
@@ -5897,6 +5956,22 @@ fn terminal_recovery_from_session(
             Some(terminal_replay_event(pane_id, replay))
         }
     }
+}
+
+/// Live screen sent before any replay, so the receiver can show the current
+/// screen while the replayed history parses. The preview is a snapshot only
+/// and never changes history. The size of the event is not a test: attach
+/// replays are capped at `TERMINAL_RECOVERY_EVENT_MAX_BYTES`, so a size
+/// threshold above that cap would never send a preview on the attach path.
+fn screen_preview_before_replay(
+    pane_id: NodeId,
+    runtime: &crate::pane::TerminalPaneRuntime,
+    event: &ServerEvent,
+) -> Option<ServerEvent> {
+    let ServerEvent::TerminalReplay { .. } = event else {
+        return None;
+    };
+    Some(screen_preview_event(pane_id, &runtime.session))
 }
 
 /// Converts one atomically captured PTY journal snapshot into the protocol
@@ -10453,7 +10528,8 @@ mod tests {
             assert!(tree.get(pane_id).unwrap().has_activity_since_focus());
         }
 
-        handle_set_pane_focus(&state, pane_id, true).await;
+        let (direct_tx, _direct_rx) = DirectEventSender::channel(16);
+        handle_set_pane_focus(&state, pane_id, true, &direct_tx).await;
         assert!(matches!(
             events.recv().await,
             Ok(ServerEvent::NodeFocusCheckpointChanged {
