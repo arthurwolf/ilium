@@ -20,6 +20,7 @@
 
 #![cfg(unix)]
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -65,7 +66,8 @@ struct IsolatedDirs {
     agent_setup_home: PathBuf,
     runtime_dir: PathBuf,
     socket_dir: PathBuf,
-    /// Short directory under `/tmp` so the session socket fits `sockaddr_un`.
+    /// Short directory under the configured runtime root so the session
+    /// socket fits `sockaddr_un`.
     _runtime_root: tempfile::TempDir,
 }
 
@@ -74,21 +76,32 @@ impl IsolatedDirs {
         let data_home = root.join("data");
         let config_home = root.join("config");
         let ilium_config_dir = config_home.join("ilium");
-        let debug_log_dir = root.join("debug-logs");
         let agent_setup_home = root.join("agent-home");
-        for dir in [
-            &data_home,
-            &ilium_config_dir,
-            &debug_log_dir,
-            &agent_setup_home,
-        ] {
+        for dir in [&data_home, &ilium_config_dir, &agent_setup_home] {
             std::fs::create_dir_all(dir).expect("create isolated directory");
+        }
+        let runtime_base = std::env::var_os("ILIUM_PTY_SMOKE_RUNTIME_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        if std::env::var_os("ILIUM_PTY_SMOKE_RUNTIME_ROOT").is_some() {
+            assert!(
+                runtime_base.join(".scratch-reaper").is_file(),
+                "configured voice E2E runtime root must be an existing marked scratch folder: {runtime_base:?}"
+            );
         }
         let runtime_root = tempfile::Builder::new()
             .prefix("iv")
-            .tempdir_in("/tmp")
+            .tempdir_in(&runtime_base)
             .expect("short runtime directory");
         let runtime_dir = runtime_root.path().to_path_buf();
+        std::fs::write(runtime_dir.join(".scratch-reaper"), b"")
+            .expect("mark isolated runtime directory");
+        // The server's Unix log relay socket is rooted beside the project
+        // session logs. Keep its override under this already-marked short
+        // runtime directory so the complete relay filename stays below
+        // sockaddr_un's path limit.
+        let debug_log_dir = runtime_dir.join("l");
+        std::fs::create_dir_all(&debug_log_dir).expect("create isolated debug log directory");
         let socket_dir = runtime_dir.join("ilium");
         Self {
             data_home,
@@ -159,6 +172,10 @@ impl IsolatedDirs {
             .push(project_dir.to_path_buf());
         ilium_client::config::save_agent_setup_settings(&self.ilium_config_dir, &agent_setup)
             .expect("save agent setup policy");
+        let mut debug = config.debug;
+        debug.file_logging_enabled = true;
+        ilium_client::config::save_debug_settings(&self.ilium_config_dir, &debug)
+            .expect("enable isolated server diagnostics");
 
         // A stored project name keeps the client from inferring one online.
         let ilium_dir = project_dir.join(".ilium");
@@ -169,6 +186,108 @@ impl IsolatedDirs {
         )
         .expect("write project config");
     }
+}
+
+/// Preserves bounded logs from this failed isolated startup for diagnosis.
+/// Only the server's private log files and active-log metadata are copied; no
+/// config, environment or voice payload is included in the retained evidence.
+fn retain_startup_logs(dirs: &IsolatedDirs) -> String {
+    const MAX_LOG_BYTES: usize = 64 * 1024;
+    const MAX_LOG_FILES_PER_SESSION: usize = 8;
+
+    let Some(runtime_base) = std::env::var_os("ILIUM_PTY_SMOKE_RUNTIME_ROOT") else {
+        return "isolated log retention skipped (no marked runtime root configured)".to_owned();
+    };
+    let runtime_base = PathBuf::from(runtime_base);
+    let Ok(evidence) = tempfile::Builder::new()
+        .prefix("voice-e2e-failure-")
+        .tempdir_in(&runtime_base)
+    else {
+        return format!("could not create isolated evidence folder under {runtime_base:?}");
+    };
+    let evidence_path = evidence.path().to_path_buf();
+    if std::fs::write(evidence_path.join(".scratch-reaper"), b"").is_err() {
+        return format!("could not mark isolated evidence folder {evidence_path:?}");
+    }
+
+    let Ok(session_dirs) = std::fs::read_dir(&dirs.debug_log_dir) else {
+        let retained_path = evidence.keep();
+        return format!(
+            "isolated debug log root is unavailable; evidence folder {retained_path:?}"
+        );
+    };
+    let mut copied_logs = 0usize;
+    for (index, entry) in session_dirs.filter_map(Result::ok).enumerate() {
+        let session_dir = entry.path();
+        let metadata_path = session_dir.join(".active-log-path");
+        let metadata = std::fs::read_to_string(&metadata_path).ok();
+        let active_log = metadata
+            .as_deref()
+            .and_then(|metadata| {
+                metadata
+                    .lines()
+                    .find_map(|line| line.strip_prefix("log_path="))
+                    .map(PathBuf::from)
+                    .or_else(|| (!metadata.is_empty()).then(|| PathBuf::from(metadata.trim())))
+            })
+            .filter(|path| {
+                path.parent() == Some(session_dir.as_path())
+                    && path.file_name().is_some_and(|name| {
+                        let name = name.to_string_lossy();
+                        name.starts_with("log-") && name.ends_with(".txt")
+                    })
+            });
+        let active_log_for_filter = active_log.clone();
+        let log_paths = active_log.into_iter().chain(
+            std::fs::read_dir(&session_dir)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.is_file()
+                        && active_log_for_filter.as_ref() != Some(path)
+                        && path.file_name().is_some_and(|name| {
+                            let name = name.to_string_lossy();
+                            name.starts_with("log-") && name.ends_with(".txt")
+                        })
+                })
+                .take(MAX_LOG_FILES_PER_SESSION),
+        );
+        for (log_index, log_path) in log_paths.take(MAX_LOG_FILES_PER_SESSION).enumerate() {
+            let Ok(mut log_file) = std::fs::File::open(&log_path) else {
+                continue;
+            };
+            let Ok(log_length) = log_file.metadata().map(|metadata| metadata.len()) else {
+                continue;
+            };
+            let tail_offset = log_length.saturating_sub(MAX_LOG_BYTES as u64);
+            if log_file.seek(SeekFrom::Start(tail_offset)).is_err() {
+                continue;
+            }
+            let mut log_tail = Vec::with_capacity((log_length - tail_offset) as usize);
+            if log_file
+                .take(MAX_LOG_BYTES as u64)
+                .read_to_end(&mut log_tail)
+                .is_err()
+            {
+                continue;
+            }
+            let stem = format!("server-{index}-{log_index}");
+            if let Some(metadata) = &metadata {
+                let _ = std::fs::write(
+                    evidence_path.join(format!("{stem}.active-log-path")),
+                    metadata,
+                );
+            }
+            if std::fs::write(evidence_path.join(format!("{stem}.log-tail")), log_tail).is_ok() {
+                copied_logs += 1;
+            }
+        }
+    }
+
+    let retained_path = evidence.keep();
+    format!("retained {copied_logs} bounded isolated server log(s) at {retained_path:?}")
 }
 
 /// Kills the detached server this test started, even when an assertion fails.
@@ -482,7 +601,13 @@ async fn voice_say_reaches_a_terminal_through_the_real_voice_pipeline() {
         None,
     )
     .await;
-    assert!(new_pane.success, "new-pane failed: {}", new_pane.stdout);
+    assert!(
+        new_pane.success,
+        "new-pane failed: stdout={:?}, stderr={:?}; {}",
+        new_pane.stdout,
+        new_pane.stderr,
+        retain_startup_logs(&dirs)
+    );
     let pane_id = first_pane_id(&dirs, &project_dir).await;
 
     let (mock, mock_task) = MockRealtime::start().await;

@@ -165,6 +165,8 @@ async fn async_main(
         }
     };
     let options = ilium_server::ServerOptions {
+        resource_catalog_path: directories::ProjectDirs::from("", "", "ilium")
+            .map(|directories| directories.data_local_dir().join("resources/catalog.json")),
         session_name: launch.session_name,
         socket_path: launch.socket_path,
         snapshot_path: launch.snapshot_path,

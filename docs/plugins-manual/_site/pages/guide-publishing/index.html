@@ -413,7 +413,7 @@
 <tbody>
 <tr>
 <td>[PKG-490]</td>
-<td>The first segment pair of the plugin id MUST match the publisher id in the signing key (PKG-218). Otherwise signing fails with <code>manifest.id-publisher</code>.</td>
+<td>The plugin id MUST start with <code>&lt;publisher_id&gt;.</code> of the signing key (PKG-218). Otherwise signing fails with <code>manifest.id-publisher</code>.</td>
 </tr>
 <tr>
 <td>[PKG-491]</td>
@@ -437,7 +437,7 @@
 <tbody>
 <tr>
 <td>[PKG-493]</td>
-<td>The private key MUST NOT be stored in the plugin repository. For CI, put it in a secret store and pass it through <code>ILIUM_PUBLISHER_KEY</code>.</td>
+<td>The private key MUST NOT be stored in the plugin repository. For CI, put it in a secret store and pass it through <code>ILIUM_PUBLISHER_KEY</code> (PEM text) or <code>ILIUM_PLUGIN_SIGNING_KEY</code> (path of a key file).</td>
 </tr>
 <tr>
 <td>[PKG-494]</td>
@@ -509,6 +509,10 @@
 <td>[PKG-504]</td>
 <td>A registry at review level B MAY require an SBOM (PKG-401).</td>
 </tr>
+<tr>
+<td>[PKG-685]</td>
+<td>To reach review level B, include <code>sbom.json</code>, a valid SPDX <code>license</code> in the manifest and a <code>LICENSE</code> or <code>NOTICE</code> file. Without them the registry refuses the publish with <code>registry.policy</code> (PKG-681) when it requires level B, and otherwise shows level A with <code>No SBOM</code> or <code>No licence notice</code> (PKG-682). The full list is in PKG-680.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="pack-sign-check">Pack, sign, check</h2>
@@ -562,7 +566,23 @@ ilium plugin verify dist/com.example.git-tools-1.4.2.iliumpkg
 <li>To withdraw a bad version, run <code>ilium plugin yank &lt;id&gt;@&lt;version&gt; --reason "&lt;text&gt;"</code>. Installed copies keep working.</li>
 <li>To retire a plugin, run <code>deprecate</code> with <code>--successor</code>.</li>
 <li>Never delete a blob. Takedown is the registry operator's decision (PKG-403).</li>
+<li>If your signing key leaks, revoke it as <code>compromised</code>. Every installed copy signed by that key enters <code>disabled-blocked</code> and users must accept the risk or take an update signed by another trusted key of your publisher id.</li>
+<li>A registry takedown (PKG-403) has the same effect on the named version. Ship a fixed version signed by a trusted key so that users can leave the blocked state.</li>
 </ul>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[USR-177]</td>
+<td>A publisher guide MUST state that revoking a key as <code>compromised</code> or a registry takedown blocks installed copies, that users leave the block with <code>enable --accept-risk</code> or with an update signed by another trusted key of the same publisher id, and that a blocked version cannot be installed from the store.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="edge-cases">Edge cases</h2>
 <table>
 <thead>
@@ -574,7 +594,7 @@ ilium plugin verify dist/com.example.git-tools-1.4.2.iliumpkg
 <tbody>
 <tr>
 <td>Same version published twice</td>
-<td><code>registry.version-exists</code>, exit 1</td>
+<td><code>registry.version-exists</code> on publish, exit 1. The same version with different content on install is <code>package.version-reused</code>.</td>
 </tr>
 <tr>
 <td>Unsigned package</td>

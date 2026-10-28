@@ -241,7 +241,11 @@ fn bounded_completion_handoff_keeps_remaining_results_with_their_owner() {
     let last = dispatcher.take_outcomes_for(&origin(), 2);
     assert_eq!(last.len(), 1);
     let all: Vec<_> = first.into_iter().chain(second).chain(last).collect();
-    assert_eq!(all.iter().map(|result| result.request.clone()).collect::<Vec<_>>(),
-        (0..4).map(RequestRef::Submission).collect::<Vec<_>>());
+    assert_eq!(
+        all.iter()
+            .map(|result| result.request.clone())
+            .collect::<Vec<_>>(),
+        (0..4).map(RequestRef::Submission).collect::<Vec<_>>()
+    );
     assert!(dispatcher.take_outcomes_for(&origin(), 1).is_empty());
 }

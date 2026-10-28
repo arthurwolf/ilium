@@ -24,7 +24,7 @@ A section is placed at an **anchor**. An anchor is a named point in a tab:
 - `before:<section>` puts it directly before a named section.
 - `after:<section>` puts it directly after a named section.
 
-Most built-in tabs have one unnamed section called `main`, so `before:main` is refused. Tabs with headings, such as Remote compaction, expose named anchors: `behaviour`, `technique-per-agent`, `custom-prompt`, `input-shaping` and `model`. Kernel anchors are never renamed or removed.
+Most built-in tabs have one unnamed section called `main`, so `before:main` is refused with `manifest.settings-anchor`. Tabs with headings, such as Remote compaction, expose named anchors: `behaviour`, `technique-per-agent`, `custom-prompt`, `input-shaping` and `model`. Kernel anchors are never renamed or removed.
 
 A new tab is placed in the rail with `after`, which names the tab it follows. The default is `text-triggers`. The tail of the rail (`debug`, `api`, `about`, `setup`) is pinned, so a plugin tab never appears after `debug`.
 
@@ -77,7 +77,7 @@ All sections of one plugin at one anchor sit together under one divider. The ins
 
 A plugin needs no grant for its own tab or for sections in its own tab. The always-granted `settings` access covers the plugin's own values.
 
-To add sections to a built-in tab, the plugin needs one grant per tab: `settings.contribute:<tab-id>`, for example `settings.contribute:terminal`. The grant takes one tab id with no wildcard. It gives permission to draw sections in that tab and nothing else. The review dialog shows it as "Adds settings to the Terminal tab". The grant is low risk and gives no read or write access to built-in values.
+To add sections to a built-in tab, the plugin needs one grant per tab: `settings.contribute:<tab-id>`, for example `settings.contribute:terminal`. The grant takes one tab id with no wildcard. It gives permission to draw sections in that tab and nothing else. The review dialog shows it as "Adds settings to the Terminal tab". The grant is normal risk and gives no read or write access to built-in values.
 
 `settings.read-all` and `settings.write-all` are a different grant and stay high risk. Neither grant implies `settings.contribute`, and the reverse is also true. See [capability: settings.read-all and settings.write-all](/pages/capability-settings-all/).
 
@@ -145,6 +145,16 @@ The user always sees who added a section. A plugin tab shows its name and versio
 | All values of one plugin, serialized | 256 KiB |
 | Manifest titles, section titles, descriptions, info text, button labels | 48, 40, 200, 120 and 20 characters |
 
+The caps above are the standard tier. A bundled T1 plugin whose id starts with `ilium.` and that sets `limits_tier: "first-party"` gets these higher caps instead (any other package is refused with `manifest.limits-tier`; see [design decisions](/pages/design-decisions/)):
+
+| Item | Standard | First-party |
+|---|---|---|
+| Tabs per plugin | 2 | 8 |
+| Value keys per plugin | 128 | 2,048 |
+| Rows per section | 24 | 64 |
+| List items | 64 | 1,024 |
+| Choice options | 64 | 512 |
+
 When the limit for plugin sections in one built-in tab is reached, the extra sections are not drawn. They are listed on the recovery page with the warning `settings.section-dropped`. Install-time errors name the item, its path in the manifest and the limit.
 
 ### Values and saving
@@ -159,7 +169,7 @@ ignore_patterns = ["^sk-[A-Za-z0-9]{20,}$", "^ghp_"]
 record_panes = true
 ```
 
-A row's key follows its section's `scope`. A row with `scope: "project"` is written to the project's `.ilium/` settings instead of `config.toml`; the project value wins while that project is open. The `scope` of a `settings-changed` event names the receiving side. Client-scope keys are read on the client. Server-scope keys are checked by the client against the same schema, written to the same table and passed to the server through the normal configuration refresh. A section has a single scope, so a plugin that needs both sides declares two sections.
+A row's key follows its section's `scope`. A row with `scope: "project"` is written to the project's `.ilium/` settings instead of `config.toml`; the project value wins while that project is open. The `side` field of a `settings-changed` event names the receiving side. Client-scope keys are read on the client. Server-scope keys are checked by the client against the same schema, written to the same table and passed to the server through the normal configuration refresh. A section has a single scope, so a plugin that needs both sides declares two sections.
 
 Changes are saved as the user makes them. There is no Save button.
 

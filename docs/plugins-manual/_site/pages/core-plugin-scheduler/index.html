@@ -401,9 +401,9 @@
 <li><strong>Prompt queue.</strong> The menu entry is "Queue prompt...". One queued prompt is sent each time the agent finishes a turn, which is a Working to Idle or Done transition, not whenever it is idle (Prompt queue).</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/04-scheduled-input.gif" alt="A prompt is scheduled with a countdown and sent to the pane when the countdown ends" loading="lazy"><figcaption>Scheduled input arrives when the countdown ends.</figcaption></figure>
+<figure><img src="/assets/demos/04-scheduled-input.gif" alt="A five-second countdown sends ping once to an echo-only local fixture" loading="lazy"><figcaption>Current Ilium sends ping once after a five-second countdown. The receiving terminal is a labelled local echo-only fixture.</figcaption></figure>
 
-<figure><img src="/assets/demos/06-prompt-queue.gif" alt="Prompts are added to a queue and sent one by one as the agent finishes each turn" loading="lazy"><figcaption>The prompt queue sends the next prompt each time the agent finishes a turn.</figcaption></figure>
+<figure><img src="/assets/demos/06-prompt-queue.gif" alt="Two prompts are queued for a local Codex-shaped fixture and sent in order after each turn; no model is used and the output is synthetic" loading="lazy"><figcaption>Current Ilium sends two queued prompts in order. A local Codex-shaped fixture supplies synthetic output; no model is used.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <p>The first render is the schedule dialog <strong>Schedule input for <em>pane name</em></strong>, with the countdown fields, the payload and the Send Enter switch. The second is the dialog <strong>Queue prompt after agent finishes</strong>, with the prompt text, the delivery mode and the repeat count. This is the baseline user interface; a calendar mode is not part of it.</p>
@@ -617,6 +617,11 @@
     ],
     &quot;client&quot;: [
       &quot;ui.panels&quot;
+    ]
+  },
+  &quot;contributes&quot;: {
+    &quot;panels&quot;: [
+      { &quot;id&quot;: &quot;scheduler.queue&quot;, &quot;title&quot;: &quot;Scheduler queue&quot;, &quot;modal&quot;: false }
     ]
   },
   &quot;activation&quot;: [
@@ -996,7 +1001,7 @@ export const { lifecycle, handler } = definePlugin({
 <ul>
 <li><code>ilium.core.scheduler/fired</code>: { schedule, pane }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.scheduler"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.scheduler"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-refuses-scheduled-prompts-on-days-the-plugin-marks-as-holidays">Example: Refuses scheduled prompts on days the plugin marks as holidays</h4>
 <p>A package adds a <code>veto</code> handler. Handlers run until one refuses.</p>
 <pre><code class="language-json">{

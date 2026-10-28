@@ -95,7 +95,7 @@ impl Handler for CellView {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.cellview/snapshot" { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             match terminal::freeze_snapshot(pane) {
                 Ok(snapshot) => {
                     if let Some(rows) = terminal::read_snapshot_cells(snapshot, 0, 40) {
@@ -124,9 +124,9 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.cellview/snapshot' || event.val.pane === undefined) continue;
+      if (event.val.command !== 'com.example.cellview/snapshot' || event.val.context.pane === undefined) continue;
       try {
-        const snapshot = freezeSnapshot(event.val.pane);
+        const snapshot = freezeSnapshot(event.val.context.pane);
         const rows = readSnapshotCells(snapshot, 0, 40);
         if (rows) log('info', `${rows.rows.length} rows, revision ${rows.revision}`);
         dropSnapshot(snapshot);
@@ -139,7 +139,7 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-The snapshot is released in every path. A plugin that forgets `drop-snapshot` keeps the copy until deactivation, and the host counts snapshots against the plugin memory quota.
+The snapshot is released in every path. A plugin that forgets `drop-snapshot` keeps the copy until deactivation, and the host counts snapshots against the plugin memory quota. A `freeze-snapshot` that would take the plugin over that quota returns `quota-exceeded` and creates no snapshot.
 
 ### Errors and edge cases
 
@@ -149,6 +149,7 @@ The snapshot is released in every path. A plugin that forgets `drop-snapshot` ke
 | Unknown pane or pane closed | `none`, or `not-found` for `freeze-snapshot` | Drop the cached pane id. |
 | `count` above 1,000 | `invalid-argument` | Read in chunks and compare the `revision` of each chunk. |
 | Pane has no screen yet | `pane-not-ready` | Wait for the next `screen-changed` event. |
+| `freeze-snapshot` over the memory quota | `quota-exceeded` | Drop older snapshots, then retry. |
 | Snapshot id already dropped | `none` | Do not reuse a dropped snapshot. |
 | Grant revoked later | `revoked`, then `not-permitted` | Stop reading; the plugin is re-activated with the reduced set. |
 

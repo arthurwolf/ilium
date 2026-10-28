@@ -293,7 +293,7 @@ Illustrative, not generated. The names and timestamps are placeholders. The refu
 
 A pane's process can be running, frozen, restarting or exited. The host reports every change with `pane-lifecycle-changed { pane, state, by }` (grant `panes.read`, never dropped). `by` is the plugin that asked for the change, or none when the user or the process did it. The intents that cause changes (`freeze-pane`, `unfreeze-pane`, `replace-pane-command`, `terminate-pane-process`, `resize-pane`) are on [pane lifecycle](/pages/api-pane-lifecycle/). A frozen pane keeps its last screen; a plugin that reads it with `terminal.read-cells` gets that last screen.
 
-The `panes` interface itself has no function for this. To find out whether a pane is frozen, a plugin keeps the last state it saw from the event. To read what happened to a pane earlier (created, exited, resumed), use the pane journal from [clock and timers](/pages/api-clock-and-timers/): the host writes `pane-created` and `pane-exited` entries into it, and `journal.read` returns them.
+The `panes` interface itself has no function for this. To find out whether a pane is frozen, a plugin keeps the last state it saw from the event. To read what happened to a pane earlier (created, exited, resumed), use the pane journal described in [journal.read](/pages/capability-journal-read/) and [log](/pages/api-log/): the host writes `pane-created` and `pane-exited` entries into it, and `journal.read` returns them.
 
 **Rust**
 
@@ -368,7 +368,7 @@ Requirement ids for this page: [EVT-020], [PAN-008], [PAN-010], [PAN-011], [PAN-
 
 ### A pane whose plugin is gone
 
-When the plugin that provided a pane kind is uninstalled or off, the pane stays in the tree. The host draws a placeholder in its place and no plugin code runs. Input to the pane is refused. When the plugin returns, the pane comes back to life with its saved state (USR-142).
+When the plugin that provided a pane kind is uninstalled or off, the pane stays in the tree. The host draws a placeholder in its place and no plugin code runs. Input to the pane is refused with `not-found`. The message text `plugin not available` is informational and not a catalogued code. When the plugin returns, the pane comes back to life with its saved state (USR-142).
 
 <figure>
 <pre class="term"><span class="t-dim">Plugin Notes is not installed</span>

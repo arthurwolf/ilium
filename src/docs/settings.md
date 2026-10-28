@@ -22,7 +22,9 @@ Ilium keeps almost every preference in one full-screen Settings view and in a pl
 3. Move between options with the Up and Down arrows (or `k` and `j`). Where an option can be stepped, the Left and Right arrows (or `h` and `l`) change it; `Enter` or `Space` activates or edits it. Text and key fields open an editor: type, then press `Enter` to confirm or `Esc` to cancel.
 4. Press `Esc` or `q` (or click **Close**) to leave Settings. The header also shows a **Guided setup** button that reopens the first-run walkthrough (see [Guided setup and onboarding](#guided-setup-and-onboarding)).
 
-Choice controls show `← value + →`. Click the arrows to step backward or forward, or click `+` to open the full clickable list. A left click on the value moves forward; a right click moves backward. The list shows the current choice and any unavailable options with their reasons.
+Choice controls show `← value + →`. Click the arrows to step backward or forward, or click `+` to open the full clickable list. A left click on the value moves forward; a right click moves backward. The list shows the current choice and any unavailable options with their reasons. Boolean settings use the same fixed-width switch throughout Settings: `[○ OFF]` / `[ON  ●]`.
+
+Settings content adds horizontal and vertical breathing room as the terminal grows. Compact screens keep the space needed to reach controls, while roomier screens add wider side margins and more top and bottom padding.
 
 Number controls show `- value + *`, with the value centered. Click `-` or `+` to change it by the field's normal step. Click `*` to type an exact value, then press `Enter` to confirm or `Esc` to cancel. The field's limits still apply. On rows too narrow to fit both step buttons alongside the value and entry target, Ilium keeps the centered value and `*` entry target and omits the step buttons. These controls are also used for choices and numbers in animation settings, dialogs, toolbars and guided setup.
 
@@ -64,6 +66,7 @@ The tabs appear in this order:
 | Titles | Title style and entry-naming instructions | `[inference]` |
 | Triggers | Which events run AI titling and tree organization | `[triggers]` |
 | Text Triggers | Regular-expression rules that send text to panes | `[text_triggers]` |
+| Custom Agents | Named Claude or Codex profiles, icons and environment variables | `[custom_agents]` |
 | Debug | File logging | `[debug]` |
 | API | Port of the local HTTP agent-creation API | `[api]` |
 | About | Version and project information | none |
@@ -93,6 +96,7 @@ General options:
 | --- | --- | --- |
 | Tree order | Manual, Type, Age up (newest first), Age down (oldest first), Name A to Z, Name Z to A, and cost-based ordering | Manual |
 | Project separators | On / Off. Draws a frame-style line after each project's visible tree | Off |
+| Tree toolbar always visible | `[○ OFF]` / `[ON  ●]`. Keep the bottom tree toolbar visible while focus is elsewhere | On when unset |
 | Tree row management buttons | On / Off. Shows Rename and Move up/down on hover | Off |
 | Agent identifier | Full name, Single letter, Selected icon, Nothing | Selected icon |
 | Color theme | Dark or light preset | Dark |
@@ -119,11 +123,15 @@ The progress-monitor options (Progress monitor, Progress footer lines, Progress 
 
 Pads the content of the left tree panel and the right panels (terminals and agents, editors, boards) inside their borders. Padding never touches borders, the agent toolbar, the last-prompt banner or the progress footer; it only moves the terminal, tree list, editor or board content inward.
 
-Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers.
+Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers. The threshold uses `- value + *`: the arrows step by one column and `*` opens exact keyboard entry. Confirm with `Enter`; `Esc` cancels without changing the saved mode or threshold. Invalid entries and failed saves retain the draft for correction or retry. A confirmed threshold selects **Size dependent**.
 
 Unless the mode is Disabled, a **Padding fine-tuning** button opens a near-fullscreen dialog. The left column holds the settings and the right column a live preview with a neutral dummy tree and dummy agent. Each panel (tree, right panels) has a **Link all sides** option and four side groups (Left, Right, Top, Bottom), each set to 0 to 3 cells with clickable buttons; linking hides the individual sides. **Share right panels** makes terminals, editors and boards use one setting; turn it off to pick a type and give it its own. The default is one cell on every side.
 
 ### Icons
+
+Press `L` in Icons to open **Tree layout**. Select Identity, Objective, Activity or Title with Up/Down. Press Enter to move the selected item with Up/Down, then Enter to save or Escape to cancel. Shift+Up/Down moves directly, and Space hides or shows an icon slot. Title is always visible and acts as the divider: items above it appear before the title; items below it align at the right edge. `1` restores the default, `2` places all icons on the right, and `3` keeps Identity left with Objective and Activity right. `R` resets the layout. A labelled dummy tree previews changes using the same layout as the sidebar; narrow dialogs stack the preview below the controls. Bookmark/frozen badges stay with their title; cost indicators and hover actions retain their positions. Blocking errors remain visible even when Activity is hidden.
+
+Layouts persist under `[ui.tree_row_layout]` with `order` and `hidden` lists containing `identity`, `objective`, `activity` and `title`. Duplicate/missing order entries are normalized; Title cannot be hidden. Direct moves, visibility and preset changes save immediately.
 
 Choose the glyph for each configurable role: group, top-level destination, project, vertical and horizontal split, folder, worktree branch, terminal, editor, board, each agent family, bookmark and locked-closed markers, tree toolbar buttons (Search, Restructure, Settings), hover-row controls (Rename, Move up, Move down, Close, Retitle), project restructure, Ask for update, screen-transfer arrows, Open in OS, and the agent toolbar actions (Compact, Clear, Configure, Stop, Copy screen, Smart Copy, Copy last message, Change effort, Change model, model choices, Exit, Fast mode, Text selection). Up and Down select a role, Left and Right cycle its glyph, and `Enter`, `Space` or `+` opens the icon picker. `R` toggles between the preview and the real rendering. Custom assignments are stored under `[ui.icons]`.
 
@@ -135,6 +143,7 @@ Blocking project and agent failures display a yellow triangular caution icon in 
 | --- | --- |
 | Display mode | Normal shows objective and current activity separately; Attention emphasises the highest-priority signal |
 | Attention running indicator | How Attention mode still shows that an agent is working |
+| Large attention buttons | `[○ OFF]` / `[ON  ●]`. Use the taller buttons in the left-panel Attention footer; defaults on when unset or on first install |
 | Progress monitor | Turns supervision of registered long-running tasks on or off (default on) |
 | Progress footer lines | 1 to 20 detail rows below the status line (default 4) |
 | Hide completed progress after | Seconds a finished task footer stays; 0 or Never keeps it (default 60, steps of 30) |
@@ -302,6 +311,16 @@ The terminal checkpoint fires after every second submitted plain-shell command. 
 
 Rules pairing a regular expression with a literal message. When an enabled regex matches a completed output line, Ilium sends the message plus Enter to the selected target after the rule's **Delay** (whole seconds, default 60, `0` sends immediately). See [Automation](automation.md).
 
+### Custom Agents
+
+Create a named profile for Claude or Codex, choose its icon, and add environment rows. Select a profile to edit it, or select the add row to create one. Values are masked by default; the editor can reveal them. Select an environment row's remove control to delete it. Save validates the entire draft; duplicate names or keys, invalid keys, and reserved variables are rejected. Empty values and literal spaces, quotes, equals signs, newlines and Unicode are preserved when supported by the platform.
+
+Saved profiles appear as additional icons in the tree toolbar. Use the arrows on that row to reach profiles that do not fit; hover an icon to see its name and click it to launch. With the tree focused, `Alt+Left` and `Alt+Right` select a profile and `Alt+Enter` starts it. Right-click a profile icon to open the new-worktree dialog; selecting an existing worktree before launching opens the existing-worktree dialog. The tree context menu also lists each profile under its Claude or Codex new-agent submenu, with choices for launching here or in a new or existing worktree.
+
+The profile values override inherited environment variables. Ilium reserves `TERM`, `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME`, `ILIUM_SESSION_SOCKET`, `ILIUM_WORKTREE`, and `ILIUM_BRANCH`, plus the terminal-filtered `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `TMUX`, `ZELLIJ`, `NO_COLOR`, and variables beginning with `WEZTERM_`, `KITTY_`, `TMUX_` or `ZELLIJ_`. Reserved names are rejected instead of silently ignored.
+
+**Profile values are plaintext in Ilium's owner-only configuration file; they are not encrypted.** The launched agent and its descendants inherit them. Edits apply to future starts and restarts, while a running process keeps its existing environment. Deletion requires confirmation: a running process continues, but its pane cannot restart as that profile until the profile is restored. Session snapshots keep the profile identity and provider rather than the environment values. For a missing profile still referenced by a pane, Settings offers **Restore missing profile** with its original identity; re-enter its name, icon and environment values before saving.
+
 ### Debug
 
 **File logging** (default off). When on, instrumented actions, errors and complete text LLM exchanges are written to a timestamped session log; enabling applies at once to the client and the detached server. See [Inference and privacy](inference-and-privacy.md#logging).
@@ -381,7 +400,7 @@ Accepted spellings for common enumerated values:
 | `editor.line_display` | `clip`, `wrap` |
 | `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |
 
-Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `section_frames_enabled`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
+Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `tree_toolbar_always_visible`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `section_frames_enabled`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
 
 An invalid value (for example a tree width outside 16 to 80, or an unknown enumerated string) makes that table fail validation with a message naming the key; fix or remove the key.
 
@@ -453,3 +472,7 @@ Most Settings rows have a help affordance. Press `?` on a selected row (or click
 - **Experiments in a temporary configuration.** Run Ilium with `ILIUM_CONFIG_DIR` pointing at an empty directory to start from defaults without touching your real file.
 
 Related: [Getting started](getting-started.md), [Inference and privacy](inference-and-privacy.md), [Voice](voice.md), [Session recovery](session-recovery.md), [CLI reference](cli-reference.md).
+
+## Resource queue grouping
+
+**Group agents under resources** (`[ui].resource_queue_grouping`, default `true`) displays a local owner and waiting agents beneath the resource row, in authoritative queue order. Queue numbers remain global when agents belong to another linked project. Turning this off restores the ordinary pane placement while retaining waiting badges, resource rows, queue details and native wait progress. Grouping changes display only; it does not move real pane parents, alter splits or redirect input. See [Resource queues](resource-queues.md).

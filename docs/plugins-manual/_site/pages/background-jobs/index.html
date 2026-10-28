@@ -453,7 +453,7 @@
 <td><code>failed(quota-exceeded)</code></td>
 </tr>
 <tr>
-<td>Input, and output, each</td>
+<td>Input, and output, each (<code>job_io_mib</code>)</td>
 <td>16 MiB</td>
 <td>64 MiB</td>
 <td>16 MiB</td>
@@ -473,11 +473,19 @@
 <td>16</td>
 <td><code>busy</code> at the start call</td>
 </tr>
+<tr>
+<td>Hold of a finished result for <code>take-output</code></td>
+<td>30 s</td>
+<td>30 s</td>
+<td>30 s</td>
+<td><code>none</code> after the hold (ABI-012)</td>
+</tr>
 </tbody>
 </table>
+<p>The quota group is the <code>ilium-execution</code> CPU token bucket of <a href="/pages/reference-resource-accounting/">Resource accounting</a>: 2,000 ms of CPU time, refilled at 500 ms per second, one group for each plugin side in each process. A job start spends from it.</p>
 <p>The CPU deadline counts CPU time only. Time spent in <code>wait-request</code> or waiting for the disk counts against the wall-clock deadline instead.</p>
 <h2 id="the-surface">The surface</h2>
-<p>The <code>jobs</code> import has five functions. Two of them are callable only inside the job, and the <code>job-runner</code> export is the code the host calls.</p>
+<p>The <code>jobs</code> import has six functions. Three of them are callable only inside the job, and the <code>job-runner</code> export is the code the host calls.</p>
 <table>
 <thead>
 <tr>
@@ -873,7 +881,7 @@ export function scheduleCleanup(dueEpochMillis: bigint) {
 </tr>
 </tbody>
 </table>
-<p>Every failed job is reported to the plugin and never counts toward the restart rule. A trap in the plugin's own instance, by contrast, counts. See <a href="/pages/errors-and-limits/">errors and limits</a> for the restart and disable rule.</p>
+<p>Every failed job is reported to the plugin and never counts toward the restart rule. A trap in the plugin's own instance, by contrast, counts. See <a href="/pages/reference-errors-and-limits/">errors and limits</a> for the restart and disable rule.</p>
 <div class="warn">
 <p>A job cannot start another job. <code>jobs.start</code> returns <code>unsupported</code> inside <code>run</code>. Start the second job from the plugin's own instance, after the first one completes.</p>
 </div>
@@ -885,7 +893,7 @@ export function scheduleCleanup(dueEpochMillis: bigint) {
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
 <li><a href="/pages/api-jobs/">API: jobs</a></li>
 <li><a href="/pages/capability-jobs-run/">Capability: jobs.run</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/services/">Services</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
 </ul>

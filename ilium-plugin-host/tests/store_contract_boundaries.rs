@@ -2,7 +2,7 @@ use ilium_plugin_api::{grants::Grant, side::Side};
 use ilium_plugin_host::stores::{
     ConsentStore, GrantEvidence, GrantStore, StoreError, StoreNotice, TrustStore,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const KEY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER_KEY: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -49,21 +49,17 @@ fn side_identity_and_epoch_survive_restart_without_cross_side_permissions() {
             .unwrap(),
         vec![grant("sound.play")]
     );
-    assert!(
-        reopened
-            .load("example.plugin", OTHER_KEY, "T2")
-            .unwrap()
-            .is_empty()
-    );
+    assert!(reopened
+        .load("example.plugin", OTHER_KEY, "T2")
+        .unwrap()
+        .is_empty());
     reopened
         .set("example.plugin", OTHER_KEY, "T2", &[grant("tree.read")])
         .unwrap();
-    assert!(
-        reopened
-            .load_for_side("example.plugin", OTHER_KEY, "T2", Side::Client)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(reopened
+        .load_for_side("example.plugin", OTHER_KEY, "T2", Side::Client)
+        .unwrap()
+        .is_empty());
     assert_eq!(
         read(reopened.path())["plugins"]["example.plugin"]["epoch"],
         3
@@ -155,23 +151,19 @@ fn dynamic_high_risk_arguments_use_the_real_catalogue_validator() {
     store
         .set("example.plugin", KEY, "T2", &[grant("commands.invoke:*")])
         .unwrap();
-    assert!(
-        GrantStore::open(directory.path())
-            .unwrap()
-            .load("example.plugin", KEY, "T2")
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        store
-            .set(
-                "example.plugin",
-                KEY,
-                "T2",
-                &[grant("fs.read:path:/private/**")]
-            )
-            .is_err()
-    );
+    assert!(GrantStore::open(directory.path())
+        .unwrap()
+        .load("example.plugin", KEY, "T2")
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .set(
+            "example.plugin",
+            KEY,
+            "T2",
+            &[grant("fs.read:path:/private/**")]
+        )
+        .is_err());
 }
 
 #[test]
@@ -179,42 +171,32 @@ fn invalid_id_side_duplicate_and_capacity_never_mutate_disk() {
     let directory = tempfile::tempdir().unwrap();
     let mut store = GrantStore::open(directory.path()).unwrap();
     let before = std::fs::read(store.path()).unwrap();
-    assert!(
-        store
-            .set("../escape", KEY, "T2", &[grant("tree.read")])
-            .is_err()
-    );
-    assert!(
-        store
-            .set("example.plugin", "key-a", "T2", &[grant("tree.read")])
-            .is_err()
-    );
-    assert!(
-        store
-            .set_for_side(
-                "example.plugin",
-                KEY,
-                "T2",
-                Side::Client,
-                &[grant("panes.signal")]
-            )
-            .is_err()
-    );
-    assert!(
-        store
-            .set(
-                "example.plugin",
-                KEY,
-                "T2",
-                &[grant("tree.read"), grant("tree.read")]
-            )
-            .is_err()
-    );
-    assert!(
-        store
-            .set("example.plugin", KEY, "T2", &vec![grant("tree.read"); 257])
-            .is_err()
-    );
+    assert!(store
+        .set("../escape", KEY, "T2", &[grant("tree.read")])
+        .is_err());
+    assert!(store
+        .set("example.plugin", "key-a", "T2", &[grant("tree.read")])
+        .is_err());
+    assert!(store
+        .set_for_side(
+            "example.plugin",
+            KEY,
+            "T2",
+            Side::Client,
+            &[grant("panes.signal")]
+        )
+        .is_err());
+    assert!(store
+        .set(
+            "example.plugin",
+            KEY,
+            "T2",
+            &[grant("tree.read"), grant("tree.read")]
+        )
+        .is_err());
+    assert!(store
+        .set("example.plugin", KEY, "T2", &vec![grant("tree.read"); 257])
+        .is_err());
     assert_eq!(std::fs::read(store.path()).unwrap(), before);
 }
 
@@ -320,18 +302,16 @@ fn startup_hash_mismatch_is_an_explicit_notice_not_an_invented_audit_record() {
     };
     let store = GrantStore::open_with_evidence(directory.path(), &evidence).unwrap();
     assert!(store.notices().contains(&StoreNotice::ExternalEdit));
-    assert!(
-        ilium_plugin_host::stores::AuditLog::open(directory.path())
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(ilium_plugin_host::stores::AuditLog::open(directory.path())
+        .unwrap()
+        .entries()
+        .is_empty());
 }
 
 #[cfg(unix)]
 #[test]
 fn private_files_and_directory_and_symlink_refusal() {
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::fs::{symlink, PermissionsExt};
     let directory = tempfile::tempdir().unwrap();
     let store = GrantStore::open(directory.path()).unwrap();
     assert_eq!(

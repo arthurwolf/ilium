@@ -406,7 +406,7 @@
 <li>The Kanban Board settings tab: card preview and column width (see Settings, "Kanban Board").</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/08-kanban.gif" alt="A Kanban board with three columns while a card moves from To do to Doing" loading="lazy"><figcaption>A board pane with three columns. The selected card moves one column to the right.</figcaption></figure>
+<figure><img src="/assets/demos/08-kanban.gif" alt="The current Ilium Kanban board moves a card to Doing, marks it complete, edits its note, then verifies the saved Markdown file" loading="lazy"><figcaption>The current board completes a card, edits its note, and reopens the Markdown file to verify the saved title and note. The visible agent panes are idle local CLI-shaped fixtures; no provider request is made, and the capture does not demonstrate live agent classification.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -495,7 +495,7 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;pane-kind:kanban&quot;
+    &quot;pane-kind:board&quot;
   ],
   &quot;contributes&quot;: {
     &quot;pane_kinds&quot;: [
@@ -558,6 +558,7 @@
 </tr>
 </tbody>
 </table>
+<p>The user sees one tab titled Kanban Board in the rail. The kernel tab id <code>kanban-board</code> is the tab the user sees and the <code>[kanban_board]</code> table is where its values live. The manifest tab <code>id: "kanban"</code> is this plugin's contributed row group and is shown inside that same tab, never as a second tab with the same title.</p>
 <p>If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Kanban is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in <a href="/pages/reference-config-and-data-migration/">config and data migration</a>). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>. [COR-022]</p>
 <h3 id="samples">Samples</h3>
 <h4 id="a-board-pane-kind">A board pane kind</h4>
@@ -921,8 +922,8 @@ impl Handler for DropMarker {
 <ul>
 <li><code>ilium.core.kanban/card-moved</code>: { board, card, to_column }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.kanban"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
-<h4 id="example-posts-a-toast-when-a-card-reaches-the-done-column">Example: Posts a toast when a card reaches the <code>Done</code> column</h4>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.kanban"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
+<h4 id="example-observes-every-card-move">Example: Observes every card move</h4>
 <p>A package adds a <code>observe</code> handler. Every handler runs; replies are ignored.</p>
 <pre><code class="language-json">{
   &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
@@ -990,7 +991,7 @@ impl HookHandler for Plugin {
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#a-board-pane-kind">A board pane kind</a></li><li class="l3"><a href="#cards-with-check-lists">Cards with check lists</a></li><li class="l3"><a href="#read-and-write-the-markdown-file-safely">Read and write the Markdown file safely</a></li><li class="l3"><a href="#reload-when-the-file-changes">Reload when the file changes</a></li><li class="l3"><a href="#open-a-board-from-a-file">Open a board from a file</a></li><li class="l3"><a href="#drop-marker-during-a-drag">Drop marker during a drag</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-posts-a-toast-when-a-card-reaches-the-done-column">Example: Posts a toast when a card reaches the Done column</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#a-board-pane-kind">A board pane kind</a></li><li class="l3"><a href="#cards-with-check-lists">Cards with check lists</a></li><li class="l3"><a href="#read-and-write-the-markdown-file-safely">Read and write the Markdown file safely</a></li><li class="l3"><a href="#reload-when-the-file-changes">Reload when the file changes</a></li><li class="l3"><a href="#open-a-board-from-a-file">Open a board from a file</a></li><li class="l3"><a href="#drop-marker-during-a-drag">Drop marker during a drag</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-observes-every-card-move">Example: Observes every card move</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

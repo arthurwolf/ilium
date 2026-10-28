@@ -94,7 +94,7 @@ impl Handler for StagedInput {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.stagedinput/compact" { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             submissions.push(Submission::new(Intent::SendInput(SendInputSpec {
                 pane,
                 stages: vec![
@@ -121,12 +121,12 @@ export const { lifecycle, handler } = definePlugin({
     const submissions: Submission[] = [];
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.stagedinput/compact' || event.val.pane === undefined) continue;
+      if (event.val.command !== 'com.example.stagedinput/compact' || event.val.context.pane === undefined) continue;
       submissions.push({
         intent: {
           tag: 'send-input',
           val: {
-            pane: event.val.pane,
+            pane: event.val.context.pane,
             stages: [
               { text: '/compact', delayMs: 0 },
               { text: '\r', delayMs: 120 },
@@ -154,7 +154,7 @@ Without the grant the whole `send-input` is refused with `not-permitted`; a plug
 | Pane already locked | `conflict` | Wait for the unlock; one lock per pane at a time. |
 | Plugin stops while locked | lock released, queue delivered | Nothing. |
 | Pane closed while locked | lock dropped with the pane | Nothing. |
-| Session limit on locks | `busy` | Retry later. |
+| Session limit on locks (one lock per pane, so at most the number of open panes; no other cap) | `busy` | Retry later. |
 
 Check order for `send-input` is: capability, stage and size rules, `if-current` precondition, then the lock. A failed precondition refuses the intent before any lock is taken.
 

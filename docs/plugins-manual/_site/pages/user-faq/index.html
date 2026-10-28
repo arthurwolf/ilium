@@ -442,10 +442,11 @@
 <p><strong>An update failed.</strong> Ilium puts the old version back and says "Update failed, rolled back".</p>
 <p><strong>A plugin says "Waiting for <owner>".</strong> It adds to a plugin that is off or missing. Turn the owner on or install it.</p>
 <p><strong>Can I get back my notes after I uninstalled?</strong> Yes, if you did not use <code>--purge</code>. Reinstall the same plugin and it reads its data again.</p>
+<p><strong>How do I back up one plugin's data or move it to another computer?</strong> Run <code>ilium plugin export &lt;id&gt; --out &lt;file&gt;</code>, install the plugin on the other computer and run <code>ilium plugin import &lt;id&gt; --from &lt;file&gt;</code>. Do this before <code>--purge</code>, which cannot be undone.</p>
 <h3 id="administrators">Administrators</h3>
 <p><strong>Can I stop users from installing plugins?</strong> Yes, with the policy file. See <a href="/pages/guide-administration/">Administration guide</a> and <a href="/pages/reference-plugin-policy/">Plugin policy</a>.</p>
-<p><strong>Can I allow only signed plugins from my company?</strong> Yes. Set <code>allowed_tiers</code> and <code>allowed_publishers</code>.</p>
-<p><strong>Can I see what was installed?</strong> Turn on the audit log in the policy.</p>
+<p><strong>Can I allow only signed plugins from my company?</strong> Yes. Set <code>packages.allowed_tiers</code> and <code>publishers.allow</code> in the policy file (<a href="/pages/reference-plugin-policy/">Plugin policy</a>).</p>
+<p><strong>Can I see what was installed?</strong> The audit log is always on. See <a href="/pages/reference-audit-log/">Audit log</a> for where it is stored and how to read it.</p>
 <h3 id="errors-and-edge-cases">Errors and edge cases</h3>
 <table>
 <thead>

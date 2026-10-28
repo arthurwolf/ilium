@@ -450,13 +450,13 @@
 <tr>
 <td>[CAP-008]</td>
 <td>An fs scope that is unknown, or that does not accept the access, MUST fail with manifest.grant-scope: fs.write:package, fs.write:agent-sessions:<agent>, and an absolute path without a path template.</td>
-<td><a href="/pages/capability-fs-write/#grants-and-scopes">Write grants</a></td>
+<td><a href="/pages/capability-fs-write/#scopes">Write grants</a></td>
 <td>(install-error) list fs.write:package -&gt; manifest.grant-scope.</td>
 </tr>
 <tr>
 <td>[CAP-009]</td>
 <td>A process.run grant with arguments, a wildcard or a relative path with a separator MUST fail with manifest.grant-program.</td>
-<td><a href="/pages/capability-process-run/#grants">Run grants</a></td>
+<td><a href="/pages/capability-process-run/#grant-syntax">Run grants</a></td>
 <td>(install-error) list "process.run:git status" -&gt; manifest.grant-program.</td>
 </tr>
 <tr>
@@ -485,9 +485,9 @@
 </tr>
 <tr>
 <td>[CAP-014]</td>
-<td>A refused call MUST be logged as: refused <grant> because <reason>.</td>
+<td>A refused call MUST be logged as: refused <grant> by <function> (<reason>).</td>
 <td><a href="/pages/reference-capabilities/#errors-and-edge-cases">errors and edge cases</a></td>
-<td>(log-line) call without the grant -&gt; a log line starting "refused ".</td>
+<td>(log-line) call without the grant -&gt; a log line starting "refused " and matching <code>refused &lt;grant&gt; by &lt;function&gt; (&lt;reason&gt;)</code>.</td>
 </tr>
 <tr>
 <td>[CAP-015]</td>
@@ -512,6 +512,42 @@
 <td>An import whose capability the manifest never requested MUST trap. An import whose grant the user declined or revoked MUST return not-permitted.</td>
 <td><a href="/pages/reference-errors-and-limits/#traps">traps</a></td>
 <td>(trap) call an import never requested -&gt; trap. (sync-return) call one the user declined -&gt; err not-permitted.</td>
+</tr>
+<tr>
+<td>[CAP-880]</td>
+<td>Every <code>play-sound</code> for an event MUST be accompanied, in the same batch, by a visible text signal for that event; a batch with a <code>play-sound</code> and no visible signal for the event MUST be rejected by the plugin check with <code>a11y.sound-only</code>.</td>
+<td><a href="/pages/capability-sound-play/#sound-is-never-the-only-signal">sound is never the only signal</a></td>
+<td>(install-error) a batch of one <code>play-sound</code> and no text -&gt; <code>a11y.sound-only</code>.</td>
+</tr>
+<tr>
+<td>[CAP-881]</td>
+<td><code>failed(io)</code>, <code>refused(rate-limited)</code> and a muted sound setting MUST NOT suppress or delay the paired visible signal.</td>
+<td><a href="/pages/capability-sound-play/#sound-is-never-the-only-signal">sound is never the only signal</a></td>
+<td>(screen-text) sound muted -&gt; the text row still appears.</td>
+</tr>
+<tr>
+<td>[CAP-882]</td>
+<td>Every <code>notify</code> intent MUST be accompanied by an in-app text signal of the same event that stays until the user dismisses it or the event ends. Dismissal is the user closing or clearing the row, and the event ends when the condition the notice reports stops being true, after which the row is removed within 1 second.</td>
+<td><a href="/pages/capability-notify-desktop/#desktop-notices-are-never-the-only-signal">desktop notices are never the only signal</a></td>
+<td>(screen-text) desktop notice sent -&gt; a persistent in-app row exists.</td>
+</tr>
+<tr>
+<td>[CAP-883]</td>
+<td>A toast for an error or an action-needed event MUST be paired with a persistent text signal that remains after the toast duration; a toast without one MUST be rejected by the plugin check with <code>a11y.toast-only</code>.</td>
+<td><a href="/pages/capability-notify-toast/#toasts-are-never-the-only-signal">toasts are never the only signal</a></td>
+<td>(install-error) action-needed toast and no panel row -&gt; <code>a11y.toast-only</code>.</td>
+</tr>
+<tr>
+<td>[CAP-884]</td>
+<td>Turning off sound, desktop notices or toasts, or a failure of one channel, MUST leave the text signal of the same event unchanged; colour or sound alone MUST NOT carry a state.</td>
+<td><a href="/pages/accessibility-and-theming/#sound-and-notices-are-never-the-only-signal">sound and notices are never the only signal</a></td>
+<td>(screen-text) all channels muted -&gt; the same text row.</td>
+</tr>
+<tr>
+<td>[CAP-885]</td>
+<td>The <code>notifications</code> core plugin MUST always deliver the in-app text for an event, and a <code>refused</code> or <code>failed</code> result on the sound or desktop channel MUST NOT remove the other channels.</td>
+<td><a href="/pages/core-plugins/#alert-channels">alert channels</a></td>
+<td>(screen-text) sound fails, desktop ok -&gt; text and desktop notice both appear.</td>
 </tr>
 </tbody>
 </table>

@@ -138,7 +138,7 @@ use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::host::fs;
 use ilium_plugin_sdk::primitives::editor;
 
-#[ilium_plugin(side = "client", exports = ["views", "service-provider"])]
+#[ilium_plugin(side = "client", exports = ["views", "service-provider", "token-provider"])]
 #[derive(Default)]
 struct Editor {
     ropes: HashMap<BufferId, ropey::Rope>,
@@ -482,7 +482,7 @@ Other plugins change what `ilium.core.editor` does through the points below. The
 
 `languages` entries and the `token-provider` export colour the buffers this plugin shows.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.editor"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.editor"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Removes trailing spaces on every line when a Markdown buffer is saved
 
@@ -518,10 +518,12 @@ impl HookHandler for Plugin {
         match call.extension.as_str() {
             "trim_trailing" => {
                 // call.payload_json holds: buffer, path, language, text
-                let _payload: serde_json::Value = match serde_json::from_str(&call.payload_json) {
+                let mut payload: serde_json::Value = match serde_json::from_str(&call.payload_json) {
                     Ok(value) => value,
                     Err(_) => return HookReply::Pass,
                 };
+                // Change the fields the hook owns, for example payload["text"].
+                let new_payload_json = payload.to_string();
                 HookReply::Replace(new_payload_json)
             }
             _ => HookReply::Pass,
@@ -538,7 +540,8 @@ definePlugin({
     if (call.extension !== 'trim_trailing') return { tag: 'pass' };
     // call.payloadJson holds: buffer, path, language, text
     const payload = JSON.parse(call.payloadJson);
-    void payload;
+    // Change the fields the hook owns, for example payload.text.
+    const newPayloadJson = JSON.stringify(payload);
     return { tag: 'replace', val: newPayloadJson };
   },
 });

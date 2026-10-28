@@ -98,9 +98,17 @@ Every user-visible feature of Ilium maps to exactly one core plugin. Each plugin
 
 ### How the samples teach the ABI
 
-The samples on these pages are short and focused. Together they illustrate the whole ABI: the matrix assigns each ABI area (API pages, widgets, settings row types, services, events and intents) one primary plugin, and that plugin's samples use it. Across the 30 pages there are 395 ABI pages linked from the "ABI used" sections, between 8 and 20 per plugin (counted by script over `core-plugin-*.md`). Each sample is given in Rust and in TypeScript, and every name in it appears on the linked ABI page. The `calendar` and `api-gpu` areas are unstable and the samples say so.
+The samples on these pages are short and focused. Together they illustrate the whole ABI: the matrix assigns each ABI area (API pages, widgets, settings row types, services, events and intents) one primary plugin, and that plugin's samples use it. Across the 30 pages the "ABI used" sections hold 395 links to ABI pages (link occurrences, not distinct pages; the same page is linked by several plugins), between 8 and 20 per plugin. Each sample is given in Rust and in TypeScript, and every name in it appears on the linked ABI page. The `calendar` and `api-gpu` areas are unstable and the samples say so.
 
-Renders and samples marked Illustrative are not test oracles. When a page differs from `src/docs` at the baseline commit, `src/docs` wins and the page is a defect. The exact values a test uses are in the "Behaviour contract" table of each page: a table with one row per rule, an id of the form `<plugin>-B<nn>`, the exact value or text, and the baseline source (`src/docs/<file>.md#<anchor>`, or the source file of the baseline crate when the user documentation is silent). The test oracle for a plugin is that table, checked against the baseline binary through the golden outputs in [CLI compatibility](/pages/reference-cli-compatibility/).
+Renders and samples marked Illustrative are not test oracles. When a page differs from `src/docs` at the baseline commit, `src/docs` wins and the page is a defect. The exact values a test uses are in the "Behaviour contract" table of the pages that have one (currently the scheduler, chatroom and progress pages; the other core-plugin pages state their values in prose): a table with one row per rule, an id of the form `<plugin>-B<nn>`, the exact value or text, and the baseline source (`src/docs/<file>.md#<anchor>`, or the source file of the baseline crate when the user documentation is silent). The test oracle for a plugin is that table, checked against the baseline binary through the golden outputs in [CLI compatibility](/pages/reference-cli-compatibility/).
+
+### Alert channels
+
+The `notifications` core plugin sends sound, desktop notice and in-app text as separate channels. A failure or refusal in one channel MUST NOT drop another, and the in-app text is always sent.
+
+| ID | Rule | Exact value | Source |
+|---|---|---|---|
+| CAP-885 | Core notifications fan-out | For one event the in-app text is always delivered; a `refused` or `failed` result on the sound or desktop channel is logged and does not remove the other channels | `src/docs/notifications.md` |
 
 ### Security
 

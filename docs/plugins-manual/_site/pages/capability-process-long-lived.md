@@ -125,7 +125,7 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
       if (event.tag === 'command-invoked' && event.val.command === 'com.example.watcher/start') {
-        child = spawn({ process: { program: 'tail', args: ['-f', '/var/log/syslog'] }, stdinOpen: false, lineMode: true });
+        child = spawn({ process: { program: 'tail', arguments: ['-f', '/var/log/syslog'], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 600_000 }, stdinOpen: false, lineMode: true });
       } else if (event.tag === 'command-invoked' && event.val.command === 'com.example.watcher/stop') {
         child?.signal('terminate');
         child = undefined;
@@ -196,7 +196,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.wa
 - [process.run](/pages/capability-process-run/).
 - [jobs.run](/pages/capability-jobs-run/).
 - [Process control](/pages/api-process-control/).
-- [Errors and limits](/pages/errors-and-limits/).
+- [Errors and limits](/pages/reference-errors-and-limits/).
 
 ### Security
 

@@ -449,7 +449,7 @@
 </tr>
 <tr>
 <td><code>update-staged</code></td>
-<td><code>plugins/staging/</code></td>
+<td><code>plugins/store/&lt;id&gt;/&lt;version&gt;/</code></td>
 <td>A newer version is unpacked and verified, and the swap has not happened.</td>
 </tr>
 <tr>
@@ -919,6 +919,26 @@
 <td>none</td>
 <td>log <code>activate.wait-expired</code></td>
 <td>Row keeps <code>waiting for &lt;name&gt;</code></td>
+</tr>
+<tr>
+<td>I19</td>
+<td><code>inactive</code></td>
+<td>disable</td>
+<td>none</td>
+<td>Record the desired state. Cancel pending retries. No <code>deactivate</code> call, there is no instance.</td>
+<td>none</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch off, contributions withdrawn</td>
+</tr>
+<tr>
+<td>I20</td>
+<td><code>waiting-dependency</code></td>
+<td>disable</td>
+<td>none</td>
+<td>Record the desired state. Cancel the wait. No <code>deactivate</code> call, there is no instance.</td>
+<td>none</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch off, <code>waiting for &lt;name&gt;</code> cleared</td>
 </tr>
 </tbody>
 </table>

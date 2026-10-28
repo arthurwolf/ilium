@@ -404,7 +404,7 @@
 <p>The client UI thread paints from <strong>data it already holds</strong>. It reads the mirrored tree, the retained contribution mirror, the last <code>ui-tree</code> of each open view, and the last complete scene frame. It never waits for a plugin and never calls Wasmtime. When a plugin is slow, the UI shows the previous result. When a plugin is gone, the UI shows the previous result marked stale.</p>
 <ul>
 <li><strong>[HST-250]</strong> The client MUST paint every frame from held data only, and a frame MUST NOT be late because a plugin call is pending.</li>
-<li><strong>[HST-251]</strong> A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after <code>ui.invalidate</code>, after a change of the view's area (a resize), and after a theme change.</li>
+<li><strong>[HST-251]</strong> A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after <code>ui.invalidate</code>, after a change of the view's area (a resize), after a theme change, and after a user action in the view.</li>
 </ul>
 <h2 id="retained-contributions">Retained contributions</h2>
 <table>
@@ -564,7 +564,7 @@
 </tr>
 </tbody>
 </table>
-<p>A tree over a cap, or any other invalid tree, is a plugin bug. There is one outcome: the host keeps the previous tree (marked stale), logs one error, and the instance traps with a <code>ui.*</code> code, counted under the restart rule, as in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. <code>views.render</code> returns a <code>ui-tree</code>, not a <code>result</code>, so no tree error is ever returned as <code>invalid-argument</code>. The codes are:</p>
+<p>A tree over a cap, or any other invalid tree, is a plugin bug. There is one outcome: the host keeps the previous tree (marked stale), logs one error, and the instance traps with <code>trap.invalid-ui-tree</code>, whose logged detail reason is a <code>ui.*</code> code, counted under the restart rule, as in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. <code>views.render</code> returns a <code>ui-tree</code>, not a <code>result</code>, so no tree error is ever returned as <code>invalid-argument</code>. The codes are:</p>
 <table>
 <thead>
 <tr>
@@ -685,7 +685,7 @@
 </tr>
 <tr>
 <td>Clip memory</td>
-<td>256 MiB</td>
+<td>256 MiB in total across clips; one clip is limited to 64 MiB (<a href="/pages/api-scenes/">scenes</a>)</td>
 </tr>
 </tbody>
 </table>

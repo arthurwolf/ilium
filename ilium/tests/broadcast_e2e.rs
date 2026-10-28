@@ -76,6 +76,54 @@ impl IsolatedDirs {
             _runtime_root: runtime_root,
         }
     }
+
+    /// Include isolated server failures before temporary-directory cleanup erases them.
+    fn server_failure_logs(&self) -> String {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let root = self
+            .pairs
+            .iter()
+            .find(|(key, _)| *key == ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV)
+            .map(|(_, path)| path)
+            .expect("isolated debug log directory");
+        let mut diagnostics = String::new();
+        let mut remaining = 24 * 1024;
+        for session in std::fs::read_dir(root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .take(8)
+        {
+            for entry in std::fs::read_dir(session.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .take(8)
+            {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if remaining == 0 || !name.starts_with("log-") || !name.ends_with(".txt") {
+                    continue;
+                }
+                if let Ok(mut file) = std::fs::File::open(&path) {
+                    let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                    let count = length.min(remaining.min(12 * 1024) as u64);
+                    let _ = file.seek(SeekFrom::End(-(count as i64)));
+                    let mut bytes = Vec::new();
+                    let _ = file.take(count).read_to_end(&mut bytes);
+                    remaining -= bytes.len();
+                    diagnostics.push_str(&format!(
+                        "\nIsolated server log {}:\n{}",
+                        path.display(),
+                        String::from_utf8_lossy(&bytes)
+                    ));
+                }
+            }
+        }
+        diagnostics
+    }
 }
 
 struct KillSessionOnDrop<'a> {
@@ -222,6 +270,59 @@ async fn wait_for_file(path: &Path, needle: &str) -> bool {
     false
 }
 
+/// Exercises the real detached server and its unchanged 2 MiB worker stack.
+#[tokio::test]
+async fn new_pane_admission_survives_two_megabyte_server_stack() {
+    let temp_root = tempfile::tempdir().expect("isolated project root");
+    let dirs = IsolatedDirs::under(temp_root.path());
+    let plain_project = temp_root.path().join("plain-project");
+    let git_project = temp_root.path().join("git-project");
+    for project in [&plain_project, &git_project] {
+        std::fs::create_dir_all(project).expect("isolated project directory");
+    }
+    let plain_probe = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&plain_project)
+        .output()
+        .expect("check non-Git fixture");
+    assert!(
+        !plain_probe.status.success(),
+        "non-Git fixture belongs to a repository"
+    );
+    let initialized = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&git_project)
+        .status()
+        .expect("initialize owned Git fixture");
+    assert!(initialized.success(), "git init failed");
+    let _cleanup = KillSessionOnDrop {
+        dirs: &dirs,
+        projects: vec![plain_project.clone(), git_project.clone()],
+    };
+    for (project, label) in [(&plain_project, "plain"), (&git_project, "git")] {
+        let created = run_ilium(&dirs, project, &["new-pane", "--", "cat"], None).await;
+        assert!(
+            created.success,
+            "{label} NewPane failed: {} {}{}",
+            created.stdout,
+            created.stderr,
+            dirs.server_failure_logs()
+        );
+        let listed = run_ilium(&dirs, project, &["panes", "--here"], None).await;
+        assert!(
+            listed.success,
+            "{label} pane listing failed: {}",
+            listed.stderr
+        );
+        assert_eq!(
+            listed.of_type("pane").len(),
+            1,
+            "{label} NewPane reported success without one registered pane: {}",
+            listed.stdout
+        );
+    }
+}
+
 #[tokio::test]
 async fn broadcast_reaches_selected_agents_across_projects_and_never_shells() {
     let temp_root = tempfile::tempdir().expect("tempdir");
@@ -269,8 +370,11 @@ async fn broadcast_reaches_selected_agents_across_projects_and_never_shells() {
         .await;
         assert!(
             created.success,
-            "new-pane failed: {} {}",
-            created.stdout, created.stderr
+            "new-pane failed in {}: {} {}{}",
+            project.display(),
+            created.stdout,
+            created.stderr,
+            dirs.server_failure_logs()
         );
     }
     let shell_script = format!("cat >> {}", shell_received.display());

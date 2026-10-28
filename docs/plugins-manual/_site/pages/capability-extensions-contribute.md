@@ -26,7 +26,7 @@ The owner does not have to be installed. A contribution to a point whose owner i
 | `extensions.contribute-any` | refused, `manifest.grant-unknown` | this grant does not exist; list each point |
 | `extensions.contribute:ilium.core.smart-copy/after-copy@0.1.0` | refused, `manifest.grant-unknown` | a version is never part of a grant |
 
-A version can appear in the `point` field of a `contributes.extensions` entry, for example `ilium.core.smart-copy/after-copy@0.1.0`. It means "same major, minor at least this". See [versioning](/pages/versioning/).
+A version can appear in the `point` field of a `contributes.extensions` entry, for example `ilium.core.smart-copy/after-copy@0.1.0`. A bare version is a caret range (`@0.1.0` accepts `>=0.1.0 <0.2.0`); see [dependency resolution](/pages/reference-dependency-resolution/) (PKG-317, PKG-318, PKG-328). See [versioning](/pages/versioning/).
 
 ### Side
 
@@ -45,9 +45,9 @@ A handler gets only the payload of the owner's `payload_schema`. It may call oth
 
 ### Risk
 
-The grant is normal risk (S) for a point with `risk: "standard"`. It is high risk (H) for a point with `risk: "high"`. The owner sets the risk, because the owner knows what its payload holds. A high-risk grant starts unchecked in the review dialog, and the line carries a warning. Examples are the `before-send-input` point of the terminal, `before-fire` of text triggers, and `before-broadcast` of fleet.
+The grant is normal risk (not high risk) for a point with `risk: "standard"`. It is high risk (H) for a point with `risk: "high"`. The owner sets the risk, because the owner knows what its payload holds. A high-risk grant starts unchecked in the review dialog, and the line carries a warning. Examples are the `before-send-input` point of the terminal, `before-fire` of text triggers, and `before-broadcast` of fleet.
 
-A handler on a `veto` point can stop an action. A handler on a `transform` point can change data in flight. Both are limited. A handler that is slow, traps or errors counts as `pass`, so a broken contributor never blocks the owner. Three breaches in a row stop that extension until the plugin restarts.
+A handler on a `veto` point can stop an action. A handler on a `transform` point can change data in flight. Both are limited. A handler that is slow, traps or errors counts as `pass`, so a broken contributor never blocks the owner. Three consecutive breaches (a timeout, trap, error or disallowed reply, with no successful handler call between them) stop that extension until the plugin restarts.
 
 ### Manifest
 
@@ -146,7 +146,7 @@ export const { lifecycle, handler, hookHandler } = definePlugin({
 | `extension.cap-exceeded` | The point already holds `max_entries` entries or `max_handlers` handlers. | synchronous, or the extension stays dormant |
 | `extension.handler-timeout` | The handler passed its deadline. Counts as `pass`. | log |
 | `extension.reply-not-allowed` | The reply does not fit the mode. Counts as `pass`. | log |
-| `extension.disabled` | Stopped after three breaches, or turned off by the user. | log, Plugins screen |
+| `extension.disabled` | Stopped after three consecutive breaches, or turned off by the user. | log, Plugins screen |
 
 ### Edge cases
 

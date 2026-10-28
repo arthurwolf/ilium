@@ -528,7 +528,7 @@ export function fit(text: string, maxCells: number): string {
   return out + '…';
 }
 </code></pre>
-<p>The call to <code>display-width</code> crosses into the host. A plugin SHOULD NOT call it once per character for a long text. Measure once, and cut only when the text is too wide. [AUT-604]</p>
+<p>The call to <code>display-width</code> crosses into the host. A plugin SHOULD NOT call <code>display-width</code> once per character for a long text. Measure once, and cut only when the text is too wide. [AUT-604]</p>
 <h3 id="label-and-value-pairs">Label and value pairs</h3>
 <p>Use <code>leader-row</code> for a label and a value. It shrinks the value first, then the label, with <code>…</code>. A translated label is often longer than an English one by 30 percent or more. A plugin SHOULD leave room for a longer label and SHOULD NOT depend on a fixed width. [AUT-605] See <a href="/pages/layout/">Layout constraints</a>.</p>
 <h2 id="text-that-the-plugin-does-not-control">Text that the plugin does not control</h2>
@@ -575,7 +575,11 @@ export function fit(text: string, maxCells: number): string {
 </tr>
 </tbody>
 </table>
-<p>Command ids, setting keys, error codes and event names are identifiers. A plugin MUST NOT translate them. [AUT-610] Titles shown to people, such as a command <code>title</code>, are text and MAY be in any language.</p>
+<p>Command ids, setting keys, error codes and event names are identifiers. A plugin MUST NOT translate command ids, setting keys, error codes and event names. [AUT-610] Titles shown to people, such as a command <code>title</code>, are text and MAY be in any language.</p>
+<h2 id="text-on-capability-surfaces">Text on capability surfaces</h2>
+<p>Toasts, notices and the grant-review dialog are drawn by the host, but part of their text comes from the plugin. The host does not translate text a plugin supplies, and a plugin does not control the host's own words. The sections below say who owns which text.</p>
+<p>A plugin MUST pass a toast or notice body already in the language it chose, and the host MUST show it unchanged apart from escape removal and the width cut. [AUT-618] The host's fixed words around it (a <code>Show toasts</code> row, a button, a grant label) are not in the plugin's language and a plugin MUST NOT rely on them matching its own. [AUT-619]</p>
+<p>The one-line reason a plugin gives for a grant in its manifest has one value. The review dialog shows it verbatim, as data, cut at the dialog width with <code>…</code>, and never mixes it into a host sentence. [AUT-620] A plugin SHOULD write that reason in a language its users read and SHOULD keep it short enough to fit 60 cells after a translation. [AUT-621] Grant ids, the plugin id and capability names in the dialog are identifiers and are never translated. [AUT-622] See <a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a>.</p>
 <h2 id="time">Time</h2>
 <p><code>now-unix-millis</code> returns milliseconds since 1970-01-01 in UTC. The contract has no function for the user's offset. Choose one of three ways.</p>
 <table>
@@ -605,15 +609,17 @@ export function fit(text: string, maxCells: number): string {
 </tbody>
 </table>
 <p>A plugin that shows a time MUST write the zone or say that it is relative, and MUST store times as UTC milliseconds, never as local text. [AUT-611]</p>
-<p>The manual uses the form <code>YYYY-MM-DD HH:mm:ss</code> for dates, which has the same order in every language. A plugin SHOULD use it for absolute times unless the user chooses another form. [AUT-612]</p>
-<pre><code class="language-rust">/// Format UTC milliseconds as `YYYY-MM-DD HH:mm:ss` plus an offset in minutes.
+<p>The manual uses the form <code>YYYY-MM-DD HH:mm:ss</code> for dates, which has the same order in every language. A plugin SHOULD use <code>YYYY-MM-DD HH:mm:ss</code> for absolute times unless the user chooses another form. [AUT-612]</p>
+<pre><code class="language-rust">/// Format UTC milliseconds as `YYYY-MM-DD HH:mm:ss` plus the zone as `UTC+HH:MM`, so the zone is always written.
 fn format_time(unix_millis: u64, offset_minutes: i64) -&gt; String {
     let seconds = (unix_millis / 1000) as i64 + offset_minutes * 60;
     let days = seconds.div_euclid(86_400);
     let rest = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
-    format!(&quot;{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}&quot;,
-        rest / 3600, (rest % 3600) / 60, rest % 60)
+    let sign = if offset_minutes &lt; 0 { '-' } else { '+' };
+    let offset = offset_minutes.abs();
+    format!(&quot;{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC{sign}{:02}:{:02}&quot;,
+        rest / 3600, (rest % 3600) / 60, rest % 60, offset / 60, offset % 60)
 }
 </code></pre>
 <p><code>civil_from_days</code> stands for a standard day-count to calendar conversion. A date library is simpler. A plugin that formats time MUST be tested with the fake clock, which starts at 2030-01-01 00:00:00 UTC. [AUT-613] See <a href="/pages/api-clock-and-timers/">Clock and timers</a>.</p>
@@ -713,7 +719,7 @@ fn wide_text_never_overflows() {
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-the-contract-provides-and-what-it-does-not">What the contract provides and what it does not</a></li><li class="l2"><a href="#width">Width</a></li><li class="l3"><a href="#label-and-value-pairs">Label and value pairs</a></li><li class="l2"><a href="#text-that-the-plugin-does-not-control">Text that the plugin does not control</a></li><li class="l2"><a href="#right-to-left-text">Right-to-left text</a></li><li class="l2"><a href="#your-own-strings">Your own strings</a></li><li class="l2"><a href="#time">Time</a></li><li class="l3"><a href="#numbers-units-and-sizes">Numbers, units and sizes</a></li><li class="l2"><a href="#sorting-and-search">Sorting and search</a></li><li class="l2"><a href="#testing">Testing</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-the-contract-provides-and-what-it-does-not">What the contract provides and what it does not</a></li><li class="l2"><a href="#width">Width</a></li><li class="l3"><a href="#label-and-value-pairs">Label and value pairs</a></li><li class="l2"><a href="#text-that-the-plugin-does-not-control">Text that the plugin does not control</a></li><li class="l2"><a href="#right-to-left-text">Right-to-left text</a></li><li class="l2"><a href="#your-own-strings">Your own strings</a></li><li class="l2"><a href="#text-on-capability-surfaces">Text on capability surfaces</a></li><li class="l2"><a href="#time">Time</a></li><li class="l3"><a href="#numbers-units-and-sizes">Numbers, units and sizes</a></li><li class="l2"><a href="#sorting-and-search">Sorting and search</a></li><li class="l2"><a href="#testing">Testing</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

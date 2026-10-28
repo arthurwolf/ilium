@@ -582,9 +582,14 @@ export const { lifecycle, handler } = definePlugin({
 <td>Retry later.</td>
 </tr>
 <tr>
-<td><code>limit</code> above 8</td>
-<td>clamped to 8</td>
-<td>Nothing.</td>
+<td><code>text</code> shorter than 2 or longer than 200 characters</td>
+<td><code>invalid-argument</code></td>
+<td>Fix the input before calling.</td>
+</tr>
+<tr>
+<td><code>limit</code> below 1 or above 8</td>
+<td><code>invalid-argument</code> (not clamped; <a href="/pages/reference-wit/">WIT</a>)</td>
+<td>Pass a limit from 1 to 8.</td>
 </tr>
 </tbody>
 </table>

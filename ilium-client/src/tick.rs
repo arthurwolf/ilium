@@ -35,6 +35,7 @@ pub fn on_tick(
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
+    let resource_saved = app.tick_resource_dialog(now);
     let budget_saved = app.tick_restructure_budget_autosave(now)
         | app.tick_inference_number_autosave(now)
         | app.tick_remote_compaction_save(now);
@@ -64,6 +65,8 @@ pub fn on_tick(
     was_animating
         || tree_transition_changed
         || terminal_activity_changed
+        || (app.ui_settings.progress_monitor_enabled && !app.resources.waits.is_empty())
+        || resource_saved
         || autosave_wrote
         || budget_saved
         || workspace_search_started

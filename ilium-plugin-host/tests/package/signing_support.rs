@@ -181,10 +181,13 @@ pub fn refusal_with_keys(bytes: &[u8], trust: &TrustStore, known: &[TrustedKey])
             .first()
             .cloned()
             .unwrap_or_else(|| "no-error-code".into()),
-        Ok(package) => match ilium_plugin_host::signing::verify_with_public_keys(&package, trust, known, now()) {
-            Err(d) => d.code.as_str().to_string(),
-            Ok(_) => "accepted".into(),
-        },
+        Ok(package) => {
+            match ilium_plugin_host::signing::verify_with_public_keys(&package, trust, known, now())
+            {
+                Err(d) => d.code.as_str().to_string(),
+                Ok(_) => "accepted".into(),
+            }
+        }
     }
 }
 

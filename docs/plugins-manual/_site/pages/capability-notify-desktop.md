@@ -58,13 +58,13 @@ The grant unlocks one intent and one related host function from the sound module
 |---|---|---|
 | `notify` | intent | Submits a notice. Payload is `notify-spec`. Rust: `Intent::Notify(NotifySpec)`. |
 | `notify-spec.title` | field | `string`, 1 to 256 characters. The first line of the notice. |
-| `notify-spec.body` | field | `string`, 0 to 2,048 characters. The text below the title. |
+| `notify-spec.body` | field | `option<string>`, 0 to 2,048 characters when present. The text below the title; none shows a title-only notice. Rust: `Option<String>`. TypeScript: `string \| undefined`. |
 | `notify-spec.urgency` | field | `enum urgency`: `low`, `normal` or `high`. Rust: `Urgency::Low` and so on. TypeScript: `'low'`, `'normal'`, `'high'`. |
 | `notify-spec.sound` | field | `option<string>`, a sound id, or none. Rust: `Option<String>`. TypeScript: `string \| undefined`. |
 | `sound.catalog` | host function | `func() -> list<string>`. Returns the bundled and contributed sound ids. |
 | `ok` | outcome | The notice is queued. |
 
-The payload is a record with these four fields and no others. The WIT form is `record notify-spec { title: string, body: string, urgency: urgency, sound: option<string> }`.
+The core payload is a record with these four fields. The WIT form is `record notify-spec { title: string, body: option<string>, urgency: urgency, sound: option<string> }` (the full record also carries the optional coalescing fields described in [notifications](/pages/api-notifications/)).
 
 ### Urgency
 
@@ -142,7 +142,7 @@ impl Handler for NotesNotifier {
             submissions.push(Submission::keyed(
                 Intent::Notify(NotifySpec {
                     title: "Export finished".into(),
-                    body: "12 notes written to the archive folder.".into(),
+                    body: Some("12 notes written to the archive folder.".into()),
                     urgency: Urgency::Normal,
                     sound: Some("done".into()),
                 }),
@@ -246,6 +246,14 @@ notify.desktop     normal   <span class="t-ok">granted</span>
 
 A revocation re-activates the plugin with the reduced grant set. The plugin receives `deactivate(revoked)` and its activation does not count as a failure.
 
+### Desktop notices are never the only signal
+
+The desktop may hide a notice (focus or do-not-disturb rules) and `ok` only means it was queued.
+
+| ID | Rule | Exact value | Source |
+|---|---|---|---|
+| CAP-882 | In-app twin of a desktop notice | Every `notify` intent MUST be accompanied by an in-app text signal of the same event that stays until the user dismisses it or the event ends. Dismissal is the user closing or clearing the row, and the event ends when the condition the notice reports stops being true (for example the agent leaves the waiting state), after which the row is removed within 1 second. The desktop notice alone is not a valid signal | `src/docs/notifications.md` |
+
 ### Risk and tier rules
 
 - The grant has the normal risk. The review dialog lists it, and it is checked by default.
@@ -254,7 +262,7 @@ A revocation re-activates the plugin with the reduced grant set. The plugin rece
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md` use the grant for:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/) use the grant for:
 
 - 48: desktop notifications.
 - 56: text triggers, which often finish with a notice. See [the terminal output filter](/pages/capability-terminal-output-filter/).
@@ -265,7 +273,7 @@ First-party plugins from `feature-mapping.md` use the grant for:
 - [sound.play](/pages/capability-sound-play/) for the sound catalogue and the `play-sound` intent.
 - [agent.read](/pages/capability-agent-read/) for the agent activity that usually triggers an alert.
 - [Requests and outcomes](/pages/requests-and-outcomes/) for the `ok`, `refused` and `duplicate` outcomes.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the rate rules.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the rate rules.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the import paths.
 
 Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).

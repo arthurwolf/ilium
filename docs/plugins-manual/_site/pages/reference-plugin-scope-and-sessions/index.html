@@ -396,7 +396,7 @@
 <p>A user may run several Ilium sessions, and may open projects with different needs. This page defines where a plugin is installed, where it is enabled, how a change reaches the other sessions, and which failure state is shared.</p>
 <p>Contract version: <code>ilium:plugin@0.1.0</code>.</p>
 <h3 id="install-scope">Install scope</h3>
-<p>In 0.1.0 a plugin installs globally, for the user. There is no project-scope install. A package in a project folder could run code the moment a repository is opened, so the platform leaves it out until workspace trust exists. The shared package store, <code>installed.json</code>, grants and the global storage bucket serve every session of the user.</p>
+<p>In 0.1.0 a plugin installs globally, for the user. There is no project-scope install. A package in a project folder could run code the moment a repository is opened, so the platform leaves it out until project trust exists. The shared package store, <code>installed.json</code>, grants and the global storage bucket serve every session of the user.</p>
 <ul>
 <li>[LIF-160] The host MUST accept installs only into the user scope in 0.1.0, and MUST refuse <code>--scope project</code> for install with <code>install.scope-unsupported</code>. Test: run the command.</li>
 </ul>

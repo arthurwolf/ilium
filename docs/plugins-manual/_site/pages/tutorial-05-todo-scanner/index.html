@@ -463,7 +463,7 @@
 <td><code>fs::scan(&amp;path, glob, max_entries)</code></td>
 <td>server</td>
 <td>async, <code>request-id</code></td>
-<td>Lists files that match a glob such as <code>**/*.rs</code>. <code>max_entries</code> is at most 65,536 (L3).</td>
+<td>Lists files that match a glob such as <code>**/*.rs</code>. <code>max_entries</code> is at most 65,536 (see <a href="/pages/reference-errors-and-limits/#requestable-limits">Fixed caps</a>).</td>
 </tr>
 <tr>
 <td><code>fs::take_entries(request)</code></td>
@@ -547,7 +547,7 @@
 </table>
 <p>Widget defaults come from the SDK builder (W1). A list sends <code>activated</code> with the row index on Enter (W11).</p>
 <h3 id="manifest">Manifest</h3>
-<p>This step adds the entries below to the step 4 manifest. Keep every other entry from step 4. <code>exports</code> lists <code>job-runner</code>, so the host creates a job instance from the server component. The job's <code>deadline_ms</code> and <code>memory_mib</code> are requested limits. A value above the tier ceiling is clamped and logged, never refused. For a T1 plugin the ceilings are 60,000 ms of CPU and 512 MiB (L2).</p>
+<p>This step adds the entries below to the step 4 manifest. Keep every other entry from step 4. <code>exports</code> lists <code>job-runner</code>, so the host creates a job instance from the server component. The job's <code>deadline_ms</code> (a limit on CPU time, not wall time) and <code>memory_mib</code> are requested limits. A value above the tier ceiling is clamped and logged, never refused. For a T1 plugin the ceilings are 60,000 ms of CPU and 512 MiB (L2).</p>
 <pre><code class="language-json">{
   &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [&quot;job-runner&quot;] },
   &quot;capabilities&quot;: {
@@ -742,8 +742,8 @@ Event::JobProgress(progress) =&gt; scan::on_job_progress(progress.request_id, pr
 <p>Points to notice:</p>
 <ul>
 <li>A failed scan takes the same branch as a successful one. <code>take_entries</code> returns <code>None</code>, and the log says <code>scan finished without a result</code>.</li>
-<li>A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it (N16).</li>
-<li>A job failure never counts toward the plugin's restart rule (A22).</li>
+<li>A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it.</li>
+<li>A job failure never counts toward the plugin's restart rule.</li>
 </ul>
 <h3 id="client-the-results-panel">Client: the results panel</h3>
 <p>The client keeps the last results and the last progress value. Enter on a row sends an <code>editor-open</code> intent.</p>
@@ -846,7 +846,7 @@ Event::UiAction(action) if todos::is_todos_panel(&amp;action.view) =&gt; {
 <li>Without <code>fs.read</code> for the path, <code>editor-open</code> is refused with <code>not-permitted</code> (E4).</li>
 </ul>
 <h3 id="the-same-workflow-in-typescript">The same workflow in TypeScript</h3>
-<p>The TypeScript server uses the same commands, topics and manifest. <code>start</code> resolves with the job output and gives no job id (N5), so the scan sets a <code>scanning</code> flag and forwards each <code>job-progress</code> event while it is set. Errors are thrown as <code>PluginError</code>, and a <code>u64</code> such as the read offset is a <code>bigint</code> (S5).</p>
+<p>The TypeScript server uses the same commands, topics and manifest. <code>start</code> resolves with the job output and gives no job id, so the scan sets a <code>scanning</code> flag and forwards each <code>job-progress</code> event while it is set. Errors are thrown as <code>PluginError</code>, and a <code>u64</code> such as the read offset is a <code>bigint</code> (S5).</p>
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">// core/src/todo.ts. Finds TODO lines in one file's text. No host imports.
 export interface TodoHit {
@@ -873,7 +873,6 @@ import { isCancelled, reportProgress, start } from '@ilium/plugin-sdk/host/jobs'
 import { log } from '@ilium/plugin-sdk/host/log';
 import { publish } from '@ilium/plugin-sdk/host/topics';
 import type { Event, Submission } from '@ilium/plugin-sdk/types';
-import { lifecycle as baseLifecycle } from './lifecycle'; // the lifecycle of step 8
 import { findTodos, type TodoHit } from '../../core/src/todo';
 
 const SCAN_COMMAND = 'example.agent-tools/scan-todos';
@@ -929,7 +928,11 @@ function runJob(kind: string, input: Uint8Array): Uint8Array {
 }
 
 export const { lifecycle, handler, jobRunner } = definePlugin({
-  lifecycle: baseLifecycle,
+  lifecycle: {
+    activate(context) {
+      log('info', `todo scanner active for ${context.plugin}`);
+    },
+  },
   handler: { onEvents },
   jobRunner: { run: runJob },
 });
@@ -974,15 +977,15 @@ ilium plugin dev
 </tr>
 <tr>
 <td>16 jobs already queued</td>
-<td><code>jobs::start</code> returns <code>busy</code> (C42).</td>
+<td><code>jobs::start</code> returns <code>busy</code> (see <a href="/pages/api-jobs/">jobs</a>).</td>
 </tr>
 <tr>
 <td>Job runs past 10 seconds of CPU</td>
-<td>The job fails as <code>timed-out</code>, and its output is dropped (A22).</td>
+<td>The job fails as <code>timed-out</code>, and its output is dropped.</td>
 </tr>
 <tr>
 <td>Results over 64 KiB</td>
-<td><code>topics::publish</code> refuses the payload with <code>invalid-argument</code> (L3). A few hundred hits can reach that size.</td>
+<td><code>topics::publish</code> refuses the payload with <code>invalid-argument</code> (a topic payload is at most 64 KiB, see <a href="/pages/capability-topics-subscribe/">topics</a>). A few hundred hits can reach that size.</td>
 </tr>
 </tbody>
 </table>

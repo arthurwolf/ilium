@@ -1,5 +1,5 @@
 //! API strings and binary sections describe the same unsigned 16-bit triplet.
-use ilium_plugin_api::version::{API_VERSION_BYTES, ApiVersion, CONTRACT, CURRENT};
+use ilium_plugin_api::version::{ApiVersion, API_VERSION_BYTES, CONTRACT, CURRENT};
 
 #[test]
 fn published_identity_and_payload_agree() {

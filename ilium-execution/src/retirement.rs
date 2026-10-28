@@ -19,6 +19,34 @@ use crate::job::Retention;
 
 pub const RETIREMENT_SLOTS: usize = 64;
 
+/// Exact cooperative declaration used by retirement admission. Composition
+/// roots may prepay metadata for every existing slot without guessing layout.
+/// This does not reserve a slot or promise that a slot is currently available.
+pub const fn retirement_storage_bytes<T: Send + 'static>(declared_bytes: usize) -> Option<usize> {
+    if declared_bytes < size_of::<T>() {
+        return None;
+    }
+    let owner = if size_of::<Retiring<T>>() > size_of::<RetirementReservation<T>>() {
+        size_of::<Retiring<T>>()
+    } else {
+        size_of::<RetirementReservation<T>>()
+    };
+    let owner = if owner > size_of::<FailedRetirement>() {
+        owner
+    } else {
+        size_of::<FailedRetirement>()
+    };
+    let bytes = match declared_bytes.checked_add(size_of::<RetirementEnvelope<T>>()) {
+        Some(bytes) => bytes,
+        None => return None,
+    };
+    let bytes = match bytes.checked_add(owner) {
+        Some(bytes) => bytes,
+        None => return None,
+    };
+    bytes.checked_add(2 * size_of::<usize>())
+}
+
 /// Shared immutable leaf. The last Arc owner invokes `Retiring<T>::drop`,
 /// including when that owner is a pending frame or native acknowledgement.
 pub type RetiringArc<T> = Arc<Retiring<T>>;
@@ -353,17 +381,8 @@ impl RetirementState {
         // Both the payload declaration and envelope metadata are charged
         // before envelope construction. This is cooperative capacity accounting,
         // not an allocator-enforced RSS bound or a charge for opaque native data.
-        let bytes = declared_bytes
-            .checked_add(size_of::<RetirementEnvelope<T>>())
-            .and_then(|n| {
-                n.checked_add(
-                    size_of::<Retiring<T>>()
-                        .max(size_of::<RetirementReservation<T>>())
-                        .max(size_of::<FailedRetirement>()),
-                )
-            })
-            .and_then(|n| n.checked_add(2 * size_of::<usize>()))
-            .ok_or(RejectReason::InvalidCost)?;
+        let bytes =
+            retirement_storage_bytes::<T>(declared_bytes).ok_or(RejectReason::InvalidCost)?;
         let storage = quota.reserve_external_storage(bytes)?;
         if !still_open() {
             return Err(RejectReason::Closed);

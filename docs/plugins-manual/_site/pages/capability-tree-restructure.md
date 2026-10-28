@@ -100,7 +100,7 @@ impl Handler for Organizer {
             submissions.push(Submission::new(Intent::CreateGroup(CreateGroupSpec {
                 parent,
                 title: "Review".into(),
-                placement: Placement::End,
+                placement: Placement::InsideLast,
                 children: invoked.selection.clone(),
             })));
         }
@@ -124,7 +124,7 @@ export const { lifecycle, handler } = definePlugin({
       submissions.push({
         intent: {
           tag: 'create-group',
-          val: { parent: event.val.parent, title: 'Review', placement: 'end', children: event.val.selection },
+          val: { parent: event.val.parent, title: 'Review', placement: 'inside-last', children: event.val.selection },
         },
         correlation: 1n,
         dedupKey: undefined,
@@ -145,7 +145,9 @@ The outcome `ok-node` carries the new node id. For `restructure` it carries the 
 | One of many operations fails | `refused(conflict)` with the operation index | Fix that operation and resubmit the batch. |
 | More than 256 operations | `refused(invalid-argument)` | Split into several restructures. |
 | Revert after a later change | `refused(conflict)` | Tell the user that the layout changed since. |
-| Locked node in the batch | `refused(conflict)` | Skip locked nodes. |
+| `create-split` with a pane count outside 2 to 4 | `refused(invalid-argument)` | Pass 2, 3 or 4 panes. |
+| `revert-restructure` with an unknown or expired undo token | `refused(not-found)` | Treat the layout as not revertable. |
+| Locked node in the batch | Applied: the lock flag only blocks `close-node` in `tree.write`, and a restructure never closes a node | None needed. |
 | Unknown node | `refused(not-found)` | Re-read the tree. |
 
 The attention policy and the user's manual order are kernel concerns. A restructure never changes a title that the user set by hand.

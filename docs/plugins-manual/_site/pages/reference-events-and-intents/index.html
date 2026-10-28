@@ -530,7 +530,7 @@
 </tr>
 <tr>
 <td><code>pointer</code></td>
-<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, drag, wheel), <code>button: option</code></td>
+<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), <code>button: option</code></td>
 <td><code>terminal.pointer</code>, while claimed</td>
 <td>coalesced (drag)</td>
 </tr>
@@ -794,7 +794,7 @@
 </table>
 <p>Two existing payloads gain optional fields:</p>
 <ul>
-<li><code>pointer</code> gains <code>sub-x</code>, <code>sub-y</code>, <code>modifiers</code> and the kind <code>move</code>. <code>move</code> is reported only while the pointer is claimed and over the pane.</li>
+<li><code>pointer</code> gains <code>sub-x</code>, <code>sub-y</code> and <code>modifiers</code>. The kind <code>move</code> is in the base kind list and is reported only while the pointer is claimed and over the pane.</li>
 <li><code>command-invoked</code> gains the origins <code>toast</code>, <code>row-action</code>, <code>status-segment</code>, <code>tree-toolbar</code>, <code>frame-slot</code>, <code>virtual-row-drop</code> and <code>text</code>. Its context gains <code>virtual-row</code> and <code>menu-item</code>.</li>
 </ul>
 <p>Two prompt events exist. <code>input-submitted</code> fires only for a pane with an identified agent, once per recorded prompt, and carries the source and the epoch. <code>user-line-submitted</code> fires for any terminal pane, agent or plain, when the user presses Enter on a line, and carries no source. For one prompt typed by the user into an agent pane, both fire, <code>input-submitted</code> first, then <code>user-line-submitted</code> in the same batch if the queue allows. A prompt sent by a plugin, a schedule or voice fires <code>input-submitted</code> only [EVT-040].</p>
@@ -802,7 +802,7 @@
 <p><code>durable-timer-fired</code> arrives once, late, after a downtime. <code>input-uncertain</code> means the host cannot tell whether a journaled <code>send-input</code> reached the program before a restart. The host never replays it. The plugin decides.</p>
 <h3 id="ui-action-kinds-and-action-values">ui-action kinds and action values</h3>
 <p>Six kinds extend the base set, which makes 17: <code>hover-enter</code> and <code>hover-leave</code> (nodes with <code>hover-events</code>), <code>pointer</code> (nodes with <code>pointer-events</code>), <code>drag-over</code> (drop targets), <code>resized</code> (<code>split</code>) and <code>filter-changed</code> (<code>%list</code>, <code>choice</code>, debounced 150 ms). <code>scrolled</code>, <code>pointer</code> and <code>drag-over</code> are coalesced. The others are never dropped.</p>
-<p>Five <code>action-value</code> cases extend the base set, which makes 12.</p>
+<p>Six <code>action-value</code> cases extend the base set of six (<code>none</code>, <code>text</code>, <code>index</code>, <code>number</code>, <code>flag</code>, <code>drop</code>), which makes 12.</p>
 <table>
 <thead>
 <tr>
@@ -812,6 +812,11 @@
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>cell</code></td>
+<td><code>cell-position</code> (<code>column</code>, <code>row</code>)</td>
+<td><code>surface</code>, <code>terminal-view</code> and <code>code-view</code> activations</td>
+</tr>
 <tr>
 <td><code>pointer</code></td>
 <td><code>view-pointer</code></td>
@@ -1040,7 +1045,7 @@ record request-result { request: request-ref, outcome: outcome }
 <td><code>invoke-command</code></td>
 <td><code>command</code>, <code>arguments-json</code></td>
 <td><code>commands.invoke</code></td>
-<td><code>failed(timed-out)</code> after 30 s</td>
+<td><code>refused(conflict)</code> for a disabled command; <code>failed(timed-out)</code> after 30 s</td>
 </tr>
 <tr>
 <td><code>message</code></td>
@@ -1139,7 +1144,7 @@ record request-result { request: request-ref, outcome: outcome }
 <td><code>mark-attention</code>, <code>ack-attention</code></td>
 <td><code>node</code>, <code>reason</code> (at most 80)</td>
 <td><code>tree.attention</code></td>
-<td><code>ok</code></td>
+<td><code>ok</code>; <code>refused(rate-limited)</code> above 10 per second per node per plugin, the two intents together</td>
 </tr>
 <tr>
 <td><code>open-external</code></td>
@@ -1151,7 +1156,7 @@ record request-result { request: request-ref, outcome: outcome }
 <td><code>set-status-segment</code>, <code>clear-status-segment</code></td>
 <td><code>segment</code>, <code>content</code>, <code>tooltip</code>, <code>tone</code></td>
 <td><code>ui.chrome</code></td>
-<td><code>ok</code>; 10 per second per segment</td>
+<td><code>ok</code>; 10 per second per slot (the segment id is the slot)</td>
 </tr>
 <tr>
 <td><code>set-frame-slot</code>, <code>clear-frame-slot</code></td>
@@ -1240,6 +1245,7 @@ if (outcome.tag === 'ok-epoch') promptEpoch = outcome.val;
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::PaneTitleChangedEvent;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::TitleSource;
 
 #[ilium_plugin(side = &quot;server&quot;)]
 #[derive(Default)]
@@ -1253,7 +1259,12 @@ impl Handler for Titler {
             else {
                 continue;
             };
-            let spec = RenameNodeSpec { node, title: title.trim().to_string() };
+            let spec = RenameNodeSpec {
+                node,
+                title: title.trim().to_string(),
+                source: TitleSource::Inferred,
+                expected_revision: None,
+            };
             let key = dedup::key_for(&amp;[&quot;titler&quot;, &amp;node.to_string(), spec.title.as_str()]);
             submissions.push(Submission::keyed(Intent::RenameNode(spec), key));
         }

@@ -395,7 +395,7 @@
 
 <p>A service is a named interface that one plugin provides and other plugins call. A caller sends a method name and a JSON payload. The provider answers with a JSON string, either at once or later, and the kernel delivers the answer to the caller as a <code>request-completed</code> event. Services let a feature in one plugin use a feature in another without knowing its code. The kernel checks both grants, the payload schema and the deadlines on every call.</p>
 <div class="warn">
-<p>Plugin-defined services are unstable (<code>@unstable</code>) and may change in a later release. Build on one only with a plan to update it. The kernel-known services <code>ilium:inference/provider</code> and the editor provider have typed interfaces instead, see the <a href="/pages/api-inference/">inference</a> page.</p>
+<p>Plugin-defined services are unstable (<code>@unstable</code>) and may change in a later release. Build on one only with a plan to update it. Both the provider and the caller list <code>"plugin-services"</code> in the manifest <code>unstable</code> array, including core plugins that provide a service. The kernel-known services <code>ilium:inference/provider</code> and the editor provider have typed interfaces instead, see the <a href="/pages/api-inference/">inference</a> page.</p>
 </div>
 
 <h3 id="what-you-need">What you need</h3>
@@ -426,6 +426,11 @@
 <td><code>ilium:inference/provider</code></td>
 </tr>
 <tr>
+<td>First-party plugin service name</td>
+<td>the plugin-defined form, with the providing plugin's dotted id before the slash</td>
+<td><code>ilium.instructions/inputs</code>, <code>ilium.compact/trigger</code></td>
+</tr>
+<tr>
 <td>Caller grant</td>
 <td><code>services.use:&lt;name&gt;</code></td>
 <td><code>services.use:com.example.titles/suggest</code></td>
@@ -442,8 +447,8 @@
 </tr>
 <tr>
 <td>Caller manifest entry</td>
-<td><code>requires.services</code> with a range</td>
-<td><code>"requires": { "services": ["com.example.titles/suggest@^0.1.0"] }</code></td>
+<td><code>requires.services</code> with a minimum version</td>
+<td><code>"requires": { "services": ["com.example.titles/suggest@0.1.0"] }</code></td>
 </tr>
 </tbody>
 </table>
@@ -810,7 +815,7 @@ async function askForTitle(note: string): Promise&lt;void&gt; {
 <li>Two calls to the same service return two request ids. Each completion carries its own request, so take each reply by its id.</li>
 <li><code>take-reply</code> gives the JSON once. A second call for the same request returns <code>None</code> or <code>undefined</code>.</li>
 <li>A deferred reply that arrives after 30 seconds returns <code>not-found</code>. The provider should log it and drop the work.</li>
-<li>A provider that restarts after a failure (see the restart and disable rule) loses its deferred calls. Their callers receive <code>failed(cancelled)</code>. If the restart was caused by the provider breaching its 50 ms call deadline, the caller of the breaching call receives <code>failed(timed-out)</code> and every other deferred caller receives <code>failed(cancelled)</code>.</li>
+<li>A provider that restarts after a failure (see the restart and disable rule) loses its deferred calls. Their callers receive <code>failed(cancelled)</code>. If the restart was caused by the provider breaching its per-export call deadline (20 ms, or 10 ms for <code>tokens</code>), the caller of the breaching call receives <code>failed(internal)</code> (the deadline breach is a trap, not a missing reply, so it is never <code>timed-out</code>) and every other deferred caller receives <code>failed(cancelled)</code>.</li>
 </ul>
 <h3 id="when-to-use-extension-points-instead">When to use extension points instead</h3>
 <p>A service has one provider. If several plugins should add data or handlers to one owner, declare an extension point. See <a href="/pages/api-extension-points/">extension points</a>.</p>
@@ -880,7 +885,7 @@ export const otherLayouts = () =&gt;
 <li><a href="/pages/capability-services/">capability: services</a> for the grant rules and the review dialog.</li>
 <li><a href="/pages/api-extension-points/">extension points</a> for the many-contributors alternative.</li>
 <li><a href="/pages/requests-and-outcomes/">requests and outcomes</a> for the completion event and <code>request-result</code>.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> and <a href="/pages/reference-errors-and-limits/">reference: errors and limits</a> for the full code table.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> and <a href="/pages/reference-errors-and-limits/">reference: errors and limits</a> for the full code table.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the module layout of each language.</li>
 <li><a href="/pages/packages/">packages</a> and <a href="/pages/reference-manifest/">reference: manifest</a> for the manifest keys used above.</li>
 </ul>

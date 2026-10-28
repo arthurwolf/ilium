@@ -38,6 +38,9 @@ fn frame_decode_options() -> impl bincode::Options {
 pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024; // 64 MiB
 
 const LENGTH_HEADER_BYTES: usize = 4;
+/// Idle headers may wait indefinitely. Once a frame starts, a peer must make
+/// finite progress; callers close the stream on timeout, never replay a prefix.
+const FRAME_TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Owned wire payload suitable for preparation on a CPU worker. Construction
 /// enforces the same limit as the on-wire header before growing its buffer.
@@ -84,7 +87,7 @@ impl std::io::Write for LimitedPayload<'_> {
             })?;
         if required > self.0.capacity() {
             let capacity = required
-                .max(self.0.capacity().saturating_mul(2).max(8192))
+                .max(self.0.capacity().saturating_mul(2).max(256))
                 .min(MAX_FRAME_LEN as usize);
             self.0
                 .try_reserve_exact(capacity - self.0.len())
@@ -108,7 +111,7 @@ pub fn encode_frame<T: Serialize>(value: &T) -> Result<EncodedFrame, IpcError> {
 
 /// Conservative allocation capacity for this module's `LimitedPayload`
 /// growth rule. Sizing is pure and must run on the same CPU worker as encoding.
-/// The estimate includes the 8192-byte initial growth floor and each doubling;
+/// The estimate includes the 256-byte initial growth floor and each doubling;
 /// it preserves the wire limit and does not allocate the serialized payload.
 pub fn encoded_capacity_bound<T: Serialize>(value: &T) -> Result<usize, IpcError> {
     let length = usize::try_from(bincode::serialized_size(value)?)
@@ -121,7 +124,7 @@ pub fn encoded_capacity_bound<T: Serialize>(value: &T) -> Result<usize, IpcError
     } else {
         length
             .saturating_mul(2)
-            .max(8192)
+            .max(256)
             .min(MAX_FRAME_LEN as usize)
     })
 }
@@ -139,9 +142,18 @@ pub fn decode_bounded_frame<T: crate::BoundedMessage>(frame: &EncodedFrame) -> R
     crate::bounded_decode::decode_bounded(&frame.payload)
 }
 
-// Persisted presentation revisions and captured title observations require
-// a matching peer. The tag must occupy only bits in FRAME_SCHEMA_MASK.
-const FRAME_SCHEMA_TAG: u32 = 0xC000_0000;
+/// Decode on the CPU owner and preserve its audited allocation declaration
+/// for transferring a completed request out of a finite decoder job slot.
+pub fn decode_bounded_frame_with_storage<T: crate::BoundedMessage>(
+    frame: &EncodedFrame,
+) -> Result<(T, usize), IpcError> {
+    crate::bounded_decode::decode_bounded_with_storage(&frame.payload)
+}
+
+// Resource commands, lifecycle history and wait snapshots require a matching
+// peer. Reject the previous enum layout before decoding any payload.
+// The tag must occupy only bits in FRAME_SCHEMA_MASK.
+const FRAME_SCHEMA_TAG: u32 = 0xC800_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {
     FRAME_SCHEMA_TAG | length
@@ -213,6 +225,20 @@ where
     }
 
     async fn write_payload_bytes(writer: &mut W, payload: &[u8]) -> Result<(), IpcError> {
+        tokio::time::timeout(
+            FRAME_TRANSFER_TIMEOUT,
+            Self::write_payload_bytes_unbounded(writer, payload),
+        )
+        .await
+        .map_err(|_| {
+            IpcError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "IPC frame write exceeded 30 seconds; stream must be closed",
+            ))
+        })?
+    }
+
+    async fn write_payload_bytes_unbounded(writer: &mut W, payload: &[u8]) -> Result<(), IpcError> {
         let length: u32 = payload
             .len()
             .try_into()
@@ -298,30 +324,105 @@ where
     /// admission so an idle peer cannot monopolize a finite execution bank.
     pub async fn read_encoded_length(&mut self) -> Result<u32, IpcError> {
         let mut length_bytes = [0u8; LENGTH_HEADER_BYTES];
-        self.reader.read_exact(&mut length_bytes).await?;
+        // Keep truly idle peers cheap, but do not let a partial header pin a
+        // connection forever. A timeout poisons this stream just like payload
+        // cancellation; callers must close it rather than retry framing.
+        self.reader.read_exact(&mut length_bytes[..1]).await?;
+        tokio::time::timeout(
+            FRAME_TRANSFER_TIMEOUT,
+            self.reader.read_exact(&mut length_bytes[1..]),
+        )
+        .await
+        .map_err(|_| {
+            IpcError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "IPC frame header exceeded 30 seconds; stream must be closed",
+            ))
+        })??;
         frame_payload_length(u32::from_le_bytes(length_bytes))
+    }
+
+    /// Conservative requested-capacity peak, including retained buffers,
+    /// growth overlap and frame metadata. Decoded allocations are separate.
+    pub fn encoded_payload_input_bytes(&self, length: u32) -> Result<usize, IpcError> {
+        if length > MAX_FRAME_LEN {
+            return Err(IpcError::bad_length_prefix(length));
+        }
+        let required = length as usize;
+        let current = self.payload.capacity();
+        let overlap = if required > current {
+            current.saturating_add(required)
+        } else {
+            current
+        };
+        Ok(current
+            .max(required)
+            .saturating_mul(2)
+            .max(overlap.saturating_add(4096)))
     }
 
     /// Read the previously validated header's payload after byte admission.
     /// The caller must retain ordered ownership between header and payload;
     /// abandoning either operation requires closing that stream.
     pub async fn read_encoded_payload(&mut self, length: u32) -> Result<EncodedFrame, IpcError> {
-        self.read_payload_length_into_buffer(length).await?;
-        Ok(EncodedFrame {
-            payload: std::mem::take(&mut self.payload),
-        })
+        if length > MAX_FRAME_LEN {
+            return Err(IpcError::bad_length_prefix(length));
+        }
+        // Keep a partial body inside this future, not in the long-lived
+        // reader. Cancellation destroys its allocation before the caller's
+        // decoder reservation is released.
+        let mut payload = std::mem::take(&mut self.payload);
+        let required = length as usize;
+        if required > payload.capacity() {
+            payload
+                .try_reserve_exact(required - payload.len())
+                .map_err(|error| IpcError::Io(std::io::Error::other(error)))?;
+        }
+        payload.resize(required, 0);
+        let result =
+            tokio::time::timeout(FRAME_TRANSFER_TIMEOUT, self.reader.read_exact(&mut payload))
+                .await
+                .map_err(|_| {
+                    IpcError::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "IPC frame payload exceeded 30 seconds; stream must be closed",
+                    ))
+                })?;
+        match result {
+            Ok(_) => Ok(EncodedFrame { payload }),
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                Err(IpcError::TruncatedFrame { expected: length })
+            }
+            Err(error) => Err(IpcError::Io(error)),
+        }
     }
 
     async fn read_payload_into_buffer(&mut self) -> Result<(), IpcError> {
         let length = self.read_encoded_length().await?;
-        self.read_payload_length_into_buffer(length).await
+        tokio::time::timeout(
+            FRAME_TRANSFER_TIMEOUT,
+            self.read_payload_length_into_buffer(length),
+        )
+        .await
+        .map_err(|_| {
+            IpcError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "IPC frame payload exceeded 30 seconds; stream must be closed",
+            ))
+        })?
     }
 
     async fn read_payload_length_into_buffer(&mut self, length: u32) -> Result<(), IpcError> {
         if length > MAX_FRAME_LEN {
             return Err(IpcError::bad_length_prefix(length));
         }
-        self.payload.resize(length as usize, 0);
+        let required = length as usize;
+        if required > self.payload.capacity() {
+            self.payload
+                .try_reserve_exact(required - self.payload.len())
+                .map_err(|error| IpcError::Io(std::io::Error::other(error)))?;
+        }
+        self.payload.resize(required, 0);
         match self.reader.read_exact(&mut self.payload).await {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
@@ -371,6 +472,53 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tiny_frames_do_not_reserve_eight_kibibytes() {
+        let frame = encode_frame(&7_u8).unwrap();
+        assert_eq!(frame.payload, vec![7]);
+        assert!(frame.retained_bytes() <= 256);
+        assert!(encoded_capacity_bound(&7_u8).unwrap() >= frame.retained_bytes());
+    }
+
+    #[tokio::test]
+    async fn partial_header_has_a_finite_deadline() {
+        let (mut peer, stream) = tokio::io::duplex(8);
+        peer.write_all(&[1]).await.unwrap();
+        let error = FrameReader::new(stream)
+            .read_encoded_length()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, IpcError::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+        );
+        drop(peer);
+    }
+
+    #[tokio::test]
+    async fn stalled_payload_releases_the_frame_owner() {
+        let (_peer, stream) = tokio::io::duplex(8);
+        let error = FrameReader::new(stream)
+            .read_encoded_payload(4)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, IpcError::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_writer_has_a_finite_deadline() {
+        let (stream, _peer) = tokio::io::duplex(1);
+        let frame = encode_frame(&7_u8).unwrap();
+        let error = FrameWriter::new(stream)
+            .write_encoded(&frame)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, IpcError::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+        );
+    }
+
     #[tokio::test]
     async fn prepared_encoding_matches_legacy_wire_and_decodes_after_transport_read() {
         let value = vec!["first".to_owned(), "second".to_owned()];
@@ -714,6 +862,7 @@ mod prompt_attempt_wire_tests {
     use super::*;
     #[test]
     fn previous_schema_is_rejected_before_decoding_changed_prompt_queue_shape() {
+        assert!(frame_payload_length(0xC000_0000 | 16).is_err());
         assert!(frame_payload_length(0xA800_0000 | 16).is_err());
         assert!(frame_payload_length(0xB800_0000 | 16).is_err());
         assert!(frame_payload_length(0xB000_0000 | 16).is_err());

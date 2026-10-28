@@ -95,7 +95,7 @@ An anchor is a named point in a kernel tab. Every tab has `main`, the block of k
 - `"after:main"` puts the block after the last kernel row. It is the form used above. Because the anchor is named, the position stays stable if the kernel later adds sections, since kernel anchors are never renamed or removed.
 - `"end"`, the default, also puts the block after the last kernel row. On Terminal the two placements give the same result. They differ on a tab with several named anchors. The Remote compaction tab exposes `behaviour`, `technique-per-agent`, `custom-prompt`, `input-shaping` and `model`, so `after:input-shaping` places a block between two kernel sections. The diagram below shows that case.
 
-`"before:main"` is refused at install. Kernel rows always come first, so a plugin cannot push the rows of a one-section tab down.
+`"before:main"` is refused at install with `manifest.settings-anchor`. Kernel rows always come first, so a plugin cannot push the rows of a one-section tab down.
 
 To use the second variant, change the placement line to `"placement": "end"`, or remove the line, since `end` is the default. The manifest is valid either way, and the Settings screen shows the same block on Terminal.
 
@@ -358,7 +358,7 @@ The kernel enforces these limits for sections in built-in tabs. Install refuses 
 
 These limits keep the Terminal tab readable. A plugin that needs more than two sections in one tab merges its rows into fewer sections. A plugin that needs more room gives itself a tab of its own, as tutorial 10 shows.
 
-A seventh plugin section on one tab is not drawn. The kernel drops the extra sections in ordering order and writes a load warning, so the plugin keeps running and the values stay stored. The render shows the warning as `ilium plugin list` prints it.
+A seventh plugin section on one tab is not drawn. The kernel drops the extra sections in ordering order and writes a load warning, so the plugin keeps running and the values stay stored. The render shows the warning as `ilium plugin logs` prints it.
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.clipboard-history
@@ -379,7 +379,7 @@ Build the package, then install it with the package command. The install checks 
 ilium plugin install ./example.clipboard-history.iliumpkg
 ```
 
-The review dialog lists the grant in plain words. The grant `settings.contribute:terminal` appears as one line, low risk, and the always-granted settings of the plugin's own values need no line. Approving the install lets the plugin draw sections in the Terminal tab and nothing else. It gives no read or write access to Terminal values.
+The review dialog lists the grant in plain words. The grant `settings.contribute:terminal` appears as one line, normal risk, and the always-granted settings of the plugin's own values need no line. Approving the install lets the plugin draw sections in the Terminal tab and nothing else. It gives no read or write access to Terminal values.
 
 <figure>
 <pre class="term">╭  ≡ ● · Install Clipboard history 1.3.0?────────────────────╮
@@ -468,7 +468,7 @@ To read a Terminal value, add `settings.read-kernel:terminal` to `capabilities.c
 **Rust**
 
 ```rust
-use ilium_plugin_sdk::host::settings;
+use ilium_plugin_sdk::host::kernel_settings;
 
 // Needs the grant settings.read-kernel:terminal. Read-only, secrets are redacted.
 fn scrollback_budget() -> Option<u64> {

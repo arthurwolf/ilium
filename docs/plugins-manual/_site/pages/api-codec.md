@@ -44,7 +44,7 @@ Names follow the SDK naming rules. In Rust the functions are snake_case and the 
 | `deflate` | `format`, `data`, `level: u8` | bytes | Compresses data. `level` runs from 0 to 9. Higher levels are slower and produce smaller output. |
 | `image-info` | `data` | `image-info` | Reads the width, height and frame count from the header. It does not decode any pixels. |
 | `decode-image` | `data`, `frame: u32`, `max-pixels: u32` | `decoded-image` | Decodes one frame, counted from 0, to 8-bit RGBA. Refused if the image has more pixels than `max-pixels`. |
-| `sha256` | `data` | 32 bytes | Returns the SHA-256 digest. It never fails. |
+| `sha256` | `data` | 32 bytes | Returns the SHA-256 digest. It fails with `invalid-argument` for input above 16 MiB. |
 | `rasterize-text` | `request: raster-text` | `decoded-image` | Draws text as white pixels. The alpha channel holds the ink tone: 0 is background, 255 is full ink. Text wraps at word boundaries to `max-width-px`. |
 
 Records:
@@ -55,7 +55,7 @@ Records:
 | `decoded-image` | `width`, `height` (`u32`), `rgba` (bytes) | Pixels in RGBA order, 4 bytes per pixel, so `rgba` is `width × height × 4` bytes. |
 | `raster-text` | `text` (string), `size-px` (`u16`), `max-width-px` (`u32`) | The text, its font size in pixels and the widest line allowed. |
 
-Each function is synchronous, so Rust and TypeScript code call it directly. Errors arrive as `PluginError`, see [errors](/pages/errors-and-limits/).
+Each function is synchronous, so Rust and TypeScript code call it directly. Errors arrive as `PluginError`, see [errors](/pages/reference-errors-and-limits/).
 
 The native crates behind the import are flate2, the image decoders, sha2 and cosmic-text. A plugin cannot choose another decoder.
 
@@ -300,5 +300,5 @@ The plugin supplies bytes and receives pixels. Every step between those two poin
 - [ui](/pages/api-ui/) for `write-surface`.
 - [background jobs](/pages/background-jobs/) for work near the input limit.
 - [always-granted capabilities](/pages/capability-always-granted/) for the grant rules.
-- [errors and limits](/pages/errors-and-limits/) for the error codes.
+- [errors and limits](/pages/reference-errors-and-limits/) for the error codes.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for project setup.

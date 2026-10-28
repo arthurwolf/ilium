@@ -486,7 +486,7 @@
 </tbody>
 </table>
 <h2 id="install">install</h2>
-<p><code>ilium plugin install &lt;source&gt; [--allow-unsigned] [--allow-downgrade] [--trust &lt;key_id&gt;] [--channel stable|beta|dev] [--yes] [--grant &lt;grant&gt;]... [--locked] [--dry-run] [--registry &lt;url&gt;] [--from-bundle &lt;dir&gt;]</code></p>
+<p><code>ilium plugin install &lt;source&gt; [--allow-unsigned] [--allow-downgrade] [--trust &lt;key_id&gt;] [--channel stable|beta|dev] [--yes] [--grant &lt;grant&gt;]... [--locked] [--dry-run] [--registry &lt;url&gt;] [--from-bundle &lt;dir&gt;] [--unskip]</code></p>
 <p>A source is a path to a <code>.iliumpkg</code> file, an <code>https://</code> URL, or a registry id with an optional range (<code>com.example.notes@^1.2</code>).</p>
 <table>
 <thead>
@@ -498,7 +498,7 @@
 <tbody>
 <tr>
 <td>[PKG-426]</td>
-<td><code>install</code> MUST classify the source in this order: an existing file path; a URL with the scheme <code>https</code>; a registry id. A URL with another scheme fails with <code>install.source-scheme</code>. An id with <code>--from-bundle</code> reads the bundle and never the network.</td>
+<td><code>install</code> MUST classify the source in this order: a URL (it has <code>://</code>): <code>https</code> is a download; an argument that is a file path (it contains <code>/</code> or <code>\</code>, starts with <code>.</code> or <code>~</code>, or ends in <code>.iliumpkg</code>), which fails with <code>usage.file-not-found</code> when nothing is at that path or the path is a directory; otherwise a registry id. A URL with the scheme <code>http</code> fails with <code>install.insecure-url</code>; a URL with any other scheme fails with <code>install.source-scheme</code>. An id with <code>--from-bundle</code> reads the bundle and never the network.</td>
 </tr>
 <tr>
 <td>[PKG-427]</td>
@@ -510,11 +510,11 @@
 </tr>
 <tr>
 <td>[PKG-429]</td>
-<td><code>--yes</code> skips the review dialog as in <a href="/pages/reference-plugin-cli/#install-uninstall-enable-disable">Plugin command line</a>. <code>--yes</code> MUST NOT trust a new key. Only <code>--trust &lt;key_id&gt;</code> does.</td>
+<td><code>--yes</code> skips the review dialog as in <a href="/pages/reference-plugin-cli/#install-uninstall-enable-disable">Plugin command line</a>. <code>--yes</code> does not confirm a new high-risk grant or a new <code>replaces</code> entry; only <code>--grant &lt;grant&gt;</code> for that exact grant does. <code>--yes</code> MUST NOT trust a new key. Only <code>--trust &lt;key_id&gt;</code> does.</td>
 </tr>
 <tr>
 <td>[PKG-430]</td>
-<td>With no attached client and no <code>--yes</code>, <code>install</code> MUST fail with <code>install.needs-input</code> and exit 1. It MUST NOT wait for input that cannot come.</td>
+<td>With no attached client and no <code>--yes</code>, <code>install</code> MUST fail with <code>install.review-required</code> and exit 1 (the missing decision is the grant review; <code>install.needs-input</code> stays for any other decision nobody can answer). It MUST NOT wait for input that cannot come.</td>
 </tr>
 </tbody>
 </table>
@@ -594,7 +594,7 @@
 </tr>
 <tr>
 <td><code>ilium plugin verify &lt;file or id&gt;</code></td>
-<td>Runs stages 1 to 8 on a package file or an installed package, and prints the tier.</td>
+<td>Runs stages 1 to 7 on a package file or an installed package, and prints the tier.</td>
 </tr>
 <tr>
 <td><code>ilium plugin lock</code></td>
@@ -661,7 +661,7 @@
 <tbody>
 <tr>
 <td>[PKG-438]</td>
-<td><code>registry add</code> MUST fail with <code>registry.root-key-missing</code> when <code>--root-key</code> is absent, and with <code>usage.invalid-value</code> for a URL whose scheme is not <code>https</code> (a <code>file://</code> folder is allowed for bundles and mirrors).</td>
+<td><code>registry add</code> MUST fail with <code>registry.root-key-missing</code> when <code>--root-key</code> is absent, with <code>registry.insecure-url</code> for a plain <code>http:</code> URL (PKG-371 allows <code>localhost</code> only when <code>allow_insecure_localhost = true</code>), and with <code>usage.invalid-value</code> for any other scheme that is not <code>https</code> (a <code>file://</code> folder is allowed for bundles and mirrors).</td>
 </tr>
 <tr>
 <td>[PKG-439]</td>
@@ -734,7 +734,7 @@
 </tr>
 <tr>
 <td>[PKG-445]</td>
-<td><code>trust</code> failures exit 1, except <code>trust.not-found</code> (5) and a declined prompt (7).</td>
+<td><code>trust</code> failures exit 1, except <code>trust.not-found</code> (5). A declined prompt (<code>trust.declined</code>) exits 1, as [PKG-424] says.</td>
 </tr>
 </tbody>
 </table>

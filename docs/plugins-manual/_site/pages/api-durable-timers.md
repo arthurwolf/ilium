@@ -6,7 +6,7 @@ Ordinary timers (see [clock and timers](/pages/api-clock-and-timers/)) live in m
 
 Both features live in the snapshot that the server keeps. They are always granted: a plugin needs no capability for its own durable timers or its own journal entries. Reading the journal entries of the host or of other plugins needs the `journal.read` grant.
 
-This page covers the durable timer, the journal and the input journal. The settings row state and meter calls that share section 6.33 of the spec (`set-row-state`, `set-item-states`, `set-choice-items`, `set-info-rich`, `set-meter`) belong to the settings pages (see [settings](/pages/api-settings/)).
+This page covers the durable timer, the journal and the input journal. The settings row state and meter calls (`set-row-state`, `set-item-states`, `set-choice-items`, `set-info-rich`, `set-meter`) belong to the settings pages (see [settings](/pages/api-settings/)).
 
 <figure>
 <svg viewBox="0 0 440 250" role="img" aria-label="Durable timer across a restart">
@@ -64,7 +64,7 @@ read:      func(pane: option<node-id>, since: epoch-ms, limit: u32) -> list<jour
 | `at` | `timers::at(epoch: u64, name: &str) -> Result<TimerId, PluginError>` | `timers.at(epoch: bigint, name: string): bigint` | Arms a durable timer that fires at `epoch`. The same `name` replaces an earlier timer of that name. |
 | `cancel-durable` | `timers::cancel_durable(name: &str)` | `timers.cancelDurable(name: string): void` | Removes the durable timer with that name. |
 | `log-event` | `journal::log_event(pane: Option<NodeId>, kind: &str, payload_json: &str) -> Result<(), PluginError>` | `journal.logEvent(pane: bigint \| undefined, kind: string, payloadJson: string): void` | Adds an entry to the journal, for a pane or with `pane` set to `none`. |
-| `read` | `journal::read(pane: Option<NodeId>, since: u64, limit: u32) -> Vec<JournalEntry>` | `journal.read(pane: bigint \| undefined, since: bigint, limit: number): JournalEntry[]` | Returns entries from `since` on, at most `limit`. Without `journal.read` these are the plugin's own entries. |
+| `read` | `journal::read(pane: Option<NodeId>, since: u64, limit: u32) -> Vec<JournalEntry>` | `journal.read(pane: bigint \| undefined, since: bigint, limit: number): JournalEntry[]` | Returns entries from `since` on, at most `limit`. A `limit` above 1,000 is clamped to 1,000 (the per-call read cap); page with `since`. Without `journal.read` these are the plugin's own entries. |
 
 `JournalEntry` is `JournalEntry { at: u64, pane: Option<NodeId>, source: String, kind: String, payload_json: String }` in Rust and `{ at: bigint; pane: bigint | undefined; source: string; kind: string; payloadJson: string }` in TypeScript.
 
@@ -286,8 +286,7 @@ The plugin log records what happened around a restart:
 | `at` | `invalid-argument` | `epoch` is in the past by more than 1 s. |
 | `at` | `quota-exceeded` | The plugin already holds `durable_timers` timers. |
 | `log-event` | `invalid-argument` | The payload is over 4 KiB. |
-| `log-event` | `quota-exceeded` | The `journal_entries` quota is full. |
-| `log-event` | `rate-limited` | Too many entries in a short time. |
+| `log-event` | `rate-limited` | More than 20 `log-event` calls per second per plugin (see the rate table in the [errors and limits reference](/pages/reference-errors-and-limits/)). When `journal_entries` is full the oldest entries are trimmed, with no error. |
 | `cancel-durable`, `read` | none | These functions return no error. |
 | journaled `send-input` | as for `send-input` | The `journal` field adds no error code of its own. |
 
@@ -299,7 +298,7 @@ The plugin log records what happened around a restart:
 | `journal_entries` (per pane, own entries) | 5,000 | 20,000 | 5,000 |
 | Journal payload | 4 KiB | 4 KiB | 4 KiB |
 
-`durable_timers` and `journal_entries` are requestable in the manifest `limits` up to the ceiling for the tier. Beyond `journal_entries`, the oldest entries are trimmed.
+`journal.read` returns at most 1,000 entries per call (a larger `limit` is clamped). `durable_timers` and `journal_entries` are requestable in the manifest `limits` up to the ceiling for the tier. Beyond `journal_entries`, the oldest entries are trimmed.
 
 ### Edge cases
 
@@ -321,6 +320,6 @@ The plugin log records what happened around a restart:
 - [Events](/pages/api-events/) for the delivery policy of `durable-timer-fired` and `input-uncertain`.
 - [Lifecycle](/pages/lifecycle/) for the `durable-timer` activation trigger.
 - [storage](/pages/api-storage/) for keeping the job's pane and text across restarts.
-- [Errors and limits](/pages/errors-and-limits/) for the full code list.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full code list.
 
 Interface version: `ilium:host/timers` and `ilium:host/journal`, version 0.1.

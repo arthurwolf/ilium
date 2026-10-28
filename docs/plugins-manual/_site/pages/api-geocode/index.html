@@ -438,7 +438,7 @@ take-places: func(request: request-id) -&gt; option&lt;list&lt;geo-place&gt;&gt;
 </tr>
 </tbody>
 </table>
-<p>Results are cached for 24 hours by query text. Up to 8 places are returned. An empty list is a valid answer, not an error. Rate: 1 request per second per plugin.</p>
+<p>Results are cached for 24 hours by query text. Up to 8 places are returned. An empty list is a valid answer, not an error. <code>take-places</code> has no error channel: every failure in the Errors table below (except the synchronous ones <code>not-permitted</code>, <code>invalid-argument</code> and <code>rate-limited</code> returned by <code>search</code> or <code>reverse</code> themselves) arrives in the <code>request-completed</code> event of that request as an error outcome, and <code>take-places</code> then returns <code>none</code> (<code>None</code>, <code>undefined</code>). <code>some</code> with an empty list means the provider answered with no place. A second call after the first take also returns <code>none</code>. Rate: 1 request per second per plugin.</p>
 <h3 id="the-picker-and-the-row">The picker and the row</h3>
 <p>The <code>location-picker</code> widget draws the world as a Braille map (each cell holds a 2 by 4 dot pattern) and returns a <code>geo(geo-point)</code> value when the user clicks or searches. A <code>location</code> settings row embeds the same picker in a dialog and stores the point; the plugin may show it without ever seeing the coordinates as text.</p>
 <figure>
@@ -510,7 +510,7 @@ export const onCompleted = (request: bigint): string[] =&gt; (takePlaces(request
 </tr>
 <tr>
 <td>Provider failure, or 10 s without answer</td>
-<td><code>network</code>, <code>timed-out</code></td>
+<td><code>network</code>, <code>timed-out</code>, delivered in <code>request-completed</code> (not by <code>take-places</code>)</td>
 </tr>
 </tbody>
 </table>

@@ -293,7 +293,7 @@ When the user installs the plugin, the review dialog shows the video grant as on
 │ com.example.media 0.1.0 by Example Ltd                                     │
 │                                                                            │
 │ <span class="t-hi">Client side</span>                                                                │
-│ [x] Plays video <span class="t-dim">…………………………………………………………………………………………………………………………</span> media.video │
+│ [x] Decode video files <span class="t-dim">………………………………………………………………………………………………………</span> media.video │
 │                                                                            │
 │ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
 ╰────────────────────────────────────────────────────────────────────────────╯
@@ -341,4 +341,4 @@ The native video scene becomes the bundled scene plugin `ilium.video` in Phase 4
 - [fs.read](/pages/capability-fs-read/) for the read grant that `open-video` needs.
 - [audio](/pages/capability-audio/) for the audio half of a media scene.
 - [Media and embedded widgets](/pages/widgets-media-and-embedded/) for the `surface` widget.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the limit model.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the limit model.

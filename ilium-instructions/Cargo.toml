@@ -1,0 +1,18 @@
+[package]
+name = "ilium-instructions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
+ilium-prompts = { version = "0.1.1", path = "../ilium-prompts" }
+directories = "6.0.0"
+regex = "1.12.3"
+serde_json = "1.0.149"
+uuid = { version = "1.23.5", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

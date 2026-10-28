@@ -16,7 +16,7 @@ The Terminal plugin (`ilium.core.terminal`, side both) owns terminal panes as pl
 
 ### See it
 
-<figure><img src="/assets/demos/05-screen-transfer.gif" alt="The screen of one terminal pane is pasted into another pane" loading="lazy"><figcaption>Screen transfer. The visible screen and history of the source pane arrive in the target pane as one paste.</figcaption></figure>
+<figure><img src="/assets/demos/05-screen-transfer.gif" alt="Ilium transfers a complete visible report to the local receiver in the terminal on the right" loading="lazy"><figcaption>Screen transfer sends the visible report to the terminal on the right as one bracketed paste. Both terminals run local fixtures; the receiver verifies the bytes.</figcaption></figure>
 
 ### What the user sees
 
@@ -60,7 +60,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     ],
     "client": [
       "terminal.read-screen", "editor.edit",
-      "commands.invoke:ilium.core.editor/*", "ui.panels"
+      "commands.invoke:ilium.core.editor/*", "ui.panels", "settings.write-kernel:terminal"
     ]
   },
   "contributes": {
@@ -82,7 +82,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "name": "Terminal",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and their signals, screen reads, scrollback history, typed and pasted input, clickable links, pane titles from the terminal and scr",
+  "description": "The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and signals, screen reads, scrollback history, input, clickable links, pane titles and screen transfer.",
   "license": "MIT",
   "server": {
     "entry": "server.wasm",
@@ -111,7 +111,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "event:terminal-screen-changed",
+    "event:screen-changed",
     "startup"
   ],
   "contributes": {
@@ -215,7 +215,7 @@ OSC titles rename the pane unless the user named it. On `pane-title-changed` wit
 
 ```rust
 use ilium_plugin_sdk::prelude::*;
-use ilium_plugin_sdk::types::tree::TitleOrigin;
+use ilium_plugin_sdk::types::tree::{TitleOrigin, TitleSource};
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
 
 fn on_title(event: Event) -> Option<Submission> {
@@ -225,6 +225,7 @@ fn on_title(event: Event) -> Option<Submission> {
         Intent::RenameNode(RenameNodeSpec {
             node: change.node,
             title: change.title,
+            source: TitleSource::Inferred,
             expected_revision: None,
         }),
         format!("osc-title-{}", change.node),
@@ -273,6 +274,9 @@ fn transfer(source: NodeId, target: NodeId) -> Option<Submission> {
             stages: vec![],
             raw: None,
             mouse: None,
+            if_current: None,
+            lock_user_input: false,
+            journal: false,
         }),
         format!("transfer-{source}-{target}-{}", screen.revision),
     ))
@@ -446,11 +450,11 @@ Other plugins change what `ilium.core.terminal` does through the points below. T
 
 **Topics** (list under `contributes.topics.subscribes`):
 
-- `ilium.core.terminal/screen-changed`: { pane, rows } when visible rows change, at most 10 per second
+- `ilium.core.terminal/screen-changed`: { pane, first-row, last-row, revision } when visible rows change, at most 10 per second
 
 Link detectors from `contributes.link_detectors` feed the `link-actions` point.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.terminal"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.terminal"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds `Open ticket` to the right-click menu on a link of kind `ticket`
 

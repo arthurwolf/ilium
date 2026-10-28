@@ -426,7 +426,7 @@
 </tr>
 </tbody>
 </table>
-<p>The kernel calls <code>render</code> when the view first opens, after <code>ui.invalidate</code> for that view, and when the view's area changes. It never runs on every frame. Every change of the view's area triggers one render with the new area, coalesced to at most one per 16 ms; until it returns, the host lays out the previous tree in the new area through the same constraint solver. <code>area</code> gives the <code>columns</code> and <code>rows</code> the view may use. The host clips every widget to that area. <a href="/pages/layout/">Layout constraints</a> shows how a plugin uses <code>area</code>.</p>
+<p>The kernel calls <code>render</code> when the view first opens, after <code>ui.invalidate</code> for that view, when the view's area changes, and after a theme or font change. It never runs on every frame. Every change of the view's area triggers one render with the new area, coalesced to at most one per 16 ms; until it returns, the host lays out the previous tree in the new area through the same constraint solver. <code>area</code> gives the <code>columns</code> and <code>rows</code> the view may use. The host clips every widget to that area. <a href="/pages/layout/">Layout constraints</a> shows how a plugin uses <code>area</code>.</p>
 <h3 id="view-targets">View targets</h3>
 <table>
 <thead>
@@ -482,7 +482,7 @@ record ui-tree { version: u32, nodes: list&lt;ui-node&gt;, root: u32 }
 <li>Each <code>key</code> must be unique across the whole view, not only among siblings. A duplicate key anywhere in one <code>ui-tree</code> traps with <code>ui.duplicate-key</code>. The host matches nodes by key across the whole view, so a keyed node that moves to another parent keeps its host-owned state.</li>
 <li>The depth is at most 32, and the root is depth 1. A node at depth 33 traps with <code>ui.too-deep</code>.</li>
 <li>A <code>layout</code> needs one child per constraint, and a <code>ratio</code> with denominator 0 is invalid (<code>ui.invalid-tree</code>).</li>
-<li><code>views.render</code> returns a <code>ui-tree</code>, not a <code>result</code>, so it cannot return <code>invalid-argument</code>. There is one outcome for every invalid tree: the host keeps the previous tree (marked stale), logs one error, and the instance traps with a <code>ui.*</code> code. The trap counts as one failure under the restart rule (see <a href="/pages/errors-and-limits/">Errors and limits</a>). The codes are <code>ui.invalid-tree</code> (structure, duplicate item ids, a prop out of range, more than 256 check-list items, more items than <code>max-items</code>, a bad validation regex), <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code> (more than 4,096 nodes or 1 MiB) and <code>ui.widget-not-allowed</code> (a <code>menu</code>, <code>list-editor</code> or other input widget in a settings page). A render over its deadline traps with <code>ui.render-timeout</code>.</li>
+<li><code>views.render</code> returns a <code>ui-tree</code>, not a <code>result</code>, so it cannot return <code>invalid-argument</code>. There is one outcome for every invalid tree: the host keeps the previous tree (marked stale), logs one error, and the instance traps with <code>trap.invalid-ui-tree</code>, whose logged detail reason is a <code>ui.*</code> code. The trap counts as one failure under the restart rule (see <a href="/pages/reference-errors-and-limits/">Errors and limits</a>). The codes are <code>ui.invalid-tree</code> (structure, a prop out of range, more than 256 check-list items, more items than <code>max-items</code>, a bad validation regex), <code>ui.duplicate-key</code> (two nodes with the same key, or two items with the same item <code>id</code> in one widget), <code>ui.too-deep</code>, <code>ui.too-large</code> (more than 4,096 nodes or 1 MiB) and <code>ui.widget-not-allowed</code> (a <code>menu</code>, <code>list-editor</code> or other input widget in a settings page). A render over its deadline traps with <code>ui.render-timeout</code>.</li>
 </ul>
 <p>The Rust and TypeScript builders fill <code>version</code>, the widget defaults and the child indices. A wrong layout stops the render before the tree leaves the plugin, and the message names the layout key.</p>
 <table>
@@ -652,8 +652,14 @@ const exportButton = button('Export', {
 </tr>
 <tr>
 <td>Text</td>
-<td><code>leader-row</code>, <code>key-hints</code>, <code>diff-view</code></td>
+<td><code>leader-row</code>, <code>key-hints</code></td>
 <td>nothing; <code>key-hints</code> runs its command on the host</td>
+<td><a href="/pages/widgets-text/">Text</a></td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>diff-view</code></td>
+<td><code>selected</code>, <code>activated</code> with <code>index(u32)</code> (hunk or line)</td>
 <td><a href="/pages/widgets-text/">Text</a></td>
 </tr>
 <tr>
@@ -676,8 +682,14 @@ const exportButton = button('Export', {
 </tr>
 <tr>
 <td>Input</td>
-<td><code>button</code>, <code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text-input</code>, <code>text-area</code>, <code>schema-form</code>, <code>key-capture</code>, <code>color-picker</code>, <code>path-field</code>, <code>location-picker</code></td>
+<td><code>button</code>, <code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text-input</code>, <code>text-area</code>, <code>key-capture</code>, <code>color-picker</code>, <code>path-field</code>, <code>location-picker</code></td>
 <td><code>activated</code>, <code>changed</code>, <code>submitted</code>, <code>filter-changed</code></td>
+<td><a href="/pages/widgets-input/">Input</a></td>
+</tr>
+<tr>
+<td>Input</td>
+<td><code>schema-form</code></td>
+<td>nothing; the owning plugin receives <code>settings-changed</code></td>
 <td><a href="/pages/widgets-input/">Input</a></td>
 </tr>
 <tr>
@@ -846,7 +858,7 @@ ui.setWidgetState(view, 'views', { tag: 'tab', val: 1 });
 </tbody>
 </table>
 <p>The host coalesces <code>scrolled</code>, <code>pointer</code> and <code>drag-over</code>. The others are never dropped.</p>
-<p>Typing never reaches the plugin key by key. A <code>text-input</code> sends <code>changed</code> after 600 ms. A <code>text-area</code> with <code>debounce-ms</code> unset waits 600 ms while its current text is at most 10,000 bytes (UTF-8) and 1,000 ms above that, re-evaluated at each keystroke; an explicit <code>debounce-ms</code> (0 to 2,000) always wins. 64 KiB stays only as the <code>text-input</code> <code>max-length</code> cap. A <code>text-input</code> with <code>submit-on-enter</code> sends <code>submitted</code> on Enter. A <code>toggle</code> and a <code>choice</code> send <code>changed</code> at once. <code>filter-changed</code> is debounced by 150 ms.</p>
+<p>Typing never reaches the plugin key by key. A <code>text-input</code> sends <code>changed</code> after 600 ms. A <code>text-area</code> with <code>debounce-ms</code> unset waits 600 ms while its current text is at most 10,000 bytes (UTF-8) and 1,000 ms above that, re-evaluated at each keystroke; an explicit <code>debounce-ms</code> (0 to 2,000) always wins. This rule covers <code>text-area</code> widgets in plugin views; a text-area row of a settings tab is written to the config 1 s after the last keystroke whatever its size, per <a href="/pages/reference-settings-schema/#validation-and-saving">validation and saving</a>. 64 KiB stays only as the <code>text-input</code> <code>max-length</code> cap. A <code>text-input</code> with <code>submit-on-enter</code> sends <code>submitted</code> on Enter. A <code>toggle</code> and a <code>choice</code> send <code>changed</code> at once. <code>filter-changed</code> is debounced by 150 ms.</p>
 <p>The handler changes its own state and calls <code>ui.invalidate</code> for the view. The next <code>render</code> reads the new state.</p>
 <h3 id="context-requests">Context requests</h3>
 <p><code>context-requested</code> is sent for a right click on any node that has a key, and for Shift+F10 or the Menu key on the focused node. The node does not need <code>pointer-events</code>. A mouse trigger carries <code>pointer</code> data with the cell relative to the node, button <code>right</code> and <code>clicks</code> 1. A keyboard trigger carries <code>pointer</code> data with column 0, row 0, button <code>none</code> and <code>clicks</code> 0. In a collection the item under the pointer (or the selected item, for the keyboard) is selected first, and the <code>selected</code> event is delivered before <code>context-requested</code> in the same batch.</p>
@@ -1201,7 +1213,7 @@ const list = listWidget(items, { key: 'list', tabIndex: 3 });
 </code></pre>
 <h2 id="drag-and-drop">Drag and drop</h2>
 <p>A <code>draggable</code> node dropped on a <code>drop-target</code> node produces one <code>dropped</code> action. Its value is <code>drop(drop-value)</code> (a record with <code>source-key</code>, <code>target-key</code> and <code>index</code>), with <code>index</code> as the insertion position. The event <code>key</code> is the target key. The host does not move data; the plugin moves its own.</p>
-<p>While a drag hovers a drop target, the host sends <code>drag-over</code> with <code>drag-over-value { source-key, target-key, index, accept }</code> once each time the target changes. The host decides the position from the pointer row inside the target's area, and <code>accept</code> carries the result: <code>before</code>, <code>after</code>, <code>inside</code> or <code>none</code>. For a <code>tree-item</code> with <code>expandable</code> set, the top third is <code>before</code>, the middle third is <code>inside</code> and the bottom third is <code>after</code>, with rows rounded down. For any other target, the top half is <code>before</code> and the bottom half is <code>after</code>. A target with <code>drop-target</code> unset accepts nothing. A drop sends <code>dropped</code> to the target key with the position in the <code>drop</code> value, and for a <code>tree-list</code> the source item id as <code>text</code>. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.</p>
+<p>While a drag hovers a drop target, the host sends <code>drag-over</code> with <code>drag-over-value { source-key, target-key, index, accept }</code> once each time the target changes. The host decides the position from the pointer row inside the target's area, and <code>accept</code> carries the result: <code>before</code>, <code>after</code>, <code>inside</code> or <code>none</code>. For a <code>tree-item</code> with <code>expandable</code> set, the top third is <code>before</code>, the middle third is <code>inside</code> and the bottom third is <code>after</code>, with rows rounded down. For any other target, the top half is <code>before</code> and the bottom half is <code>after</code>. A target with <code>drop-target</code> unset accepts nothing. A drop sends <code>dropped</code> to the target key with the position in the <code>drop</code> value, and for a <code>tree-list</code> the target item id as <code>text</code>. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.</p>
 <h2 id="settings-views">Settings views</h2>
 <p>A <code>settings-page</code> tree uses a subset of the widgets. The subset is: <code>block</code>, <code>paragraph</code>, <code>tabs</code>, <code>separator</code>, <code>leader-row</code>, <code>%list</code>, <code>table</code>, <code>button</code> and <code>schema-form</code>, and also <code>layout</code>, <code>split</code>, <code>scroll-view</code>, <code>markdown</code>, <code>key-hints</code>, <code>diff-view</code>, <code>tree-list</code>, <code>check-list</code>, <code>gauge</code>, <code>line-gauge</code>, <code>sparkline</code>, <code>bar-chart</code>, <code>chart</code>, <code>canvas</code>, <code>progress-row</code>, <code>meter</code>, <code>minimap</code>, <code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code>, <code>image</code>, <code>surface</code>, <code>location-picker</code> and <code>code-view</code> with <code>read-only: true</code>.</p>
 <p>These trap the instance in a settings page with <code>ui.widget-not-allowed</code>, and the host keeps the previous tree and logs one error: <code>popup</code>, <code>dialog</code>, <code>menu</code>, <code>video</code>, <code>terminal-view</code>, an editable <code>code-view</code>, and the input widgets other than <code>button</code>, <code>schema-form</code> and <code>location-picker</code>. Values are still edited through <code>schema-form</code>, and the host validates and saves them.</p>
@@ -1470,8 +1482,8 @@ export const { lifecycle, handler, views } = definePlugin({
 <ul>
 <li><strong>Escape</strong> is reserved by the host and follows the order in <a href="#escape">Escape</a>. A modal popup cannot refuse the close, and the plugin receives <code>closed</code>.</li>
 <li><strong>Popups</strong> draw only while an <code>open-popup</code> call has them open. A fifth open popup in one view fails with <code>quota-exceeded</code>.</li>
-<li><strong>Traps.</strong> A duplicate key, a bad child index, a broken layout, a tree over a limit or a widget outside the allowed subset traps the instance with a <code>ui.*</code> code (see <a href="#the-ui-tree">The ui-tree</a>).</li>
-<li><strong>Permissions.</strong> A <code>code-view</code> on a buffer the plugin did not create needs <code>editor.read</code>. A <code>terminal-view</code> needs <code>terminal.read-screen</code>. Without the grant the widget draws an empty frame with the text <code>not permitted</code>.</li>
+<li><strong>Traps.</strong> A duplicate key, a bad child index, a broken layout, a tree over a limit or a widget outside the allowed subset traps the instance with <code>trap.invalid-ui-tree</code> (detail reason a <code>ui.*</code> code) (see <a href="#the-ui-tree">The ui-tree</a>).</li>
+<li><strong>Permissions.</strong> A <code>code-view</code> on a buffer the plugin did not create needs <code>editor.read</code>. A <code>terminal-view</code> needs <code>terminal.read-screen</code>, and an <code>interactive</code> one also needs <code>terminal.raw-input</code>. Without the grant the widget draws an empty frame with the text <code>not permitted</code>.</li>
 <li><strong>Pointer without focusable.</strong> A node with <code>pointer-events</code> but not <code>focusable</code> sends no pointer actions.</li>
 <li><strong>Render-time caps.</strong> <code>views.render</code> has no result type, so a widget outside the allowed subset, or a <code>check-list</code> or <code>list-editor</code> over its item cap, cannot return <code>invalid-argument</code>. The host traps the instance (one failure under the restart rule) with <code>ui.invalid-tree</code> or <code>ui.widget-not-allowed</code> and logs the widget key [WID-014].</li>
 <li><strong>Tooltip length.</strong> A tooltip is limited to 200 Unicode scalar values. A longer text is cut at 199 characters and ends with <code>…</code>; it is not an error.</li>

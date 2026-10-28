@@ -494,7 +494,7 @@ Other plugins change what `ilium.core.inference` does through the points below. 
 
 Providers implemented by plugins use the `inference-provider` export and `inference.provide`.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.inference"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.inference"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Replaces home-directory paths in outgoing text with `~`
 
@@ -530,10 +530,12 @@ impl HookHandler for Plugin {
         match call.extension.as_str() {
             "redact_paths" => {
                 // call.payload_json holds: purpose, provider, model, messages_length, text
-                let _payload: serde_json::Value = match serde_json::from_str(&call.payload_json) {
+                let mut payload: serde_json::Value = match serde_json::from_str(&call.payload_json) {
                     Ok(value) => value,
                     Err(_) => return HookReply::Pass,
                 };
+                // Change the fields the hook owns, for example payload["text"].
+                let new_payload_json = payload.to_string();
                 HookReply::Replace(new_payload_json)
             }
             _ => HookReply::Pass,
@@ -550,7 +552,8 @@ definePlugin({
     if (call.extension !== 'redact_paths') return { tag: 'pass' };
     // call.payloadJson holds: purpose, provider, model, messages_length, text
     const payload = JSON.parse(call.payloadJson);
-    void payload;
+    // Change the fields the hook owns, for example payload.text.
+    const newPayloadJson = JSON.stringify(payload);
     return { tag: 'replace', val: newPayloadJson };
   },
 });

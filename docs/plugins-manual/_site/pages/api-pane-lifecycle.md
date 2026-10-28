@@ -87,7 +87,7 @@ use ilium_plugin_sdk::types::intents::{FreezePaneSpec, Intent, UnfreezePaneSpec}
 fn pause_until_reset(pane: NodeId, reset_at: EpochMs) -> Result<Vec<Submission>, PluginError> {
     // A durable timer survives a restart of Ilium; its handler later submits the unfreeze.
     timers::at(reset_at, &format!("unfreeze-{pane}"))?;
-    // The key makes a retry after a restart harmless: the host reports the same outcome.
+    // The key makes a repeat within 10 minutes a harmless `duplicate`. The key table is in memory, so a restart clears it; a freeze does not survive a restart either, so check the pane state before submitting again.
     Ok(vec![Submission::keyed(Intent::FreezePane(FreezePaneSpec { pane }), format!("freeze-{pane}"))])
 }
 
@@ -302,7 +302,7 @@ The token comes from the outcome `ok-node` in `request-completed`. A plugin that
 
 ### Titles, icons, bookmarks and attention
 
-- `rename-node` gains two optional fields: `source` (`plugin` or `inferred`) and `expected-revision`. A stale revision is `refused(conflict)`. A title with source `inferred` never replaces a title the user typed.
+- `rename-node` gains two fields: `source` (`plugin` or `inferred`, required) and `expected-revision` (optional). A stale revision is `refused(conflict)`. A title with source `inferred` never replaces a title the user typed.
 - `set-inferred-icon { node, icon, source }` sets an icon from a catalogue id or a glyph. A manual icon wins and the outcome is `refused(conflict)`.
 - `set-bookmarked { node, bookmarked }` sets the bookmark star `★` on a node.
 - `mark-attention { node, reason }` marks a node as needing attention, with a reason of at most 80 characters. The host owns what attention looks like (the done prefix, the sound). `ack-attention { node }` clears the plugin's mark. Changes arrive as `attention-changed { node, marked, reason, by }`.
@@ -310,11 +310,13 @@ The token comes from the outcome `ok-node` in `request-completed`. A plugin that
 **Rust**
 
 ```rust
+use ilium_plugin_sdk::types::tree::TitleSource;
+
 fn name_from_content(node: NodeId, revision: u64, inferred: &str) -> Submission {
     Submission::new(Intent::RenameNode(RenameNodeSpec {
         node,
         title: inferred.into(),
-        source: Some(TitleOrigin::Inferred),
+        source: TitleSource::Inferred,
         expected_revision: Some(revision), // from NodeView.revision
     }))
 }
@@ -342,7 +344,7 @@ export function needsYou(node: bigint, reason: string): Submission {
 
 ### Open a link in the desktop browser
 
-`open-external` takes a target: `url(string)`, `file(fs-path)` or `settings(string)` for an `ilium://settings/...` address. Only `http`, `https` and `mailto` schemes are allowed for URLs. The host checks its allowlist and may ask the user to confirm. The outcome is `ok` after the desktop handler started, or `refused(not-permitted)` when the user declines.
+`open-external` takes a target: `url(string)`, `file(fs-path)` or `settings(string)` for an `ilium://settings/...` address. Only `http`, `https` and `mailto` schemes are allowed for URLs. The host checks the scheme list and asks the user once per target origin and plugin; there is no other allowlist. The outcome is `ok` after the desktop handler started, or `refused(not-permitted)` when the user declines. A `file` target must be an absolute path of an existing file or folder, else `refused(invalid-argument)`. A `settings` target must start with `ilium://settings/` and name an existing settings page, else `refused(invalid-argument)`.
 
 **Rust**
 
@@ -380,6 +382,9 @@ export function openStatusPage(): Submission {
 |---|---|
 | `freeze-pane` on Windows | `refused(unsupported)` |
 | `unfreeze-pane` on a pane that is not frozen | `refused(conflict)` |
+| `freeze-pane` on a pane that is exited, restarting or already frozen | `refused(conflict)` |
+| `create-split` with fewer than 2 or more than 4 panes | `refused(invalid-argument)` |
+| `open-external` with a `file` target that is not an absolute existing path, or a `settings` target outside `ilium://settings/` | `refused(invalid-argument)` |
 | `terminate-pane-process` with `grace-ms` above 10,000 | `refused(invalid-argument)` |
 | `resize-pane` the layout cannot give | `refused(conflict)`, message names the neighbour |
 | Intent to a restored pane whose process has not started | `refused(pane-not-ready)` |

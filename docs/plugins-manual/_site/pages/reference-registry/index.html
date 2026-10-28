@@ -798,7 +798,7 @@
 <tbody>
 <tr>
 <td>[PKG-385]</td>
-<td>A registry publisher id is one of: a reverse-DNS name of a domain that the publisher controls (<code>com.example</code>), or a registry account name written <code>user.&lt;name&gt;</code>, where <code>&lt;name&gt;</code> is 3 to 32 characters of <code>[a-z0-9-]</code>.</td>
+<td>A registry publisher id is one of: a reverse-DNS name of a domain that the publisher controls (<code>com.example</code>), or a registry account name written <code>user.&lt;name&gt;</code>, where <code>&lt;name&gt;</code> is 3 to 32 characters and matches the segment grammar of PKG-217 (<code>[a-z][a-z0-9]*(-[a-z0-9]+)*</code>).</td>
 </tr>
 <tr>
 <td>[PKG-386]</td>
@@ -824,6 +824,18 @@
 <td>[PKG-391]</td>
 <td><strong>Disputes.</strong> A claim dispute is decided by the registry operator under the published policy. An id is never reassigned to a different publisher when its versions are still installed by users, except by a takedown and a clearly marked new publisher.</td>
 </tr>
+<tr>
+<td>[PKG-655]</td>
+<td><strong>Dormancy.</strong> A namespace is <strong>dormant</strong> when no version has been published under it for 730 days. The registry MUST compute dormancy from publish dates in the metadata, never from a clock the publisher controls. A namespace with a published, unrevoked <code>maintained: true</code> statement is not dormant until that statement is older than 730 days.</td>
+</tr>
+<tr>
+<td>[PKG-656]</td>
+<td><strong>Reclaim.</strong> The registry MUST NOT reassign a dormant namespace to another publisher unless all of these hold: the namespace is dormant as defined in PKG-655 (no publish for 730 days and no install report for 365 days); the registry sent a notice to the contact address in the last signed metadata and published it on the namespace page; 90 days passed after that notice with no reply or publish from the owner; and no version of the namespace is installed by users according to [PKG-391]. Otherwise the namespace stays with its owner. A reclaim MUST be recorded in the plugin metadata as <code>reclaimed_from</code>, and the new owner MUST publish under a new key. Refusal code: <code>registry.namespace-not-dormant</code>.</td>
+</tr>
+<tr>
+<td>[PKG-657]</td>
+<td><strong>User notice.</strong> When a plugin's namespace becomes dormant, the client MUST show the notice <code>dormant namespace</code> in the plugin detail page and in <code>ilium plugin list</code> output, with the date of the last publish. The notice MUST NOT block use, update or removal. A client MUST warn the user before an update that follows a reclaim, naming the old and the new publisher id.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="publishing">Publishing</h2>
@@ -842,7 +854,7 @@
 </tr>
 <tr>
 <td>[PKG-393]</td>
-<td>The server runs every install stage 1 to 6 and the signature check (stage 7) on the upload, and a policy check. It refuses the publish with the same codes as the client would, plus the registry codes.</td>
+<td>The server runs install stages 1 to 7 on the upload, including the signature check (stage 4) and key trust (stage 7), and a policy check. It refuses the publish with the same codes as the client would, plus the registry codes.</td>
 </tr>
 <tr>
 <td>[PKG-394]</td>
@@ -886,6 +898,26 @@
 <tr>
 <td>[PKG-401]</td>
 <td><strong>Review levels.</strong> Level A: automated checks only (all package checks, a scan for known-bad hashes, the confusable check). Level B: a human review is also required when the package requests any high-risk grant (<code>process.run</code>, <code>fs.write</code> outside the plugin scope, <code>http</code> with <code>*</code>, <code>agent.control</code>, <code>commands.invoke:*</code>) or <code>replaces</code>, or when it is the first publish of a publisher id. A registry MUST state which level applies to which version on the plugin page.</td>
+</tr>
+<tr>
+<td>[PKG-680]</td>
+<td><strong>What level B requires.</strong> A version is at level B only when all of these hold: (a) a review record exists for that version with the reviewer id, the review time and the SHA-256 of the package; (b) the package contains <code>sbom.json</code> of at most 4 MiB (PKG-502); (c) the manifest <code>license</code> is a valid SPDX expression (PKG-019); (d) the package contains a <code>LICENSE</code> or <code>NOTICE</code> file. A version that lacks any of (a) to (d) is at level A, whatever else the operator claims.</td>
+</tr>
+<tr>
+<td>[PKG-681]</td>
+<td><strong>Publish refusal.</strong> When a registry requires level B for the package (PKG-401), a publish without (b), (c) or (d) of PKG-680 is refused before review with <code>registry.policy</code> and the detail <code>sbom-missing</code>, <code>license-invalid</code> or <code>license-notice-missing</code>. A publish that meets (b) to (d) is queued for review and is shown at level A until (a) holds.</td>
+</tr>
+<tr>
+<td>[PKG-682]</td>
+<td><strong>Level A stays open.</strong> At level A the SBOM and the licence notice are optional. A version published without them is accepted and the plugin page states <code>No SBOM</code> or <code>No licence notice</code>. It never carries the level B badge.</td>
+</tr>
+<tr>
+<td>[PKG-683]</td>
+<td><strong>Badge is derived, per version.</strong> The level B badge is computed from the review record of that exact version and package hash. A new version, a re-upload with another hash or a withdrawn review record returns the version to level A. A level is never inherited from an earlier version.</td>
+</tr>
+<tr>
+<td>[PKG-684]</td>
+<td><strong>Level in the index.</strong> Every version entry of <code>index.json</code> carries <code>review_level</code> (<code>"A"</code> or <code>"B"</code>), <code>sbom</code> (boolean) and <code>license_notice</code> (boolean). A client MUST show the level B badge only when <code>review_level</code> is <code>"B"</code> and <code>sbom</code> and <code>license_notice</code> are both <code>true</code>; with a missing field it shows level A.</td>
 </tr>
 <tr>
 <td>[PKG-402]</td>

@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use ilium_core::NodeId;
+use ilium_core::{NodeId, Tree};
 use ilium_ipc::{RecapTrigger, ServerEvent};
 
 use crate::pane::PaneResource;
@@ -106,10 +106,10 @@ fn updated_event(recap: &PersistedRecap, trigger: RecapTrigger) -> ServerEvent {
     }
 }
 
-/// Events that bring a newly attached client up to date. A stored recap whose
-/// pane no longer exists is skipped; clients check the session themselves.
-pub(crate) async fn replay_events(state: &ServerState) -> Vec<ServerEvent> {
-    let tree = state.tree.read().await;
+/// Events for the exact tree already captured by the attach seed. Never
+/// reacquire the source tree here: a queued writer could make a nested read
+/// wait for the outer read guard that the caller still owns.
+pub(crate) async fn replay_events(state: &ServerState, tree: &Tree) -> Vec<ServerEvent> {
     let recaps = state.recaps.read().await;
     let mut stored: Vec<&PersistedRecap> = recaps
         .values()

@@ -75,6 +75,15 @@ const BUILT_IN_PRICES: &[(&str, ModelPrice)] = &[
     ("gpt-5.6-sol", ModelPrice::new(4.0, 20.0, 0.40, 0.0)),
     ("gpt-5.6-terra", ModelPrice::new(2.0, 12.0, 0.20, 0.0)),
     ("gpt-5.6-luna", ModelPrice::new(0.20, 1.20, 0.02, 0.0)),
+    // Codex transcripts report model/token totals but not a dollar total.
+    // These public API-list-price estimates ensure they remain comparable to
+    // Claude by default; `[cost.prices]` always takes precedence.
+    ("gpt-5.3-codex", ModelPrice::new(1.75, 14.0, 0.175, 0.0)),
+    ("gpt-5.2-codex", ModelPrice::new(1.75, 14.0, 0.175, 0.0)),
+    ("gpt-5.1-codex-max", ModelPrice::new(1.25, 10.0, 0.125, 0.0)),
+    ("gpt-5.1-codex-mini", ModelPrice::new(0.25, 2.0, 0.025, 0.0)),
+    ("gpt-5.1-codex", ModelPrice::new(1.25, 10.0, 0.125, 0.0)),
+    ("gpt-5-codex", ModelPrice::new(1.25, 10.0, 0.125, 0.0)),
 ];
 
 /// Built-in prices plus the user's overrides.
@@ -641,6 +650,31 @@ mod tests {
         );
         assert!(table.lookup("gpt-reserve").is_none());
         assert!(table.lookup("unknown").is_none());
+    }
+
+    #[test]
+    fn built_in_codex_models_have_estimated_prices_without_an_override() {
+        let table = PriceTable::default();
+        for model in [
+            "gpt-5.3-codex",
+            "gpt-5.2-codex",
+            "gpt-5.1-codex",
+            "gpt-5.1-codex-mini",
+            "gpt-5-codex",
+        ] {
+            assert!(
+                table.lookup(model).is_some(),
+                "{model} should receive a default Codex estimate"
+            );
+        }
+        assert_eq!(
+            table.lookup("gpt-5.3-codex"),
+            Some(ModelPrice::new(1.75, 14.0, 0.175, 0.0))
+        );
+        assert_eq!(
+            table.lookup("gpt-5.1-codex-mini"),
+            Some(ModelPrice::new(0.25, 2.0, 0.025, 0.0))
+        );
     }
 
     #[test]

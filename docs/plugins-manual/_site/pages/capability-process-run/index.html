@@ -551,7 +551,7 @@
 <td><code>process-spec.environment</code></td>
 <td><code>Vec&lt;(String, String)&gt;</code></td>
 <td><code>[string, string][]</code></td>
-<td>Each pair replaces the inherited variable of the same name. At most 64 pairs.</td>
+<td>Each pair replaces the inherited variable of the same name, except <code>PATH</code>, <code>LD_PRELOAD</code> and <code>LD_LIBRARY_PATH</code>, which cannot be set (<code>invalid-argument</code>, [SEC-033]). At most 64 pairs.</td>
 </tr>
 <tr>
 <td><code>process-spec.timeout_millis</code></td>
@@ -616,9 +616,9 @@
 
 <p>When the plugin calls <code>run</code>:</p>
 <ol>
-<li><strong>Grant check.</strong> A program that matches no grant, including a grant the user declined, returns <code>invalid-argument</code> at once. A <code>cwd</code> outside a readable scope returns <code>not-permitted</code>. A value over a fixed cap returns <code>invalid-argument</code>. Nothing starts.</li>
+<li><strong>Grant check.</strong> A program that matches no grant, including a grant the user declined, returns <code>not-permitted</code> at once. A <code>cwd</code> outside a readable scope returns <code>not-permitted</code>. A value over a fixed cap returns <code>invalid-argument</code>. Nothing starts.</li>
 <li><strong>Program lookup.</strong> A bare name is resolved through <code>PATH</code>. An absolute path runs exactly that file.</li>
-<li><strong>Environment.</strong> The helper starts with <code>PATH</code>, <code>HOME</code> and <code>LANG</code> only. Each <code>environment</code> pair then replaces or adds one variable.</li>
+<li><strong>Environment.</strong> The helper starts with <code>PATH</code> (fixed to <code>/usr/bin:/bin</code>, [SEC-027]), <code>HOME</code> and <code>LANG</code> only. Each <code>environment</code> pair then replaces or adds one variable, except <code>PATH</code>, <code>LD_PRELOAD</code> and <code>LD_LIBRARY_PATH</code>, which cannot be set (<code>invalid-argument</code>, [SEC-033]).</li>
 <li><strong>Priority and quota.</strong> The helper runs at low priority, and its CPU time is charged to the plugin's CPU quota.</li>
 <li><strong>Confinement.</strong> On T2 and T3 packages the helper runs in a bubblewrap mount namespace with a seccomp filter. It sees only the plugin's granted scopes (read-only for read grants), plus read-only <code>/usr</code>, <code>/bin</code>, <code>/lib*</code> and <code>/etc</code>, and it has no network. On T1 bundled plugins the helper runs unconfined, at low priority.</li>
 <li><strong>Timeout.</strong> The helper is killed when <code>timeout_millis</code> passes, and the completion is <code>failed(timed-out)</code>.</li>
@@ -716,8 +716,13 @@
 <tbody>
 <tr>
 <td><code>run</code>, sync</td>
+<td><code>not-permitted</code></td>
+<td>The program matches no grant, or a declined grant leaves none.</td>
+</tr>
+<tr>
+<td><code>run</code>, sync</td>
 <td><code>invalid-argument</code></td>
-<td>The program matches no grant, or a declined grant leaves none. <code>timeout_millis</code> is 0 or over 600,000. Stdin is over 4 MiB. There are more than 1,024 arguments or 64 pairs.</td>
+<td><code>timeout_millis</code> is 0 or over 600,000. Stdin is over 4 MiB. There are more than 1,024 arguments or 64 pairs.</td>
 </tr>
 <tr>
 <td><code>run</code>, sync</td>
@@ -847,7 +852,7 @@ export async function countTodos(project: FsPath): Promise&lt;number | undefined
 </code></pre>
 <p>The <code>run</code> call rejects with <code>PluginError</code> only when the run fails. A grep that finds nothing resolves with <code>status</code> 1, so the function returns 0 rather than an error.</p>
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code>:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a>:</p>
 <ul>
 <li>59 Progress monitor: <code>process.run:sh</code>, to run arbitrary probe commands. Only a T1 bundled plugin can hold this grant.</li>
 <li>67, 68, 69 and 70 Git worktree features: <code>process.run:git</code>.</li>
@@ -861,12 +866,12 @@ export async function countTodos(project: FsPath): Promise&lt;number | undefined
 <li><a href="/pages/capability-fs-read/">Capability: fs.read</a> for the scope that holds a working folder.</li>
 <li><a href="/pages/capability-workspace-manage/">Capability: workspace.manage</a>, which creates worktrees through the kernel and uses this grant for Git commands.</li>
 <li><a href="/pages/capability-jobs-run/">Capability: jobs.run</a> for work that does not need an external program.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error table.</li>
 <li><a href="/pages/security/">Security</a> for the risk tiers behind high-risk grants.</li>
 </ul>
 <p>Targets <code>ilium:plugin@0.1.0</code>.</p>
 <h3 id="security">Security</h3>
-<p>Children get a rebuilt environment: <code>LD_PRELOAD</code>, <code>LD_LIBRARY_PATH</code> and <code>PATH</code> cannot be set (<code>invalid-argument</code>, [SEC-033]), <code>PATH</code> is fixed, the data folder is mounted <code>noexec</code>, the child has no network, and secrets are redacted from captured output ([SEC-243]). A refused program returns <code>not-permitted</code>. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
+<p>Children get a rebuilt environment: <code>LD_PRELOAD</code>, <code>LD_LIBRARY_PATH</code> and <code>PATH</code> cannot be set (<code>invalid-argument</code>, [SEC-033]), <code>PATH</code> is fixed to <code>/usr/bin:/bin</code> ([SEC-027]), the data folder is mounted <code>noexec</code>, the child has no network on T2 and T3 (T1 bundled plugins run unconfined), and secrets are redacted from captured output ([SEC-243]). A refused program returns <code>not-permitted</code>. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-plugins-manage/"><small>Previous</small>Capability: plugins.manage</a><a class="next" href="/pages/capability-services/"><small>Next</small>Capability: services</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

@@ -21,22 +21,30 @@ struct BundledArtifact {
 const BUNDLED: &[BundledArtifact] = &[];
 
 pub(super) fn bundled_artifacts() -> Vec<EmbeddedArtifact> {
-    BUNDLED.iter().map(|item| EmbeddedArtifact {
-        name: item.name.to_owned(),
-        fingerprint: item.fingerprint.to_owned(),
-        wasm: item.wasm.to_vec(),
-        cwasm: item.cwasm.to_vec(),
-    }).collect()
+    BUNDLED
+        .iter()
+        .map(|item| EmbeddedArtifact {
+            name: item.name.to_owned(),
+            fingerprint: item.fingerprint.to_owned(),
+            wasm: item.wasm.to_vec(),
+            cwasm: item.cwasm.to_vec(),
+        })
+        .collect()
 }
 
 pub(super) fn is_bundled(artifact: &EmbeddedArtifact) -> bool {
-    BUNDLED.iter().any(|item| item.name == artifact.name
-        && item.fingerprint == artifact.fingerprint
-        && item.wasm == artifact.wasm
-        && item.cwasm == artifact.cwasm)
+    BUNDLED.iter().any(|item| {
+        item.name == artifact.name
+            && item.fingerprint == artifact.fingerprint
+            && item.wasm == artifact.wasm
+            && item.cwasm == artifact.cwasm
+    })
 }
 
-pub(super) fn deserialize_verified(engine: &Engine, artifact: &EmbeddedArtifact) -> Result<Component, HostError> {
+pub(super) fn deserialize_verified(
+    engine: &Engine,
+    artifact: &EmbeddedArtifact,
+) -> Result<Component, HostError> {
     if !is_bundled(artifact) || artifact.cwasm.is_empty() {
         return Err(HostError::EmbeddedIncompatible);
     }

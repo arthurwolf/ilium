@@ -1070,7 +1070,7 @@ impl Views for MediaDemo {
 <h2 id="worked-example-in-typescript">Worked example in TypeScript</h2>
 <p>The TypeScript version builds the same panel with the camelCase builders.</p>
 <pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
-import { createBuffer } from '@ilium/plugin-sdk/host/editor';
+import { createBuffer } from '@ilium/plugin-sdk/primitives/editor';
 import { surfaceSize, writeSurface } from '@ilium/plugin-sdk/host/ui';
 import { codeView, image, layout, paragraph, surface, terminalView, tree, video }
   from '@ilium/plugin-sdk/ui/build';
@@ -1237,7 +1237,7 @@ export const { lifecycle, handler, views } = definePlugin({
 </tr>
 </tbody>
 </table>
-<p>The <code>not-found</code>, <code>invalid-argument</code>, <code>unsupported</code> and <code>quota-exceeded</code> codes are described in <a href="/pages/errors-and-limits/">Errors and limits</a>. A missing grant or bad source never fails the render, so check the plugin log when a widget stays empty.</p>
+<p>The <code>not-found</code>, <code>invalid-argument</code>, <code>unsupported</code> and <code>quota-exceeded</code> codes are described in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. A missing grant or bad source never fails the render, so check the plugin log when a widget stays empty.</p>
 <h2 id="what-the-user-sees">What the user sees</h2>
 <ul>
 <li>An image keeps its proportions in <code>contain</code> and <code>cover</code> modes.</li>
@@ -1258,7 +1258,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><a href="/pages/primitives-editor/">Editor primitive</a></li>
 <li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
 <li><a href="/pages/accessibility-and-theming/">Accessibility and theming</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-layout-and-containers/"><small>Previous</small>Layout and containers</a><a class="next" href="/pages/widgets-text/"><small>Next</small>Text</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

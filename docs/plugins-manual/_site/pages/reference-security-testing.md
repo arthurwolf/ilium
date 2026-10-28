@@ -52,8 +52,8 @@ A **fuzz target** is a function that takes arbitrary bytes and must never crash,
 | Write outside the granted scope, through `..`, a symlink swap race, a hard link, a bind mount | `not-permitted` | [SEC-058], [SEC-059] |
 | Execute a binary written to `data` | `EACCES` | [SEC-023], [SEC-034] |
 | Fork-bomb | `EAGAIN` at `pids.max`; helper still responsive | [SEC-029] |
-| Allocate beyond `memory.max` | Helper killed; trap `limit-exceeded(memory)` | [SEC-029] |
-| Call each denied system call of [SEC-067] | `EPERM` or kill | [SEC-024] |
+| Allocate beyond `memory.max` | Helper killed; `trap.memory` | [SEC-029] |
+| Call each denied system call of [SEC-067] | `EPERM` | [SEC-024] |
 | Read another plugin's data folder | Not mounted | [SEC-020], [SEC-060] |
 | Send a message with another plugin's id | Dropped; failure counted | [SEC-050] |
 | Set `LD_PRELOAD` or `PATH` in `process.run` env | `invalid-argument` | [SEC-033] |
@@ -75,7 +75,7 @@ Every row below is a test the project MUST have. Kinds: unit, integration, e2e (
 | [SEC-103] | e2e | Hold Enter while the dialog opens | Dialog stays open |
 | [SEC-110] | e2e | Decline an origin three times | Fourth call returns `not-permitted` with no prompt |
 | [SEC-113] | integration | Add an H grant to `grants.json` by hand | Dropped at start; `store-external-edit` |
-| [SEC-116] | e2e | `ilium plugin install --yes` from a pane with no client | `approval.no-client` |
+| [SEC-116] | e2e | `ilium plugin install --yes` from a pane with no client | `install.review-required` |
 | [SEC-120] | integration | `consents --withdraw` | Next use asks again |
 | [SEC-182] | integration | Policy file writable by the user | Ignored; notice; audit |
 | [SEC-181] | unit | System and user policy pairs | Merge table of the policy page |
@@ -90,8 +90,8 @@ Every row below is a test the project MUST have. Kinds: unit, integration, e2e (
 | [SEC-084] | integration | Offline switch | `not-permitted` reason `offline` |
 | [SEC-243] | unit | A secret in a log line, in base64, in a URL | `<redacted>` in each |
 | [SEC-242] | unit | `secret` with `scope: "project"` | `manifest.secret-scope` |
-| [SEC-287] | integration | A veto handler that sleeps | Plugin-initiated send refused with `guard-failed`; user prompt for a paste |
-| [SEC-285] | integration | Withdrawn (see HST-472): a handler that starts before 100 ms and burns its deadline | Handlers not started at 100 ms are skipped as pass and logged `extension.chain-cap` |
+| [SEC-287] | integration | A veto handler that sleeps | Plugin-initiated send refused with `extension.vetoed` (reason `guard-failed`); user prompt for a paste |
+| HST-472 | integration | A handler that starts before 100 ms and burns its deadline | Handlers not started at 100 ms are skipped as pass and logged `extension.chain-cap` |
 | [SEC-284] | integration | A transform that returns an invalid payload | Next handler sees the previous valid payload |
 | [SEC-289] | integration | Hooks nested three deep | `extension.depth-exceeded` at depth 3 |
 | [SEC-290] | integration | Three consecutive breaches | Extension stopped; notice; audit |

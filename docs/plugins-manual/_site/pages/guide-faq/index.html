@@ -403,9 +403,9 @@
 <h3 id="capabilities-and-limits">Capabilities and limits</h3>
 <p><strong>Why does my call return <code>not-permitted</code>?</strong> The grant is missing from the side that calls, or the user declined it. Optional grants can be refused at any time, so handle the error.</p>
 <p><strong>Can I ask for a grant later?</strong> No. Grants are in the manifest, and a new grant needs an update that the user reviews.</p>
-<p><strong>How much memory can I use?</strong> 32 MiB by default. The ceiling is 256 MiB for bundled (T1) plugins and 128 MiB for T2 and T3. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p><strong>How much memory can I use?</strong> 32 MiB by default. The ceiling is 256 MiB for bundled (T1) plugins and 128 MiB for T2 and T3. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <p><strong>How long may a handler run?</strong> Events 20 ms (T1: 50 ms), commands 50 ms, render 10 ms, <code>activate</code> 2 s, <code>deactivate</code> 500 ms. Longer work goes to jobs. See <a href="/pages/performance/">Performance</a>.</p>
-<p><strong>What happens when I break a limit?</strong> The instance traps and restarts after 1 s, then 5 s, then 30 s. The third failure in 10 minutes disables the plugin on that side.</p>
+<p><strong>What happens when I break a limit?</strong> The instance traps and restarts after 1 s, then 5 s. The third failure in 10 minutes disables the plugin on that side.</p>
 <p><strong>Can I use threads?</strong> No. A component is single-threaded. Use jobs or requests for background work.</p>
 <p><strong>Can I use the network?</strong> Yes, with an <code>http:&lt;host-pattern&gt;</code> grant. A process started with <code>process.run</code> has no network.</p>
 <h3 id="data-and-state">Data and state</h3>

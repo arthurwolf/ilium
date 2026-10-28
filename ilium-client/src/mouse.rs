@@ -144,6 +144,11 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
     trace_mouse_event(app, &mouse);
     if !app.pointer_geometry_is_current() {
+        // A release still ends our held drag when a redraw invalidates its
+        // destination. Cancel it rather than replaying a structural gesture.
+        if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
+            app.clear_tree_drag();
+        }
         // A completed menu action changes mode before its matching release.
         // Discard that stale release without replacing the action's result.
         // Only a press is worth announcing: hover motion would overwrite the
@@ -174,6 +179,26 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
     if app.handle_plugin_permission_mouse(mouse) {
         return;
+    }
+    if app.resources.dialog.is_some() || app.resources.help_open {
+        app.resource_key(&Event::Mouse(mouse));
+        return;
+    }
+    if matches!(app.mode, Mode::Normal) && app.modal_stack.is_empty() {
+        if matches!(app.right_panel_target, RightPanelTarget::Resource { .. })
+            && app
+                .layout
+                .pane_area
+                .contains(Position::new(mouse.column, mouse.row))
+        {
+            app.resource_key(&Event::Mouse(mouse));
+            return;
+        }
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && app.open_resource_from_wait_footer(Position::new(mouse.column, mouse.row))
+        {
+            return;
+        }
     }
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
@@ -1181,6 +1206,57 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         return;
     }
 
+    if app.tree_toolbar_hovered || app.focus == crate::app::FocusTarget::Tree {
+        let hit = tree_ui::custom_toolbar_buttons(
+            app.layout.tree_area,
+            &app.custom_agents.profiles,
+            app.custom_toolbar_selected.as_deref(),
+        )
+        .into_iter()
+        .find_map(|(hit, area)| area.contains(position).then_some(hit));
+        if let Some(hit) = hit {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+                if let tree_ui::CustomToolbarHit::Profile(index) = hit {
+                    let profile = &app.custom_agents.profiles[index];
+                    let identity = ilium_core::custom_agent::CustomAgentIdentity {
+                        profile_id: profile.id.clone(),
+                        base_provider: profile.base_provider,
+                    };
+                    let target = app
+                        .selected_node_id()
+                        .or_else(|| app.active_pane_id())
+                        .unwrap_or(ilium_core::ROOT_ID);
+                    app.open_create_agent_workspace_dialog(identity.base_provider, target, false);
+                    if let Mode::CreateAgentWorkspace(state) = &mut app.mode {
+                        state.custom_agent = Some(identity);
+                    }
+                }
+                return;
+            }
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                match hit {
+                    tree_ui::CustomToolbarHit::Previous => app.step_custom_toolbar(-1),
+                    tree_ui::CustomToolbarHit::Next => app.step_custom_toolbar(1),
+                    tree_ui::CustomToolbarHit::Profile(index) => {
+                        let id = app.custom_agents.profiles[index].id.clone();
+                        app.custom_toolbar_selected = Some(id.clone());
+                        app.action_new_custom_agent(&id);
+                    }
+                }
+            }
+            return;
+        }
+        let toolbar = tree_ui::toolbar_area(app.layout.tree_area);
+        if !app.custom_agents.profiles.is_empty()
+            && toolbar.height >= 2
+            && position.y == toolbar.y + 1
+            && position.x >= toolbar.x
+            && position.x < toolbar.right()
+        {
+            return;
+        }
+    }
+
     if let Some(action) = app.emitted_tree_toolbar_at(position) {
         if let TreeToolbarAction::Agent(provider) = action {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
@@ -1224,6 +1300,21 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 .tree_node_at(position)
                 .map(|hit| hit.id)
                 .unwrap_or(ROOT_ID);
+            if let Some(target) = app.resources.rows.targets.get(&selected_target).cloned() {
+                let target = match target {
+                    crate::resource_queue::ResourceRowTarget::Participant {
+                        pane_id: Some(pane),
+                        ..
+                    } => pane,
+                    crate::resource_queue::ResourceRowTarget::Resource { project_id, .. }
+                    | crate::resource_queue::ResourceRowTarget::Participant {
+                        project_id, ..
+                    } => project_id,
+                };
+                app.select_node(target);
+                app.open_context_menu(target, mouse.column, mouse.row);
+                return;
+            }
             let target =
                 tree_ui::chatroom_project(&app.tree, selected_target, &app.chatroom_projects)
                     .unwrap_or(selected_target);
@@ -1232,6 +1323,10 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(hit) = app.tree_node_at(position) {
+                if let Some(target) = app.resources.rows.targets.get(&hit.id).cloned() {
+                    app.resource_select_target(hit.id, target);
+                    return;
+                }
                 if let Some(project_id) =
                     tree_ui::chatroom_project(&app.tree, hit.id, &app.chatroom_projects)
                 {
@@ -1367,6 +1462,23 @@ const TREE_DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 /// Updates the two independent hover affordances (row hit + toolbar) from
 /// the pointer's current tree-panel-relative position.
 fn update_tree_hover(app: &mut App, position: Position) {
+    app.custom_toolbar_hovered = tree_ui::custom_toolbar_buttons(
+        app.layout.tree_area,
+        &app.custom_agents.profiles,
+        app.custom_toolbar_selected.as_deref(),
+    )
+    .into_iter()
+    .find_map(|(hit, area)| {
+        if !area.contains(position) {
+            return None;
+        }
+        match hit {
+            tree_ui::CustomToolbarHit::Profile(index) => {
+                Some(app.custom_agents.profiles[index].id.clone())
+            }
+            _ => None,
+        }
+    });
     let previous_branch = app
         .hovered_tree_node
         .filter(|hit| hit.line == 1)
@@ -1454,6 +1566,11 @@ fn compute_drop_target(
     dragged_id: NodeId,
     drop_target: Option<NodeId>,
 ) -> Option<(NodeId, Option<usize>)> {
+    if tree.worktree_container_for_node(dragged_id).is_some()
+        || drop_target.is_some_and(|target| tree.worktree_container_for_node(target).is_some())
+    {
+        return None;
+    }
     let dragged_is_pane = matches!(
         tree.get(dragged_id).map(|node| &node.kind),
         Some(NodeKind::Pane { .. })
@@ -2360,6 +2477,45 @@ fn select_settings_pointer_tab(
 /// module doc comment for the shared layout/hit-test functions this
 /// reproduces no arithmetic of its own from.
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
+    if state.tree_layout_editor.is_some() {
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
+        let position = Position::new(mouse.column, mouse.row);
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if crate::settings_ui::close_button_hit(layout.header_area, position) {
+                crate::tree_layout_settings::dismiss(app, &mut state);
+                app.mode = Mode::Normal;
+                return;
+            }
+            if let Some(tab) =
+                crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)
+                    .or_else(|| {
+                        crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
+                    })
+            {
+                crate::tree_layout_settings::dismiss(app, &mut state);
+                select_settings_pointer_tab(app, &mut state, tab, layout.content_area);
+            } else if layout.content_area.contains(position) {
+                let row = position.y.saturating_sub(layout.content_area.y + 2);
+                let editor_width = if layout.content_area.width < 86 {
+                    layout.content_area.width
+                } else {
+                    46
+                };
+                if row < 4 && position.x < layout.content_area.x.saturating_add(editor_width) {
+                    if let Some(editor) = state
+                        .tree_layout_editor
+                        .as_mut()
+                        .filter(|editor| !editor.moving)
+                    {
+                        editor.selected = usize::from(row);
+                    }
+                }
+            }
+        }
+        app.mode = Mode::Settings(Box::new(state));
+        return;
+    }
     let selected_before = state.selected_row;
     let position = Position::new(mouse.column, mouse.row);
     let mut layout =
@@ -2394,6 +2550,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     crate::padding_ui::hit(layout.content_area, &app.padding_settings, position)
                 {
                     crate::padding_ui::click(app, &mut state, target);
+                    if target == crate::padding_ui::PaddingHit::Field {
+                        app.mode = Mode::Settings(Box::new(state));
+                        app.begin_settings_number_dialog(
+                            crate::value_settings::SettingsNumber::PaddingThreshold,
+                        );
+                        return;
+                    }
                 }
             }
             _ => {}
@@ -2842,7 +3005,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 }
                 Some(crate::settings_ui::IconPickerHit::Entry(entry_index)) => {
                     if let Some(entry) = picker.search_results.entry(entry_index) {
-                        app.settings_set_icon(picker.target, entry.glyph.to_string());
+                        if state.tab == crate::app::SettingsTab::CustomAgents {
+                            if let Some(editor) = &mut state.custom_agent_editor {
+                                editor.draft.icon = entry.glyph.to_string();
+                            }
+                        } else {
+                            app.settings_set_icon(picker.target, entry.glyph.to_string());
+                        }
                         None
                     } else {
                         Some(picker)
@@ -3125,12 +3294,16 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             } else if crate::settings_ui::has_shared_content_scrollbar(state.tab)
                 && content_scrollbar_area.contains(position)
             {
-                let max_scroll = crate::settings_ui::max_scroll(
-                    state.tab,
-                    app,
-                    state.selected_row,
-                    layout.content_area,
-                );
+                let max_scroll = if state.tab == crate::app::SettingsTab::CustomAgents {
+                    crate::settings_ui::custom_agent_max_scroll(app, &state, layout.content_area)
+                } else {
+                    crate::settings_ui::max_scroll(
+                        state.tab,
+                        app,
+                        state.selected_row,
+                        layout.content_area,
+                    )
+                };
                 if let Some(scroll) = crate::settings_ui::content_scrollbar_target(
                     content_scrollbar_area,
                     position,
@@ -3288,6 +3461,46 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app.open_text_trigger_dialog(editing_index);
                     return;
                 }
+            } else if state.tab == crate::app::SettingsTab::CustomAgents {
+                if layout.content_area.contains(position) && !state.custom_agent_editing {
+                    let line =
+                        usize::from(position.y - layout.content_area.y) + usize::from(state.scroll);
+                    let count = state.custom_agent_editor.as_ref().map_or(
+                        app.custom_agents.profiles.len()
+                            + crate::custom_agent_settings::missing_profiles(app).len()
+                            + 1,
+                        |editor| editor.rows().len(),
+                    );
+                    if let Some(index) = line.checked_sub(4).filter(|index| *index < count) {
+                        state.selected_row = index;
+                        let delete_start = if state.custom_agent_editor.is_none() {
+                            app.custom_agents.profiles.get(index).map(|profile| {
+                                let prefix = format!(
+                                    "› {} {}  ({:?}, {} variables)  ",
+                                    profile.icon,
+                                    profile.name,
+                                    profile.base_provider,
+                                    profile.environment.len()
+                                );
+                                unicode_width::UnicodeWidthStr::width(prefix.as_str())
+                            })
+                        } else {
+                            None
+                        };
+                        let delete_hit = delete_start.is_some_and(|start| {
+                            usize::from(position.x - layout.content_area.x) >= start
+                        });
+                        let event = Event::Key(KeyEvent::new(
+                            if delete_hit {
+                                KeyCode::Delete
+                            } else {
+                                KeyCode::Enter
+                            },
+                            KeyModifiers::NONE,
+                        ));
+                        crate::custom_agent_settings::handle(app, &mut state, &event);
+                    }
+                }
             } else if state.tab == crate::app::SettingsTab::Triggers {
                 if let Some((event, action_hit)) = crate::trigger_settings_ui::hit_test(
                     app,
@@ -3413,7 +3626,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 ) {
                     state.selected_row = hit.index;
                     app.mode = Mode::Settings(Box::new(state));
-                    if app.cost_settings.number_spec(hit.row).is_none()
+                    if let Some(target) = hit.row.icon_target() {
+                        let Mode::Settings(state) = &mut app.mode else {
+                            unreachable!("settings mode was retained for the icon picker");
+                        };
+                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                    } else if app.cost_settings.number_spec(hit.row).is_none()
                         && !crate::value_cost::is_choice(hit.row)
                     {
                         app.settings_adjust_cost_row(hit.row, hit.direction);
@@ -3749,8 +3967,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             crate::animation_settings_ui::sync_scrolls(layout.content_area, &model, &mut state);
         }
     }
-    let max_scroll =
-        crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area);
+    let max_scroll = if state.tab == crate::app::SettingsTab::CustomAgents {
+        crate::settings_ui::custom_agent_max_scroll(app, &state, layout.content_area)
+    } else {
+        crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area)
+    };
     state.scroll = state.scroll.min(max_scroll);
     app.optimization_sync_visibility(state.tab == crate::app::SettingsTab::Optimization);
     app.remote_compaction_sync_native(state.tab == crate::app::SettingsTab::RemoteCompaction);
@@ -3900,6 +4121,39 @@ mod drop_target_tests {
             .add_pane(group_c, "d", ilium_core::PaneContentKind::Terminal)
             .unwrap();
         (tree, group_a, pane_b, group_c, pane_d)
+    }
+
+    #[test]
+    fn dragging_cannot_extract_an_agent_or_insert_foreign_nodes_into_a_worktree() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/test/repo"))
+            .unwrap();
+        let member = tree
+            .add_pane(project, "agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let outsider = tree
+            .add_pane(project, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(
+            member,
+            Some(ilium_core::PaneWorkspace {
+                workspace_id: None,
+                repo_common_dir: "/test/repo/.git".into(),
+                worktree_root: "/test/worktree".into(),
+                branch: "agent/shared".into(),
+                base_ref: "main".into(),
+                base_commit: "abc".into(),
+                created_by_ilium: false,
+                created_at_unix: 0,
+            }),
+        )
+        .unwrap();
+        let worktree = tree.parent_of(member).unwrap();
+        assert_eq!(compute_drop_target(&tree, member, Some(project)), None);
+        assert_eq!(compute_drop_target(&tree, worktree, Some(project)), None);
+        assert_eq!(compute_drop_target(&tree, outsider, Some(worktree)), None);
+        assert_eq!(compute_drop_target(&tree, outsider, Some(member)), None);
     }
 
     #[test]
@@ -4443,7 +4697,71 @@ mod tree_order_context_mouse_tests {
     }
 
     #[test]
-    fn hovering_agent_parent_opens_submenu_and_disabled_item_explains_itself() {
+    fn clicking_existing_worktree_opens_its_agent_dialog() {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let (parent_column, parent_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let index = menu
+                    .actions
+                    .iter()
+                    .position(|action| {
+                        *action
+                            == crate::app::ContextMenuAction::NewAgent(
+                                ilium_core::BuiltinAgentProvider::Claude,
+                            )
+                    })
+                    .expect("New Agent should be available in the tree menu");
+                (
+                    menu.area.x + 1,
+                    menu.area.y + 1 + menu.layout().row_for_action(index).unwrap(),
+                )
+            }
+            _ => panic!("context menu should be open"),
+        };
+
+        click(&mut app, parent_column, parent_row);
+
+        let (existing_column, existing_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let submenu = menu
+                    .submenu
+                    .as_ref()
+                    .expect("New Agent click should open its submenu");
+                let index = submenu
+                    .items
+                    .iter()
+                    .position(|item| {
+                        item.action
+                            == crate::app::SubmenuItemAction::AgentInExistingWorktree(
+                                ilium_core::BuiltinAgentProvider::Claude,
+                            )
+                    })
+                    .expect("existing worktree choice should be present");
+                (
+                    submenu.area.x + 1,
+                    submenu.area.y + 1 + submenu.layout().row_for_action(index).unwrap(),
+                )
+            }
+            _ => panic!("agent submenu should remain open"),
+        };
+
+        click(&mut app, existing_column, existing_row);
+
+        assert!(matches!(
+            &app.mode,
+            Mode::CreateAgentWorkspace(state)
+                if state.mode == crate::worktree_dialog::WorktreeDialogMode::Existing
+        ));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ilium_ipc::ClientRequest::QueryRepoFacts { .. })));
+    }
+
+    #[test]
+    fn hovering_agent_parent_opens_submenu_and_new_worktree_opens_dialog() {
         let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         app.open_context_menu(ROOT_ID, 2, 2);
@@ -4491,11 +4809,15 @@ mod tree_order_context_mouse_tests {
             _ => panic!("context menu should remain open"),
         };
         click(&mut app, item_column, item_row);
-        assert!(matches!(app.mode, Mode::ContextMenu(_)));
-        assert_eq!(
-            app.status_message.as_deref(),
-            Some("Checking Git repository…")
-        );
+        assert!(matches!(
+            &app.mode,
+            Mode::CreateAgentWorkspace(state)
+                if state.mode == crate::worktree_dialog::WorktreeDialogMode::New
+        ));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::QueryRepoFacts { .. }]
+        ));
     }
 
     #[test]
@@ -4658,7 +4980,7 @@ mod markdown_board_context_mouse_tests {
         assert!(
             matches!(
                 requests.as_slice(),
-                [ilium_ipc::ClientRequest::QueryRepoFacts { .. }, ilium_ipc::ClientRequest::NewBoard {
+                [ilium_ipc::ClientRequest::NewBoard {
                     parent_group,
                     storage: ilium_core::BoardStorage::MarkdownFile { path: board_path },
                     ..

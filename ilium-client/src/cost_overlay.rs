@@ -690,6 +690,7 @@ mod tests {
             reported_usd: None,
             quota: vec![("primary".to_owned(), 41.0)],
             spend_points: Vec::new(),
+            token_spend_points: Vec::new(),
             storage: Default::default(),
         };
         let page = text(detail_card_lines(&cost, &row(3, 7.5), &overlay));

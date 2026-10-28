@@ -94,7 +94,7 @@ onAction(action: UiAction): Submission[] {
 
 ### Errors and limits
 
-Pointer events are not requests; they have no error. A node that sets `pointer-events` without `focusable` is refused at render with `invalid-argument`. See [Errors and limits](/pages/reference-errors-and-limits/).
+Pointer events are not requests; they have no error. A node that sets `pointer-events` without `focusable` is not an error: the node sends no pointer actions (WID-010) and render does not fail. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ### See also
 

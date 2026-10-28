@@ -356,8 +356,14 @@ fn normalize_agent_resumes(
     let mut invalid_automatic_titles = Vec::new();
     let mut changed = false;
     for pane in &mut snapshot.panes {
-        let PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) = &mut pane.kind else {
-            continue;
+        let command = match &mut pane.kind {
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) => command,
+            PaneSnapshotKind::Terminal(TerminalOrigin::CustomAgent {
+                command_line,
+                frozen: false,
+                ..
+            }) => command_line,
+            _ => continue,
         };
         let Some(binding) = persisted_resume_binding(command) else {
             continue;
@@ -692,6 +698,15 @@ fn capture_estimated_bytes(
                     PaneSnapshotKind::Terminal(TerminalOrigin::Frozen { resume_command }) => {
                         resume_command.capacity().saturating_mul(8)
                     }
+                    PaneSnapshotKind::Terminal(TerminalOrigin::CustomAgent {
+                        identity,
+                        command_line,
+                        ..
+                    }) => identity
+                        .profile_id
+                        .capacity()
+                        .saturating_add(command_line.capacity())
+                        .saturating_mul(8),
                     PaneSnapshotKind::Terminal(TerminalOrigin::PlainShell) => 0,
                 };
                 kind.saturating_add(1024).saturating_add(
@@ -711,6 +726,14 @@ fn capture_estimated_bytes(
                     TerminalOrigin::Command(command) => command.capacity(),
                     TerminalOrigin::PlainShell => 0,
                     TerminalOrigin::Frozen { resume_command } => resume_command.capacity(),
+                    TerminalOrigin::CustomAgent {
+                        identity,
+                        command_line,
+                        ..
+                    } => identity
+                        .profile_id
+                        .capacity()
+                        .saturating_add(command_line.capacity()),
                 };
                 let mut amount = command
                     .saturating_add(runtime.session_id.as_ref().map_or(0, String::capacity))
@@ -777,6 +800,30 @@ fn snapshot_origin_from_identity(
     pending_generated_session_id: Option<&str>,
     is_session_identity_invalidated: bool,
 ) -> TerminalOrigin {
+    if let TerminalOrigin::CustomAgent {
+        identity,
+        command_line,
+        frozen,
+    } = origin
+    {
+        if *frozen {
+            return origin.clone();
+        }
+        let updated = snapshot_origin_from_identity(
+            &TerminalOrigin::Command(command_line.clone()),
+            session_id,
+            pending_generated_session_id,
+            is_session_identity_invalidated,
+        );
+        if let TerminalOrigin::Command(command_line) = updated {
+            return TerminalOrigin::CustomAgent {
+                identity: identity.clone(),
+                command_line,
+                frozen: false,
+            };
+        }
+        return origin.clone();
+    }
     let TerminalOrigin::Command(command) = origin else {
         return origin.clone();
     };
@@ -1232,6 +1279,24 @@ pub(crate) fn load_snapshot_blocking(path: &Path) -> Result<Option<SessionSnapsh
             path: path_buf.clone(),
             source: SnapshotError::InvalidTree(source),
         })?;
+    // Earlier snapshots stored worktree provenance only on panes. Reconcile
+    // their fixed membership after structural validation, before any restore.
+    snapshot
+        .tree
+        .normalize_worktree_membership()
+        .map_err(|source| ServerError::Snapshot {
+            operation: "restore worktree membership",
+            path: path_buf.clone(),
+            source: SnapshotError::InvalidTree(source),
+        })?;
+    snapshot
+        .tree
+        .validate()
+        .map_err(|source| ServerError::Snapshot {
+            operation: "validate worktree membership",
+            path: path_buf.clone(),
+            source: SnapshotError::InvalidTree(source),
+        })?;
     // Old restructuring recorded AI presentation as user-owned without fixing
     // it. Repair only that explicit provenance; retain every authored bundle.
     for pane_id in snapshot.tree.pane_ids_in_tree_order() {
@@ -1524,6 +1589,67 @@ mod tests {
         let loaded = load_snapshot(&path).await.unwrap().expect("just wrote it");
 
         assert_eq!(loaded, snapshot);
+    }
+
+    #[tokio::test]
+    async fn legacy_workspace_panes_restore_under_one_fixed_worktree() {
+        let path = scratch_snapshot_path();
+        let mut snapshot = sample_snapshot();
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/fixture/main")).unwrap();
+        let workspace = ilium_core::PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: PathBuf::from("/fixture/main/.git"),
+            worktree_root: PathBuf::from("/fixture/shared"),
+            branch: "agent/shared".into(),
+            base_ref: "main".into(),
+            base_commit: "base".into(),
+            created_by_ilium: false,
+            created_at_unix: 0,
+        };
+        let mut pane_ids = Vec::new();
+        for name in ["first", "second"] {
+            let pane_id = tree
+                .add_pane(project, name, PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(pane_id, workspace.worktree_root.join(name))
+                .unwrap();
+            // Reconstruct the pre-container snapshot shape without invoking
+            // the current provenance setter's membership normalization.
+            let mut pane = tree.get(pane_id).unwrap().clone();
+            if let ilium_core::NodeKind::Pane {
+                workspace: field, ..
+            } = &mut pane.kind
+            {
+                *field = Some(Box::new(workspace.clone()));
+            }
+            tree.replace_pane_in_place(pane).unwrap();
+            pane_ids.push(pane_id);
+        }
+        snapshot.tree = tree;
+        snapshot.panes = pane_ids
+            .iter()
+            .map(|node_id| PaneSnapshot {
+                node_id: *node_id,
+                kind: PaneSnapshotKind::Terminal(TerminalOrigin::PlainShell),
+            })
+            .collect();
+        write_snapshot_to(&path, &snapshot).await.unwrap();
+        let loaded = load_snapshot(&path).await.unwrap().unwrap();
+        let owner = loaded
+            .tree
+            .worktree_container_for_node(pane_ids[0])
+            .unwrap();
+        assert_eq!(loaded.tree.parent_of(owner), Some(project));
+        assert_eq!(loaded.tree.children_of(owner).unwrap(), pane_ids);
+        for (pane_id, name) in pane_ids.iter().zip(["first", "second"]) {
+            assert_eq!(
+                loaded.tree.pane_cwd(*pane_id),
+                Some(workspace.worktree_root.join(name).as_path())
+            );
+        }
+        write_snapshot_to(&path, &loaded).await.unwrap();
+        assert_eq!(load_snapshot(&path).await.unwrap().unwrap(), loaded);
     }
 
     #[test]
@@ -1836,6 +1962,11 @@ mod tests {
         let path = scratch_snapshot_path();
         let mut snapshot = sample_snapshot();
         let pane_id = snapshot.panes[1].node_id;
+        // Worktree provenance belongs to a project, including in persisted fixtures.
+        snapshot
+            .tree
+            .ensure_launch_project(PathBuf::from("/tmp/project"))
+            .unwrap();
         let launch_cwd = PathBuf::from("/tmp/project.worktrees/agent-fix/src");
         let workspace = PaneWorkspace {
             workspace_id: Some("test-workspace".to_string()),
@@ -2383,6 +2514,11 @@ root:
         let directory = tempfile::tempdir().unwrap();
         let mut snapshot = sample_snapshot();
         let pane_id = snapshot.panes[1].node_id;
+        // Worktree provenance belongs to a project, including in persisted fixtures.
+        snapshot
+            .tree
+            .ensure_launch_project(directory.path().join("repo"))
+            .unwrap();
         let worktree = directory.path().join("removed-worktree");
         snapshot
             .tree
@@ -2518,6 +2654,32 @@ root:
             format!("codex resume '{session_id}'"),
             "an earlier unverified duplicate must not block a later pane's verified resume"
         );
+    }
+
+    #[test]
+    fn custom_agent_snapshot_retains_identity_while_updating_session() {
+        let identity = ilium_core::custom_agent::CustomAgentIdentity {
+            profile_id: "profile-one".into(),
+            base_provider: BuiltinAgentProvider::Codex,
+        };
+        let origin = TerminalOrigin::CustomAgent {
+            identity: identity.clone(),
+            command_line: "codex".into(),
+            frozen: false,
+        };
+        let session_id = "44444444-4444-4444-8444-444444444444";
+        let saved = snapshot_origin_from_identity(&origin, Some(session_id), None, false);
+        assert_eq!(
+            saved,
+            TerminalOrigin::CustomAgent {
+                identity,
+                command_line: format!("codex resume {}", shell_quote(session_id)),
+                frozen: false,
+            }
+        );
+        let json = serde_json::to_string(&saved).unwrap();
+        assert!(json.contains("profile-one"));
+        assert!(!json.contains("sensitive-sentinel"));
     }
 
     #[test]

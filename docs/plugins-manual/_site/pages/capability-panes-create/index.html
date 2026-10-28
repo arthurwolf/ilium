@@ -566,9 +566,9 @@
 <p>With <code>command: none</code> and <code>content-kind: "ilium.terminal"</code>, the pane runs the user's login shell from the <code>SHELL</code> variable, or <code>/bin/sh</code> when <code>SHELL</code> is unset. With <code>cwd: none</code>, the pane starts in the root of the <code>project</code> scope.</p>
 <p>A plugin's own pane kind has the content kind <code>&lt;plugin-id&gt;/&lt;kind&gt;</code>, where <code>&lt;kind&gt;</code> is declared in the <code>pane_kinds</code> entry of its manifest. See <a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a>.</p>
 <h2 id="worked-example-rust-server-side">Worked example: Rust, server side</h2>
-<p>This server plugin opens a review pane each time an agent finishes. It keeps the correlation numbers of its own submissions and logs the node id when the pane exists. The manifest requests <code>agent.read</code> for the activity event and <code>panes.create</code> for the new pane.</p>
+<p>This server plugin opens a review pane each time an agent finishes. It keeps the correlation numbers of its own submissions and logs the node id when the pane exists. The manifest requests <code>agent.read</code> for the activity event, <code>panes.create</code> for the new pane and <code>panes.create-command:git</code> for the <code>git</code> program it runs in that pane.</p>
 <pre><code class="language-json">{
-  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;panes.create&quot;, &quot;agent.read&quot;] }
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;panes.create&quot;, &quot;panes.create-command:git&quot;, &quot;agent.read&quot;] }
 }
 </code></pre>
 <p><strong>Rust</strong></p>
@@ -669,9 +669,9 @@ export const { lifecycle, handler } = definePlugin({
   },
 });
 </code></pre>
-<p>The manifest for this plugin requests <code>panes.create</code> on the client side and <code>fs.read:project</code> for the <code>cwd</code> scope:</p>
+<p>The manifest for this plugin requests <code>panes.create</code> and <code>panes.create-command:tail</code> (the program in <code>command</code>) on the client side, and <code>fs.read:project</code> for the <code>cwd</code> scope:</p>
 <pre><code class="language-json">{
-  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;panes.create&quot;, &quot;fs.read:project&quot;] }
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;panes.create&quot;, &quot;panes.create-command:tail&quot;, &quot;fs.read:project&quot;] }
 }
 </code></pre>
 <p>In TypeScript, every <code>u64</code> is a <code>bigint</code>, so <code>correlation</code> is written <code>1n</code>. The <code>dedupKey</code> is written as a plain string.</p>
@@ -760,7 +760,7 @@ export const { lifecycle, handler } = definePlugin({
 <h2 id="when-the-grant-is-declined">When the grant is declined</h2>
 <p><code>create-pane</code> completes with <code>refused(not-permitted)</code>. No pane is created, and no process starts. The plugin can still run its other features. A plugin that offers "start an agent in a new pane" should hide that action when the grant is missing. Check the grant list at activation, so the menu item is never shown for a pane that cannot open.</p>
 <h2 id="what-the-user-sees">What the user sees</h2>
-<p>After the kernel accepts the request, the new pane appears in the tree under its parent, with its title and status line. The command runs at once. With <code>parent: none</code>, the pane is placed after the focused pane in its group, the same place a user-created pane gets (U33).</p>
+<p>After the kernel accepts the request, the new pane appears in the tree under its parent, with its title and status line. The command runs at once. With <code>parent: none</code>, the pane is placed after the focused pane in its group, the same place a user-created pane gets.</p>
 <figure>
 <pre class="term"><span class="t-dim">session default</span>
 ├─ Group

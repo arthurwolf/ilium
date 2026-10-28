@@ -42,7 +42,7 @@ The `editor.read` grant lets a client-side plugin read the editor's buffers: the
 
 - `editor.read`
 
-The invalid form `editor.read:project` fails the build with this text:
+The invalid form `editor.read:project` fails the build and the install with the code `manifest.grant-argument` and this text:
 
 `capability "editor.read" takes no argument (got "editor.read:project")`
 
@@ -279,7 +279,7 @@ If the grant is requested on the wrong side, the build stops and names the side:
 - [panes.read](/pages/capability-panes-read/) for the pane of a buffer.
 - [primitives: editor](/pages/primitives-editor/) for the primitive as a whole.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the bindings.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes.
 - [Events and intents](/pages/events-and-intents/) for the event delivery rules.
 
 Checked against the API version `ilium:plugin@0.1.0`.

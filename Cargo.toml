@@ -16,6 +16,7 @@ members = [
     "ilium-gpu",
     "ilium-http",
     "ilium-ipc",
+    "ilium-instructions",
     "ilium-inference",
     "ilium-kilo-gateway",
     "ilium-logging",

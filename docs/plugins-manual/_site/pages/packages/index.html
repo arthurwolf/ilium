@@ -561,7 +561,7 @@
 </tr>
 </tbody>
 </table>
-<p>The <code>exports</code> list names only the optional exports: <code>views</code>, <code>detector</code>, <code>job-runner</code>, <code>service-provider</code>, <code>inference-provider</code> and <code>annotator</code>. Required exports (<code>lifecycle</code>, <code>handler</code>, <code>renderer</code>) are never listed. A component whose real exports differ from required plus listed fails with <code>manifest.exports-mismatch</code>.</p>
+<p>The <code>exports</code> list names only the optional exports: <code>detector</code>, <code>views</code>, <code>annotator</code>, <code>job-runner</code>, <code>service-provider</code>, <code>inference-provider</code>, <code>settings-validate</code>, <code>catalog-provider</code>, <code>menu-provider</code>, <code>virtual-rows-provider</code>, <code>token-provider</code>, <code>hook-handler</code> and <code>migrator</code>, each only on the sides that accept it (see <a href="/pages/worlds-and-sides/">Worlds and sides</a>). Required exports (<code>lifecycle</code>, <code>handler</code>, <code>renderer</code>) are never listed. A component whose real exports differ from required plus listed fails with <code>manifest.exports-mismatch</code>.</p>
 <h2 id="contributions">Contributions</h2>
 <p><code>contributes</code> declares what Ilium shows without running plugin code. Ids are local. The host builds global ids as <code>&lt;plugin-id&gt;/&lt;id&gt;</code> for commands, settings pages and help topics, and <code>&lt;plugin-id&gt;.&lt;id&gt;</code> for pane kinds.</p>
 <table>
@@ -582,11 +582,7 @@
 </tr>
 <tr>
 <td><code>settings</code></td>
-<td><code>{ page, section?, scope, schema }</code>. Scope is <code>server</code> or <code>client</code>.</td>
-</tr>
-<tr>
-<td><code>settings</code></td>
-<td><code>kind</code> <code>tab</code> (with <code>"render": "view"</code> for a custom page) or <code>section</code>. See <a href="/pages/settings-extension/">Plugin settings extension</a>.</td>
+<td><code>{ kind, ... }</code>. <code>kind</code> is <code>tab</code> (with <code>"render": "view"</code> for a custom page) or <code>section</code> (with <code>tab</code>, <code>anchor?</code>, <code>scope</code> of <code>server</code>, <code>client</code> or <code>project</code>, and rows). See <a href="/pages/settings-extension/">Plugin settings extension</a>.</td>
 </tr>
 <tr>
 <td><code>help</code></td>
@@ -886,7 +882,7 @@
 </tr>
 <tr>
 <td><code>manifest.asset-size</code></td>
-<td>Package assets over 64 MiB, or a font asset over 4 MiB.</td>
+<td>Package assets over the <code>package_assets_mib</code> limit: 64 MiB, or up to 256 MiB for a T1 plugin that raises it (T2 and T3: 64 MiB, see <a href="/pages/performance/">Performance</a>). Also a font asset over 4 MiB.</td>
 </tr>
 <tr>
 <td><code>manifest.visible-when</code></td>
@@ -906,7 +902,7 @@
 </tr>
 <tr>
 <td><code>manifest.scene-prerender</code></td>
-<td><code>prerender</code> out of range, or on a scene that declares <code>wants-pointer</code>.</td>
+<td><code>prerender</code> out of range.</td>
 </tr>
 </tbody>
 </table>
@@ -934,7 +930,7 @@
 <tr>
 <td>T3</td>
 <td>Unsigned local packages</td>
-<td>Needs <code>--allow-unsigned</code> or <code>ilium plugin dev</code>. Shows a <code>dev</code> badge and T2 ceilings.</td>
+<td>Needs <code>--allow-unsigned</code> or <code>ilium plugin dev</code>. Shows a <code>dev</code> badge and runs under the T2 sandbox and ceilings.</td>
 </tr>
 </tbody>
 </table>
@@ -959,9 +955,9 @@
 <h2 id="updates-trust-and-keys">Updates, trust and keys</h2>
 <p>The rules for a person who installs packages are in <a href="/pages/user-install-and-manage/">Install and manage plugins</a>. The rules that a package and its publisher must meet are these. Key formats, the trust store and registry updates are defined in <a href="/pages/reference-signing-and-trust/">Signing and trust</a> and <a href="/pages/reference-install-and-update/">Install and update</a>.</p>
 <ul>
-<li>[USR-126] An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the user trusts after seeing both fingerprints. Test: offer an update signed by a second key and assert the prompt shows the old and the new fingerprint.</li>
+<li>[USR-126] An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the old key endorsed with a rotation statement (SEC-142). Any other key MUST be refused with <code>package.publisher-key-changed</code>. Test: offer an update signed by an unendorsed second key and assert it is refused with <code>package.publisher-key-changed</code>.</li>
 <li>[USR-127] Trust MUST be per key, MUST be stored in the user's trust list, and MUST NOT be created by installing a package without a prompt. Test: install with a new key in a script without <code>--yes</code> and assert the install is refused.</li>
-<li>[USR-128] A T2 package whose key was removed from the trust list MUST keep running and MUST show <code>untrusted</code> in <code>ilium plugin list</code>. A later update MUST ask for trust again. Test: remove the key, list, and offer an update.</li>
+<li>[USR-128] A T2 package whose key was removed from the trust list MUST stop loading at the next activation and show <code>Publisher no longer trusted</code> (SEC-144); it is not uninstalled and its data stays. Trusting the key again reactivates it. A later update MUST ask for trust again. Test: remove the key, list, and offer an update.</li>
 <li>[USR-129] A publisher MUST keep the private key offline and MUST NOT put it in a package. A lost key means new packages need a new key and a new trust prompt. Test: review <code>ilium plugin keygen</code> output for the path of the private key and its mode <code>0600</code>.</li>
 </ul>
 <h2 id="edge-cases">Edge cases</h2>

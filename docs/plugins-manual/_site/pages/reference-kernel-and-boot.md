@@ -75,7 +75,7 @@ The server start in [Host architecture](/pages/reference-host-architecture/) has
 | 1 | Client kernel | Enter the alternate screen, read the theme and the keymap, connect to the socket, complete the handshake |
 | 2 | Client kernel | Receive the tree, the pane viewports and the retained contribution replica |
 | 3 | Client kernel | Draw the first frame with kernel chrome only. The tree uses its kernel rows (name and status glyph) until `ilium.core.tree` has drawn |
-| 4 | Plugin host | Activate every client side with the `startup` trigger, in dependency order. The core plugins in this group are Tree, Settings, Ambient look, Agent toolbar, Terminal and Keys and help |
+| 4 | Plugin host | Activate every client side with the `startup` trigger, in dependency order. The core plugins in this group are Tree, Settings, Ambient look, Agent toolbar, Terminal and Progress |
 | 5 | Client kernel | Redraw with the plugin contributions. A plugin that is slow keeps its previous frame, and the client never waits for a plugin to draw |
 | 6 | Plugin host | Activate other plugins when their trigger fires |
 
@@ -131,22 +131,24 @@ The commands that work this way are `ilium panes`, `ilium broadcast`, `ilium rec
 
 ### Startup and lazy activation of the 30 core plugins
 
+In the tables below, a `view:` trigger is written `view:<plugin short name>.<view id>`: the short name is the plugin id without its `ilium:` prefix, and the view id is the `id` declared in the plugin's `panels`, `views` or `overlays`. For Agent detect, `view:agent-detect.panel` is the view declared with the id `panel`.
+
 A plugin that starts at boot costs time in every session. A plugin that starts on first use costs time at the first use. The rule used here: a plugin starts at boot only when it must see events from the first moment, must be present on the first frame, or must restore state that outlives the process. Everything else is lazy. The Plugins screen shows the column **Starts** with `at boot` or `on use`.
 
 | Core plugin | Server side | Client side | Reason |
 |---|---|---|---|
 | Agent detect | `startup` | `view:agent-detect.panel` | Detection needs every screen update from the start |
 | Agent setup | `settings:setup`, `command:refresh`, `service:install` | `settings:setup` | Used when the user opens Setup |
-| Agent toolbar | `event:agent-state-changed` | `startup` | Buttons are on the first frame |
+| Agent toolbar | `event:agent-activity-changed` | `startup` | Buttons are on the first frame |
 | Ambient look | none | `startup` | The look is applied from the first frame |
 | Chatroom | `startup` | `topic:chatroom` | File watch for `CHATROOM.md` and hook text must work without a client |
-| Compaction | `event:agent-context-low`, `service:compact` | `view:compaction.optimizer` | Runs when an agent needs it |
+| Compaction | `event:agent-activity-changed`, `service:compact` | `view:compaction.optimizer` | Runs when an agent needs it |
 | Cost | `startup` | `view:cost.panel` | Usage accrues from transcripts while nobody looks |
 | Diagnostics | `startup` | `view:diagnostics.warnings` | Collects warnings from the first line of the log |
 | Editor | none | `pane-kind:editor` | Native in v1 (see D4). In plugin form it starts when a file opens |
 | Fleet | `cli:panes`, `cli:broadcast`, `http:/create_agent`, `service:broadcast` | `command:ask-for-update` | Used on demand |
 | Inference | `service:ilium:inference/provider` | none | Starts when a consumer calls it |
-| Kanban | none | `pane-kind:kanban` | Native in v1. In plugin form it starts with a board pane |
+| Kanban | none | `pane-kind:board` | Native in v1. In plugin form it starts with a board pane |
 | Keys and help | none | `command:keys-and-help.open`, `settings:keyboard` | Used on demand. Bindings work without it |
 | Layout | `command:layout.preset` | `view:layout.presets` | Used on demand. The kernel keeps the geometry |
 | Notifications | `startup` | none | Must catch the first state change |
@@ -158,8 +160,8 @@ A plugin that starts at boot costs time in every session. A plugin that starts o
 | Session convert | `command:convert`, `service:convert` | `view:session-convert.progress` | Used on demand |
 | Sessions | `startup` | `view:sessions.list` | Offers the snapshot sections to the kernel writer |
 | Settings | none | `startup` | The Settings screen frame and the guided setup |
-| Smart copy | `service:copy` | `command:smart-copy` | Starts on the copy gesture |
-| Terminal | `event:terminal-screen-changed` | `startup` | Links and the context menu need the first frame |
+| Smart copy | none | `command:smart-copy` | Starts on the copy gesture |
+| Terminal | `event:screen-changed` | `startup` | Links and the context menu need the first frame |
 | Text triggers | `startup` | `view:text-triggers.rules` | The output filter must be in place before the first byte |
 | Titles | `startup` | none | Triggers fire on agent events from the start |
 | Tree | `startup` | `startup` | Rows, bookmarks and locks are on the first frame |
@@ -254,8 +256,8 @@ The tree and the Settings screen are the only two core plugins whose absence cha
 
 Two properties are different.
 
-- **Disableable.** The user can turn the plugin off in the Plugins screen. Every core plugin is disableable, including Sessions, Settings and Tree, because the kernel has a fallback for them.
-- **Replaceable.** Another package may list the plugin id in `replaces` and provide its whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)). The manifest says `replaceable: true` and carries a `surface`.
+- **Disableable.** The user can turn the plugin off in the Plugins screen. Every core plugin is disableable, including Sessions, Settings and Tree, because the kernel has a fallback for them. The one exception is Editor: it is native in v1 and cannot be turned off (see the table above).
+- **Replaceable.** Another package may list the plugin id in `replaces` and provide its whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)). The manifest says `replaceable: true` and carries a `surface`.
 
 Replaceable is stricter than disableable, because a replacement takes over stored data and a surface that other plugins call. Sessions and Settings are not replaceable (`replaceable: false`) because they own the stored sections and the settings screen that every other plugin depends on. The rest are replaceable. The rule for thin plugins that mostly drive a kernel part (Terminal, Tree, Layout) is: they are replaceable only if the replacement provides every service and point in their `surface`. A replacement that omits one is refused with `manifest.replaces-surface-incomplete`.
 
@@ -327,7 +329,7 @@ Code that reads a restart-only value gets the value that was current at the star
 | Two startup plugins `require` each other | Both stay off | `manifest.requires-cycle` |
 | `snapshot-sections` entry has an unknown `schema_version` | Section kept unchanged | `section-unsupported` |
 | A route for `/create_agent` is registered twice | The second registration is refused | `http-api.route-taken` |
-| `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-failed` |
+| `config.toml` fails to parse at boot | Moved aside, defaults used, recovery page opens | `config.parse-error` |
 | A startup plugin takes longer than `HOST-START` | Boot continues. The plugin is reported late | `host.start-slow` (logged) |
 | A scene side declares `extensions.provide` | Install refused | `manifest.grant-side` |
 

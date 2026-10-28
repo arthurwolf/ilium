@@ -62,7 +62,10 @@ fn cap_001_picked_with_extra_argument_is_judged_on_the_whole_argument() {
         "manifest.grant-scope"
     ));
     assert_eq!(
-        Grant::parse("fs.read:picked:x").expect_err("the whole argument is an invalid scope").code.as_str(),
+        Grant::parse("fs.read:picked:x")
+            .expect_err("the whole argument is an invalid scope")
+            .code
+            .as_str(),
         "manifest.grant-scope"
     );
 }
@@ -548,11 +551,7 @@ fn cap_008_agent_configuration_write_is_a_high_risk_valid_scope() {
 /// REQ: CAP-008
 #[test]
 fn cap_008_unknown_scope_and_bare_absolute_path_are_grant_scope() {
-    for text in [
-        "fs.read:nowhere",
-        "fs.read:/srv/logs",
-        "fs.write:/srv/logs",
-    ] {
+    for text in ["fs.read:nowhere", "fs.read:/srv/logs", "fs.write:/srv/logs"] {
         let codes = codes_for(Tier::T2, Side::Server, &[text]);
         assert!(
             codes.iter().any(|code| code == "manifest.grant-scope"),
@@ -566,11 +565,24 @@ fn cap_008_unknown_scope_and_bare_absolute_path_are_grant_scope() {
 fn cap_008_explicit_absolute_named_path_is_bundled_only() {
     for text in ["fs.read:path:/srv/logs", "fs.read:path:/srv/logs/**"] {
         let parsed = grant(text);
-        assert!(check_grant(&parsed, Tier::T1, Side::Server).is_ok(), "{text}");
-        assert!(!reports_any_grant_code(Tier::T1, Side::Server, &[text]), "{text}");
+        assert!(
+            check_grant(&parsed, Tier::T1, Side::Server).is_ok(),
+            "{text}"
+        );
+        assert!(
+            !reports_any_grant_code(Tier::T1, Side::Server, &[text]),
+            "{text}"
+        );
         for tier in [Tier::T2, Tier::T3] {
-            assert_eq!(code_of(check_grant(&parsed, tier, Side::Server)), "manifest.grant-tier", "{text} {tier}");
-            assert!(reports(tier, Side::Server, &[text], "manifest.grant-tier"), "{text} {tier}");
+            assert_eq!(
+                code_of(check_grant(&parsed, tier, Side::Server)),
+                "manifest.grant-tier",
+                "{text} {tier}"
+            );
+            assert!(
+                reports(tier, Side::Server, &[text], "manifest.grant-tier"),
+                "{text} {tier}"
+            );
         }
     }
 }

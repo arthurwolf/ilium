@@ -17,7 +17,7 @@ Walking the process tree and scraping the vt100 screen are kernel-native. The ke
 
 ### See it
 
-<figure><img src="/assets/demos/01-agent-activity.gif" alt="Tree rows whose agent icons change between working, idle and waiting" loading="lazy"><figcaption>Agent icons follow the activity of each pane: working, idle, awaiting approval, done.</figcaption></figure>
+<figure><img src="/assets/demos/01-agent-activity.gif" alt="Current Ilium activity signals on local scripted agent fixtures" loading="lazy"><figcaption>Local scripted fixtures show working, unread completion and focus acknowledgement in current Ilium. The approval menu is a simulation; no provider session is running.</figcaption></figure>
 
 <figure><img src="/assets/demos/17-goal-indicators.gif" alt="A goal badge appears on a tree row while an agent pursues a goal" loading="lazy"><figcaption>The goal badge shows while an agent pursues a /goal and clears when the goal ends.</figcaption></figure>
 
@@ -60,6 +60,13 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       { "id": "example-agent", "process_names": ["example-agent"],
         "aliases": ["example"], "icon": "robot" }
     ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Agent detection",
+        "modal": false
+      }
+    ],
     "decoration_slots": [
       { "id": "activity", "placement": "icon", "priority": 90 },
       { "id": "goal", "placement": "badge", "priority": 80 }
@@ -98,7 +105,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
   },
   "capabilities": {
     "server": [
@@ -128,6 +138,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
           "example"
         ],
         "icon": "robot"
+      }
+    ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Agent detection",
+        "modal": false
       }
     ],
     "decoration_slots": [
@@ -175,7 +192,7 @@ A custom signature has the class `other`. It gets an identity and an icon, but n
 | Enum | Values |
 |---|---|
 | Agent class | `claude`, `codex`, `antigravity`, `other(name)`. `antimatter` is accepted as a process-name alias of `antigravity` |
-| Activity | `working`, `waiting-background`, `background-task-still-running`, `waiting-approval`, `done`, `idle` |
+| Activity | `none`, `working`, `idle`, `awaiting-approval`, `done`, `menu` (the `agent-activity` enum of [WIT](/pages/reference-wit/)) |
 | Turn | `working`, `waiting-approval`, `waiting-subagents`, `settling`, `idle` |
 | Goal state | `active`, `paused`, `blocked`, `usage-limited`, `reached` |
 | Pane kind | `plain-shell`, `agent`, `editor`, `board`, `agent-unavailable` |
@@ -338,7 +355,7 @@ function activityDecoration(node: bigint, current: string): Submission {
       val: {
         ...baseDecoration(node, 'activity', ''),
         icon: working ? SPINNER[0] : current === 'awaiting-approval' ? '?' : '●',
-        frames: working ? SPINNER.map((frame) => ({ spans: [{ text: frame }] })) : [],
+        frames: working ? SPINNER.map((frame) => ([{ text: frame }])) : [],
         frameMs: 100,
       },
     },
@@ -498,7 +515,7 @@ export function render() {
 
 #### Normal and Attention modes
 
-A display mode changes what the tree emphasises. The plugin declares `display_modes` in the manifest and listens for `display-mode-changed` ([events and intents](/pages/events-and-intents/), [events](/pages/api-events/)). In Attention mode the panel lists only agents that need the user.
+A display mode changes what the tree emphasises. The plugin declares `display_modes` in the manifest and listens for `display-mode-changed` ([events and intents](/pages/events-and-intents/), [events](/pages/api-events/)). In Attention mode the panel lists only agents that need the user or have just finished: those awaiting approval and those whose activity is `done`.
 
 **Rust**
 
@@ -594,7 +611,7 @@ export function onEvents(events: Event[]): Submission[] {
 
 ### Detection loop and budget
 
-The poll loop is native and runs in the server. This plugin's detector runs on the plugin executor, one call per pane, in parallel with other plugins' detectors. One poll cycle spends at most 50 ms on detector calls. A slow call keeps the previous activity and counts as a breach, and the third breach in a row restarts this plugin side. The full rules are in the [detection loop](/pages/capability-agent-signatures/#detection-loop) section of the signatures page and in [Host scheduling](/pages/reference-host-scheduling/).
+The poll loop is native and runs in the server. This plugin's detector runs on the plugin executor, one call per pane, in parallel with other plugins' detectors. One poll cycle spends at most 50 ms on detector calls. A slow call keeps the previous activity and counts as a breach. A third breach in a row traps the call; the side stops only after a third counted failure within the failure window (LIF-030), with no restart. The full rules are in the [detection loop](/pages/capability-agent-signatures/#detection-loop) section of the signatures page and in [Host scheduling](/pages/reference-host-scheduling/).
 
 ### Extension points
 
@@ -615,7 +632,7 @@ Other plugins change what `ilium.core.agent-detect` does through the points belo
 
 `contributes.signatures` entries register agent CLIs. This plugin turns them into identity.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.agent-detect"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.agent-detect"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Marks a pane as awaiting approval when the last lines contain the question
 

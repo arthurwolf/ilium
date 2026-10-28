@@ -33,7 +33,9 @@ impl App {
             && matches!(self.mode, Mode::Normal)
             && !matches!(
                 self.right_panel_target,
-                RightPanelTarget::Chatroom { .. } | RightPanelTarget::Attention
+                RightPanelTarget::Chatroom { .. }
+                    | RightPanelTarget::Resource { .. }
+                    | RightPanelTarget::Attention
             )
     }
 

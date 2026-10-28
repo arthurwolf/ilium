@@ -33,9 +33,9 @@ The global kind id is the plugin id, a dot and the local id. The plugin `example
 |---|---|---|
 | `primitive` | `basic` | Selects this primitive. |
 | `wants_keys` | `true` or `false` | With `true`, keys that the focused widget does not consume arrive as `key-pressed` for the pane. |
-| `persist` | `metadata`, `storage` or `none` | Decides what survives a restart (see below). |
+| `persist` | `metadata` or `none` | Decides what survives a restart (see below). |
 
-With `persist: "metadata"`, the kernel saves the node's metadata, up to 64 KiB per node per plugin, and gives it back on restore. With `persist: "storage"`, the kernel recreates the node empty and deletes the plugin's storage keys under `pane/<node-id>/` when the pane closes; the plugin reads its own buckets. With `persist: "none"`, the pane starts empty after a restart.
+With `persist: "metadata"`, the kernel saves the node's metadata, up to 64 KiB per node per plugin, and gives it back on restore. With `persist: "none"`, the pane starts empty after a restart.
 
 ### Interface
 
@@ -352,7 +352,7 @@ footer `Saved` comes from `basic.set_status`. The body is the plugin's tree.
 
 | Code | When it happens on a basic pane | What the plugin does |
 |---|---|---|
-| `not-permitted` | The node is not a pane of one of the plugin's kinds, or `panes.provide-kind` or `tree.metadata` is missing. | Stop calling for that node. The host logs `refused basic.set-title: not-permitted` at level warn. |
+| `not-permitted` | The node is not a pane of one of the plugin's kinds, or `panes.provide-kind` or `tree.metadata` is missing. | Stop calling for that node. The host logs `refused <grant> by basic.set-title (not-permitted)`, naming the missing grant at level warn. |
 | `invalid-argument` | A title over 256 characters, or a status over 256 characters or with a line break. | Fix the argument. Nothing is changed. |
 | `conflict` | The user has set a manual title on the pane. The title is not changed. | Show the user's title. The plugin title appears again after the user clears the manual title. |
 | `quota-exceeded` | The metadata would be over 64 KiB. `set-metadata` writes nothing. | Keep the older notes, show `Not saved`, and ask the user to delete notes. |
@@ -367,7 +367,7 @@ Other rules:
   instead of an error.
 - A render that returns a layout whose child count differs from its constraint count traps the
   instance. A zero-size area draws nothing and is not an error.
-- With `persist: "none"` or `"storage"`, notes kept only in metadata are lost on restart. Pick the
+- With `persist: "none"`, notes kept only in metadata are lost on restart. Pick the
   persist mode that matches where the state lives.
 
 ### Pane activity and dirty state
@@ -423,6 +423,6 @@ Requirement ids for this page: [PRI-030], [PRI-031]. See the [requirements index
 - [Tree](/pages/api-tree/) for `metadata` and `set-metadata`.
 - [Notes pane tutorial](/pages/tutorial-06-notes-pane/) for a step-by-step version of this page.
 - [Terminal primitive](/pages/primitives-terminal/) and [Agent primitive](/pages/primitives-agent/) for the other two primitives.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and limits used here.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and limits used here.
 
 This page follows `ilium:plugin@0.1.0`.

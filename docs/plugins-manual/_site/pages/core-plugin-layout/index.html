@@ -401,7 +401,7 @@
 <li>Board panes and editor panes in splits, so one screen can mix terminals, editors and boards (Panes and layout, Board panes and Split views).</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/03-mixed-splits.gif" alt="A terminal, an editor and a board share one screen in a mixed split" loading="lazy"><figcaption>A mixed split. Terminal, editor and board panes sit side by side, and focus moves between them.</figcaption></figure>
+<figure><img src="/assets/demos/03-mixed-splits.gif" alt="Two local fixture terminals, a text editor and a live clock share a four-pane split" loading="lazy"><figcaption>A four-pane split combines two labelled local terminal fixtures, a text editor and a live clock. Focus moves between panes.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -439,7 +439,7 @@
   &quot;version&quot;: &quot;0.1.0&quot;,
   &quot;publisher&quot;: &quot;Ilium&quot;,
   &quot;capabilities&quot;: {
-    &quot;server&quot;: [&quot;panes.read&quot;, &quot;panes.lifecycle&quot;, &quot;tree.restructure&quot;],
+    &quot;server&quot;: [&quot;panes.read&quot;, &quot;panes.lifecycle&quot;, &quot;panes.create&quot;, &quot;tree.restructure&quot;],
     &quot;client&quot;: [&quot;panes.read&quot;, &quot;ui.panels&quot;]
   }
 }
@@ -466,6 +466,7 @@
     &quot;server&quot;: [
       &quot;panes.read&quot;,
       &quot;panes.lifecycle&quot;,
+      &quot;panes.create&quot;,
       &quot;tree.restructure&quot;
     ],
     &quot;client&quot;: [
@@ -480,6 +481,7 @@
   &quot;limits_tier&quot;: &quot;first-party&quot;
 }
 </code></pre>
+<p>The server side holds <code>panes.create</code> because the <code>create-pane</code> intent that the split samples submit is opened only by that grant (<a href="/pages/capability-panes-create/">panes.create</a>). The two activation triggers name a command and a view that the plugin registers itself at run time through the command and view registries (<a href="/pages/api-commands/">commands</a>, <a href="/pages/ui-model/">UI model</a>), not through <code>contributes</code>. The trigger <code>command:layout.preset</code> starts the plugin when that command is first run, and <code>view:layout.presets</code> when the presets panel is first shown. A trigger whose name the plugin never registers never fires, and the plugin then starts only at the next explicit use.</p>
 <h3 id="samples">Samples</h3>
 <h4 id="split-four-ways">Split four ways</h4>
 <p>A command splits the focused pane right, left, up or down. The client commands <code>Split right</code>, <code>Split left</code>, <code>Split up</code> and <code>Split down</code> send the focused pane to the server side, which submits <code>create-split</code> with a new terminal pane. Pages: <a href="/pages/api-intent-tree-structure/">tree structure intents</a>, <a href="/pages/capability-tree-restructure/">tree.restructure</a>, <a href="/pages/api-commands/">commands</a>, <a href="/pages/api-events/">events</a> and <a href="/pages/api-messages-and-topics/">messages and topics</a>. The direction of a split is <code>horizontal</code> or <code>vertical</code>; left and up place the new pane first.</p>
@@ -678,7 +680,7 @@ fn on_drag(&amp;mut self, divider_column: u16) -&gt; Option&lt;Submission&gt; {
     })))
 }
 
-// Server side: refused(conflict) names the neighbour that blocks the size.
+// Server side: a size that a neighbour blocks is refused with `conflict`.
 fn resize(pane: NodeId, columns: u16) -&gt; Submission {
     Submission::new(Intent::ResizePane(ResizePaneSpec { pane, columns: Some(columns), rows: None }))
 }
@@ -703,7 +705,7 @@ function onDrag(dividerColumn: number): Submission | undefined {
   };
 }
 
-// Server side: refused(conflict) names the neighbour that blocks the size.
+// Server side: a size that a neighbour blocks is refused with `conflict`.
 const resize = (pane: bigint, columns: number): Submission =&gt; ({
   intent: { tag: 'resize-pane', val: { pane, columns, rows: undefined } },
   correlation: 5n,
@@ -727,7 +729,7 @@ const resize = (pane: bigint, columns: number): Submission =&gt; ({
 <td><code>layout-presets</code></td>
 <td>collect</td>
 <td>Offer a named split layout in the layout chooser.</td>
-<td>entry: id, title, template (nested split description with pane-kind placeholders)</td>
+<td>entry: id, title, template (a preset template string, grammar below)</td>
 <td>standard</td>
 </tr>
 <tr>
@@ -739,6 +741,7 @@ const resize = (pane: bigint, columns: number): Submission =&gt; ({
 </tr>
 </tbody>
 </table>
+<p><strong>Preset template grammar.</strong> A <code>template</code> is a string. <code>h(a, b, ...)</code> is a horizontal split (children side by side) and <code>v(a, b, ...)</code> is a vertical split (children stacked), each with two or more children and each child either a nested split or a pane-kind placeholder. A placeholder is a bare word naming a pane kind: <code>terminal</code>, <code>agent</code>, <code>editor</code> or <code>board</code>. Whitespace between tokens is ignored and names are lowercase. A template that does not parse, has a split with fewer than two children, or names an unknown kind is refused with <code>invalid-argument</code> when the contribution is validated at load, and the preset is not offered. Example: <code>h(agent, v(editor, terminal))</code> puts the agent pane left and an editor above a terminal on the right.</p>
 <p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
 <ul>
 <li><code>ilium.core.layout/presets</code>: list, apply: list the layout presets and apply one to a group</li>
@@ -747,7 +750,7 @@ const resize = (pane: bigint, columns: number): Submission =&gt; ({
 <ul>
 <li><code>ilium.core.layout/changed</code>: { group, split_count } after a split is added, removed or resized</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.layout"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.layout"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-a-three-pane-review-layout-to-the-layout-chooser">Example: Adds a three-pane review layout to the layout chooser</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

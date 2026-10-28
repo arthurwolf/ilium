@@ -548,12 +548,20 @@
 <td><code>safe-mode</code></td>
 <td>The server started in safe mode</td>
 </tr>
+<tr>
+<td><code>audit-reset</code></td>
+<td>The server recreated a deleted log file, with <code>prev_hash</code> of zeros</td>
+</tr>
+<tr>
+<td><code>audit-dropped</code></td>
+<td>Records were dropped while the disk was full ([SEC-225]); written when space returns, with the count</td>
+</tr>
 </tbody>
 </table>
 <p><strong>[SEC-223]</strong> Redaction. A record never contains terminal text, prompts, transcripts, file contents or request bodies. Argument values equal to a current plugin secret (and its base64 and percent-encoded forms) are replaced with <code>&lt;redacted&gt;</code> ([SEC-243]). Process arguments are logged in full otherwise.</p>
 <h2 id="retention-and-failure">Retention and failure</h2>
 <p><strong>[SEC-224]</strong> Rotation. The log rotates at <code>audit.max_mib</code> (default 64 MiB) or when the oldest record is older than <code>audit.keep_days</code> (default 365). The new file starts with a record whose <code>prev_hash</code> is the hash of the last line of the rotated file, and the old file is renamed <code>audit-&lt;first seq&gt;.jsonl</code> and kept until its age exceeds <code>keep_days</code>. Policy may change both values.</p>
-<p><strong>[SEC-225]</strong> Disk full. If a record cannot be written, the server keeps running, keeps the record in memory (up to 1,000 records), retries every 10 s, and shows a notice. Security events have priority over the rest: when the in-memory queue is full, the oldest <code>h-grant-refused</code> and <code>egress-host-first-use</code> records are dropped first, and a <code>audit-dropped</code> record with the count is written when space returns.</p>
+<p><strong>[SEC-225]</strong> Disk full. If a record cannot be written, the server keeps running, keeps the record in memory (up to 1,000 records), retries every 10 s, and shows a notice. When the in-memory queue is full, the oldest <code>h-grant-refused</code> and <code>egress-host-first-use</code> records are dropped first, no other record type is dropped while one of those two remains, the <code>audit-dropped</code> record is never dropped, and a <code>audit-dropped</code> record with the count is written when space returns.</p>
 <p><strong>[SEC-226]</strong> Verification. <code>ilium plugin audit --verify</code> re-computes the chain and prints <code>ok</code> or the first broken <code>seq</code>. The chain detects edits by someone who cannot also rewrite the whole file; an attacker with write access to the file can rebuild it. For stronger assurance the policy can set <code>[audit] sink</code> to <code>syslog</code> or <code>journald</code> ([SEC-228]).</p>
 <h2 id="viewing-and-export">Viewing and export</h2>
 <p><strong>[SEC-227]</strong> <code>ilium plugin audit [--plugin &lt;id&gt;] [--since &lt;time&gt;] [--event &lt;name&gt;] [--limit &lt;n&gt;]</code> prints matching records as JSONL (one <code>audit</code> object per line, then one <code>summary</code>). <code>--since</code> accepts an ISO 8601 time or a duration such as <code>24h</code>. Settings &gt; Plugins &gt; Activity shows the same records in a list.</p>

@@ -658,6 +658,10 @@ end-22  end record (22 bytes, comment length 0)
 <td><code>build-info.json</code></td>
 <td>The build record. See <a href="/pages/guide-publishing/">Publishing guide</a>.</td>
 </tr>
+<tr>
+<td><code>sbom.spdx.json</code>, <code>provenance.json</code></td>
+<td>Optional SPDX dependency and in-toto build statements, listed and hashed as ordinary files (SEC-155). Displayed without establishing trust.</td>
+</tr>
 </tbody>
 </table>
 <table>
@@ -816,7 +820,7 @@ end-22  end record (22 bytes, comment length 0)
 <tbody>
 <tr>
 <td>[PKG-143]</td>
-<td><strong>Input set.</strong> <code>pack</code> includes: the source <code>manifest.json</code>; the built components <code>server.wasm</code>, <code>client.wasm</code> and <code>scene.wasm</code> for each declared side, taken from the build output folder; every file under <code>assets/</code>, <code>help/</code>, <code>sounds/</code>, <code>screenshots/</code> and <code>src/</code>; and <code>README.md</code>, <code>CHANGELOG.md</code>, <code>LICENSE</code>, <code>NOTICE</code>, <code>sbom.json</code> and <code>build-info.json</code> when present. Nothing else is included.</td>
+<td><strong>Input set.</strong> <code>pack</code> includes: the source <code>manifest.json</code>; the built components <code>server.wasm</code>, <code>client.wasm</code> and <code>scene.wasm</code> for each declared side, taken from the build output folder; every file under <code>assets/</code>, <code>help/</code>, <code>sounds/</code>, <code>screenshots/</code> and <code>src/</code>; and <code>README.md</code>, <code>CHANGELOG.md</code>, <code>LICENSE</code>, <code>NOTICE</code>, <code>sbom.json</code>, <code>build-info.json</code>, <code>sbom.spdx.json</code> and <code>provenance.json</code> when present. Nothing else is included.</td>
 </tr>
 <tr>
 <td>[PKG-144]</td>
@@ -1054,7 +1058,7 @@ end-22  end record (22 bytes, comment length 0)
 </table>
 <p>The install error catalogue in <a href="/pages/reference-manifest-schema/#error-catalogue">Manifest schema</a> is the only list of codes. It also has a table of retired spellings.</p>
 <h2 id="offline-verification-ilium-plugin-verify">Offline verification: <code>ilium plugin verify</code></h2>
-<p><code>ilium plugin verify &lt;file&gt;</code> runs stages 1 to 8 on a package without installing it. It needs no network and changes no state. It prints JSONL lines.</p>
+<p><code>ilium plugin verify &lt;file&gt;</code> runs stages 1 to 7 on a package without installing it. The <code>tier</code> it reports comes from a read-only look-up of the signing key in the trust store, not from stage 8. It needs no network and changes no state. It prints JSONL lines.</p>
 <table>
 <thead>
 <tr>
@@ -1065,7 +1069,7 @@ end-22  end record (22 bytes, comment length 0)
 <tbody>
 <tr>
 <td>[PKG-154]</td>
-<td><code>verify</code> prints one <code>progress</code> line per stage with <code>stage</code> (1 to 8) and <code>name</code>, then one <code>error</code> line per error, then one <code>result</code> line.</td>
+<td><code>verify</code> prints one <code>progress</code> line per stage with <code>stage</code> (1 to 7) and <code>name</code>, then one <code>error</code> line per error, then one <code>result</code> line.</td>
 </tr>
 <tr>
 <td>[PKG-155]</td>

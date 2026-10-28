@@ -39,7 +39,7 @@ Each entry in `contributes.output_filters` is installed when the plugin starts.
 | Field | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `id` | string | yes | none | Filter id, unique within the plugin. It appears in `output-matched` events. |
-| `regex` | string | yes | none | Pattern, see [Matching](#matching). Up to 1 KiB. |
+| `regex` | string | yes | none | Pattern, see [Matching](#matching). Up to 512 bytes (the manifest schema `maxLength`). |
 | `panes` | `"all"`, `"agents"` or `"terminals"` | yes | none | Which panes the filter watches. |
 | `rate_per_second` | integer, 1 to 100 | no | 10 | Accepted matches per second, per pane. |
 
@@ -92,7 +92,7 @@ Each filter instance on each pane has its own limit of `rate_per_second` accepte
 | Filters across all plugins | n/a | 512 | 512 | `quota-exceeded` |
 | Queued `output-matched` events per plugin | 1,024 | 4,096 | 1,024 | Oldest dropped, counted |
 
-Events of a plugin are dropped oldest first when its event queue is full, and the drop is counted in `events-dropped`.
+`output-matched` is a drop-oldest event kind in the [runtime model](/pages/reference-runtime-model/) (ABI-033): when the queue is full, the oldest queued drop-oldest event is evicted and counted in `events-dropped`. Events that are never dropped, such as `agent-activity-changed`, are not evicted. Matches above the rate limit are dropped and counted as described under Rate limit.
 
 ## Risk and tier rules
 
@@ -225,7 +225,7 @@ export const { lifecycle, handler } = definePlugin({
 |---|---|
 | Grant declined or revoked | `add-output-filter` returns `not-permitted`. Manifest filters are not installed. No events arrive. |
 | Pane does not exist | `not-found`. |
-| Regex does not compile, or the pattern is over 1 KiB, or the compiled program is over 1 MiB | `invalid-argument`. |
+| Regex does not compile, or the pattern is over 512 bytes, or the compiled program is over 1 MiB | `invalid-argument`. |
 | `rate_per_second` is 0 or over 100, or the id is empty | `invalid-argument`. |
 | More than 32 filters on T2 or T3 (128 on T1), or 512 across all plugins | `quota-exceeded`. |
 | Same id added twice on one pane | The second call replaces the first. |
@@ -284,10 +284,10 @@ Requirement ids for this page: [PRI-006]. See the [requirements index](/pages/re
 - [sound.play](/pages/capability-sound-play/) and [notify.desktop](/pages/capability-notify-desktop/), the actions a text trigger usually runs.
 - [Terminal primitives](/pages/primitives-terminal/) for the complete terminal interface.
 - [Events and intents](/pages/api-events/) for the event envelope and the batch rules.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and quota model.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and quota model.
 
 Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-**[SEC-046]** Filter patterns are compiled with size limits; a catastrophic pattern is refused with `regex.too-large` or `regex.unsupported`. See [Security testing](/pages/reference-security-testing/).
+**[SEC-046]** Filter patterns are compiled with size limits; a catastrophic pattern is refused with `invalid-argument`. See [Security testing](/pages/reference-security-testing/).

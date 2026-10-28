@@ -468,12 +468,9 @@ impl SettingsChoice {
                 if options.is_empty() {
                     options.push(ChoiceOption { id: "unavailable".into(), label: "No model configured".into(), disabled_reason: Some("Press E on the model row to enter a name, or refresh the model catalog".into()) });
                 }
-                let selected = if current.trim().is_empty() {
-                    options[0].id.clone()
-                } else {
-                    current.clone()
-                };
-                (options, selected)
+                // An empty configured model has no current catalog selection.
+                // Keeping that identity empty also makes the first step choose A.
+                (options, current.clone())
             }
             Self::InferenceProvider => catalog(
                 &ilium_inference::InferenceProviderKind::ALL,
@@ -492,17 +489,17 @@ impl SettingsChoice {
             Self::AttentionPressSorts => catalog(
                 &[true, false],
                 app.attention_settings.press_sorts,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::AttentionLargeButtons => catalog(
                 &[true, false],
                 app.attention_settings.large_buttons,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::AttentionShowBriefing => catalog(
                 &[true, false],
                 app.attention_settings.show_briefing,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::AttentionModel => {
                 let mut options = vec![ChoiceOption {
@@ -557,7 +554,7 @@ impl SettingsChoice {
             Self::CodexThreadNames => catalog(
                 &[true, false],
                 app.inference_settings.codex_official_thread_names,
-                |value| if value { "☑ On" } else { "☐ Off" }.into(),
+                |value| crate::value_control::boolean_switch(value).into(),
             ),
             Self::VoiceModel => catalog(
                 &ilium_voice::VoiceModel::ALL,
@@ -668,7 +665,7 @@ impl SettingsChoice {
         Ok(ValueDialogState::Choice(ChoiceDialogState::new(
             self.title(),
             options,
-            Some(selected),
+            (!selected.trim().is_empty()).then_some(selected),
         )?))
     }
 }
@@ -1206,6 +1203,98 @@ mod tests {
     use crate::app::SettingsState;
 
     #[test]
+    fn universal_review_blank_model_does_not_select_or_skip_first_catalog_entry() {
+        for field in [
+            SettingsChoice::OllamaModel,
+            SettingsChoice::OpenAiModel,
+            SettingsChoice::AnthropicModel,
+        ] {
+            for count in 0..=2 {
+                for direction in [-1, 1] {
+                    let directory = tempfile::tempdir().unwrap();
+                    let mut app = App::new("blank-model".into(), directory.path().into());
+                    app.config_dir = Some(directory.path().into());
+                    app.inference_settings.ollama.model.clear();
+                    app.inference_settings.openai.model.clear();
+                    app.inference_settings.anthropic.model.clear();
+                    let models: Vec<String> = ["synthetic-A", "synthetic-B"]
+                        .into_iter()
+                        .take(count)
+                        .map(str::to_owned)
+                        .collect();
+                    app.ollama_models = models.clone();
+                    app.openai_models = models.clone();
+                    app.anthropic_models = models;
+                    app.inference_settings.selected_provider = match field {
+                        SettingsChoice::OllamaModel => {
+                            ilium_inference::InferenceProviderKind::Ollama
+                        }
+                        SettingsChoice::AnthropicModel => {
+                            ilium_inference::InferenceProviderKind::Anthropic
+                        }
+                        _ => ilium_inference::InferenceProviderKind::OpenAi,
+                    };
+                    let row = (0..crate::settings_ui::inference_rows(&app.inference_settings)
+                        .len())
+                        .find(|row| {
+                            SettingsChoice::at(&app, crate::app::SettingsTab::Inference, *row)
+                                == Some(field)
+                        })
+                        .unwrap();
+                    let state = SettingsState {
+                        tab: crate::app::SettingsTab::Inference,
+                        selected_row: row,
+                        ..SettingsState::default()
+                    };
+                    let area = ratatui::layout::Rect::new(0, 0, 140, 100);
+                    let (_, control) =
+                        crate::settings_ui::settings_choice_control(area, &app, &state, row)
+                            .unwrap();
+                    let has_step = (0..area.height).any(|y| {
+                        (0..area.width).any(|x| {
+                            matches!(
+                                control.hit(
+                                    ratatui::layout::Position::new(x, y),
+                                    crate::value_control::PointerButton::Left
+                                ),
+                                Some(
+                                    crate::value_control::ControlAction::PreviousChoice
+                                        | crate::value_control::ControlAction::NextChoice
+                                )
+                            )
+                        })
+                    });
+                    assert_eq!(has_step, count > 0, "blank model step availability");
+                    let ValueDialogState::Choice(dialog) = field.dialog(&app).unwrap() else {
+                        panic!("not a catalog")
+                    };
+                    assert!(
+                        dialog.selected_id.as_deref().is_none_or(str::is_empty),
+                        "unconfigured model claimed a selection: {:?}",
+                        dialog.selected_id
+                    );
+                    app.step_settings_choice(field, direction);
+                    app.settle_filesystem_for_test();
+                    let loaded = crate::config::load(directory.path()).unwrap();
+                    let actual = match field {
+                        SettingsChoice::OllamaModel => loaded.inference.ollama.model,
+                        SettingsChoice::AnthropicModel => loaded.inference.anthropic.model,
+                        _ => loaded.inference.openai.model,
+                    };
+                    let expected = if count == 0 {
+                        ""
+                    } else if count == 2 && direction < 0 {
+                        "synthetic-B"
+                    } else {
+                        "synthetic-A"
+                    };
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn sound_catalog_retains_authored_file_and_selection_updates_disk_and_server() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("sound-catalog".into(), directory.path().into());
@@ -1626,7 +1715,7 @@ mod tests {
         for field in [SettingsChoice::OllamaModel, SettingsChoice::OpenAiModel] {
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), 1);
-            assert_eq!(selected, "unavailable");
+            assert!(selected.is_empty());
             assert!(options[0]
                 .disabled_reason
                 .as_deref()
@@ -1634,7 +1723,7 @@ mod tests {
                 .contains("Press E"));
             let attempts = app.configuration_admission.attempts;
             assert!(app
-                .save_settings_choice(field, &selected, directory.path().into(), None)
+                .save_settings_choice(field, &options[0].id, directory.path().into(), None)
                 .is_err());
             assert_eq!(app.configuration_admission.attempts, attempts);
         }
@@ -1770,15 +1859,35 @@ mod tests {
             };
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), expected, "{field:?}");
-            assert!(options
-                .iter()
-                .all(|option| { option.disabled_reason.is_none() || option.id == selected }));
+            let unconfigured_model = selected.is_empty()
+                && matches!(
+                    field,
+                    SettingsChoice::OllamaModel
+                        | SettingsChoice::OpenAiModel
+                        | SettingsChoice::AnthropicModel
+                );
+            if unconfigured_model {
+                assert_eq!(
+                    options.len(),
+                    1,
+                    "empty model catalog has one unavailable placeholder"
+                );
+                assert_eq!(options[0].id, "unavailable");
+                assert!(
+                    options[0].disabled_reason.is_some(),
+                    "placeholder must not be selectable"
+                );
+            } else {
+                assert!(options
+                    .iter()
+                    .all(|option| option.disabled_reason.is_none() || option.id == selected));
+            }
             assert_eq!(
                 options
                     .iter()
                     .filter(|option| option.id == selected)
                     .count(),
-                1
+                usize::from(!unconfigured_model)
             );
             let ids: std::collections::HashSet<_> =
                 options.iter().map(|option| &option.id).collect();
@@ -1787,7 +1896,10 @@ mod tests {
                 panic!("choice");
             };
             assert_eq!(dialog.options().len(), expected);
-            assert_eq!(dialog.selected_id, Some(selected));
+            assert_eq!(
+                dialog.selected_id,
+                (!unconfigured_model).then_some(selected)
+            );
 
             let location = crate::app::SettingsTab::ALL
                 .into_iter()

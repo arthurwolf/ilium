@@ -19,3 +19,4 @@ target/
 
 # Task-owned hashed development inputs for remote UI qualification.
 /.ni-build-ui-sdk/
+/claude-api.sh

@@ -128,8 +128,9 @@ impl Drop for CleanupOnFailure {
 }
 
 impl PtyOwner {
-    /// `setup_failure` kills/reaps ONLY the child just spawned by this session.
-    /// It runs before dropping native control on every ordinary setup error.
+    /// `setup_failure` requests shutdown of ONLY this session's child through
+    /// its already started, supervised reaper. It runs before dropping native
+    /// control on every ordinary setup error; native cleanup may remain pending.
     /// A successful owner never invokes it and never signals a user process.
     pub(crate) fn spawn(
         master: Box<dyn MasterPty + Send>,
@@ -372,6 +373,9 @@ impl Engine {
     fn run(mut self, stop: &StopToken, guard: &OwnerExitGuard) {
         loop {
             if self.active.is_some() {
+                // Observe the wake counter before checking completion. A writer
+                // finishing between the check and wait must prevent sleeping.
+                let wake_generation = self.queue.wake_generation();
                 if let Some((reason, error)) = self.poll_active() {
                     guard.stop(reason, error);
                     break;
@@ -380,7 +384,6 @@ impl Engine {
                     // One partial input/reply owns the writer exclusively.
                     // Parse only output that precedes the next queued command;
                     // a resize ahead of output remains an absolute barrier.
-                    let wake_generation = self.queue.wake_generation();
                     if let Some(output) = self.queue.take_output_while_writing() {
                         if let Some((reason, error)) = self.execute(output) {
                             guard.stop(reason, error);
@@ -431,9 +434,10 @@ impl Engine {
         // poll observes either an exact completion or the bounded cancellation
         // grace's unconfirmed result. Keep the original terminal reason.
         while self.active.is_some() {
+            // Use the same check-before-wait ordering during retirement.
+            let wake_generation = self.queue.wake_generation();
             let _ = self.poll_active();
             if self.active.is_some() {
-                let wake_generation = self.queue.wake_generation();
                 self.queue.wait_during_write(
                     wake_generation,
                     self.writer.next_poll_delay().unwrap_or(Duration::ZERO),
@@ -626,17 +630,11 @@ impl Engine {
             parser.callbacks_mut().take_pending_replies()
         };
         let _ = self.terminal.changed.send(());
+        // Automatic capability-query replies are best effort. A child that floods
+        // queries while the writer is busy must not shut the pane's input down,
+        // so the excess replies are dropped instead.
         if pending.len() > MAX_PENDING_REPLY_BYTES.saturating_sub(self.pending_reply_bytes) {
-            return Some((
-                ShutdownReason::WriterFailed,
-                Some(DeliveryError::new(
-                    None,
-                    DeliveryFailure::TooLarge {
-                        requested: self.pending_reply_bytes + pending.len(),
-                        maximum: MAX_PENDING_REPLY_BYTES,
-                    },
-                )),
-            ));
+            return None;
         }
         if !pending.is_empty() {
             self.pending_reply_bytes += pending.len();

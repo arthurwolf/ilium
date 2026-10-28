@@ -10,6 +10,7 @@ use crate::status_icons::{safe_tooltip_text, TooltipContent};
 use crate::tree_ui::TreeToolbarAction;
 
 pub(crate) struct PendingPaneCreation {
+    pub custom_profile_id: Option<String>,
     pub parent_group: NodeId,
     pub action: TreeToolbarAction,
     pub started: Instant,
@@ -41,10 +42,17 @@ impl App {
                 ..
             } => Self::toolbar_action_for_command(command),
             NewPaneKind::Editor(_) => TreeToolbarAction::Editor,
+            NewPaneKind::CustomAgent { identity, .. } => {
+                TreeToolbarAction::Agent(identity.base_provider)
+            }
         };
         Some((
             *request_id,
             PendingPaneCreation {
+                custom_profile_id: match kind {
+                    NewPaneKind::CustomAgent { identity, .. } => Some(identity.profile_id.clone()),
+                    _ => None,
+                },
                 parent_group: *parent_group,
                 action,
                 started: Instant::now(),
@@ -237,9 +245,9 @@ impl App {
         }
         messages.sort();
         Some(TooltipContent {
-            title: "Blocking errors".into(),
+            title: "Recorded operation failures".into(),
             body: messages.join("\n\n"),
-            reason: messages.first().cloned(),
+            reason: Some("Retained error records may describe earlier failed attempts. They do not establish a current hang; compare the operation with its latest result and current monitor registration.".into()),
         })
     }
 }
@@ -257,6 +265,7 @@ mod tests {
             app.pending_pane_creations.insert(
                 request_id,
                 PendingPaneCreation {
+                    custom_profile_id: None,
                     parent_group: ROOT_ID,
                     action,
                     started: Instant::now(),
@@ -282,6 +291,7 @@ mod tests {
         app.pending_pane_creations.insert(
             43,
             PendingPaneCreation {
+                custom_profile_id: None,
                 parent_group: ROOT_ID,
                 action,
                 started: Instant::now(),
@@ -319,6 +329,7 @@ mod tests {
         app.pending_pane_creations.insert(
             7,
             PendingPaneCreation {
+                custom_profile_id: None,
                 parent_group: ROOT_ID,
                 action: TreeToolbarAction::Shell,
                 started,

@@ -232,7 +232,7 @@ the plugin log gets a warn line. The developer can check the state from the term
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md`:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 10 Help and key reference, which shows the topics of every installed plugin.
 - 90 Settings UI, which links each settings page to its help topic.

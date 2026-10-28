@@ -59,7 +59,7 @@ The argument of `http` is a host pattern.
 
 Install refuses a bare `*`. A redirect follows the same rule for each hop.
 
-`http:setting:<key>` names one of the plugin's own setting keys (otherwise the manifest fails with `manifest.grant-argument`). The setting is a `text` row with `item_format` `url` or `host`, or a `list` of them. The host is checked at `fetch` and `open-stream` time. When the stored value changes to a host the user has not confirmed, the user is asked once before the first request (D23), and until then calls to it return `not-permitted`. Wildcards in the stored value are refused. The full flow, with the confirmation dialog, is on [http streams](/pages/api-http-streams/).
+`http:setting:<key>` names one of the plugin's own setting keys (otherwise the manifest fails with `manifest.grant-argument`). The setting is a `text` row with `item_format` `url` or `host`, or a `list` of them. The host is checked at `fetch` and `open-stream` time. When the stored value changes to a host the user has not confirmed, the user is asked once before the first request (SEC-074), and until then calls to it return `not-permitted`. Wildcards in the stored value are refused. The full flow, with the confirmation dialog, is on [http streams](/pages/api-http-streams/).
 
 ### Politeness
 
@@ -67,7 +67,7 @@ The host keeps requests polite on behalf of every plugin, so a plugin does not i
 
 | Mechanism | What the plugin sees |
 |---|---|
-| Per-host rate limiter | A request over the allowance for one host fails with `rate-limited`. |
+| Per-host rate limiter | The request is not failed at once. Its Completion outcome is `rate-limited` with `retry-after-ms` set. |
 | `Retry-After` | The failure carries `retry-after-ms`; wait that long before the next call to the host. |
 | ETag cache | The host sends `If-None-Match` for a URL it has fetched before. A `304` is returned to the plugin as the cached `200`, with the full body. The plugin never handles a `304`. |
 
@@ -84,7 +84,7 @@ The host keeps requests polite on behalf of every plugin, so a plugin does not i
 | Request body | 8 MiB | `invalid-argument` |
 | `timeout_millis` | 1 to 300,000 | `invalid-argument` |
 | Response body | `http_response_mib`: 8 by default, 64 at the tier 1 ceiling, 8 at the tier 2 and 3 ceiling | Completion `failed(quota-exceeded)`; no body is delivered |
-| Pending requests per plugin | 256 by default | `busy` |
+| Pending requests per plugin | 64 by default (`pending_requests`; ceiling 256 at tier 1) | `busy` |
 | Completed result held for `take-response` | 30 s, or until taken once | Later takes return `none`, which the wrapper turns into `not-found` |
 | Connections for the whole session | 32 | Extra requests queue inside the host; no error |
 
@@ -202,7 +202,7 @@ let response = http::take_response(id);   // Option<HttpResponse>; None after 30
 ```json
 {
   "type": "refusal",
-  "capability": "http:evil.example",
+  "grant": "http:evil.example",
   "function": "http.fetch",
   "reason": "not-granted"
 }
@@ -296,7 +296,7 @@ The contract below is an excerpt. The owner is the [WIT reference](/pages/refere
 record http-request { method: string, url: string, headers: list<header>, body: option<list<u8>>, timeout-millis: u32 }
 record http-response { status: u16, headers: list<header>, body: list<u8> }
 enum stream-framing { raw, lines, server-sent-events, ndjson }
-/// max-chunk-bytes at most 1 MiB.
+/// max-chunk-bytes at most 64 KiB.
 record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
 /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
 fetch: func(request: http-request) -> result<request-id, plugin-error>;

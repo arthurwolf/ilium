@@ -27,7 +27,7 @@ Contract version: `ilium:plugin@0.1.0`.
 
 The `ilium-execution` quota group is a token bucket. It holds 2,000 ms of CPU time and refills at 500 ms per second. There is one group for each plugin side in each process. A call spends its thread time. A submission also spends 1 ms for every 64 KiB of payload.
 
-- When the bucket is empty, a new submission returns `quota-exceeded` with The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200.
+- When the bucket is empty, a new submission returns `quota-exceeded` with a `retry-after-ms` value. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200.
 - A call already running is not stopped by an empty bucket. Its deadline stops it.
 - A refused call is not a failure and is not counted toward the restart rule. It counts as a quota hit in the metrics of [Health and watchdog](/pages/reference-health-and-watchdog/).
 
@@ -62,7 +62,7 @@ memory_mib = 64
 
 Example. A T3 plugin asks `memory_mib: 200` in its manifest. The user sets nothing. The ceiling for T2 and T3 is 128, so the plugin gets 128 and the log says `limit memory_mib clamped 200 to 128`. If the user sets 64 for this plugin, it gets 64. If the user sets 256, it gets 128.
 
-- [LIF-143] The effective limit MUST be `min(ceiling, first set of [plugins."<id>".limits] value, [plugins.limits] value, manifest value, default)`; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them. Test: the three cases of the example.
+- [LIF-143] The effective limit MUST be `min(ceiling, v)`, where `v` is the first set of the `[plugins."<id>".limits]` value, the `[plugins.limits]` value, the manifest value and the default, in that order; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them; a value above the current session value is clamped to it and the host logs a warning. Test: the three cases of the example.
 - [LIF-144] A per-plugin user value MUST win over a user value for all plugins. Test: set both and read the effective value.
 
 ### Helpers and cgroups
@@ -80,7 +80,7 @@ T2 and T3 instances run in the helper process of [Sandbox helper](/pages/referen
 {"type":"plugin-stat","id":"com.example.notes","side":"server","resource":"execution-ms","used":1240,"limit":2000,"source":"fixed"}
 ```
 
-`source` is `default`, `manifest`, `user` or `ceiling`. The Plugins screen detail tab Resources shows the same rows ([Managing plugins](/pages/user-managing-plugins/)).
+`source` is `default`, `manifest`, `user`, `ceiling` or `fixed`. `fixed` marks a limit that no manifest or user setting changes, such as the `ilium-execution` bucket. The Plugins screen detail tab Resources shows the same rows ([Managing plugins](/pages/user-managing-plugins/)).
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin stats com.example.notes
@@ -106,7 +106,7 @@ disk         12 MiB   256 MiB  default
 
 ### See also
 
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Reference, errors and limits](/pages/reference-errors-and-limits/)
 - [Performance](/pages/performance/)
 - [Health and watchdog](/pages/reference-health-and-watchdog/)

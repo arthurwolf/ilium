@@ -555,7 +555,7 @@
 <td>size</td>
 <td><code>width: u32</code>, <code>height: u32</code></td>
 <td><code>width</code>, <code>height</code></td>
-<td>Surface size in pixels: cells times the dither sub-cell factor.</td>
+<td>Surface size in pixels: cells times the dither sub-cell factor (the number of pixels that one cell holds along each axis, set by the user's active dither mode).</td>
 </tr>
 <tr>
 <td>palette</td>
@@ -772,7 +772,7 @@ impl Renderer for RingRenderer {
 <h3 id="the-same-scene-in-typescript">The same scene in TypeScript</h3>
 <p>The TypeScript version has the same behaviour. <code>defineScene</code> takes the class, and the spec arrives already parsed. <code>timeMillis</code> is a <code>bigint</code>, so the code converts it with <code>Number</code>. The <code>ringTone</code> function mirrors the Rust one line for line, so both builds draw the same frame.</p>
 <p><strong>TypeScript</strong></p>
-<pre><code class="language-ts">// scene/src/main.ts. The rings scene, step 7, in TypeScript.
+<pre><code class="language-ts">// scene/src/scene.ts. The rings scene, step 7, in TypeScript.
 import { defineScene } from '@ilium/plugin-sdk';
 import type { FrameInput, SceneSpec } from '@ilium/plugin-sdk/anim/renderer';
 import type { FrameSurface } from '@ilium/plugin-sdk/anim/surface';
@@ -895,7 +895,7 @@ ilium plugin dev
 </tr>
 <tr>
 <td>A trap or a failed readiness</td>
-<td>Counts as one failure. The restart waits 1 s after the first failure, 5 s after the second and 30 s after later ones. The third failure within 10 minutes disables the scene side of the plugin.</td>
+<td>Counts as one failure. The restart waits 1 s after the first failure, 5 s after the second. The third failure within 10 minutes disables the scene side of the plugin.</td>
 </tr>
 <tr>
 <td>Ring count 12 on a small panel</td>
@@ -988,7 +988,7 @@ ilium plugin dev
 <td>manifest <code>prerender</code></td>
 <td>none</td>
 <td>none</td>
-<td><code>{{ frames, fps, cache_mib }}</code>. The host calls <code>render</code> for the frames once, caches them (at most 128 MiB, 30 fps) and plays the loop.</td>
+<td><code>{ frames, fps, cache_mib }</code>. The host calls <code>render</code> for the frames once, caches them (at most 128 MiB, 30 fps) and plays the loop.</td>
 </tr>
 <tr>
 <td>Fonts</td>
@@ -1003,35 +1003,35 @@ ilium plugin dev
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">// scene/src/lib.rs. In render, after surface.write_tones and before present.
 // Needs &quot;glyph_plane&quot;: true on the scene in the manifest.
-let label = GlyphCell {{
+let label = GlyphCell {
     column: (frame.width / 2) as u16,
     row: (frame.height / 2) as u16,
     text: self.settings.ring_count.to_string(),
     fg: None,
     bg: None,
     add: Modifiers::default(),
-}};
+};
 surface.write_glyphs(&amp;[label]);
 </code></pre>
 <p><strong>TypeScript</strong></p>
-<pre><code class="language-ts">// scene/src/main.ts. In render, after surface.writeTones and before present.
+<pre><code class="language-ts">// scene/src/scene.ts. In render, after surface.writeTones and before present.
 // Needs &quot;glyph_plane&quot;: true on the scene in the manifest.
-surface.writeGlyphs([{{
+surface.writeGlyphs([{
   column: Math.floor(frame.width / 2),
   row: Math.floor(frame.height / 2),
   text: String(this.settings.ring_count),
   fg: undefined,
   bg: undefined,
-  add: {{}},
-}}]);
+  add: {},
+}]);
 </code></pre>
-<p>The glyph is drawn after the shared look, so it follows the palette and the colour mode like the rings do. The surface size in <code>frame.width</code> and <code>frame.height</code> is in pixels. A glyph cell uses cell coordinates, so a scene divides by the dither sub-cell factor; the SDK pages do not yet expose that factor to a scene, which the gap list notes.</p>
-<p>A pre-rendered scene declares <code>modes: ["pre-rendered"]</code> and <code>prerender</code> in the manifest. The host runs the frames once and plays them with no further calls. A <code>prerender</code> on a scene that answers <code>wants_pointer</code> is the manifest error <code>manifest.scene-prerender</code>.</p>
-<pre><code class="language-json">{{
+<p>The glyph is drawn after the shared look, so it follows the palette and the colour mode like the rings do. The surface size in <code>frame.width</code> and <code>frame.height</code> is in pixels. A glyph cell uses cell coordinates, and the scene API does not give a scene the dither sub-cell factor. A scene therefore cannot convert <code>frame.width</code> into a cell column exactly. The example above uses half the pixel size as the cell position, which is exact only where one cell holds one pixel; with a larger factor the label sits right of and below the centre. A scene that needs exact cell positions has to avoid the glyph plane until the SDK exposes the factor.</p>
+<p>A pre-rendered scene declares <code>modes: ["pre-rendered"]</code> and <code>prerender</code> in the manifest. The host runs the frames once and plays them with no further calls. Values out of range are the manifest error <code>manifest.scene-prerender</code>. A pre-rendered scene that answers <code>wants_pointer</code> with <code>true</code> is not refused: <code>pointer</code> returns <code>none</code> and the host logs a warning.</p>
+<pre><code class="language-json">{
   &quot;id&quot;: &quot;rings-loop&quot;, &quot;title&quot;: &quot;Rings loop&quot;, &quot;family&quot;: &quot;procedural&quot;,
   &quot;modes&quot;: [&quot;pre-rendered&quot;], &quot;clip_seconds&quot;: 8,
-  &quot;prerender&quot;: {{ &quot;frames&quot;: 240, &quot;fps&quot;: 30, &quot;cache_mib&quot;: 32 }}
-}}
+  &quot;prerender&quot;: { &quot;frames&quot;: 240, &quot;fps&quot;: 30, &quot;cache_mib&quot;: 32 }
+}
 </code></pre>
 <h3 id="see-also">See also</h3>
 <ul>

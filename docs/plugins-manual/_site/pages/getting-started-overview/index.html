@@ -526,7 +526,7 @@ struct MyPlugin { /* state */ }
 <p>A batch holds at most 256 events, and one <code>on-events</code> call may return at most 256 submissions; more is a trap. The host checks the batch against the grants, then applies the submissions in order.</p>
 <h3 id="capabilities-and-grants">Capabilities and grants</h3>
 <p>A grant is a name, or a name with one argument after the first colon, such as <code>tree.read</code> or <code>http:api.example.com</code>. A plugin lists its grants per side in <code>capabilities</code>. Grants are recorded per side and per user configuration, not per project. Normal grants are checked by default in the install dialog. High-risk grants, marked H, are never checked by default. A bundled plugin gets its normal grants up to the manifest ceiling and is asked once for each H grant at first activation.</p>
-<p>The contract includes 19 further grants for terminal cell reads, history and raw input, pane lifecycle, tree restructuring, attention marks, client chrome, external opening, cross-session control, long-lived children, kernel settings and keymap reads, agent transcripts, geocoding, embeddings, toasts and the pane journal. Nine of them are high risk. The <a href="/pages/capabilities/">capability reference</a> lists every one.</p>
+<p>The contract includes 23 further grants for terminal cell reads, history and raw input, pane lifecycle, tree restructuring, attention marks, client chrome, external opening, cross-session control, long-lived children, kernel settings and keymap reads, agent transcripts, geocoding, embeddings, toasts and the pane journal. Eleven of them are high risk. The <a href="/pages/capabilities/">capability reference</a> lists every one.</p>
 <p>Two outcomes matter when you write code:</p>
 <ul>
 <li>A capability the user declined returns <code>not-permitted</code> from its functions. Your code gets an error value and keeps running.</li>
@@ -573,7 +573,7 @@ struct MyPlugin { /* state */ }
 </tbody>
 </table>
 <p>The limits differ by tier. The manifest asks for values in <code>limits</code>, and the host clamps them to the tier ceiling. A request above the ceiling is clamped and logged, never refused.</p>
-<p>A T1 plugin may also set the top-level manifest key <code>limits_tier</code> to <code>"first-party"</code>. The host verifies the tier and then applies the higher ceilings of <a href="/pages/errors-and-limits/">Errors and limits</a>. The table below shows the standard ceilings.</p>
+<p>A T1 plugin may also set the top-level manifest key <code>limits_tier</code> to <code>"first-party"</code>. The host verifies the tier and then applies the higher ceilings of <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. The table below shows the standard ceilings.</p>
 <table>
 <thead>
 <tr>
@@ -868,7 +868,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td><code>revoked</code></td>
-<td>The grant set changed during the call. The plugin is re-activated.</td>
+<td>The grant set changed while this call was in flight. The plugin is re-activated. Calls made after that return <code>not-permitted</code>.</td>
 <td>No</td>
 </tr>
 <tr>
@@ -901,7 +901,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/tutorial-01-agent-badge/">Tutorial step 1</a> adds the first decoration.</li>
 <li><a href="/pages/lifecycle/">Lifecycle</a> describes activation, deactivation and restarts in full.</li>
 <li><a href="/pages/capabilities/">Capabilities</a> lists every grant and what it unlocks.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> gives the full error and limit tables.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> gives the full error and limit tables.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> describe the two SDKs.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/getting-started-first-plugin/"><small>Previous</small>Your first plugin in five minutes</a><a class="next" href="/pages/getting-started-toolchain/"><small>Next</small>Set up a toolchain</a></nav>

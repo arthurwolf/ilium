@@ -31,7 +31,7 @@ Each plugin side has these counters. A **class** is a row of the call-class tabl
 | `duration` | class | histogram | Call duration, buckets of 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 500, 1000 ms and above |
 | `near_misses` | class | count | Calls that took at least 80 % of the deadline |
 | `breaches` | class, kind (hard, soft) | count | Deadline breaches |
-| `traps` | trap code | count | Traps, by code (for example `host.deadline`, `host.stack-overflow`) |
+| `traps` | trap code | count | Traps, by code (for example `trap.deadline`, `host.stack-overflow`) |
 | `queue_depth` | none | gauge, high-water | Event queue length |
 | `events_dropped` | event kind | count | Events dropped by the drop-oldest policy |
 | `events_coalesced` | event kind | count | Events merged |
@@ -63,7 +63,7 @@ The host writes its own lines to the plugin log under the plugin id, with the ke
 | Level | Condition | Id |
 |---|---|---|
 | info | Instance start and end, with a summary | `instance.started`, `instance.ended` |
-| warn | A soft breach or a hard breach, with class and duration | `host.deadline`, `host.late` |
+| warn | A soft breach or a hard breach, with class and duration | `trap.deadline`, `host.late` |
 | warn | A call abandoned in the queue | `host.queue-timeout` |
 | warn | Events dropped, with counts | `events.dropped` |
 | warn | A clamp of a limit to the tier ceiling | `limits.clamped` |

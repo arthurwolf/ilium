@@ -52,11 +52,11 @@ pub mod settings;
 pub mod signing;
 pub mod storage;
 pub mod stores;
-pub mod trust;
 pub mod sync;
 pub mod telemetry;
-pub mod wasm_guest;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod trust;
+pub mod wasm_guest;
 
 pub use error::HostError;

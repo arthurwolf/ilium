@@ -77,7 +77,9 @@ fn create_process_quota() -> QuotaGroup {
             // General children collectively512 MiB; independent
             // decoder128 + encoder128 MiB retain dedicated headroom.
             input_bytes: 768 * MIB,
-            result_bytes: 768 * MIB,
+            // General result capacity grew for ambient replacement overlap;
+            // retain both codec directions' dedicated 128 MiB headroom too.
+            result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB,
             worker_threads: PROCESS_WORKER_THREADS
                 + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
             // Shared ceiling for selected charged owners; retiring native
@@ -1220,15 +1222,33 @@ mod composition_tests {
             .enable_all()
             .build()
             .unwrap();
+        // Fill the declared general result allowance without allocating a
+        // payload. Both codec directions must still admit their full envelope.
+        let general_credit = execution
+            .general
+            .try_reserve(
+                ilium_execution::Lane::Cpu,
+                JobCost {
+                    input_bytes: 0,
+                    result_bytes: GENERAL_RESULT_BYTES,
+                },
+            )
+            .expect("general capacity stays available");
         let decoder_credit = runtime
-            .block_on(first.reserve_decoder())
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), first.reserve_decoder()).await
+            })
+            .expect("general pressure must not starve decoding")
             .expect("first connection uses the shared decoder identity");
         let encoder_credit = runtime
-            .block_on(second.reserve_encoder())
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), second.reserve_encoder()).await
+            })
+            .expect("general pressure must not starve encoding")
             .expect("second connection uses the distinct encoder identity");
         assert_eq!(decoder.usage().jobs, before_decoder_jobs + 1);
         assert_eq!(encoder.usage().jobs, before_encoder_jobs + 1);
-        drop((decoder_credit, encoder_credit));
+        drop((general_credit, decoder_credit, encoder_credit));
         assert_eq!(decoder.usage().jobs, before_decoder_jobs);
         assert_eq!(encoder.usage().jobs, before_encoder_jobs);
 

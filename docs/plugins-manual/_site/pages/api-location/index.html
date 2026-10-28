@@ -401,7 +401,7 @@
 <li><strong>Grant:</strong> <code>location.observer</code>, risk high (H). It takes no argument and grants access to <code>location.current</code> only.</li>
 <li><strong>Side:</strong> client plugins and scene plugins (the animation world). The server world has no location import.</li>
 <li><strong>Language:</strong> Rust with the <code>ilium-plugin-sdk</code> crate, or TypeScript with the <code>@ilium/plugin-sdk</code> package. Both SDKs need no extra setup for this import.</li>
-<li><strong>Manifest:</strong> list <code>location.observer</code> in the plugin's capabilities. A plugin that does not list it gets a stub that returns nothing; see <a href="#edge-cases-and-errors">Edge cases</a>.</li>
+<li><strong>Manifest:</strong> list <code>location.observer</code> in the plugin's capabilities. A plugin that does not list it traps when it calls <code>current</code>, because that is a plugin bug; see <a href="#edge-cases-and-errors">Edge cases</a>.</li>
 <li><strong>User approval:</strong> the user must check the grant at install (T2 and T3 packages) or accept it at first activation (T1 bundled plugins). See <a href="#what-the-user-sees">What the user sees</a>.</li>
 </ul>
 <h3 id="surface">Surface</h3>
@@ -569,7 +569,7 @@ $ 3 lines shown, 0 dropped
 <pre class="term">
 ╭─ Plugin example.live-weather asks for ─────────────────────────────╮
 │ Plugin example.live-weather asks for:                              │
-│ [x] location.observer  high risk  Read the observer position       │
+│ [ ] location.observer  high risk  Read the observer position       │
 │                                                                    │
 │                          [ Allow selected ]      [ Not now ]       │
 ╰────────────────────────────────────────────────────────────────────╯
@@ -674,7 +674,7 @@ $ 3 lines shown, 0 dropped
 <li><a href="/pages/api-scenes/">scenes</a> for the scene contract that feature 99 uses.</li>
 <li><a href="/pages/api-http/">http</a> for the data requests that follow the position.</li>
 <li><a href="/pages/capabilities/">capabilities</a> for the full grant list and the risk tiers.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the error codes that other imports use.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the error codes that other imports use.</li>
 </ul>
 <p>Interface: <code>ilium:host/location@0.1.0</code>, part of <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-keys/"><small>Previous</small>keys</a><a class="next" href="/pages/api-log/"><small>Next</small>log</a></nav>

@@ -53,8 +53,8 @@ Normal risk. The host owns the layout: content is rich text of bounded length, a
 | `row_actions` | contribution | `{ id, icon, label, command, applies_to, when?, order? }`. The click arrives as `command-invoked` with origin `row-action`. |
 | `status_segments` | contribution | `{ id, priority, max_width? }`. `priority` 0 to 100, `max_width` 4 to 40 cells. |
 | `pane_frame_slots` | contribution | `{ id, placement, applies_to }`. Placement `header-icon`, `header-text`, `footer-row` or `banner`. |
-| `set-status-segment`, `clear-status-segment` | intents | Fill or clear an own segment: `content: rich-text`, `tooltip`, `tone`. |
-| `set-frame-slot`, `clear-frame-slot` | intents | Fill or clear an own slot for one pane. |
+| `set-status-segment`, `clear-status-segment` | intents | Fill or clear an own segment: `segment` (the own `status_segments` id), `content: rich-text`, `tooltip`, `tone`. `clear-status-segment` takes `segment` only. |
+| `set-frame-slot`, `clear-frame-slot` | intents | Fill or clear an own slot for one pane: `pane`, `slot` (the own `pane_frame_slots` id), `content: rich-text`, `icon`, `tooltip`. `clear-frame-slot` takes `pane` and `slot`. |
 
 Contribution keys are in [Manifest reference](/pages/reference-manifest/); the intents are on [Intents](/pages/api-intents/) and [UI](/pages/api-ui/).
 
@@ -136,16 +136,16 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-The client draws the segment with the real status bar separators, and drops the lowest-priority segments first when the terminal is narrow.
+The client draws the segment with the real status bar separators, and drops segments when the terminal is narrow, in ascending `priority` order (lowest first; segments of equal priority drop the one whose plugin id sorts last, then the later segment id). A dropped segment is hidden whole, never truncated below its `max_width` floor of 4 cells. Test: with segments of priority 10, 50 and 90 and room for two, only the priority 10 segment is hidden.
 
 ### Errors and edge cases
 
 | Situation | Outcome | What the plugin does |
 |---|---|---|
 | Grant missing or declined | `refused(not-permitted)`; declared contributions are not drawn | Keep the information in an own panel. |
-| Segment or slot id not declared | `refused(invalid-argument)` | Declare it in the manifest. |
+| Segment or slot id not declared | `refused(not-found)` | Declare it in the manifest. |
 | Pane does not match `applies_to` | `refused(invalid-argument)` | Check the pane kind first. |
-| More than 10 updates per second | `refused(rate-limited)` | Coalesce updates. |
+| More than 10 updates per second to one segment or slot | `refused(rate-limited)` | Coalesce updates. |
 | Contribution cap exceeded | install refused with `manifest.contribution-limit` | Declare fewer places. |
 | Unknown `when` key | install refused with `manifest.when-key` | Use a key from the context grammar. |
 

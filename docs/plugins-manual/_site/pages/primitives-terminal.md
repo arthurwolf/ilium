@@ -15,7 +15,7 @@ Declare the grants you use in `capabilities.server` of the manifest. Each grant 
 | `terminal.pointer` | `claim_pointer`, `release_pointer`, `set_highlights`, `clear_highlights`, `pointer` events while a claim is held |
 | `terminal.write` | the `send-input` intent and `prompt_epoch` |
 
-The primitive is available to the server side only, through the `ilium:server/base` world. Import it from `ilium_plugin_sdk::primitives::terminal` in Rust, or from `@ilium/plugin-sdk/primitives/terminal` in TypeScript. Agent identification is a separate contract, described in [primitives-agent](/pages/primitives-agent/).
+The primitive is available to both the server and the client sides, through the `ilium:server/base` and `ilium:client/base` worlds. Import it from `ilium_plugin_sdk::primitives::terminal` in Rust, or from `@ilium/plugin-sdk/primitives/terminal` in TypeScript. Agent identification is a separate contract, described in [primitives-agent](/pages/primitives-agent/).
 
 ```json
 {
@@ -64,7 +64,7 @@ In TypeScript, a `result` that fails throws a `PluginError`. The functions that 
 | `LinkActivatedEvent` | `node`, `detector_id`, `text` | The user activated a link match. |
 | `PointerEvent` | `node`, `row`, `column`, `kind`, `button` | Mouse input while a claim is held. |
 
-`kind` is `down`, `up`, `drag` or `wheel`. `button` is `left`, `middle`, `right`, or `none` for a wheel event. `row` and `column` count from the top visible row and the left column of the pane. The scrollback offset is not applied.
+`kind` is `down`, `up`, `move`, `drag`, `wheel-up`, `wheel-down`, `wheel-left` or `wheel-right` (the `pointer-kind` enum of the WIT). `button` is `left`, `middle`, `right`, or `none` for a wheel or move event. `row` and `column` count from the top visible row and the left column of the pane. The scrollback offset is not applied.
 
 ### Reading the screen
 
@@ -88,7 +88,7 @@ A highlight layer has a name of 1 to 32 characters from `[a-z0-9-]`. Layer names
 
 A `label` is not drawn in the pane. It appears as a tooltip after the pointer rests on the region for 500 ms. A label over 128 characters is `invalid-argument`. Highlights survive `release_pointer`. They are withdrawn when the plugin is disabled, its grant is revoked, or the pane is removed.
 
-A claim gives the plugin the pointer of one pane. While it holds the claim, the host stops forwarding mouse events to the program in the pane, and its own selection and wheel scrollback are off there. Wheel events reach the plugin as `pointer` events with kind `wheel`. Typing is not affected, because typing needs `terminal.write`, not a claim. The plugin that already holds a claim can call `claim_pointer` again and gets `ok`. `release_pointer` without a claim does nothing.
+A claim gives the plugin the pointer of one pane. While it holds the claim, the host stops forwarding mouse events to the program in the pane, and its own selection and wheel scrollback are off there. Wheel events reach the plugin as `pointer` events with kind `wheel-up`, `wheel-down`, `wheel-left` or `wheel-right`. Typing is not affected, because typing needs `terminal.write`, not a claim. The plugin that already holds a claim can call `claim_pointer` again and gets `ok`. `release_pointer` without a claim does nothing.
 
 ### Input: the send-input intent
 
@@ -116,7 +116,7 @@ The terminal primitive has three further areas. Each has a page of its own.
 | Sub-cell pointer, move, modifier gestures | `claim-pointer-gesture`, extended `pointer` event | [Terminal pointer](/pages/primitives-terminal-pointer/) |
 | Staged, raw, mouse and conditional input, lock, journal | extended `send-input`, `lock-input`, `unlock-input` | [Terminal input](/pages/primitives-terminal-input/) |
 
-The grants `terminal.read-cells`, `terminal.history`, `terminal.raw-input` and `terminal.input-lock` are listed in [Capabilities](/pages/reference-capabilities/). The `pointer` event gains `sub-x`, `sub-y`, `modifiers` and the kind `move`; the `wheel` kind is split into `wheel-up`, `wheel-down`, `wheel-left` and `wheel-right` in `view-pointer`. The new fields are optional.
+The grants `terminal.read-cells`, `terminal.history`, `terminal.raw-input` and `terminal.input-lock` are listed in [Capabilities](/pages/reference-capabilities/). The `pointer` event gains `sub-x`, `sub-y`, `modifiers` and the kind `move`; the single `wheel` kind of the earlier surface is replaced by `wheel-up`, `wheel-down`, `wheel-left` and `wheel-right` in `view-pointer`. The new fields are optional.
 
 ### Manifest contributions
 
@@ -287,7 +287,7 @@ Store `epoch_at_idle` when the agent becomes idle, and return the submission fro
 
 | Call | Code | When |
 |---|---|---|
-| any function with a pane | `not-permitted` | The grant is missing or was declined. |
+| any function with a pane, except `read_screen`, `selection` and `prompt_epoch` | `not-permitted` | The grant was declined or revoked. |
 | any function with a pane | `not-found` | The pane does not exist or has closed. |
 | `read_screen`, `selection`, `prompt_epoch` | none | Unknown pane, declined or revoked grant. A refusal line goes to the plugin log. |
 | `add_output_filter` | `invalid-argument` | Empty id, invalid regex, pattern over 1 KiB, compiled program over 1 MiB, rate 0 or above 100. |
@@ -340,4 +340,4 @@ The other functions of the `terminal` primitive are on the pages for its capabil
 - [Agent primitive](/pages/primitives-agent/) for the pane's agent identity and prompt epoch.
 - [Read-screen](/pages/capability-terminal-read-screen/), [write](/pages/capability-terminal-write/), [output-filter](/pages/capability-terminal-output-filter/) and [pointer](/pages/capability-terminal-pointer/) capabilities.
 - [Terminal view widget](/pages/widgets-media-and-embedded/) for showing a pane's screen inside a plugin's own UI.
-- [Errors and limits](/pages/errors-and-limits/) for the codes used above.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the codes used above.

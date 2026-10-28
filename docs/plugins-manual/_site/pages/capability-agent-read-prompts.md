@@ -193,12 +193,12 @@ export const { lifecycle, handler, views } = definePlugin({
 
 The `activate` hook reads the activation context, which lists only the grants that were accepted. When the
 grant is declined, the banner says so rather than showing an empty box. The `render` function runs under
-the 10 ms `render_deadline_ms` default (see [Limits](/pages/errors-and-limits/)), and `lastPrompt` is a
+the 10 ms `render_deadline_ms` default (see [Limits](/pages/reference-errors-and-limits/)), and `lastPrompt` is a
 synchronous call, so the read fits.
 
 ## What the user sees
 
-When a T2 or T3 plugin is installed, the review dialog lists the grant with the `HIGH` mark. The row is
+When a T2 or T3 plugin is installed, the review dialog lists the grant with the `!` mark (high risk). The row is
 unchecked until the user checks it.
 
 <figure>
@@ -253,7 +253,7 @@ of the server process. A server restart clears it. The snapshot stores the epoch
 
 ## Limits
 
-- `event_queue` is 1,024 events by default and 4,096 at the T1 ceiling (see [Errors and limits](/pages/errors-and-limits/)). Prompt events are never dropped, so a slow handler fills the queue quickly.
+- `event_queue` is 1,024 events by default and 4,096 at the T1 ceiling (see [Errors and limits](/pages/reference-errors-and-limits/)). Prompt events are never dropped, so a slow handler fills the queue quickly.
 - Prompt text that the plugin keeps counts against its `memory_mib` budget (32 MiB by default). The banner example keeps none.
 - Prompt text stored with `storage.put` counts against the storage bucket (16 MiB by default). Store only what the feature needs.
 

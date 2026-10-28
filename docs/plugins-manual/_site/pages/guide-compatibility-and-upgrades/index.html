@@ -641,8 +641,8 @@
 </tr>
 </tbody>
 </table>
-<p>A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST accept restore bytes of the format of the previous release, or MUST fall back to defaults. [AUT-206]</p>
-<p>Data that must survive a layout change MUST live in storage and be converted by a <code>migrator</code>, because restore bytes are dropped when the <code>data_version</code> differs. [AUT-207]</p>
+<p>A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST fall back to defaults when the first byte is not a format it knows, because the host delivers restore bytes only when the <code>data_version</code> equals that of the build that wrote them. [AUT-206]</p>
+<p>Data that must survive a layout change MUST live in storage and be converted by a <code>migrator</code>, because restore bytes are delivered only when the <code>data_version</code> matches, and across versions only a <code>migrator</code> carries data. [AUT-207]</p>
 <h2 id="downgrades-and-rollbacks">Downgrades and rollbacks</h2>
 <p>The user can roll back with <code>ilium plugin rollback &lt;id&gt;</code> or install a lower version with <code>--allow-downgrade</code>. The host refuses a rollback with <code>migration.data-newer</code> when the stored data version is higher than the target supports. The user can then restore the backup taken before the update, which loses what was written since, or discard the data.</p>
 <p>A plugin SHOULD keep its data readable by the previous release for one release, by adding keys instead of changing the meaning of old ones. A user who rolls back then loses nothing. [AUT-208]</p>
@@ -679,7 +679,7 @@
 </tr>
 </tbody>
 </table>
-<p>A plugin SHOULD rebuild and publish against each new minor contract version within the lifetime of the previous one, so that users never hold a plugin outside the window. [AUT-209]</p>
+<p>A plugin SHOULD rebuild and publish against each new minor contract version before the host drops the minor it was built for (the host loads the current minor and the previous one), so that users never hold a plugin outside the window. [AUT-209]</p>
 <p>A published plugin MUST NOT list an unstable feature unless the plugin is for development use, because a T2 or T3 package that lists one is installable only in development mode. [AUT-210]</p>
 <h2 id="version-syntax-prereleases-and-channels">Version syntax, prereleases and channels</h2>
 <p>A version is <code>MAJOR.MINOR.PATCH</code> with an optional <code>-prerelease</code>, for example <code>2.0.0-beta.1</code>. A leading <code>v</code> is refused with <code>manifest.version-invalid</code>. A prerelease sorts below its release, so <code>2.0.0-beta.2</code> is older than <code>2.0.0</code>. A prerelease does not satisfy a plain range such as <code>^2.0.0</code> on the stable channel. See <a href="/pages/reference-dependency-resolution/">Versions and dependencies</a>.</p>

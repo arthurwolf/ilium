@@ -1,5 +1,15 @@
 [
   {
+    "id": "CUSTOMAGENT-01",
+    "title": "Custom agent profiles",
+    "explanation": "Create named Claude or Codex profiles with their own icon and environment variables.",
+    "specimen": "Profile: Work\nProvider: Claude\nEnvironment: TOKEN = ••••••••",
+    "states": "Values are masked until revealed. Changes affect future launches and restarts; running processes keep their existing environment.",
+    "frames": ["Profile: Work\nProvider: Claude\nEnvironment: TOKEN = ••••••••"],
+    "motion": "None.",
+    "caveat": "Values are stored as plaintext in an owner-only configuration file, not encrypted. Deleting a profile prevents its panes from restarting until the profile is restored or reassigned."
+  },
+  {
     "id": "AM-01",
     "title": "Display mode",
     "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",
@@ -1507,6 +1517,54 @@
     "caveat": "Changing it recomputes every agent and re-reads history for the other window; sessions that never reported that window show nothing.",
     "frames": [
       "`‹ Short window ›` and `‹ Long window ›`.\n"
+    ]
+  },
+  {
+    "id": "COST-24",
+    "title": "Spending medals",
+    "explanation": "“Show gold, silver and bronze beside the agents that used the most tokens recently.”",
+    "specimen": "`🥇 agent-one`, `🥈 agent-two`, `🥉 agent-three` at the far right of their tree rows.",
+    "states": "Off or on; on is the default.",
+    "motion": "Ranks update as timestamped transcript token buckets arrive.",
+    "caveat": "Medals measure tokens rather than estimated dollars, so an unpriced model still participates.",
+    "frames": [
+      "agent-one                 🥇\nagent-two                 🥈\nagent-three               🥉\n"
+    ]
+  },
+  {
+    "id": "COST-25",
+    "title": "Medal period",
+    "explanation": "“Choose the rolling token-spend period used to award medals.”",
+    "specimen": "`← 12h +` by default.",
+    "states": "One minute to one year; the default is twelve hours.",
+    "motion": "Left/right step common durations; Enter accepts exact values such as 90m, 6h or 2d.",
+    "caveat": "Only token use inside this rolling period counts, not an agent's lifetime total.",
+    "frames": [
+      "MEDAL PERIOD\nMedal period     ← 12h + →\n"
+    ]
+  },
+  {
+    "id": "COST-26",
+    "title": "Medal scope",
+    "explanation": "“Award one podium across all agents or one podium per provider.”",
+    "specimen": "`← All agents together + →` or `← Each provider separately + →`.",
+    "states": "Global is the default; per-provider gives Claude and Codex independent gold, silver and bronze medals.",
+    "motion": "static.",
+    "caveat": "A provider with fewer than three agents receives only the ranks it has spenders for.",
+    "frames": [
+      "Medal scope     ← All agents together + →\n"
+    ]
+  },
+  {
+    "id": "COST-27",
+    "title": "Medal icons",
+    "explanation": "“Choose the gold, silver and bronze glyphs from the shared icon catalogue.”",
+    "specimen": "`Gold medal icon … 🥇`.",
+    "states": "Each medal has its own assignment and persists with Settings -> Icons.",
+    "motion": "Enter opens the rich icon picker.",
+    "caveat": "The icon is presentation only; medal ranking remains token-based.",
+    "frames": [
+      "Gold medal icon            🥇\n"
     ]
   },
   {
@@ -3575,12 +3633,12 @@
     "id": "TITLE-02",
     "title": "For Codex, use the official thread name",
     "explanation": "“Name Codex panes with the thread name Codex saved on disk instead of asking the AI, so those panes make no title calls.”",
-    "specimen": "`For Codex, use the official thread name · ☑ On` versus `☐ Off`.",
+    "specimen": "`For Codex, use the official thread name · [ON  ●]` versus `[○ OFF]`.",
     "states": "on reads the name from `~/.codex/session_index.jsonl`; off keeps AI titles for Codex panes.",
     "motion": "static.",
     "caveat": "titles you set yourself always win; Codex names a thread some time after the first turn, so a new pane stays untitled until then.",
     "frames": [
-      "`For Codex, use the official thread name · ☑ On` versus `☐ Off`."
+      "`For Codex, use the official thread name · [ON  ●]` versus `[○ OFF]`."
     ]
   },
   {
@@ -4572,6 +4630,18 @@
     ]
   },
   {
+    "id": "AP-34",
+    "title": "Tree toolbar always visible",
+    "explanation": "Keep the small action toolbar at the bottom of the tree panel visible while focus is elsewhere.",
+    "specimen": "[ON  ●] keeps the tree toolbar visible; [○ OFF] shows it when the tree is focused or hovered.",
+    "states": "On is the default, including when this setting is missing from config.toml. An explicit Off is saved and respected.",
+    "motion": "None.",
+    "caveat": "The toolbar still follows the panel's available height and width.",
+    "frames": [
+      "[ON  ●] keeps the tree toolbar visible; [○ OFF] shows it when the tree is focused or hovered."
+    ]
+  },
+  {
     "id": "ATT-01",
     "title": "Attention mode",
     "explanation": "“Choose how the attention queue is fed: Off hides it, Instant only uses what agent detection already knows and calls no LLM, Shared adds the attention question to the Sort call, Turbo asks one parallel LLM call per agent.”",
@@ -4587,12 +4657,12 @@
     "id": "ATT-02",
     "title": "Sort refreshes attention",
     "explanation": "“When On, pressing Sort also refreshes the attention queue so one press updates both.”",
-    "specimen": "Sort refreshes attention ........ ‹ ☑ On ›\n\nOn   press Sort: tree order and queue refresh together\nOff  press Sort: tree order only",
+    "specimen": "Sort refreshes attention ........ [ON  ●]\n\n[ON  ●]  press Sort: tree order and queue refresh together\n[○ OFF]  press Sort: tree order only",
     "states": "On and Off. Off keeps Sort for tree order alone. The queue is unaffected when Attention mode is Off.",
     "motion": "None.",
     "caveat": "Turning it Off does not hide the queue; it only stops the Sort press from refreshing it.",
     "frames": [
-      "Sort refreshes attention ........ ‹ ☑ On ›\n\nOn   press Sort: tree order and queue refresh together\nOff  press Sort: tree order only"
+      "Sort refreshes attention ........ [ON  ●]\n\n[ON  ●]  press Sort: tree order and queue refresh together\n[○ OFF]  press Sort: tree order only"
     ]
   },
   {
@@ -4635,22 +4705,35 @@
     "id": "ATT-06",
     "title": "Show briefing on arrival",
     "explanation": "“When On, reaching an agent from the attention queue shows a box at the top of that agent saying why you were brought there, what the agent is doing, and what it needs from you.”",
-    "specimen": "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box",
+    "specimen": "Show briefing on arrival ........ [ON  ●]\n\n[ON  ●]  a box above the terminal explains why you are here\n[○ OFF]  you land on the agent with no extra box",
     "states": "On and Off; the default is On. The box only ever appears while Attention mode is not Off. In Instant only mode it shows wording derived from agent detection, marked automatic; in Shared and Turbo mode it shows the model's wording, marked AI.",
     "motion": "None.",
     "caveat": "Each box can be dismissed with its x or folded to one line, and it comes back only for a new attention item on that agent. Turning the setting Off removes every open box at once.",
     "frames": [
-      "Show briefing on arrival ........ ‹ ☑ On ›\n\nOn   a box above the terminal explains why you are here\nOff  you land on the agent with no extra box"
+      "Show briefing on arrival ........ [ON  ●]\n\n[ON  ●]  a box above the terminal explains why you are here\n[○ OFF]  you land on the agent with no extra box"
     ]
   },
   {
     "id": "ATT-07",
     "title": "Large attention buttons",
     "explanation": "Use larger attention controls at the bottom of the left panel.",
-    "specimen": "Large attention buttons ........ ‹ ☐ Off ›",
-    "states": "Off (default) uses one row. On uses three rows with centered text and a three-row by five-column overview button.",
+    "specimen": "Large attention buttons ........ [ON  ●]",
+    "states": "On (default) uses three rows with centered text and a three-row by five-column overview button. Off uses one row.",
     "motion": "The list gives its bottom two rows to the larger buttons.",
     "caveat": "Very short panels fall back to a one-row button to preserve the list and toolbar.",
-    "frames": ["Large attention buttons ........ ‹ ☐ Off ›", "Large attention buttons ........ ‹ ☑ On ›"]
+    "frames": ["Large attention buttons ........ [○ OFF]", "Large attention buttons ........ [ON  ●]"]
+  },
+  {
+    "id": "AP-36",
+    "title": "Group agents under resources",
+    "explanation": "Display resource owners and waiting agents beneath the shared resource in queue order. This is a presentation preference; real pane parents, split geometry and terminal input routes remain unchanged.",
+    "specimen": "ON\n▾ GPU · Taken · queue 2\n  🔑 Owner\n  ⌛ 1. Waiting agent\n  ⌛ 2. Waiting agent\nOFF\nGPU · Taken · queue 2\nAgents remain in their normal tree locations with waiting badges.",
+    "states": "Default On. Off keeps resource rows, queue details and waiting indicators visible.",
+    "frames": [
+      "Grouped resource participants",
+      "Ordinary pane rows with waiting badges"
+    ],
+    "motion": "Static projection only.",
+    "caveat": "Participants in splits and other sessions appear as navigation references; no pane is physically moved."
   }
 ]

@@ -402,7 +402,7 @@
 <li>The progress footer in the tree and the count in the status bar, described in the agent monitoring guide.</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A progress monitor row fills while a long task runs and ends as done" loading="lazy"><figcaption>A registered monitor appears in the tree footer, updates on each probe run and settles when the task ends.</figcaption></figure>
+<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A local Codex-shaped fixture runs a monitored five-card census task and receives its completed result" loading="lazy"><figcaption>A local script acts as the Codex-shaped fixture. Ilium registers its monitor, shows progress, and posts the result; no provider request is made.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -451,7 +451,7 @@
 <tr>
 <td>progress-B01</td>
 <td>Exit status of <code>progress set --wait</code> and <code>progress wait</code></td>
-<td>0 done, 2 usage or rejected (for example <code>monitor-ambiguous</code>), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 <code>--timeout-seconds</code> elapsed</td>
+<td>0 done, 2 usage or rejected (for example <code>monitor-ambiguous</code>), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 <code>--timeout-seconds</code> elapsed while the task is still running (<code>outcome</code> <code>still-running</code>)</td>
 <td><code>src/docs/cli-reference.md#progress-wait</code></td>
 </tr>
 <tr>
@@ -523,7 +523,7 @@
 <tr>
 <td>progress-B13</td>
 <td>Delivery states</td>
-<td><code>not-queued</code>, <code>queued</code>, <code>attempted</code>, <code>delivered-to-pty</code>, <code>uncertain</code>, <code>not-deliverable</code>, <code>collected-by-waiter</code>. Only <code>queued</code> is retried after a restart. Undelivered outcomes are re-sent every 20 s</td>
+<td><code>not-queued</code>, <code>queued</code>, <code>attempted</code>, <code>delivered-to-pty</code>, <code>uncertain</code>, <code>not-deliverable</code>, <code>collected-by-waiter</code>. Only <code>queued</code> is retried after a restart. A settled outcome whose delivery is <code>not-deliverable</code>, or <code>uncertain</code> after a server restart, is re-sent by the 20 s reconciler, at most 5 times per monitor generation; it then stops. A re-sent notice carries a possible-duplicate prefix instead of a dedup key, so the agent may see it twice and ignores it if already handled</td>
 <td><code>ilium-server/src/agent_delivery.rs</code></td>
 </tr>
 <tr>
@@ -572,7 +572,7 @@
 </tr>
 <tr>
 <td><code>[ui] task_progress_frames</code></td>
-<td>a preset</td>
+<td>the built-in preset 0 of the Agent Monitoring tab frame picker (the client default; the other presets are bars, moon phases and quarter circles)</td>
 <td>2 to 13 printable frames, all one cell wide or all two cells wide</td>
 <td><code>src/docs/automation.md#progress-monitor</code></td>
 </tr>
@@ -585,10 +585,10 @@
 <pre><code class="language-json">{
   &quot;id&quot;: &quot;ilium.core.progress&quot;,
   &quot;capabilities&quot;: {
-    &quot;server&quot;: [&quot;cli.contribute&quot;, &quot;process.run:sh&quot;, &quot;process.long-lived&quot;, &quot;settings.read-kernel:agent-monitoring&quot;],
+    &quot;server&quot;: [&quot;cli.contribute&quot;, &quot;process.run:sh&quot;, &quot;process.long-lived&quot;, &quot;http-api.route:/progress.json&quot;, &quot;settings.read-kernel:agent-monitoring&quot;],
     &quot;client&quot;: [&quot;ui.chrome&quot;, &quot;settings.read-kernel:agent-monitoring&quot;]
   },
-  &quot;contributes&quot;: { &quot;cli&quot;: { &quot;name&quot;: &quot;progress&quot;, &quot;summary&quot;: &quot;Progress monitors&quot;, &quot;output&quot;: &quot;jsonl&quot;, &quot;requires_server&quot;: true, &quot;aliases&quot;: [&quot;wait&quot;] } }
+  &quot;contributes&quot;: { &quot;cli&quot;: [{ &quot;name&quot;: &quot;progress&quot;, &quot;summary&quot;: &quot;Progress monitors&quot;, &quot;output&quot;: &quot;jsonl&quot;, &quot;requires_server&quot;: true, &quot;aliases&quot;: [&quot;wait&quot;] }] }
 }
 </code></pre>
 <h3 id="complete-manifest">Complete manifest</h3>
@@ -614,6 +614,7 @@
       &quot;cli.contribute&quot;,
       &quot;process.run:sh&quot;,
       &quot;process.long-lived&quot;,
+      &quot;http-api.route:/progress.json&quot;,
       &quot;settings.read-kernel:agent-monitoring&quot;
     ],
     &quot;client&quot;: [
@@ -625,13 +626,13 @@
     &quot;startup&quot;
   ],
   &quot;contributes&quot;: {
-    &quot;cli&quot;: {
+    &quot;cli&quot;: [{
       &quot;name&quot;: &quot;progress&quot;,
       &quot;summary&quot;: &quot;Progress monitors&quot;,
       &quot;output&quot;: &quot;jsonl&quot;,
       &quot;requires_server&quot;: true,
       &quot;aliases&quot;: [&quot;wait&quot;]
-    }
+    }]
   },
   &quot;limits_tier&quot;: &quot;first-party&quot;
 }
@@ -698,7 +699,7 @@ export const { handler } = definePlugin({
 });
 </code></pre>
 <h4 id="run-the-probe">Run the probe</h4>
-<p>A repeating timer fires on the probe interval. The plugin runs the probe command, parses the JSON object it prints and stores the status and percent. A non-zero exit is not a plugin error, it is a probe result. See <a href="/pages/api-process-control/">process control</a>, <a href="/pages/capability-process-run/">process.run</a> and <a href="/pages/api-events/">events</a>.</p>
+<p>A repeating timer fires on the probe interval. The plugin runs the probe command, parses the JSON object it prints and stores the status and percent. A non-zero exit is not a plugin error and updates no status or percent. It counts as one probe failure toward the three-failure rule (progress-B09), and the probe is reported with the rejection code <code>probe-exited-non-zero</code> when a registration or a <code>progress check</code> run exits non-zero. The third consecutive failure sets the monitor health to <code>failed</code>. See <a href="/pages/api-process-control/">process control</a>, <a href="/pages/capability-process-run/">process.run</a> and <a href="/pages/api-events/">events</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::process::{self, ProcessSpec};
 
@@ -740,7 +741,7 @@ export async function runProbe(command: string, projectRoot: string): Promise&lt
 // In onEvents: case 'timer-fired': run the probe of the monitor that owns event.val.
 </code></pre>
 <h4 id="long-lived-watcher">Long-lived watcher</h4>
-<p>New in the plugin build, not covered by COR-041. A watcher is a child process that stays alive and prints one JSON line per progress step. Each line is a probe-format JSON object (<code>job_id</code>, <code>status</code>, <code>percent</code>, <code>message</code>, <code>details</code>, <code>error</code>), at most 64 KiB long, and at most 10 lines per second are applied; extra lines are coalesced to the latest. An invalid line counts as one probe failure. The plugin parses each <code>child-output</code> line and settles the monitor on <code>child-exited</code>. See <a href="/pages/capability-process-long-lived/">process.long-lived</a>, <a href="/pages/api-process-control/">process control</a> and <a href="/pages/api-events/">events</a>.</p>
+<p>New in the plugin build, not covered by COR-041. A watcher is a child process that stays alive and prints one JSON line per progress step. Its program is always <code>sh</code>, the only program the plugin holds a <code>process.run:&lt;program&gt;</code> grant for; <code>process.long-lived</code> alone is not enough, and any other program makes <code>spawn</code> fail with <code>not-permitted</code> (see <a href="/pages/capability-process-long-lived/">process.long-lived</a>). Each line is a probe-format JSON object (<code>job_id</code>, <code>status</code>, <code>percent</code>, <code>message</code>, <code>details</code>, <code>error</code>), at most 64 KiB long, and at most 10 lines per second are applied; extra lines are coalesced to the latest. An invalid line counts as one probe failure. The plugin parses each <code>child-output</code> line and settles the monitor on <code>child-exited</code>. See <a href="/pages/capability-process-long-lived/">process.long-lived</a>, <a href="/pages/api-process-control/">process control</a> and <a href="/pages/api-events/">events</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::process::{self, ProcessSpec, SpawnSpec};
 use ilium_plugin_sdk::types::events::OutputStream;
@@ -749,7 +750,7 @@ fn start_watcher(&amp;mut self, monitor: u64, program: &amp;str) -&gt; Result&lt
     let child = process::spawn(&amp;SpawnSpec {
         process: ProcessSpec {
             program: program.to_string(), arguments: Vec::new(), cwd: None,
-            stdin: None, environment: Vec::new(), timeout_millis: 0,
+            stdin: None, environment: Vec::new(), timeout_millis: 1_000,
         },
         stdin_open: false,
         line_mode: true,
@@ -771,7 +772,7 @@ const children = new Map&lt;bigint, Child&gt;();
 export function startWatcher(monitor: bigint, program: string): void {
   children.set(monitor, process.spawn({
     process: { program, arguments: [], cwd: undefined, stdin: undefined,
-      environment: [], timeoutMillis: 0 },
+      environment: [], timeoutMillis: 1_000 },
     stdinOpen: false,
     lineMode: true,
   }));
@@ -824,7 +825,7 @@ export function statusSegment(running: number): Submission {
 }
 </code></pre>
 <h4 id="status-route-on-the-loopback-listener">Status route on the loopback listener</h4>
-<p>New in the plugin build, not covered by COR-041. The plugin answers <code>GET /progress.json</code> on the loopback HTTP listener. Each <code>http-called</code> event is one request, and <code>respond</code> answers exactly that request, so a script can read progress without the terminal. The body is <code>{"monitors":[&lt;progress object&gt;]}</code>, where each element has the same shape as the <code>progress</code> field of a <code>progress status</code> record.</p>
+<p>New in the plugin build, not covered by COR-041. The plugin holds the grant <code>http-api.route:/progress.json</code> and answers <code>GET /progress.json</code> on the loopback HTTP listener. A request for any other path never reaches the plugin and gets <code>404 Not Found</code> from the kernel; another method on <code>/progress.json</code> gets <code>405 Method Not Allowed</code> from the plugin. Each <code>http-called</code> event is one request, and <code>respond</code> answers exactly that request, so a script can read progress without the terminal. The body is <code>{"monitors":[&lt;progress object&gt;]}</code>, where each element has the same shape as the <code>progress</code> field of a <code>progress status</code> record.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::host::http_api;
@@ -833,7 +834,11 @@ impl Handler for StatusRoute {
     fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
         for event in batch {
             let Event::HttpCalled(call) = event else { continue };
-            if call.method != &quot;GET&quot; || call.path != &quot;/progress.json&quot; { continue; }
+            if call.path != &quot;/progress.json&quot; { continue; }
+            if call.method != &quot;GET&quot; {
+                let _ = http_api::respond(call.call, 405, &amp;[(&quot;allow&quot;.into(), &quot;GET&quot;.into())], &amp;[]);
+                continue;
+            }
             let body = serde_json::to_vec(&amp;self.snapshot()).unwrap_or_default();
             let _ = http_api::respond(call.call, 200, &amp;[(&quot;content-type&quot;.into(), &quot;application/json&quot;.into())], &amp;body);
         }
@@ -848,7 +853,11 @@ export function onEvents(events: Event[]): Submission[] {
   for (const event of events) {
     if (event.tag !== 'http-called') continue;
     const { call, method, path } = event.val;
-    if (method !== 'GET' || path !== '/progress.json') continue;
+    if (path !== '/progress.json') continue;
+    if (method !== 'GET') {
+      respond(call, 405, [['allow', 'GET']], new Uint8Array());
+      continue;
+    }
     respond(call, 200, [['content-type', 'application/json']], encode(snapshot()));
   }
   return [];
@@ -891,7 +900,8 @@ export function onEvents(events: Event[]): Submission[] {
 <ul>
 <li><code>ilium.core.progress/changed</code>: { monitor, status, percent }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.progress"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p>A job that ends is announced on the separate kernel topic <code>ilium.progress/finished</code>, which belongs to the reserved kernel namespace <code>ilium.progress</code> (see <a href="/pages/api-messages-and-topics/#topic-names-and-patterns">Messages and topics</a>). This plugin does not publish it, so its own topics all start with <code>ilium.core.progress/</code>.</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.progress"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-a-probe-template-for-a-ci-run">Example: Adds a probe template for a CI run</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

@@ -8,15 +8,15 @@ The kernel never runs Git itself. The plugin runs `git worktree add` through pro
 
 ### What it covers
 
-- Start an agent in a new worktree or in an existing one, described in the worktrees guide.
+- Start an agent in a new worktree or in an existing one, described under "New agent in a worktree (Ctrl+B W)" and "Create the worktree and the pane" below.
 - The status and branch line in the tree.
-- Cleanup: pruning, the removal blockers and branch deletion.
+- Cleanup: removal blockers (uncommitted changes or a running process refuse removal), shown under "Git settings and removal blockers" below. Pruning and branch deletion are not offered by this plugin; they stay with the user's own Git commands.
 - Copying local files with `.worktreeinclude` and running the post-create command.
 - The Git settings tab, with the default worktree path and the post-create command.
 
 ### See it
 
-<figure><img src="/assets/demos/25-worktree-agent.gif" alt="A new agent starts in a fresh Git worktree and its branch shows in the tree" loading="lazy"><figcaption>The command creates the worktree, opens a pane inside it and shows the branch in the tree.</figcaption></figure>
+<figure><img src="/assets/demos/25-worktree-agent.gif" alt="Ilium creates a Git worktree; a local Codex-shaped fixture runs inside it and the terminal shows its branch and file diff. Typing is shortened and three editorial captions were added." loading="lazy"><figcaption>A documented local Codex-shaped fixture runs from its absolute path inside the worktree; the built-in provider launch is not intercepted or represented. Typing is shortened, and three editorial captions were added.</figcaption></figure>
 
 ### What the user sees
 
@@ -195,10 +195,10 @@ async fn add_worktree(&mut self, repository: FsPath, folder: FsPath, host_path: 
     let git = ProcessSpec {
         program: "git".into(),
         arguments: vec!["worktree".into(), "add".into(), "-b".into(), branch.clone(), host_path, "HEAD".into()],
-        cwd: Some(repository), stdin: None, environment: Vec::new(), timeout_millis: 60_000,
+        cwd: Some(repository.clone()), stdin: None, environment: Vec::new(), timeout_millis: 60_000,
     };
     process::run(git).await?;
-    self.pending.insert(branch.clone(), folder.clone());
+    self.pending.insert(branch.clone(), (repository, folder.clone())); // (repository, folder), both needed by workspace::register
     Ok(Submission::new(Intent::CreatePane(CreatePaneSpec {
         parent: None, title: branch, content_kind: "ilium.terminal".into(),
         cwd: Some(folder), command: Some(vec!["claude".into()]), initial_input: None,
@@ -206,7 +206,7 @@ async fn add_worktree(&mut self, repository: FsPath, folder: FsPath, host_path: 
 }
 }
 
-// Event::PaneCreated(pane): look up pane.title in self.pending, then
+// Event::PaneCreated(pane): look up pane.title in self.pending (the stored repository and folder), then
 // workspace::register(WorkspaceSpec { repository, path, branch, base: Some("HEAD".into()), owner: Some(pane.node) }).
 ```
 
@@ -243,14 +243,24 @@ export async function addWorktree(
 ```rust
 use ilium_plugin_sdk::host::fs::{self, WriteMode};
 use ilium_plugin_sdk::types::paths::FsPath;
+use ilium_plugin_sdk::{ErrorCode, PluginError};
 
 async fn copy_includes(worktree_dir: &str) -> Result<(), PluginError> {
     let list_path = FsPath { scope: "project".into(), path: ".worktreeinclude".into() };
-    let list = String::from_utf8_lossy(&fs::read(&list_path).await?).to_string();
+    let list = match fs::read(&list_path).await {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+        Err(error) if error.code == ErrorCode::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
     for relative in list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         let source = FsPath { scope: "project".into(), path: relative.into() };
         let target = FsPath { scope: "worktrees".into(), path: format!("{worktree_dir}/{relative}") };
-        let bytes = fs::read(&source).await?;
+        // A missing file or a path outside the project is skipped; the other entries still copy.
+        let bytes = match fs::read(&source).await {
+            Ok(bytes) => bytes,
+            Err(error) if matches!(error.code, ErrorCode::NotFound | ErrorCode::InvalidArgument | ErrorCode::NotPermitted) => continue,
+            Err(error) => return Err(error),
+        };
         fs::write(&target, bytes, WriteMode::Replace).await?;
     }
     Ok(())
@@ -260,17 +270,33 @@ async fn copy_includes(worktree_dir: &str) -> Result<(), PluginError> {
 **TypeScript**
 
 ```ts
+import type { PluginError } from '@ilium/plugin-sdk';
 import { read, write } from '@ilium/plugin-sdk/host/fs';
 
 export async function copyIncludes(worktreeDir: string): Promise<void> {
-  const list = new TextDecoder().decode(await read({ scope: 'project', path: '.worktreeinclude' }));
+  let list: string;
+  try {
+    list = new TextDecoder().decode(await read({ scope: 'project', path: '.worktreeinclude' }));
+  } catch (error) {
+    if ((error as PluginError).code === 'not-found') return;
+    throw error;
+  }
   const lines = list.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   for (const relative of lines) {
-    const bytes = await read({ scope: 'project', path: relative });
+    let bytes: Uint8Array;
+    try {
+      bytes = await read({ scope: 'project', path: relative });
+    } catch (error) {
+      const code = (error as PluginError).code;
+      if (code === 'not-found' || code === 'invalid-argument' || code === 'not-permitted') continue;
+      throw error;
+    }
     await write({ scope: 'worktrees', path: `${worktreeDir}/${relative}` }, bytes, 'replace');
   }
 }
 ```
+
+The copy has three defined failure cases. When the project has no `.worktreeinclude`, the plugin copies nothing and reports no error. When a listed file does not exist, the plugin skips that entry and copies the others. When an entry points outside the project scope (an absolute path or a `..` segment), `fs.read` refuses it with `invalid-argument` or `not-permitted`, and the plugin skips it too. Any other error, such as `io` or `quota-exceeded`, stops the copy and is returned to the caller.
 
 #### Status and branch line
 
@@ -337,15 +363,18 @@ Other plugins change what `ilium.core.worktrees` does through the points below. 
 | `post-create-steps` | collect | Add a step that runs after a worktree is created. | entry: id, title, command, working_directory | standard |
 | `before-remove` | hook (veto) | Refuse removing a worktree. | path, branch, dirty, merged | standard |
 
+**Post-create failure.** Post-create steps (the `post_create` setting and every `post-create-steps` entry) run in priority order inside the new worktree. When a step exits non-zero, later steps are skipped, the worktree is kept, the create call still succeeds with a warning naming the failed step and its exit code, and the user sees that warning as a notice in the Git settings and the pane. The worktree is never deleted because a step failed.
+
 **Services** (grant `services.use:<name>`):
 
-- `ilium.core.worktrees/create`: create: create a worktree and return its path
+- `ilium.core.worktrees/create`: request `{ repo, branch, base?, agent? }`, response `{ path, branch }`. It runs the `before-create` hook, creates the worktree, then runs the post-create steps. Errors: `worktrees.refused` (a `before-create` contributor refused), `worktrees.branch-exists`, `worktrees.not-a-repository`, `worktrees.git-failed` (git exited non-zero; nothing is left on disk) and `worktrees.denied` (the caller lacks the grant). A failed create returns the error and creates no pane.
+- `ilium.core.worktrees/remove`: request `{ path, force? }`, response `{ removed }`. It reads the worktree state (`dirty`, `merged`, running processes) and runs the `before-remove` hook. Errors: `worktrees.dirty` (uncommitted changes), `worktrees.in-use` (a process is running in it), `worktrees.vetoed` (a `before-remove` contributor refused; the reason is returned) and `worktrees.not-found`. On any error the worktree stays untouched. `force` skips only the `dirty` and `merged` checks, never `in-use` or a veto.
 
 **Topics** (list under `contributes.topics.subscribes`):
 
 - `ilium.core.worktrees/changed`: { path, state }
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.worktrees"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.worktrees"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Runs `bun install` in every new worktree
 

@@ -9,9 +9,9 @@ The plugin log holds one entry per line: the time, the level, the plugin id and 
 ## What you need
 
 - A plugin package with a `server`, `client` or `scene` side. The `log` import needs no grant.
-- Rust: the crate `ilium-plugin-sdk` (S1). TypeScript: `@ilium/plugin-sdk` with Bun 1.2 or later (S14).
+- Rust: the crate `ilium-plugin-sdk`. TypeScript: `@ilium/plugin-sdk` with Bun 1.2 or later.
 - The `ilium` binary. The `plugin` subcommands are part of it (U5), so nothing else is installed.
-- Background reading: [Errors and limits](/pages/errors-and-limits/) for the error codes and the restart rule, and [Lifecycle](/pages/lifecycle/) for `activate` and `deactivate`.
+- Background reading: [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the restart rule, and [Lifecycle](/pages/lifecycle/) for `activate` and `deactivate`.
 
 ## The log import
 
@@ -30,7 +30,7 @@ Rules that apply to every entry:
 - A line break in the message is written as the two characters `\n`, so each entry stays on one line.
 - An empty message is accepted and writes an entry with no text after the plugin id.
 - The rate is 200 lines per second for an ordinary plugin and 1,000 for a trusted T1 plugin. Lines over the rate are dropped and counted. Once per second, with lines dropped, the host writes one `warn` entry, `<n> lines dropped in the last second`. That summary does not use the rate budget.
-- WASI standard output is written at level `info` and standard error at level `error`. Both share the rate budget and the size cap.
+- WASI standard output is written at level `info` and standard error at level `warn`. Both share the rate budget. A captured WASI line longer than 16 KiB is cut and marked `[cut]` (HST-078); the `…[truncated]` marker above applies to `log::log` messages only.
 - Log entries carry no source position. The Rust `log!` macros of the SDK add `file:line` to the message themselves.
 
 Write each message as `operation: object`, for example `sync: 3 notes saved to data/notes.json`, so that the line can be read without the source code.
@@ -47,12 +47,12 @@ The level is padded to five characters and the side to six. The side is `server`
 
 | Source | Level | Message |
 |---|---|---|
-| Your log call, stdout, stderr | as given, `info`, `error` | Your text. |
+| Your log call, stdout, stderr | as given, `info`, `warn` | Your text. |
 | Refused call | `warn` | Names the capability, the function and the reason, one word from the closed list in [Errors and limits](/pages/reference-errors-and-limits/#refusal-reasons). A call the manifest never requested is a trap, `host.capability-not-requested`, not a refusal. |
 | Grant-sensitive action | `info` | File writes outside `data` and `cache`, and every process run, with the scope or program and the arguments. |
 | Trap | `error` | `trap in <export> (<view>): <reason>`, followed by frame entries (see Traps). |
 | Deadline breach | `error` | `deadline breach in <export>: limit <n> ms`. |
-| Restart | `warn` | `restarting in <1 or 5 or 30> s (failure <n> of 3 in 10 minutes)`. |
+| Restart | `warn` | `restarting in <1 or 5> s (failure <n> of 3 in 10 minutes)`. |
 | Dropped lines | `warn` | `<n> lines dropped in the last second`. |
 
 <figure>
@@ -77,7 +77,7 @@ The level is padded to five characters and the side to six. The side is `server`
 A trap ends the instance at once. The host drops the instance, withdraws its dynamic contributions, cancels its pending requests and starts a new instance after a delay. A trap is caused by one of these:
 
 - A call to an import that the manifest never requested. A declined grant does not trap: the import returns `not-permitted`. A call without any request in the manifest does trap.
-- An invalid `ui-tree`: a child index out of range, or two nodes with the same `key` in one tree (UI3). The SDK builder cannot produce a bad index, so this comes from hand-written `raw` code or a duplicate key.
+- An invalid `ui-tree`: a child index out of range, or two nodes with the same `key` in one tree. The SDK builder cannot produce a bad index, so this comes from hand-written `raw` code or a duplicate key.
 - More than 256 submissions returned from one `on-events` call.
 - A deadline breach on an export that traps (see the table below).
 - Exceeding `memory_mib` or `table_elements`, or a Rust panic or a thrown TypeScript exception in an export that has no outcome.
@@ -94,7 +94,7 @@ The first entry names the export and, for `views.render`, the view. Each backtra
 | `activate_deadline_ms` | 2,000 ms | 5,000 ms | Trap |
 | `deactivate_deadline_ms` | 500 ms | 1,000 ms | Instance dropped; no restore bytes kept |
 
-A job that runs past its deadline does not trap the plugin. The job request fails with `timed-out`, and the failure does not count toward the restart rule (A22). Move slow work into a job, as described on the [background jobs page](/pages/background-jobs/).
+A job that runs past its deadline does not trap the plugin. The job request fails with `timed-out`, and the failure does not count toward the restart rule. Move slow work into a job, as described on the [background jobs page](/pages/background-jobs/).
 
 ### Stuck plugins
 
@@ -115,7 +115,7 @@ Release builds strip the debug information. Their frames show function names onl
 
 ## Development reload
 
-`ilium plugin dev` watches the package directory. A plugin installed this way has tier T3 and shows a `dev` badge (U3). Each save follows these steps:
+`ilium plugin dev` watches the package directory. A plugin installed this way has tier T3 and shows a `dev` badge. Each save follows these steps:
 
 <figure>
 <svg viewBox="0 0 400 290" role="img" aria-label="Development reload loop in five steps">
@@ -162,7 +162,7 @@ Keep in the restore bytes only the state that the host does not keep. Settings, 
 
 **Rust**
 
-The plugin logs each agent start, keeps a count across reloads and warns about a bad restore. The `log::log` calls use the SDK paths of S4 and S7.
+The plugin logs each agent start, keeps a count across reloads and warns about a bad restore. The `log::log` calls use the SDK path `ilium_plugin_sdk::host::log`.
 
 ```rust
 use ilium_plugin_sdk::prelude::*;
@@ -279,7 +279,7 @@ The contract includes surfaces that fail in ways the earlier sections do not cov
 
 | Symptom | Likely cause | What to check |
 |---|---|---|
-| The render traps, the previous view stays and the plugin log has `invalid-argument` | A tree or widget cap: 4,096 nodes, 1,024 KiB, 256 `check-list` items, 64 `list-editor` items, 4 popups | The log entry names the cap. Page the data with a virtual-row or catalogue provider. |
+| The render traps, the previous view stays and the plugin log has `ui.invalid-tree` or another `ui.*` code | A tree or widget cap: 4,096 nodes, 1,024 KiB, 256 `check-list` items, 64 `list-editor` items, 4 popups | The log entry names the cap. Page the data with a virtual-row or catalogue provider. |
 | `rate-limited` with `retry-after-ms` | More than 10 widget updates per second, or 3 toasts in 10 s | Update when a value changes by a visible step. The entry shows the retry delay. |
 | A menu or a token list shows static content | A `menu-items` or `tokens` provider missed its 10 or 20 ms deadline | Time the provider with `clock.monotonic-millis` and cache the result. |
 | `quota-exceeded` on `http.stream`, `process.spawn` or `vector` | A requestable limit (`limits` in the manifest) is at its ceiling | Raise the key in the manifest within the tier ceiling, or close what you opened. |
@@ -342,7 +342,7 @@ When a plugin is disabled, the tree footer shows notice N14 with the plugin name
 
 - [Testing plugins](/pages/testing/)
 - [Lifecycle](/pages/lifecycle/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Background jobs](/pages/background-jobs/)
 
 API version checked: `ilium:plugin@0.1.0`.

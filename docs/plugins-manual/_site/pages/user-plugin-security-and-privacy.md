@@ -37,7 +37,7 @@ A third-party plugin can send data only to hosts you allowed in its install scre
 
 **[SEC-263]** Only the features in the inventory of [Network egress](/pages/reference-network-egress/) send data off the machine. The two that matter most:
 
-- **AI model requests.** The default provider is the remote Kilo Gateway, with no key. Text a plugin sends to the AI model goes to that service. Choose a local provider in Settings > API if you do not want that.
+- **AI model requests.** The default provider is the remote Kilo Gateway, with no key. Text a plugin sends to the AI model goes to that service. Choose a local provider in Settings > Inference if you do not want that.
 - **Place lookups.** Place names go to a public geocoding service, after you agree once.
 
 **[SEC-264]** The install screen of a plugin that asks for `inference` names the provider that is selected now and says `remote` or `local`.

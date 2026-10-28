@@ -474,7 +474,7 @@
 <td><code>set-status-segment</code></td>
 <td>intent</td>
 <td><code>segment</code>, <code>content: rich-text</code>, <code>tooltip</code>, <code>tone</code></td>
-<td>Fills a segment. Needs <code>ui.chrome</code>. At most 10 per second per segment.</td>
+<td>Fills a segment. Needs <code>ui.chrome</code>. At most 10 per second per slot (the segment id is the slot).</td>
 </tr>
 <tr>
 <td><code>clear-status-segment</code></td>
@@ -655,7 +655,7 @@ export const { lifecycle, handler } = definePlugin({
 <p>The smallest version has three flaws.</p>
 <ul>
 <li><strong>A stale segment.</strong> At zero nothing clears the segment.</li>
-<li><strong>Too many updates.</strong> Ilium accepts at most 10 <code>set-status-segment</code> intents per second for one segment. A burst of events would trip <code>rate-limited</code> and the extra updates would be refused.</li>
+<li><strong>Too many updates.</strong> Ilium accepts at most 10 <code>set-status-segment</code> intents per second for one segment (the segment id is the slot). A burst of events would trip <code>rate-limited</code> and the extra updates would be refused.</li>
 <li><strong>A repeated toast.</strong> If the same finish is delivered twice, the user sees two toasts.</li>
 </ul>
 <p>The fix is small. Update the segment once per batch, and only when the count changed. Clear the segment at zero. Put a dedup key on the toast, built from the node and the <code>revision</code> that the event carries. The revision grows with every change, so a new finish has a new key.</p>
@@ -741,6 +741,11 @@ function finishedToast(node: bigint, revision: bigint): Submission {
 <h3 id="narrow-terminals">Narrow terminals</h3>
 <p>A segment never grows past its <code>max_width</code>. Longer text is cut with <code>…</code>. When the bar is still too narrow, the lowest <code>priority</code> goes first, and it returns when the window widens. None of this is an error. Write short text: <code>2 working</code> fits <code>max_width: 16</code>.</p>
 <h3 id="points-to-notice">Points to notice</h3>
+<ul>
+<li>The toast is fire-and-forget: it needs no reply, and a failed toast never stops the status-bar update.</li>
+<li>The segment is set again on every change and removed with a clear call when the count reaches 0, so no stale <code>0 working</code> text stays.</li>
+<li>Text longer than <code>max_width</code> is cut with <code>…</code> and the lowest <code>priority</code> leaves first; none of this is an error.</li>
+</ul>
 <h3 id="edge-cases-and-errors">Edge cases and errors</h3>
 <table>
 <thead>

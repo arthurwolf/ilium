@@ -393,7 +393,7 @@
 <p class="crumbs"><b>Capabilities</b></p>
 <h1>Capability: open-external</h1>
 <h2 id="open-external">open-external</h2>
-<p>The <code>open-external</code> capability lets a plugin ask the host to open something outside Ilium: a web address in the default browser, a file with its desktop handler, a mail link, or an Ilium settings page with an <code>ilium://settings/...</code> link. The plugin never starts the handler itself. The host checks the target, and it asks the user to confirm the first open for each target origin (decision D25).</p>
+<p>The <code>open-external</code> capability lets a plugin ask the host to open something outside Ilium: a web address in the default browser, a file with its desktop handler, a mail link, or an Ilium settings page with an <code>ilium://settings/...</code> link. The plugin never starts the handler itself. The host checks the target, and it asks the user to confirm the first open for each target origin (SEC-043). The origin of a web target is scheme, host and port; of a <code>mailto</code> target the scheme <code>mailto</code>; of a file target the granted scope root that contains the path, so one confirmation covers every file below that root.</p>
 <p><strong>You will need:</strong></p>
 <ul>
 <li>An <code>open-external</code> grant. No argument.</li>
@@ -551,7 +551,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Scheme other than http, https or mailto in a <code>url</code></td>
-<td><code>refused(invalid-argument)</code></td>
+<td><code>refused(not-permitted)</code> ([SEC-043])</td>
 <td>Use <code>file</code> or <code>settings</code> targets for those.</td>
 </tr>
 <tr>
@@ -565,8 +565,8 @@ export const { lifecycle, handler } = definePlugin({
 <td>Show the target as text.</td>
 </tr>
 <tr>
-<td>Rate limit</td>
-<td><code>refused(rate-limited)</code></td>
+<td>More than 10 opens in 60 seconds for one plugin (sliding window)</td>
+<td><code>refused(rate-limited)</code> with <code>retry-after-ms</code></td>
 <td>Open once per user action.</td>
 </tr>
 </tbody>
@@ -609,7 +609,7 @@ open-external                     normal   <span class="t-ok">granted</span>
 <li><a href="/pages/security/">Security</a>.</li>
 </ul>
 <h3 id="security">Security</h3>
-<p><strong>[SEC-043]</strong> <code>open-external</code> accepts only <code>https</code>, <code>http</code>, <code>mailto</code> and file paths inside granted scopes; each origin needs consent (D25). See <a href="/pages/reference-network-egress/">Network egress</a>.</p>
+<p><strong>[SEC-043]</strong> <code>open-external</code> accepts only <code>https</code>, <code>http</code>, <code>mailto</code> and file paths inside granted scopes; each origin needs consent (SEC-043). See <a href="/pages/reference-network-egress/">Network egress</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-ui-chrome/"><small>Previous</small>Capability: ui.chrome</a><a class="next" href="/pages/capability-sessions-cross/"><small>Next</small>Capability: sessions.cross</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

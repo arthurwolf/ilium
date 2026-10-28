@@ -272,7 +272,10 @@ pub fn context(tier: Tier) -> ValidationContext {
         platform: Platform::Linux,
         installed: Vec::new(),
         core_plugins: Vec::new(),
-        unstable_features: ilium_plugin_api::abi::UNSTABLE_FEATURES.iter().map(|name| (*name).to_owned()).collect(),
+        unstable_features: ilium_plugin_api::abi::UNSTABLE_FEATURES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect(),
     }
 }
 

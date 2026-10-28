@@ -41,12 +41,13 @@ pub use delivery::{
     Delivery, DeliveryError, DeliveryFailure, DeliveryObserver, DeliveryReceipt, OperationKind,
     ShutdownReason,
 };
-pub use error::PtyError;
+pub use error::{PtyCaptureError, PtyError};
 pub use owner::{OwnerLimits, OwnerStatus, PtyInput, QueueLoad, ShutdownReport};
 pub use replay_text::{screen_text_from_replay, REPLAY_SCREEN_COLUMNS, REPLAY_SCREEN_ROWS};
 pub use screen_reader::ScreenReader;
 pub use session::{
-    PtyChildExit, PtyCommand, PtyExitCause, PtyOutputChunk, PtyOutputHistory, PtyOutputRecovery,
-    PtyOutputRecoveryEstimate, PtyOutputReplay, PtyOutputReplayEstimate, PtyScreenSnapshot,
-    PtySession, PtySessionIdentity, PtyShellObserver, PtyTerminationHandle, ScreenSnapshot,
+    PtyCaptureHandle, PtyChildExit, PtyCommand, PtyExitCause, PtyOutputChunk, PtyOutputHistory,
+    PtyOutputRecovery, PtyOutputRecoveryEstimate, PtyOutputReplay, PtyOutputReplayEstimate,
+    PtyScreenSnapshot, PtySession, PtySessionIdentity, PtyShellObserver, PtyTerminationHandle,
+    ScreenSnapshot,
 };

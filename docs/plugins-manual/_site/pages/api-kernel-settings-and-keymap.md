@@ -67,6 +67,10 @@ All calls are synchronous. They read a snapshot and return at once, so no `reque
 
 An unknown id fails with `not-found`. The labels are for the reader of this table; the plugin passes the id.
 
+### Key `automatic_ai` of the `inference` tab
+
+The `inference` tab holds the boolean key `automatic_ai`. It is `true` when the user has switched on automatic AI features under Inference and privacy, and `false` otherwise. A plugin that sends screen text to a model, such as the recap plugin ([recap](/pages/core-plugin-recap/)), reads this key first and treats a missing key as `false`.
+
 ### What `read` returns
 
 The result is one JSON object of the tab's values. The keys are the kernel's stable configuration keys of that tab. A key that the kernel removes in a later release disappears from the object, so read keys defensively and give each a default. Every secret value, such as an API key, is the string `"<redacted>"` and never the secret. The object has the shape of the tab at the moment of the call, and a later change does not alter an object already returned.
@@ -212,7 +216,7 @@ write: func(tab: string, key: string, value: string) -> result<_, plugin-error>;
 |---|---|---|
 | `kernel-settings.write` | `kernel_settings::write(tab, key, json)` | `write(tab, key, json)` |
 
-A write sends `kernel-settings-changed` to every reader of the tab, including the writer. A secret key cannot be written through this call; the owner uses the secrets import. Tabs with no owner plugin have no writer: the kernel row is the only editor.
+A write sends `kernel-settings-changed` to every reader of the tab, including the writer. A secret key cannot be written through this call; the owner stores it through the secrets store ([secrets](/pages/reference-secrets/)). Tabs with no owner plugin have no writer: the kernel row is the only editor.
 
 ### Link to a setting
 

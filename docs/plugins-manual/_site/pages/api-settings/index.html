@@ -398,8 +398,8 @@
 <p><strong>You need:</strong></p>
 <ul>
 <li>No grant for the plugin's own values. <code>get-json</code> and <code>set-json</code> are always granted on the <code>server</code> and <code>client</code> sides. A plugin's own tab needs no other grant.</li>
-<li><code>settings.contribute:&lt;tab-id&gt;</code> for each built-in tab where the plugin adds a section, for example <code>settings.contribute:terminal</code>. It allows drawing sections in that tab and nothing else. It is low risk, and it neither implies nor is implied by the two all-settings grants. See <a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a>.</li>
-<li><code>settings.read-kernel:&lt;tab-id&gt;</code> for the read-only <code>kernel-settings.read</code> call. It is low risk, takes one tab id and gives no write access.</li>
+<li><code>settings.contribute:&lt;tab-id&gt;</code> for each built-in tab where the plugin adds a section, for example <code>settings.contribute:terminal</code>. It allows drawing sections in that tab and nothing else. It is normal risk, and it neither implies nor is implied by the two all-settings grants. See <a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a>.</li>
+<li><code>settings.read-kernel:&lt;tab-id&gt;</code> for the read-only <code>kernel-settings.read</code> call. It is normal risk for most tabs and high risk for the <code>api</code> tab, takes one tab id and gives no write access.</li>
 <li><code>settings.read-all</code> for <code>list-settings</code> and <code>get-plugin-json</code>. This grant is high risk and available only to bundled first-party (T1) plugins.</li>
 <li><code>settings.write-all</code> for <code>set-plugin-json</code>. It also needs <code>settings.read-all</code>. It is high risk and T1 only.</li>
 <li>A language: Rust with <code>ilium_plugin_sdk</code>, or TypeScript with <code>@ilium/plugin-sdk</code>.</li>
@@ -474,7 +474,7 @@
 </tbody>
 </table>
 <p>The <code>SettingsRef</code> record has these fields: <code>plugin</code> (the plugin id), <code>tab</code> (the global tab id <code>&lt;plugin-id&gt;/&lt;tab-id&gt;</code>, or the built-in tab id for a section in a built-in tab), <code>section</code> (the global section id, when the entry is a section), <code>title</code>, <code>scope</code> (<code>server</code> or <code>client</code>) and <code>kernel-tab</code> (an optional built-in tab id). In Rust it is imported from <code>ilium_plugin_sdk::host::settings</code>. In TypeScript it is imported as a type from <code>@ilium/plugin-sdk/host/settings</code>.</p>
-<p>The <code>SettingsChange</code> record has three fields: <code>keys</code> (the changed keys, sorted, no duplicates), <code>origin</code> and <code>scope</code> (the receiving side, <code>server</code> or <code>client</code>). The origin is one of:</p>
+<p>The <code>SettingsChange</code> record has three fields: <code>keys</code> (the changed keys, sorted, no duplicates), <code>origin</code> and <code>side</code> (the receiving side, <code>server</code> or <code>client</code>). The origin is one of:</p>
 <ul>
 <li><code>user</code>: a row on the Settings screen changed, or the <code>r</code> key reset a row.</li>
 <li><code>plugin</code>: the plugin's own <code>set-json</code> call.</li>
@@ -619,7 +619,7 @@
 </tr>
 </tbody>
 </table>
-<p>The error codes <code>manifest.catalog-unknown</code> (a choice <code>source</code> names an unknown catalogue) and <code>manifest.settings-source</code> (<code>source</code> together with <code>options</code>) are install-time manifest errors.</p>
+<p>The error codes <code>manifest.catalog-unknown</code> (a choice <code>source</code> names an unknown catalogue) and <code>manifest.settings-source</code> (a <code>choice</code> row with both or neither of <code>options</code> and <code>source</code>) are install-time manifest errors.</p>
 <p>Row keys must be unique within one plugin, across all its tabs and sections. A duplicate is refused at install with <code>manifest.settings-key-clash</code>.</p>
 <h3 id="live-reload-of-settings">Live reload of settings</h3>
 <p>The kernel store is the single copy of every value. A write by the user, by a file edit, or by a tab owner (<code>settings.write-kernel</code>) reaches a running plugin as the event <code>settings-changed</code> (own keys) or <code>kernel-settings-changed</code> (kernel tabs) without a restart. Values that need a restart are listed in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>, table "Live reload and restart". [COR-024]</p>
@@ -857,7 +857,7 @@ export function dumpNotesSettings(): string[] {
 </tr>
 </tbody>
 </table>
-<p><code>get-json</code> has no error code of its own. A tab or section that a plugin does not declare is simply left out of <code>list-settings</code> (A37).</p>
+<p><code>get-json</code> has no error code of its own. A tab or section that a plugin does not declare is simply left out of <code>list-settings</code>.</p>
 <h3 id="what-the-user-sees">What the user sees</h3>
 <ul>
 <li><strong>A plugin tab</strong> appears in the Settings rail, next to the built-in tabs. Its frame title ends with <code>· plugin</code>, and its first line names the plugin and its version.</li>

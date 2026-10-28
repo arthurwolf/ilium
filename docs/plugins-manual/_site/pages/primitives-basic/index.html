@@ -432,12 +432,12 @@
 </tr>
 <tr>
 <td><code>persist</code></td>
-<td><code>metadata</code>, <code>storage</code> or <code>none</code></td>
+<td><code>metadata</code> or <code>none</code></td>
 <td>Decides what survives a restart (see below).</td>
 </tr>
 </tbody>
 </table>
-<p>With <code>persist: "metadata"</code>, the kernel saves the node's metadata, up to 64 KiB per node per plugin, and gives it back on restore. With <code>persist: "storage"</code>, the kernel recreates the node empty and deletes the plugin's storage keys under <code>pane/&lt;node-id&gt;/</code> when the pane closes; the plugin reads its own buckets. With <code>persist: "none"</code>, the pane starts empty after a restart.</p>
+<p>With <code>persist: "metadata"</code>, the kernel saves the node's metadata, up to 64 KiB per node per plugin, and gives it back on restore. With <code>persist: "none"</code>, the pane starts empty after a restart.</p>
 <h3 id="interface">Interface</h3>
 <pre><code class="language-wit">// Excerpt of ilium:primitives/basic in reference-wit
 interface basic {
@@ -798,7 +798,7 @@ footer <code>Saved</code> comes from <code>basic.set_status</code>. The body is 
 <tr>
 <td><code>not-permitted</code></td>
 <td>The node is not a pane of one of the plugin's kinds, or <code>panes.provide-kind</code> or <code>tree.metadata</code> is missing.</td>
-<td>Stop calling for that node. The host logs <code>refused basic.set-title: not-permitted</code> at level warn.</td>
+<td>Stop calling for that node. The host logs <code>refused &lt;grant&gt; by basic.set-title (not-permitted)</code>, naming the missing grant at level warn.</td>
 </tr>
 <tr>
 <td><code>invalid-argument</code></td>
@@ -835,7 +835,7 @@ footer <code>Saved</code> comes from <code>basic.set_status</code>. The body is 
   instead of an error.</li>
 <li>A render that returns a layout whose child count differs from its constraint count traps the
   instance. A zero-size area draws nothing and is not an error.</li>
-<li>With <code>persist: "none"</code> or <code>"storage"</code>, notes kept only in metadata are lost on restart. Pick the
+<li>With <code>persist: "none"</code>, notes kept only in metadata are lost on restart. Pick the
   persist mode that matches where the state lives.</li>
 </ul>
 <h3 id="pane-activity-and-dirty-state">Pane activity and dirty state</h3>
@@ -896,7 +896,7 @@ setDirty(pane, true);
 <li><a href="/pages/api-tree/">Tree</a> for <code>metadata</code> and <code>set-metadata</code>.</li>
 <li><a href="/pages/tutorial-06-notes-pane/">Notes pane tutorial</a> for a step-by-step version of this page.</li>
 <li><a href="/pages/primitives-terminal/">Terminal primitive</a> and <a href="/pages/primitives-agent/">Agent primitive</a> for the other two primitives.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and limits used here.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and limits used here.</li>
 </ul>
 <p>This page follows <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/primitives-agent/"><small>Previous</small>Agent primitive</a><a class="next" href="/pages/primitives-editor/"><small>Next</small>Editor primitive</a></nav>

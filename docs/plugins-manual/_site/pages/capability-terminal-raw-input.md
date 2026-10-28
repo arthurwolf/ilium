@@ -95,14 +95,14 @@ impl Handler for RawKeys {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.rawkeys/click" { continue; }
-            let Some(pane) = invoked.pane else { continue };
-            submissions.push(Submission::new(Intent::SendInput(SendInputSpec {
+            let Some(pane) = invoked.context.pane else { continue };
+            submissions.push(Submission::keyed(Intent::SendInput(SendInputSpec {
                 pane,
                 mouse: Some(vec![TerminalMouse {
-                    kind: PointerKind::Press, button: 0, column: 10, row: 5, modifiers: Modifiers::empty(),
+                    kind: PointerKind::Down, button: PointerButton::Left, column: 10, row: 5, modifiers: Modifiers::empty(),
                 }]),
                 ..SendInputSpec::default()
-            })));
+            }), format!("rawkeys-click:{pane}")));
         }
         submissions
     }
@@ -120,17 +120,17 @@ export const { lifecycle, handler } = definePlugin({
     const submissions: Submission[] = [];
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.rawkeys/click' || event.val.pane === undefined) continue;
+      if (event.val.command !== 'com.example.rawkeys/click' || event.val.context.pane === undefined) continue;
       submissions.push({
         intent: {
           tag: 'send-input',
           val: {
-            pane: event.val.pane,
-            mouse: [{ kind: 'press', button: 0, column: 10, row: 5, modifiers: [] }],
+            pane: event.val.context.pane,
+            mouse: [{ kind: 'down', button: 'left', column: 10, row: 5, modifiers: [] }],
           },
         },
         correlation: 1n,
-        dedupKey: undefined,
+        dedupKey: `rawkeys-click:${event.val.context.pane}`,
       });
     }
     return submissions;
@@ -138,7 +138,7 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-To send bytes instead, set `raw` (Rust `raw: Some(vec![0x1b, b'[', b'A'])`, TypeScript `raw: new Uint8Array([0x1b, 0x5b, 0x41])`). A submission cannot mix `raw` and `text` or `stages` in one `send-input`.
+To send bytes instead, set `raw` (Rust `raw: Some(vec![0x1b, b'[', b'A'])`, TypeScript `raw: new Uint8Array([0x1b, 0x5b, 0x41])`). A `send-input` always needs a dedup key, as every `send-input` does. A submission cannot mix `raw` and `text` or `stages` in one `send-input`: that is a shape failure.
 
 ### Errors and edge cases
 
@@ -146,6 +146,7 @@ To send bytes instead, set `raw` (Rust `raw: Some(vec![0x1b, b'[', b'A'])`, Type
 |---|---|---|
 | Grant missing or declined | `refused(not-permitted)` | Send plain text through `terminal.write` instead. |
 | Mouse events while mouse reporting is off | `refused(unsupported)` | Read `terminal.modes` first. |
+| `raw` mixed with `text` or `stages` in one `send-input` | `refused(invalid-argument)` for that submission (a shape failure); every other submission of the batch completes as `refused(cancelled)` | Send the bytes in a separate `send-input`. |
 | `raw` above 64 KiB | `refused(invalid-argument)` | Split into several sends. |
 | `if-current` precondition fails | `refused(conflict)` | Re-read the pane state and retry. |
 | Pane exited | `refused(not-found)` | Drop the pane id. |

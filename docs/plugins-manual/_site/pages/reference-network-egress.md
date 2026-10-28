@@ -39,7 +39,7 @@ A name that a user granted may resolve to an address the user never meant to all
 
 **[SEC-074]** Loopback. `http:localhost` requires an explicit port (`http:localhost:8080`), is high risk, and can never reach the Ilium HTTP API port or the Ilium socket of any session: the host refuses those destinations with `not-permitted` reason `reserved`. The port check compares the destination with the listener ports of all Ilium sessions of the user, not only the current one.
 
-`http:setting:<key>` takes its host from a setting. The same address checks apply to the value. A setting that holds a private address needs the user consent of decision D23, shown with the address class named.
+`http:setting:<key>` takes its host from a setting. The same address checks apply to the value. A setting that holds a private address needs the user consent of SEC-074 (decision D23 in the [Design decisions](/pages/design-decisions/)), shown with the address class named.
 
 ## Redirects
 
@@ -75,12 +75,12 @@ Every feature in which the host sends data on a plugin's behalf.
 
 | Feature | Destination | Data sent | Consent | Log |
 |---|---|---|---|---|
-| `inference` (default provider) | The provider configured in Settings > API; the default is the remote Kilo Gateway, no key | Prompt text and options the plugin passes | Review dialog names the provider and whether it is local or remote ([SEC-264]) | Privacy log |
+| `inference` (default provider) | The provider configured in Settings > Inference; the default is the remote Kilo Gateway, no key | Prompt text and options the plugin passes | Review dialog names the provider and whether it is local or remote ([SEC-264]) | Privacy log |
 | `inference.embed` | Same provider | Texts to embed | Same | Privacy log |
-| `location.geocode` | Photon, with Nominatim as fallback | Place text | First-use consent (D14) | Plugin log, audit |
+| `location.geocode` | Photon, with Nominatim as fallback | Place text | First-use consent (host geocoding, decision D14 in the [Design decisions](/pages/design-decisions/)) | Plugin log, audit |
 | Notification channels (`ilium.core.notifications`) | A webhook URL the user configured | Title and body of the notification | The user configured the URL | Plugin log |
 | Help sources (remote indexes) | The index host the user configured | The search query or the fetch path | The user configured the source | Plugin log |
-| `open-external` | The user's desktop handler, not Ilium | A URL or file path | Origin consent (D25) | Audit |
+| `open-external` | The user's desktop handler, not Ilium | A URL or file path | Origin consent (SEC-043) | Audit |
 | `http`, streams, WebSocket | The granted hosts | Whatever the plugin sends | Review dialog | Plugin log, audit on first use of a host |
 | `ilium.core.updates` (if present) | The project release host | Version query only, no identifiers | Opt-in setting, off by default | Plugin log |
 

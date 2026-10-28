@@ -755,7 +755,7 @@
 <li>The host loads the current minor version and the previous one through hand-written adapters.</li>
 <li>A plugin built for a newer minor than the host is refused at install. The message names both versions.</li>
 </ul>
-<p>Experimental items carry <code>@unstable(feature = &lt;name&gt;)</code> instead. Such an item is visible only to a plugin whose manifest lists the feature in the <code>unstable</code> key. In 0.1 there are two of them: <code>ui-calendar</code>, which enables the <code>calendar</code> widget, and <code>plugin-services</code>, which enables <code>services.call</code>. The <code>chart</code> widget is stable.</p>
+<p>Experimental items carry <code>@unstable(feature = &lt;name&gt;)</code> instead. Such an item is visible only to a plugin whose manifest lists the feature in the <code>unstable</code> key. In 0.1 there are two feature-gated items: <code>ui-calendar</code>, which enables the <code>calendar</code> widget, and <code>plugin-services</code>, which enables <code>services.call</code>. The <code>chart</code> widget is stable. <code>gpu</code> and WebSocket are also marked <code>@unstable</code>, but they are not part of the 0.1 contract and no manifest can enable them.</p>
 <h2 id="the-restart-rule">The restart rule</h2>
 <p>The restart rule applies to each plugin on each side. On the client side, each client counts separately. A failing view counts against its plugin, not against the view.</p>
 <table>
@@ -782,60 +782,50 @@
 </table>
 <p>A failure counts for 10 minutes and then expires. A successful run does not clear it sooner. A trap or a missed deadline counts as a failure. A <code>revoked</code> re-activation, a disable chosen by the user, an upgrade and a shutdown never count. Re-enabling the plugin by hand resets the count to zero.</p>
 <h2 id="decisions-that-closed-the-open-items">Decisions that closed the open items</h2>
-<p>These answers replace the questions that the plan left open. Each one is recorded in the decisions file with its identifier.</p>
+<p>These answers replace the questions that the plan left open.</p>
 <table>
 <thead>
 <tr>
 <th>Question</th>
 <th>Answer</th>
-<th>Decision</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Background-job model</td>
 <td>Every job runs in a second instance of the component, in its own store. The plugin's own instance is never used</td>
-<td>A21, X5</td>
 </tr>
 <tr>
 <td>TypeScript compiler</td>
 <td><code>componentize-js</code>. <code>componentize-qjs</code> is not used</td>
-<td>U8</td>
 </tr>
 <tr>
 <td>Optional exports</td>
 <td>Checked against the component's export list. The manifest lists only the optional exports</td>
-<td>N9</td>
 </tr>
 <tr>
 <td>Settings and payload schemas</td>
 <td>A JSON-Schema subset, draft 2020-12, checked by one pinned validator</td>
-<td>N28</td>
 </tr>
 <tr>
 <td>Resource limits</td>
-<td>The 0.1 defaults in the <a href="/pages/reference-errors-and-limits/">errors and limits page</a>. A measured value may replace one, and the change is dated in the decisions file</td>
-<td>Section 3</td>
+<td>The 0.1 defaults in the <a href="/pages/reference-errors-and-limits/">errors and limits page</a>. A measured value may replace one, and the change is dated in the release notes</td>
 </tr>
 <tr>
 <td><code>calendar</code> and <code>chart</code></td>
 <td><code>chart</code> is stable. <code>calendar</code> stays unstable behind <code>ui-calendar</code></td>
-<td>W19, N33</td>
 </tr>
 <tr>
 <td>Prompt text for plugins without the grant</td>
 <td>Nothing is sent, not even a length or a hash</td>
-<td>C3</td>
 </tr>
 <tr>
 <td>Key-release events</td>
 <td>Delivered only when the terminal supports the kitty keyboard protocol</td>
-<td>C45</td>
 </tr>
 <tr>
 <td><code>device.gpu</code></td>
 <td>Not part of the contract (<code>gpu.kernels</code> is <code>@unstable</code>). A manifest that names it is refused with <code>manifest.grant-unknown</code></td>
-<td>Added by page writers (<code>porting-iliumanim</code>)</td>
 </tr>
 </tbody>
 </table>

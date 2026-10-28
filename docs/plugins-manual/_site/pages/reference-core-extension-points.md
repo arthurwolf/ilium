@@ -54,7 +54,7 @@ Read [Extension points](/pages/api-extension-points/) for the mechanism, [Extend
 | `ilium.core.terminal/open-link` | hook: first | standard | Decide how a clicked link opens. The first handler that answers wins. |
 | `ilium.core.terminal/link-actions` | collect | standard | Offer actions for a detected link kind in the terminal right-click menu. |
 | `ilium.core.smart-copy/recognisers` | collect | standard | Teach Smart Copy a new kind of structure to select. |
-| `ilium.core.smart-copy/after-copy` | hook: transform | standard | Change the copied text before it reaches the clipboard, for example to remove secrets. |
+| `ilium.core.smart-copy/after-copy` | hook: transform | high | Change the copied text before it reaches the clipboard, for example to remove secrets. |
 | `ilium.core.editor/before-save` | hook: transform | standard | Change buffer text just before it is written, for example to format it. |
 | `ilium.core.editor/file-openers` | collect | standard | Choose which pane kind opens files with certain extensions. |
 | `ilium.core.editor/line-badges` | collect | standard | Add a marker in the editor gutter for lines that match. |
@@ -79,11 +79,11 @@ Read [Extension points](/pages/api-extension-points/) for the mechanism, [Extend
 | `ilium.core.voice/voice-intents` | collect | standard | Add a spoken phrase that runs a command. |
 | `ilium.core.scheduler/schedule-sources` | collect | standard | Add a trigger source such as a calendar or a reset forecast. |
 | `ilium.core.scheduler/before-send-scheduled` | hook: veto | high | Refuse a scheduled or queued input at the moment it would be sent. |
-| `ilium.core.text-triggers/rule-packs` | collect | standard | Ship a group of rules the user can enable as a set. |
+| `ilium.core.text-triggers/rule-packs` | collect | high | Ship a group of rules the user can enable as a set. |
 | `ilium.core.text-triggers/before-fire` | hook: veto | high | Refuse or end a rule that is about to send text. |
 | `ilium.core.progress/footer-segments` | collect | standard | Add a segment to the progress footer. |
 | `ilium.core.progress/probe-kinds` | collect | standard | Add a ready-made probe, such as a CI run or a build. |
-| `ilium.core.chatroom/before-post` | hook: transform | standard | Change or refuse a message before it is written to the room. |
+| `ilium.core.chatroom/before-post` | hook: transform | standard | Change a message before it is written to the room. |
 | `ilium.core.chatroom/message-renderers` | collect | standard | Draw a message kind in a special way, such as a task claim. |
 | `ilium.core.worktrees/before-create` | hook: transform | standard | Choose the branch name or refuse a new worktree. |
 | `ilium.core.worktrees/post-create-steps` | collect | standard | Add a step that runs after a worktree is created. |
@@ -155,7 +155,7 @@ Read [Extension points](/pages/api-extension-points/) for the mechanism, [Extend
 |---|---|
 | `ilium.core.tree/changed` | { node, change } after any structural change |
 | `ilium.core.layout/changed` | { group, split_count } after a split is added, removed or resized |
-| `ilium.core.terminal/screen-changed` | { pane, rows } when visible rows change, at most 10 per second |
+| `ilium.core.terminal/screen-changed` | { pane, first-row, last-row, revision } when visible rows change, at most 10 per second |
 | `ilium.core.smart-copy/copied` | { kind, length } after text is copied |
 | `ilium.core.editor/saved` | { buffer, path } after a save |
 | `ilium.core.kanban/card-moved` | { board, card, to_column } |

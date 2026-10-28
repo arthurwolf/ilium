@@ -454,6 +454,11 @@
 <td>Ask your administrator</td>
 </tr>
 <tr>
+<td>A plugin shows <strong>Blocked</strong> with <code>trust.key-revoked</code> or <code>registry.takedown</code></td>
+<td>The publisher key was revoked as compromised, or the registry took the version down</td>
+<td>Do not turn it on unless you accept the risk. Install an update from the publisher, or run <code>ilium plugin enable &lt;id&gt; --accept-risk</code>. See <a href="/pages/user-install-and-manage/">Install and manage plugins</a></td>
+</tr>
+<tr>
 <td>A plugin shows <strong>Waiting for <owner></strong></td>
 <td>It depends on a plugin that is off or removed</td>
 <td>Turn on or install the owner</td>
@@ -511,7 +516,7 @@
 <ol>
 <li>From a terminal: <code>ilium --safe-mode</code>.</li>
 <li>From the recovery page, press the Safe mode action. Ilium restarts the client with third-party plugins off.</li>
-<li>If Ilium fails to start twice in a row while a plugin starts, Ilium offers safe mode at the next start. (Pending decision: the offer after two failed starts is proposed.)</li>
+<li>If Ilium crashes during start three times within 5 minutes, the next start uses safe mode with third-party plugins off (LIF-186).</li>
 </ol>
 <p>In safe mode, a banner stays at the top of the screen: "Safe mode: third-party plugins are off." The Plugins tab still works. Every third-party row shows <strong>Off</strong> with the reason <code>safe-mode</code>. You can read logs, uninstall plugins and use the bisect tool. You cannot turn a third-party plugin on until you leave safe mode.</p>
 <figure>
@@ -551,7 +556,7 @@
 <figcaption>Rendered at 48 columns. Illustrative. The recovery page.</figcaption>
 </figure>
 
-<p>Open the recovery page from the <strong>Open Plugins page</strong> link on any disabled plugin's rows, or from a failed-start notice, or with <code>Ctrl+B</code> then <code>:</code> and the Recovery entry when Settings is not available. (Pending decision: the direct key for the recovery page is not set.)</p>
+<p>Open the recovery page from the <strong>Open Plugins page</strong> link on any disabled plugin's rows, or from a failed-start notice, or with <code>Ctrl+B</code> then <code>:</code> and the Recovery entry when Settings is not available. The recovery page has no direct key of its own; those three routes are the only ones.</p>
 <table>
 <thead>
 <tr>
@@ -610,7 +615,7 @@ ilium plugin bisect good     # the problem is gone with the current set off
 ilium plugin bisect bad      # the problem is still there
 ilium plugin bisect reset    # stop and put everything back
 </code></pre>
-<p>Bisect changes nothing on disk. The plugins it turns off are off for this run, as in safe mode, and <code>reset</code> or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.</p>
+<p>Bisect writes only its own state file, <code>&lt;data&gt;/plugins/bisect.json</code>, and changes no plugin file and no setting. The plugins it turns off are off for this run, as in safe mode, and <code>reset</code> or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.</p>
 <ol>
 <li>Run <code>ilium plugin bisect start</code>.</li>
 <li>Look at whether the problem is still there. Answer <code>good</code> when it is gone, <code>bad</code> when it is still there.</li>
@@ -663,6 +668,7 @@ ilium plugin logs com.example.notes --follow
 <p>When a plugin stops with an error, Ilium starts it again after a delay: 1 s after the first failure, 5 s after the second. At the third failure within 10 minutes it stays off, the row shows <strong>Failed</strong>, and a notice names the plugin. Turning it on again, from the Plugins tab, the recovery page or <code>ilium plugin enable &lt;id&gt;</code>, starts counting from zero. <code>ilium plugin reset-failures &lt;id&gt;</code> clears the count without starting the plugin. See <a href="/pages/lifecycle/">Lifecycle</a>.</p>
 <p>If you changed the plugin in the meantime, for example by updating it, the count also starts from zero.</p>
 <ul>
+<li>[USR-176] The troubleshooting table MUST tell a user whose plugin shows <code>Blocked</code> with <code>trust.key-revoked</code> or <code>registry.takedown</code> that the block is not a failure, that the plugin stays off until <code>enable --accept-risk</code> or a signed update, and that the failure counter does not apply. Test: read the page text and assert that the row names both reasons, <code>--accept-risk</code> and the update route; block a plugin and assert that <code>ilium plugin list</code> shows no failure count for it.</li>
 <li>[USR-100] The plugin MUST restart after 1 s, then after 5 s, and MUST stay off at the third failure within 10 minutes. Test: make a test plugin fail on start and measure.</li>
 <li>[USR-101] Turning a plugin on MUST clear its failure count. Test: reach the stop, turn on, fail once, and assert a restart after 1 s.</li>
 </ul>

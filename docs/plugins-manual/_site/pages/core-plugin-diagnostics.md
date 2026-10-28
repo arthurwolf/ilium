@@ -4,15 +4,15 @@
 
 Diagnostics helps when something goes wrong. It builds a report of facts about the install, it watches the warnings and errors that plugins write, and it helps the user attach the right log file to an issue. The plugin id is `ilium.core.diagnostics` and it runs on both sides. The server side reads the log file and builds the report. The client side shows the report and the warning list.
 
-The Debug and About tabs, and the file logging switch, belong to the Settings plugin. Diagnostics does not draw them again. It reads the Debug setting without writing it, and it adds the report to the Debug tab through the Settings plugin's own extension, as an ordinary contribution.
+The Debug and About tabs, and the file logging switch, belong to the Settings plugin. Diagnostics does not draw them again. It reads the Debug setting without writing it, and the Debug tab's Build report button runs this plugin's `build-report` command. Diagnostics holds no grant on the Settings plugin's extension points and contributes no settings rows.
 
 ### What it covers
 
-- The log file: one file for each server lifetime, named `log-<local date and time>.txt`, under `/tmp/.ilium-<uid>/logs/<session-id>/` on Linux and macOS and `%LOCALAPPDATA%\ilium\logs` on Windows. `ILIUM_DEBUG_LOG_DIR` replaces the root. The five newest logs of a session are kept and older ones are removed when the server starts.
+- The log file: one file for each server lifetime, named `log-<local date and time>.txt`, under `/tmp/.ilium-<uid>/logs/<session-id>/` on Linux and macOS and `%LOCALAPPDATA%\ilium\logs` on Windows. `ILIUM_DEBUG_LOG_DIR` replaces the root. The manifest grant `fs.read:path:/tmp/.ilium-<uid>/logs` is fixed and does not follow the override: when the override puts the logs outside the granted path, reads of them return `not-permitted`, and the report shows the line `log directory not readable: <path>` and lists no log files. Diagnostics does not fail, does not retry in a loop and does not widen its own grant. The five newest logs of a session are kept and older ones are removed when the server starts.
 - File logging is off by default. It records actions, errors and complete model text exchanges. Credential headers and URL parameters are redacted, but other text is not. Treat a log as sensitive.
 - Log levels: trace, debug, info, warn, error. A plugin writes its own diary at these levels with the host log. The user reads it with `ilium plugin logs <id>`.
 - The `ilium-logging` service of the server, which opens the file, applies the switch live to client and server, flushes on request and shuts down in order.
-- The report: a text block of facts, one section for each contributor, at most 64 KiB for each section.
+- The report: a text block of facts, one section for each contributor, at most 64 KiB (65,536 bytes) for each section.
 - Attaching a log to an issue: choose a file, see what the report holds, and read a warning about private content before anything leaves the machine.
 
 ### See it
@@ -33,7 +33,7 @@ There is no recording of this feature yet. The renders below are illustrative.
 │ [ <span class="t-hi">Build report</span> ]   [ Open folder ]           │
 ╰──────────────────────────────────────────────╯
 </pre>
-<figcaption>Rendered at 48 columns. Illustrative. The Debug tab is drawn by the Settings plugin. Diagnostics supplies the size and the report button.</figcaption>
+<figcaption>Rendered at 48 columns. Illustrative. The Debug tab is drawn by the Settings plugin. Diagnostics supplies the `build-report` command that the button runs.</figcaption>
 </figure>
 
 <figure>
@@ -343,7 +343,7 @@ export function fileLoggingOn(): boolean {
 
 #### Tail the log file
 
-The log can grow large, so the plugin never reads it whole. It keeps a cursor and asks for a chunk. A chunk holds the bytes, a new cursor and a flag that says the start was cut. The newest warning lines go to the warnings panel, and the size goes to the Debug tab. See [tail](/pages/api-fs-atomic-and-tail/) and [fs.read](/pages/capability-fs-read/).
+The log can grow large, so the plugin never reads it whole. It keeps a cursor and asks for a chunk. A chunk holds the bytes, a new cursor and a flag that says the start was cut. The `name` argument is relative to the granted root, so it includes the session folder: `<session-id>/log-<local date and time>.txt`. The newest warning lines go to the warnings panel, and the size goes to the Debug tab. See [tail](/pages/api-fs-atomic-and-tail/) and [fs.read](/pages/capability-fs-read/).
 
 **Rust**
 
@@ -352,7 +352,7 @@ use ilium_plugin_sdk::host::fs;
 use ilium_plugin_sdk::types::paths::FsPath;
 
 async fn poll_log(&mut self, name: &str) -> Result<(), PluginError> {
-    let path = FsPath { scope: "path:/tmp/.ilium-1000/logs".into(), path: name.into() };
+    let path = FsPath { scope: "path:/tmp/.ilium-1000/logs".into(), path: format!("{}/{}", self.session_id, name) };
     let chunk = fs::tail(&path, self.tail_cursor, 64 * 1024).await?;
     self.tail_cursor = Some(chunk.cursor);
     for line in String::from_utf8_lossy(&chunk.bytes).lines() {
@@ -372,7 +372,7 @@ async fn poll_log(&mut self, name: &str) -> Result<(), PluginError> {
 import { tail } from '@ilium/plugin-sdk/host/fs';
 
 export async function pollLog(name: string): Promise<void> {
-  const chunk = await tail({ scope: 'path:/tmp/.ilium-1000/logs', path: name }, state.tailCursor, 64 * 1024);
+  const chunk = await tail({ scope: 'path:/tmp/.ilium-1000/logs', path: `${state.sessionId}/${name}` }, state.tailCursor, 64 * 1024);
   state.tailCursor = chunk.cursor;
   for (const line of new TextDecoder().decode(chunk.bytes).split('\n')) {
     if (line.includes(' WARN ') || line.includes(' ERROR ')) {
@@ -431,8 +431,7 @@ fn remember(&self, pane: Option<NodeId>, line: &str) -> Result<(), PluginError> 
 }
 
 fn recent_for_report(&self, pane: NodeId) -> Vec<String> {
-    journal::read(pane, 0, 20)
-        .unwrap_or_default()
+    journal::read(Some(pane), 0, 20)
         .into_iter()
         .filter(|entry| entry.kind == "diagnostics.warning")
         .map(|entry| entry.payload_json)
@@ -448,7 +447,7 @@ import * as journal from '@ilium/plugin-sdk/host/journal';
 export const remember = (pane: bigint | undefined, line: string): void =>
   journal.logEvent(pane, 'diagnostics.warning', JSON.stringify({ line }));
 
-export const recentForReport = (pane: bigint): string[] =>
+export const recentForReport = (pane: bigint | undefined): string[] =>
   journal.read(pane, 0n, 20)
     .filter((entry) => entry.kind === 'diagnostics.warning')
     .map((entry) => entry.payloadJson);
@@ -456,7 +455,7 @@ export const recentForReport = (pane: bigint): string[] =>
 
 #### Build the report in a service
 
-The service `report/build` returns the text. It starts with its own facts, then asks each contributed section for text. A section that is slow or fails is named and skipped, so one bad contributor cannot stop the report. The result is cut at 256 KiB. The call is deferred, so the plugin answers when the sections are in. See [services](/pages/api-services/) and [client requests](/pages/api-client-requests/).
+The service `report/build` returns the text. It starts with its own facts, then asks each contributed section for text. A section that is slow or fails is named and skipped, so one bad contributor cannot stop the report. The result is cut at 256 KiB. The call is deferred, so the plugin answers when the sections are in. Each section service gets a reply deadline of 2000 ms, and the whole report has an overall deadline of 10,000 ms; sections not in by then are named as slow and skipped. These two deadlines are the plugin's own constants. They are not fields of the `report-sections` point or of its entry schema. The calls to the section services need no `services.use` grant: the kernel admits them because the contributed entry is active (see [entry-bound services](/pages/api-extension-points/#entry-bound-services)). Only `services.use:ilium.core.settings/get` is granted for the Settings read. See [services](/pages/api-services/) and [client requests](/pages/api-client-requests/).
 
 **Rust**
 
@@ -469,7 +468,11 @@ async fn build_report(&mut self) -> String {
         let Ok(section) = serde_json::from_str::<Section>(&entry.entry_json) else { continue };
         match services::call(&section.service, "text", "{}").await {
             Ok(reply) => {
-                let body: String = reply.chars().take(64 * 1024).collect();
+                let mut end = reply.len().min(64 * 1024);
+                while !reply.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let body: String = reply[..end].to_string();
                 text.push_str(&format!("\n## {} (from {})\n{}\n", section.title, entry.contributor, body));
             }
             Err(error) => {
@@ -489,13 +492,19 @@ import * as extensions from '@ilium/plugin-sdk/host/extensions';
 import { call } from '@ilium/plugin-sdk/host/services';
 import { log } from '@ilium/plugin-sdk/host/log';
 
+/** Cuts at a byte limit without splitting a character. */
+function cap_bytes(text: string, limit: number): string {
+  const bytes = new TextEncoder().encode(text).slice(0, limit);
+  return new TextDecoder('utf-8').decode(bytes).replace(/\uFFFD+$/, '');
+}
+
 export async function buildReport(): Promise<string> {
   let text = coreFacts();
   for (const entry of extensions.list('ilium.core.diagnostics/report-sections')) {
     const section = JSON.parse(entry.entryJson) as { id: string; title: string; service: string };
     try {
       const reply = await call(section.service, 'text', '{}');
-      text += `\n## ${section.title} (from ${entry.contributor})\n${reply.slice(0, 64 * 1024)}\n`;
+      text += `\n## ${section.title} (from ${entry.contributor})\n${cap_bytes(reply, 64 * 1024)}\n`;
     } catch (error) {
       log('warn', `section ${section.id}: ${(error as { code: string }).code}`);
       text += `\n## ${section.title}\n(not available)\n`;
@@ -520,7 +529,7 @@ fn publish_line(&mut self, level: &str, plugin: &str, message: &str, time: &str)
     let payload = serde_json::json!({
         "level": level, "plugin": plugin, "target": "plugin", "message": message, "time": time,
     });
-    if let Ok(request) = extensions::run_hook("ilium.core.diagnostics/log-sinks", &payload.to_string()) {
+    if let Ok(request) = extensions::run_hook_request("ilium.core.diagnostics/log-sinks", &payload.to_string()) {
         self.observed.insert(request);
     }
 }
@@ -540,7 +549,7 @@ import * as extensions from '@ilium/plugin-sdk/host/extensions';
 
 export function publishLine(level: string, plugin: string, message: string, time: string): void {
   if (state.sinkCount === 0) return; // nobody listens
-  const request = extensions.runHook('ilium.core.diagnostics/log-sinks',
+  const request = extensions.runHookRequest('ilium.core.diagnostics/log-sinks',
     JSON.stringify({ level, plugin, target: 'plugin', message, time }));
   state.observed.add(request);
 }
@@ -616,7 +625,7 @@ Other plugins change what `ilium.core.diagnostics` does through the points below
 
 - `ilium.core.diagnostics/report`: build: build the diagnostics report
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.diagnostics"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.diagnostics"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds GPU facts to the report
 

@@ -472,7 +472,7 @@
 </tr>
 </tbody>
 </table>
-<p>The default duration is 5,000 ms, and a <code>danger</code> toast stays until dismissed. See <a href="/pages/api-notifications/">Notifications</a> and <a href="/pages/api-intents/">Intents</a>.</p>
+<p>The default duration is 5,000 ms, and a <code>danger</code> toast stays until dismissed while a client is attached; a queued toast of any level, <code>danger</code> included, is discarded after its duration when no client attaches. See <a href="/pages/api-notifications/">Notifications</a> and <a href="/pages/api-intents/">Intents</a>.</p>
 <h3 id="manifest">Manifest</h3>
 <p>The grant goes into <code>manifest.json</code> under <code>capabilities</code>, in the list of the side that uses it (server or client).</p>
 <pre><code class="language-json">{
@@ -586,7 +586,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>No client attached</td>
-<td><code>ok</code>; the toast is shown when a client attaches only if its duration allows</td>
+<td><code>ok</code>; the toast is shown on the first client attach only if it was queued less than its duration (default 5 s) earlier; an older toast, <code>danger</code> included, is discarded and never shown</td>
 <td>Use desktop notices for important news.</td>
 </tr>
 </tbody>
@@ -621,6 +621,26 @@ notify.toast                      normal   <span class="t-ok">granted</span>
 </figure>
 
 <p>The user can change the grant at any time in Settings &gt; Plugins &gt; com.example.exporter &gt; Capabilities. A revocation re-activates the plugin with the reduced grant set, and the stubs of the declined imports return <code>not-permitted</code>.</p>
+<h3 id="toasts-are-never-the-only-signal">Toasts are never the only signal</h3>
+<p>A toast expires. An event the user must act on or learn about MUST also be available after the toast is gone.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Rule</th>
+<th>Exact value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CAP-883</td>
+<td>Persistent twin of a toast</td>
+<td>A toast for an error or an action-needed event MUST be paired with a persistent text signal (panel row or status line) that remains after the toast duration. A toast with no persistent twin for such an event is refused by the plugin check with <code>a11y.toast-only</code></td>
+<td><code>src/docs/notifications.md</code></td>
+</tr>
+</tbody>
+</table>
 <h3 id="related-pages">Related pages</h3>
 <ul>
 <li><a href="/pages/capability-notify-desktop/">notify.desktop</a>.</li>
@@ -632,7 +652,7 @@ notify.toast                      normal   <span class="t-ok">granted</span>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#notifytoast">notify.toast</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#what-it-unlocks">What it unlocks</a></li><li class="l3"><a href="#manifest">Manifest</a></li><li class="l3"><a href="#worked-example">Worked example</a></li><li class="l3"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#related-pages">Related pages</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#notifytoast">notify.toast</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#what-it-unlocks">What it unlocks</a></li><li class="l3"><a href="#manifest">Manifest</a></li><li class="l3"><a href="#worked-example">Worked example</a></li><li class="l3"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#toasts-are-never-the-only-signal">Toasts are never the only signal</a></li><li class="l3"><a href="#related-pages">Related pages</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

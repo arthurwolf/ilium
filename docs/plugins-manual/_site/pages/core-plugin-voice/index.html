@@ -403,7 +403,7 @@
 <li><strong>Device selection and reconnect.</strong> Choose a microphone and recover when it returns (Audio devices).</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/02-voice-control.gif" alt="A voice command is spoken and Ilium runs it after the transcript appears" loading="lazy"><figcaption>Voice control: speak, read the transcript, run the command.</figcaption></figure>
+<figure><img src="/assets/demos/02-voice-control.gif" alt="Typed voice commands drive current Ilium through scripted local tools" loading="lazy"><figcaption>Typed commands pass through a scripted loopback model to real Ilium tools and a real shell running ls -lh. Agent panes are local fixtures; no microphone or hosted inference. F8 stops voice after Settings closes.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <p>The first render is the voice strip while listening, with a level meter and the partial transcript. The second is the confirmation dialog before a voice command closes a pane.</p>
@@ -436,7 +436,7 @@
   &quot;capabilities&quot;: {
     &quot;server&quot;: [&quot;cli.contribute&quot;],
     &quot;client&quot;: [&quot;audio.microphone&quot;, &quot;keys.intercept&quot;, &quot;commands.invoke:*&quot;,
-               &quot;inference&quot;, &quot;jobs.run&quot;]
+               &quot;inference&quot;, &quot;jobs.run&quot;, &quot;settings.write-kernel:voice-control&quot;]
   }
 }
 </code></pre>
@@ -478,12 +478,18 @@
   ],
   &quot;limits_tier&quot;: &quot;first-party&quot;,
   &quot;contributes&quot;: {
-    &quot;cli&quot;: {
+    &quot;commands&quot;: [
+      { &quot;id&quot;: &quot;voice.toggle&quot;, &quot;title&quot;: &quot;Toggle voice control&quot; }
+    ],
+    &quot;cli&quot;: [{
       &quot;name&quot;: &quot;voice&quot;,
       &quot;summary&quot;: &quot;Voice control: say&quot;,
       &quot;output&quot;: &quot;jsonl&quot;,
       &quot;requires_server&quot;: true
-    }
+    }],
+    &quot;jobs&quot;: [
+      { &quot;kind&quot;: &quot;transcribe&quot;, &quot;deadline_ms&quot;: 30000, &quot;memory_mib&quot;: 512 }
+    ]
   }
 }
 </code></pre>
@@ -746,7 +752,7 @@ use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::{CliInvokedEvent, ClientRequestEvent};
 
 // server manifest: &quot;capabilities&quot;: { &quot;server&quot;: [&quot;cli.contribute&quot;] },
-//   &quot;contributes&quot;: { &quot;cli&quot;: { &quot;name&quot;: &quot;voice&quot;, &quot;output&quot;: &quot;jsonl&quot;, ... } }
+//   &quot;contributes&quot;: { &quot;cli&quot;: [{ &quot;name&quot;: &quot;voice&quot;, &quot;output&quot;: &quot;jsonl&quot;, ... }] }
 // client manifest: &quot;client_requests&quot;: [{ &quot;id&quot;: &quot;voice-say&quot;, &quot;timeout_ms&quot;: 5000 }]
 impl Handler for VoiceServer {
     fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
@@ -789,7 +795,7 @@ import * as cli from '@ilium/plugin-sdk/host/cli';
 import * as clientRequests from '@ilium/plugin-sdk/host/client-requests';
 
 // server manifest: &quot;capabilities&quot;: { &quot;server&quot;: [&quot;cli.contribute&quot;] },
-//   &quot;contributes&quot;: { &quot;cli&quot;: { &quot;name&quot;: &quot;voice&quot;, &quot;output&quot;: &quot;jsonl&quot;, ... } }
+//   &quot;contributes&quot;: { &quot;cli&quot;: [{ &quot;name&quot;: &quot;voice&quot;, &quot;output&quot;: &quot;jsonl&quot;, ... }] }
 // client manifest: &quot;client_requests&quot;: [{ &quot;id&quot;: &quot;voice-say&quot;, &quot;timeout_ms&quot;: 5000 }]
 let client: bigint | undefined;
 const pending = new Map&lt;bigint, bigint&gt;(); // request id -&gt; invocation
@@ -859,7 +865,7 @@ export function answer(event: Event): void {
 <ul>
 <li><code>ilium.core.voice/heard</code>: { text, command }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.voice"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.voice"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-the-phrase-open-the-board">Example: Adds the phrase <code>open the board</code></h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{
@@ -899,13 +905,23 @@ export function answer(event: Event): void {
 <li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
 <li><a href="/pages/security/">Security</a></li>
 </ul>
+<h3 id="data-and-privacy">Data and privacy</h3>
+<p>Voice handles two kinds of data: the audio you speak and the transcript made from it.</p>
+<ul>
+<li>Audio stays in memory. It is never written to disk, a log or a crash report, and the buffer is released when the transcription job ends, fails or is cancelled. [COR-080]</li>
+<li>With a local transcription provider nothing leaves your machine. With a remote provider the audio is sent to the host you configured, and the voice strip shows a "remote" marker while it is. [COR-081]</li>
+<li>Settings names the provider and whether it is local or remote before the first capture. A failing provider never makes Voice switch to a remote one on its own. [COR-082]</li>
+<li>A transcript lives in memory for the current voice session, is not written to the log at Info level or above, and is dropped when the session ends. [COR-083]</li>
+<li>Audio and transcripts are not published on a topic, sent in an event or shown to other plugins. Only the command id a transcript maps to leaves the plugin. [COR-084]</li>
+</ul>
+<p>See <a href="/pages/user-privacy/#core-plugins-and-ai-providers">Plugin privacy</a>.</p>
 <h3 id="security">Security</h3>
 <p>Risk marks of this plugin's extension points follow the corrected table in <a href="/pages/reference-extension-security/">Extension security</a> ([SEC-293]).</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-notifications/"><small>Previous</small>Notifications</a><a class="next" href="/pages/core-plugin-scheduler/"><small>Next</small>Scheduler</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#1-push-to-talk-on-f8">1. Push to talk on F8</a></li><li class="l3"><a href="#2-capture-microphone-frames">2. Capture microphone frames</a></li><li class="l3"><a href="#3-voice-runs-ilium-commands">3. Voice runs Ilium commands</a></li><li class="l3"><a href="#4-ilium-voice-say">4. ilium voice say</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-adds-the-phrase-open-the-board">Example: Adds the phrase open the board</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#kernel-tabs-this-plugin-owns">Kernel tabs this plugin owns</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#1-push-to-talk-on-f8">1. Push to talk on F8</a></li><li class="l3"><a href="#2-capture-microphone-frames">2. Capture microphone frames</a></li><li class="l3"><a href="#3-voice-runs-ilium-commands">3. Voice runs Ilium commands</a></li><li class="l3"><a href="#4-ilium-voice-say">4. ilium voice say</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-adds-the-phrase-open-the-board">Example: Adds the phrase open the board</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#data-and-privacy">Data and privacy</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

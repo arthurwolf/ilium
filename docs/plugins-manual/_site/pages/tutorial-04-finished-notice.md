@@ -28,7 +28,7 @@ When an agent finishes, the plugin plays a sound and shows a desktop notice. Bot
 | `notify` | intent | `title` (1 to 256 characters), `body` (0 to 2,048), `urgency` (`low`, `normal`, `high`), `sound: option<string>` | Shows a desktop notice. Needs `notify.desktop`. Limit: 6 per minute. |
 | `play-sound` | intent | sound id: `string` | Plays a sound from the catalogue. Needs `sound.play`. Limit: 4 per second. |
 | `agent-action` | intent | `pane: node-id`, `action-id: string`, and a mandatory `dedup-key` | Presses the keys that the pane's signature declares for the action. Needs `agent.control`. |
-| `outcome` | variant | `ok`, `ok-node`, `duplicate(request-ref)`, `refused(plugin-error)`, `failed(plugin-error)`, `cancelled` | The result of one submission. |
+| `outcome` | variant | `ok`, `ok-node`, `duplicate(request-ref)`, `refused(plugin-error)`, `failed(plugin-error)`, `cancelled`, `ok-epoch(u64)` | The result of one submission. `ok-epoch` is returned only by `send-input` on an agent pane; this step never sees it. A submission whose grant was revoked before it applied completes as `refused(revoked)`. |
 | `dedup-key` | submission field | 1 to 128 characters from `[A-Za-z0-9._:/-]` | A repeat of a reserved key within 10 minutes completes as `duplicate` and has no effect. |
 | `requires_action` | toolbar button key | an action id, such as `"compact"` | Shows the button only on panes whose signature declares that action. |
 
@@ -96,6 +96,7 @@ The manifest adds the toolbar button, its command, and the sound file. The four 
       "tree.read",
       "tree.decorate",
       "notify.desktop",
+      "notify.toast",
       "sound.play"
     ],
     "client": ["agent.read", "tree.read", "ui.panels"]
@@ -232,7 +233,7 @@ pub fn compact_agent(pane: u64, now_unix_millis: u64) -> Submission {
 
 **Rust**
 
-The three new arms go into the `on_events` of `lib.rs`. The helpers from steps 1 to 3 (`decorate`, `to_kind`, `toggle_badges`, `refresh_all`, `load_settings`) stay as they are. Add these imports to `lib.rs`: `use ilium_plugin_sdk::host::{clock, log::{self, Level}, tree};`.
+The three new arms go into the `on_events` of `lib.rs`. The helpers from steps 1 to 3 (`to_kind`, `refresh_all`, `load_settings`) stay as they are, with two signature changes: `decorate` takes the activity revision as a third argument (`decorate(node, kind, revision, settings)`), and `toggle_badges` takes the loaded settings (`toggle_badges(settings)`). Update their definitions and the step 2 call sites to match. Add these imports to `lib.rs`: `use ilium_plugin_sdk::host::{clock, log::{self, Level}, tree};`.
 
 ```rust
 // server/src/lib.rs, the handler body. Replaces the step 2 version.
@@ -395,7 +396,7 @@ export function onEvents(batch: Event[]): Submission[] {
 
 ### In-app toast
 
-A desktop notice leaves the terminal. A `toast` (grant `notify.toast`) stays inside the Ilium client and draws in its footer. Use it for a short message that needs no operating-system notice. The step 4 plugin sends one when a compact press is refused because the agent is working.
+A desktop notice leaves the terminal. A `toast` (grant `notify.toast`) stays inside the Ilium client and draws in its footer. Use it for a short message that needs no operating-system notice. The step 4 plugin defines this toast but does not send it: a compact press that is refused because the agent is working sends nothing, as the edge-case table below shows. Call `compact_busy_toast` from the refusal path if you want the message.
 
 **Rust**
 
@@ -430,7 +431,7 @@ export function compactBusyToast(pane: bigint): Submission {
 }
 ```
 
-Add `notify.toast` to `capabilities.server` to use it. The toast shows in the footer as a notice line.
+The manifest of this tutorial already lists `notify.toast` in `capabilities.server`. The toast shows in the footer as a notice line.
 
 ### Points to notice
 
@@ -441,11 +442,11 @@ Add `notify.toast` to `capabilities.server` to use it. The toast shows in the fo
 
 | Case | Outcome | What the plugin sees |
 |---|---|---|
-| `notify` or `play-sound` without its grant | `refused(not-permitted)`. The rest of the batch completes as `refused(cancelled)` (A29). | A warn line. The finish raises no notice. |
-| Sound id not in `contributes.sounds` | `refused(not-found)` for that submission only (A30). | A warn line. Other submissions in the batch apply. |
+| `notify` or `play-sound` without its grant | `refused(not-permitted)`. The rest of the batch completes as `refused(cancelled)`. | A warn line. The finish raises no notice. |
+| Sound id not in `contributes.sounds` | `refused(not-found)` for that submission only. | A warn line. Other submissions in the batch apply. |
 | Seventh `notify` within one minute | `refused(rate-limited)` with `retry-after-ms`. | A warn line. The notice is dropped. |
 | Same finish delivered twice within 10 minutes | `duplicate(original)`. | A debug line. No second notice. |
-| Compact while the agent is `working` | `refused(conflict)`, message `agent is working` (C1). | A warn line. Nothing is sent. |
+| Compact while the agent is `working` | `refused(conflict)`, message `agent is working`. | A warn line. Nothing is sent. |
 | Pane not restored yet | `refused(pane-not-ready)`. | A warn line. Retry on a later event. |
 | Keys written to the agent fail after acceptance | `failed(code)`. The key stays reserved. | A warn line. The next press uses a new key. |
 | Notice body over 2,048 characters | `refused(invalid-argument)`. | A warn line. |
@@ -454,7 +455,7 @@ Limits: `notify` 6 per minute, `play-sound` 4 per second, `agent-action` 20 per 
 
 ### Test it
 
-Run the plugin, start an agent, and let it finish. The notice and the sound appear, and `ilium plugin logs` shows the outcome. When an attached client reports terminal focus on the pane, the notice goes to the client footer instead of the desktop (C51).
+Run the plugin, start an agent, and let it finish. The notice and the sound appear, and `ilium plugin logs` shows the outcome. When an attached client reports terminal focus on the pane, the notice goes to the client footer instead of the desktop.
 
 To test the duplicate case, write a JSON fixture that lists the same finish twice. `ilium plugin test` prints each submission and its outcome as JSONL, and the second notice shows `duplicate`.
 

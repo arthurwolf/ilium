@@ -510,6 +510,7 @@
 </tbody>
 </table>
 <p>The host steps the frames itself. The plugin makes one call, not one per frame. When the user turns on reduced motion, the host shows the first frame only.</p>
+<p>The samples on this page and in the core plugin pages call <code>baseDecoration(node, slot, text)</code>. It is a helper each sample plugin defines for itself, not host API: it returns a <code>set-decoration</code> value with the given <code>node</code> and <code>slot</code>, a <code>content</code> of one run of <code>text</code> in the default tone, and every other field at its plain default (no icon, <code>persist</code> false, no frames, <code>always</code> visibility). The caller then spreads it and overrides the fields it needs, such as <code>sortKey</code> or <code>trailing</code>.</p>
 <p>Manifest, declared once per plugin:</p>
 <pre><code class="language-json">&quot;decoration_slots&quot;: [
   { &quot;id&quot;: &quot;cost&quot;,  &quot;placement&quot;: &quot;badge&quot;,    &quot;priority&quot;: 40, &quot;trailing&quot;: true },
@@ -786,7 +787,7 @@ export const virtualRows: VirtualRowsProvider = {
     const page = loadPage(parent, cursor); // must answer within 20 ms: read from a cache
     const rows: VirtualRowChild[] = page.items.map((item) =&gt; ({
       id: item.id,
-      label: { spans: [{ text: item.title }] },
+      label: [{ text: item.title }],
       icon: '🔎',
       expandable: false,
       command: 'run-search',
@@ -825,7 +826,7 @@ export const virtualRows: VirtualRowsProvider = {
 <tr>
 <td><code>set-status-segment</code></td>
 <td><code>segment</code>, <code>content</code> (rich text), <code>tooltip</code>, <code>tone</code></td>
-<td>At most 10 per second per segment; faster calls are refused with <code>rate-limited</code>.</td>
+<td>At most 10 per second per slot (the segment id is the slot); faster calls are refused with <code>rate-limited</code>.</td>
 </tr>
 <tr>
 <td><code>clear-status-segment</code></td>
@@ -853,7 +854,7 @@ export const virtualRows: VirtualRowsProvider = {
       tag: 'set-status-segment',
       val: {
         segment: 'quota',
-        content: { spans: [{ text: `quota ${percentUsed}%` }] },
+        content: [{ text: `quota ${percentUsed}%` }],
         tooltip: { text: 'Tokens used in this 5 hour window' },
         tone: percentUsed &gt;= 90 ? 'warning' : 'info',
       },
@@ -889,7 +890,7 @@ export const virtualRows: VirtualRowsProvider = {
   return {
     intent: {
       tag: 'set-frame-slot',
-      val: { pane, slot: 'model', content: { spans: [{ text: model }] }, icon: '🧩', tooltip: undefined },
+      val: { pane, slot: 'model', content: [{ text: model }], icon: '🧩', tooltip: undefined },
     },
     correlation: 1n,
     dedupKey: undefined,

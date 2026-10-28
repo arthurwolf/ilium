@@ -10,7 +10,8 @@ fn engine(cache_dir: Option<std::path::PathBuf>) -> PluginEngine {
         epoch_tick_ms: 10,
         cache_dir,
         process: ProcessKind::Server,
-    }).expect("pinned Wasmtime engine initializes")
+    })
+    .expect("pinned Wasmtime engine initializes")
 }
 
 fn component(text: &str) -> Vec<u8> {
@@ -48,7 +49,10 @@ fn parses_and_validates_real_component_bytes_before_admission() {
         "(component (import \"wasi:sockets/tcp@0.2.0\" (instance)))",
     ));
     assert_eq!(
-        validate_component(&forbidden, &context).unwrap_err().code.as_str(),
+        validate_component(&forbidden, &context)
+            .unwrap_err()
+            .code
+            .as_str(),
         "component.wasi-forbidden",
     );
 }
@@ -64,18 +68,38 @@ fn unavailable_disk_cache_still_compiles_without_unsafe_deserialization() {
     engine.compile(&bytes).expect("second compile");
     assert_eq!(engine.stats().component_new_calls, 2);
     assert_eq!(engine.stats().deserialize_calls, 0);
-    assert_eq!(engine.log_lines().iter().filter(|line| line.contains("host.cache-unavailable")).count(), 1);
+    assert_eq!(
+        engine
+            .log_lines()
+            .iter()
+            .filter(|line| line.contains("host.cache-unavailable"))
+            .count(),
+        1
+    );
 }
 
 #[test]
 fn shared_execution_quota_refuses_ticker_before_starting_a_worker() {
     use ilium_execution::{QuotaGroup, QuotaLimits};
     let quota = QuotaGroup::new(QuotaLimits {
-        clients: 0, jobs: 0, service_jobs: 0, input_bytes: 0, result_bytes: 0,
-        worker_threads: 0, worker_bytes: 0,
+        clients: 0,
+        jobs: 0,
+        service_jobs: 0,
+        input_bytes: 0,
+        result_bytes: 0,
+        worker_threads: 0,
+        worker_bytes: 0,
     });
-    let result = PluginEngine::with_quota(EngineConfig {
-        epoch_tick_ms: 10, cache_dir: None, process: ProcessKind::Server,
-    }, &quota);
-    assert!(result.is_err(), "an exhausted process quota must refuse the ticker");
+    let result = PluginEngine::with_quota(
+        EngineConfig {
+            epoch_tick_ms: 10,
+            cache_dir: None,
+            process: ProcessKind::Server,
+        },
+        &quota,
+    );
+    assert!(
+        result.is_err(),
+        "an exhausted process quota must refuse the ticker"
+    );
 }

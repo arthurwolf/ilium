@@ -393,7 +393,7 @@
 <p class="crumbs"><b>Host API</b></p>
 <h1>http streams</h1>
 
-<p>A stream is an HTTP response that the plugin reads piece by piece while it is still arriving. Use it for server-sent events, newline-delimited JSON, long downloads and live feeds, where <code>fetch</code> (which waits for the whole body) does not fit. Streams are specified in section 6.30. They use the same <code>http:&lt;host-pattern&gt;</code> grant as <a href="/pages/api-http/">http</a>, so read that page for request, header and host-pattern rules.</p>
+<p>A stream is an HTTP response that the plugin reads piece by piece while it is still arriving. Use it for server-sent events, newline-delimited JSON, long downloads and live feeds, where <code>fetch</code> (which waits for the whole body) does not fit. Streams are specified in the <code>http-stream</code> functions of the <a href="/pages/reference-wit/#512-http">WIT reference</a>. They use the same <code>http:&lt;host-pattern&gt;</code> grant as <a href="/pages/api-http/">http</a>, so read that page for request, header and host-pattern rules.</p>
 <h3 id="what-you-need">What you need</h3>
 <ul>
 <li>The grant <code>http:&lt;host-pattern&gt;</code> of the target host, on the side that opens the stream. There is no separate stream grant.</li>
@@ -414,7 +414,7 @@ close-stream: func(stream: stream-id);
 open-websocket: func(url: string, protocols: list&lt;string&gt;) -&gt; result&lt;stream-id, plugin-error&gt;;
 send-websocket: func(stream: stream-id, text: string) -&gt; result&lt;_, plugin-error&gt;;
 </code></pre>
-<p>Events (section 12.1):</p>
+<p>Events (defined in the <a href="/pages/reference-wit/#412-events">WIT reference</a>):</p>
 <table>
 <thead>
 <tr>
@@ -697,7 +697,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Session cap</td>
-<td>At most 64 open streams for the whole session and 32 connections.</td>
+<td>At most 64 open streams for the whole session and 32 open network connections (one TCP and TLS connection to a remote host; streams to one host share a connection only when the server speaks HTTP/2). Over either cap <code>open-stream</code> fails at once with <code>quota-exceeded</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -727,7 +727,7 @@ export const { lifecycle, handler } = definePlugin({
 </pre>
 
 <h3 id="websocket-unstable">WebSocket (unstable)</h3>
-<p><code>open-websocket</code> and <code>send-websocket</code> exist only when the feature <code>websocket</code> is enabled for development builds (<code>@unstable(feature = websocket)</code>). The functions are absent from stable builds. Server frames arrive as <code>http-stream-data</code> events and the end as <code>http-stream-closed</code>. Send text with <code>send-websocket</code>. The grant is the same <code>http:&lt;host-pattern&gt;</code>, for a <code>wss://</code> URL.</p>
+<p><code>open-websocket</code> and <code>send-websocket</code> exist only when the feature <code>websocket</code> is enabled for development builds (<code>@unstable(feature = websocket)</code>). A plugin that does not opt in to the feature cannot import them. On a host built without the feature, a plugin that did opt in gets <code>unsupported</code> from <code>open-websocket</code>. Server frames arrive as <code>http-stream-data</code> events and the end as <code>http-stream-closed</code>. Send text with <code>send-websocket</code>. The grant is the same <code>http:&lt;host-pattern&gt;</code>, for a <code>wss://</code> URL.</p>
 <h3 id="errors-and-limits">Errors and limits</h3>
 <table>
 <thead>
@@ -794,7 +794,11 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Streams per session</td>
-<td>64</td>
+<td>64 (<code>quota-exceeded</code> over the cap)</td>
+</tr>
+<tr>
+<td>Open connections per session</td>
+<td>32 (<code>quota-exceeded</code> over the cap)</td>
 </tr>
 <tr>
 <td>Chunk</td>
@@ -816,7 +820,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/capability-http/">Capability: http</a> for the grant and its review text.</li>
 <li><a href="/pages/api-events/">Events</a> for the delivery policy of stream events.</li>
 <li><a href="/pages/api-settings/">Settings</a> for the rows that hold a host.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the shared codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the shared codes.</li>
 </ul>
 <h3 id="security">Security</h3>
 <p>Stream size and egress budget limits are in <a href="/pages/reference-network-egress/">Network egress</a> ([SEC-082], [SEC-083]).</p>

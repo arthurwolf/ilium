@@ -394,14 +394,14 @@
 <h1>Diagnostics</h1>
 
 <p>Diagnostics helps when something goes wrong. It builds a report of facts about the install, it watches the warnings and errors that plugins write, and it helps the user attach the right log file to an issue. The plugin id is <code>ilium.core.diagnostics</code> and it runs on both sides. The server side reads the log file and builds the report. The client side shows the report and the warning list.</p>
-<p>The Debug and About tabs, and the file logging switch, belong to the Settings plugin. Diagnostics does not draw them again. It reads the Debug setting without writing it, and it adds the report to the Debug tab through the Settings plugin's own extension, as an ordinary contribution.</p>
+<p>The Debug and About tabs, and the file logging switch, belong to the Settings plugin. Diagnostics does not draw them again. It reads the Debug setting without writing it, and the Debug tab's Build report button runs this plugin's <code>build-report</code> command. Diagnostics holds no grant on the Settings plugin's extension points and contributes no settings rows.</p>
 <h3 id="what-it-covers">What it covers</h3>
 <ul>
-<li>The log file: one file for each server lifetime, named <code>log-&lt;local date and time&gt;.txt</code>, under <code>/tmp/.ilium-&lt;uid&gt;/logs/&lt;session-id&gt;/</code> on Linux and macOS and <code>%LOCALAPPDATA%\ilium\logs</code> on Windows. <code>ILIUM_DEBUG_LOG_DIR</code> replaces the root. The five newest logs of a session are kept and older ones are removed when the server starts.</li>
+<li>The log file: one file for each server lifetime, named <code>log-&lt;local date and time&gt;.txt</code>, under <code>/tmp/.ilium-&lt;uid&gt;/logs/&lt;session-id&gt;/</code> on Linux and macOS and <code>%LOCALAPPDATA%\ilium\logs</code> on Windows. <code>ILIUM_DEBUG_LOG_DIR</code> replaces the root. The manifest grant <code>fs.read:path:/tmp/.ilium-&lt;uid&gt;/logs</code> is fixed and does not follow the override: when the override puts the logs outside the granted path, reads of them return <code>not-permitted</code>, and the report shows the line <code>log directory not readable: &lt;path&gt;</code> and lists no log files. Diagnostics does not fail, does not retry in a loop and does not widen its own grant. The five newest logs of a session are kept and older ones are removed when the server starts.</li>
 <li>File logging is off by default. It records actions, errors and complete model text exchanges. Credential headers and URL parameters are redacted, but other text is not. Treat a log as sensitive.</li>
 <li>Log levels: trace, debug, info, warn, error. A plugin writes its own diary at these levels with the host log. The user reads it with <code>ilium plugin logs &lt;id&gt;</code>.</li>
 <li>The <code>ilium-logging</code> service of the server, which opens the file, applies the switch live to client and server, flushes on request and shuts down in order.</li>
-<li>The report: a text block of facts, one section for each contributor, at most 64 KiB for each section.</li>
+<li>The report: a text block of facts, one section for each contributor, at most 64 KiB (65,536 bytes) for each section.</li>
 <li>Attaching a log to an issue: choose a file, see what the report holds, and read a warning about private content before anything leaves the machine.</li>
 </ul>
 <h3 id="see-it">See it</h3>
@@ -419,7 +419,7 @@
 │ [ <span class="t-hi">Build report</span> ]   [ Open folder ]           │
 ╰──────────────────────────────────────────────╯
 </pre>
-<figcaption>Rendered at 48 columns. Illustrative. The Debug tab is drawn by the Settings plugin. Diagnostics supplies the size and the report button.</figcaption>
+<figcaption>Rendered at 48 columns. Illustrative. The Debug tab is drawn by the Settings plugin. Diagnostics supplies the `build-report` command that the button runs.</figcaption>
 </figure>
 
 <figure>
@@ -710,13 +710,13 @@ export function fileLoggingOn(): boolean {
 //   state.loggingOn = fileLoggingOn(); state.tailCursor = undefined;
 </code></pre>
 <h4 id="tail-the-log-file">Tail the log file</h4>
-<p>The log can grow large, so the plugin never reads it whole. It keeps a cursor and asks for a chunk. A chunk holds the bytes, a new cursor and a flag that says the start was cut. The newest warning lines go to the warnings panel, and the size goes to the Debug tab. See <a href="/pages/api-fs-atomic-and-tail/">tail</a> and <a href="/pages/capability-fs-read/">fs.read</a>.</p>
+<p>The log can grow large, so the plugin never reads it whole. It keeps a cursor and asks for a chunk. A chunk holds the bytes, a new cursor and a flag that says the start was cut. The <code>name</code> argument is relative to the granted root, so it includes the session folder: <code>&lt;session-id&gt;/log-&lt;local date and time&gt;.txt</code>. The newest warning lines go to the warnings panel, and the size goes to the Debug tab. See <a href="/pages/api-fs-atomic-and-tail/">tail</a> and <a href="/pages/capability-fs-read/">fs.read</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::fs;
 use ilium_plugin_sdk::types::paths::FsPath;
 
 async fn poll_log(&amp;mut self, name: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
-    let path = FsPath { scope: &quot;path:/tmp/.ilium-1000/logs&quot;.into(), path: name.into() };
+    let path = FsPath { scope: &quot;path:/tmp/.ilium-1000/logs&quot;.into(), path: format!(&quot;{}/{}&quot;, self.session_id, name) };
     let chunk = fs::tail(&amp;path, self.tail_cursor, 64 * 1024).await?;
     self.tail_cursor = Some(chunk.cursor);
     for line in String::from_utf8_lossy(&amp;chunk.bytes).lines() {
@@ -733,7 +733,7 @@ async fn poll_log(&amp;mut self, name: &amp;str) -&gt; Result&lt;(), PluginError
 <pre><code class="language-ts">import { tail } from '@ilium/plugin-sdk/host/fs';
 
 export async function pollLog(name: string): Promise&lt;void&gt; {
-  const chunk = await tail({ scope: 'path:/tmp/.ilium-1000/logs', path: name }, state.tailCursor, 64 * 1024);
+  const chunk = await tail({ scope: 'path:/tmp/.ilium-1000/logs', path: `${state.sessionId}/${name}` }, state.tailCursor, 64 * 1024);
   state.tailCursor = chunk.cursor;
   for (const line of new TextDecoder().decode(chunk.bytes).split('\n')) {
     if (line.includes(' WARN ') || line.includes(' ERROR ')) {
@@ -779,8 +779,7 @@ fn remember(&amp;self, pane: Option&lt;NodeId&gt;, line: &amp;str) -&gt; Result&
 }
 
 fn recent_for_report(&amp;self, pane: NodeId) -&gt; Vec&lt;String&gt; {
-    journal::read(pane, 0, 20)
-        .unwrap_or_default()
+    journal::read(Some(pane), 0, 20)
         .into_iter()
         .filter(|entry| entry.kind == &quot;diagnostics.warning&quot;)
         .map(|entry| entry.payload_json)
@@ -793,13 +792,13 @@ fn recent_for_report(&amp;self, pane: NodeId) -&gt; Vec&lt;String&gt; {
 export const remember = (pane: bigint | undefined, line: string): void =&gt;
   journal.logEvent(pane, 'diagnostics.warning', JSON.stringify({ line }));
 
-export const recentForReport = (pane: bigint): string[] =&gt;
+export const recentForReport = (pane: bigint | undefined): string[] =&gt;
   journal.read(pane, 0n, 20)
     .filter((entry) =&gt; entry.kind === 'diagnostics.warning')
     .map((entry) =&gt; entry.payloadJson);
 </code></pre>
 <h4 id="build-the-report-in-a-service">Build the report in a service</h4>
-<p>The service <code>report/build</code> returns the text. It starts with its own facts, then asks each contributed section for text. A section that is slow or fails is named and skipped, so one bad contributor cannot stop the report. The result is cut at 256 KiB. The call is deferred, so the plugin answers when the sections are in. See <a href="/pages/api-services/">services</a> and <a href="/pages/api-client-requests/">client requests</a>.</p>
+<p>The service <code>report/build</code> returns the text. It starts with its own facts, then asks each contributed section for text. A section that is slow or fails is named and skipped, so one bad contributor cannot stop the report. The result is cut at 256 KiB. The call is deferred, so the plugin answers when the sections are in. Each section service gets a reply deadline of 2000 ms, and the whole report has an overall deadline of 10,000 ms; sections not in by then are named as slow and skipped. These two deadlines are the plugin's own constants. They are not fields of the <code>report-sections</code> point or of its entry schema. The calls to the section services need no <code>services.use</code> grant: the kernel admits them because the contributed entry is active (see <a href="/pages/api-extension-points/#entry-bound-services">entry-bound services</a>). Only <code>services.use:ilium.core.settings/get</code> is granted for the Settings read. See <a href="/pages/api-services/">services</a> and <a href="/pages/api-client-requests/">client requests</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::{extensions, services};
 
@@ -809,7 +808,11 @@ async fn build_report(&amp;mut self) -&gt; String {
         let Ok(section) = serde_json::from_str::&lt;Section&gt;(&amp;entry.entry_json) else { continue };
         match services::call(&amp;section.service, &quot;text&quot;, &quot;{}&quot;).await {
             Ok(reply) =&gt; {
-                let body: String = reply.chars().take(64 * 1024).collect();
+                let mut end = reply.len().min(64 * 1024);
+                while !reply.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let body: String = reply[..end].to_string();
                 text.push_str(&amp;format!(&quot;\n## {} (from {})\n{}\n&quot;, section.title, entry.contributor, body));
             }
             Err(error) =&gt; {
@@ -826,13 +829,19 @@ async fn build_report(&amp;mut self) -&gt; String {
 import { call } from '@ilium/plugin-sdk/host/services';
 import { log } from '@ilium/plugin-sdk/host/log';
 
+/** Cuts at a byte limit without splitting a character. */
+function cap_bytes(text: string, limit: number): string {
+  const bytes = new TextEncoder().encode(text).slice(0, limit);
+  return new TextDecoder('utf-8').decode(bytes).replace(/\uFFFD+$/, '');
+}
+
 export async function buildReport(): Promise&lt;string&gt; {
   let text = coreFacts();
   for (const entry of extensions.list('ilium.core.diagnostics/report-sections')) {
     const section = JSON.parse(entry.entryJson) as { id: string; title: string; service: string };
     try {
       const reply = await call(section.service, 'text', '{}');
-      text += `\n## ${section.title} (from ${entry.contributor})\n${reply.slice(0, 64 * 1024)}\n`;
+      text += `\n## ${section.title} (from ${entry.contributor})\n${cap_bytes(reply, 64 * 1024)}\n`;
     } catch (error) {
       log('warn', `section ${section.id}: ${(error as { code: string }).code}`);
       text += `\n## ${section.title}\n(not available)\n`;
@@ -852,7 +861,7 @@ fn publish_line(&amp;mut self, level: &amp;str, plugin: &amp;str, message: &amp;
     let payload = serde_json::json!({
         &quot;level&quot;: level, &quot;plugin&quot;: plugin, &quot;target&quot;: &quot;plugin&quot;, &quot;message&quot;: message, &quot;time&quot;: time,
     });
-    if let Ok(request) = extensions::run_hook(&quot;ilium.core.diagnostics/log-sinks&quot;, &amp;payload.to_string()) {
+    if let Ok(request) = extensions::run_hook_request(&quot;ilium.core.diagnostics/log-sinks&quot;, &amp;payload.to_string()) {
         self.observed.insert(request);
     }
 }
@@ -869,7 +878,7 @@ fn on_completed(&amp;mut self, done: RequestResult) {
 
 export function publishLine(level: string, plugin: string, message: string, time: string): void {
   if (state.sinkCount === 0) return; // nobody listens
-  const request = extensions.runHook('ilium.core.diagnostics/log-sinks',
+  const request = extensions.runHookRequest('ilium.core.diagnostics/log-sinks',
     JSON.stringify({ level, plugin, target: 'plugin', message, time }));
   state.observed.add(request);
 }
@@ -955,7 +964,7 @@ export const renderAttach = (state: AttachState) =&gt;
 <ul>
 <li><code>ilium.core.diagnostics/report</code>: build: build the diagnostics report</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.diagnostics"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.diagnostics"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-gpu-facts-to-the-report">Example: Adds GPU facts to the report</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

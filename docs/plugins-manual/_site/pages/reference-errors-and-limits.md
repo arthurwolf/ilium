@@ -8,7 +8,7 @@ Tiers decide the ceilings. T1 is first-party bundled plugins. T2 is a third-part
 
 ### What you need
 
-- **Grants:** none for this page. Each call needs the grant of its own capability. A declined or revoked grant returns `not-permitted`. Storage is always granted.
+- **Grants:** none for this page. Each call needs the grant of its own capability. A declined grant, and any call made after a revocation, returns `not-permitted`; only a call already in flight when the grant is revoked returns `revoked`. Storage is always granted.
 - **Language:** Rust with `ilium_plugin_sdk`, or TypeScript with `@ilium/plugin-sdk`. Both SDKs expose the same record and codes.
 - **Prerequisites:** the [Rust SDK reference](/pages/rust-sdk/) or the [TypeScript SDK reference](/pages/typescript-sdk/) for handler rules, and the [Performance guide](/pages/performance/) for how deadlines are charged.
 
@@ -26,7 +26,7 @@ The SDKs map the result to `Result<T, PluginError>` in Rust and to a return valu
 
 | Code | Meaning | Retry |
 |---|---|---|
-| `not-permitted` | The capability is missing, declined or revoked, the argument is outside the grant, a path escapes its scope, or a policy forbids the action | No |
+| `not-permitted` | The capability is missing or declined, or was revoked before the call started, the argument is outside the grant, a path escapes its scope, or a policy forbids the action | No |
 | `not-found` | The node, pane, buffer, file, command, plugin, provider, call or device does not exist any more | No |
 | `invalid-argument` | The argument breaks a rule the plugin can check before the call: syntax, range, a per-call cap | No, fix the call |
 | `conflict` | State changed or is held: a stale revision, a manual title, a held lock, an existing file for `create-new` | Yes, after reading the state again |
@@ -37,12 +37,12 @@ The SDKs map the result to `Result<T, PluginError>` in Rust and to a return valu
 | `cancelled` | Cancelled by the plugin, the user, a shutdown, or a refused batch | Maybe |
 | `unsupported` | The host or platform cannot do it, such as a codec, a channel count or an unknown action, or the call is made in the wrong instance kind | No |
 | `pane-not-ready` | A restored terminal pane has not started its process yet | Yes, after `pane-created` or `tree-changed` |
-| `revoked` | The authorization epoch changed during the call. The plugin is re-activated | No |
+| `revoked` | A call already in flight when the grant was revoked (the authorization epoch changed during the call). The plugin is re-activated | No |
 | `io` | An operating system I/O error other than a missing file | Maybe |
 | `network` | DNS, connect, TLS or transport failure | Yes |
 | `internal` | A host bug, or a trap inside a job instance | No |
 
-Every function that returns a result can return `not-permitted`, `revoked` and `internal`. A function that returns a `request-id` can also return `busy`, and `quota-exceeded` when the CPU budget is spent. Other codes are listed per function. For example, `storage.put` returns `invalid-argument` for an empty key, a key over 256 bytes or a value over 1 MiB, and `quota-exceeded` when the bucket or the disk is full.
+Every function that returns a result can return `not-permitted`, `revoked` and `internal`. A function that returns a `request-id` can also return `busy`, and `quota-exceeded` when the CPU budget is spent. Other codes are listed per function. For example, `storage.put` returns `invalid-argument` for an empty key, a key over 256 bytes or a value over 1 MiB, and `quota-exceeded` when the bucket or the plugin's own `disk_mib` limit is full. A physically full disk returns `io` with the message `no-space`, never `quota-exceeded`.
 
 Calls that return a `request-id` split their errors in two. Grant, scope, syntax and per-call cap checks fail at once, in the call. Disk, network, process and user failures arrive later in the completion as `failed(code)`. Check the completion, not only the call.
 
@@ -114,6 +114,8 @@ export function saveCursor(cursor: Uint8Array): SaveOutcome {
 
 ### Traps
 
+An author MUST treat a limit as a trap and not as a warning. [AUT-111]
+
 A trap ends the instance. The plugin is restarted under the restart rule below. The plugin cannot catch a trap. A trap is raised for these cases, because each one is a plugin bug:
 
 - Calling a function of a capability the manifest never requested, in an interface that the plugin linked because it requested another capability of it. An interface that no requested capability unlocks is refused at install with `manifest.import-not-requested` and never links. A function of a requested capability that the user declined is not a trap: it returns `not-permitted`. See [Host runtime](/pages/reference-host-runtime/).
@@ -125,7 +127,7 @@ A trap ends the instance. The plugin is restarted under the restart rule below. 
 
 ### Trap codes
 
-A trap carries one code. The codes are diagnostics of the host, the harness and `ilium plugin logs`. They are never a value of `plugin-error.code`, which is always one of the 15 values of the error-code enum above.
+A trap carries one code: the seven in the table below, plus `host.capability-not-requested` and `host.import-panic`, which are defined in the fault table and in [Host architecture](/pages/reference-host-architecture/). The codes are diagnostics of the host, the harness and `ilium plugin logs`. They are never a value of `plugin-error.code`, which is always one of the 15 values of the error-code enum above.
 
 | Code | Raised when |
 |---|---|
@@ -134,11 +136,10 @@ A trap carries one code. The codes are diagnostics of the host, the harness and 
 | `trap.table` | A table grows past the effective table limit |
 | `trap.submission-batch` | One `on-events` call returns more than 256 submissions |
 | `trap.invalid-ui-tree` | A `ui-tree` is invalid: an index out of range, a graph that is not a tree, a duplicate `key`, more nodes than `ui_tree_nodes`, or a `layout` whose child count differs from its constraint count |
-| `trap.import-not-requested` | A function of a capability the manifest never requested is called |
 | `trap.abi` | An ABI fault: the bytes cannot be a value of the type |
 | `trap.panic` | A Rust panic or an uncaught TypeScript exception in an export |
 
-- **[API-081]** A trap MUST carry exactly one of the eight codes `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.import-not-requested`, `trap.abi` and `trap.panic`, and the log line of the trap MUST name it.
+- **[API-081]** A trap MUST carry exactly one of the seven trap codes `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.abi` and `trap.panic`, or, for the two host-side faults, `host.capability-not-requested` (a call of a never-requested capability) or `host.import-panic` (a panic in a host import), and the log line of the trap MUST name it.
 
 Every `not-permitted` result and every trap is logged with the plugin id, the interface and the function, and shown in `ilium plugin logs`. Release builds show function names in trap backtraces only. Build with `ilium plugin build --debug` to see `file:line` for each frame.
 
@@ -244,8 +245,6 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `job_queue` | 16 | 64 | 16 | `busy` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
 | `pending_requests` (ABI-013) | 64 | 256 | 64 | `busy` |
-
-`pending_requests` counts the requests that have a request id and no delivered completion: accepted submissions, calls that return a `request-id` (including deferred service calls) and jobs. A request enters the count when its id is returned and leaves it when its `request-completed` is enqueued for the plugin. Refused submissions, synchronous calls and the host-internal work of a request do not count. A call that would make the count exceed the limit returns `busy`, and in a batch it is refused as `refused(busy)` for that submission only. [API-073]
 | `timers` | 64 | 256 | 64 | `quota-exceeded` |
 | `output_filters` | 32 | 128 | 32 | `quota-exceeded` |
 | `watches` | 64 | 256 | 64 | `quota-exceeded` |
@@ -264,7 +263,9 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `open_videos` | 2 | 8 | 2 | `quota-exceeded` |
 | `audio_captures` | 2 | 4 | 2 | `quota-exceeded` |
 
-The CPU time of a plugin is also charged to the `ilium-execution` quota group [API-072]. There is one group for each plugin side in each process. The group is a token bucket that holds 2,000 ms of CPU time and refills at 500 ms of CPU time per second. These values are fixed for ilium:plugin@0.1.0 and are not manifest keys. The group charges the thread time of `on-events`, `views.render`, `command`, scene frames, annotators and jobs, and it charges 1 ms for every 64 KiB of payload in a submission or a call that returns a `request-id`. When the bucket is empty, every call that returns a `request-id` and every submission returns `quota-exceeded` with The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200. A trap inside a call still charges the time used. Test: run jobs that spin 2,500 ms of CPU in total and assert that the next submission returns `quota-exceeded` with `retry-after-ms` between 100 and 400. Second test: drive the balance to -100 ms, submit, and expect `retry-after-ms` 200. A per-kind job limit in `contributes.jobs` (`deadline_ms`, `memory_mib`) overrides the job values for that kind, within the same ceilings.
+`pending_requests` counts the requests that have a request id and no delivered completion: accepted submissions, calls that return a `request-id` (including deferred service calls) and jobs. A request enters the count when its id is returned and leaves it when its `request-completed` is enqueued for the plugin. Refused submissions, synchronous calls and the host-internal work of a request do not count. A call that would make the count exceed the limit returns `busy`, and in a batch it is refused as `refused(busy)` for that submission only. [API-073]
+
+The CPU time of a plugin is also charged to the `ilium-execution` quota group [API-072]. There is one group for each plugin side in each process. The group is a token bucket that holds 2,000 ms of CPU time and refills at 500 ms of CPU time per second. These values are fixed for ilium:plugin@0.1.0 and are not manifest keys. The group charges the thread time of `on-events`, `views.render`, `command`, scene frames, annotators and jobs, and it charges 1 ms for every 64 KiB of payload in a submission or a call that returns a `request-id`. When the bucket is empty, every call that returns a `request-id` and every submission returns `quota-exceeded` with a `retry-after-ms` value. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. `retry-after-ms` = max(100, ceil_10(-balance_ms * 2)), where `ceil_10` rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200. A trap inside a call still charges the time used. Test: run jobs that spin 2,150 ms of CPU in total from a full bucket (balance -150 ms) and assert that the next submission returns `quota-exceeded` with `retry-after-ms` 300. Second test: drive the balance to -100 ms, submit, and expect `retry-after-ms` 200. A per-kind job limit in `contributes.jobs` (`deadline_ms`, `memory_mib`) overrides the job values for that kind, within the same ceilings.
 
 Some caps are fixed and no manifest or user setting changes them: 256 submissions per `on-events` return (a trap when exceeded), 1 MiB for a synchronous `fs.read`, 4,096 entries for `fs.list-dir`, 8 MiB, 64 headers and 8 KiB of URL per HTTP request, a timer interval of at least 50 ms, and 64 picked paths per plugin (the oldest is forgotten). A call over a fixed cap that the plugin can check in advance returns `invalid-argument`, and nothing is written or sent. The host never truncates a value silently, with the exceptions in the next table. This table is the complete list of cuts and clamps [API-060]. Every other over-limit input is refused with a code.
 
@@ -277,12 +278,13 @@ Some caps are fixed and no manifest or user setting changes them: 256 submission
 | `history-text` over 4 MiB | Keeps the newest 4 MiB |
 | Transcript over 512 turns or 4 MiB | Drops the oldest turns |
 | Catalogue page over 256 items, geocode results over 8 | Clamps the count |
-| Debounce outside 0 to 2,000 ms (rows 300 to 2,000) | Clamps the value |
+| A `debounce-ms` field of a widget outside 0 to 2,000 ms, or a settings row `debounce_ms` outside 300 to 2,000 ms | Clamps the value to the nearest bound of that range |
 | Layout percentage above 100 | Clamps it to 100 |
 | `limits` request above the tier ceiling | Clamps it and logs it; the install never fails |
 | Event queues, journal, shared cache | Drop or evict the oldest entry and count it |
+| `fs.scan` over 65,536 entries | Stops at 65,536 and returns `truncated: true` |
 
-Per-call caps that a plugin can check before the call return `invalid-argument`. The caps that return `quota-exceeded` instead (`read-cells` rows, CLI stdin, `write-glyphs` cells, the popup stack) do so because they depend on held or cumulative state that the plugin cannot see in advance: other panes' frozen snapshots, bytes already written to the invocation, cells already queued in the frame, and popups already open [API-061].
+Per-call caps that a plugin can check before the call return `invalid-argument`. The caps that return `quota-exceeded` instead (`read-cells` rows, which return `none` and log the code, CLI stdin, `write-glyphs` cells, the popup stack) do so because they depend on held or cumulative state that the plugin cannot see in advance: other panes' frozen snapshots, bytes already written to the invocation, cells already queued in the frame, and popups already open [API-061].
 
 ### Host rules for limits and restarts
 
@@ -298,8 +300,8 @@ Limits that apply to a whole session (all plugins of one hosting process togethe
 
 | Key | Default | Ceiling | Effect when reached |
 |---|---|---|---|
-| `session_memory_mib` | 1,024 | 4,096 | Activation refused with `session.memory-exceeded`; the side stays `inactive` with the reason `host-capacity`; no failure |
-| `session_helpers` | 16 | 32 | Activation refused with `helper.too-many`; no failure |
+| `session_memory_mib` | 1,024 | 4,096 | Activation refused with `session.memory-exceeded` ([Host helper](/pages/reference-host-helper/)); the side stays `inactive` with the reason `host-capacity`; no failure |
+| `session_helpers` | 16 | 32 | Activation refused with `helper.too-many` ([Host helper](/pages/reference-host-helper/)); no failure |
 | `session_processes` | 16 | 64 | `process.run` returns `busy` and `process.spawn` returns `quota-exceeded`; one count covers both kinds of child |
 | `session_http_streams` | 64 | 256 | `http.open-stream` returns `quota-exceeded` |
 | `session_decorations` | 65,536 | 262,144 | `refused(quota-exceeded)` |
@@ -314,11 +316,11 @@ Restart delay, per side, within a window of 10 minutes: the first failure restar
 - **[HST-403]** A breach or trap in `deactivate` MUST drop the instance, discard its restore bytes, and MUST NOT count as a failure.
 - **[HST-404]** The host MUST clamp each manifest limit to the ceiling of the plugin's tier, log the clamp once, and never fail the install because of a limit request.
 - **[HST-405]** The defaults MUST be the same for all tiers. The T1 values in brackets on other pages MUST be read as T1 ceilings.
-- **[HST-496]** `retry-after-ms` on a `quota-exceeded` from the `ilium-execution` group MUST equal max(100, ceil((100 - bucket_ms) / 0.5 / 10) * 10).
+- **[HST-496]** `retry-after-ms` on a `quota-exceeded` from the `ilium-execution` group MUST equal max(100, ceil_10(-balance_ms * 2)) (`ceil_10` rounds up to the next 10 ms); a balance of -100 ms gives 200.
 - **[HST-497]** `session_processes` MUST allow 16 children per session, counting `process.run` and `process.spawn` children together; when it is full `process.run` MUST return `busy` and `process.spawn` MUST return `quota-exceeded`.
 - **[HST-498]** A soft deadline breach MUST trap and count as a failure when it reaches the streak limit of its call class (3, or 30 for scene frames) or runs 100 ms past its deadline; a hook-handler breach MUST NOT count as a failure and MUST disable that extension handler.
-- **[HST-499]** The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns `timed-out` to the caller.
-- **[HST-406]** The host MUST enforce the five session keys `session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams` and `session_decorations`, and MUST apply a user value under `[plugins.limits]` for them only when it is lower than the default.
+- **[HST-499]** The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, sessions send reply 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns `timed-out` to the caller.
+- **[HST-406]** The host MUST enforce the five session keys `session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams` and `session_decorations`, and MUST apply a user value under `[plugins.limits]` for them only when it is lower than the current session value (the default, or the value already set); a higher value is clamped to the current session value and the host logs a warning.
 - **[HST-407]** A refusal because of `session_memory_mib` or `session_helpers` MUST leave the side `inactive` with the reason `host-capacity` and MUST retry the activation when capacity returns.
 - **[HST-408]** `event_queue` MUST default to 1,024 with a ceiling of 4,096 for T1 and 1,024 for T2 and T3.
 - **[HST-409]** `detector_deadline_ms` MUST default to 20 ms with ceilings of 50 ms for T1 and 20 ms for T2 and T3.
@@ -351,6 +353,7 @@ Install errors for `contributes.settings`. Each names the item, its JSON path an
 | `manifest.settings-command` | `settings row at <json path> names command "<id>" that the plugin does not contribute` |
 | `manifest.settings-glyph` | `settings tab glyph "<glyph>" must be one character 1 or 2 cells wide` |
 | `manifest.settings-limit` | `settings <item> at <json path> exceeds the limit of <n>` |
+| `manifest.settings-owner` | `another plugin already owns the settings tab "<tab>"` (raised when a second plugin claims a tab that already has an owner) |
 
 Load warnings are not install errors. They appear in `ilium plugin list` and on the recovery page:
 
@@ -361,7 +364,68 @@ Load warnings are not install errors. They appear in `ilium plugin list` and on 
 | `settings.anchor-missing` | An own-section anchor no longer exists; the section is placed at the end |
 | `settings.value-ignored` | A stored value no longer matches its row; the default applies and the stored text is kept |
 
-Limits are in [Errors and limits](/pages/errors-and-limits/#settings-limits). The validation answer has a deadline of 100 ms, and a timeout refuses the save with `Could not check this value: <plugin name> did not answer.`
+Limits are in [Errors and limits](/pages/reference-errors-and-limits/#settings-codes-limits-and-warnings). The validation answer has a deadline of 100 ms, and a timeout refuses the save with `Could not check this value: <plugin name> did not answer.`
+
+### Config, snapshot and settings-write codes
+
+Run-time codes of the [config and data migration](/pages/reference-config-and-data-migration/) rules. The file API reports a stale revision as `conflict` and an expired lock wait as `timed-out` (see the [file API](/pages/api-fs/)).
+
+| Code | Raised when |
+|---|---|
+| `config.parse-error` | `config.toml` or `.ilium/config.yaml` cannot be parsed. The file stays unchanged, defaults apply for the run and the host boots (COR-090) |
+| `config.unknown-key` | A `[plugins]` key is not owned by the plugin host |
+| `settings.unknown-key` | A write names a key the kernel does not know in that tab. Nothing is written |
+| `snapshot.section-too-large` | A snapshot section is larger than its `max_bytes`. It is dropped and the previous value is kept |
+| `section-unsupported` | The plugin answers `restore-section` with a `schema_version` it does not accept. The section stays unchanged |
+| `settings.invalid-value` | A write is outside the range of a row. Nothing is written |
+| `settings.key-not-owned` | A write through `settings.write-kernel:<tab>` names a key outside the "Keys written" column of that tab (COR-034). Nothing is written |
+| `settings.locked` | A write to a key in the administrator policy `settings.locked`, by the user, by `ilium config set` or by a plugin with `settings.write-all` (SEC-190) |
+| `snapshot.write-failed` | A snapshot write failed. The server keeps running, the previous snapshot file is kept and the write is retried at the next snapshot (LIF-154) |
+
+### Component, host and store codes
+
+Codes of the component checks, of the host runtime and of the grant and trust stores. A rule that the host logs carries the code in the log line. A rule that traps carries it as the trap code. The checks of `ilium plugin check` are in [Check and lint rules](/pages/reference-check-and-lint-rules/), the runtime rules are in [Host runtime](/pages/reference-host-runtime/) and [Host architecture](/pages/reference-host-architecture/).
+
+| Code | Raised when |
+|---|---|
+| `component.custom-section-too-large` | A custom section is over 4 MiB, or the custom sections together are over 8 MiB |
+| `component.import-ungranted` | The component imports a host function whose grant the side does not request |
+| `component.import-unknown` | The component imports an interface that is not in the contract |
+| `component.invalid` | The file is not a valid WebAssembly component |
+| `component.missing` | A declared side has no component |
+| `component.size-warning` | A component is larger than 8 MiB. Above 32 MiB it is an error |
+| `component.too-large` | The component is larger than 32 MiB |
+| `component.wasi-forbidden` | A component imports `wasi:sockets` or `wasi:http`. It is refused at load and not instantiated (HST-077) |
+| `component.world-mismatch` | The world of the component differs from `world` in the manifest |
+| `host.capability-not-requested` | A plugin calls a function that its manifest never requested. The call traps |
+| `host.cache-unavailable` | The compile cache is unreadable, unwritable or full. The host compiles in memory and logs the code once (HST-062) |
+| `host.cwasm-incompatible` | No `.cwasm` fits the target triple or the engine fingerprint. The component is compiled at load and the start is slower |
+| `host.engine-error` | A Wasmtime engine-level error, or a Store over its limit of 16 instances, 8 tables or 4 memories. The load or instantiation fails and the plugin is not activated |
+| `host.engine-failed` | The Wasmtime engine cannot be created. The process continues without a plugin host, as with `--no-plugins` (HST-037) |
+| `host.grants-unreadable` | The grant store is unreadable at start. The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired |
+| `host.import-panic` | A Rust panic inside a host import. Only the calling instance traps (HST-036) |
+| `host.late` | A call finished after a soft or a hard deadline. Written to the telemetry log with the class and the duration |
+| `host.queue-timeout` | The deadline of a call passes while it waits in the queue. The call is abandoned and a breach is counted (HST-216) |
+| `host.shutdown-timeout` | Shutdown of the server host takes longer than 5 s. The remaining plugins are dropped without `deactivate` |
+| `host.slow-calls` | Report, at most once a minute per side, of the 3 slowest calls of the last minute when a call took over 50 % of its deadline (HST-359) |
+| `host.stack-overflow` | A stack overflow in guest code. The instance traps and the process keeps running (HST-089) |
+| `host.start-slow` | A startup plugin takes longer than `HOST-START`. Boot continues and the plugin is reported late |
+| `host.trap` | A trap, written to the telemetry log with the trap code |
+| `grants.unreadable` | The grant store file cannot be parsed. It is renamed to `<name>.corrupt-<YYYYMMDD-HHmmss>`, starts with no entries and the grants are asked again (SEC-114) |
+| `grants.unsafe-permissions` | Another user can write the grant file or the trust store. T2 and T3 plugins are refused at load until the file is fixed (USR-207) |
+| `trust.unreadable` | The trust store file cannot be parsed. It is handled like the grant store (SEC-114) |
+| `trust.removed` | A trusted key was removed with `trust remove <key_id> --force`. A plugin that it signed is shown as `Untrusted` |
+
+### Install, migration and registry log codes
+
+Codes that are logged or refused outside the install pipeline of [Manifest schema and error catalogue](/pages/reference-manifest-schema/#error-catalogue).
+
+| Code | Raised when |
+|---|---|
+| `install.ok` | Logged when an install completes |
+| `migration.no-backup-failed` | An update installed with `--no-backup` fails in `migrate`. The previous version stays active and the data may be half migrated. Logged at level error |
+| `plugin.blocked` | `ilium plugin enable <id>` on a blocked plugin without `--accept-risk` (USR-175) |
+| `registry.namespace-not-dormant` | A registry refuses to give a namespace to another publisher because it is not dormant, or the notice period is not over (PKG-656) |
 
 ### Error codes of the extended functions
 
@@ -374,18 +438,19 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `cli.write-text`, `read-stdin` | `invalid-argument`, `unsupported` (stdin `none`), `quota-exceeded` (4 MiB) | `cancelled` |
 | `sessions.send` | `not-found`, `not-permitted` | `timed-out`, `network` |
 | `surface.write-glyphs`, `set-owner-ids` | `invalid-argument`, `quota-exceeded`, `unsupported` | none |
-| `media.open-video-bytes`, `open-video-range` | `invalid-argument`, `quota-exceeded` (16 MiB) | `io` |
+| `media.open-video-bytes`, `open-video-range` | `invalid-argument` (including more than 16 MiB) | `io` |
 | `fs.write-atomic` | `not-permitted` | `conflict`, `io` |
 | `fs.tail` | `not-found`, `io` | none |
 | `http.open-stream` | `not-permitted`, `quota-exceeded` | `network`, `timed-out`, `rate-limited` (in `http-stream-closed`) |
 | `vector.embed` | `unsupported`, `invalid-argument` | `network`, `rate-limited`, `timed-out` |
 | `vector.upsert`, `create-index` | `quota-exceeded`, `invalid-argument` | none |
+| `vector.top-k`, `remove-entries`, `drop-index` | `not-found` (unknown index id), `invalid-argument` | none |
 | `process.spawn` | `not-permitted`, `quota-exceeded` (`children`), `not-found` | exit status in `child-exited` |
 | `timers.at` | `invalid-argument` (past by more than 1 s), `quota-exceeded` | none |
 | `journal.log-event` | `quota-exceeded`, `rate-limited` | none |
 | `settings.set-row-state`, `set-item-states`, `set-choice-items`, `set-meter` | `not-found`, `invalid-argument`, `rate-limited` | none |
 | `kernel-settings.read` | `not-permitted`, `not-found` | none |
-| `terminal.read-cells`, `freeze-snapshot` | `pane-not-ready`, `not-found`, `quota-exceeded` | none |
+| `terminal.read-cells`, `freeze-snapshot` (`read-cells` returns `none` and logs the code; only `freeze-snapshot` returns the error) | `pane-not-ready`, `not-found`, `quota-exceeded` | none |
 | `terminal.history-text`, `search-history` | `invalid-argument`, `quota-exceeded` | `timed-out` |
 | `terminal.lock-input` | `conflict`, `invalid-argument` (over 2 s) | none |
 | `agent.transcript` | `unsupported`, `not-found` | `io`, `quota-exceeded` |
@@ -428,15 +493,19 @@ Run codes, returned by the `extensions` host functions or written to the plugin 
 |---|---|
 | `extension.unknown-point` | The point does not exist or its owner is not enabled |
 | `extension.not-granted` | The matching `extensions.provide` or `extensions.contribute` grant is missing |
-| `extension.schema-mismatch` | A payload, entry or reply failed its schema. A bad reply counts as a pass |
+| `extension.schema-mismatch` | A payload, entry (including a priority outside 0 to 100, EXT-047) or reply failed its schema. A bad reply counts as "no change" |
 | `extension.cap-exceeded` | A point is full |
 | `extension.reentrant` | A handler called `run-hook` on the point that is running it |
 | `extension.not-dynamic` | `register` or `unregister` on a point without `dynamic: true` |
-| `extension.handler-timeout` | A handler missed its deadline. It counts as a pass |
-| `extension.reply-not-allowed` | The reply does not fit the mode. It counts as a pass |
-| `extension.vetoed` | A `veto` handler refused. The run completes as `refused(conflict)` |
+| `extension.handler-timeout` | A handler missed its deadline. It counts as "no change" |
+| `extension.reply-not-allowed` | The reply does not fit the mode. It counts as "no change" |
+| `extension.vetoed` | A `veto` handler refused, or, with `on_failure: refuse`, a guard handler failed on a plugin-started action (reason `guard-failed`). The run completes as `refused(conflict)` |
 | `extension.disabled` | The extension stopped after three breaches in a row, until the plugin restarts or the user presses Reset |
 | `extension.chain-cap` | Handlers after the 100 ms chain cap were skipped. Log-only |
+| `extension.contributor-not-ready` | A hook call met a contributor that is not yet `active`. The host skips it, treats it as `pass` and logs the code (LIF-056) |
+| `extension.depth-exceeded` | A `run-hook` from a handler at depth 3. It counts as `pass`, not as a breach. Travels as `reentrant` |
+| `extension.entry-rejected` | The owner refused an entry outside its allowlist (SEC-283). Log-only, to the log of the contributor and of the owner |
+| `extension.veto-overridden` | The user overrode a `veto` chain or a guard on an action that the user started (SEC-291). The chain completes `ok` and the owner's log gets the code |
 
 ### Requestable limits
 
@@ -480,16 +549,16 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | Backup copy before a migration (`migration_backup_mib`) | 2,048 MiB | the migration is refused with `migration.backup-too-large` |
 | Input lock | 2 s | `invalid-argument` |
 | `history-text` | 4 MiB, newest kept | truncated |
-| `read-cells` rows per call | 1,000 | `quota-exceeded` |
+| `read-cells` rows per call | 1,000 | `none`, and the host logs `quota-exceeded` |
 | Transcript per call | 512 turns or 4 MiB | oldest dropped |
-| HTTP stream chunk | 1 MiB | split |
+| HTTP stream chunk | 64 KiB | split |
 | CLI stdin per invocation | 4 MiB | `quota-exceeded` |
 | `write-glyphs` cells per frame | 131,072 | `quota-exceeded` |
 | Decoration frames, frame time | 16, at least 90 ms | `invalid-argument` |
 | `map` entries, `multi-choice` options | 64, 64 | `manifest.settings-limit` |
 | `steps` ladder, `special_values` | 64, 8 | `manifest.row-format` |
-| `check-list` items | 256 | trap, `invalid-argument` logged |
-| `list-editor` items | 64 (1,024 with `first-party`) | trap, `invalid-argument` logged |
+| `check-list` items | 256 | `trap.invalid-ui-tree` (detail `ui.invalid-tree`), logged |
+| `list-editor` items | 64 (1,024 with `first-party`) | `trap.invalid-ui-tree` (detail `ui.invalid-tree`), logged |
 | `vector.embed` | 256 texts of at most 8 KiB | `invalid-argument` |
 | Journal bytes per pane, all plugins | 4 MiB | oldest trimmed |
 | Pre-rendered scene loop | 30 fps, 3,600 frames, 128 MiB | `manifest.scene-prerender` |
@@ -497,11 +566,11 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | `status_segments`, `pane_frame_slots`, `tree_toolbar`, `row_actions`, `tree_orderings`, `display_modes` | 2, 4, 4, 4, 4, 2 | `manifest.contribution-limit` |
 | Geocode results | 8 | clamped |
 | Popup stack per view | 4 | `quota-exceeded` |
-| Debounce | 0 to 2,000 ms (rows 300 to 2,000) | clamped |
+| Widget `debounce-ms`; settings row `debounce_ms` | 0 to 2,000 ms; 300 to 2,000 ms | clamped to the nearest bound |
 | `restructure` operations | 256 | `invalid-argument` |
-| Minimap marks per layer, meter segments | 4,096, 8 | trap, `invalid-argument` logged |
-| Toast actions, notice actions | 2, 3 | `invalid-argument` |
-| Spinner custom frames | 16 | trap, `invalid-argument` logged |
+| Minimap marks per layer, meter segments | 4,096, 8 | `trap.invalid-ui-tree` (detail `ui.invalid-tree`), logged |
+| Toast actions, notice actions | 2, 3 | Toast: `invalid-argument`. Notice: the render traps with `ui.invalid-tree` (render has no result) |
+| Spinner custom frames | 16 | `trap.invalid-ui-tree` (detail `ui.invalid-tree`), logged |
 | Rich text of an info row | 120 characters | `invalid-argument` |
 
 Deadlines: `query-catalog`, `menu-items` and `list-virtual-children` take 20 ms, and `tokens` takes 10 ms per call. The timeout of `client-requests.request` is 1 to 30,000 ms. A breach counts like any deadline breach. `menu-items` and `tokens` fall back to static content and do not fail the user action.
@@ -513,7 +582,7 @@ Fixed session caps. They count across every plugin of the session [API-070]. The
 | Pending requests | 4,096 | `busy` at the call |
 | Key grabs | 32 | `quota-exceeded` |
 | Input locks | one per pane | `conflict` |
-| Client session memory | 512 MiB (fixed) | the new instance is refused, logged, and not counted as a failure (state `inactive`, reason `host-capacity`) |
+| Client session memory | `session_memory_mib` (default 1,024, ceiling 4,096; per hosting process) | the new instance is refused, logged, and not counted as a failure (state `inactive`, reason `host-capacity`) |
 
 `session_processes` is the single budget of 16 per session for `process.run` children (`busy` when full) and `process.spawn` children (`quota-exceeded` when full) together. It is not a manifest key.
 
@@ -524,12 +593,16 @@ Rates:
 | `toast` | 3 per 10 s per plugin |
 | `geocode` | 1 per second per plugin |
 | `set-status-segment`, `set-frame-slot` | 10 per second per slot |
-| `set-row-state`, `set-item-states`, `set-choice-items`, `set-info-rich`, `set-meter` | 10 per second per plugin, together |
+| `set-info`, `set-choices`, `set-row-note`, `set-row-state`, `set-item-states`, `set-choice-items`, `set-info-rich`, `set-meter` | 10 per second per plugin, together |
 | `journal.log-event` | 20 per second per plugin |
+| `journal.read` | `limit` is clamped to 1,000 entries per call (a size cap, not a rate) |
 | `send-input`, `agent-action` | 20 per second per pane per plugin |
 | `topics.publish` | 100 per second per plugin |
 | `notify` | 6 per minute per plugin |
 | `play-sound` | 4 per second per plugin |
+| `open-external` | 10 per 60 s per plugin (sliding window) |
+| `run-hook` | 200 per second per extension point (sliding window) |
+| `mark-attention`, `ack-attention` | 10 per second per node per plugin, together |
 | `screen-changed` delivery | 10 per second per pane |
 
 Every rate in this table is a **sliding window** over the host monotonic clock: an operation is allowed when fewer than N operations of the same key were allowed in the previous window length (1 s, 10 s or 60 s). Refused operations do not enter the window. The key is the plugin, plus the slot or the pane where the table says so. The window is not reset by a restart of the plugin side, and not shared between the server and the client half. A refusal is `rate-limited` with `retry-after-ms` set to the time until the oldest counted operation leaves the window, rounded up to 10 ms. [API-071]
@@ -581,6 +654,7 @@ A caller that waits for an answer gets `timed-out` when the answer does not arri
 |---|---|---|
 | Command reply | 30,000 ms | `timed-out` |
 | Service reply | 30,000 ms | `timed-out` |
+| Sessions send reply | 30,000 ms | `timed-out` |
 | Inference completion | 120,000 ms | `timed-out` |
 | HTTP API respond | 30,000 ms | `timed-out` |
 | Client request, default | 5,000 ms (settable from 1 to 30,000 ms) | `timed-out` |
@@ -592,7 +666,7 @@ The complete list of install, signature, trust, registry and dependency codes, w
 
 An install, an update and `ilium plugin verify` report a code with the path of the fault. Codes that start with `manifest.` are about what the manifest says. Codes that start with `package.` are about the archive. The settings and extension point tables on this page give those codes with their messages. This index lists the other codes in one place, with the page that defines each. Codes of the `ilium plugin` command itself (`toolchain.`, `new.`, `dev.`, `inspect.`, `trace.` and `usage.`) are in [Plugin command-line reference](/pages/reference-plugin-cli/), the `component.` and `lint.` rules are in [Check and lint rules](/pages/reference-check-and-lint-rules/), and the `harness.` and `fixture.` codes are in [Test harness reference](/pages/reference-test-harness/). When two pages differ, the defining page decides, and a page that cites an install code MUST use the cause that the defining page gives. [AUT-110]
 
-Older drafts used other spellings for these codes. The current names are `manifest.unknown-key`, `manifest.api-version` and the four `manifest.file-*` codes; the [install error catalogue](/pages/reference-manifest-schema/#error-catalogue) is the only list.
+Older drafts used other spellings for these codes. The current names are `manifest.unknown-key`, `manifest.api-version` and the five `manifest.file-*` codes; the [install error catalogue](/pages/reference-manifest-schema/#error-catalogue) is the only list.
 
 | Code | Cause | Defined in |
 |---|---|---|
@@ -601,7 +675,7 @@ Older drafts used other spellings for these codes. The current names are `manife
 | `manifest.catalog-unknown` | A `choice` row `source` names a catalogue that no plugin provides | [Settings API](/pages/api-settings/) |
 | `manifest.client-request-unknown` | A client request kind or export disagrees between the two sides | [Client requests](/pages/api-client-requests/) |
 | `manifest.cli-field` | A CLI `output`, `stdin` or `argument_groups` value is invalid | [CLI](/pages/api-cli/) |
-| `manifest.cli-name-reserved` | A CLI name is a kernel subcommand (plugin, session, recap, progress, chat, kill-session, help, version) | [CLI](/pages/api-cli/) |
+| `manifest.cli-name-reserved` | A CLI name is a kernel-owned subcommand (plugin, session, kill-session, help, version); the names of bundled core plugins give `manifest.cli-name-taken` to other plugins | [CLI](/pages/api-cli/) |
 | `manifest.cli-name-taken` | A CLI name is owned by another installed plugin | [CLI](/pages/api-cli/) |
 | `manifest.point-risk` | An extension point declares a risk level lower than the grant its handlers receive, or an unknown risk | [Extension security](/pages/reference-extension-security/) |
 | `manifest.contribution-limit` | A contribution list is longer than its limit | [Manifest](/pages/reference-manifest/) |
@@ -640,9 +714,10 @@ Older drafts used other spellings for these codes. The current names are `manife
 | `manifest.row-format` | A row format string is invalid | [Manifest](/pages/reference-manifest/) |
 | `manifest.scene-prerender` | A scene declares prerender settings that are not allowed | [Manifest](/pages/reference-manifest/) |
 | `manifest.schema-keyword` | A service schema uses a keyword outside the allowed subset | [Services](/pages/capability-services/) |
-| `manifest.settings-source` | A `choice` row has both or neither of `options` and `source` | [Packages](/pages/packages/) |
+| `manifest.settings-source` | A `choice` row has both or neither of `options` and `source` (it needs exactly one) | [Packages](/pages/packages/) |
 | `manifest.signature-invalid` | The signature does not verify | [Signing and trust](/pages/reference-signing-and-trust/) |
 | `manifest.sound-id-taken` | A sound id repeats or is `chirping` | [Sound](/pages/capability-sound-play/) |
+| `manifest.sound-format` | A sound file is missing or is not WAV PCM or OGG Vorbis | [Sound](/pages/capability-sound-play/) |
 | `manifest.unstable-missing` | The component uses an unstable item the manifest does not list | [Versioning](/pages/versioning/) |
 | `manifest.unstable-tier` | A T2 or T3 package lists an unstable feature outside development mode | [Versioning](/pages/versioning/) |
 | `manifest.unstable-unknown` | A name in `unstable` is not an unstable feature | [Versioning](/pages/versioning/) |
@@ -657,6 +732,7 @@ Older drafts used other spellings for these codes. The current names are `manife
 | `package.publisher-key-changed` | A known publisher id arrives with a different key | [Signing and trust](/pages/reference-signing-and-trust/) |
 | `package.precompiled-forbidden` | The package contains a `.cwasm` file | [Host runtime](/pages/reference-host-runtime/) |
 | `package.old-format` | The file is an `.iliumanim` package | [Porting from .iliumanim](/pages/porting-iliumanim/) |
+| `host.helper-missing` | A T2 or T3 package is installed but the sandbox helper binary is missing. This is not an install refusal: the package stays installed and disabled, and T1 plugins run | [Host architecture](/pages/reference-host-architecture/) |
 | `package.*` | All other archive, path, signature and component faults of a `.iliumpkg` | [Package format](/pages/reference-package-format/) lists each one |
 
 An install code never reaches a running plugin. The installer shows the code and the path in the install error, and nothing from the package runs. [Troubleshooting](/pages/guide-troubleshooting/) gives a route from the symptom to these codes.
@@ -728,4 +804,4 @@ Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-Security codes: `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.third-party-denied` (detail codes of the one install code `policy.blocked`, written as the message prefix), `policy.grant-forbidden` (shown next to a locked row, never an install failure), `policy.source-denied`, `policy.replacement`, `policy.invalid`, `sandbox.unavailable`, `package.publisher-key-changed`, `package.blocked`, `package.path-invalid`, `package.path-duplicate`, `package.entry-symlink` or `package.entry-directory`, `package.zip-invalid`, `manifest.replaces-tier`, `manifest.secret-scope`, `trust.declined`, `manifest.display-name`, `manifest.point-risk`, `extension.depth-exceeded`, `extension.entry-rejected`, `approval.no-client`, `store.version`, `trust.collision`, `install.same-version`, `settings.locked`, `regex.too-large`, `regex.unsupported`. New `not-permitted` reasons: `policy`, `offline`, `private-address`, `downgrade`, `reserved`, `not-user-initiated`, `file-type`. Limits: [SEC-082] and [SEC-083] (egress), [SEC-285] and [SEC-290] (hooks), [SEC-029] (helper). See [Security and policy requirements](/pages/reference-requirements-security-policy/).
+Security codes: `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.third-party-denied` (detail codes of the one install code `policy.blocked`, written as the message prefix), `policy.grant-forbidden` (shown next to a locked row, never an install failure), `policy.source-denied`, `policy.replacement`, `policy.invalid`, `sandbox.unavailable`, `package.publisher-key-changed`, `package.blocked`, `package.path-invalid`, `package.path-duplicate`, `package.entry-symlink` or `package.entry-directory`, `package.zip-invalid`, `manifest.replaces-tier`, `manifest.secret-scope`, `trust.declined`, `manifest.display-name`, `manifest.point-risk`, `extension.depth-exceeded`, `extension.entry-rejected`, `install.review-required`, `store.version`, `trust.collision`, `settings.locked`. New `not-permitted` reasons: `policy`, `offline`, `private-address`, `downgrade`, `reserved`, `not-user-initiated`, `file-type`. Limits: [SEC-082] and [SEC-083] (egress), [SEC-290] (hooks), [SEC-029] (helper). See [Security and policy requirements](/pages/reference-requirements-security-policy/).

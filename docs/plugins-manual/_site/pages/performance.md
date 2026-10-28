@@ -2,7 +2,7 @@
 
 ## Performance
 
-Every plugin call runs under a deadline, and every plugin has a memory, queue and I/O budget. A call that exceeds its deadline traps the instance, and the host restarts the plugin. Keeping each call short is the only way to keep a plugin responsive. This page lists the deadlines and budgets, the performance targets the host checks, where time is charged, and how to move slow work into a job.
+Every plugin call runs under a deadline, and every plugin has a memory, queue and I/O budget. A call that exceeds its hard deadline traps the instance, and the host restarts the plugin (a `deactivate` breach instead drops the instance and is not a failure). Keeping each call short is the only way to keep a plugin responsive. This page lists the deadlines and budgets, the performance targets the host checks, where time is charged, and how to move slow work into a job.
 
 ### You need
 
@@ -75,6 +75,9 @@ The contract also has nine requestable limits in the same form. They bound the h
 | `journal_entries` (per pane) | 5,000 | 20,000 | 5,000 | Oldest trimmed |
 | `toasts_pending` | 3 | 3 | 3 | Oldest replaced |
 | `package_assets_mib` | 64 | 256 | 64 | `manifest.asset-size` |
+| `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
+| `ui_tree_nodes` | 4,096 | 16,384 | 4,096 | Trap (`ui.too-large`) |
+| `table_elements` | 10,000 | 50,000 | 20,000 | Instance trapped |
 
 A bundled plugin with the top-level manifest key `limits_tier: "first-party"` also lifts the settings caps and the `list-editor` cap. That tier is for bundled `ilium.` plugins only.
 
@@ -96,7 +99,7 @@ These caps do not change. A value over a per-call cap that the plugin can know i
 | Log line | 16 KiB, cut and marked | Line cut, not refused |
 | Log lines per second, third-party | 200 | Dropped and counted |
 | Dedup window for `dedup-key` | 10 minutes | A retry after the window is a new submission |
-| `check-list` items / `list-editor` items | 256 / 64 | `invalid-argument` on render |
+| `check-list` items / `list-editor` items | 256 / 64 | Render traps with `ui.invalid-tree` |
 | Popups per view | 4 | `quota-exceeded` |
 | Minimap marks per layer, meter segments | 4,096 / 8 | `invalid-argument` |
 | Catalogue page | 256 items | Clamped |
@@ -115,6 +118,7 @@ New provider exports run under short deadlines. A breach counts like any other d
 |---|---|
 | `catalog-provider.query-catalog`, `menu-provider.menu-items`, `virtual-rows-provider.list-virtual-children` | 20 ms |
 | `token-provider.tokens` | 10 ms per call |
+| `settings-validate` (the optional export that checks a settings save) | 100 ms; a breach counts like any other deadline breach, and the save fails and keeps the previous value |
 | `client-requests.request` timeout | 1 to 30,000 ms, set per request |
 
 The host also limits how often a plugin may call some imports. A call over the rate is refused with `rate-limited` and `retry-after-ms`, so a plugin that updates a widget in a loop spends nothing on the refused calls.
@@ -128,7 +132,7 @@ The host also limits how often a plugin may call some imports. A call over the r
 | `journal.log-event` | 20 per second per plugin |
 | `screen-changed` delivery | At most 10 per second per pane |
 
-Session-wide, at most 64 HTTP streams and 16 spawned children are open across all plugins, and a pane has one input lock at a time.
+Session-wide, at most 64 HTTP streams and 16 spawned children are open across all plugins, and a pane has one input lock at a time and the session has no further cap on locks.
 
 ## What the new widgets and services cost
 
@@ -138,7 +142,7 @@ Most of the 51 widgets cost nothing between renders, because the host draws the 
 |---|---|---|
 | `spinner`, decoration frame animation | The host steps frames. The plugin is not called per frame. | Use them instead of a timer that calls `ui.invalidate` every 100 ms. |
 | `chart` with many points | Render size: the tree limit is 4,096 nodes or 1,024 KiB. | Send a series with `resample: min-max` and let the host reduce it to the width of the chart. |
-| `check-list`, `list-editor`, `%list` | Items are part of the tree. | `check-list` is capped at 256 items and `list-editor` at 64; a larger one fails at render time with `invalid-argument`. A `%list` has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned `offset` (read through `ui.widget-state`) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the [Patterns cookbook](/pages/guide-patterns-cookbook/). |
+| `check-list`, `list-editor`, `%list` | Items are part of the tree. | `check-list` is capped at 256 items and `list-editor` at 64; a larger one traps at render time with `ui.invalid-tree`. A `%list` has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned `offset` (read through `ui.widget-state`) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the [Patterns cookbook](/pages/guide-patterns-cookbook/). |
 | `choice` with a catalogue `source` | The host pages the catalogue, 256 items per page, with a 20 ms provider deadline. | Return one page per call. Never build the whole catalogue in `query-catalog`. |
 | `terminal-view`, `video`, `surface` | Native decode and frame pacing. The plugin pays only for the frames it writes. | Prefer `prerender` for a scene that loops, so `render` is called once per frame and then never again. |
 | `screen-changed`, `http-stream-data`, `child-output` | Event volume. | Read only the rows in `first-row` to `last-row`. Handle a whole batch in one call. |
@@ -261,7 +265,7 @@ The host has a fixed set of budgets and a benchmark for each. They are not rules
 | Choice | Cost | What to do |
 |---|---|---|
 | T1 plugin | A host call is a function call inside the process: about 1 µs. | Nothing special. |
-| T2 or T3 plugin | Each host call that has an effect, such as `storage.set` or a submission, is one round trip to the host: 0.2 ms median and 0.5 ms at the 99th percentile. Pure imports such as `codec` and `vector` run inside the helper with no round trip. | Batch work. In a 20 ms batch, 20 forwarded calls can use half of the budget. Read once, write once. |
+| T2 or T3 plugin | Each host call that has an effect, such as `storage.set` or a submission, is one round trip to the host: 0.2 ms median and 0.5 ms at the 99th percentile. Pure imports such as `codec` and `vector` run inside the helper with no round trip. | Batch work. At the 99th percentile (0.5 ms), 20 forwarded calls use 10 ms, half of a 20 ms batch. Read once, write once. |
 | T2 or T3 start | A helper process starts at the first activation: record 20 to 80 ms. | Use lazy activation triggers; do not activate at startup without need. |
 | Rust component | Instance about 4 MiB, start under 5 ms. | The default choice for scenes and detectors. |
 | TypeScript component | Includes a JavaScript engine: a larger component and instance, and slower code than Rust. Budget it at several times the memory of a Rust plugin and measure your handlers. | Keep TypeScript handlers short. Put heavy loops in a job, or write them in Rust. Measure a TypeScript scene against its frame budget. |
@@ -528,7 +532,7 @@ A breach and each restart appear in the plugin log with the export name and the 
 
 ### See also
 
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Reference: errors and limits](/pages/reference-errors-and-limits/)
 - [Background jobs](/pages/background-jobs/)
 - [Jobs API](/pages/api-jobs/)

@@ -29,7 +29,7 @@ take-places: func(request: request-id) -> option<list<geo-place>>;
 | `reverse` | `geocode::reverse(GeoPoint)` | `reverse(point)` | request id |
 | `take-places` | `geocode::take_places(request)` | `takePlaces(request)` | `Option<Vec<GeoPlace>>` |
 
-Results are cached for 24 hours by query text. Up to 8 places are returned. An empty list is a valid answer, not an error. Rate: 1 request per second per plugin.
+Results are cached for 24 hours by query text. Up to 8 places are returned. An empty list is a valid answer, not an error. `take-places` has no error channel: every failure in the Errors table below (except the synchronous ones `not-permitted`, `invalid-argument` and `rate-limited` returned by `search` or `reverse` themselves) arrives in the `request-completed` event of that request as an error outcome, and `take-places` then returns `none` (`None`, `undefined`). `some` with an empty list means the provider answered with no place. A second call after the first take also returns `none`. Rate: 1 request per second per plugin.
 
 ### The picker and the row
 
@@ -95,7 +95,7 @@ export const onCompleted = (request: bigint): string[] => (takePlaces(request) ?
 | No consent | `not-permitted` |
 | Over 1 request per second | `rate-limited` with `retry-after-ms` |
 | Text outside 2 to 200 characters, limit outside 1 to 8 | `invalid-argument` |
-| Provider failure, or 10 s without answer | `network`, `timed-out` |
+| Provider failure, or 10 s without answer | `network`, `timed-out`, delivered in `request-completed` (not by `take-places`) |
 
 The privacy notice about sending place names to the provider is shown by the host, not the plugin. See [location](/pages/api-location/).
 

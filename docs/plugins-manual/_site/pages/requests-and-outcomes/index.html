@@ -426,7 +426,7 @@
 <td><code>u64</code></td>
 <td>The host</td>
 <td>One slow host call</td>
-<td>The raw call's return value, <code>request-ref</code> <code>call(id)</code>, and every <code>take-*</code> function. Unique per plugin side for the whole server run, starts at 1 at server start and is never reused, also across instance restarts [ABI-040]</td>
+<td>The raw call's return value, <code>request-ref</code> <code>call(id)</code>, and every <code>take-*</code> function. Unique per plugin side for the whole server run, starts at 1 at each server start and is never reused across plugin-instance restarts [ABI-040]</td>
 </tr>
 </tbody>
 </table>
@@ -490,7 +490,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>plugin-error</code> has a <code>code</code>, a <code>message</code> and an optional <code>retry-after-ms</code>. Its codes are listed in <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p><code>plugin-error</code> has a <code>code</code>, a <code>message</code> and an optional <code>retry-after-ms</code>. Its codes are listed in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h3 id="slow-calls">Slow calls</h3>
 <p>Each slow call exists in two forms. The async wrapper is the normal form. The raw form returns the <code>request-id</code> and leaves the completion to <code>on-events</code>.</p>
 <table>
@@ -773,7 +773,7 @@
 }
 </code></pre>
 <h2 id="duplicate-submissions-and-dedup-keys">Duplicate submissions and dedup keys</h2>
-<p>A submission carries an optional <code>dedup-key</code>. It has 1 to 128 characters from <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code>, <code>:</code>, <code>/</code> and <code>-</code>. The key is scoped to the plugin id, and it stays reserved for 10 minutes from the moment the kernel accepts the submission. A refused submission does not reserve its key, so a retry with the same key after fixing the cause is valid. An accepted submission keeps its key even if it later fails or is cancelled. A key is reserved while <code>now_wall_ms - accepted_wall_ms &lt; 600,000</code>. The accepted time is persisted in the journal on the wall clock, so it survives a server restart, and at exactly 600,000 ms the key is free [ABI-034].</p>
+<p>A submission carries an optional <code>dedup-key</code>. It has 1 to 128 characters from <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code>, <code>:</code>, <code>/</code> and <code>-</code>. The key is scoped to the plugin id for submissions the kernel handles itself, and it stays reserved for 10 minutes from the moment the kernel accepts the submission. A refused submission does not reserve its key, so a retry with the same key after fixing the cause is valid. An accepted submission keeps its key even if it later fails or is cancelled. A key is reserved while <code>now_wall_ms - accepted_wall_ms &lt; 600,000</code>. The accepted time is persisted in the journal on the wall clock, so it survives a server restart, and at exactly 600,000 ms the key is free [ABI-034].</p>
 <p>A submission that a client plugin half forwards to the server has a wider scope: the pair (plugin id, client id), held by the server for the same 10 minutes. Two clients that send the same key for the same plugin are two submissions. See <a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a>.</p>
 <p>A repeated key completes as <code>duplicate</code>, and the outcome names the first submission by the ref it was first submitted with, even across instances, server restarts and re-attach resends. If submission 17 repeats the key of submission 16, the event for 17 carries <code>duplicate(submission 16)</code>, and the kernel applies only the first one. <code>duplicate</code> means only that the key was taken within the window. It makes no claim about the result of the original. The host does not check that correlation numbers are unique: completions carry the number as given, and the plugin owns uniqueness [ABI-035].</p>
 <p><code>send-input</code> and <code>agent-action</code> must carry a key, and a submission of either without one refuses its batch. The kernel journals these keys before it writes to the terminal, so a duplicate is caught after a server restart. The journal keeps 24 hours or 4,096 entries per session, whichever is smaller. The journal and the dedup window are separate rules. The dedup window is always 10 minutes from reservation, also across a server restart: a repeat of a journaled key within 10 minutes completes as <code>duplicate</code>, and a repeat after 10 minutes is a new submission and is applied. The journal only lets the plugin learn, through <code>input-uncertain</code>, that a submission was in flight at a restart; it never makes a key unusable for longer than 10 minutes and never replays input [RQO-030].</p>
@@ -1049,7 +1049,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/events-and-intents/">Events and intents</a> for the event batch and the submission record.</li>
 <li><a href="/pages/api-intents/">Intents</a> for the intent catalogue and per-intent outcomes.</li>
 <li><a href="/pages/background-jobs/">Background jobs</a> and <a href="/pages/api-jobs/">Jobs</a> for <code>jobs.wait-request</code>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error code table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error code table.</li>
 <li><a href="/pages/api-extension-points/">Extension points</a> for <code>run-hook</code>.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a>, <a href="/pages/typescript-sdk/">TypeScript SDK</a> and <a href="/pages/testing/">Testing</a>.</li>
 </ul>

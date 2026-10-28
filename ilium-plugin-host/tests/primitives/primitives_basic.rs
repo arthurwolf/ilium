@@ -58,7 +58,11 @@ struct BodyRig {
 fn body_rig() -> BodyRig {
     let kernel = Arc::new(FakeKernel::new(ProcessKind::Client));
     kernel.set_tree(standard_tree());
-    kernel.register_pane_kind("test.plugin", "test.plugin.notes", ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic);
+    kernel.register_pane_kind(
+        "test.plugin",
+        "test.plugin.notes",
+        ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic,
+    );
     let seen = Arc::new(Mutex::new(Vec::new()));
     let areas = Arc::new(Mutex::new(Vec::new()));
     let host = HostHarness::new()

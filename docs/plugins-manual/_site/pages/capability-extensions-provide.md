@@ -39,7 +39,7 @@ It does not allow anything on other plugins' points. It does not allow reading a
 
 ### Risk
 
-The grant is normal risk (S). It is checked by default in the review dialog. Owning a point gives a plugin no power over the user's machine. It gives other plugins a way to run code at a place in the owner's flow, so the owner is responsible for what it puts in the payload. The owner sets `risk: "high"` on a point whose handlers can see or change sensitive data, such as text that goes to a terminal. A high-risk point makes the contributor's grant a high-risk (H) grant.
+The grant is normal risk (not high risk). It is checked by default in the review dialog. Owning a point gives a plugin no power over the user's machine. It gives other plugins a way to run code at a place in the owner's flow, so the owner is responsible for what it puts in the payload. The owner sets `risk: "high"` on a point whose handlers can see or change sensitive data, such as text that goes to a terminal. A high-risk point makes the contributor's grant a high-risk (H) grant.
 
 ### Manifest
 
@@ -117,7 +117,7 @@ Every extension code travels as a base `plugin-error` code plus a message prefix
 - **No contributors.** `list` returns an empty list. `run-hook` resolves with outcome `ok` and no reply. The owner carries on with its original data.
 - **Grant declined.** Every call returns `extension.not-granted`. Contributions to the point go dormant because the point has no active owner.
 - **Owner disabled.** Its contributions go dormant at once. When the user enables the owner again, they become active and the owner receives `ilium.extensions/changed`.
-- **Replaced owner.** A plugin that replaces a core plugin takes over its points. The replacement must declare them all. See [extending core plugins](/pages/extending-core-plugins/#replace).
+- **Replaced owner.** A plugin that replaces a core plugin takes over its points. The replacement must declare them all. See [extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin).
 - **Limits.** 16 points per plugin, up to 256 entries per collect point, up to 8 handlers per hook point, a chain of 100 ms.
 
 ### Review dialog

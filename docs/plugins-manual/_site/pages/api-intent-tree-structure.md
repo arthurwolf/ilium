@@ -13,7 +13,7 @@ The session tree is made of groups, folders, projects, splits and panes. A plugi
 ### Records
 
 ```wit
-variant placement { before, after, inside-first, inside-last }           // as for move-node
+enum placement { before, after, inside-first, inside-last }           // as for move-node
 
 record create-group-spec   { parent: node-id, title: string, placement: placement, children: list<node-id> }
 record create-folder-spec  { parent: node-id, title: string, path: option<fs-path> }
@@ -171,8 +171,9 @@ const submission: Submission = {
 | More than 256 operations, a split with fewer than 2 or more than 4 panes | `refused(invalid-argument)` |
 | One operation of a restructure fails | whole intent `refused(conflict)`, index in the message |
 | Revert after a later change touched the same nodes | `refused(conflict)` |
-| Token from before a server restart | `refused(not-found)` or `refused(conflict)`; tokens do not survive restarts |
-| A node that does not exist or a locked node that must move | `refused(not-found)`, `refused(conflict)` |
+| Token from before a server restart | `refused(not-found)`; tokens do not survive restarts, so a token minted before the restart is unknown. `refused(conflict)` is only for a token still known whose nodes changed since |
+| A node that does not exist | `refused(not-found)` |
+| A locked node that must be closed | `refused(conflict)`; a locked node can be moved or renamed, because the lock blocks only closing |
 
 ### What the user sees
 

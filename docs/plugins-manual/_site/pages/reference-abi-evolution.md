@@ -157,9 +157,9 @@ Results for the three kinds of plugin:
 
 ## 7. The cases that the first freeze fixes
 
-The counts below are the sizes of the main variants and enums in 0.1.0. A later minor can only make them larger.
+The counts below are the sizes of the main variants and enums in 0.1.0. A later minor can only make them larger. The extension counts are subsets of those totals, not additions introduced in a later API version: the frozen WIT and case-order snapshot already include them in 0.1.0, including `ok-epoch`. Future additions require a separately recorded introduction version.
 
-| Type | Cases in 0.1.0 | Appended after the base set |
+| Type | Cases in 0.1.0 | Included extension cases in the same freeze |
 |---|---|---|
 | `event` | 56 | 18 |
 | `intent` | 42 | 23 |
@@ -174,7 +174,7 @@ The event catalogue shows 35 rows for the base events, because three rows each d
 
 ## 8. Edge cases
 
-- **A patch release.** A patch version changes no interface. A component built for `0.1.0` and a host at `0.1.1` still need the exact `api` string match, so a package states the patch it was built for. The host at a later patch of the same minor loads it through the same adapter.
+- **A patch release.** A patch version changes no interface, and the window counts minors only. A component built for `0.1.0` loads on a host at `0.1.1`: the `api` string is well formed and its minor is inside the window, so stage 3 accepts it, and the host uses the adapter of that minor. The string in the manifest and the `ilium:api-version` section of the component must still equal each other in all three fields (otherwise `manifest.api-version`), so a package states the patch it was built for.
 - **A reserved case.** `crash-restart` exists in `deactivation-reason` so that the numbering never changes. The host never delivers it [ABI-028].
 - **A removed feature.** An unstable feature may be removed. A package that lists it fails with `manifest.unstable-unknown` after the upgrade.
 - **Names kept by users.** Pane kind ids, command ids, settings keys, decoration slots and topic names are stored in user snapshots and keep their spelling for ever.

@@ -422,7 +422,7 @@
 </tr>
 </tbody>
 </table>
-<p>The older switches stay as aliases: <code>--safe-plugins</code> is <code>--safe-mode=third-party</code>, and <code>--no-plugins</code> starts no plugin host at all (the kernel only). When more than one is given, the strictest wins.</p>
+<p>The older switches stay as aliases: <code>--safe-plugins</code> is <code>--safe-mode=third-party</code>, and <code>--no-plugins</code> starts no plugin host at all (the kernel only). When more than one is given, the strictest wins. From strictest to least strict the order is: <code>--no-plugins</code> (no plugin host), <code>--safe-mode=all-optional</code> (essential set only), <code>--safe-mode=third-party</code> or <code>--safe-plugins</code> (bundled plugins only), then no safe mode. For example, <code>--no-plugins</code> with <code>--safe-mode=all-optional</code> starts the kernel only.</p>
 <p>Safe mode changes nothing on disk. Installed packages, grants, settings and data stay as they were. The footer shows "Safe mode: third-party plugins are off."</p>
 <ul>
 <li>[LIF-180] <code>--safe-mode=third-party</code> MUST load no T2 or T3 plugin and ignore <code>replaces</code>, and <code>--safe-mode=all-optional</code> MUST load only the essential set. Neither MUST change files on disk. Test: start both and compare the profile before and after.</li>
@@ -489,15 +489,18 @@
 </tr>
 </tbody>
 </table>
-<p>State lives in <code>&lt;data&gt;/plugins/bisect.json</code>. Each command prints JSONL records of type <code>bisect</code> with the enabled list and the remaining candidates. When one plugin remains, the record has <code>found</code> set to its id. The bisect changes the session level only, so it never alters your saved choices.</p>
+<p>State lives in <code>&lt;data&gt;/plugins/bisect.json</code>. Each command prints JSONL records of type <code>bisect</code> with the enabled list and the remaining candidates. When one plugin remains, the record has <code>found</code> set to its id. When the problem persists with no third-party plugin enabled, the record has <code>found</code> null and <code>reason</code> <code>not-a-plugin</code> (LIF-187). The bisect changes the session level only, so it never alters your saved choices.</p>
 <ul>
 <li>[LIF-184] Bisect MUST change only the session-level enabled state and MUST restore the saved set on <code>reset</code>. Test: run to the end and compare <code>installed.json</code>.</li>
 <li>[LIF-185] Bisect MUST finish in at most <code>ceil(log2(n))</code> steps for <code>n</code> plugins. Test: 16 plugins, 4 steps.</li>
+<li>[LIF-187] A bisect that ends without a <code>found</code> plugin MUST say so and MUST NOT name a plugin. When <code>bad</code> is answered with only the empty set enabled (the problem persists with no third-party plugin), or when <code>good</code> is answered for every half so that no plugin reproduces the problem, the final record has <code>found</code> set to <code>null</code> and <code>reason</code> set to <code>not-a-plugin</code>, and the text says the fault is not caused by a third-party plugin. The saved set is restored by <code>reset</code> as usual. Test: run <code>start</code>, answer <code>bad</code> at every step on a profile where the fault is in the kernel, then read the final record.</li>
 </ul>
 <h3 id="the-crash-loop-guard">The crash-loop guard</h3>
 <p>If the server stops with a crash 3 times within 5 minutes during start, the next start runs in <code>third-party</code> safe mode and opens the recovery page. The guard clears after one start that stays up for 5 minutes.</p>
+<p>A <strong>crash mark</strong> is one timestamped record that the host writes to the server's own state folder (not into any plugin's data) as soon as a start begins. The host removes the record when startup completes, so a mark left behind by the next start means that start ended without finishing: a panic, a kill or a power loss before startup completed. A normal exit is not a crash. The 5 minutes are measured on the monotonic clock from the moment startup completes, and a stop before then (crash or normal exit) does not count as staying up.</p>
 <ul>
 <li>[LIF-186] Three crashes during start within 5 minutes MUST cause the next start to use <code>third-party</code> safe mode. Test: write three crash marks.</li>
+<li>[LIF-294] The crash-loop guard MUST clear all crash marks once a start has stayed up for 5 minutes after startup completed. A stop before that point MUST leave the marks in place. Test: write three crash marks, start, advance 4 minutes 59 seconds and stop (marks remain), start again, advance 5 minutes and stop, then assert the next start is not in safe mode.</li>
 </ul>
 <h3 id="recovery-steps">Recovery steps</h3>
 <ol>

@@ -20,7 +20,7 @@ A plugin tells the user about an event in two ways. The `notify` intent shows a 
 
 | Name | Rust | TypeScript | Grant | Kind | Meaning |
 |---|---|---|---|---|---|
-| `sound.catalog` | `host::sounds::catalog() -> Vec<String>` | `catalog(): string[]` from `@ilium/plugin-sdk/host/sound` | none | sync | Lists the bundled sound ids and the sound ids the plugins contribute. Never fails. |
+| `sound.catalog` | `host::sounds::catalog() -> Vec<String>` | `catalog(): string[]` from `@ilium/plugin-sdk/host/sounds` | none | sync | Lists the bundled sound ids and the sound ids the plugins contribute. Never fails. |
 | `notify` | `Intent::Notify(NotifySpec)` | `{ tag: 'notify', val: NotifySpec }` | `notify.desktop` | submission | Shows a desktop notice. Completes `ok` when shown. |
 | `play-sound` | `Intent::PlaySound(String)` | `{ tag: 'play-sound', val: string }` | `sound.play` | submission | Plays one sound id. Completes `ok` when played. |
 
@@ -29,7 +29,7 @@ The `NotifySpec` record has four fields:
 | Field | Type | Meaning |
 |---|---|---|
 | `title` | string | The first line of the notice. |
-| `body` | string | The second line of the notice. |
+| `body` | option of string | The second line of the notice. `None` or `undefined` shows a title-only notice. |
 | `urgency` | `low`, `normal` or `high` | Sets the priority on each operating system (see the table below). Rust `Urgency::High`, TypeScript `'high'`. |
 | `sound` | option of string | A sound id from the catalogue, played with the notice. Use `None` or `undefined` for a silent notice. |
 
@@ -45,9 +45,9 @@ Urgency maps to the native priority of each platform:
 
 Every submission may carry a `dedup-key`. Rust sets it with `Submission::keyed(intent, key)`. `Submission::new(intent)` sends no key. TypeScript sets the field `dedupKey` on the submission literal.
 
-- **Format.** From 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. Any other character makes the submission malformed.
+- **Format.** From 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. A key over 128 characters or with any other character is refused as `refused(invalid-argument)` for the lowest-index offender of the batch; every other submission completes as `refused(cancelled)` with the message `batch refused: submission <index>` ([ABI-009]).
 - **Scope.** The pair of plugin id and key. The server and each client keep separate tables, so a server notice and a client notice with the same key do not suppress each other.
-- **Window.** 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it.
+- **Window.** 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it, except that from Phase 5 the keys of `send-input` and `agent-action` are journaled in the snapshot and survive.
 - **Outcome.** A repeat completes as `duplicate(original)`, where `original` names the submission that reserved the key. Nothing is shown or played. A duplicate is not an error.
 - **Reservation.** A key is reserved only after the submission passes its checks. A refused submission does not reserve its key, so a retry with the same key is valid.
 - **Batches.** The first submission in a batch that reserves a key blocks every later submission in the same batch with that key. Use a different key for the notice and for the sound, as the examples do.
@@ -116,7 +116,7 @@ impl Handler for ApprovalNotice {
             submissions.push(Submission::keyed(
                 Intent::Notify(NotifySpec {
                     title: "Agent needs approval".to_string(),
-                    body: format!("Pane {node} is waiting for you"),
+                    body: Some(format!("Pane {node} is waiting for you")),
                     urgency: Urgency::High,
                     sound: None,
                 }),
@@ -211,11 +211,11 @@ export const { lifecycle, handler } = definePlugin({
 |---|---|---|
 | `notify` without `notify.desktop`, or `play-sound` without `sound.play` | `refused(not-permitted)` for that submission | The other submissions complete as `refused(cancelled)`. |
 | Sound id not in the catalogue, in `play-sound` or in `notify.sound` | `refused(not-found)` for that submission | The other submissions run. |
-| Dedup key with a disallowed character or over 128 characters | `refused(invalid-argument)` | The whole batch is refused. |
+| Dedup key with a disallowed character or over 128 characters | `refused(invalid-argument)` for the lowest-index offender | Every other submission completes as `refused(cancelled)` with the message `batch refused: submission <index>` ([ABI-009]). |
 | More than 6 `notify` submissions per minute per plugin | `refused(rate-limited)` with `retry-after-ms` | Only that submission. |
 | More than 4 `play-sound` submissions per second per plugin | `refused(rate-limited)` with `retry-after-ms` | Only that submission. |
 | Repeat of a reserved key within 10 minutes | `duplicate(original)` | None. Not an error. |
-| Manifest sound file missing or in another format | Package check fails at install | The plugin is not installed. |
+| Manifest sound file missing or in another format | Package check fails at install with `manifest.sound-format` | The plugin is not installed. |
 
 The sound id check happens per submission, so one bad id never stops a notice from showing. A refused submission does not reserve its key, so the plugin can fix the id and retry with the same key.
 
@@ -246,7 +246,7 @@ When the terminal pane the notice is about has focus in an attached client, the 
 
 ### Coalescing and toasts
 
-The `notify` intent gains two optional fields. Notifications with the same `coalesce-key` inside `coalesce-window-ms` replace each other, so a burst of "build finished" events shows one notice with the latest text.
+The `notify` intent gains two fields: `coalesce-key` is optional, and `coalesce-window-ms` is a plain `u32` that is `0` when unused. Notifications with the same `coalesce-key` inside `coalesce-window-ms` replace each other, so a burst of "build finished" events shows one notice with the latest text.
 
 ```wit
 // Excerpt of ilium:types/intents in reference-wit
@@ -299,6 +299,6 @@ When the user is in the Ilium window, a desktop notice is often the wrong tool. 
 - [Events](/pages/api-events/) for `agent-activity-changed` and `pane-exited`.
 - [Desktop notifications capability](/pages/capability-notify-desktop/) for the per-platform behaviour.
 - [Sound capability](/pages/capability-sound-play/) for the `sound.play` grant.
-- [Errors and limits](/pages/errors-and-limits/) for the full error code table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error code table.
 
 Checked against `ilium:plugin@0.1.0`.

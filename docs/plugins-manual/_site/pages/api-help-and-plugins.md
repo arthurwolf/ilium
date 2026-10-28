@@ -38,7 +38,7 @@ Reading help needs an ordinary grant. Managing plugins needs a high-risk grant (
 | Language | Rust with `ilium-plugin-sdk`, or TypeScript with `@ilium/plugin-sdk`. |
 | Manifest | Each help topic is declared under `contributes.help`, and its Markdown file sits in `help/`. |
 
-A T2 or T3 package that asks for `plugins.manage` is refused at install with `manifest.grant-tier`. A T1 bundled plugin with H capabilities is activated first without them. Ilium then shows one prompt, "Plugin <name> asks for: <list>", with the buttons `Allow selected` and `Not now`. The user can allow the grant later in Settings > Plugins. Until then, the calls behave as the edge-case table below describes.
+A T2 or T3 package that asks for `plugins.manage` is refused at install with `manifest.grant-tier`. A T1 bundled plugin with H capabilities is activated first without them. Ilium then shows a prompt, "Plugin <name> asks for: <list>", with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three prompts in total. The user can allow the grant later in Settings > Plugins. Until then, the calls behave as the edge-case table below describes.
 
 ### The surface
 
@@ -57,7 +57,7 @@ Topic ids are global. A topic id is `<plugin-id>/<local-id>`, where `<local-id>`
 | Function | Rust | TypeScript | WIT | Meaning |
 |---|---|---|---|---|
 | `list()` | `plugins::list() -> Vec<PluginInfo>` | `list()`, returns `PluginInfo[]` | `list<plugin-info>` | Returns every installed plugin, including disabled and failed ones. |
-| `set-enabled(plugin, enabled)` | `plugins::set_enabled(plugin: &str, enabled: bool) -> Result<(), PluginError>` | `setEnabled(plugin, enabled)`, throws `PluginError` | `result<_, plugin-error>` | Turns a plugin on or off. The call returns once the change is recorded. |
+| `set-enabled(plugin, enabled, scope)` | `plugins::set_enabled(plugin: &str, enabled: bool, scope: &str) -> Result<(), PluginError>` | `setEnabled(plugin, enabled, scope)`, throws `PluginError` | `result<_, plugin-error>` | Turns a plugin on or off. The call returns once the change is recorded. |
 
 The record `plugin-info` has nineteen fields. The WIT in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/) adds `state`, `side-states`, `scope`, `disabled-reason` and `health` to the six below, and eight distribution fields: `publisher`, `publisher-key`, `source`, `channel`, `pinned`, `update-available`, `deprecated` and `yanked`. `list()` never contacts a registry. `set-enabled` also takes a `scope` (`global`, `project` or `session`) and a global change reaches every running session within 2 seconds ([Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)). The first six fields:
 
@@ -161,7 +161,7 @@ function restoreFailedPlugins(): void {
   for (const plugin of list()) {
     if (plugin.enabled || !plugin.failed) continue;
     try {
-      setEnabled(plugin.id, true);
+      setEnabled(plugin.id, true, 'global');
       log('info', `turned on ${plugin.name} ${plugin.version} (${plugin.tier})`);
     } catch (error) {
       const code = (error as { code?: string }).code ?? 'unknown';
@@ -217,12 +217,13 @@ Illustrative, not generated: the help pane for the quick start topic, and the Se
 | Topic of a removed plugin | `none`. |
 | `plugins.manage` declined or revoked | `list()` returns an empty list, and `set-enabled` returns `not-permitted`. |
 | `set-enabled` with an unknown plugin id | `not-found`. |
+| `set-enabled` with scope `project` when no project is open, or the open project is not trusted | `not-permitted`, and nothing changes. |
 | `set-enabled` to the state a plugin already has | `ok`, and nothing changes. |
 | `set-enabled(id, true)` on a failed plugin | `ok`. The `failed` flag is cleared. |
 | Revocation during the call | `revoked`. The plugin is re-activated with the reduced grant set. |
 | Host fault inside the call | `internal`. |
 
-`not-permitted`, `revoked` and `internal` are universal codes for every call that returns a `result`. Only `not-found` is specific to `set-enabled`. The full table of codes and limits is in [errors and limits](/pages/errors-and-limits/).
+`not-permitted`, `revoked` and `internal` are universal codes for every call that returns a `result`. Only `not-found` is specific to `set-enabled`. The full table of codes and limits is in [errors and limits](/pages/reference-errors-and-limits/).
 
 ### Help topics and settings rows
 
@@ -258,10 +259,10 @@ topic: func(id: string) -> option<string>;
 - [Settings screens](/pages/settings-screens/) for the Settings > Plugins page.
 - [Manifest reference](/pages/reference-manifest/) for every `contributes` key.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the attribute and the `definePlugin` shape.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes.
 - [Security](/pages/security/) for the tier rules that limit `plugins.manage`.
 
-Checked against `ilium:plugin@0.1.0`. Section 6.23 of the specification adds nothing new to `help` or `plugins`.
+Checked against `ilium:plugin@0.1.0`.
 
 ### Security
 

@@ -435,7 +435,7 @@
 </table>
 <p>Other rules that apply:</p>
 <ul>
-<li><code>fs.roots</code> needs any <code>fs</code> grant. The <code>package</code>, <code>data</code> and <code>cache</code> scopes are always granted, so a manifest does not list them.</li>
+<li><code>fs.roots</code> needs any <code>fs.*</code> grant. The <code>package</code>, <code>data</code> and <code>cache</code> scopes are always granted, so a manifest does not list them.</li>
 <li><code>fs.pick</code> without <code>fs.read:picked</code> or <code>fs.write:picked</code> fails at install with <code>manifest.grant-dependency</code>.</li>
 <li><code>fs.write:agent-sessions:&lt;agent&gt;</code> is refused at install.</li>
 <li><code>fs.read:path:</code> with a literal absolute path, <code>fs.watch:path:</code> with one, and <code>fs.write:worktrees</code> are high-risk grants. The user checks each one by hand.</li>
@@ -483,7 +483,7 @@
 <td><code>worktrees</code></td>
 <td><code>/worktrees</code></td>
 <td>the worktree folder set by <code>workspace.worktree_root</code></td>
-<td>grant, high risk for write</td>
+<td>grant, high risk for read and for write</td>
 </tr>
 <tr>
 <td><code>picked</code></td>
@@ -517,7 +517,7 @@
 </tr>
 </tbody>
 </table>
-<p>Every scope except <code>package</code> can be watched, and <code>picked</code> only for folders. A path that leaves the scope root through <code>..</code> or a symbolic link is refused with <code>not-permitted</code>. Synchronous <code>std::fs</code> code also works, because the component sees only the preopens.</p>
+<p>Every scope except <code>package</code> and the <code>agent-config</code> scopes can be watched (a watch on <code>agent-config</code> is refused with <code>manifest.grant-scope</code>), and <code>picked</code> only for folders. A path that leaves the scope root through <code>..</code> or a symbolic link is refused with <code>not-permitted</code>. Synchronous <code>std::fs</code> code also works, because the component sees only the preopens.</p>
 <h3 id="surface">Surface</h3>
 <h4 id="functions">Functions</h4>
 <table>
@@ -532,7 +532,7 @@
 <tbody>
 <tr>
 <td><code>roots</code></td>
-<td>any <code>fs</code> grant</td>
+<td>any <code>fs.*</code> grant</td>
 <td>sync</td>
 <td>List of <code>(scope, writable)</code> pairs for the granted scopes.</td>
 </tr>
@@ -618,7 +618,7 @@
 <td><code>pick(spec)</code></td>
 <td><code>fs.pick</code></td>
 <td>async</td>
-<td>Opens the picker. The chosen path arrives in a <code>picked/&lt;n&gt;</code> scope.</td>
+<td>Opens the picker and returns a <code>request-id</code>. Retrieve the chosen path with <code>take_picked(request)</code> (WIT <code>take-picked</code>), which returns <code>option&lt;fs-path&gt;</code>: <code>none</code> means the user cancelled. The path arrives in a <code>picked/&lt;n&gt;</code> scope.</td>
 </tr>
 <tr>
 <td><code>read_with_revision(path)</code></td>

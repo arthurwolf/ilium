@@ -1,5 +1,5 @@
 use ilium_plugin_host::package::{read_package, write_package};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 fn manifest() -> Vec<u8> {
     serde_json::to_vec(&json!({
@@ -188,14 +188,18 @@ fn declared_expansion_limits_are_checked_before_entry_data() {
         let mut bytes = base.clone();
         let mut cursor = central_offset(&bytes);
         for index in 0..8 {
-            let length = 64 * 1024 * 1024 - u32::from(index == 0) + if index == 0 { extra } else { 0 };
+            let length =
+                64 * 1024 * 1024 - u32::from(index == 0) + if index == 0 { extra } else { 0 };
             put32(&mut bytes, cursor + 20, length);
             put32(&mut bytes, cursor + 24, length);
-            let name_len = u16::from_le_bytes(bytes[cursor + 28..cursor + 30].try_into().unwrap()) as usize;
+            let name_len =
+                u16::from_le_bytes(bytes[cursor + 28..cursor + 30].try_into().unwrap()) as usize;
             cursor += 46 + name_len;
         }
         let errors = read_archive_entries(&bytes).unwrap_err();
-        let expansion_error = errors.iter().any(|error| error.message.contains("total uncompressed size"));
+        let expansion_error = errors
+            .iter()
+            .any(|error| error.message.contains("total uncompressed size"));
         assert_eq!(expansion_error, exceeds);
     }
     for (length, exceeds) in [(200, false), (201, true)] {
@@ -204,6 +208,11 @@ fn declared_expansion_limits_are_checked_before_entry_data() {
         put32(&mut bytes, cursor + 20, 1);
         put32(&mut bytes, cursor + 24, length);
         let errors = read_archive_entries(&bytes).unwrap_err();
-        assert_eq!(errors.iter().any(|error| error.message.contains("compression ratio")), exceeds);
+        assert_eq!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("compression ratio")),
+            exceeds
+        );
     }
 }

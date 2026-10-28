@@ -396,7 +396,7 @@
 <p>Everything Ilium does is done by a plugin. The 30 core plugins ship with Ilium, need no install and are maintained by the Ilium project. This page tells you what each one does in plain words, what you lose when you turn it off, which ones other plugins may replace, and what happens to your data when you do. If you write plugins, read <a href="/pages/core-plugins/">Core plugins</a> instead.</p>
 <p>Contract version: <code>ilium:plugin@0.1.0</code>. Requirement ids have the form <code>[USR-nnn]</code>, collected in <a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a>.</p>
 <div class="note">
-<p>Decision status. Which core plugins a user may turn off is a pending decision. The column "Can you turn it off" below is the proposal. The two rules that are not pending: a core plugin never needs an install, and the kernel recovery page can never be turned off or replaced.</p>
+<p>The set is fixed: the plugins marked "no" in the column "Can you turn it off" below cannot be turned off. A core plugin never needs an install, and the kernel recovery page can never be turned off or replaced.</p>
 </div>
 
 <h3 id="contents">Contents</h3>
@@ -422,7 +422,7 @@
 <li>[USR-040] The Plugins tab and <code>ilium plugin list</code> MUST list all 30 core plugins with the tier T1, and MUST NOT offer to install or uninstall one. Test: list plugins on a fresh profile, count 30 rows with ids <code>ilium.core.*</code>, and try <code>ilium plugin uninstall ilium.core.tree</code>, which must fail with <code>plugin.not-removable</code>.</li>
 </ul>
 <h3 id="the-30-core-plugins">The 30 core plugins</h3>
-<p>The column "Can you turn it off" is a proposal, see the decision status above. "Replaceable" says whether a third-party plugin may take over the job with <code>replaces</code>.</p>
+<p>The column "Can you turn it off" lists the fixed set of plugins that stay on. "Replaceable" says whether a third-party plugin may take over the job with <code>replaces</code>.</p>
 <h4 id="tree-and-panes">Tree and panes</h4>
 <table>
 <thead>
@@ -706,7 +706,7 @@
 <p>A plugin you replace or turn off keeps its settings and data on disk. See <a href="/pages/reference-plugin-files/">Plugin files on disk</a>.</p>
 <p>The two plugins that cannot be replaced, Settings and Sessions, hold data and roles that a replacement cannot take over safely. The kernel recovery page, which is not a plugin, can never be turned off or replaced either.</p>
 <ul>
-<li>[USR-041] The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why. Test: press Space on <code>ilium.core.tree</code> and assert the refusal text. (Pending decision: the set of "no" plugins.)</li>
+<li>[USR-041] The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why. Test: press Space on <code>ilium.core.tree</code> and assert the refusal text.</li>
 <li>[USR-042] A request to replace <code>ilium.core.settings</code> or <code>ilium.core.sessions</code> MUST fail at install with <code>manifest.replaces-not-replaceable</code>. Test: install a package with such a <code>replaces</code> entry.</li>
 </ul>
 <h3 id="turning-one-off">Turning one off</h3>
@@ -745,7 +745,7 @@
 <p>The built-in plugin's data stays on disk, unread and unchanged. The replacement does not read it. It starts with its own data folder. If you turn the replacement off or remove it, the built-in plugin comes back and finds its data as it was.</p>
 <p>If the replacement imports the old data on its own initiative, it needs a permission to do so, for example reading a path, and you see that in the review dialog.</p>
 <h3 id="updates">Updates</h3>
-<p>Core plugins are updated together with Ilium. You never update one on its own. When you update Ilium, every core plugin changes to the version inside it. Third-party plugins are unaffected. A third-party plugin built for an older interface version may be refused after an Ilium update with <code>api.window</code>. See <a href="/pages/user-install-and-manage/">Install and manage plugins</a>.</p>
+<p>Core plugins are updated together with Ilium. You never update one on its own. When you update Ilium, every core plugin changes to the version inside it. Third-party plugins are unaffected. A third-party plugin built for an older interface version may be refused after an Ilium update with the message "built for an interface version this Ilium does not support" (code <code>package.api-unsupported</code>). See <a href="/pages/user-install-and-manage/">Install and manage plugins</a>.</p>
 <h3 id="errors-and-edge-cases">Errors and edge cases</h3>
 <table>
 <thead>
@@ -757,7 +757,7 @@
 <tbody>
 <tr>
 <td>You uninstall a core plugin</td>
-<td>Refused with <code>plugin.not-removable</code> (pending decision: code name). Turn it off instead</td>
+<td>Refused with <code>plugin.not-removable</code> (USR-040). Turn it off instead</td>
 </tr>
 <tr>
 <td>Two plugins replace the same core plugin</td>

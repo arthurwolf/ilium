@@ -30,6 +30,8 @@ Declare grants in the manifest under the side that makes the request:
 | `http:api.example.com:8443` | yes | one exact host and port |
 | `http:*.openstreetmap.org` | yes | any subdomain at any depth; not the bare domain |
 | `http:localhost` | yes | loopback; plain HTTP allowed |
+| `http:127.0.0.1` | yes | loopback IPv4 literal; plain HTTP allowed |
+| `http:[::1]` | yes | loopback IPv6 literal; plain HTTP allowed |
 | `http:*` | no | a bare `*` is refused |
 | `http:tile.*.org` | no | a wildcard in any position other than the leftmost label |
 | `http` | no | the host pattern is missing |
@@ -240,7 +242,7 @@ A declined grant shows as unchecked and dimmed. The plugin's `granted` list in t
 A request to a host without a grant returns `not-permitted` at once. The host also writes one refusal line to the plugin log. The `reason` field is `declined` when the user unticked the row, and `not-granted` when the manifest asked for other hosts but not this one:
 
 ```json
-{"type":"refusal","capability":"http:api.example.com","function":"http.fetch","reason":"declined"}
+{"type":"refusal","grant":"http:api.example.com","function":"http.fetch","reason":"declined"}
 ```
 
 A request that matches a granted host still works. A granted host that is down or unreachable returns `network`, not `not-permitted`.
@@ -251,7 +253,7 @@ A request that matches a granted host still works. A granted host that is down o
 |---|---|---|---|
 | `invalid-argument` | URL not HTTPS outside loopback, unparsable or over 8 KiB; body over 8 MiB; timeout outside 1 to 300,000 ms; over 64 headers; method not in the list | at the call | no, fix the call |
 | `not-permitted` | no grant for the host; the admission policy refused an AI provider call; a redirect to an ungranted host | at the call, or in the completion for redirects and policy | no |
-| `busy` | 256 pending requests (1,024 at T1) | at the call | yes, later |
+| `busy` | 64 pending requests (256 at T1) | at the call | yes, later |
 | `quota-exceeded` | response body over the cap; CPU budget of the quota group spent | in the completion, or at the call with `retry-after-ms` | after freeing resources or after `retry-after-ms` |
 | `rate-limited` | the admission gate throttled a provider host | in the completion, with `retry-after-ms` | yes, after `retry-after-ms` |
 | `network` | DNS, connect or TLS failure; more than 5 redirects | in the completion | yes |
@@ -282,7 +284,7 @@ First-party plugins that use this grant:
 - [inference](/pages/capability-inference/) for requests that go through the AI admission gate.
 - [jobs.run](/pages/capability-jobs-run/) for long downloads.
 - [api-http](/pages/api-http/) for the full function reference.
-- [Errors and limits](/pages/errors-and-limits/) for the error code table and every size limit.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error code table and every size limit.
 - [capability-http-api-route](/pages/capability-http-api-route/) for the opposite direction: local requests that reach your plugin.
 
 Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).

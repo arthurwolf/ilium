@@ -864,7 +864,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td><code>close_buffer(buffer)</code> / <code>closeBuffer</code></td>
-<td><code>editor.read</code> (the spec lists no other grant)</td>
+<td><code>editor.edit</code></td>
 <td>No result.</td>
 </tr>
 </tbody>
@@ -961,7 +961,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 </tbody>
 </table>
-<p>Every function that returns a result can also return <code>not-permitted</code>, <code>revoked</code> and <code>internal</code>. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p>Every function that returns a result can also return <code>not-permitted</code>, <code>revoked</code> and <code>internal</code>. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h2 id="what-the-user-sees">What the user sees</h2>
 <ul>
 <li>A basic pane shows the title in its title row, the footer from <code>set_status</code>, and the body from <code>views.render</code>.</li>

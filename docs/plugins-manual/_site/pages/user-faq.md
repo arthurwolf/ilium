@@ -85,13 +85,15 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 
 **Can I get back my notes after I uninstalled?** Yes, if you did not use `--purge`. Reinstall the same plugin and it reads its data again.
 
+**How do I back up one plugin's data or move it to another computer?** Run `ilium plugin export <id> --out <file>`, install the plugin on the other computer and run `ilium plugin import <id> --from <file>`. Do this before `--purge`, which cannot be undone.
+
 ### Administrators
 
 **Can I stop users from installing plugins?** Yes, with the policy file. See [Administration guide](/pages/guide-administration/) and [Plugin policy](/pages/reference-plugin-policy/).
 
-**Can I allow only signed plugins from my company?** Yes. Set `allowed_tiers` and `allowed_publishers`.
+**Can I allow only signed plugins from my company?** Yes. Set `packages.allowed_tiers` and `publishers.allow` in the policy file ([Plugin policy](/pages/reference-plugin-policy/)).
 
-**Can I see what was installed?** Turn on the audit log in the policy.
+**Can I see what was installed?** The audit log is always on. See [Audit log](/pages/reference-audit-log/) for where it is stored and how to read it.
 
 ### Errors and edge cases
 

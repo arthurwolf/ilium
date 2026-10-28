@@ -530,7 +530,7 @@ record topic-published-event { topic: string, from: plugin-id, payload-json: str
 </tbody>
 </table>
 <h3 id="topic-names-and-patterns">Topic names and patterns</h3>
-<p>A topic id is the publisher's plugin id, a <code>/</code>, and a name, for example <code>example.notes/saved</code>. A plugin may publish only topics that start with its own plugin id followed by <code>/</code>. The kernel publishes its own topics under the kernel plugin ids, for example <code>ilium.progress/finished</code>.</p>
+<p>A topic id is the publisher's plugin id, a <code>/</code>, and a name, for example <code>example.notes/saved</code>. A plugin may publish only topics that start with its own plugin id followed by <code>/</code>. The kernel publishes its own topics under reserved kernel namespaces, which are ids that no installed plugin can take, for example <code>ilium.progress/finished</code>. The kernel namespace <code>ilium.progress</code> is not the id of the core plugin <code>ilium.core.progress</code>: the core plugin publishes only under its own id, as <code>ilium.core.progress/changed</code>, and no plugin may publish under <code>ilium.progress/</code>.</p>
 <p>A subscription pattern takes one of three forms:</p>
 <ul>
 <li>An exact topic, such as <code>ilium.progress/finished</code>.</li>

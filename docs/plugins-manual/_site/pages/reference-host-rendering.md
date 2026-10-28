@@ -15,7 +15,7 @@ The client draws on every frame. A plugin never draws on a frame. This page defi
 The client UI thread paints from **data it already holds**. It reads the mirrored tree, the retained contribution mirror, the last `ui-tree` of each open view, and the last complete scene frame. It never waits for a plugin and never calls Wasmtime. When a plugin is slow, the UI shows the previous result. When a plugin is gone, the UI shows the previous result marked stale.
 
 - **[HST-250]** The client MUST paint every frame from held data only, and a frame MUST NOT be late because a plugin call is pending.
-- **[HST-251]** A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after `ui.invalidate`, after a change of the view's area (a resize), and after a theme change.
+- **[HST-251]** A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after `ui.invalidate`, after a change of the view's area (a resize), after a theme change, and after a user action in the view.
 
 ## Retained contributions
 
@@ -77,7 +77,7 @@ The tree is diffed by the client against the previous tree, keyed by node `key`.
 | Views open per plugin | 16 |
 | Renders per view | At most one in flight, at most one queued |
 
-A tree over a cap, or any other invalid tree, is a plugin bug. There is one outcome: the host keeps the previous tree (marked stale), logs one error, and the instance traps with a `ui.*` code, counted under the restart rule, as in [Errors and limits](/pages/reference-errors-and-limits/). `views.render` returns a `ui-tree`, not a `result`, so no tree error is ever returned as `invalid-argument`. The codes are:
+A tree over a cap, or any other invalid tree, is a plugin bug. There is one outcome: the host keeps the previous tree (marked stale), logs one error, and the instance traps with `trap.invalid-ui-tree`, whose logged detail reason is a `ui.*` code, counted under the restart rule, as in [Errors and limits](/pages/reference-errors-and-limits/). `views.render` returns a `ui-tree`, not a `result`, so no tree error is ever returned as `invalid-argument`. The codes are:
 
 | Code | Cause |
 |---|---|
@@ -156,7 +156,7 @@ A scene is an animated background that a plugin renders. Scenes run on the dedic
 | Surface write per frame | 16 MiB |
 | Frame rate | 60 |
 | Scenes active per client | 1 |
-| Clip memory | 256 MiB |
+| Clip memory | 256 MiB in total across clips; one clip is limited to 64 MiB ([scenes](/pages/api-scenes/)) |
 
 - **[HST-262]** Scene frames MUST be rendered on the scene thread into a back buffer, and the UI thread MUST read only a complete front buffer.
 - **[HST-263]** A late scene frame MUST be skipped without delaying the UI, and the host MUST apply the shared look to each presented frame.

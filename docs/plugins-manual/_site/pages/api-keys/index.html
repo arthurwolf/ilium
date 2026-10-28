@@ -486,7 +486,7 @@ release: func(grab: grab-id);
 <td>field</td>
 <td><code>Vec&lt;String&gt;</code></td>
 <td><code>string[]</code></td>
-<td>The chords to take. One to 32 chords, each in the grammar above.</td>
+<td>The chords to take. One to 32 chords, each in the grammar above. An empty list is <code>invalid-argument</code>.</td>
 </tr>
 <tr>
 <td><code>GrabSpec.pane</code></td>
@@ -865,7 +865,7 @@ export const { lifecycle, handler } = definePlugin({
 <ul>
 <li>A grab with no pane is active whatever has focus, except in kernel modal dialogs such as the file picker.</li>
 <li>A grab with a pane is active only while that pane has focus. It is suspended while another pane has focus and resumes when focus returns.</li>
-<li>An <code>until-release</code> grab ends when focus changes.</li>
+<li>An <code>until-release</code> grab is never suspended. It ends when focus changes, even if its pane is set and regains focus later.</li>
 <li>Without release reports, an <code>until-release</code> grab ends at the next key that does not match. That key goes to the pane as usual. The plugin receives no event for the end, so copy or save inside the <code>key-pressed</code> handler when the result must not be lost.</li>
 <li>A grab ends when its pane closes or its plugin stops. The plugin gets no event for it. A later <code>release</code> call for that id does nothing.</li>
 <li>Revoking <code>keys.intercept</code> withdraws every grab of the plugin at once.</li>
@@ -947,7 +947,7 @@ if (event.tag === 'ui-action' &amp;&amp; event.val.key === 'chord' &amp;&amp; ev
 │ <span class="t-dim">Enter capture · Esc cancel · Backspace clear</span>                  │
 ╰───────────────────────────────────────────────────────────────╯
 </pre>
-<figcaption>A settings panel with three <code>key-capture</code> rows. The border, title chrome and the grey <code>…</code> leaders are what the client draws; the strings <code>⌨ press keys…</code> and <code>! used by &lt;command&gt;</code> are those the widget specification names. The panel is composed by hand: the client build in this tree has no key-capture widget yet, so this is not a capture.</figcaption>
+<figcaption>A settings panel with three <code>key-capture</code> rows. The border, title chrome and the grey <code>…</code> leaders are what the client draws; the strings <code>⌨ press keys…</code> and <code>! used by &lt;command&gt;</code> are those the widget specification names. The figure is a composed illustration, not a screen capture.</figcaption>
 </figure>
 
 <h3 id="errors-and-limits">Errors and limits</h3>
@@ -965,7 +965,7 @@ if (event.tag === 'ui-action' &amp;&amp; event.val.key === 'chord' &amp;&amp; ev
 </tr>
 <tr>
 <td><code>invalid-argument</code></td>
-<td>A chord breaks the grammar, the list has more than 32 chords, or the client cannot report the chord.</td>
+<td>A chord breaks the grammar, the list is empty or has more than 32 chords, or the client cannot report the chord.</td>
 </tr>
 <tr>
 <td><code>not-found</code></td>
@@ -977,7 +977,7 @@ if (event.tag === 'ui-action' &amp;&amp; event.val.key === 'chord' &amp;&amp; ev
 </tr>
 <tr>
 <td><code>quota-exceeded</code></td>
-<td>The plugin holds its maximum of grabs. The limit <code>key_grabs</code> is 8 per plugin by default and 32 at most, and <code>session_key_grabs</code> caps all plugins together at 32. Release a grab, then retry.</td>
+<td>The plugin holds its maximum of grabs. The limit <code>key_grabs</code> is 8 per plugin by default and at most 32 for tier 1 and 8 for tiers 2 and 3. Release a grab, then retry.</td>
 </tr>
 <tr>
 <td><code>revoked</code></td>
@@ -999,11 +999,7 @@ if (event.tag === 'ui-action' &amp;&amp; event.val.key === 'chord' &amp;&amp; ev
 </tr>
 <tr>
 <td>Grabs per plugin (<code>key_grabs</code>)</td>
-<td>8 by default, 32 at most</td>
-</tr>
-<tr>
-<td>Grabs per session, all plugins (<code>session_key_grabs</code>)</td>
-<td>32</td>
+<td>8 by default, 32 at most for tier 1, 8 for tiers 2 and 3</td>
 </tr>
 <tr>
 <td>Chords per <code>key-capture</code> widget</td>

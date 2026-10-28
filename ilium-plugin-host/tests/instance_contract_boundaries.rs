@@ -29,7 +29,9 @@ struct Guest {
 }
 
 impl Drop for Guest {
-    fn drop(&mut self) { self.observations.lock().unwrap().drops += 1; }
+    fn drop(&mut self) {
+        self.observations.lock().unwrap().drops += 1;
+    }
 }
 
 impl GuestExports for Guest {
@@ -37,7 +39,11 @@ impl GuestExports for Guest {
         let mut observations = self.observations.lock().unwrap();
         observations.activates += 1;
         observations.restore_size = activation.restored.as_ref().map(Vec::len);
-        Ok(if self.activation_error { Err(PluginError::new(ErrorCode::InvalidArgument, "bad settings")) } else { Ok(()) })
+        Ok(if self.activation_error {
+            Err(PluginError::new(ErrorCode::InvalidArgument, "bad settings"))
+        } else {
+            Ok(())
+        })
     }
     fn deactivate(&mut self, _: DeactivationReason) -> Result<Option<Vec<u8>>, Trap> {
         self.observations.lock().unwrap().deactivates += 1;
@@ -46,17 +52,34 @@ impl GuestExports for Guest {
     fn on_events(&mut self, _: Vec<Event>) -> Result<Vec<Submission>, Trap> {
         self.observations.lock().unwrap().events += 1;
         assert!(!self.panic_events, "fixture panic");
-        Ok((0..self.submissions).map(|correlation| Submission {
-            intent: Intent::PlaySound("bell".to_owned()), correlation: correlation as u64, dedup_key: None,
-        }).collect())
+        Ok((0..self.submissions)
+            .map(|correlation| Submission {
+                intent: Intent::PlaySound("bell".to_owned()),
+                correlation: correlation as u64,
+                dedup_key: None,
+            })
+            .collect())
     }
-    fn render(&mut self, _: ViewTarget, _: Area) -> Result<UiTree, Trap> { Ok(UiTree::default()) }
-    fn call_export(&mut self, _: ExportCall) -> Result<ExportReply, Trap> { Ok(ExportReply::Job(Ok(vec![1]))) }
+    fn render(&mut self, _: ViewTarget, _: Area) -> Result<UiTree, Trap> {
+        Ok(UiTree::default())
+    }
+    fn call_export(&mut self, _: ExportCall) -> Result<ExportReply, Trap> {
+        Ok(ExportReply::Job(Ok(vec![1])))
+    }
 }
 
 fn fixture() -> (Guest, Arc<Mutex<Observations>>) {
     let observations = Arc::new(Mutex::new(Observations::default()));
-    (Guest { observations: observations.clone(), submissions: 0, panic_events: false, activation_error: false, saved_size: 0 }, observations)
+    (
+        Guest {
+            observations: observations.clone(),
+            submissions: 0,
+            panic_events: false,
+            activation_error: false,
+            saved_size: 0,
+        },
+        observations,
+    )
 }
 
 #[test]
@@ -67,7 +90,10 @@ fn lifecycle_calls_are_owned_and_teardown_consumes_the_guest_once() {
     instance.activate(Activation::default()).unwrap();
     assert!(instance.activate(Activation::default()).is_err());
     assert_eq!(instance.state(), InstanceState::Active);
-    assert_eq!(instance.deactivate(DeactivationReason::Shutdown), Some(Vec::new()));
+    assert_eq!(
+        instance.deactivate(DeactivationReason::Shutdown),
+        Some(Vec::new())
+    );
     assert_eq!(instance.deactivate(DeactivationReason::Shutdown), None);
     assert!(instance.on_events(Vec::new()).is_err());
     assert!(instance.activate(Activation::default()).is_err());
@@ -82,10 +108,14 @@ fn a_host_batch_over_256_events_is_not_delivered() {
     let (guest, observations) = fixture();
     let mut instance = PluginInstance::from_guest(Box::new(guest));
     instance.activate(Activation::default()).unwrap();
-    assert!(instance.on_events(vec![Event::TreeChanged(Vec::new()); 257]).is_err());
+    assert!(instance
+        .on_events(vec![Event::TreeChanged(Vec::new()); 257])
+        .is_err());
     assert_eq!(observations.lock().unwrap().events, 0);
     assert_eq!(instance.state(), InstanceState::Active);
-    assert!(instance.on_events(vec![Event::TreeChanged(Vec::new()); 256]).is_ok());
+    assert!(instance
+        .on_events(vec![Event::TreeChanged(Vec::new()); 256])
+        .is_ok());
 }
 
 #[test]
@@ -94,7 +124,10 @@ fn a_submission_overflow_discards_the_whole_return_and_ends_the_instance() {
     guest.submissions = 257;
     let mut instance = PluginInstance::from_guest(Box::new(guest));
     instance.activate(Activation::default()).unwrap();
-    assert_eq!(instance.on_events(Vec::new()).unwrap_err().code, "trap.submission-batch");
+    assert_eq!(
+        instance.on_events(Vec::new()).unwrap_err().code,
+        "trap.submission-batch"
+    );
     assert_eq!(observations.lock().unwrap().drops, 1);
     assert!(instance.on_events(Vec::new()).is_err());
 }
@@ -105,7 +138,10 @@ fn native_unwind_is_a_trap_and_never_leaves_a_live_guest() {
     guest.panic_events = true;
     let mut instance = PluginInstance::from_guest(Box::new(guest));
     instance.activate(Activation::default()).unwrap();
-    assert_eq!(instance.on_events(Vec::new()).unwrap_err().code, "trap.panic");
+    assert_eq!(
+        instance.on_events(Vec::new()).unwrap_err().code,
+        "trap.panic"
+    );
     assert_eq!(observations.lock().unwrap().drops, 1);
     assert_eq!(instance.last_trap().unwrap().code, "trap.panic");
 }
@@ -126,7 +162,10 @@ fn restore_caps_and_activation_errors_do_not_retain_guest_memory() {
     let (mut guest, observations) = fixture();
     guest.activation_error = true;
     let mut instance = PluginInstance::from_guest(Box::new(guest));
-    assert_eq!(instance.activate(Activation::default()).unwrap_err().code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        instance.activate(Activation::default()).unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(observations.lock().unwrap().drops, 1);
 }
 
@@ -136,11 +175,22 @@ fn dedicated_job_instances_run_once_without_activation_or_events() {
     let mut instance = PluginInstance::for_job(Box::new(guest));
     assert!(instance.activate(Activation::default()).is_err());
     assert!(instance.on_events(Vec::new()).is_err());
-    assert!(matches!(instance.call_export(ExportCall::Job { kind: "one".to_owned(), input: Vec::new() }), Ok(ExportReply::Job(Ok(_)))));
+    assert!(matches!(
+        instance.call_export(ExportCall::Job {
+            kind: "one".to_owned(),
+            input: Vec::new()
+        }),
+        Ok(ExportReply::Job(Ok(_)))
+    ));
     assert_eq!(instance.state(), InstanceState::Stopped);
     assert_eq!(observations.lock().unwrap().activates, 0);
     assert_eq!(observations.lock().unwrap().drops, 1);
-    assert!(instance.call_export(ExportCall::Job { kind: "two".to_owned(), input: Vec::new() }).is_err());
+    assert!(instance
+        .call_export(ExportCall::Job {
+            kind: "two".to_owned(),
+            input: Vec::new()
+        })
+        .is_err());
 }
 
 #[test]
@@ -158,11 +208,26 @@ fn malformed_render_trees_and_wrong_export_reply_types_are_traps() {
     let (guest, observations) = fixture();
     let mut instance = PluginInstance::from_guest(Box::new(guest));
     instance.activate(Activation::default()).unwrap();
-    assert_eq!(instance.render(ViewTarget::Panel("view".to_owned()), Area::default()).unwrap_err().code, "trap.invalid-ui-tree");
+    assert_eq!(
+        instance
+            .render(ViewTarget::Panel("view".to_owned()), Area::default())
+            .unwrap_err()
+            .code,
+        "trap.invalid-ui-tree"
+    );
     assert_eq!(observations.lock().unwrap().drops, 1);
     let (guest, _) = fixture();
     let mut migration = PluginInstance::for_migration(Box::new(guest));
-    assert_eq!(migration.call_export(ExportCall::Migrate { from_version: 1, data: Vec::new() }).unwrap_err().code, "trap.abi");
+    assert_eq!(
+        migration
+            .call_export(ExportCall::Migrate {
+                from_version: 1,
+                data: Vec::new()
+            })
+            .unwrap_err()
+            .code,
+        "trap.abi"
+    );
 }
 
 #[cfg(feature = "testing")]
@@ -171,9 +236,12 @@ fn native_fixture_bridge_uses_production_lifecycle_guards() {
     use ilium_plugin_host::testing::native_guest::{NativeGuest, NativeGuestAdapter};
     struct Quiet;
     impl NativeGuest for Quiet {
-        fn on_events(&mut self, _: Vec<Event>) -> Result<Vec<Submission>, Trap> { Ok(Vec::new()) }
+        fn on_events(&mut self, _: Vec<Event>) -> Result<Vec<Submission>, Trap> {
+            Ok(Vec::new())
+        }
     }
-    let mut instance = PluginInstance::from_guest(Box::new(NativeGuestAdapter::new(Box::new(Quiet))));
+    let mut instance =
+        PluginInstance::from_guest(Box::new(NativeGuestAdapter::new(Box::new(Quiet))));
     assert!(instance.on_events(Vec::new()).is_err());
     instance.activate(Activation::default()).unwrap();
     assert!(instance.on_events(Vec::new()).unwrap().is_empty());

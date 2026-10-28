@@ -610,9 +610,9 @@
 </tr>
 <tr>
 <td>ABI-034</td>
-<td>A dedup key MUST be reserved while now_wall_ms - accepted_wall_ms &lt; 600,000, measured on the wall clock and persisted in the journal.</td>
+<td>A dedup key MUST be reserved while now_wall_ms - accepted_wall_ms &lt; 600,000, measured on the wall clock. The table is in memory and a server restart clears it, except that from Phase 5 the keys of <code>send-input</code> and <code>agent-action</code> are persisted in the journal and survive.</td>
 <td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
-<td>repeat a key at 599,999 ms (duplicate) and at 600,000 ms (accepted); restart the server between</td>
+<td>repeat a key at 599,999 ms (duplicate) and at 600,000 ms (accepted); restart the server between (only <code>send-input</code> and <code>agent-action</code> keys, from Phase 5, stay reserved)</td>
 </tr>
 <tr>
 <td>ABI-035</td>
@@ -646,9 +646,9 @@
 </tr>
 <tr>
 <td>ABI-040</td>
-<td>A request-id MUST be unique per plugin side for the whole server run, start at 1 at server start, and never be reused, also across restarts.</td>
+<td>A request-id MUST be unique per plugin side for the whole server run, start at 1 at each server start, and never be reused across plugin-instance restarts within a server run. A server restart begins a new run.</td>
 <td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
-<td>restart a plugin -&gt; new ids exceed the old ones</td>
+<td>restart a plugin instance -&gt; new ids exceed the old ones</td>
 </tr>
 <tr>
 <td>ABI-041</td>
@@ -664,7 +664,7 @@
 </tr>
 <tr>
 <td>ABI-043</td>
-<td>On revocation, synchronous calls needing the grant MUST return err(revoked), pending requests needing it MUST complete failed(revoked) before deactivate(revoked), and other pending call(id) requests MUST be cancelled with the instance.</td>
+<td>On revocation, synchronous calls needing the grant MUST return err(revoked) (reads with no error channel, such as the <code>tree.read</code> functions, instead return <code>none</code> or an empty list), pending requests needing it MUST complete failed(revoked) before deactivate(revoked), and other pending call(id) requests MUST be cancelled with the instance.</td>
 <td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
 <td>revoke http with one http and one fs request pending</td>
 </tr>

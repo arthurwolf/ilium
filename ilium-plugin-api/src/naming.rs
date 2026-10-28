@@ -16,7 +16,11 @@ pub enum Language {
 /// (reference-wit.md section 10).
 pub fn rust_function_name(wit_name: &str) -> String {
     let name = wit_name.trim_start_matches('%').replace('-', "_");
-    if RUST_KEYWORDS.contains(&name.as_str()) { format!("r#{name}") } else { name }
+    if RUST_KEYWORDS.contains(&name.as_str()) {
+        format!("r#{name}")
+    } else {
+        name
+    }
 }
 
 /// `kebab-case` type to Rust `PascalCase` (reference-wit.md section 10).
@@ -28,7 +32,9 @@ pub fn rust_type_name(wit_name: &str) -> String {
 pub fn typescript_function_name(wit_name: &str) -> String {
     let mut words = wit_name.trim_start_matches('%').split('-');
     let mut name = words.next().unwrap_or_default().to_owned();
-    for word in words { name.push_str(&capitalize(word)); }
+    for word in words {
+        name.push_str(&capitalize(word));
+    }
     name
 }
 
@@ -44,7 +50,11 @@ pub fn wrapper_names(function: &WitFunction, language: Language) -> Vec<String> 
         Language::Rust => (rust_function_name(function.name), "_request"),
         Language::TypeScript => (typescript_function_name(function.name), "Request"),
     };
-    let result: String = function.result.chars().filter(|character| !character.is_whitespace()).collect();
+    let result: String = function
+        .result
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
     let is_request = result == "request-id" || result.starts_with("result<request-id,");
     let mut names = vec![plain.clone()];
     if is_request {
@@ -64,14 +74,17 @@ fn capitalize(word: &str) -> String {
 }
 
 fn pascal_name(wit_name: &str) -> String {
-    wit_name.trim_start_matches('%').split('-').map(capitalize).collect()
+    wit_name
+        .trim_start_matches('%')
+        .split('-')
+        .map(capitalize)
+        .collect()
 }
 
 const RUST_KEYWORDS: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
-    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
-    "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super",
-    "trait", "true", "type", "unsafe", "use", "where", "while", "abstract", "become",
-    "box", "do", "final", "gen", "macro", "override", "priv", "try", "typeof", "unsized",
-    "virtual", "yield",
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final", "gen", "macro",
+    "override", "priv", "try", "typeof", "unsized", "virtual", "yield",
 ];

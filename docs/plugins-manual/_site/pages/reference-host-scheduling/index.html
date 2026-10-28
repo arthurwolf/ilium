@@ -725,7 +725,7 @@
 <td>100 ms</td>
 <td>50 ms</td>
 <td>hard</td>
-<td>Trap the provider; the caller's request completes <code>failed(timed-out)</code>; other deferred calls of the provider complete <code>failed(cancelled)</code></td>
+<td>Trap the provider; the caller's request completes <code>failed(internal)</code>; other deferred calls of the provider complete <code>failed(cancelled)</code></td>
 <td>yes</td>
 </tr>
 <tr>
@@ -953,7 +953,7 @@
 <tr>
 <td>A service provider traps or restarts while callers wait</td>
 <td><code>failed(cancelled)</code> for every deferred call, at once</td>
-<td>A breach of the 50 ms provider deadline completes the breaching call as <code>failed(timed-out)</code> and the other deferred calls as <code>failed(cancelled)</code></td>
+<td>A breach of the 50 ms provider deadline completes the breaching call as <code>failed(internal)</code> and the other deferred calls as <code>failed(cancelled)</code></td>
 </tr>
 </tbody>
 </table>
@@ -984,7 +984,7 @@
 </tr>
 <tr>
 <td>Helper call</td>
-<td>A <code>Cancel</code> message is sent; if the helper does not answer within the call's deadline plus 5 ms, it is killed</td>
+<td>A <code>Cancel</code> message is sent; if the helper has not answered 500 ms after the call's deadline, the host kills it and counts one failure (HST-162)</td>
 </tr>
 </tbody>
 </table>
@@ -1077,7 +1077,7 @@
 <tr>
 <td>Deadline expires inside a synchronous import</td>
 <td>Trap when the import returns</td>
-<td><code>host.deadline</code></td>
+<td><code>trap.deadline</code></td>
 </tr>
 <tr>
 <td>System suspend during a call</td>
@@ -1102,7 +1102,7 @@
 <tr>
 <td>Soft call passes the soft deadline plus 100 ms</td>
 <td>Trap</td>
-<td><code>host.deadline</code></td>
+<td><code>trap.deadline</code></td>
 </tr>
 <tr>
 <td>Stream credit window full</td>

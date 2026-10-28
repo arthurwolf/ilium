@@ -95,6 +95,23 @@ where
         self
     }
 
+    /// Change only the presentation identity of a reference row. The caller
+    /// must ensure the replacement remains unique among its siblings.
+    #[must_use]
+    pub fn with_identifier(mut self, identifier: Identifier) -> Self {
+        self.identifier = identifier;
+        self
+    }
+
+    /// Prefix an existing label without dropping its status spans or styling.
+    #[must_use]
+    pub fn with_prefix(mut self, prefix: String) -> Self {
+        if let Some(line) = self.text.lines.first_mut() {
+            line.spans.insert(0, prefix.into());
+        }
+        self
+    }
+
     /// Get a reference to the identifier.
     #[must_use]
     pub const fn identifier(&self) -> &Identifier {

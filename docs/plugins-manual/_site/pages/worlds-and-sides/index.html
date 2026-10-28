@@ -684,7 +684,7 @@
 </tr>
 </tbody>
 </table>
-<p>The <code>hook-handler</code> export is listed in the manifest <code>exports</code> of every side that has hook extensions. The <code>collect</code> kind of extension point needs no export, because entries are data. A plugin that owns a point and runs hooks does not export <code>hook-handler</code> (see <a href="/pages/api-extension-points/">Extension points</a>).</p>
+<p>A side lists <code>hook-handler</code> in its manifest <code>exports</code> when it contributes handlers to hook extension points, its own or another plugin's. Owning a point and running its hooks does not need the export. A plugin that both owns a point and contributes handlers lists <code>hook-handler</code> on each side that contributes handlers; a plugin that only owns points never lists it. The <code>collect</code> kind of extension point needs no export, because entries are data (see <a href="/pages/api-extension-points/">Extension points</a>).</p>
 <h3 id="where-each-side-runs">Where each side runs</h3>
 <p>Each side runs in the process that hosts it: the <code>server</code> side in the session server, the <code>client</code> and <code>scene</code> sides in each attached client, and a CLI entry with <code>requires_server: false</code> in the short-lived CLI process. A T2 or T3 side also has a sandbox helper process. The side's instance, its failure count and its restart timer belong to that process, so a client and the server count failures separately. The full process map is in <a href="/pages/reference-host-architecture/">Host architecture</a>.</p>
 <h2 id="splitting-a-plugin-across-sides">Splitting a plugin across sides</h2>
@@ -918,7 +918,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><a href="/pages/capabilities/">Capabilities and grants</a></li>
 <li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/api-exports/">Exports</a></li>
 <li><a href="/pages/api-ui/">UI</a></li>
 <li><a href="/pages/api-scenes/">Scenes</a></li>

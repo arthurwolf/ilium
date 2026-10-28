@@ -677,7 +677,9 @@ impl ServiceProvider for GlossaryV11 {
 }
 
 impl GlossaryV11 {
-    /// Called when the slow source has an answer. A late call gets `not-found`, which is ignored.
+    /// Called from the plugin's event handler when the slow source reports that it is done
+    /// (in the demo, the `timer-fired` event of a timer started when `waiting` was filled).
+    /// A late call gets `not-found`, which is ignored.
     fn finish(&amp;mut self, call: u64) {
         if let Some(term) = self.waiting.remove(&amp;call) {
             let _ = services::reply(call, Ok(define_in(&amp;term, &quot;en&quot;).to_string()));
@@ -704,6 +706,7 @@ export function defineIn(term: string, lang: string) {
 /** Calls waiting for a slow source, keyed by the host's call number. */
 const waiting = new Map&lt;bigint, string&gt;();
 
+// Wired as `handle` in definePlugin, as in version 1.0.0: definePlugin({ side: 'server', handle: handleCall }).
 export function handleCall(call: ServiceCall): ServiceReply {
   const params = JSON.parse(call.payloadJson) as { term?: string; lang?: string; slow?: boolean };
   if (params.slow === true) {
@@ -713,7 +716,11 @@ export function handleCall(call: ServiceCall): ServiceReply {
   return { tag: 'done', val: JSON.stringify(defineIn(params.term ?? '', params.lang ?? 'en')) };
 }
 
-/** Called when the slow source has an answer. A late call gets `not-found`, which is ignored. */
+/**
+ * Called from the plugin's event handler when the slow source reports that it is done
+ * (in the demo, the `timer-fired` event of a timer started when `waiting` was filled).
+ * A late call gets `not-found`, which is ignored.
+ */
 export function finish(call: bigint): void {
   const term = waiting.get(call);
   if (term === undefined) return;
@@ -725,6 +732,7 @@ export function finish(call: bigint): void {
   }
 }
 </code></pre>
+<p>Nothing calls <code>finish</code> by itself: the plugin's event handler must call it with the call number stored in the pending map when the slow source completes. If it never does, the caller gets <code>timed-out</code> after 30 s, so the handler for the timeout must also remove the entry from the map.</p>
 <p>Points to notice:</p>
 <ul>
 <li>A deferred call has an owner: the pending map. If the provider restarts, the host cancels every deferred call. The caller sees <code>cancelled</code>. Do not try to save the map.</li>
@@ -759,7 +767,7 @@ export function finish(call: bigint): void {
 }
 </code></pre>
 <p><code>requires.services</code> makes the host wait at activation. It waits for a compatible provider, 2 s by default and 5 s at most. If none shows up, the consumer still activates and its first call fails with <code>not-found</code>. Install never fails because a provider is missing.</p>
-<p>The consumer must handle six outcomes. Write them as one pure function, so each can be tested alone.</p>
+<p>The consumer must handle eight outcomes. Write them as one pure function, so each can be tested alone.</p>
 <table>
 <thead>
 <tr>
@@ -795,6 +803,16 @@ export function finish(call: bigint): void {
 <td><code>Glossary did not answer.</code></td>
 </tr>
 <tr>
+<td><code>busy</code></td>
+<td>The caller already has 64 pending calls</td>
+<td><code>Glossary is busy.</code></td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>The provider restarted with the call open</td>
+<td><code>Glossary is not available.</code> (the fallback)</td>
+</tr>
+<tr>
 <td><code>invalid-argument</code> or garbage</td>
 <td>A broken schema or a broken result</td>
 <td><code>Glossary gave an unusable answer.</code></td>
@@ -823,6 +841,8 @@ pub fn describe(term: &amp;str, outcome: Result&lt;String, String&gt;) -&gt; Str
                 &quot;not-found&quot; =&gt; &quot;Glossary is not available.&quot;.to_string(),
                 &quot;unsupported&quot; =&gt; &quot;Glossary is too old.&quot;.to_string(),
                 &quot;timed-out&quot; =&gt; &quot;Glossary did not answer.&quot;.to_string(),
+                &quot;busy&quot; =&gt; &quot;Glossary is busy.&quot;.to_string(),
+                &quot;cancelled&quot; =&gt; &quot;Glossary is not available.&quot;.to_string(),
                 _ =&gt; &quot;Glossary gave an unusable answer.&quot;.to_string(),
             };
         }
@@ -899,6 +919,8 @@ export function describe(term: string, outcome: Outcome): string {
       case 'not-found': return 'Glossary is not available.';
       case 'unsupported': return 'Glossary is too old.';
       case 'timed-out': return 'Glossary did not answer.';
+      case 'busy': return 'Glossary is busy.';
+      case 'cancelled': return 'Glossary is not available.';
       default: return 'Glossary gave an unusable answer.';
     }
   }
@@ -988,7 +1010,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Pending calls</td>
-<td>At most 64 per provider. More give <code>busy</code>.</td>
+<td>At most 64 per caller. More give <code>busy</code>.</td>
 </tr>
 <tr>
 <td>Time</td>
@@ -1030,6 +1052,8 @@ mod tests {
     #[test]
     fn provider_slow() {
         assert_eq!(describe(&quot;x&quot;, err(&quot;timed-out&quot;)), &quot;Glossary did not answer.&quot;);
+        assert_eq!(describe(&quot;x&quot;, err(&quot;busy&quot;)), &quot;Glossary is busy.&quot;);
+        assert_eq!(describe(&quot;x&quot;, err(&quot;cancelled&quot;)), &quot;Glossary is not available.&quot;);
     }
 
     #[test]
@@ -1064,6 +1088,8 @@ test('provider absent, old and slow', () =&gt; {
   expect(describeOutcome('x', err('not-found'))).toBe('Glossary is not available.');
   expect(describeOutcome('x', err('unsupported'))).toBe('Glossary is too old.');
   expect(describeOutcome('x', err('timed-out'))).toBe('Glossary did not answer.');
+  expect(describeOutcome('x', err('busy'))).toBe('Glossary is busy.');
+  expect(describeOutcome('x', err('cancelled'))).toBe('Glossary is not available.');
 });
 test('provider returns garbage', () =&gt; {
   expect(describeOutcome('x', ok('not json'))).toBe('Glossary gave an unusable answer.');
@@ -1133,7 +1159,7 @@ test('long definition is capped', () =&gt; {
 </tr>
 <tr>
 <td><code>busy</code></td>
-<td>The provider has 64 pending calls</td>
+<td>The caller already has 64 pending calls</td>
 <td>Retry later. Cache answers.</td>
 </tr>
 <tr>

@@ -672,7 +672,7 @@ export function releaseAfterClose(workspaceId: bigint): boolean {
 </code></pre>
 <p>After <code>release</code> succeeds, the folder is still on disk. To remove it, the plugin runs <code>git worktree remove &lt;path&gt;</code> through <code>process.run:git</code>, as a separate step. The release record and the folder are two separate things.</p>
 <h3 id="live-sessions-across-projects">Live sessions across projects</h3>
-<p>One Ilium server runs per project session. A workspace plugin often needs to see the others: which sessions are running, and how busy they are. The <code>sessions</code> interface (server side, grant <code>sessions.cross</code>, medium to high risk) lists the user's live sessions and runs one command of the same plugin in another session.</p>
+<p>One Ilium server runs per project session. A workspace plugin often needs to see the others: which sessions are running, and how busy they are. The <code>sessions</code> interface (server side, grant <code>sessions.cross</code>, high risk) lists the user's live sessions and runs one command of the same plugin in another session.</p>
 <pre><code class="language-wit">// Excerpt of ilium:host/sessions in reference-wit
 // ilium:host/sessions
 record live-session { name: string, project: string, socket-id: string, panes: u32, attached-clients: u32, is-self: bool }
@@ -711,7 +711,7 @@ take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
 </tr>
 </tbody>
 </table>
-<p>Rules. The target session must have the same plugin installed and enabled, with <code>sessions.cross</code> granted there. The command must be one that the plugin declares. Kernel commands of another session cannot be reached. The request carries the caller's plugin id and session name, so the receiving command can tell who asked. A target that is not found is <code>not-found</code>; a target without the plugin or grant is <code>not-permitted</code>. A completion can fail with <code>timed-out</code> or <code>network</code>.</p>
+<p>Rules. The target session must have the same plugin installed and enabled, with <code>sessions.cross</code> granted there. The command must be one that the plugin declares. Kernel commands of another session cannot be reached. The request carries the caller's plugin id and session name, so the receiving command can tell who asked. A target that is not found is <code>not-found</code>; a target without the plugin or grant is <code>not-permitted</code>. <code>take-reply</code> has no error channel: a completion that fails with <code>timed-out</code> or <code>network</code> is reported by the outcome of the <code>request-completed</code> event, and <code>take-reply</code> then returns none.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::host::sessions::{self, CrossRequest};
@@ -823,6 +823,21 @@ website      ~/dev/web/site            5        1
 <td><code>register</code></td>
 <td><code>invalid-argument</code></td>
 <td>The branch name is empty or not a valid Git branch name.</td>
+</tr>
+<tr>
+<td><code>send</code></td>
+<td><code>not-found</code></td>
+<td>The target session is not running.</td>
+</tr>
+<tr>
+<td><code>send</code></td>
+<td><code>not-permitted</code></td>
+<td>The target has not got the plugin installed and enabled with <code>sessions.cross</code> granted, or the command is a kernel command.</td>
+</tr>
+<tr>
+<td><code>send</code></td>
+<td><code>invalid-argument</code></td>
+<td>The command is not one that the plugin declares, or <code>arguments-json</code> is not valid JSON.</td>
 </tr>
 <tr>
 <td><code>release</code></td>

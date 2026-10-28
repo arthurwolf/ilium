@@ -47,18 +47,30 @@ pub fn next_instance_state(
     use InstanceInput as I;
     use InstanceState as S;
     let next = match (current, input) {
-        (S::Inactive, I::Activate) | (S::RestartScheduled, I::RestartTimerFired)
-            | (S::WaitingDependency, I::DependencyReady) => S::Activating,
+        (S::Inactive, I::Activate)
+        | (S::RestartScheduled, I::RestartTimerFired)
+        | (S::WaitingDependency, I::DependencyReady) => S::Activating,
         (S::Inactive, I::DependencyMissing) => S::WaitingDependency,
         (S::WaitingDependency, I::DependencyWaitExpired) => S::Inactive,
         (S::Activating, I::ActivateOk) => S::Active,
-        (S::Activating, I::ActivateErr(_)) | (S::Activating | S::Active, I::Trap(_)) => S::RestartScheduled,
+        (S::Activating, I::ActivateErr(_)) | (S::Activating | S::Active, I::Trap(_)) => {
+            S::RestartScheduled
+        }
         (S::RestartScheduled, I::FailureLimitReached) => S::StoppedByFailure,
-        (S::Active, I::Deactivate(reason)) if *reason != DeactivationReason::CrashRestart => S::Deactivating,
+        (S::Active, I::Deactivate(reason)) if *reason != DeactivationReason::CrashRestart => {
+            S::Deactivating
+        }
         (S::Active, I::Disable) => S::Deactivating,
         (S::Deactivating, I::DeactivateDone) => S::Inactive,
         (S::Deactivating, I::DeactivateDoneStopped) => S::Stopped,
-        (S::Inactive | S::WaitingDependency | S::RestartScheduled | S::StoppedByFailure | S::Stopped, I::Disable) => S::Stopped,
+        (
+            S::Inactive
+            | S::WaitingDependency
+            | S::RestartScheduled
+            | S::StoppedByFailure
+            | S::Stopped,
+            I::Disable,
+        ) => S::Stopped,
         (S::Stopped | S::StoppedByFailure | S::Inactive, I::Enable) => S::Inactive,
         _ => return Err(Code::from_static("host.invalid-state")),
     };
@@ -110,7 +122,9 @@ pub fn next_package_state(
         (S::UninstallPending, I::InstanceStopped) => S::NotInstalled,
         (state, I::Revoked) if state != S::NotInstalled => S::DisabledBlocked,
         (state, I::RefuseAtLoad(_)) if state != S::NotInstalled => S::RefusedAtLoad,
-        (state, I::RequestUninstall) if !matches!(state, S::NotInstalled | S::UninstallPending) => S::UninstallPending,
+        (state, I::RequestUninstall) if !matches!(state, S::NotInstalled | S::UninstallPending) => {
+            S::UninstallPending
+        }
         _ => return Err(Code::from_static("host.invalid-state")),
     };
     Ok(next)
@@ -145,7 +159,8 @@ impl RestartPolicy {
     /// Records a failure at `now_ms` and decides (reference-runtime-model.md "12. Failures and restart").
     pub fn on_failure(&mut self, now_ms: u64) -> RestartDecision {
         // The boundary is exclusive: a failure exactly ten minutes old expires.
-        self.failures_ms.retain(|time| *time <= now_ms && now_ms - *time < FAILURE_WINDOW_MS);
+        self.failures_ms
+            .retain(|time| *time <= now_ms && now_ms - *time < FAILURE_WINDOW_MS);
         self.failures_ms.push(now_ms);
         match self.failures_ms.len() {
             1 => RestartDecision::RestartAfterMs(FIRST_RESTART_DELAY_MS),
@@ -156,7 +171,10 @@ impl RestartPolicy {
 
     /// Failures inside the window ending at `now_ms` (reference-runtime-model.md "12. Failures and restart").
     pub fn failures_in_window(&self, now_ms: u64) -> u32 {
-        self.failures_ms.iter().filter(|time| **time <= now_ms && now_ms - **time < FAILURE_WINDOW_MS).count() as u32
+        self.failures_ms
+            .iter()
+            .filter(|time| **time <= now_ms && now_ms - **time < FAILURE_WINDOW_MS)
+            .count() as u32
     }
 
     /// Forgets every failure, after a manual enable (reference-runtime-model.md "12. Failures and restart").

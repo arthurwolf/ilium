@@ -69,9 +69,9 @@ The store shows cached results with their age ("Updated 3 days ago"). Install of
 
 | Case | Result |
 |---|---|
-| Two registries list the same id | The default registry wins. The detail view names the source. |
+| Two registries list the same id | The registry listed first in the configuration wins. The detail view names the source. |
 | Search has no match | The view shows "No plugins found" and keeps the filters. |
-| Policy blocks a plugin | The row shows "Blocked by your administrator". |
+| Policy blocks a plugin | The row shows "Blocked by policy". |
 
 ## See also
 

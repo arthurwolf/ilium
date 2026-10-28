@@ -407,7 +407,7 @@
 <li><strong>Grant <code>fs.read:project</code></strong> for the folder passed as <code>repository</code>.</li>
 <li><strong>Grant <code>fs.write:worktrees</code></strong> (risk H) for the folder passed as <code>path</code>. The <code>worktrees</code> scope is rooted at the setting <code>workspace.worktree_root</code>. Its default is <code>&lt;parent of the project&gt;/&lt;project name&gt;.worktrees/</code>.</li>
 <li><strong>Side and language.</strong> Server side only, in Rust or TypeScript. The client world has no <code>workspace</code> import.</li>
-<li><strong>Tier.</strong> The grant is H for every tier. A T1 bundled plugin is asked once, at its first activation. A T2 or T3 plugin shows it in the install review dialog, unchecked.</li>
+<li><strong>Tier.</strong> The grant is H for every tier. A T1 bundled plugin is asked at its first activation, and again at each following server start after <code>Not now</code>, for three prompts in total. A T2 or T3 plugin shows it in the install review dialog, unchecked.</li>
 </ul>
 <h3 id="grant-syntax">Grant syntax</h3>
 <p>The grant takes no argument. The install check rejects the other forms with these errors:</p>
@@ -667,7 +667,7 @@ release: func(workspace: u64) -&gt; result&lt;_, plugin-error&gt;;
 
 </figure>
 
-<p>A T1 bundled plugin is activated first without its high-risk grants. The first activation shows one prompt, "Plugin <name> asks for:", with a checkbox for <code>workspace.manage</code> and the buttons <code>Allow selected</code> and <code>Not now</code>. <code>Not now</code> asks again at the next server start, at most three times. After that the user grants it from Settings &gt; Plugins.</p>
+<p>A T1 bundled plugin is activated first without its high-risk grants. The first activation shows one prompt, "Plugin <name> asks for:", with a checkbox for <code>workspace.manage</code> and the buttons <code>Allow selected</code> and <code>Not now</code>. <code>Not now</code> asks again at the next server start; there are three prompts in total. After that the user grants it from Settings &gt; Plugins.</p>
 <p>The user can also inspect and revoke the grant from the command line:</p>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin grants com.example.worktrees
 com.example.worktrees 0.1.0, server side
@@ -755,7 +755,7 @@ export function releaseWorktree(workspaceId: bigint): void {
 <li><strong>Deleting the folder by hand.</strong> The kernel does not notice. The record stays until the plugin releases it.</li>
 </ul>
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code> use this capability:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a> use this capability:</p>
 <ul>
 <li>67 Agent in a new Git worktree: <code>workspace.manage</code>, <code>process.run:git</code>, <code>fs.write:worktrees</code>.</li>
 <li>68 Agent in an existing worktree: <code>workspace.manage</code>, <code>process.run:git</code>.</li>

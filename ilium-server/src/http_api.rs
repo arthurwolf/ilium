@@ -147,6 +147,7 @@ async fn create_agent(
             parent_group: ROOT_ID,
             project_override: Some(project_path.clone()),
             provider: request.agent_type.provider(),
+            custom_agent: None,
             spec,
             initial_input: Some(request.prompt),
             wait_for_prompt: true,

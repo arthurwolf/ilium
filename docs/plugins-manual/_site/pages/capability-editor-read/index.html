@@ -432,7 +432,7 @@
 <ul>
 <li><code>editor.read</code></li>
 </ul>
-<p>The invalid form <code>editor.read:project</code> fails the build with this text:</p>
+<p>The invalid form <code>editor.read:project</code> fails the build and the install with the code <code>manifest.grant-argument</code> and this text:</p>
 <p><code>capability "editor.read" takes no argument (got "editor.read:project")</code></p>
 <p>Buffers are chosen by id or by pane, not by a grant argument. A file in the project is read through a file scope such as <code>fs.read:project</code>, which is a different grant.</p>
 <h2 id="the-surface">The surface</h2>
@@ -771,7 +771,7 @@ missing. The editor itself works without any plugin.</p>
 <li><a href="/pages/capability-panes-read/">panes.read</a> for the pane of a buffer.</li>
 <li><a href="/pages/primitives-editor/">primitives: editor</a> for the primitive as a whole.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the bindings.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes.</li>
 <li><a href="/pages/events-and-intents/">Events and intents</a> for the event delivery rules.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>

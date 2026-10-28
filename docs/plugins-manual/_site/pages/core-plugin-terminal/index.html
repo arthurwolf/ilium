@@ -405,7 +405,7 @@
 <li>Pane titles set by the terminal with OSC sequences (Titles and instructions, When a title is applied).</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/05-screen-transfer.gif" alt="The screen of one terminal pane is pasted into another pane" loading="lazy"><figcaption>Screen transfer. The visible screen and history of the source pane arrive in the target pane as one paste.</figcaption></figure>
+<figure><img src="/assets/demos/05-screen-transfer.gif" alt="Ilium transfers a complete visible report to the local receiver in the terminal on the right" loading="lazy"><figcaption>Screen transfer sends the visible report to the terminal on the right as one bracketed paste. Both terminals run local fixtures; the receiver verifies the bytes.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -445,7 +445,7 @@
     ],
     &quot;client&quot;: [
       &quot;terminal.read-screen&quot;, &quot;editor.edit&quot;,
-      &quot;commands.invoke:ilium.core.editor/*&quot;, &quot;ui.panels&quot;
+      &quot;commands.invoke:ilium.core.editor/*&quot;, &quot;ui.panels&quot;, &quot;settings.write-kernel:terminal&quot;
     ]
   },
   &quot;contributes&quot;: {
@@ -463,7 +463,7 @@
   &quot;name&quot;: &quot;Terminal&quot;,
   &quot;version&quot;: &quot;0.1.0&quot;,
   &quot;publisher&quot;: &quot;Ilium&quot;,
-  &quot;description&quot;: &quot;The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and their signals, screen reads, scrollback history, typed and pasted input, clickable links, pane titles from the terminal and scr&quot;,
+  &quot;description&quot;: &quot;The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and signals, screen reads, scrollback history, input, clickable links, pane titles and screen transfer.&quot;,
   &quot;license&quot;: &quot;MIT&quot;,
   &quot;server&quot;: {
     &quot;entry&quot;: &quot;server.wasm&quot;,
@@ -492,7 +492,7 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;event:terminal-screen-changed&quot;,
+    &quot;event:screen-changed&quot;,
     &quot;startup&quot;
   ],
   &quot;contributes&quot;: {
@@ -593,7 +593,7 @@ export const { lifecycle, handler } = definePlugin({
 <p>OSC titles rename the pane unless the user named it. On <code>pane-title-changed</code> with <code>source: osc</code>, the server submits <code>rename-node</code> with <code>source: inferred</code>, so a manual name always wins. Pages: <a href="/pages/primitives-terminal/">terminal primitive</a>, <a href="/pages/capability-panes-read/">panes.read</a>, <a href="/pages/api-events/">events</a> and <a href="/pages/api-intents/">intents</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
-use ilium_plugin_sdk::types::tree::TitleOrigin;
+use ilium_plugin_sdk::types::tree::{TitleOrigin, TitleSource};
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
 
 fn on_title(event: Event) -&gt; Option&lt;Submission&gt; {
@@ -603,6 +603,7 @@ fn on_title(event: Event) -&gt; Option&lt;Submission&gt; {
         Intent::RenameNode(RenameNodeSpec {
             node: change.node,
             title: change.title,
+            source: TitleSource::Inferred,
             expected_revision: None,
         }),
         format!(&quot;osc-title-{}&quot;, change.node),
@@ -643,6 +644,9 @@ fn transfer(source: NodeId, target: NodeId) -&gt; Option&lt;Submission&gt; {
             stages: vec![],
             raw: None,
             mouse: None,
+            if_current: None,
+            lock_user_input: false,
+            journal: false,
         }),
         format!(&quot;transfer-{source}-{target}-{}&quot;, screen.revision),
     ))
@@ -814,10 +818,10 @@ impl Handler for PromptWatch {
 </ul>
 <p><strong>Topics</strong> (list under <code>contributes.topics.subscribes</code>):</p>
 <ul>
-<li><code>ilium.core.terminal/screen-changed</code>: { pane, rows } when visible rows change, at most 10 per second</li>
+<li><code>ilium.core.terminal/screen-changed</code>: { pane, first-row, last-row, revision } when visible rows change, at most 10 per second</li>
 </ul>
 <p>Link detectors from <code>contributes.link_detectors</code> feed the <code>link-actions</code> point.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.terminal"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.terminal"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-open-ticket-to-the-right-click-menu-on-a-link-of-kind-ticket">Example: Adds <code>Open ticket</code> to the right-click menu on a link of kind <code>ticket</code></h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

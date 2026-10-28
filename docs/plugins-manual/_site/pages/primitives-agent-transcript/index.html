@@ -393,7 +393,7 @@
 <p class="crumbs"><b>Pane primitives</b></p>
 <h1>Agent transcript and signals</h1>
 
-<p>The base agent primitive tells a plugin which agent runs in a pane and what it is doing. The primitive also gives the facts a cost meter, a context gauge or a handoff tool needs: the model in use, the prompt epoch, the typed transcript of the conversation, and two events, <code>signal-changed</code> and <code>agent-model-changed</code>. The host parses the agent's session file. The plugin never receives a file path to read.</p>
+<p>The base agent primitive tells a plugin which agent runs in a pane and what it is doing. The primitive also gives the facts a cost meter, a context gauge or a handoff tool needs: the model in use, the prompt epoch, the typed transcript of the conversation, and two events, <code>signal-changed</code> and <code>agent-model-changed</code>. The host parses the agent's session file.</p>
 <p>This page extends <a href="/pages/primitives-agent/">Agent primitive</a>.</p>
 <h3 id="you-will-need">You will need</h3>
 <table>
@@ -468,7 +468,7 @@ take-transcript: func(request: request-id) -&gt; option&lt;list&lt;transcript-tu
 <h3 id="model-and-epoch">Model and epoch</h3>
 <p><code>model</code> returns the name the agent reports, the provider when known, the context window in tokens when known, and <code>source</code>, which says where the host found it: the agent's status line, its transcript, or the signature's default. A model change fires <code>agent-model-changed { pane, model }</code>, coalesced per pane. The prompt epoch is the counter that <code>send-input</code> compares against (see <a href="/pages/primitives-terminal-input/">Terminal input</a>); the call replaces a read-and-guess pattern. A successful <code>send-input</code> on an agent pane returns the new epoch in its outcome.</p>
 <h3 id="signals">Signals</h3>
-<p>A signature can declare named signals that the host extracts from the agent's status line or screen: context percentage, session cost, the rate-limit reset time. <code>signal-changed { pane, signal, value }</code> carries the signal name and its value as a string. The event is coalesced by pane and signal, so a rapidly changing percentage arrives as its latest value. Signal names come from the signature, so a plugin lists the names it cares about in its own configuration.</p>
+<p>A signature can declare named signals that the host extracts from the agent's status line or screen: context percentage, session cost, the rate-limit reset time. <code>signal-changed { pane, signal, value }</code> carries the signal name and its value as a string. The event is coalesced by pane and signal, so a rapidly changing percentage arrives as its latest value. Signal names come from the signature, so a plugin keeps the names it cares about in its own settings (for example a <code>list-editor</code> row) and compares them with <code>signal.signal</code> in the handler. The host delivers only signals that a signature declares; a name that no signature declares is ignored and never delivered, and it raises no error.</p>
 <h3 id="the-transcript">The transcript</h3>
 <p><code>transcript</code> is a request. The host reads the session file in the background, parses it into turns, and answers through <code>request-completed</code>; then <code>take-transcript</code> returns the turns, oldest first. <code>last-turns</code> is at most 512 and <code>max-bytes</code> at most 4 MiB. When the result is larger, the oldest turns are dropped. A turn has a role, its text, the tool name for a tool turn, the time when the file records one, and the token count when the file records one. A signature without a known file format returns <code>unsupported</code>; a pane with no session yet returns <code>not-found</code>.</p>
 <figure>
@@ -500,10 +500,10 @@ for event in batch {
         Event::SignalChanged(signal) if signal.signal == &quot;context-percent&quot; =&gt; {
             self.context.insert(signal.pane, signal.value);
         }
-        Event::AgentActivityChanged(change) if change.activity == AgentActivity::Idle =&gt; {
+        Event::AgentActivityChanged(change) if change.current == AgentActivity::Idle =&gt; {
             match agent::transcript(TranscriptQuery {
-                pane: change.pane, last_turns: 20, max_bytes: 256 * 1024 }) {
-                Ok(request) =&gt; { self.pending.insert(request, change.pane); }
+                pane: change.node, last_turns: 20, max_bytes: 256 * 1024 }) {
+                Ok(request) =&gt; { self.pending.insert(request, change.node); }
                 Err(error) =&gt; log::log(Level::Warn, &amp;error.message),
             }
         }
@@ -564,8 +564,8 @@ const tokens = turns.reduce((sum, turn) =&gt; sum + (turn.tokens ?? 0), 0);
 </tr>
 <tr>
 <td>completion</td>
-<td><code>io</code>, <code>quota-exceeded</code></td>
-<td>the file could not be read, or the result was too large to hold</td>
+<td><code>io</code></td>
+<td>the file could not be read</td>
 </tr>
 <tr>
 <td>any</td>

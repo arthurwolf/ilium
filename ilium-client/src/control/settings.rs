@@ -1473,7 +1473,7 @@ mod tests {
         app.config_dir = Some(directory.path().to_path_buf());
         set_setting(&mut app, "attention.mode", json!("Instant-Only")).unwrap();
         set_setting(&mut app, "attention.press_sorts", json!(false)).unwrap();
-        assert!(!app.attention_settings.large_buttons);
+        assert!(app.attention_settings.large_buttons);
         set_setting(&mut app, "attention.large_buttons", json!(true)).unwrap();
         assert!(app.attention_settings.large_buttons);
         assert!(set_setting(&mut app, "attention.large_buttons", json!("yes")).is_err());

@@ -29,14 +29,15 @@ write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-erro
 | Function | Rust | TypeScript | Returns | Error codes |
 |---|---|---|---|---|
 | `get` | `get(bucket, key) -> Option<Vec<u8>>` | `get(bucket, key): Uint8Array \| undefined` | the value, or nothing | none |
-| `put` | `put(bucket, key, &[u8]) -> Result<(), PluginError>` | `put(bucket, key, Uint8Array): void`, throws | nothing | `invalid-argument`, `quota-exceeded` |
-| `remove` | `remove(bucket, key)` | `remove(bucket, key): void` | nothing | none |
+| `put` | `put(bucket, key, &[u8]) -> Result<(), PluginError>` | `put(bucket, key, Uint8Array): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io` (`no-space`, [LIF-119]), `conflict` (`stale-data-version`, [LIF-121]) |
+| `remove` | `remove(bucket, key) -> Result<(), PluginError>` | `remove(bucket, key): void`, throws | nothing | `conflict` (`stale-data-version`, [LIF-121]) |
+| `lease` | `lease(key, ttl_millis) -> bool` | `lease(key, ttlMillis): boolean` | true for the one caller that may refresh a `shared` entry | none; a caller that does not win the lease gets false, which is not an error |
 | `keys` | `keys(bucket, prefix) -> Vec<String>` | `keys(bucket, prefix): string[]` | matching keys | none |
-| `write-batch` | `write_batch(bucket, &[Entry]) -> Result<(), PluginError>` | `writeBatch(bucket, entries): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `conflict` |
+| `write-batch` | `write_batch(bucket, &[Entry]) -> Result<(), PluginError>` | `writeBatch(bucket, entries): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io` (`no-space`, [LIF-119]), `conflict` (`stale-data-version`, [LIF-121]) |
 
-The bucket type is the enum `Bucket` with the variants `Global`, `Project` and `Session` in Rust. In TypeScript it is the string `'global'`, `'project'` or `'session'`. All four functions are synchronous: each call returns when the host has applied it, with no request id to wait for.
+The bucket type is the enum `Bucket` with the variants `Global`, `Project`, `Session` and `Shared` in Rust. In TypeScript it is the string `'global'`, `'project'`, `'session'` or `'shared'` (see [The shared bucket and the lease](#the-shared-bucket-and-the-lease)). All six functions (`get`, `put`, `remove`, `keys`, `write-batch` and `lease`) are synchronous: each call returns when the host has applied it, with no request id to wait for.
 
-`put` also returns the universal codes `not-permitted`, `revoked` and `internal` (see [errors and limits](/pages/errors-and-limits/)). In practice these appear only when the grant is revoked during a call.
+`put` also returns the universal codes `not-permitted`, `revoked` and `internal` (see [errors and limits](/pages/reference-errors-and-limits/)). In practice these appear only when the grant is revoked during a call.
 
 ### Buckets
 
@@ -46,7 +47,7 @@ The bucket type is the enum `Bucket` with the variants `Global`, `Project` and `
 | `project` | every session that opens the same canonical project directory | until the project's data is deleted | counters, last-run markers, per-project state |
 | `session` | only the one named session | deleted when that session is deleted | cursors, pane state |
 
-A session's name comes from its file under `.ilium/sessions/`. The bare `ilium` command owns the `default` session. When a pane's kind declares `persist: "storage"`, the kernel deletes that pane's session keys under `pane/<node-id>/` when the pane closes.
+A session's name comes from its file under `.ilium/sessions/`. The bare `ilium` command owns the `default` session. The kernel does not delete a plugin's storage keys when a pane closes; a plugin that keys data by pane removes it itself.
 
 ### Rules
 
@@ -252,12 +253,16 @@ formats them. The key, values and times are placeholders.
 When a plugin is uninstalled, the user chooses whether to keep or delete its data and storage. A
 deleted session bucket goes with its session.
 
+**Export before you remove.** `ilium plugin export <id> --out <file>` copies a plugin's data, buckets and settings values into one archive, and `ilium plugin import <id> --from <file>` restores it on another machine. Details: LIF-290 to LIF-292 in [Install, update and uninstall](/pages/reference-install-update-uninstall/).
+
 ### Errors
 
 | Code | Raised by | Cause | Action |
 |---|---|---|---|
 | `invalid-argument` | `put` | key empty or over 256 bytes, or value over 1 MiB | fix the call; nothing is written |
-| `quota-exceeded` | `put` | the bucket or the disk limit (`data` plus `cache`) would be passed | remove keys or shrink values, then retry |
+| `quota-exceeded` | `put` | the bucket's size (key bytes plus value bytes) would pass its quota; a full disk is `io` (`no-space`), not this code | remove keys or shrink values, then retry |
+| `io` (`no-space`) | `put`, `write-batch` | the disk is full; never reported as `quota-exceeded` ([LIF-119]) | free disk space, then retry |
+| `conflict` (`stale-data-version`) | `put`, `remove`, `write-batch` | the instance is older than the bucket's data version stamp ([LIF-121]) | restart the plugin on the current version |
 
 A value over 1 MiB is always `invalid-argument`, never `quota-exceeded`. This lets a plugin tell a bad
 call from a full bucket. The host never truncates a value.
@@ -324,7 +329,7 @@ export function indexBytes(): Uint8Array | undefined {
 }
 ```
 
-Errors: `put` into `shared` returns `quota-exceeded` only when one value alone is larger than `shared_cache_mib`; otherwise the oldest entries go. The key rules are those of the other buckets.
+Errors: the 1 MiB value cap applies to `shared` like every bucket, so a larger value is `invalid-argument`. `shared` never returns `quota-exceeded` for size: when the bucket exceeds `shared_cache_mib`, the oldest entries go. The key rules are those of the other buckets.
 
 ### See also
 
@@ -332,4 +337,4 @@ Errors: `put` into `shared` returns `quota-exceeded` only when one value alone i
 - [Data migration](/pages/guide-data-migration/) for changing the layout of stored data between versions.
 - [settings](/pages/api-settings/) for values that the user edits.
 - [Always-granted capabilities](/pages/capability-always-granted/) for the other imports that need no grant.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the full limit table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the full limit table.

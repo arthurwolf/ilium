@@ -545,10 +545,10 @@
 <li>[USR-103] Ilium MUST refuse a request to a host that the plugin has no grant for, including a redirect target. Test: redirect from a granted host to an ungranted host and assert <code>not-permitted</code>.</li>
 </ul>
 <h3 id="what-ilium-itself-sends">What Ilium itself sends</h3>
-<p>Ilium does not contact any server to check, list, download or update plugins. Installing a plugin does not use the network. Reading a package does not use the network. Verifying a signature does not use the network, because the keys you trust are stored on your machine.</p>
+<p>Ilium does not contact any server on its own to check, list, download or update plugins. The only exception is a registry you set up yourself: the store then fetches that registry's metadata when you open it (see <a href="/pages/user-plugin-store/">the plugin store</a>), and nothing else is fetched. Installing a plugin does not use the network. Reading a package does not use the network. Verifying a signature does not use the network, because the keys you trust are stored on your machine.</p>
 <p>Ilium's own features that use the network are unchanged: for example, AI providers you configure. Core plugins contact the same services as before. Their page in Settings lists them. See <a href="/pages/core-plugin-inference/">Inference providers</a>.</p>
 <ul>
-<li>[USR-062] Install, verify, update, uninstall and list MUST NOT use the network. Test: run each in a network namespace without interfaces and assert success.</li>
+<li>[USR-062] Install, verify, update, uninstall and list of local packages MUST NOT use the network; only the store's registry fetch from a registry the user configured (the refresh sequence of PKG-370 in <a href="/pages/reference-registry/">the registry reference</a>) may, and never with no registry configured (PKG-532). Test: run each in a network namespace without interfaces and assert success.</li>
 </ul>
 <h3 id="what-is-stored-on-your-machine">What is stored on your machine</h3>
 <table>
@@ -567,7 +567,7 @@
 </tr>
 <tr>
 <td>Your permissions and answers</td>
-<td>one file per plugin</td>
+<td><code>grants.json</code> and <code>consents.json</code>, one file each for all plugins</td>
 <td>you</td>
 </tr>
 <tr>
@@ -587,7 +587,7 @@
 </tr>
 <tr>
 <td>Audit log</td>
-<td>only if your administrator turned it on</td>
+<td>always on; nothing to enable</td>
 <td>you and the administrator</td>
 </tr>
 </tbody>
@@ -613,7 +613,7 @@
 </tr>
 <tr>
 <td>A plugin's logs</td>
-<td><code>--purge</code>, or wait: logs of an uninstalled plugin are deleted after 7 days</td>
+<td><code>--purge</code></td>
 </tr>
 <tr>
 <td>One project's plugin data</td>
@@ -621,7 +621,7 @@
 </tr>
 <tr>
 <td>My trusted publisher keys</td>
-<td><code>ilium plugin trust remove &lt;publisher&gt;</code></td>
+<td><code>ilium plugin trust remove &lt;key_id&gt;</code></td>
 </tr>
 <tr>
 <td>Everything</td>
@@ -629,9 +629,9 @@
 </tr>
 </tbody>
 </table>
-<p><code>--purge</code> also leaves a note so that other projects delete the plugin's project and session data the next time you open them. A plugin that was uninstalled without <code>--purge</code> leaves its data inert: no other plugin can read it, and the same plugin reads it again if you reinstall.</p>
+<p><code>--purge</code> also records a purge note in Ilium's data folder (<code>&lt;data&gt;/plugins/purged.json</code>, holding the plugin id and the purge time). The next time you open a project that holds data of that plugin, Ilium deletes the plugin's project and session data and then removes that project from the note. A project you never reopen keeps its data, and the note stays until every known project has been cleaned. A plugin that was uninstalled without <code>--purge</code> leaves its data inert: no other plugin can read it, and the same plugin reads it again if you reinstall.</p>
 <h3 id="core-plugins-and-ai-providers">Core plugins and AI providers</h3>
-<p>Core plugins are made by the Ilium project and follow the same permission rules for high-risk abilities. Some of them send data to services you configure: the Inference plugin sends prompts to the AI provider you pick, the Voice plugin may use a speech service you set up, and the Cost plugin may read agents' usage files. These behave as documented in the user documentation. A third-party plugin that asks for <code>inference</code> uses the same providers and the same privacy controls: the provider you choose for each purpose, and the setting that decides whether file names, paths and terminal text may be included in a prompt.</p>
+<p>Core plugins are made by the Ilium project and follow the same permission rules for high-risk abilities. Some of them send data to services you configure: the Inference plugin sends prompts to the AI provider you pick, the Voice plugin may use a speech service you set up (audio is sent only when that provider is remote, stays in memory, and transcripts are dropped when the voice session ends; see <a href="/pages/core-plugin-voice/#data-and-privacy">Voice data and privacy</a>), and the Cost plugin may read agents' usage files. These behave as documented in the user documentation. A third-party plugin that asks for <code>inference</code> uses the same providers and the same privacy controls: the provider you choose for each purpose, and the AI admission gate, which checks every request against the <code>purpose</code> its caller named and records it in the privacy log (see <a href="/pages/capability-inference/#risk-and-privacy-rules">Inference</a>). No separate setting exists for file names, paths or terminal text: a plugin sees them only through its own read grants, and sends them only if it puts them in a request.</p>
 <h3 id="errors-and-edge-cases">Errors and edge cases</h3>
 <table>
 <thead>
@@ -647,7 +647,7 @@
 </tr>
 <tr>
 <td>You revoke a network grant during a request</td>
-<td>The request ends with <code>revoked</code></td>
+<td>The request completes as <code>failed(revoked)</code></td>
 </tr>
 <tr>
 <td>The audit log</td>

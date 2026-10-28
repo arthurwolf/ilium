@@ -480,7 +480,7 @@
 </tbody>
 </table>
 <h2 id="surface">Surface</h2>
-<p>The grant unlocks four call forms and one intent. The Rust and TypeScript wrappers wait for the outcome, so most plugins use them. The raw forms return the request id at once, and the outcome arrives later as an event.</p>
+<p>The grant unlocks five call forms and one intent. The Rust and TypeScript wrappers wait for the outcome, so most plugins use them. The raw forms return the request id at once, and the outcome arrives later as an event.</p>
 <table>
 <thead>
 <tr>
@@ -663,7 +663,7 @@ async function refreshGitStatus(): Promise&lt;boolean&gt; {
 <tr>
 <td><code>busy</code></td>
 <td>The plugin's pending request limit is full.</td>
-<td>Retry after a short delay. See <a href="/pages/errors-and-limits/">errors-and-limits</a> for the limits.</td>
+<td>Retry after a short delay. See <a href="/pages/reference-errors-and-limits/">errors-and-limits</a> for the limits.</td>
 </tr>
 <tr>
 <td><code>quota-exceeded</code></td>
@@ -700,7 +700,7 @@ async function refreshGitStatus(): Promise&lt;boolean&gt; {
 <p>When a call is refused, the palette shows nothing new. The refusal goes to the plugin log, which the user reads with <code>ilium plugin logs</code>.</p>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example-notes
 <span class="t-warn">warn</span> 2026-10-11 09:14:02 invoke refused, command outside grant
-{"type":"refusal","capability":"commands.invoke:ilium.compaction/compact",
+{"type":"refusal","grant":"commands.invoke:ilium.compaction/compact",
  "function":"commands.invoke","reason":"not-granted"}
 </pre>
 

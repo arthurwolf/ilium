@@ -71,7 +71,7 @@ Every `u64` is a `bigint` in TypeScript. The `path` argument is an `fs-path` rec
 - **Quota.** `watches` defaults to 64 per plugin. A recursive watch counts once, however many folders it covers. The manifest may request another value under `limits`, clamped to 256 for a T1 bundled plugin and 64 for T2 and T3. A `watch` beyond the quota returns `quota-exceeded`.
 - **Duplicates.** A second `watch` on the same folder returns a new id and counts separately. Each id sends its own event.
 - **Lifetime.** A watch ends on `unwatch`, when its instance deactivates, restarts or is disabled, or when the plugin loses the grant. Ids do not survive a restart, so the plugin starts its watches again in `activate`.
-- **Delivery.** `fs-changed` reaches only the instance that called `watch`. Events of one watch keep their order, and `fs-changed` is never dropped under the drop policy.
+- **Delivery.** `fs-changed` reaches only the instance that called `watch`. Events of one watch keep their order, and `fs-changed` is coalesced by watch: events of the same watch that are still pending merge, so a slow plugin sees fewer events with the newest paths and none is reported in `events-dropped` (the coalesced delivery policy defined in [events](/pages/api-events/)).
 
 <figure>
 <svg viewBox="0 0 400 280" role="img" aria-label="Watch flow from the watch call to one fs-changed event">
@@ -100,14 +100,14 @@ Every `u64` is a `bigint` in TypeScript. The `path` argument is an `fs-path` rec
 
 ### Risk and tier rules
 
-- `fs.watch:<scope>` is a normal-risk grant. The API permission table does not mark it as high risk.
+- `fs.watch:<scope>` is a normal-risk grant, except `fs.watch:agent-sessions:<agent>`, which is high risk like the `agent-sessions` scopes of [fs.read](/pages/capability-fs-read/): the user checks it by hand and a T1 plugin is asked at first activation.
 - `fs.watch:path:` with a literal absolute path is high risk. The user checks it by hand.
 - A T1 bundled plugin receives a normal grant up to its manifest ceiling. A T2 or T3 package lists the grant in the install dialog, checked by default.
 - Revoking the grant withdraws every watch of the plugin. Calls in flight return `revoked`. The plugin receives `deactivate(revoked)` and is activated again with the reduced grant set. A later `watch` returns `not-permitted`.
 
 ### What the user sees
 
-The install and permission dialog shows one row for the grant. The row text is "Watch files in the project folder for changes", followed by the grant string. The row is grey-dotted, as every row of that dialog is.
+The install and permission dialog shows one row for the grant. The row text is "Watches files in this project", followed by the grant string. The row is grey-dotted, as every row of that dialog is.
 
 <figure>
 <pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
@@ -240,7 +240,7 @@ export const { lifecycle, handler } = definePlugin({
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md` that request a watch on the project:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/) that request a watch on the project:
 
 - 22 File explorer and picker: `fs.watch:project`, to refresh the tree.
 - 62 Chatroom: `fs.watch:project`, to notice new coordination messages.

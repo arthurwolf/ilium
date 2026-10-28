@@ -267,8 +267,16 @@ pub struct RowModel {
 
 impl RowModel {
     pub fn new(settings: &AnimationSettings, context: &RowContext) -> Self {
-        let rows = rows(settings, context);
         let scene_controls = settings.scene_controls();
+        Self::with_scene_controls(settings, context, &scene_controls)
+    }
+
+    fn with_scene_controls(
+        settings: &AnimationSettings,
+        context: &RowContext,
+        scene_controls: &[Control],
+    ) -> Self {
+        let rows = rows_with_scene_controls(settings, context, scene_controls);
         let controls: Vec<_> = rows
             .iter()
             .map(|row| match row {
@@ -285,7 +293,7 @@ impl RowModel {
             .zip(&controls)
             .map(|(row, control)| {
                 control.as_ref().map_or_else(
-                    || row.view(settings, &scene_controls, context),
+                    || row.view(settings, scene_controls, context),
                     |control| control_view(row, settings.kind, control),
                 )
             })
@@ -417,8 +425,16 @@ impl RowModel {
     }
 }
 
-/// The ordered row list for `settings`.
+#[cfg(test)]
 pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<AnimationRow> {
+    rows_with_scene_controls(settings, context, &settings.scene_controls())
+}
+
+fn rows_with_scene_controls(
+    settings: &AnimationSettings,
+    context: &RowContext,
+    scene_controls: &[Control],
+) -> Vec<AnimationRow> {
     let kind = settings.kind;
     let rendering_kind = context.effective_kind.unwrap_or(kind);
     let mut rows: Vec<AnimationRow> = AnimationKind::ALL
@@ -461,9 +477,8 @@ pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<Animation
     }
     // The selected animation's own settings.
     rows.extend(
-        settings
-            .scene_controls()
-            .into_iter()
+        scene_controls
+            .iter()
             .map(|control| AnimationRow::SceneControl(control.id)),
     );
     if kind == AnimationKind::OpenStreetMap
@@ -887,7 +902,11 @@ mod overhaul_tests {
                 ..Default::default()
             };
             let scene_controls = settings.scene_controls();
-            let model = RowModel::new(&settings, &RowContext::default());
+            // GPU probing may finish between two reads. Compare against the
+            // exact control snapshot supplied to the model, including disabled
+            // options, rather than a second observation of process-wide state.
+            let model =
+                RowModel::with_scene_controls(&settings, &RowContext::default(), &scene_controls);
             for (index, row) in model.rows().iter().enumerate() {
                 let expected = match row {
                     AnimationRow::Common(id) => settings.common_control(id),

@@ -2,6 +2,7 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
+pub(crate) use connection::SERVER_EVENT_RETIREMENT_BYTES;
 pub(crate) mod direct_events;
 pub(crate) use direct_events::DirectEventSender;
 pub(crate) use direct_events::EventReply;
@@ -268,8 +269,11 @@ mod tests {
     async fn full_connection_registry_preserves_queued_bytes_then_reaps_and_reaccepts() {
         let listener = TestListener::start(1).await;
         let mut admitted = listener.connect().await;
+        let initial_events = attach(&mut admitted).await;
         assert!(matches!(
-            attach(&mut admitted).await.first(),
+            initial_events
+                .iter()
+                .find(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. })),
             Some(ServerEvent::PaneStateSnapshot { .. })
         ));
 
@@ -310,11 +314,14 @@ mod tests {
             write_frame(&mut admitted, &ClientRequest::Detach)
                 .await
                 .expect("detach admitted connection");
-            let admitted_end =
-                tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
-                    .await
-                    .expect("admitted connection did not close");
-            assert!(admitted_end.is_err(), "Detach must end the prior stream");
+            // Detach drains the captured final broadcast prefix before EOF.
+            // A prior wrong-session request can leave feedback after attach's
+            // sync marker; require closure without discarding that contract.
+            tokio::time::timeout(TEST_DEADLINE, async {
+                while read_frame::<ServerEvent, _>(&mut admitted).await.is_ok() {}
+            })
+            .await
+            .expect("Detach must drain final events and close the prior stream");
 
             let first_reply: ServerEvent =
                 tokio::time::timeout(TEST_DEADLINE, read_frame(&mut queued))
@@ -336,8 +343,9 @@ mod tests {
                 remaining[..snapshot_index].iter().all(
                     |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
                     if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                        || matches!(event, ServerEvent::ResourceObservationFailed { .. })
                 ),
-                "only visible feedback for the refused request may precede attachment"
+                "only refused-request feedback or an independent resource warning may precede attachment"
             );
             assert!(
                 remaining[snapshot_index..].iter().any(

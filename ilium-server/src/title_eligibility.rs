@@ -93,7 +93,8 @@ impl TitleRuntimeSnapshot {
         let has_launch_intent = [&runtime.origin]
             .into_iter()
             .chain(runtime.deferred_workspace_origin.as_ref())
-            .any(|origin| matches!(origin, TerminalOrigin::Command(command) if BuiltinAgentProvider::from_command_line(command).is_some()))
+            .any(|origin| matches!(origin, TerminalOrigin::Command(command) if BuiltinAgentProvider::from_command_line(command).is_some())
+                || matches!(origin, TerminalOrigin::CustomAgent { .. }))
             || runtime.pending_generated_session_id.is_some();
         let kind = if class.is_some() || historical.is_some() {
             TerminalTitleKind::Agent

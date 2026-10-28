@@ -162,7 +162,7 @@ One value out of a list of options. The `stepper` style shows `← value → +`,
 | Fields | `options`: `[{ value, title }]` (2 to 64), `style`: `"stepper"`, `"list"` or `"dialog"`, `dynamic` |
 | Option fields | `description` (120), `disabled_reason` (40), `preview`, `help` |
 | Catalogue and filter | `source: { "catalog": "<id>" }`, `filter`, `allow_custom`, `custom_pattern`, `view_modes` |
-| Validation | `enum` with `enum_titles`; a value that is not an option is `invalid-argument`; `source` together with `options` is `manifest.settings-source`; an unknown catalogue is `manifest.catalog-unknown` |
+| Validation | `enum` with `enum_titles`; a value that is not an option is `invalid-argument`; a `choice` row with both or neither of `options` and `source` is `manifest.settings-source`; an unknown catalogue is `manifest.catalog-unknown` |
 | Written | at once |
 
 <figure>
@@ -429,7 +429,7 @@ A multi-line string. Enter opens an editor dialog, and the row shows the number 
 | Fields | `max_length` (at most 65,536, default 16,384), `language` |
 | Fields | `debounce_ms` (300 to 2,000) |
 | Validation | `maxLength`; compiles to `type: string` with `multiline: true` |
-| Written | 1 s after the last keystroke, and at once when the editor closes |
+| Written | 600 ms after the last keystroke, or 1 s when the text is above 10,000 bytes (`debounce_ms` overrides both), and at once when the editor closes |
 
 <figure>
 <pre class="term">╭  ≡ ● · Text area states───────────────────────────────╮
@@ -493,7 +493,7 @@ A file or a directory chosen with the kernel file picker.
 | Validation | `type: string`; the extension list is checked on confirm |
 | Written | on confirm |
 
-The row stores the path as text. It grants no file access: the plugin needs its own `fs` grant to open the path, and the path must lie inside a scope it holds.
+The row stores the path as text. It grants no file access: the plugin needs its own `fs.*` grant to open the path, and the path must lie inside a scope it holds.
 
 <figure>
 <pre class="term">╭  ≡ ● · Path states────────────────────────────────────╮
@@ -785,8 +785,8 @@ A titled group of rows, with an optional fold. The group holds no value, and it 
 | Item | Value |
 |---|---|
 | Value | none |
-| Fields | `title`, `rows` (1 to 12, no nested `group`), `collapsed` |
-| Validation | `manifest.settings-limit` above 12 rows; a nested group is `manifest.settings-row-field` |
+| Fields | `title`, `rows` (1 to 12 children, no nested `group`), `collapsed` |
+| Validation | `manifest.settings-limit` above 12 children in a group (a section holds up to 24 rows, a group counting as one row plus its children); a nested group is `manifest.settings-row-field` |
 | Written | nothing |
 
 <figure>
@@ -1294,7 +1294,7 @@ Hidden rows make the row positions jump under the cursor. Use `depends_on` when 
 
 #### scope and applies
 
-`scope: "project"` stores the value in the project's `.ilium/` settings under `[plugins."<plugin-id>"]` instead of the user configuration. The project value wins while that project is open. A `settings-changed` event carries the scope of the change in its `scope` field. `applies: "restart"` draws `↻` after the value and the note `Applies after restart.` The plugin reads the new value only after it restarts.
+`scope: "project"` stores the value in the project's `.ilium/` settings under `[plugins."<plugin-id>"]` instead of the user configuration. The project value wins while that project is open. A `settings-changed` event carries the side that owns the changed keys in its `side` field. `applies: "restart"` draws `↻` after the value and the note `Applies after restart.` The plugin reads the new value only after it restarts.
 
 **Rust**
 
@@ -1302,7 +1302,7 @@ Hidden rows make the row positions jump under the cursor. Use `depends_on` when 
 fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
     for event in batch {
         let Event::SettingsChanged(change) = event else { continue };
-        // change.scope tells which side owns the keys; change.origin says who wrote them
+        // change.side tells which side owns the keys; change.origin says who wrote them
         self.reload(&change.keys);
     }
     Vec::new()

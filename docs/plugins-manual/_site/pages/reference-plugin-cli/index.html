@@ -740,7 +740,7 @@
 <li><strong>[DEV-021]</strong> The <code>step</code> field of <code>progress</code> MUST be one of <code>toolchain</code>, <code>compile</code>, <code>bundle</code>, <code>component</code>, <code>api-version</code>, <code>strip</code>, <code>inventory</code>, <code>pack</code>, <code>sign</code>, <code>check</code>, <code>lint</code>, <code>test</code>, <code>install</code>, <code>watch</code>.</li>
 <li><strong>[DEV-022]</strong> The <code>kind</code> field of <code>artifact</code> MUST be one of <code>component</code>, <code>package</code>, <code>source-map</code>, <code>build-info</code>, <code>key</code>, <code>public-key</code>, <code>signature</code>, <code>replay</code>.</li>
 <li><strong>[DEV-023]</strong> The <code>severity</code> field of <code>check</code> and <code>lint</code> MUST be <code>error</code> or <code>warn</code>. A <code>lint</code> record MAY also use <code>info</code>.</li>
-<li><strong>[DEV-024]</strong> The <code>status</code> field of <code>test-case</code> MUST be <code>pass</code>, <code>fail</code>, <code>trap</code> or <code>skip</code>. The <code>status</code> field of <code>doctor-check</code> MUST be <code>ok</code>, <code>warn</code> or <code>fail</code>.</li>
+<li><strong>[DEV-024]</strong> The <code>status</code> field of <code>test-case</code> MUST be <code>pass</code>, <code>fail</code>, <code>trap</code> or <code>skipped</code>. The <code>status</code> field of <code>doctor-check</code> MUST be <code>ok</code>, <code>warn</code> or <code>fail</code>.</li>
 <li><strong>[DEV-025]</strong> The <code>side</code> field MUST be <code>server</code>, <code>client</code>, <code>scene</code> or <code>host</code>. <code>host</code> marks an entry that the host itself wrote.</li>
 </ul>
 <p>A build that succeeds prints:</p>
@@ -1004,6 +1004,8 @@
 <h2 id="check">check</h2>
 <p>Runs the install checks without installing. The rules are in <a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a>.</p>
 <p><code>ilium plugin check [&lt;dir&gt; | &lt;file.iliumpkg&gt;] [--side &lt;side&gt;] [--json]</code></p>
+<p><code>ilium plugin check --print-schema</code></p>
+<p>The second form takes no directory or archive. It writes the manifest JSON Schema that ships with the host to standard output and exits with 0; it never reads the network (<a href="/pages/reference-manifest-schema/">reference-manifest-schema</a>, PKG-563).</p>
 <ul>
 <li><strong>[DEV-070]</strong> <code>check</code> MUST run offline and MUST report the same rule codes (<code>manifest.*</code>, <code>package.*</code>, <code>signature.*</code>) that the install path reports, plus the component rules (<code>component.*</code>).</li>
 <li><strong>[DEV-071]</strong> <code>check</code> on a project directory MUST validate the source manifest and the built components in <code>dist/</code>. A missing <code>dist/</code> for a declared side MUST be reported as <code>component.missing</code>, not as an error of the command.</li>
@@ -1021,7 +1023,7 @@
 </ul>
 <h2 id="test">test</h2>
 <p>Runs fixtures against the plugin. The harness behind it is in <a href="/pages/reference-test-harness/">Test harness reference</a>. The fixture and expectation formats are in the same page.</p>
-<p><code>ilium plugin test [&lt;dir&gt;] [--fixture &lt;glob&gt;]... [--expect &lt;glob&gt;] [--grants &lt;list&gt; | --grant-manifest] [--side &lt;side&gt;] [--component &lt;file&gt;] [--replay &lt;file&gt;] [--update] [--seed &lt;n&gt;] [--conformance [--subject &lt;subject&gt;] [--case &lt;id&gt;]] [--coverage [--min-coverage &lt;percent&gt;]]</code></p>
+<p><code>ilium plugin test [&lt;dir&gt;] [--fixture &lt;glob&gt;]... [--expect &lt;glob&gt;] [--grants &lt;list&gt; | --grant-manifest] [--side &lt;side&gt;] [--component &lt;file&gt;] [--replay &lt;file&gt;] [--update] [--record &lt;file&gt;] [--seed &lt;n&gt;] [--conformance [--subject &lt;subject&gt;] [--case &lt;id&gt;]] [--coverage [--min-coverage &lt;percent&gt;]]</code></p>
 <table>
 <thead>
 <tr>
@@ -1081,6 +1083,12 @@
 <td>Writes missing or different expectation and golden files.</td>
 </tr>
 <tr>
+<td><code>--record</code></td>
+<td>file</td>
+<td>none</td>
+<td>With <code>--fixture</code>, writes the replay file of the run and prints an <code>artifact</code> of kind <code>replay</code> ([DEV-088]).</td>
+</tr>
+<tr>
 <td><code>--seed</code></td>
 <td>integer</td>
 <td>1</td>
@@ -1128,7 +1136,7 @@
 <li><strong>[DEV-098]</strong> <code>pack</code> MUST NOT store <code>src/**</code> unless <code>--include-src</code> is given. With it, <code>pack</code> MUST store the sources named by the project's <code>src/</code> folder and the source maps of a debug build under <code>src/</code>.</li>
 <li><strong>[DEV-099]</strong> <code>pack</code> MUST be reproducible. Two runs on the same inputs MUST produce byte-identical files. The archive format already fixes entry order, timestamps and compression (see <a href="/pages/packages/">Packages</a>).</li>
 <li><strong>[DEV-100]</strong> <code>pack</code> MUST NOT sign. The default output path is <code>dist/&lt;id&gt;-&lt;version&gt;.iliumpkg</code>, and the command prints one <code>artifact</code> of kind <code>package</code>.</li>
-<li><strong>[DEV-101]</strong> <code>pack</code> MUST fail with <code>pack.size-cap</code> when the package is larger than 128 MiB, and MUST print a <code>warning</code> with the same code at 100 MiB. See <code>lint.package-size-near-cap</code>.</li>
+<li><strong>[DEV-101]</strong> <code>pack</code> MUST fail with <code>package.size-limit</code> when the package is larger than 300 MiB (the package format cap, PKG-130), and MUST print a <code>warning</code> with the separate code <code>pack.size-cap</code> at 100 MiB. See <code>lint.package-size-near-cap</code>.</li>
 <li><strong>[DEV-102]</strong> <code>pack --out &lt;file&gt;</code> MUST refuse to overwrite a file that is not a package of the same id, with <code>pack.out-exists</code>.</li>
 </ul>
 <h2 id="keygen-sign-and-trust">keygen, sign and trust</h2>
@@ -1136,7 +1144,7 @@
 <ul>
 <li><strong>[DEV-110]</strong> <code>keygen</code> MUST create <code>publisher.key</code> (PKCS#8 PEM, mode 0600) and <code>publisher.pub</code> (<code>ilium-pub/1</code> JSON) with Ed25519, as defined in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>. It MUST refuse to overwrite either file with <code>trust.key-exists</code>.</li>
 <li><strong>[DEV-111]</strong> The file forms of the secret and public key are defined only in <a href="/pages/reference-signing-and-trust/">Signing and trust</a> (requirements PKG-210 to PKG-215).</li>
-<li><strong>[DEV-112]</strong> The fingerprint of a key is its <code>key_id</code>, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form shows the first 4 and the last 4 characters joined by <code>…</code>, for example <code>3f2a…9c01</code>.</li>
+<li><strong>[DEV-112]</strong> The fingerprint of a key is its <code>key_id</code>, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form is the first 8 digits, for example <code>3f2a91c0</code>, shown only beside the full form or in <code>trust list</code> (SEC-177).</li>
 </ul>
 <p><code>ilium plugin sign &lt;file.iliumpkg&gt; [--key &lt;file&gt;] [--replace]</code></p>
 <ul>
@@ -1159,20 +1167,22 @@
 <li><strong>[DEV-136]</strong> A package file, the file <code>publisher.pub</code> and the SHA-256 of the package remain a complete way to share a plugin without a registry. An update from a file is found when the user installs a package of the same id with a higher version.</li>
 </ul>
 <h2 id="install-uninstall-enable-disable">install, uninstall, enable, disable</h2>
-<p><code>ilium plugin install &lt;file.iliumpkg&gt; [--allow-unsigned] [--allow-downgrade] [--yes] [--grant &lt;grant&gt;]...</code></p>
+<p><code>ilium plugin install &lt;source&gt; [--allow-unsigned] [--allow-downgrade] [--trust &lt;key_id&gt;] [--channel stable|beta|dev] [--yes] [--grant &lt;grant&gt;]... [--locked] [--unskip]</code></p>
 <ul>
-<li><strong>[DEV-140]</strong> <code>install</code> MUST run the validation pipeline of <a href="/pages/reference-package-format/#the-validation-pipeline">Package format</a> before it runs any plugin code, print every failure as an <code>error</code> with the code of that pipeline, and exit with the code of <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>. Sources other than a file are defined there.</li>
+<li><strong>[DEV-140]</strong> <code>install</code> MUST run the validation pipeline of <a href="/pages/reference-package-format/#the-validation-order">Package format</a> before it runs any plugin code, print every failure as an <code>error</code> with the code of that pipeline, and exit with the code of <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>. Sources other than a file are defined there.</li>
 <li><strong>[DEV-141]</strong> <code>install</code> MUST show the review dialog in the attached client unless <code>--yes</code> is given. With <code>--yes</code>, it MUST grant every requested grant whose risk is not high, and MUST grant a high-risk grant only when it is named with <code>--grant</code>.</li>
 <li><strong>[DEV-142]</strong> <code>install</code> with no attached client and no <code>--yes</code> MUST fail with <code>install.review-required</code>.</li>
-<li><strong>[DEV-143]</strong> A declined review MUST fail with <code>install.review-declined</code>. A declined key trust MUST fail with <code>trust.declined</code>. An unsigned package without <code>--allow-unsigned</code> MUST fail with <code>install.unsigned</code>. A lower version without <code>--allow-downgrade</code> MUST fail with <code>install.downgrade</code>.</li>
+<li><strong>[DEV-143]</strong> A declined review MUST fail with <code>install.review-declined</code>. A declined key trust MUST fail with <code>trust.declined</code>. An unsigned package without <code>--allow-unsigned</code> MUST fail with <code>install.unsigned</code>. A lower version without <code>--allow-downgrade</code> MUST fail with <code>package.downgrade</code>.</li>
 <li><strong>[DEV-144]</strong> A successful <code>install</code> MUST print one <code>plugin</code> record for the installed plugin and exit with 0. The plugin is enabled after install.</li>
 </ul>
-<p><code>ilium plugin uninstall &lt;id&gt; [--purge]</code></p>
+<p><code>ilium plugin uninstall &lt;id&gt; [--purge | --keep-data]</code></p>
 <ul>
-<li><strong>[DEV-155]</strong> <code>uninstall</code> MUST deactivate the plugin with reason <code>disabled</code>, withdraw its contributions and remove the package. Without <code>--purge</code> the <code>data</code> folder, the storage and the settings values MUST stay on disk for a later reinstall.</li>
+<li><strong>[DEV-155]</strong> <code>uninstall</code> MUST deactivate the plugin with reason <code>disabled</code>, withdraw its contributions and remove the package. Without <code>--purge</code> the <code>data</code> folder, the storage and the settings values MUST stay on disk for a later reinstall. <code>--keep-data</code> is accepted, means the same as the default, and MUST NOT ask a question; it excludes <code>--purge</code>, and giving both fails with <code>usage.conflict</code> and exit 2 ([USR-209], [LIF-082]).</li>
 <li><strong>[DEV-156]</strong> <code>uninstall --purge</code> MUST also delete the <code>data</code> and <code>cache</code> folders, the storage buckets, the settings values and the plugin log. It MUST print each removed item as a <code>warning</code> with code <code>uninstall.purged</code>.</li>
 <li><strong>[DEV-157]</strong> <code>uninstall</code> of an unknown id MUST fail with <code>plugin.not-found</code> and exit 5.</li>
 </ul>
+<p><code>ilium plugin reinstall &lt;id&gt;</code></p>
+<p><code>reinstall</code> repairs the store entry of an installed or registry-listed plugin from the cached package and prints one <code>plugin</code> record. It exits 0 on success, 5 for an unknown id, and 1 with <code>package.cache-missing</code> when no cached package exists ([LIF-093]).</p>
 <p><code>ilium plugin enable &lt;id&gt;</code> and <code>ilium plugin disable &lt;id&gt;</code></p>
 <ul>
 <li><strong>[DEV-160]</strong> <code>disable</code> MUST deactivate the plugin with reason <code>disabled</code> and keep its data. <code>enable</code> MUST reset the failure count to zero, as the Settings &gt; Plugins toggle does, and activate the plugin.</li>
@@ -1181,7 +1191,7 @@
 <h2 id="list-and-grants">list and grants</h2>
 <p><code>ilium plugin list [--json]</code> prints the installed plugins.</p>
 <ul>
-<li><strong>[DEV-165]</strong> <code>list</code> text mode MUST print one line per plugin with the id, the version, the tier, the state (<code>running</code>, <code>disabled</code>, <code>stopped</code>, <code>untrusted</code>) and the grant count. A <code>[dev]</code> badge MUST mark a plugin installed by <code>dev</code>.</li>
+<li><strong>[DEV-165]</strong> <code>list</code> text mode MUST print one line per plugin with the id, the version, the tier, the state and the grant count. The state word maps from the lifecycle states: <code>running</code> is <code>installed-enabled</code> with an active instance, <code>stopped</code> is <code>installed-enabled</code> with no active instance (including <code>stopped-by-failure</code>), <code>disabled</code> is <code>installed-disabled-by-user</code> or <code>disabled-by-policy</code>, and <code>untrusted</code> is <code>disabled-untrusted</code> or <code>disabled-blocked</code>. <code>list --json</code> MUST print the lifecycle state name itself (LIF-001). A <code>[dev]</code> badge MUST mark a plugin installed by <code>dev</code>.</li>
 </ul>
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin list
@@ -1670,10 +1680,16 @@ ilium.tasks         0.1.0 T1 disabled
 <td>1</td>
 </tr>
 <tr>
-<td><code>pack.size-cap</code></td>
-<td>The package is over 128 MiB</td>
+<td><code>package.size-limit</code></td>
+<td>The package is over 300 MiB</td>
 <td>Remove assets</td>
 <td>1</td>
+</tr>
+<tr>
+<td><code>pack.size-cap</code> (warning)</td>
+<td>The package is over 100 MiB</td>
+<td>Remove assets</td>
+<td>0</td>
 </tr>
 <tr>
 <td><code>pack.out-exists</code></td>
@@ -1796,7 +1812,7 @@ ilium.tasks         0.1.0 T1 disabled
 <td>1</td>
 </tr>
 <tr>
-<td><code>install.downgrade</code></td>
+<td><code>package.downgrade</code></td>
 <td>A lower version without <code>--allow-downgrade</code></td>
 <td>Use the flag</td>
 <td>1</td>

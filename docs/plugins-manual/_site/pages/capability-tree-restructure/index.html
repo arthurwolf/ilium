@@ -530,7 +530,7 @@ impl Handler for Organizer {
             submissions.push(Submission::new(Intent::CreateGroup(CreateGroupSpec {
                 parent,
                 title: &quot;Review&quot;.into(),
-                placement: Placement::End,
+                placement: Placement::InsideLast,
                 children: invoked.selection.clone(),
             })));
         }
@@ -551,7 +551,7 @@ export const { lifecycle, handler } = definePlugin({
       submissions.push({
         intent: {
           tag: 'create-group',
-          val: { parent: event.val.parent, title: 'Review', placement: 'end', children: event.val.selection },
+          val: { parent: event.val.parent, title: 'Review', placement: 'inside-last', children: event.val.selection },
         },
         correlation: 1n,
         dedupKey: undefined,
@@ -593,9 +593,19 @@ export const { lifecycle, handler } = definePlugin({
 <td>Tell the user that the layout changed since.</td>
 </tr>
 <tr>
+<td><code>create-split</code> with a pane count outside 2 to 4</td>
+<td><code>refused(invalid-argument)</code></td>
+<td>Pass 2, 3 or 4 panes.</td>
+</tr>
+<tr>
+<td><code>revert-restructure</code> with an unknown or expired undo token</td>
+<td><code>refused(not-found)</code></td>
+<td>Treat the layout as not revertable.</td>
+</tr>
+<tr>
 <td>Locked node in the batch</td>
-<td><code>refused(conflict)</code></td>
-<td>Skip locked nodes.</td>
+<td>Applied: the lock flag only blocks <code>close-node</code> in <code>tree.write</code>, and a restructure never closes a node</td>
+<td>None needed.</td>
 </tr>
 <tr>
 <td>Unknown node</td>

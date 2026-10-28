@@ -404,7 +404,7 @@
   <rect x="20" y="10" width="360" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
   <text x="200" y="35" text-anchor="middle" fill="currentColor" font-size="12">Setup plugin (client, T1, plugins.manage)</text>
   <line x1="200" y1="50" x2="200" y2="82" stroke="currentColor" marker-end="url(#arr-plugins-disable)"/>
-  <text x="212" y="70" fill="currentColor" font-size="11">set-enabled(id, false)</text>
+  <text x="212" y="70" fill="currentColor" font-size="11">set-enabled(id, false, scope)</text>
   <rect x="20" y="82" width="360" height="40" rx="6" fill="none" stroke="currentColor"/>
   <text x="200" y="107" text-anchor="middle" fill="currentColor" font-size="12">Plugin registry</text>
   <line x1="200" y1="122" x2="200" y2="154" stroke="currentColor" marker-end="url(#arr-plugins-disable)"/>
@@ -501,8 +501,8 @@
 </tr>
 <tr>
 <td><code>set-enabled</code></td>
-<td><code>plugins::set_enabled(plugin: &amp;str, enabled: bool) -&gt; Result&lt;(), PluginError&gt;</code></td>
-<td><code>setEnabled(plugin, enabled)</code> returns <code>void</code> and throws <code>PluginError</code></td>
+<td><code>plugins::set_enabled(plugin: &amp;str, enabled: bool, scope: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>setEnabled(plugin, enabled, scope)</code> returns <code>void</code> and throws <code>PluginError</code></td>
 <td><code>result&lt;_, plugin-error&gt;</code></td>
 <td>Turns the plugin on or off. Returns once the change is recorded.</td>
 </tr>
@@ -703,7 +703,7 @@ fn disable_target() {
         log::log(Level::Warn, &quot;the notes plugin is not installed&quot;);
         return;
     }
-    match plugins::set_enabled(TARGET_PLUGIN, false) {
+    match plugins::set_enabled(TARGET_PLUGIN, false, &quot;global&quot;) {
         Ok(()) =&gt; log::log(Level::Info, &quot;the notes plugin is turned off&quot;),
         Err(error) =&gt; log::log(
             Level::Error,
@@ -730,7 +730,7 @@ function disableTarget(): void {
     return;
   }
   try {
-    setEnabled(TARGET_PLUGIN, false);
+    setEnabled(TARGET_PLUGIN, false, 'global');
     log('info', 'the notes plugin is turned off');
   } catch (error) {
     if (!(error instanceof PluginError)) {

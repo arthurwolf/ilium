@@ -46,8 +46,6 @@ pub struct KeyboardUiState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyboardHit {
     Preset(KeymapPreset),
-    GeneralPrefix(i32),
-    NavigationPrefix(i32),
     Binding(usize),
     Close,
 }
@@ -57,8 +55,6 @@ impl KeyboardHit {
         match self {
             Self::Preset(KeymapPreset::Tmux) => 0,
             Self::Preset(KeymapPreset::Screen) => 1,
-            Self::GeneralPrefix(_) => 2,
-            Self::NavigationPrefix(_) => 3,
             Self::Binding(index) => FIRST_BINDING + index,
             Self::Close => usize::MAX,
         }
@@ -145,20 +141,8 @@ pub fn geometry(area: Rect, state: &KeyboardUiState) -> KeyboardGeometry {
         ),
         target: KeyboardHit::Preset(KeymapPreset::Screen),
     });
-    for navigation in [false, true] {
-        let prefix_area = row(if navigation { 3 } else { 2 });
-        let target = |direction| {
-            if navigation {
-                KeyboardHit::NavigationPrefix(direction)
-            } else {
-                KeyboardHit::GeneralPrefix(direction)
-            }
-        };
-        result.hits.push(HitArea {
-            area: prefix_area,
-            target: target(1),
-        });
-    }
+    // The two prefix rows are not hit areas: `click_button` resolves them through
+    // their shared ValueControl (`prefix_rows`), so the pointer and keys agree.
     for index in 0..visible_bindings {
         let offset = 4 + index as u16 * row_height;
         let y = area.y.saturating_add(offset);
@@ -356,12 +340,6 @@ impl KeyboardUiState {
         let target = geometry.hit(position)?;
         let request = match target {
             KeyboardHit::Preset(preset) => KeyboardRequest::ApplyPreset(preset),
-            KeyboardHit::GeneralPrefix(direction) => {
-                KeyboardRequest::SetGeneralPrefix(keyboard.shortcut_base.stepped(direction))
-            }
-            KeyboardHit::NavigationPrefix(direction) => KeyboardRequest::SetNavigationPrefix(
-                keyboard.navigation_shortcut_base.stepped(direction),
-            ),
             KeyboardHit::Binding(index) => KeyboardRequest::Rebind(bindings.get(index)?.action),
             KeyboardHit::Close => KeyboardRequest::Close,
         };
@@ -443,12 +421,6 @@ pub fn render(
         Rect::new(area.x, area.y, area.width, area.height.min(1)),
     );
     for hit in &geometry.hits {
-        if matches!(
-            hit.target,
-            KeyboardHit::GeneralPrefix(_) | KeyboardHit::NavigationPrefix(_)
-        ) {
-            continue;
-        }
         let focus = if hit.target == KeyboardHit::Close {
             FIRST_BINDING + bindings.len()
         } else {
@@ -458,31 +430,6 @@ pub fn render(
         let text = match hit.target {
             KeyboardHit::Close => "[Close]".into(),
             KeyboardHit::Preset(preset) => format!("[{} preset]", preset.label()),
-            KeyboardHit::GeneralPrefix(direction) | KeyboardHit::NavigationPrefix(direction) => {
-                if hit.area.width <= 2 {
-                    if direction < 0 {
-                        "‹".into()
-                    } else {
-                        "›".into()
-                    }
-                } else {
-                    let navigation = matches!(hit.target, KeyboardHit::NavigationPrefix(_));
-                    format!(
-                        "  {}: {}",
-                        if navigation {
-                            "Tree prefix"
-                        } else {
-                            "General prefix"
-                        },
-                        if navigation {
-                            keyboard.navigation_shortcut_base
-                        } else {
-                            keyboard.shortcut_base
-                        }
-                        .label()
-                    )
-                }
-            }
             KeyboardHit::Binding(index) => {
                 let Some(binding) = bindings.get(index) else {
                     continue;
@@ -913,6 +860,42 @@ mod tests {
                 before
             );
             assert!(text(&terminal).contains(keymap::action_label(bindings.last().unwrap().action)));
+        }
+    }
+
+    #[test]
+    fn prefix_rows_use_the_shared_choice_controls_without_pills() {
+        let keyboard = KeyboardSettings::default();
+        let bindings = keymap::preset_bindings(KeymapPreset::Tmux);
+        let state = KeyboardUiState::default();
+        let area = Rect::new(0, 0, 80, 24);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut geometry = KeyboardGeometry::default();
+        terminal
+            .draw(|frame| {
+                geometry = render(frame, area, &state, &keyboard, &bindings, None);
+            })
+            .unwrap();
+        for field in crate::value_keyboard::KeyboardPrefix::ALL {
+            let row = geometry.prefix_rows[field.row()];
+            let control = field.control(row, keyboard, 20).geometry();
+            for (rectangle, glyph) in [
+                (control.previous, "←"),
+                (control.open, "+"),
+                (control.next, "→"),
+            ] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                    glyph
+                );
+            }
+            let painted: String = (row.x..row.right())
+                .map(|x| terminal.backend().buffer()[(x, row.y)].symbol())
+                .collect();
+            assert!(
+                !painted.contains('‹') && !painted.contains('›'),
+                "{painted:?}"
+            );
         }
     }
 }

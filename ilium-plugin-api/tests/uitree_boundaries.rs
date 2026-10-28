@@ -1,6 +1,6 @@
 use ilium_plugin_api::generated::types::{NodeFlags, UiNode, UiTree, Widget};
 use ilium_plugin_api::tier::Tier;
-use ilium_plugin_api::uitree::{UiCaps, check_ui_tree, check_ui_tree_encoded};
+use ilium_plugin_api::uitree::{check_ui_tree, check_ui_tree_encoded, UiCaps};
 
 const CAPS: UiCaps = UiCaps {
     max_nodes: 4096,

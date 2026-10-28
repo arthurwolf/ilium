@@ -46,6 +46,11 @@ impl DirectEventReceiver {
 }
 
 impl DirectEventSender {
+    /// Exact envelope needed to transfer producer-owned event storage.
+    pub(crate) fn required_storage_bytes(event: &ServerEvent) -> Option<usize> {
+        direct_event_storage_bytes(event)
+    }
+
     pub(crate) fn with_error_scope(
         &self,
         state: &Arc<crate::state::ServerState>,

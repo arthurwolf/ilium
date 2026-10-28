@@ -50,6 +50,8 @@ The Setup tab belongs to this plugin, and the Chatroom and Progress pages link h
 | Instruction detected | Matching text that Ilium did not write. |
 | Not set up | No block yet. |
 
+There is no sixth badge for a file over 512 KiB. Such a file keeps the badge its content gives it, the install and refresh actions on its row fail with `invalid-argument` and the message `file is over 512 KiB`, the notice shows that message, and the file is not read further or written.
+
 Each feature has a **Global file** row (`Enter` changes the path, `R` restores `~/.claude/CLAUDE.md`), a **Global** row per global file and a **Project** row for every open project. `Enter` on a target refreshes it. Setup is not an on/off switch, because removing a mandatory block would leave new agents uninformed. The paths are stored in `[agent_setup]` as `chatroom_global_file` and `progress_global_file`.
 
 | Scope | Files edited |
@@ -58,7 +60,7 @@ Each feature has a **Global file** row (`Enter` changes the path, `R` restores `
 | Global (Codex) | `~/.codex/AGENTS.md` |
 | Each open project | `CLAUDE.md` and `AGENTS.md` in the project root, only from the Setup tab |
 
-Blocks sit between the markers `<!-- ilium-agent-feature: chatroom -->` and `<!-- /ilium-agent-feature: chatroom -->`. Only text between the markers is replaced or removed. The `ilium chat init` command installs the chatroom hooks; the Setup tab installs the instruction blocks. The two are separate actions with this plugin as the single owner of the files. [COR-011]
+Blocks sit between the markers `<!-- ilium-agent-feature: chatroom -->` and `<!-- /ilium-agent-feature: chatroom -->`. Only text between the markers is replaced or removed. The `ilium chat init` command and the start-time repair (when `CHATROOM.md` exists) install the chatroom hooks through this plugin; the Setup tab installs the instruction blocks. The two are separate actions with this plugin as the single owner of the files. [COR-011]
 
 <figure>
 <pre class="term">╭─ Install Progress block ─────────────────────╮
@@ -90,7 +92,7 @@ Blocks sit between the markers `<!-- ilium-agent-feature: chatroom -->` and `<!-
 
 This block is a fragment. It lists the contributions. The whole manifest is in [Complete manifest](#complete-manifest).
 
-The plugin is replaceable. A replacement must provide the service, the three points and the Setup tab. The grants for the files use the scopes `agent-config:<agent>`, which are high risk for writing, and `project`.
+The plugin is replaceable. A replacement must provide the service and the three points: the `surface` list names exactly those (a surface entry has the form `services:`, `points:`, `commands:`, `pane-kinds:`, `topics:` or `cli:`, so a settings tab cannot be listed) and install checks only that list. Without its own Setup tab the replacement leaves the Setup tab empty, and agents lose the per-project install rows. The grants for the files use the scopes `agent-config:<agent>`, which are high risk for writing, and `project`.
 
 ```json
 {
@@ -126,7 +128,7 @@ The plugin is replaceable. A replacement must provide the service, the three poi
       "extensions.provide:ilium.core.agent-setup/targets",
       "extensions.provide:ilium.core.agent-setup/before-install"
     ],
-    "client": ["ui.panels", "help.read"]
+    "client": ["ui.panels", "help.read", "settings.write-kernel:setup"]
   },
   "contributes": {
     "commands": [{ "id": "refresh", "title": "Refresh agent instructions", "category": "Agents" }],
@@ -418,7 +420,7 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 #### Replace one marked block in place
 
-The core of the plugin is one pure function and one safe write. The function finds the markers, replaces what lies between them, and returns the new text. If there are no markers it appends the block at the end. The write uses the revision that came with the read, so a change made by someone else in between ends as `failed(conflict)` and nothing is lost. See [atomic write and revisions](/pages/api-fs-atomic-and-tail/) and [fs.write](/pages/capability-fs-write/).
+The core of the plugin is one pure function and one safe write. The function finds the markers, replaces what lies between them, and returns the new text. It replaces only when both markers are present and the opening marker comes first. In every other case (no marker, only one of the two, or the closing marker before the opening one) the sample appends the block at the end and leaves the stray marker text where it is. The real plugin first reports the lone or reversed marker as "Instruction detected" (see the safety rules above) and does not write, so this append-only fallback is a sample simplification. The write uses the revision that came with the read, so a change made by someone else in between ends as `failed(conflict)` and nothing is lost. See [atomic write and revisions](/pages/api-fs-atomic-and-tail/) and [fs.write](/pages/capability-fs-write/).
 
 **Rust**
 
@@ -480,11 +482,14 @@ export async function install(path: FsPath, marker: string, block: string): Prom
 
 #### Read the status of a target
 
-A target has one of five statuses. The plugin reads the file and compares what it finds with the block it would write. A block with markers and the same version is "Set up by Ilium". An older version is "Ilium update required". A newer version is "Newer Ilium instructions detected". Text that looks like the block but has no markers is "Instruction detected". Nothing at all is "Not set up". See [fs](/pages/api-fs/) and [file access](/pages/file-access/).
+A target has one of five statuses. The plugin reads the file and compares what it finds with the block it would write. A block with markers and the same version is "Set up by Ilium". An older version is "Ilium update required". A newer version is "Newer Ilium instructions detected". Text that looks like the block but has no markers is "Instruction detected". "Looks like the block" means the text contains the feature's look-alike phrase, `LOOK_ALIKE_PHRASE` in the samples: the first sentence of the block body, a fixed string the plugin ships with each feature and compares case-sensitively. Nothing at all is "Not set up". See [fs](/pages/api-fs/) and [file access](/pages/file-access/).
 
 **Rust**
 
 ```rust
+/// First sentence of the block body for this feature; the text a hand-written copy would share.
+const LOOK_ALIKE_PHRASE: &str = "Use the Ilium agent tools";
+
 #[derive(Debug, PartialEq)]
 enum Status { SetUp, UpdateRequired, Newer, Detected, NotSetUp }
 
@@ -508,6 +513,9 @@ fn status_of(text: &str, marker: &str, current_version: u32) -> Status {
 **TypeScript**
 
 ```ts
+// First sentence of the block body for this feature.
+const LOOK_ALIKE_PHRASE = 'Use the Ilium agent tools';
+
 export type Status = 'set-up' | 'update-required' | 'newer' | 'detected' | 'not-set-up';
 
 export function statusOf(text: string, marker: string, currentVersion: number): Status {
@@ -669,7 +677,7 @@ use ilium_plugin_sdk::types::requests::{Outcome, RequestResult};
 
 fn ask_before_install(&mut self, target: &str, block: &str, path: &str) -> Result<(), PluginError> {
     let payload = serde_json::json!({ "target": target, "block": block, "path": path }).to_string();
-    let request = extensions::run_hook("ilium.core.agent-setup/before-install", &payload)?;
+    let request = extensions::run_hook_request("ilium.core.agent-setup/before-install", &payload)?;
     self.pending.insert(request, (target.to_string(), block.to_string()));
     Ok(())
 }
@@ -696,7 +704,7 @@ fn on_hook_done(&mut self, done: RequestResult) -> Vec<Submission> {
 import * as extensions from '@ilium/plugin-sdk/host/extensions';
 
 export function askBeforeInstall(target: string, block: string, path: string): void {
-  const request = extensions.runHook('ilium.core.agent-setup/before-install',
+  const request = extensions.runHookRequest('ilium.core.agent-setup/before-install',
     JSON.stringify({ target, block, path }));
   pending.set(request, { target, block });
 }
@@ -783,7 +791,7 @@ Other plugins change what `ilium.core.agent-setup` does through the points below
 
 - `ilium.core.agent-setup/install`: install, remove, status: manage blocks
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.agent-setup"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.agent-setup"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Installs a block of review rules next to the Chatroom and Progress blocks
 

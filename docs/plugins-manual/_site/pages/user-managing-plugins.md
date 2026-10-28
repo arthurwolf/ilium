@@ -46,7 +46,7 @@ If the failed plugin replaced a built-in one, the built-in plugin is turned on a
 
 ### The recovery page
 
-The recovery page lists plugins with state and last failure. It offers: enable or disable, uninstall, reset failures, forget settings, and start in safe mode ([Safe mode](/pages/user-safe-mode-and-troubleshooting/)). Open it with `Ctrl+Alt+R`.
+The recovery page lists plugins with state and last failure. It offers seven actions: enable, disable, reset failures, uninstall, forget settings, safe mode and open config file ([Safe mode](/pages/user-safe-mode-and-troubleshooting/)). Open it with `Ctrl+B`, then `:` (the command prompt).
 
 ### Update, rollback and uninstall
 
@@ -56,9 +56,9 @@ Select Update on a row, or run `ilium plugin update <id>`. If the new version fa
 
 An administrator controls plugins for all users with `/etc/ilium/policy.toml` on Linux. Keys are in [Plugin policy](/pages/reference-plugin-policy/). A plugin that the policy blocks shows "Blocked by policy" and its data stays. A policy may forbid third-party plugins, limit tiers, allow or deny publishers and ids, and forbid grants. On macOS the file is in `/Library/Application Support/ilium/` and on Windows in `%PROGRAMDATA%\ilium\`.
 
-The policy can also block exact versions with `policy.blocked`, force safe mode, or pin a version. These keys are planned and are not in the first policy format. Until they exist, use `plugins.deny_ids` and `plugins.allow_ids`.
+The policy can also block exact versions, force safe mode, or pin a version. These per-version keys are planned and are not in the first policy format. A plugin blocked by id already shows `policy.blocked` as its disabled reason. Until the per-version keys exist, use `plugins.deny_ids` and `plugins.allow_ids`.
 
-- [LIF-193] A plugin blocked by policy MUST show "Blocked by policy" with the code and MUST keep its data. Test: add its id to `denied_ids`.
+- [LIF-193] A plugin blocked by policy MUST show "Blocked by policy" with the policy code of the rule that blocked it (for example `policy.id-denied`, `policy.third-party-denied`; codes in [Plugin policy](/pages/reference-plugin-policy/)) and MUST keep its data. Test: add its id to `plugins.deny_ids` and assert the row text and the code.
 
 ### See also
 

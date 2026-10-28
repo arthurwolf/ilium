@@ -179,13 +179,14 @@ The TypeScript record fields are camelCase (`processNames`, `allowedWhen`). The 
 | Situation | Result |
 |---|---|
 | The grant is declined in the review dialog | The manifest signature is not registered, `detector` is not called for the plugin, and `register_signature` returns `not-permitted`. Agents only this plugin recognises stay unidentified. |
-| A field breaks a P5 limit | `invalid-argument`, with the field path, for example `process_names[2]: empty name`. |
+| A field breaks a limit of the signature fields table | `invalid-argument`, with the field path, for example `process_names[2]: empty name`. |
 | A runtime id equals a manifest id of the same plugin | `conflict`. |
 | The grant is revoked while the plugin runs | The plugin is deactivated with `revoked` and re-activated without the grant. Its signatures and detector stop. |
 | `identify` returns an id the plugin did not register | The id is ignored, the pane stays unidentified and a warning is logged. |
 | `classify` traps or misses its deadline | A trap counts as a failure under the restart rule. A missed deadline keeps the last activity. |
+| `classify` returns an `objective` or `goal` over 1,024 bytes | The value is cut at the last whole UTF-8 character within 1,024 bytes and a warning is logged. The classification is still used. |
 | An action has no entry in the signature | `agent-action` returns `refused(unsupported)`. |
-| An action is not allowed in the current activity | `agent-action` returns `refused(conflict)`, for example `agent is working`. |
+| An action is not allowed in the current activity | `agent-action` returns `refused(conflict)`, with a message named after the current activity, for example `agent is working` or `agent is awaiting approval`. |
 | `session_scope` is absent | `agent.session` returns nothing for the pane. |
 | The plugin has no `detector` export | The pane is identified by `process_names` and `aliases` only. Its activity stays `none`. |
 
@@ -305,6 +306,7 @@ The poll loop that walks processes and captures screens stays native in the serv
 
 - A signature has at most 32 actions, and each action's `keys` is at most 1 KiB.
 - Each `identify` and `classify` call has a 20 ms soft deadline (`detector_deadline_ms`, T1 ceiling 50 ms). The rules for a slow detector and the per-poll budget are in the detection loop section above.
+- The `objective` and `goal` returned by `classify` are each at most 1,024 bytes of UTF-8. A longer value is cut, not refused.
 - The `id`, `process_names` and `aliases` limits are those of the table in the signature fields section.
 
 ## See also
@@ -319,4 +321,4 @@ Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-**[SEC-042]** `agent.signatures` changes how agents are detected, so a wrong signature can hide an agent's state. The grant is high risk and signatures are validated against the regex limits of [SEC-046]. See [Sandbox reference](/pages/reference-sandbox/).
+**[SEC-042]** `agent.signatures` changes how agents are detected, so a wrong signature can hide an agent's state. The grant is normal risk (the constraints of [SEC-042] in the sandbox reference keep it so) and signatures are validated against the regex limits of [SEC-046]. See [Sandbox reference](/pages/reference-sandbox/).

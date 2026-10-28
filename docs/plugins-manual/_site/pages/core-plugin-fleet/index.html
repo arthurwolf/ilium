@@ -404,7 +404,7 @@
 <li><code>ilium broadcast</code> (see CLI reference, "ilium broadcast").</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/05-ask-for-update.gif" alt="A dialog asks for a status update and sends it to every agent" loading="lazy"><figcaption>Ask for update: one short message goes to one agent or to all of them.</figcaption></figure>
+<figure><img src="/assets/demos/05-ask-for-update.gif" alt="Ilium asks two idle local agent fixtures for a status update while a working fixture is skipped" loading="lazy"><figcaption>Ask for status update sends the built-in prompt to two idle local fixtures. The working fixture receives no input.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -419,12 +419,11 @@ review   4     shell   <span class="t-dim">-</span>          <span class="t-dim"
 
 <figure>
 <pre class="term"><span class="t-dim">╭ Ask for update ─────────────────────────────╮</span>
-<span class="t-dim">│</span> To……………………………………………………… <span class="t-hi">All agents (3)</span>      <span class="t-dim">│</span>
 <span class="t-dim">│</span> Message…… What is your status in one line? <span class="t-dim"> │</span>
 <span class="t-dim">│</span>                                             <span class="t-dim">│</span>
 <span class="t-dim">│</span>                  [ Send ]   [ Cancel ]      <span class="t-dim">│</span>
 <span class="t-dim">╰─────────────────────────────────────────────╯</span></pre>
-<figcaption>Rendered at 48 columns. Illustrative. The Ask for update dialog with a message field and Send and Cancel buttons.</figcaption>
+<figcaption>Rendered at 48 columns. Illustrative. The Ask for update dialog with a message field and Send and Cancel buttons. The dialog has no target field.</figcaption>
 </figure>
 
 <h3 id="manifest">Manifest</h3>
@@ -437,10 +436,10 @@ review   4     shell   <span class="t-dim">-</span>          <span class="t-dim"
   &quot;contributes&quot;: {
     &quot;cli&quot;: [
       { &quot;name&quot;: &quot;panes&quot;, &quot;summary&quot;: &quot;List panes in every session&quot;, &quot;output&quot;: &quot;jsonl&quot;,
-        &quot;requires_server&quot;: false },
+        &quot;requires_server&quot;: true },
       { &quot;name&quot;: &quot;broadcast&quot;, &quot;summary&quot;: &quot;Send a line to agents&quot;, &quot;output&quot;: &quot;jsonl&quot;,
-        &quot;requires_server&quot;: false, &quot;argument_groups&quot;: [&quot;pane-selector&quot;] },
-      { &quot;name&quot;: &quot;new-pane&quot;, &quot;summary&quot;: &quot;Create a pane&quot;, &quot;output&quot;: &quot;jsonl&quot;,
+        &quot;requires_server&quot;: true, &quot;argument_groups&quot;: [&quot;pane-selector&quot;] },
+      { &quot;name&quot;: &quot;new-pane&quot;, &quot;summary&quot;: &quot;Create a pane&quot;, &quot;output&quot;: &quot;mixed&quot;,
         &quot;requires_server&quot;: true }
     ],
     &quot;http_routes&quot;: [ { &quot;method&quot;: &quot;POST&quot;, &quot;path&quot;: &quot;/create_agent&quot; } ],
@@ -505,13 +504,13 @@ review   4     shell   <span class="t-dim">-</span>          <span class="t-dim"
         &quot;name&quot;: &quot;panes&quot;,
         &quot;summary&quot;: &quot;List panes in every session&quot;,
         &quot;output&quot;: &quot;jsonl&quot;,
-        &quot;requires_server&quot;: false
+        &quot;requires_server&quot;: true
       },
       {
         &quot;name&quot;: &quot;broadcast&quot;,
         &quot;summary&quot;: &quot;Send a line to agents&quot;,
         &quot;output&quot;: &quot;jsonl&quot;,
-        &quot;requires_server&quot;: false,
+        &quot;requires_server&quot;: true,
         &quot;argument_groups&quot;: [
           &quot;pane-selector&quot;
         ]
@@ -750,7 +749,7 @@ export function broadcast(text: string): Submission[] {
 }
 </code></pre>
 <h4 id="ask-for-update">Ask for update</h4>
-<p>A dialog sends a short request to one agent or to all of them. The client side shows a <code>dialog</code> (<a href="/pages/widgets-layout-and-containers/">layout and containers</a>) with a <code>text-input</code> and buttons (<a href="/pages/widgets-input/">input widgets</a>) under <a href="/pages/capability-ui-panels/">ui.panels</a>. On Send it submits a <code>message</code> to the server side (<a href="/pages/api-messages-and-topics/">messages and topics</a>), which submits <code>send-input</code> to each target (<a href="/pages/api-intent-send-input/">send-input</a>).</p>
+<p>A dialog sends a short request to one agent or to all of them. The dialog has no target field: the server component that receives the <code>ask-for-update</code> message sends the text to the agent pane that was focused when the dialog opened, or to every agent when no agent pane was focused. The client side shows a <code>dialog</code> (<a href="/pages/widgets-layout-and-containers/">layout and containers</a>) with a <code>text-input</code> and buttons (<a href="/pages/widgets-input/">input widgets</a>) under <a href="/pages/capability-ui-panels/">ui.panels</a>. On Send it submits a <code>message</code> to the server side (<a href="/pages/api-messages-and-topics/">messages and topics</a>), which submits <code>send-input</code> to each target (<a href="/pages/api-intent-send-input/">send-input</a>).</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::ui::{ActionKind, ActionValue};
@@ -857,6 +856,7 @@ export function askUser(paneLabel: string, question: string): Submission {
 <h4 id="post-create_agent">POST /create_agent</h4>
 <p>The kernel owns the HTTP listener, its port and its on/off setting (Settings, API tab). The fleet plugin owns only the route: it registers <code>POST /create_agent</code> with <code>http-api.route</code>, and the kernel returns 404 for the route while the plugin is disabled. [COR-010]</p>
 <p>The local HTTP API creates an agent pane. The plugin routes <code>POST /create_agent</code> (<a href="/pages/api-http-api/">HTTP API</a>, <a href="/pages/capability-http-api-route/">http-api.route</a>). On <code>http-called</code> (<a href="/pages/api-events/">events</a>) it validates the JSON body and submits <code>create-pane</code> (<a href="/pages/api-intents/">intents</a>). When the <code>request-completed</code> event carries the new node, it replies with the pane id.</p>
+<p>On success the route answers 201 with <code>{"pane_id":N}</code>. When the host refuses the <code>create-pane</code> intent or it fails, the plugin answers 502 with <code>{"error":"create-pane failed"}</code>; an unparsable body answers 400 and another path or method answers 404.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::http_api;
 use ilium_plugin_sdk::prelude::*;
@@ -890,6 +890,11 @@ fn answer(request: &amp;HttpCalledEvent, pending: &amp;mut std::collections::Has
     let submission = Submission::keyed(Intent::CreatePane(spec), format!(&quot;http-{}&quot;, request.call));
     pending.insert(submission.correlation, request.call);
     vec![submission]
+}
+
+fn on_refused(call: u64) {
+    // The create-pane intent was refused or failed: answer 502 so the HTTP caller never hangs.
+    let _ = http_api::respond(call, 502, &amp;[], br#&quot;{&quot;error&quot;:&quot;create-pane failed&quot;}&quot;#);
 }
 
 fn on_created(call: u64, node: NodeId) {
@@ -929,6 +934,14 @@ export function answer(request: HttpCalledEvent): Submission[] {
     correlation,
     dedupKey: `http-${request.call}`,
   }];
+}
+
+export function onRefused(correlation: bigint): void {
+  // The create-pane intent was refused or failed: answer 502 so the HTTP caller never hangs.
+  const call = pending.get(correlation);
+  if (call === undefined) return;
+  pending.delete(correlation);
+  respond(call, 502, [], new TextEncoder().encode('{&quot;error&quot;:&quot;create-pane failed&quot;}'));
 }
 
 export function onCreated(correlation: bigint, node: bigint): void {
@@ -1022,7 +1035,7 @@ export async function costByPane(): Promise&lt;Map&lt;number, number&gt;&gt; {
 <li><code>ilium.core.fleet/broadcast-sent</code>: { targets, length }</li>
 </ul>
 <p>Calls <code>ilium.core.cost/usage</code> for the cost column.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.fleet"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.fleet"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-lets-ilium-broadcast-select-reviewers-reach-every-pane-tagged-review">Example: Lets <code>ilium broadcast --select reviewers</code> reach every pane tagged <code>review</code></h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

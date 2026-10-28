@@ -3,14 +3,14 @@
 
 use std::collections::BTreeMap;
 
-use ilium_plugin_api::grants::{Grant, check_grant};
+use ilium_plugin_api::grants::{check_grant, Grant};
 use ilium_plugin_api::limits::{self, LimitKey, Limits};
 use ilium_plugin_api::manifest::{
-    CheckMode, ComponentSummary, Stage, ValidationContext, check_component, parse_activation,
+    check_component, parse_activation, CheckMode, ComponentSummary, Stage, ValidationContext,
 };
 use ilium_plugin_api::{Side, Tier};
 use proptest::prelude::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::support::*;
 

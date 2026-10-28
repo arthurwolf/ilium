@@ -3217,6 +3217,7 @@ dependencies = [
  "ilium-gpu",
  "ilium-http",
  "ilium-inference",
+ "ilium-instructions",
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
@@ -3359,6 +3360,19 @@ dependencies = [
  "tracing",
  "ureq",
  "url",
+]
+
+[[package]]
+name = "ilium-instructions"
+version = "0.1.1"
+dependencies = [
+ "directories",
+ "ilium-platform",
+ "ilium-prompts",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -3770,6 +3784,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
+ "unicode-normalization",
  "wasmparser 0.258.3",
  "wasmtime",
  "wat",
@@ -3844,6 +3859,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "crossterm",
+ "ilium-core",
  "ilium-execution",
  "ilium-platform",
  "portable-pty",
@@ -3883,6 +3899,7 @@ dependencies = [
  "ilium-detect",
  "ilium-execution",
  "ilium-git",
+ "ilium-instructions",
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",

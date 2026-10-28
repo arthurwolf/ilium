@@ -60,7 +60,7 @@ This page shows which reference page answers which question, the values you look
 | Submission dedup key | 1 to 128 characters from `[A-Za-z0-9._:/-]`. Window of 10 minutes. | [Dedup keys](/pages/reference-events-and-intents/#dedup-keys) |
 | Submissions per return | 256 per `on-events` call. | [Fixed caps](/pages/reference-errors-and-limits/#requestable-limits) |
 | Pending requests | 64 per plugin by default. Over that, `busy`. | [Resource limits](/pages/reference-errors-and-limits/#resource-limits-in-the-manifest) |
-| Storage | Key up to 256 bytes. Value up to 1 MiB. Bucket 16 MiB by default. | [Resource limits](/pages/reference-errors-and-limits/#resource-limits-in-the-manifest) and L3 |
+| Storage | Key up to 256 bytes. Value up to 1 MiB. Bucket 16 MiB by default. | [Resource limits](/pages/reference-errors-and-limits/#resource-limits-in-the-manifest) |
 | Log line | Up to 16 KiB; longer lines are cut and end with `…[truncated]`. | [Fixed caps](/pages/reference-errors-and-limits/#requestable-limits) |
 | Command reply | 30 s. Inference reply: 120 s. | [Error codes and limits](/pages/reference-errors-and-limits/#requestable-limits) |
 | Rate of `notify` | 6 per minute per plugin. | [Error codes and limits](/pages/reference-errors-and-limits/#requestable-limits) |
@@ -157,7 +157,7 @@ A `PluginError` carries `code`, `message` and `retryAfterMs`. The function retur
 
 ## Where the extended items are listed
 
-The four reference pages list the extended items in their own sections: [manifest keys](/pages/reference-manifest/#chrome-and-contribution-keys), [events and intents](/pages/reference-events-and-intents/), [errors and limits](/pages/reference-errors-and-limits/#requestable-limits) and [capabilities](/pages/reference-capabilities/). Twenty-three grants are listed there, and ten of them are high risk. The settings row table lives in the [settings schema reference](/pages/reference-settings-schema/).
+The four reference pages list the extended items in their own sections: [manifest keys](/pages/reference-manifest/#chrome-and-contribution-keys), [events and intents](/pages/reference-events-and-intents/), [errors and limits](/pages/reference-errors-and-limits/#requestable-limits) and [capabilities](/pages/reference-capabilities/). Twenty-three grants are listed there, and eleven of them are high risk. The settings row table lives in the [settings schema reference](/pages/reference-settings-schema/).
 
 The render shows the lookup the CLI offers for a key. Illustrative, not generated.
 
@@ -183,7 +183,7 @@ The caps of the contribution keys as a table render. Illustrative, not generated
 
 - The install dialog lists the grants by risk tier. A `high` grant is listed and unchecked; the user must check it.
 - Refusals and traps are logged with the plugin id, the interface and the function. `ilium plugin logs` shows them (see [Debugging](/pages/debugging/)).
-- A keybinding conflict makes the losing binding inactive and lists it in Settings > Keys (N25).
+- A keybinding conflict makes the losing binding inactive and lists it in Settings > Keys.
 - A plugin disabled by the third failure stays disabled until the user enables it again. A manual enable resets the failure count.
 
 ## Check output
@@ -210,7 +210,7 @@ Requirement ids for this page: [API-073]. See the [requirements index](/pages/re
 - [Event and intent tables](/pages/reference-events-and-intents/)
 - [Error codes and limits](/pages/reference-errors-and-limits/)
 - [Capability model](/pages/capabilities/)
-- [Errors and limits concept](/pages/errors-and-limits/)
+- [Errors and limits concept](/pages/reference-errors-and-limits/)
 - [Events and intents concept](/pages/events-and-intents/)
 - [Lifecycle](/pages/lifecycle/)
 - [Rust SDK](/pages/rust-sdk/)

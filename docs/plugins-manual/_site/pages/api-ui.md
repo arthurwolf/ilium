@@ -97,7 +97,7 @@ Which kind each widget sends is listed on the widget pages, starting with [widge
   roles when it paints. On a theme change the host repaints the last tree of every open view at once, delivers `theme-changed`, and triggers exactly one `views.render` per open view, coalesced with any other trigger in the same 16 ms window. A plugin need not call `invalidate`. Plugins cannot ship themes.
 
 <div class="warn">
-<p>An invalid tree traps the plugin with a <code>ui.*</code> code: <code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code> or <code>ui.render-timeout</code>. The host keeps the previous tree, marked stale, and logs one error. <code>views.render</code> returns a tree, not a result, so it never returns <code>invalid-argument</code>.
+<p>An invalid tree traps the plugin with <code>trap.invalid-ui-tree</code>, whose logged detail reason is a <code>ui.*</code> code: <code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code> or <code>ui.render-timeout</code>. The host keeps the previous tree, marked stale, and logs one error. <code>views.render</code> returns a tree, not a result, so it never returns <code>invalid-argument</code>.
 A trap counts as a failure for the restart rule: the third failure in ten minutes disables the plugin on
 that side.</p>
 </div>
@@ -408,7 +408,7 @@ const frames = themeExtras().reducedMotion ? 1 : 8;
 
 **Focus and popups.** Tab and Shift+Tab follow the [focus order](/pages/ui-model/#focus-order). At most 4 popups per view are open (`quota-exceeded`). A node with `disabled-reason` is muted and shows the reason as its tooltip.
 
-**Settings views.** A `settings-page` tree may now use layout, `split`, `scroll-view`, `markdown`, `diff-view`, `check-list`, the data-display widgets, `progress-row`, `meter`, `minimap`, `badge`, `spinner`, `notice`, `icon`, `image`, `surface`, `location-picker` and a read-only `code-view`. Still refused there: `popup`, `dialog`, `menu`, `video`, `terminal-view` and the input widgets other than `button`, `schema-form` and `location-picker`; they fail with `invalid-argument` on render and are logged.
+**Settings views.** A `settings-page` tree may now use layout, `split`, `scroll-view`, `markdown`, `diff-view`, `check-list`, the data-display widgets, `progress-row`, `meter`, `minimap`, `badge`, `spinner`, `notice`, `icon`, `image`, `surface`, `location-picker` and a read-only `code-view`. Still refused there: `popup`, `dialog`, `menu`, `video`, `terminal-view` and the input widgets other than `button`, `schema-form` and `location-picker`; a tree that contains one traps with `ui.widget-not-allowed` on render (render returns a tree, never `invalid-argument`) and is logged.
 
 ### WIT
 
@@ -433,7 +433,7 @@ set-widget-state: func(view: view-target, key: string, state: widget-state) -> r
 display-width: func(text: string) -> u16;
 theme: func() -> theme-tokens;
 theme-extras: func() -> theme-extras;
-/// Rows are top to bottom. first-row plus the rows written must be within the surface height.
+/// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
 /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
 write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
 ```
@@ -448,6 +448,6 @@ write-surface: func(view: view-target, key: string, first-row: u32, format: pixe
 - [Settings screens](/pages/settings-screens/) for settings pages and `schema-form`.
 - [Capability: ui panels](/pages/capability-ui-panels/) for the grant and its dialog.
 - [Basic primitive](/pages/primitives-basic/) for plugin pane bodies.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the restart rule.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the restart rule.
 
 Interface: `ilium:host/ui` and `ilium:types/ui` in `ilium:plugin@0.1.0`.

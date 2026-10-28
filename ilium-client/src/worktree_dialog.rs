@@ -62,6 +62,8 @@ pub struct WorktreeDialogState {
     pub project_id: NodeId,
     pub parent_group: NodeId,
     pub provider: BuiltinAgentProvider,
+    /// Profile identity, if this dialog was opened from a custom launcher.
+    pub custom_agent: Option<ilium_core::custom_agent::CustomAgentIdentity>,
     pub mode: WorktreeDialogMode,
     pub focus: WorktreeDialogFocus,
     pub prompt: TextArea<'static>,
@@ -72,6 +74,8 @@ pub struct WorktreeDialogState {
     pub path_is_auto: bool,
     pub advanced: bool,
     pub selected_existing: usize,
+    /// Creation target selected in the tree; applied after asynchronous facts arrive.
+    pub(crate) preferred_existing_path: Option<PathBuf>,
     pub close_policy: WorktreeClosePolicy,
     git_settings: GitSettings,
     pub facts: Option<RepoFacts>,
@@ -114,6 +118,7 @@ impl WorktreeDialogState {
             project_id,
             parent_group,
             provider,
+            custom_agent: None,
             mode,
             focus: WorktreeDialogFocus::Prompt,
             prompt,
@@ -124,6 +129,7 @@ impl WorktreeDialogState {
             path_is_auto: true,
             advanced: false,
             selected_existing: 0,
+            preferred_existing_path: None,
             close_policy: match git_settings.default_close_policy {
                 GitClosePolicy::Keep => WorktreeClosePolicy::Keep,
                 GitClosePolicy::OfferRemovalWhenSafe => WorktreeClosePolicy::OfferRemovalWhenSafe,
@@ -212,6 +218,15 @@ impl WorktreeDialogState {
             GitDefaultBase::DefaultBranch => &facts.default_base_ref,
         };
         self.base_ref = TextPromptState::new(suggested_base);
+        if let Some(preferred) = self.preferred_existing_path.take() {
+            if let Some(index) = facts
+                .worktrees
+                .iter()
+                .position(|entry| entry.path == preferred)
+            {
+                self.selected_existing = index;
+            }
+        }
         self.facts = Some(facts);
         self.status = WorktreeDialogStatus::Ready;
         self.status_retention = None;
@@ -498,12 +513,6 @@ impl WorktreeDialogState {
                     .worktrees
                     .get(self.selected_existing)
                     .ok_or("No existing worktree is available")?;
-                if selected.occupied_pane_id.is_some() {
-                    return Err(format!(
-                        "{} already has a live agent pane",
-                        selected.path.display()
-                    ));
-                }
                 WorkspaceCreateSpec::Existing {
                     path: selected.path.clone(),
                 }
@@ -551,7 +560,7 @@ impl WorktreeDialogState {
                                 ""
                             },
                             if entry.occupied_pane_id.is_some() {
-                                " · agent already here"
+                                " · shared with agents"
                             } else {
                                 ""
                             },
@@ -833,7 +842,7 @@ pub fn draw_dialog(frame: &mut Frame, screen_area: Rect, state: &WorktreeDialogS
                     1,
                 );
                 let occupied = if entry.occupied_pane_id.is_some() {
-                    " · occupied"
+                    " · agents here"
                 } else {
                     ""
                 };
@@ -1196,7 +1205,26 @@ mod tests {
     }
 
     #[test]
-    fn path_overlap_and_occupied_existing_are_blocked() {
+    fn existing_worktree_target_is_selected_after_repository_facts_arrive() {
+        let mut state = dialog(WorktreeDialogMode::Existing);
+        let path = projects_root().join("shared");
+        state.preferred_existing_path = Some(path.clone());
+        let mut snapshot = facts();
+        snapshot.worktrees.push(WorkspaceWorktreeFact {
+            path: path.clone(),
+            branch: Some("agent/shared".into()),
+            created_by_ilium: false,
+            is_dirty: false,
+            occupied_pane_id: None,
+        });
+        state.apply_facts(snapshot);
+        assert_eq!(state.selected_existing, 1);
+        assert!(matches!(state.validated_request().unwrap().1,
+            WorkspaceCreateSpec::Existing { path: selected } if selected == path));
+    }
+
+    #[test]
+    fn path_overlap_is_blocked_and_occupied_existing_accepts_another_agent() {
         let mut state = dialog(WorktreeDialogMode::New);
         let mut snapshot = facts();
         snapshot.worktrees.push(WorkspaceWorktreeFact {
@@ -1211,10 +1239,10 @@ mod tests {
         assert!(state.validated_request().unwrap_err().contains("overlaps"));
         state.set_mode(WorktreeDialogMode::Existing);
         state.selected_existing = 1;
-        assert!(state
-            .validated_request()
-            .unwrap_err()
-            .contains("live agent"));
+        assert!(matches!(
+            state.validated_request().unwrap().1,
+            WorkspaceCreateSpec::Existing { .. }
+        ));
         state.selected_existing = 0;
         assert!(matches!(
             state.validated_request().unwrap().1,

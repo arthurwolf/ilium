@@ -408,7 +408,7 @@
 <li><strong>Optional GPU backend.</strong> Described under Background animations in How it works. The scene-side calls are an unstable development-build feature.</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/26-animations.gif" alt="Animated scenes behind the panes, switched from the Animations tab" loading="lazy"><figcaption>Scenes behind the panes. The shared look comes from the Animations tab, not from the scene.</figcaption></figure>
+<figure><img src="/assets/demos/26-animations.gif" alt="Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified." loading="lazy"><figcaption>Historical gallery capture. The current-build Voxel preview has not passed visual review.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure><pre class="term">╭─ Waves ──────────────────────────────────────╮
@@ -594,6 +594,7 @@
 </code></pre>
 <h3 id="complete-manifest">Complete manifest</h3>
 <p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<p>The <code>capabilities</code> list of this manifest is the grant set of one sample scene package, the one that holds the video, location, GPU and space-weather scenes. The grant table above names the grants of every scene family, including <code>http:lichess.org</code>, <code>http:*.wikipedia.org</code>, <code>minecraft-saves</code>, <code>codec.inflate</code> and <code>jobs</code>. A scene package declares only the grants of the scenes it contains, so those other grants belong to the packages that ship those scenes and are not in this manifest.</p>
 <pre><code class="language-json">{
   &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
   &quot;id&quot;: &quot;ilium.core.scenes&quot;,
@@ -1041,7 +1042,7 @@ export function soften(
 <li><code>ilium.core.scenes/catalog</code>: list: list scenes and their controls</li>
 </ul>
 <p><code>contributes.scenes</code> entries add scenes. This plugin hosts the built-in ones.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.scenes"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.scenes"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-bundles-a-slow-cloud-scene">Example: Bundles a slow cloud scene</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

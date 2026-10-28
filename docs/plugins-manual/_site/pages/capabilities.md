@@ -129,7 +129,7 @@ Sides: S is the server world, C is the client world and A is the animation (scen
 
 ### Extended grants
 
-The grants below cover the wider kernel surface: tree restructuring, pane lifecycle, terminal and agent data, chrome, sessions, inference and process control. Nine of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript` and `settings.read-kernel:api`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are worth knowing: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
+The grants below cover the wider kernel surface: tree restructuring, pane lifecycle, terminal and agent data, chrome, sessions, inference and process control. Eleven of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab>` and `panes.create-command:<program>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are worth knowing: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
 
 | New grant | Page |
 |---|---|
@@ -164,7 +164,7 @@ The always-granted set needs no entry in the manifest. See [Always granted](#alw
 - `http:<host>` takes an exact host, `*.<domain>` for any subdomain at any depth (not the bare
   domain), and an optional port. `localhost`, `127.0.0.1` and `[::1]` allow plain HTTP. A bare `*`
   is refused.
-- `topics.subscribe:<pattern>` takes an exact topic, `<prefix>/*` or a bare `*` (H).
+- `topics.subscribe:<pattern>` takes an exact topic, `<prefix>/*` or a bare `*`. Exact and prefix patterns are normal risk; only the bare `*` is high risk (H).
 - `process.run:*` is refused with `manifest.grant-wildcard`. `process.run:sh` is valid and H.
 - `messages.peer:<plugin-id>` takes one exact plugin id and no wildcard.
 - `extensions.provide` and `extensions.contribute` take one exact `<plugin-id>/<point>` and no wildcard. There is no `extensions.contribute-any`. List each point.
@@ -211,7 +211,7 @@ at 72 columns for a signed notes package.
 │ Notes 0.1.0 by Example Labs (T2, signed)                                   │
 │                                                                            │
 │ <span class="t-hi">Server side</span>                                                                │
-│ [x] Reads the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
+│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
 │ [x] Reads files in this project <span class="t-dim">……………………………………………………………………</span> fs.read:project │
 │ <span class="t-warn">! [ ] Runs the program git</span> <span class="t-dim">…………………………………………………………………………………</span> <span class="t-warn">process.run:git</span> │
 │ [x] Connects to api.example.com <span class="t-dim">………………………………………………………</span> http:api.example.com │
@@ -435,7 +435,7 @@ Edge cases to design for:
 - `fs.pick` needs `fs.read:picked` or `fs.write:picked`. Without either it fails with
   `manifest.grant-dependency`.
 - `settings.write-all` needs `settings.read-all`, and the review dialog cannot grant write alone.
-- `settings.contribute:<tab-id>` lets a plugin add sections to one built-in tab, such as `settings.contribute:terminal`. It is low risk and independent of `settings.read-all` and `settings.write-all`: it never implies them, and they never imply it. A plugin's own tabs need no grant. See [Plugin settings extension](/pages/settings-extension/).
+- `settings.contribute:<tab-id>` lets a plugin add sections to one built-in tab, such as `settings.contribute:terminal`. It is normal risk and independent of `settings.read-all` and `settings.write-all`: it never implies them, and they never imply it. A plugin's own tabs need no grant. See [Plugin settings extension](/pages/settings-extension/).
 - `fs.write:agent-sessions:<agent>` is refused at install with `manifest.grant-scope`. Transcripts
   are read only.
 - An `inference-provider` export needs `inference.provide`. Without the grant the plugin installs
@@ -458,7 +458,7 @@ packages must be rebuilt, because there is no compatibility layer.
 - [Packages and manifests](/pages/packages/)
 - [Lifecycle](/pages/lifecycle/)
 - [Security](/pages/security/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Reference: capabilities](/pages/reference-capabilities/)
 - [Plugin settings extension](/pages/settings-extension/)
 

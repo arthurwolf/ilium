@@ -1,6 +1,6 @@
 use ilium_plugin_api::ids::PluginId;
 use ilium_plugin_host::registry::{InstalledRegistry, PackageStore};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::Path;
 
 fn row() -> Value {
@@ -37,17 +37,13 @@ fn checked_version_path_rejects_traversal_and_invalid_semver() {
         );
         let fallback = store.version_dir(&plugin, version);
         assert!(fallback.starts_with(store.root.join(".invalid-package-path")));
-        assert!(
-            !fallback
-                .components()
-                .any(|part| matches!(part, std::path::Component::ParentDir))
-        );
+        assert!(!fallback
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir)));
     }
-    assert!(
-        store
-            .checked_version_dir(&plugin, &format!("1.0.0+{}", "a".repeat(59)))
-            .is_err()
-    );
+    assert!(store
+        .checked_version_dir(&plugin, &format!("1.0.0+{}", "a".repeat(59)))
+        .is_err());
 }
 
 #[test]
@@ -58,11 +54,9 @@ fn raw_plugin_id_cannot_escape_or_alias_a_valid_package_directory() {
     for id in ["../outside", "/outside", "a/b", "a\\b", ".", ""] {
         let plugin = PluginId(id.into());
         assert!(store.checked_version_dir(&plugin, "1.0.0").is_err());
-        assert!(
-            store
-                .version_dir(&plugin, "1.0.0")
-                .starts_with(store.root.join(".invalid-package-path"))
-        );
+        assert!(store
+            .version_dir(&plugin, "1.0.0")
+            .starts_with(store.root.join(".invalid-package-path")));
     }
     let plugin = PluginId("example.notes".into());
     for version in ["0.0.0", "1.2.3-beta.1+build.7", "2147483647.0.0"] {

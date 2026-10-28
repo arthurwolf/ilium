@@ -1,5 +1,5 @@
 use ilium_plugin_api::generated::host::clock::HostClock;
-use ilium_plugin_host::imports::clock::{ClockImport, duration_millis, unix_millis_at};
+use ilium_plugin_host::imports::clock::{duration_millis, unix_millis_at, ClockImport};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -8,8 +8,10 @@ fn wall_clock_observation_is_between_actual_host_reads() {
     let before = unix_millis_at(SystemTime::now());
     let observed = clock.now_unix_millis();
     let after = unix_millis_at(SystemTime::now());
-    assert!(before <= observed && observed <= after,
-        "wall clock changed during the real observation: {before} <= {observed} <= {after}");
+    assert!(
+        before <= observed && observed <= after,
+        "wall clock changed during the real observation: {before} <= {observed} <= {after}"
+    );
 }
 
 #[test]
@@ -32,9 +34,15 @@ fn monotonic_clock_never_resets_when_an_import_is_constructed() {
 fn unix_conversion_clamps_before_epoch_and_truncates_submilliseconds() {
     assert_eq!(unix_millis_at(UNIX_EPOCH), 0);
     assert_eq!(unix_millis_at(UNIX_EPOCH - Duration::from_nanos(1)), 0);
-    assert_eq!(unix_millis_at(UNIX_EPOCH + Duration::from_nanos(999_999)), 0);
+    assert_eq!(
+        unix_millis_at(UNIX_EPOCH + Duration::from_nanos(999_999)),
+        0
+    );
     assert_eq!(unix_millis_at(UNIX_EPOCH + Duration::from_micros(1_999)), 1);
-    assert_eq!(unix_millis_at(UNIX_EPOCH + Duration::from_secs(1_234)), 1_234_000);
+    assert_eq!(
+        unix_millis_at(UNIX_EPOCH + Duration::from_secs(1_234)),
+        1_234_000
+    );
 }
 
 #[test]

@@ -26,7 +26,7 @@ The platform adds four crates to the workspace and changes the boundaries of two
 | `ilium-plugin-conformance` | test only | Language-neutral fixtures and the Rust and TypeScript guest components that exercise each interface | Production code |
 | `ilium-plugin-bench` | test only | The benchmark programs B1 to B24 of [Performance budgets and benchmarks](/pages/reference-host-budgets/) | Production code |
 
-The helper binary is installed beside the `ilium` and `ilium-server` binaries by the same installer, and the host finds it by looking in the directory of its own executable. A missing helper is not an error for T1-only installs: T2 and T3 packages are refused with `host.helper-missing` (see [Sandbox helper](/pages/reference-host-helper/)).
+The helper binary is installed beside the `ilium` and `ilium-server` binaries by the same installer, and the host finds it by looking in the directory of its own executable. A missing helper is not an error for T1-only installs: T2 and T3 packages stay installed but disabled with `host.helper-missing` (see [Sandbox helper](/pages/reference-host-helper/)).
 
 ### Dependency edges
 
@@ -172,7 +172,7 @@ The scene host runs inside the client process. It is a separate set of Stores (o
 
 ### Job instances
 
-A plugin that uses `jobs.run` gets a second kind of instance: a **job instance** of the same component, created for one job from the `InstancePre` of the plugin side (design decision A21 in [Background jobs](/pages/background-jobs/)). Job instances are not the plugin's main instance. They have their own Store, their own memory limit (`job_memory_mib`) and no access to the plugin's main instance state. The number running at once is the plugin's `concurrent_jobs`. They run on the job worker bank of `ilium-execution`, not on the plugin executor. See [Jobs](/pages/api-jobs/).
+A plugin that uses `jobs.run` gets a second kind of instance: a **job instance** of the same component, created for one job from the `InstancePre` of the plugin side (design decision in [Background jobs](/pages/background-jobs/)). Job instances are not the plugin's main instance. They have their own Store, their own memory limit (`job_memory_mib`) and no access to the plugin's main instance state. The number running at once is the plugin's `concurrent_jobs`. They run on the job worker bank of `ilium-execution`, not on the plugin executor. See [Jobs](/pages/api-jobs/).
 
 - **[HST-017]** A job MUST run in its own Store, MUST NOT share linear memory with the plugin's main instance, and MUST run on the job worker bank.
 - **[HST-018]** The count of live job instances of one plugin side MUST NOT exceed `concurrent_jobs`; further jobs wait in the job queue.

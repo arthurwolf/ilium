@@ -1,5 +1,5 @@
 use ilium_plugin_host::lifecycle::{
-    SafeMode, StartNode, resolve_safe_mode, shutdown_order, start_order,
+    resolve_safe_mode, shutdown_order, start_order, SafeMode, StartNode,
 };
 
 fn node(id: &str, tier: u8, plugins: &[&str], services: &[&str]) -> StartNode {

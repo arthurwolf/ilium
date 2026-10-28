@@ -8,7 +8,7 @@ Contract version: `ilium:plugin@0.1.0`.
 
 ### The mechanism in one paragraph
 
-The manifest declares a number, `data_version`. The host remembers which data version each bucket and the data directory were last written with. When a new version of the plugin starts with a higher `data_version`, the host takes a backup, calls the optional export `migrator.migrate(from, to)` once, stamps the new number when it succeeds, and only then calls `activate`. If `migrate` fails, the host restores the backup and keeps the old version. A plugin that never changes its storage layout declares nothing and needs none of this.
+The manifest declares a number, `data_version`. The host remembers which data version each bucket and the data directory were last written with. When a new version of the plugin starts with a higher `data_version`, the host takes a backup, calls the optional export `migrator.migrate(from, to)` once per bucket (the global bucket and the data directory at the first activation, each project or session bucket when its session first activates the plugin, LIF-104), stamps the new number when it succeeds, and only then calls `activate`. If `migrate` fails, the host restores the backup and keeps the old version. A plugin that never changes its storage layout declares nothing and needs none of this.
 
 You will need:
 
@@ -51,7 +51,7 @@ interface migrator {
 | CPU | charged to the plugin's execution quota like any call |
 | Memory | the plugin's `memory_mib` |
 | Side | each side that exports `migrator`, server first; a client side runs at its first attach after the update |
-| Skipped when | `data_version` is unchanged, or the plugin has no `migrator` (the host only stamps the new number and logs `migration.skipped`) |
+| Skipped when | `data_version` is unchanged, or the plugin has no `migrator` (with no `migrator` the host stamps the new number, drops the restore bytes, clears the `shared` cache bucket and logs `migration.skipped`) |
 
 - [LIF-104] For each bucket, the host MUST call `migrate(from, to)` at most once per update, the first time a host instance activates with that bucket in scope and the bucket stamp is lower than `data_version`, with `from` less than `to`. The global bucket and the data directory migrate at the first activation after the swap. A project or session bucket migrates when its session first activates the plugin. Test: update from 1 to 3, open two sessions, and assert one call `(1, 3)` for the global bucket and one for each session bucket.
 - [LIF-105] A call that returns an error, traps or misses the deadline MUST be a migration failure (LIF-108). It MUST NOT count toward the failure window of the plugin. Test: return an error from `migrate` and read `failures-in-window`.
@@ -61,7 +61,7 @@ interface migrator {
 
 Before `migrate`, the host takes a backup of the buckets in scope and the data directory.
 
-- [LIF-107] The host MUST copy the global, project and session buckets in use and the data directory to `backups/<id>/<version>-<utc timestamp>/` before it calls `migrate`. The timestamp has the form `YYYYMMDDTHHmmssZ`. The host MUST refuse with `install.no-space`, before touching any data, when free space is less than twice the data size plus 100 MiB. The backup size is capped by the key `migration_backup_mib` in the `[plugins]` table of `config.toml` (integer 0 to 1048576, default 2048; 0 disables backups). Data above the cap is refused with `migration.backup-too-large` (stage I, exit 1) unless `--no-backup` is given, and then a failed migration cannot be undone. A copy-on-write copy MAY replace the full copy. Test: fill the disk and update; set the cap to 1 and update with 2 MiB of data, with and without `--no-backup`.
+- [LIF-107] The host MUST copy the global, project and session buckets in use and the data directory to `backups/<id>/<version>-<utc timestamp>/` before it calls `migrate`. The timestamp has the form `YYYYMMDDTHHmmssZ`. The host MUST refuse with `install.no-space`, before touching any data, when free space is less than twice the data size plus 100 MiB. This data check comes after the package check of the install or update, which needs three times the package size plus 64 MiB (Offline and low disk). The backup size is capped by the key `migration_backup_mib` in the `[plugins]` table of `config.toml` (integer 0 to 1048576, default 2048; 0 disables backups). Data above the cap is refused with `migration.backup-too-large` (stage I, exit 1) unless `--no-backup` is given, and then a failed migration cannot be undone. A copy-on-write copy MAY replace the full copy. Test: fill the disk and update; set the cap to 1 and update with 2 MiB of data, with and without `--no-backup`.
 - [LIF-108] On a migration failure the host MUST restore the backup, keep the previous version active, log `migration.failed` with the plugin's error code and message, and mark the update rolled back. Test: fail `migrate` after it wrote half the keys, then compare the buckets with the backup.
 - [LIF-109] After an update that succeeded and was activated, the host MUST keep only the newest backup of that plugin and delete older ones in `backups/<id>/`. Test: update twice and list the backups.
 

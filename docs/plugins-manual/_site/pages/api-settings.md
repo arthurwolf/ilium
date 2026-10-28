@@ -9,8 +9,8 @@ The `settings` import lives in `ilium:host/settings`. It has five functions and 
 **You need:**
 
 - No grant for the plugin's own values. `get-json` and `set-json` are always granted on the `server` and `client` sides. A plugin's own tab needs no other grant.
-- `settings.contribute:<tab-id>` for each built-in tab where the plugin adds a section, for example `settings.contribute:terminal`. It allows drawing sections in that tab and nothing else. It is low risk, and it neither implies nor is implied by the two all-settings grants. See [settings.read-all and settings.write-all](/pages/capability-settings-all/).
-- `settings.read-kernel:<tab-id>` for the read-only `kernel-settings.read` call. It is low risk, takes one tab id and gives no write access.
+- `settings.contribute:<tab-id>` for each built-in tab where the plugin adds a section, for example `settings.contribute:terminal`. It allows drawing sections in that tab and nothing else. It is normal risk, and it neither implies nor is implied by the two all-settings grants. See [settings.read-all and settings.write-all](/pages/capability-settings-all/).
+- `settings.read-kernel:<tab-id>` for the read-only `kernel-settings.read` call. It is normal risk for most tabs and high risk for the `api` tab, takes one tab id and gives no write access.
 - `settings.read-all` for `list-settings` and `get-plugin-json`. This grant is high risk and available only to bundled first-party (T1) plugins.
 - `settings.write-all` for `set-plugin-json`. It also needs `settings.read-all`. It is high risk and T1 only.
 - A language: Rust with `ilium_plugin_sdk`, or TypeScript with `@ilium/plugin-sdk`.
@@ -35,7 +35,7 @@ The SDK names of the calls on this page, including the `_request` / `Request` st
 
 The `SettingsRef` record has these fields: `plugin` (the plugin id), `tab` (the global tab id `<plugin-id>/<tab-id>`, or the built-in tab id for a section in a built-in tab), `section` (the global section id, when the entry is a section), `title`, `scope` (`server` or `client`) and `kernel-tab` (an optional built-in tab id). In Rust it is imported from `ilium_plugin_sdk::host::settings`. In TypeScript it is imported as a type from `@ilium/plugin-sdk/host/settings`.
 
-The `SettingsChange` record has three fields: `keys` (the changed keys, sorted, no duplicates), `origin` and `scope` (the receiving side, `server` or `client`). The origin is one of:
+The `SettingsChange` record has three fields: `keys` (the changed keys, sorted, no duplicates), `origin` and `side` (the receiving side, `server` or `client`). The origin is one of:
 
 - `user`: a row on the Settings screen changed, or the `r` key reset a row.
 - `plugin`: the plugin's own `set-json` call.
@@ -115,7 +115,7 @@ The keywords that a row's schema may use are fixed. Any other keyword is refused
 | `x-applies` | all value rows | Compiled from `applies: "restart"`. Draws `↻` and the note `Applies after restart.` |
 | `x-steps`, `x-special-values` | `integer`, `number` | Compiled from `steps` and `special_values`. A ladder of allowed stops, and values drawn as a title. |
 
-The error codes `manifest.catalog-unknown` (a choice `source` names an unknown catalogue) and `manifest.settings-source` (`source` together with `options`) are install-time manifest errors.
+The error codes `manifest.catalog-unknown` (a choice `source` names an unknown catalogue) and `manifest.settings-source` (a `choice` row with both or neither of `options` and `source`) are install-time manifest errors.
 
 Row keys must be unique within one plugin, across all its tabs and sections. A duplicate is refused at install with `manifest.settings-key-clash`.
 
@@ -315,7 +315,7 @@ A settings screen uses `list-settings` to find the tabs and sections. A section 
 | `not-permitted` | `list-settings`, `get-plugin-json`, `set-plugin-json`, `kernel-settings.read` | The grant is missing or was declined. Universal. |
 | `revoked`, `internal` | all | Universal. `revoked` means the plugin is re-activated. |
 
-`get-json` has no error code of its own. A tab or section that a plugin does not declare is simply left out of `list-settings` (A37).
+`get-json` has no error code of its own. A tab or section that a plugin does not declare is simply left out of `list-settings`.
 
 ### What the user sees
 

@@ -413,7 +413,7 @@
 </tr>
 <tr>
 <td>[COR-002]</td>
-<td>Every feature MUST have exactly one owner.</td>
+<td>Every feature MUST have one primary owner, the first one named in its Owner cell.</td>
 <td><a href="/pages/reference-feature-traceability/">Feature traceability</a></td>
 <td>Script: count rows per id in the table; the count is 116 and each owner cell is non-empty. The duplicates section lists no open claim.</td>
 </tr>
@@ -451,7 +451,7 @@
 <td>[COR-022]</td>
 <td>Disabling a core plugin MUST have the stated effect, MUST NOT delete its data and MUST leave the recovery page working.</td>
 <td><a href="/pages/reference-kernel-and-boot/">Kernel and boot</a></td>
-<td>For each of the 30 plugins: disable it, check the table row, check stored data, open recovery.</td>
+<td>For each of the 26 plugins that can be disabled (all except the four essential ones, see <a href="/pages/core-plugins/#which-core-plugins-can-be-disabled">Which core plugins can be disabled</a>): disable it, check the table row, check stored data, open recovery. For the four essential plugins assert that no disable switch is offered.</td>
 </tr>
 <tr>
 <td>[COR-023]</td>
@@ -479,7 +479,7 @@
 </tr>
 <tr>
 <td>[COR-032]</td>
-<td>Plugin state in a snapshot MUST use <code>snapshot-sections</code> with a <code>schema_version</code>; a section over 256 KiB MUST be dropped without losing the previous value; a failed plugin MUST NOT block the snapshot.</td>
+<td>Plugin state in a snapshot MUST use <code>snapshot-sections</code> with a <code>schema_version</code>; a section over its <code>max_bytes</code> (at most 256 KiB) MUST be dropped without losing the previous value; a failed plugin MUST NOT block the snapshot.</td>
 <td><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></td>
 <td>Write a 300 KiB section; the previous value survives and the snapshot is written.</td>
 </tr>
@@ -490,8 +490,20 @@
 <td>Run the build on a config with an unknown key, change one setting, diff the files; only that setting differs.</td>
 </tr>
 <tr>
+<td>[COR-034]</td>
+<td>A write through <code>settings.write-kernel:&lt;tab&gt;</code> that names a key outside the tab's "Keys written" column MUST fail with <code>settings.key-not-owned</code> and write nothing.</td>
+<td><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></td>
+<td>Write a key owned by another tab of the same table; assert <code>settings.key-not-owned</code> and an unchanged file.</td>
+</tr>
+<tr>
+<td>[COR-090]</td>
+<td>A <code>config.toml</code> or <code>.ilium/config.yaml</code> that cannot be parsed MUST be left unchanged on disk and MUST NOT be rewritten while it stays unparseable. The host MUST use the built-in defaults for that file for the run, MUST print one <code>warning</code> with the code <code>config.parse-error</code> that names the file, and MUST still boot.</td>
+<td><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></td>
+<td>Start a server with <code>config.toml</code> holding <code>[ui</code>; assert the bytes are unchanged, the warning, and a running server.</td>
+</tr>
+<tr>
 <td>[COR-040]</td>
-<td>A plugin MUST declare every <code>ilium</code> subcommand it owns; no built-in command without a declared owner MAY remain.</td>
+<td>A plugin MUST declare every <code>ilium</code> subcommand it owns; no built-in command without a declared owner MUST NOT remain.</td>
 <td><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></td>
 <td>Compare <code>ilium --help</code> with the ownership table; every non-kernel command names a plugin.</td>
 </tr>
@@ -499,7 +511,7 @@
 <td>[COR-041]</td>
 <td>Arguments, options, defaults, output records and exit codes of every command MUST equal the baseline CLI reference.</td>
 <td><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></td>
-<td>Replay the examples of <code>cli-reference.md</code> and compare the JSONL records and exit codes.</td>
+<td>Replay the examples of <code>src/docs/cli-reference.md</code> (a file of the repository user documentation, outside this manual) and compare the JSONL records and exit codes.</td>
 </tr>
 <tr>
 <td>[COR-042]</td>
@@ -530,6 +542,36 @@
 <td>The roadmap MUST state what stays native in each wave.</td>
 <td><a href="/pages/roadmap/">Roadmap</a></td>
 <td>Every wave row has a non-empty native column.</td>
+</tr>
+<tr>
+<td>[COR-080]</td>
+<td>Captured microphone audio MUST stay in memory and MUST NOT be written to disk, a log or a crash report; the buffer MUST be released when the transcription job ends, fails or is cancelled.</td>
+<td><a href="/pages/core-plugin-voice/#data-and-privacy">Voice</a></td>
+<td>Record, release the key, cancel, fail the job; assert no file under the plugin data and log directories holds audio and the buffer length is 0 after each.</td>
+</tr>
+<tr>
+<td>[COR-081]</td>
+<td>Audio MUST be sent off the machine only when the configured transcription provider is remote, and the voice strip MUST show a "remote" marker while it is. With a local provider the plugin MUST open no network connection.</td>
+<td><a href="/pages/core-plugin-voice/#data-and-privacy">Voice</a>, <a href="/pages/user-privacy/#core-plugins-and-ai-providers">Plugin privacy</a></td>
+<td>Local provider in a network namespace without interfaces: success, zero connections. Remote provider: one connection to the configured host and the marker is shown.</td>
+</tr>
+<tr>
+<td>[COR-082]</td>
+<td>The plugin SHOULD name the provider and whether it is local or remote in Settings before the first capture, and MUST NOT switch from a local to a remote provider without the user's change.</td>
+<td><a href="/pages/core-plugin-voice/#data-and-privacy">Voice</a></td>
+<td>Fresh install: settings row shows provider and locality; a provider that fails never falls back to a remote one.</td>
+</tr>
+<tr>
+<td>[COR-083]</td>
+<td>A transcript MUST be kept only in memory for the current voice session, MUST NOT be written to the log at Info level or above, and MUST be dropped when the session ends.</td>
+<td><a href="/pages/core-plugin-voice/#data-and-privacy">Voice</a></td>
+<td>Speak a phrase, end the session; scan logs and storage for the phrase; none; the session transcript is empty.</td>
+</tr>
+<tr>
+<td>[COR-084]</td>
+<td>Audio and transcripts MUST NOT be published on a topic, sent in an event payload or exposed to another plugin; only the command id the transcript maps to MAY leave the plugin.</td>
+<td><a href="/pages/core-plugin-voice/#data-and-privacy">Voice</a></td>
+<td>Subscribe a fixture plugin to every topic and event during a session; assert no payload holds the audio bytes or the transcript text.</td>
 </tr>
 </tbody>
 </table>

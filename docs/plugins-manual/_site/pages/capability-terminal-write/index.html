@@ -534,7 +534,7 @@ Input sent to a pane runs there with the permissions of that process. A plugin w
 <text x="226" y="27" font-size="11" fill="currentColor">refused: invalid-argument</text>
 <text x="226" y="63" font-size="11" fill="currentColor">refused: not-permitted</text>
 <text x="226" y="99" font-size="11" fill="currentColor">duplicate(original)</text>
-<text x="226" y="135" font-size="11" fill="currentColor">refused: not-found</text>
+<text x="226" y="135" font-size="11" fill="currentColor">refused: not-found / unsupported</text>
 <text x="226" y="171" font-size="11" fill="currentColor">refused: pane-not-ready</text>
 <text x="226" y="207" font-size="11" fill="currentColor">refused: rate-limited</text>
 <text x="226" y="243" font-size="11" fill="currentColor">refused: conflict</text>
@@ -542,13 +542,13 @@ Input sent to a pane runs there with the permissions of that process. A plugin w
 <figcaption>The eight checks of a send-input submission. A failed check stops the submission and returns the outcome beside it. The key of a refused submission is not reserved, so a retry with the same key is valid after the cause is fixed.</figcaption>
 </figure>
 
-<p>Two rules apply to the whole batch, not to one submission. A batch is refused as a whole when a submission is malformed (wrong shape, a missing <code>dedup-key</code>, or more than 256 submissions) or when the plugin lacks the grant. In that case every submission of the batch completes as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>, except the offending one. All other checks run per submission.</p>
+<p>Two rules apply to the whole batch, not to one submission. A batch is refused as a whole when a submission is malformed (wrong shape, or a missing <code>dedup-key</code>; more than 256 submissions is a trap, not a refusal) or when the plugin lacks the grant. In that case every submission of the batch completes as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>. The offending submission itself completes as <code>refused(invalid-argument)</code> when it is malformed, or as <code>refused(not-permitted)</code> when the grant is missing; this is the same whole-batch refusal that <a href="#errors-and-edge-cases">Errors and limits</a> lists. All other checks run per submission.</p>
 <h2 id="dedup-keys">Dedup keys</h2>
 <p>A plugin can lose track of whether a send worked, for example after a restart. Sending the same text again would then type it twice. The <code>dedup-key</code> prevents that.</p>
 <ul>
 <li>The key is mandatory for <code>send-input</code> and <code>agent-action</code>. A submission without one is malformed.</li>
 <li>The key has 1 to 128 characters from <code>[A-Za-z0-9._:/-]</code>. Another character makes the submission malformed.</li>
-<li>The key is reserved for the pair of plugin id and key, for 10 minutes. From build phase 5, the kernel also journals <code>send-input</code> keys in the session snapshot before the write. A server restart then does not repeat input. Before that phase, keys live in memory only.</li>
+<li>The key is reserved for the pair of plugin id and key, for the 10-minute reservation window (a different window from the 24-hour dedup journal in the limits table). From Phase 5 of the <a href="/pages/roadmap/">roadmap</a>, the kernel also journals <code>send-input</code> keys in the session snapshot before the write. A server restart then does not repeat input. Before Phase 5, keys live in memory only.</li>
 <li>A submission whose key is reserved completes as <code>duplicate(original)</code>, where <code>original</code> names the submission that reserved the key. It has no effect.</li>
 <li>A key is reserved only after every check passed. A refused submission keeps its key free, so a retry is valid. An accepted submission keeps its key reserved even if it later fails, so a retry of a failed send needs a new key.</li>
 </ul>
@@ -805,7 +805,7 @@ export const { handler } = definePlugin({
 <td>10 minutes</td>
 </tr>
 <tr>
-<td>Dedup journal</td>
+<td>Dedup journal (a different window from the 10-minute reservation)</td>
 <td>24 hours or 4,096 entries per session, whichever is smaller</td>
 </tr>
 <tr>
@@ -836,7 +836,7 @@ export const { handler } = definePlugin({
 <li><a href="/pages/capability-agent-control/">agent.control</a> for sending an agent's own action keys, which is a separate grant with its own checks.</li>
 <li><a href="/pages/capability-panes-create/">panes.create</a> for the <code>initial-input</code> field of <code>create-pane</code>.</li>
 <li><a href="/pages/capability-panes-signal/">panes.signal</a> for signals sent to a pane's process, which need no text.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the full table of error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the full table of error codes.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-terminal-read-screen/"><small>Previous</small>terminal.read-screen</a><a class="next" href="/pages/capability-topics-subscribe/"><small>Next</small>Capability: topics.subscribe</a></nav>

@@ -98,7 +98,7 @@ A `cell` holds the grapheme cluster at that position in `text`, the resolved for
 
 ### History text and search
 
-`history-text` returns the scrollback and the visible screen as one string, newest text kept when the pane holds more than `max-bytes`. The limit is 4 MiB per call. Lines are joined with a newline and trailing blanks are removed. `search-history` runs a regular expression of the Rust `regex` dialect over the same text and returns at most `max-matches` positions, each as row, column and length in cells, counted from the oldest retained row. Both are high risk because scrollback can hold secrets the user typed or pasted long ago. The host removes the regions that a program marked as a hidden password prompt.
+`history-text` returns the scrollback and the visible screen as one string, newest text kept when the pane holds more than `max-bytes`. The limit is 4 MiB per call: a larger `max-bytes` is clamped to 4 MiB and the call does not fail. For `search-history`, a `max-matches` of 0 is `invalid-argument`, and a value over 10,000 is clamped to 10,000 without a failure. Lines are joined with a newline and trailing blanks are removed. `search-history` runs a regular expression of the Rust `regex` dialect over the same text and returns at most `max-matches` positions, each as row, column and length in cells, counted from the oldest retained row. Both are high risk because scrollback can hold secrets the user typed or pasted long ago. The host removes the regions that a program marked as a hidden password prompt.
 
 ### Events
 
@@ -201,13 +201,14 @@ for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 
 ### Outcomes, errors and limits
 
+`read-cells` and `read-snapshot-cells` return `none` and never a `plugin-error`, because their WIT signature is `option<cell-rows>`. The host writes a refusal line with the code to the plugin log: `pane-not-ready` when the pane has no process yet, `not-found` for no such pane or snapshot, `not-permitted` without the grant, and `quota-exceeded` when `count` is above 1,000 rows. Only the calls in the table below return a `plugin-error`.
+
 | Call | Error | Cause |
 |---|---|---|
-| `read-cells`, `freeze-snapshot` | `pane-not-ready` | the pane has no process yet |
-| `read-cells`, `freeze-snapshot` | `not-found` | no such pane or snapshot |
-| `read-cells` | `quota-exceeded` | `count` above 1,000 rows |
+| `freeze-snapshot` | `pane-not-ready` | the pane has no process yet |
+| `freeze-snapshot` | `not-found` | no such pane |
 | `freeze-snapshot` | `quota-exceeded` | more than 4 live snapshots on this pane |
-| `search-history` | `invalid-argument` | the regex does not compile in the `regex` dialect, or is over 1 KiB |
+| `search-history` | `invalid-argument` | the regex does not compile in the `regex` dialect, or is over 1 KiB, or `max-matches` is 0 |
 | `history-text`, `search-history` | completion `timed-out` | the host gave up after its deadline |
 | any call | `not-permitted` | the grant is missing or revoked |
 

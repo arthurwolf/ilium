@@ -610,7 +610,7 @@ function rowGapRows(): number {
 </tr>
 </tbody>
 </table>
-<p>The <code>tone</code> values are <code>info</code>, <code>success</code>, <code>warning</code>, <code>danger</code> and <code>muted</code>. They map to the roles of the same name, so the dark and the light theme both stay readable.</p>
+<p>The <code>tone</code> values that the widgets accept are <code>info</code>, <code>success</code>, <code>warning</code>, <code>danger</code> and <code>muted</code>; the settings <code>notice</code> row accepts only <code>info</code>, <code>success</code>, <code>warning</code> and <code>danger</code>. They map to the roles of the same name, so the dark and the light theme both stay readable.</p>
 <figure>
 <pre class="term">╭  ≡ ● · Roles at work ────────────────────────╮
 │ <span class="t-hi">ℹ</span> The provider sends place names off site.   │
@@ -636,7 +636,7 @@ flags modifiers {
 record style { fg: option&lt;color&gt;, bg: option&lt;color&gt;, add: modifiers, remove: modifiers }
 record span { text: string, style: style }
 </code></pre>
-<p>An empty style inherits the theme. A colour given as <code>rgb</code> or <code>indexed</code> is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host's contrast guarantee covers roles. A plugin that picks its own colours is responsible for contrast on both backgrounds.</p>
+<p>An empty style inherits the theme. A colour given as <code>rgb</code> or <code>indexed</code> is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host guarantees a contrast ratio of at least 4.5:1 between each of the nine foreground roles and the theme background, in every built-in theme; a theme test computes the ratio from the token values. This guarantee covers roles only. A plugin that picks its own colours is responsible for contrast on both backgrounds.</p>
 <h2 id="the-full-surface">The full surface</h2>
 <table>
 <thead>
@@ -836,6 +836,26 @@ export const { lifecycle, handler, views } = definePlugin({
 <figcaption>The plugin names roles, never colours. The host paints the same tree once per theme, so both themes come from one plugin build.</figcaption>
 </figure>
 
+<h2 id="sound-and-notices-are-never-the-only-signal">Sound and notices are never the only signal</h2>
+<p>Meaning carried by sound, a desktop notice or a toast MUST also be carried by text the user can read in Ilium. See <a href="/pages/capability-sound-play/">sound.play</a>, <a href="/pages/capability-notify-desktop/">notify.desktop</a> and <a href="/pages/capability-notify-toast/">notify.toast</a>.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Rule</th>
+<th>Exact value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CAP-884</td>
+<td>Channels are independent</td>
+<td>Turning off sound, desktop notices or toasts, or a channel failing, MUST leave the text signal of the same event unchanged. Colour or sound alone never carries a state: every state has a text label</td>
+<td><code>src/docs/notifications.md</code></td>
+</tr>
+</tbody>
+</table>
 <h2 id="edge-cases-and-errors">Edge cases and errors</h2>
 <table>
 <thead>
@@ -874,16 +894,16 @@ export const { lifecycle, handler, views } = definePlugin({
 <td><code>spinner</code> shows one static frame. A plugin timer that animates should stop.</td>
 </tr>
 <tr>
-<td>Tree above 4,096 nodes or 1,024 KiB</td>
-<td>The plugin traps. Repeated traps count toward the restart and disable rule.</td>
+<td>Tree above its limit (<code>ui_tree_nodes</code>, default 4,096 nodes; <code>ui_tree_kib</code>, default 1,024 KiB)</td>
+<td>The plugin traps. Repeated traps count toward the restart and disable rule. A first-party (T1) plugin may raise the limits through <code>limits</code> in its manifest, up to 16,384 nodes and 4,096 KiB.</td>
 </tr>
 <tr>
-<td><code>render</code> runs past 10 ms</td>
+<td><code>render</code> runs past its deadline (default 10 ms)</td>
 <td>The render is a trap, like any other <code>views.render</code> failure.</td>
 </tr>
 </tbody>
 </table>
-<p>The styling functions return no error code. <code>theme()</code> and <code>display-width()</code> always answer, and styled-text fields have no validation error. Limits show up only as traps or as cut text.</p>
+<p>A T1 plugin may raise the render deadline through <code>render_deadline_ms</code>, up to 20 ms. The styling functions return no error code. <code>theme()</code> and <code>display-width()</code> always answer, and styled-text fields have no validation error. Limits show up only as traps or as cut text.</p>
 <h2 id="checks-before-you-ship">Checks before you ship</h2>
 <ul>
 <li>Open the view in the dark and in the light theme. Each status mark must stay readable against the background.</li>
@@ -895,7 +915,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li>Check that every state has a glyph or a word as well as a colour, for example <code>✓</code> and <code>✗</code> with a <code>notice</code>, so the state reads without colour.</li>
 </ul>
 <h3 id="what-the-contract-does-not-provide">What the contract does not provide</h3>
-<p><code>ilium:plugin@0.1.0</code> has no accessible-label, screen-reader or high-contrast import, and no locale import. The terminal has no accessibility tree, so the plugin carries meaning in text. A plugin MUST NOT use colour as the only carrier of meaning, and MUST give every status a word or a glyph beside its colour role. [AUT-501] A plugin MUST read <code>reduced-motion</code> and stop its own animating timers when it is true. [AUT-502] A plugin SHOULD work in <code>compact</code> density at 40 columns and in both icon modes, and SHOULD end every icon-only control with a text label that stays when icons are not drawn. [AUT-503] A plugin SHOULD use the nine colour roles and avoid <code>rgb</code> and <code>indexed</code> colours, because only a role follows the theme and the user's contrast choice. [AUT-504] The list for release time is in <a href="/pages/guide-quality-checklist/">Quality checklist</a>, and width rules for other scripts are in <a href="/pages/guide-internationalisation/">Internationalisation</a>.</p>
+<p><code>ilium:plugin@0.1.0</code> has no accessible-label, screen-reader or high-contrast import, and no locale import. The terminal has no accessibility tree, so the plugin carries meaning in text. A plugin MUST NOT use colour as the only carrier of meaning, and MUST give every status a word or a glyph beside its colour role. [AUT-501] A plugin MUST read <code>reduced-motion</code> and stop its own animating timers when it is true. [AUT-502] A plugin MUST work in <code>compact</code> density at 40 columns and in both icon modes, and MUST end every icon-only control with a text label that stays when icons are not drawn. [AUT-503] A plugin MUST use the nine colour roles and avoid <code>rgb</code> and <code>indexed</code> colours, because only a role follows the theme. [AUT-504] The list for release time is in <a href="/pages/guide-quality-checklist/">Quality checklist</a>, and width rules for other scripts are in <a href="/pages/guide-internationalisation/">Internationalisation</a>.</p>
 <h3 id="see-also">See also</h3>
 <ul>
 <li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
@@ -909,7 +929,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#colour-roles">Colour roles</a></li><li class="l2"><a href="#theme-extras">Theme extras</a></li><li class="l2"><a href="#widget-colour-roles">Widget colour roles</a></li><li class="l2"><a href="#styled-text">Styled text</a></li><li class="l2"><a href="#the-full-surface">The full surface</a></li><li class="l2"><a href="#worked-example-a-checks-panel">Worked example: a checks panel</a></li><li class="l2"><a href="#glyphs-and-icon-widths">Glyphs and icon widths</a></li><li class="l2"><a href="#the-leader-rule">The leader rule</a></li><li class="l2"><a href="#markdown-and-terminal-output">Markdown and terminal output</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#checks-before-you-ship">Checks before you ship</a></li><li class="l3"><a href="#what-the-contract-does-not-provide">What the contract does not provide</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#colour-roles">Colour roles</a></li><li class="l2"><a href="#theme-extras">Theme extras</a></li><li class="l2"><a href="#widget-colour-roles">Widget colour roles</a></li><li class="l2"><a href="#styled-text">Styled text</a></li><li class="l2"><a href="#the-full-surface">The full surface</a></li><li class="l2"><a href="#worked-example-a-checks-panel">Worked example: a checks panel</a></li><li class="l2"><a href="#glyphs-and-icon-widths">Glyphs and icon widths</a></li><li class="l2"><a href="#the-leader-rule">The leader rule</a></li><li class="l2"><a href="#markdown-and-terminal-output">Markdown and terminal output</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#sound-and-notices-are-never-the-only-signal">Sound and notices are never the only signal</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#checks-before-you-ship">Checks before you ship</a></li><li class="l3"><a href="#what-the-contract-does-not-provide">What the contract does not provide</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

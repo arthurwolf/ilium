@@ -122,7 +122,7 @@ A plugin adds a settings tab, a section in a kernel tab, or its own view-rendere
 
 #### Capabilities
 
-One grant per feature, such as `tree.decorate`, `agent.read` or `fs.read:<scope>`. There are 19 further grants, nine of them high risk. The user sees every grant in the review dialog before it takes effect. The [capability reference](/pages/capabilities/) lists them all with their sides and risk. The pages in the groups below describe each grant and what it unlocks.
+One grant per feature, such as `tree.decorate`, `agent.read` or `fs.read:<scope>`. There are 23 further grants, eleven of them high risk. The user sees every grant in the review dialog before it takes effect. The [capability reference](/pages/capabilities/) lists them all with their sides and risk. The pages in the groups below describe each grant and what it unlocks.
 
 | Group | Grants |
 |---|---|
@@ -133,7 +133,7 @@ One grant per feature, such as `tree.decorate`, `agent.read` or `fs.read:<scope>
 | Files | [`fs.read`](/pages/capability-fs-read/), [`fs.write`](/pages/capability-fs-write/), [`fs.watch`](/pages/capability-fs-watch/), [`fs.pick`](/pages/capability-fs-pick/) |
 | Network and processes | [`http`](/pages/capability-http/), [`http-api.route`](/pages/capability-http-api-route/), [`process.run`](/pages/capability-process-run/), [`jobs.run`](/pages/capability-jobs-run/), [`cli.contribute`](/pages/capability-cli-contribute/) |
 | UI and desktop | [`ui.panels`](/pages/capability-ui-panels/), [`keys.intercept`](/pages/capability-keys-intercept/), [`commands.invoke`](/pages/capability-commands-invoke/), [`clipboard`](/pages/capability-clipboard/), [`notify.desktop`](/pages/capability-notify-desktop/), [`sound.play`](/pages/capability-sound-play/), [`audio`](/pages/capability-audio/), [`media.video`](/pages/capability-media-video/), [`location.observer`](/pages/capability-location-observer/) |
-| Platform | [`services`](/pages/capability-services/), [`topics.subscribe`](/pages/capability-topics-subscribe/), [`messages.peer`](/pages/capability-messages-peer/), [`inference`](/pages/capability-inference/), [`inference.provide`](/pages/capability-inference-provide/), [`workspace.manage`](/pages/capability-workspace-manage/), [`settings.all`](/pages/capability-settings-all/), [`plugins.manage`](/pages/capability-plugins-manage/), [`help.read`](/pages/capability-help-read/), [always granted](/pages/capability-always-granted/) |
+| Platform | [`services`](/pages/capability-services/), [`topics.subscribe`](/pages/capability-topics-subscribe/), [`messages.peer`](/pages/capability-messages-peer/), [`inference`](/pages/capability-inference/), [`inference.provide`](/pages/capability-inference-provide/), [`workspace.manage`](/pages/capability-workspace-manage/), [`settings.read-all`](/pages/capability-settings-all/), [`plugins.manage`](/pages/capability-plugins-manage/), [`help.read`](/pages/capability-help-read/), [always granted](/pages/capability-always-granted/) |
 
 #### SDKs, agent documentation and project guides
 
@@ -142,7 +142,7 @@ One grant per feature, such as `tree.decorate`, `agent.read` or `fs.read:<scope>
 | SDKs | [Rust SDK](/pages/rust-sdk/) (crate `ilium-plugin-sdk`), [TypeScript SDK](/pages/typescript-sdk/) (package `@ilium/plugin-sdk`), [Reference](/pages/reference/) |
 | Agent documentation | [Agent docs](/pages/agent-docs/) and [the llms.txt files](/pages/agent-docs-llms-txt/) give a coding agent the contract in a form it can read |
 | Packaging | [Packages](/pages/packages/), [Manifest reference](/pages/reference-manifest/), [Versioning](/pages/versioning/) |
-| Quality | [Testing](/pages/testing/), [Debugging](/pages/debugging/), [Performance](/pages/performance/), [Errors and limits](/pages/errors-and-limits/), [Security](/pages/security/) |
+| Quality | [Testing](/pages/testing/), [Debugging](/pages/debugging/), [Performance](/pages/performance/), [Errors and limits](/pages/reference-errors-and-limits/), [Security](/pages/security/) |
 | Concepts | [Architecture](/pages/architecture/), [Events and intents](/pages/events-and-intents/), [Requests and outcomes](/pages/requests-and-outcomes/), [Lifecycle](/pages/lifecycle/), [Services](/pages/services/), [Background jobs](/pages/background-jobs/), [File access](/pages/file-access/) |
 | Background | [Design decisions](/pages/design-decisions/), [Roadmap](/pages/roadmap/), [Glossary](/pages/glossary/), [Porting iliumanim](/pages/porting-iliumanim/) |
 
@@ -483,7 +483,7 @@ A trap, which is a Rust panic or an uncaught TypeScript exception in a handler, 
 ### What the user sees
 
 - **Review dialog:** before a T2 or T3 package installs, the dialog lists each requested capability with a checkbox, drawn as `[x]` and `[ ]`. Declined rows are dimmed. High-risk capabilities start unchecked and are drawn in the warning style.
-- **First activation of a bundled plugin:** a T1 plugin with high-risk capabilities asks once, with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times.
+- **First activation of a bundled plugin:** a T1 plugin with high-risk capabilities shows a prompt at first activation, with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three prompts in total, then Settings > Plugins.
 - **Disabled plugins:** the tree footer shows the notice below. Settings > Plugins lists the same plugin with its last error.
 
 <figure>
@@ -513,4 +513,4 @@ A package is a file. A registry is optional and none is set up by default. Pack 
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/)
 - [Sides and worlds](/pages/worlds-and-sides/) and [Lifecycle](/pages/lifecycle/)
 - [Capabilities](/pages/capabilities/) and [Security](/pages/security/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)

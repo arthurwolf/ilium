@@ -689,6 +689,16 @@ fn estimated_bytes(snapshot: &SessionSnapshot) -> usize {
     for pane in &snapshot.panes {
         match &pane.kind {
             PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) => add(command.capacity()),
+            PaneSnapshotKind::Terminal(TerminalOrigin::CustomAgent {
+                identity,
+                command_line,
+                ..
+            }) => {
+                add(identity
+                    .profile_id
+                    .capacity()
+                    .saturating_add(command_line.capacity()));
+            }
             PaneSnapshotKind::Editor { path: Some(path) } => add(path_size(path)),
             _ => {}
         }

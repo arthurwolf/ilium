@@ -393,7 +393,7 @@
 <p class="crumbs"><b>Guides</b></p>
 <h1>Performance</h1>
 
-<p>Every plugin call runs under a deadline, and every plugin has a memory, queue and I/O budget. A call that exceeds its deadline traps the instance, and the host restarts the plugin. Keeping each call short is the only way to keep a plugin responsive. This page lists the deadlines and budgets, the performance targets the host checks, where time is charged, and how to move slow work into a job.</p>
+<p>Every plugin call runs under a deadline, and every plugin has a memory, queue and I/O budget. A call that exceeds its hard deadline traps the instance, and the host restarts the plugin (a <code>deactivate</code> breach instead drops the instance and is not a failure). Keeping each call short is the only way to keep a plugin responsive. This page lists the deadlines and budgets, the performance targets the host checks, where time is charged, and how to move slow work into a job.</p>
 <h3 id="you-need">You need</h3>
 <ul>
 <li>A plugin that builds and runs, so you can measure where its time goes. The toolchain is in <a href="/pages/getting-started-toolchain/">Getting started: toolchain</a>.</li>
@@ -637,6 +637,27 @@
 <td>64</td>
 <td><code>manifest.asset-size</code></td>
 </tr>
+<tr>
+<td><code>event_queue</code></td>
+<td>1,024</td>
+<td>4,096</td>
+<td>1,024</td>
+<td>Stuck plugin is restarted</td>
+</tr>
+<tr>
+<td><code>ui_tree_nodes</code></td>
+<td>4,096</td>
+<td>16,384</td>
+<td>4,096</td>
+<td>Trap (<code>ui.too-large</code>)</td>
+</tr>
+<tr>
+<td><code>table_elements</code></td>
+<td>10,000</td>
+<td>50,000</td>
+<td>20,000</td>
+<td>Instance trapped</td>
+</tr>
 </tbody>
 </table>
 <p>A bundled plugin with the top-level manifest key <code>limits_tier: "first-party"</code> also lifts the settings caps and the <code>list-editor</code> cap. That tier is for bundled <code>ilium.</code> plugins only.</p>
@@ -705,7 +726,7 @@
 <tr>
 <td><code>check-list</code> items / <code>list-editor</code> items</td>
 <td>256 / 64</td>
-<td><code>invalid-argument</code> on render</td>
+<td>Render traps with <code>ui.invalid-tree</code></td>
 </tr>
 <tr>
 <td>Popups per view</td>
@@ -773,6 +794,10 @@
 <td>10 ms per call</td>
 </tr>
 <tr>
+<td><code>settings-validate</code> (the optional export that checks a settings save)</td>
+<td>100 ms; a breach counts like any other deadline breach, and the save fails and keeps the previous value</td>
+</tr>
+<tr>
 <td><code>client-requests.request</code> timeout</td>
 <td>1 to 30,000 ms, set per request</td>
 </tr>
@@ -813,7 +838,7 @@
 </tr>
 </tbody>
 </table>
-<p>Session-wide, at most 64 HTTP streams and 16 spawned children are open across all plugins, and a pane has one input lock at a time.</p>
+<p>Session-wide, at most 64 HTTP streams and 16 spawned children are open across all plugins, and a pane has one input lock at a time and the session has no further cap on locks.</p>
 <h2 id="what-the-new-widgets-and-services-cost">What the new widgets and services cost</h2>
 <p>Most of the 51 widgets cost nothing between renders, because the host draws the tree. The table lists where a plugin does pay.</p>
 <table>
@@ -838,7 +863,7 @@
 <tr>
 <td><code>check-list</code>, <code>list-editor</code>, <code>%list</code></td>
 <td>Items are part of the tree.</td>
-<td><code>check-list</code> is capped at 256 items and <code>list-editor</code> at 64; a larger one fails at render time with <code>invalid-argument</code>. A <code>%list</code> has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned <code>offset</code> (read through <code>ui.widget-state</code>) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the <a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a>.</td>
+<td><code>check-list</code> is capped at 256 items and <code>list-editor</code> at 64; a larger one traps at render time with <code>ui.invalid-tree</code>. A <code>%list</code> has no item cap, but the whole tree is limited to 4,096 nodes and 1,024 KiB by default. Render a window of rows from the host-owned <code>offset</code> (read through <code>ui.widget-state</code>) and add a Load more row. Virtual-row providers are for sidebar rows of the tree only. See recipe 4 of the <a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a>.</td>
 </tr>
 <tr>
 <td><code>choice</code> with a catalogue <code>source</code></td>
@@ -1082,7 +1107,7 @@ const budget = meter([{ label: 'batch', value: lastBatchMs, tone }], { max: EVEN
 <tr>
 <td>T2 or T3 plugin</td>
 <td>Each host call that has an effect, such as <code>storage.set</code> or a submission, is one round trip to the host: 0.2 ms median and 0.5 ms at the 99th percentile. Pure imports such as <code>codec</code> and <code>vector</code> run inside the helper with no round trip.</td>
-<td>Batch work. In a 20 ms batch, 20 forwarded calls can use half of the budget. Read once, write once.</td>
+<td>Batch work. At the 99th percentile (0.5 ms), 20 forwarded calls use 10 ms, half of a 20 ms batch. Read once, write once.</td>
 </tr>
 <tr>
 <td>T2 or T3 start</td>
@@ -1407,7 +1432,7 @@ A job's CPU deadline counts CPU time, not wall time. A job that waits on I/O wit
 </ul>
 <h3 id="see-also">See also</h3>
 <ul>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/reference-errors-and-limits/">Reference: errors and limits</a></li>
 <li><a href="/pages/background-jobs/">Background jobs</a></li>
 <li><a href="/pages/api-jobs/">Jobs API</a></li>

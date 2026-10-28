@@ -30,6 +30,7 @@ mod pane_scan;
 mod panes;
 mod progress_wait;
 mod recap;
+mod resource;
 mod voice;
 
 use std::ffi::OsString;
@@ -92,6 +93,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Coordinate exclusive shared GPU and USB-board reservations.
+    #[command(alias = "ressource")]
+    Resource(resource::ResourceArgs),
     /// Internal native clipboard owner; never opens a session or runtime.
     #[command(hide = true)]
     ClipboardHelper,
@@ -557,6 +561,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             }
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
+        Some(Command::Resource(args)) => resource::run(args, &cli.cwd).await,
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait {

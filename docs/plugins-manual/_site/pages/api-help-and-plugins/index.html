@@ -448,7 +448,7 @@
 </tr>
 </tbody>
 </table>
-<p>A T2 or T3 package that asks for <code>plugins.manage</code> is refused at install with <code>manifest.grant-tier</code>. A T1 bundled plugin with H capabilities is activated first without them. Ilium then shows one prompt, "Plugin <name> asks for: <list>", with the buttons <code>Allow selected</code> and <code>Not now</code>. The user can allow the grant later in Settings &gt; Plugins. Until then, the calls behave as the edge-case table below describes.</p>
+<p>A T2 or T3 package that asks for <code>plugins.manage</code> is refused at install with <code>manifest.grant-tier</code>. A T1 bundled plugin with H capabilities is activated first without them. Ilium then shows a prompt, "Plugin <name> asks for: <list>", with the buttons <code>Allow selected</code> and <code>Not now</code>. <code>Not now</code> asks again at the next server start, at most three prompts in total. The user can allow the grant later in Settings &gt; Plugins. Until then, the calls behave as the edge-case table below describes.</p>
 <h3 id="the-surface">The surface</h3>
 <p>Rust paths start at <code>ilium_plugin_sdk::host</code>. TypeScript paths start at <code>@ilium/plugin-sdk/host</code>.</p>
 <h4 id="help-topics-helpread">Help topics (<code>help.read</code>)</h4>
@@ -493,9 +493,9 @@
 <td>Returns every installed plugin, including disabled and failed ones.</td>
 </tr>
 <tr>
-<td><code>set-enabled(plugin, enabled)</code></td>
-<td><code>plugins::set_enabled(plugin: &amp;str, enabled: bool) -&gt; Result&lt;(), PluginError&gt;</code></td>
-<td><code>setEnabled(plugin, enabled)</code>, throws <code>PluginError</code></td>
+<td><code>set-enabled(plugin, enabled, scope)</code></td>
+<td><code>plugins::set_enabled(plugin: &amp;str, enabled: bool, scope: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>setEnabled(plugin, enabled, scope)</code>, throws <code>PluginError</code></td>
 <td><code>result&lt;_, plugin-error&gt;</code></td>
 <td>Turns a plugin on or off. The call returns once the change is recorded.</td>
 </tr>
@@ -622,7 +622,7 @@ function restoreFailedPlugins(): void {
   for (const plugin of list()) {
     if (plugin.enabled || !plugin.failed) continue;
     try {
-      setEnabled(plugin.id, true);
+      setEnabled(plugin.id, true, 'global');
       log('info', `turned on ${plugin.name} ${plugin.version} (${plugin.tier})`);
     } catch (error) {
       const code = (error as { code?: string }).code ?? 'unknown';
@@ -697,6 +697,10 @@ function restoreFailedPlugins(): void {
 <td><code>not-found</code>.</td>
 </tr>
 <tr>
+<td><code>set-enabled</code> with scope <code>project</code> when no project is open, or the open project is not trusted</td>
+<td><code>not-permitted</code>, and nothing changes.</td>
+</tr>
+<tr>
 <td><code>set-enabled</code> to the state a plugin already has</td>
 <td><code>ok</code>, and nothing changes.</td>
 </tr>
@@ -714,7 +718,7 @@ function restoreFailedPlugins(): void {
 </tr>
 </tbody>
 </table>
-<p><code>not-permitted</code>, <code>revoked</code> and <code>internal</code> are universal codes for every call that returns a <code>result</code>. Only <code>not-found</code> is specific to <code>set-enabled</code>. The full table of codes and limits is in <a href="/pages/errors-and-limits/">errors and limits</a>.</p>
+<p><code>not-permitted</code>, <code>revoked</code> and <code>internal</code> are universal codes for every call that returns a <code>result</code>. Only <code>not-found</code> is specific to <code>set-enabled</code>. The full table of codes and limits is in <a href="/pages/reference-errors-and-limits/">errors and limits</a>.</p>
 <h3 id="help-topics-and-settings-rows">Help topics and settings rows</h3>
 <p>A settings row in a plugin tab can name a help topic with its <code>help</code> key. The topic id must be declared in <code>contributes.help</code>, or the install is refused with <code>manifest.settings-help</code> and the message <code>help topic "&lt;id&gt;" at &lt;json path&gt; is not in contributes.help</code>. The user opens the topic from the row, and the same Markdown is what <code>help.topic(id)</code> returns. A plugin therefore needs no <code>help.read</code> grant for the help of its own rows; the grant is for code that reads a topic itself. See <a href="/pages/api-settings/">settings</a>.</p>
 <h3 id="log-capture">Log capture</h3>
@@ -740,10 +744,10 @@ topic: func(id: string) -&gt; option&lt;string&gt;;
 <li><a href="/pages/settings-screens/">Settings screens</a> for the Settings &gt; Plugins page.</li>
 <li><a href="/pages/reference-manifest/">Manifest reference</a> for every <code>contributes</code> key.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the attribute and the <code>definePlugin</code> shape.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes.</li>
 <li><a href="/pages/security/">Security</a> for the tier rules that limit <code>plugins.manage</code>.</li>
 </ul>
-<p>Checked against <code>ilium:plugin@0.1.0</code>. Section 6.23 of the specification adds nothing new to <code>help</code> or <code>plugins</code>.</p>
+<p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
 <h3 id="security">Security</h3>
 <p>Help text is sanitised ([SEC-380]).</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-fs/"><small>Previous</small>fs</a><a class="next" href="/pages/api-http/"><small>Next</small>http</a></nav>

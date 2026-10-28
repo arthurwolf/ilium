@@ -23,7 +23,9 @@ pub fn parse_plugin_id(text: &str) -> Result<PluginId, Diagnostic> {
             (1..=32).contains(&segment.len())
                 && !segment.starts_with('-')
                 && !segment.ends_with('-')
-                && segment.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
         });
     if !valid {
         return Err(Diagnostic::error(crate::error::Code::from_static("manifest.id-invalid"), "id", "plugin id must have 2 to 8 lower-case dot-separated segments of 1 to 32 characters, at most 128 characters total"));

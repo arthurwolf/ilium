@@ -59,10 +59,10 @@ menu-items: func(context: menu-context) -> list<menu-entry>;   // at most 64 ent
 
 - **When.** The host calls `menu-items` each time a dynamic menu opens, with the click context. A menu opened twice calls the export twice. The plugin may cache nothing across calls except what it keeps itself.
 - **Deadline.** 20 ms, soft. On a timeout the menu opens with the static `items` only, and the breach counts toward the streak rule of the plugin (the third in a row traps; see [Host scheduling](/pages/reference-host-scheduling/)).
-- **Open latency.** The client calls all providers of the menu at once, one call per plugin side. It opens the menu when every provider has answered or after 25 ms, whichever comes first. The static entries are always in the first frame; entries of a provider that answered in time are in it too, and entries of a late provider are dropped for that opening. With three providers that answer in under 1 ms the menu is on screen within 5 ms of the click (benchmark B11).
-- **What the user sees while waiting.** Nothing is drawn until the menu opens, so the user never sees a menu that fills in after it appeared. The wait is at most 25 ms.
-- **T2 and T3.** A provider in a helper pays one round trip of about 0.5 ms at the 99th percentile inside the 20 ms. Keep the work small. A provider that is not running is activated by the trigger `menu:<id>`, and the first opening shows the static entries only because activation takes longer than the 25 ms wait. The menu does not wait for an activation.
-- **[HST-476]** The client MUST call all menu providers of one opening at once, MUST open the menu when all have answered or after 25 ms, and MUST drop the entries of a late provider for that opening.
+- **Open latency.** The client calls all providers of the menu at once, one call per plugin side. It opens the menu when every provider has answered or after 20 ms, whichever comes first. The static entries are always in the first frame; entries of a provider that answered in time are in it too, and entries of a late provider are dropped for that opening. With three providers that answer in under 1 ms the menu is on screen within 5 ms of the click (benchmark B11).
+- **What the user sees while waiting.** Nothing is drawn until the menu opens, so the user never sees a menu that fills in after it appeared. The wait is at most 20 ms.
+- **T2 and T3.** A provider in a helper pays one round trip of about 0.5 ms at the 99th percentile inside the 20 ms. Keep the work small. A provider that is not running is activated by the trigger `menu:<id>`, and the first opening shows the static entries only because activation takes longer than the 20 ms wait. The menu does not wait for an activation.
+- **[HST-476]** The client MUST call all menu providers of one opening at once, MUST open the menu when all have answered or after 20 ms, and MUST drop the entries of a late provider for that opening.
 - **[HST-477]** The static entries MUST be in the first frame of the menu, and a menu MUST NOT change after its first frame is drawn.
 - **[HST-478]** An opening MUST NOT wait for the activation of a provider that is not running.
 - **Size.** At most 64 entries. Extra entries are cut and the host appends a last row `… N more`.
@@ -234,4 +234,4 @@ A checked entry draws `✓ ` before its icon; an unchecked tri-state entry keeps
 - [Widgets: collections](/pages/widgets-collections/) for the `menu` widget that uses the same record.
 - [Errors and limits](/pages/reference-errors-and-limits/) for `manifest.menu-depth`.
 
-Return unique entry ids and valid parents; the result of an unknown `parent` or a duplicate entry `id` is undefined. Contract: `ilium:plugin@0.1.0`, export fragment `with-menus`.
+Return unique entry ids and valid parents; an entry whose `parent` is unknown is dropped, and of two entries with the same `id` only the first is kept. Each dropped entry gets a `warn` line in the plugin log, and the rest of the menu is still shown. Contract: `ilium:plugin@0.1.0`, export fragment `with-menus`.

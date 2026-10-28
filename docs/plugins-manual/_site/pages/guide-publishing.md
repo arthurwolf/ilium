@@ -18,7 +18,7 @@ Your id starts with a namespace that you own, such as `com.example.` or your reg
 
 | Id | Rule |
 |---|---|
-| [PKG-490] | The first segment pair of the plugin id MUST match the publisher id in the signing key (PKG-218). Otherwise signing fails with `manifest.id-publisher`. |
+| [PKG-490] | The plugin id MUST start with `<publisher_id>.` of the signing key (PKG-218). Otherwise signing fails with `manifest.id-publisher`. |
 | [PKG-491] | Use SemVer. Raise the major number when you remove a command, a service function or a setting. See [Versions and dependencies](/pages/reference-dependency-resolution/#plugin-versions). |
 | [PKG-492] | A version is immutable once published. A fix needs a new version (PKG-394). |
 
@@ -28,7 +28,7 @@ Run `ilium plugin keygen --publisher-id com.example --publisher "Example Labs" -
 
 | Id | Rule |
 |---|---|
-| [PKG-493] | The private key MUST NOT be stored in the plugin repository. For CI, put it in a secret store and pass it through `ILIUM_PUBLISHER_KEY`. |
+| [PKG-493] | The private key MUST NOT be stored in the plugin repository. For CI, put it in a secret store and pass it through `ILIUM_PUBLISHER_KEY` (PEM text) or `ILIUM_PLUGIN_SIGNING_KEY` (path of a key file). |
 | [PKG-494] | Encrypt a key kept on disk. Pass the passphrase through `ILIUM_KEY_PASSPHRASE`, never on the command line. |
 
 ## Reproducible builds
@@ -58,6 +58,7 @@ An SBOM is a list of every library that went into your component, with versions 
 | [PKG-502] | The file MUST be at most 4 MiB. A larger file fails with `package.size-limit`. |
 | [PKG-503] | Generate it from the lock file, for example `cargo cyclonedx` or `npx @cyclonedx/cyclonedx-npm`. |
 | [PKG-504] | A registry at review level B MAY require an SBOM (PKG-401). |
+| [PKG-685] | To reach review level B, include `sbom.json`, a valid SPDX `license` in the manifest and a `LICENSE` or `NOTICE` file. Without them the registry refuses the publish with `registry.policy` (PKG-681) when it requires level B, and otherwise shows level A with `No SBOM` or `No licence notice` (PKG-682). The full list is in PKG-680. |
 
 ## Pack, sign, check
 
@@ -92,12 +93,18 @@ The server repeats the checks and, at review level B, a person looks at it. Your
 - To withdraw a bad version, run `ilium plugin yank <id>@<version> --reason "<text>"`. Installed copies keep working.
 - To retire a plugin, run `deprecate` with `--successor`.
 - Never delete a blob. Takedown is the registry operator's decision (PKG-403).
+- If your signing key leaks, revoke it as `compromised`. Every installed copy signed by that key enters `disabled-blocked` and users must accept the risk or take an update signed by another trusted key of your publisher id.
+- A registry takedown (PKG-403) has the same effect on the named version. Ship a fixed version signed by a trusted key so that users can leave the blocked state.
+
+| Id | Rule |
+|---|---|
+| [USR-177] | A publisher guide MUST state that revoking a key as `compromised` or a registry takedown blocks installed copies, that users leave the block with `enable --accept-risk` or with an update signed by another trusted key of the same publisher id, and that a blocked version cannot be installed from the store. |
 
 ## Edge cases
 
 | Case | Result |
 |---|---|
-| Same version published twice | `registry.version-exists`, exit 1 |
+| Same version published twice | `registry.version-exists` on publish, exit 1. The same version with different content on install is `package.version-reused`. |
 | Unsigned package | `publish.unsigned`, exit 1 |
 | Namespace not yours | `registry.namespace-unowned` |
 | Two builds differ | See Reproducible builds |

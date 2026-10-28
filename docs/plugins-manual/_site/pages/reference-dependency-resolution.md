@@ -36,7 +36,7 @@ The plugin version is not the contract version. The contract is `ilium:plugin@0.
 |---|---|
 | [PKG-315] | A range is one or more comparators separated by single spaces. A version satisfies the range when it satisfies all comparators (logical AND). The operator `\|\|` is not supported and is refused with `manifest.requires-invalid`. |
 | [PKG-316] | A comparator is one of: an exact version `=1.2.3` or `1.2.3`, `>1.2.3`, `>=1.2.3`, `<1.2.3`, `<=1.2.3`, a caret range `^1.2.3`, a tilde range `~1.2.3`, or the star `*`. |
-| [PKG-317] | A bare version with no operator (`1.2.3`, `1.2`, `1`) means a caret range. This is the Cargo rule. It makes `@0.1.0` and `@^0.1.0` the same. |
+| [PKG-317] | A bare version with no operator (`1.2.3`, `1.2`, `1`) means a caret range. This is the Cargo rule. It makes `0.1.0` and `^0.1.0` the same in `requires.plugins` ranges and point references. It does not apply to `requires.services`, which takes only a full version (PKG-327). |
 | [PKG-318] | A caret range `^M.m.p` accepts versions that do not change the left-most non-zero part: `^1.2.3` is `>=1.2.3 <2.0.0`. `^0.2.3` is `>=0.2.3 <0.3.0`. `^0.0.3` is `>=0.0.3 <0.0.4`. `^0.0` is `>=0.0.0 <0.1.0`. `^0` is `>=0.0.0 <1.0.0`. |
 | [PKG-319] | A tilde range `~M.m.p` accepts patch changes: `~1.2.3` is `>=1.2.3 <1.3.0`. `~1.2` is `>=1.2.0 <1.3.0`. `~1` is `>=1.0.0 <2.0.0`. |
 | [PKG-320] | `*` accepts every release version. |
@@ -58,7 +58,7 @@ This rule replaces the rule "same major, minor at least as high" that three page
 ```json
 "requires": {
   "host": ">=0.1.0",
-  "services": ["ilium:inference/provider@0.1.0", "com.example.git/status@^1.2"],
+  "services": ["ilium:inference/provider@0.1.0", "com.example.git/status@1.2.0"],
   "plugins": [
     { "id": "com.example.git", "version": "^1.2", "optional": false },
     { "id": "com.example.theme-pack", "version": "*", "optional": true }
@@ -70,7 +70,7 @@ This rule replaces the rule "same major, minor at least as high" that three page
 | Key | Type | Default | Constraint | Code |
 |---|---|---|---|---|
 | `host` | string | none | A range over Ilium release versions. The host version is a SemVer string such as `0.1.0` | `manifest.requires-invalid`, `dependency.host-version` |
-| `services` | list of string | `[]` | At most 32. Each is `<interface>@<range>`. The interface name follows the grant argument rule for `services.use`. The `@<range>` part is optional and defaults to `*` | `manifest.requires-invalid` |
+| `services` | list of string | `[]` | At most 32. Each is `<interface>@<major>.<minor>.<patch>`. The interface name follows the grant argument rule for `services.use`. The full version is required and means the minimum compatible version; a range or short form is refused (PKG-327) | `manifest.requires-invalid`, `manifest.service-version` |
 | `plugins` | list of object | `[]` | At most 32. Keys `id` (a plugin id), `version` (a range, default `*`) and `optional` (boolean, default `false`) | `manifest.requires-invalid`, `manifest.requires-self` |
 | `wait_ms` | integer | 2000 | 0 to 5000 | `manifest.requires-invalid` |
 
@@ -79,8 +79,8 @@ This rule replaces the rule "same major, minor at least as high" that three page
 | [PKG-323] | A plugin MUST NOT list its own id in `requires.plugins`. It is refused with `manifest.requires-self`. |
 | [PKG-324] | `requires.plugins` MUST NOT name an id twice. Duplicates are refused with `manifest.requires-invalid`. |
 | [PKG-325] | `requires.host` is checked against the version of the running Ilium release. A release that does not satisfy it is refused with `dependency.host-version` at install and keeps the plugin `disabled` with a reason at load time. |
-| [PKG-326] | `wait_ms` replaces the fixed 2 s activation wait of the lifecycle page. It is the time a plugin's activation waits for each required service provider. A value above 5000 is refused. The older fixed values 2 s default and 5 s maximum remain the default and the ceiling. |
-| [PKG-327] | The service form in `requires.services` is `interface@range` with the range grammar of this page. The form `ilium:inference/provider@0.1.0` stays valid and means `^0.1.0`. The older forms `@0.1` and `@0.1.0` are therefore the same. |
+| [PKG-326] | `wait_ms` replaces the fixed 2 s activation wait of the lifecycle page. It is the time a plugin's activation waits for each required service provider. The default is 2000, the range is 0 to 5000, and a value outside the range is refused with `manifest.requires-invalid`. |
+| [PKG-327] | The service form in `requires.services` is `interface@<major>.<minor>.<patch>`, a full version that means the minimum compatible version (the caret range `^<major>.<minor>.<patch>`, so `ilium:inference/provider@0.1.0` means `^0.1.0`). The range grammar of this page does not apply to services: a short form such as `@0.1`, a caret, a tilde or any range is refused with `manifest.service-version` (PKG-579). |
 | [PKG-328] | An extension point reference `<plugin-id>/<point>@<minimum>` in `contributes.extensions.point` uses the same grammar: the part after `@` is a range, and a bare version is a caret range. `requires.points` does not exist. The point reference is the dependency. |
 
 ## What blocks an install and what does not
@@ -168,7 +168,7 @@ A channel is a stream of releases. There are three.
 | Id | Rule |
 |---|---|
 | [PKG-358] | `ilium plugin pin <id>@<version>` records an exact version. Update commands skip pinned plugins, and the resolver treats a pin as the only allowed version of that id. `ilium plugin unpin <id>` removes it. |
-| [PKG-359] | The lock file `plugins.lock` is JSON: `{ "format": "ilium-lock/1", "plugins": [ { "id", "version", "sha256", "source" } ] }`, sorted by id. `ilium plugin lock` writes it from the installed set. `ilium plugin install --locked <file>` installs exactly those versions. A locked version that no source offers fails with `dependency.unresolved`. A resolution that differs from the lock fails with `dependency.lock-mismatch`. |
+| [PKG-359] | The lock file `ilium-plugins.lock` is JSON: `{ "format": "ilium-lock/1", "plugins": [ { "id", "version", "sha256", "source" } ] }`, sorted by id. `ilium plugin lock` writes it from the installed set. `ilium plugin install --locked <file>` installs exactly those versions. A locked version that no source offers fails with `dependency.unresolved`. A resolution that differs from the lock fails with `dependency.lock-mismatch`. |
 | [PKG-360] | A lock file entry whose `sha256` differs from the SHA-256 of the downloaded package is refused with `registry.hash-mismatch`. |
 
 Use a lock file when the same plugin set must run on many machines. See [Administrator guide](/pages/guide-plugin-administration/).

@@ -394,10 +394,11 @@
 <h1>Capability: cli.contribute</h1>
 <h2 id="clicontribute">cli.contribute</h2>
 <p>The <code>cli.contribute</code> grant lets a server-side plugin add one subcommand to the <code>ilium</code> command
-line. The plugin declares the subcommand in its manifest. When the user runs
+line (a plugin that owns several commands declares each one; see <a href="#manifest">Manifest</a>). The plugin declares the subcommands in its manifest. When the user runs
 <code>ilium &lt;name&gt; [arguments]</code>, the server sends a <code>cli-invoked</code> event to the plugin, and the plugin
-answers with JSON lines on standard output and ends the call with an exit code. Every output line
-must be one JSON object with a <code>type</code> field, because agents read this output.</p>
+answers with JSON lines on standard output and ends the call with an exit code. In <code>jsonl</code> output form every
+output line must be one JSON object with a <code>type</code> field, because agents read this output. A
+subcommand declared with output form <code>text</code> or <code>mixed</code> may also write plain text with <code>write-text</code>.</p>
 <p>The grant decides whether the subcommand exists for the user at all. If the user declines it, the
 subcommand is hidden from help and cannot be run. The grant is server-side only, and it takes no
 argument: the subcommand name belongs in the <code>cli</code> contribution.</p>
@@ -450,12 +451,12 @@ argument: the subcommand name belongs in the <code>cli</code> contribution.</p>
     &quot;exports&quot;: []
   },
   &quot;contributes&quot;: {
-    &quot;cli&quot;: {
+    &quot;cli&quot;: [{
       &quot;name&quot;: &quot;notes&quot;,
       &quot;summary&quot;: &quot;List notes&quot;,
       &quot;arguments_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;query&quot;: { &quot;type&quot;: &quot;string&quot; } } },
       &quot;output&quot;: &quot;jsonl&quot;
-    }
+    }]
   }
 }
 </code></pre>
@@ -520,6 +521,13 @@ TypeScript it is <code>@ilium/plugin-sdk/host/cli</code>.</p>
 <td><code>not-found</code> (finished or cancelled), <code>invalid-argument</code> (not one object with a string <code>type</code>, a raw newline, or over 64 KiB)</td>
 </tr>
 <tr>
+<td><code>write-text</code></td>
+<td><code>cli::write_text(invocation: u64, text: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>writeText(invocation: bigint, text: string): void</code></td>
+<td>Writes plain text to the caller's standard output. Allowed only when the subcommand's <code>output</code> is <code>"text"</code> or <code>"mixed"</code>.</td>
+<td><code>not-found</code>, <code>not-permitted</code> (output form is <code>"jsonl"</code>), <code>invalid-argument</code> (over 64 KiB)</td>
+</tr>
+<tr>
 <td><code>write-error</code></td>
 <td><code>cli::write_error(invocation: u64, text: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
 <td><code>writeError(invocation: bigint, text: string): void</code></td>
@@ -537,7 +545,7 @@ TypeScript it is <code>@ilium/plugin-sdk/host/cli</code>.</p>
 </table>
 <p>In TypeScript a failed <code>writeLine</code> or <code>writeError</code> throws a <code>PluginError</code>. The universal codes
 <code>not-permitted</code>, <code>revoked</code> and <code>internal</code> can also appear (see
-<a href="/pages/errors-and-limits/">errors and limits</a>).</p>
+<a href="/pages/reference-errors-and-limits/">errors and limits</a>).</p>
 <table>
 <thead>
 <tr>
@@ -618,7 +626,7 @@ a task and write from it.</p>
 <li><strong>Risk:</strong> normal. The capability table does not mark the grant as high risk.</li>
 <li><strong>Tier T1 (bundled):</strong> granted automatically up to the manifest ceiling.</li>
 <li><strong>Tier T2 and T3:</strong> the review dialog lists the grant as a checked row, and the user can uncheck
-  it before installing. The row text is <code>Add ilium commands</code>.</li>
+  it before installing. The row text is <code>Adds commands to the ilium program</code>.</li>
 <li><strong>Other grants:</strong> the subcommand runs inside the plugin, so the plugin's other grants still
   apply to anything the subcommand reads or writes.</li>
 <li><strong>Revoke:</strong> in Settings &gt; Plugins &gt; (plugin) &gt; Capabilities, or with
@@ -816,7 +824,7 @@ only documents the arguments for help, so the plugin validates them itself.</p>
 </div>
 
 <h3 id="used-by">Used by</h3>
-<p>First-party plugins from <code>feature-mapping.md</code> that hold this grant:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a> that hold this grant:</p>
 <ul>
 <li>52 <code>ilium voice say</code>, which sends a <code>message</code> to the plugin's own client side.</li>
 <li>60 <code>ilium progress</code>, which writes its status with <code>write-line</code> and <code>finish</code>.</li>

@@ -15,7 +15,7 @@ Contract version: `ilium:plugin@0.1.0`.
 | `ilium --safe-mode=all-optional` | Runs only the essential set below. Every other plugin is off. |
 | `ILIUM_SAFE_MODE=third-party` | Same as the flag. The flag wins when both are set. The variable also accepts `all-optional`, `1` (the same as `third-party`) and `0` (off). Any other value exits 2 with `usage.invalid-value`. |
 
-The older switches stay as aliases: `--safe-plugins` is `--safe-mode=third-party`, and `--no-plugins` starts no plugin host at all (the kernel only). When more than one is given, the strictest wins.
+The older switches stay as aliases: `--safe-plugins` is `--safe-mode=third-party`, and `--no-plugins` starts no plugin host at all (the kernel only). When more than one is given, the strictest wins. From strictest to least strict the order is: `--no-plugins` (no plugin host), `--safe-mode=all-optional` (essential set only), `--safe-mode=third-party` or `--safe-plugins` (bundled plugins only), then no safe mode. For example, `--no-plugins` with `--safe-mode=all-optional` starts the kernel only.
 
 Safe mode changes nothing on disk. Installed packages, grants, settings and data stay as they were. The footer shows "Safe mode: third-party plugins are off."
 
@@ -49,16 +49,20 @@ Core plugins that are not in this table can be disabled. See the column "Can be 
 | `ilium plugin bisect bad` | The problem remains. Narrow this half. |
 | `ilium plugin bisect reset` | Restores the saved set. |
 
-State lives in `<data>/plugins/bisect.json`. Each command prints JSONL records of type `bisect` with the enabled list and the remaining candidates. When one plugin remains, the record has `found` set to its id. The bisect changes the session level only, so it never alters your saved choices.
+State lives in `<data>/plugins/bisect.json`. Each command prints JSONL records of type `bisect` with the enabled list and the remaining candidates. When one plugin remains, the record has `found` set to its id. When the problem persists with no third-party plugin enabled, the record has `found` null and `reason` `not-a-plugin` (LIF-187). The bisect changes the session level only, so it never alters your saved choices.
 
 - [LIF-184] Bisect MUST change only the session-level enabled state and MUST restore the saved set on `reset`. Test: run to the end and compare `installed.json`.
 - [LIF-185] Bisect MUST finish in at most `ceil(log2(n))` steps for `n` plugins. Test: 16 plugins, 4 steps.
+- [LIF-187] A bisect that ends without a `found` plugin MUST say so and MUST NOT name a plugin. When `bad` is answered with only the empty set enabled (the problem persists with no third-party plugin), or when `good` is answered for every half so that no plugin reproduces the problem, the final record has `found` set to `null` and `reason` set to `not-a-plugin`, and the text says the fault is not caused by a third-party plugin. The saved set is restored by `reset` as usual. Test: run `start`, answer `bad` at every step on a profile where the fault is in the kernel, then read the final record.
 
 ### The crash-loop guard
 
 If the server stops with a crash 3 times within 5 minutes during start, the next start runs in `third-party` safe mode and opens the recovery page. The guard clears after one start that stays up for 5 minutes.
 
+A **crash mark** is one timestamped record that the host writes to the server's own state folder (not into any plugin's data) as soon as a start begins. The host removes the record when startup completes, so a mark left behind by the next start means that start ended without finishing: a panic, a kill or a power loss before startup completed. A normal exit is not a crash. The 5 minutes are measured on the monotonic clock from the moment startup completes, and a stop before then (crash or normal exit) does not count as staying up.
+
 - [LIF-186] Three crashes during start within 5 minutes MUST cause the next start to use `third-party` safe mode. Test: write three crash marks.
+- [LIF-294] The crash-loop guard MUST clear all crash marks once a start has stayed up for 5 minutes after startup completed. A stop before that point MUST leave the marks in place. Test: write three crash marks, start, advance 4 minutes 59 seconds and stop (marks remain), start again, advance 5 minutes and stop, then assert the next start is not in safe mode.
 
 ### Recovery steps
 

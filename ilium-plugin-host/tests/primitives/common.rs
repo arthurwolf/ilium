@@ -151,7 +151,11 @@ pub fn rig_on(side: Side, grants: &[&str]) -> Rig {
     };
     let kernel = Arc::new(FakeKernel::new(process));
     kernel.set_tree(standard_tree());
-    kernel.register_pane_kind("test.plugin", "test.plugin.notes", ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic);
+    kernel.register_pane_kind(
+        "test.plugin",
+        "test.plugin.notes",
+        ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic,
+    );
     kernel.set_screen(PANE, screen_of(24, 80));
     let queue = Arc::new(Mutex::new(VecDeque::new()));
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -297,7 +301,11 @@ pub fn assert_golden(name: &str, actual: &str) {
 pub fn rig_with_wasm(wasm: &[u8], grants: &[&str]) -> Rig {
     let kernel = Arc::new(FakeKernel::new(ProcessKind::Client));
     kernel.set_tree(standard_tree());
-    kernel.register_pane_kind("test.plugin", "test.plugin.notes", ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic);
+    kernel.register_pane_kind(
+        "test.plugin",
+        "test.plugin.notes",
+        ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic,
+    );
     let host = HostHarness::new()
         .tier(Tier::T3)
         .side(Side::Client)

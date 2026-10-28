@@ -8,7 +8,7 @@
 //!
 //! Everything here is a pure function of text or of a frozen `vt100::Screen`.
 //! Filesystem existence checks are not performed here: path-shaped tokens
-//! carry a [`PathProbe`] that the UI thread resolves with a [`PathContext`].
+//! carry a [`PathProbe`] resolved by an admitted I/O worker with a [`PathContext`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub struct TokenMatch {
     pub probe: Option<PathProbe>,
 }
 
-/// A path-shaped token whose existence the UI thread may check.
+/// A path-shaped token whose existence a preparation worker may check.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PathProbe {
     pub path: String,
@@ -1538,7 +1538,7 @@ pub enum PathKind {
 /// root. A bare file name is also looked up in a few conventional source
 /// directories under each root, because tools print `main.rs` for
 /// `src/main.rs`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PathContext {
     roots: Vec<PathBuf>,
     home: Option<PathBuf>,
@@ -1574,7 +1574,46 @@ impl PathContext {
         }
     }
 
-    fn lookup(&self, candidate: &Path) -> Option<PathKind> {
+    /// Conservative cache/key scratch charge for the unchanged 800-probe ceiling.
+    /// Path probes are single-line tokens; a vt100 cell holds at most 22 UTF-8
+    /// bytes (vendor/vt100/src/cell.rs). Lossy OS paths can expand threefold.
+    pub(crate) fn preparation_bytes(&self, columns: u16) -> Result<usize, String> {
+        let root_bytes = self
+            .roots
+            .iter()
+            .map(|root| root.as_os_str().len())
+            .chain(self.home.iter().map(|home| home.as_os_str().len()))
+            .max()
+            .unwrap_or(0);
+        let key_bytes = root_bytes
+            .checked_mul(3)
+            .and_then(|bytes| bytes.checked_add(usize::from(columns) * 22))
+            .and_then(|bytes| bytes.checked_add(128))
+            .ok_or_else(|| "Smart Copy path charge overflow".to_string())?;
+        // Fourfold headroom covers hash-table spare buckets, key growth and
+        // joined-path scratch, without reducing the lookup or candidate limits.
+        let cache = key_bytes
+            .checked_add(std::mem::size_of::<(String, Option<PathKind>)>())
+            .and_then(|bytes| bytes.checked_mul(MAXIMUM_PATH_LOOKUPS * 4))
+            .ok_or_else(|| "Smart Copy path cache charge overflow".to_string())?;
+        let roots = self
+            .roots
+            .iter()
+            .map(|root| root.as_os_str().len())
+            .chain(self.home.iter().map(|home| home.as_os_str().len()))
+            .try_fold(0usize, |sum, bytes| sum.checked_add(bytes))
+            .and_then(|bytes| bytes.checked_mul(3))
+            .and_then(|bytes| bytes.checked_add(4096))
+            .ok_or_else(|| "Smart Copy root charge overflow".to_string())?;
+        cache
+            .checked_add(roots)
+            .ok_or_else(|| "Smart Copy path charge overflow".to_string())
+    }
+
+    fn lookup(&self, candidate: &Path, continue_work: &impl Fn() -> bool) -> Option<PathKind> {
+        if !continue_work() {
+            return None;
+        }
         let key = candidate.to_string_lossy().into_owned();
         if let Some(cached) = self.cache.borrow().get(&key) {
             return *cached;
@@ -1584,6 +1623,11 @@ impl PathContext {
             return None;
         }
         self.budget.set(remaining - 1);
+        // Check immediately before the syscall as well as at cached lookup.
+        // A syscall already in the kernel cannot be interrupted by this token.
+        if !continue_work() {
+            return None;
+        }
         let found = std::fs::metadata(candidate).ok().map(|metadata| {
             if metadata.is_dir() {
                 PathKind::Directory
@@ -1596,16 +1640,28 @@ impl PathContext {
     }
 
     /// Resolves a path as printed on screen to something that exists.
+    #[cfg(test)]
     pub fn resolve(&self, raw: &str) -> Option<PathKind> {
+        self.resolve_while(raw, &|| true)
+    }
+
+    pub(crate) fn resolve_while(
+        &self,
+        raw: &str,
+        continue_work: &impl Fn() -> bool,
+    ) -> Option<PathKind> {
+        if !continue_work() {
+            return None;
+        }
         let raw = raw.trim_end_matches('/');
         if raw.is_empty() {
             return None;
         }
         if let Some(rest) = raw.strip_prefix("~/") {
-            return self.lookup(&self.home.as_ref()?.join(rest));
+            return self.lookup(&self.home.as_ref()?.join(rest), continue_work);
         }
         if raw.starts_with('/') {
-            return self.lookup(Path::new(raw));
+            return self.lookup(Path::new(raw), continue_work);
         }
         // Git diffs print `a/src/x.rs` and `b/src/x.rs`.
         let stripped = raw.strip_prefix("a/").or_else(|| raw.strip_prefix("b/"));
@@ -1613,12 +1669,20 @@ impl PathContext {
         let is_bare = !raw.contains('/');
         for spelling in spellings {
             for root in &self.roots {
-                if let Some(kind) = self.lookup(&root.join(spelling)) {
+                if !continue_work() {
+                    return None;
+                }
+                if let Some(kind) = self.lookup(&root.join(spelling), continue_work) {
                     return Some(kind);
                 }
                 if is_bare {
                     for subdirectory in SOURCE_SUBDIRECTORIES {
-                        if let Some(kind) = self.lookup(&root.join(subdirectory).join(spelling)) {
+                        if !continue_work() {
+                            return None;
+                        }
+                        if let Some(kind) =
+                            self.lookup(&root.join(subdirectory).join(spelling), continue_work)
+                        {
                             return Some(kind);
                         }
                     }
@@ -1921,5 +1985,46 @@ mod tests {
             Some(PathKind::File)
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod cooperative_path_resolution_tests {
+    use super::*;
+    #[test]
+    fn cancelled_resolution_does_not_probe_or_populate_cache() {
+        let directory = tempfile::tempdir().expect("isolated fixture");
+        std::fs::write(directory.path().join("present.rs"), b"fixture").expect("real file");
+        let paths = PathContext::new(Some(directory.path()), directory.path(), None);
+        let initial = paths.budget.get();
+        assert_eq!(paths.resolve_while("present.rs", &|| false), None);
+        assert_eq!(paths.budget.get(), initial);
+        assert!(paths.cache.borrow().is_empty());
+        assert_eq!(paths.resolve("present.rs"), Some(PathKind::File));
+        let used = paths.budget.get();
+        assert!(used < initial);
+        assert_eq!(
+            paths.resolve_while("present.rs", &|| false),
+            None,
+            "cancellation applies even to cached hits"
+        );
+        assert_eq!(paths.budget.get(), used);
+    }
+    #[test]
+    fn path_preparation_charge_includes_columns_and_owned_roots() {
+        let small = PathContext::new(None, Path::new("/project"), None);
+        let deep = PathContext::new(
+            None,
+            Path::new("/a/longer/project/root"),
+            Some(PathBuf::from("/a/longer/home/root")),
+        );
+        assert!(small.preparation_bytes(160).unwrap() > small.preparation_bytes(80).unwrap());
+        assert!(deep.preparation_bytes(80).unwrap() > small.preparation_bytes(80).unwrap());
+        assert_eq!(
+            small.budget.get(),
+            MAXIMUM_PATH_LOOKUPS,
+            "sizing never consumes filesystem probes"
+        );
+        assert!(small.cache.borrow().is_empty());
     }
 }

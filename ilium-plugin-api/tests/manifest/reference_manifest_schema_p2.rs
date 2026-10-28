@@ -1,7 +1,7 @@
 //! reference-manifest-schema.md, part 2: PKG-578, PKG-579, PKG-581..PKG-583.
 
 use ilium_plugin_api::manifest::Diagnostic;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::support::*;
 

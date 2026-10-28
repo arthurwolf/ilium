@@ -49,7 +49,7 @@ Normal risk. Toasts have fixed size limits, at most two actions, and a rate limi
 | `toast` | intent | `id?`, `tone`, `title` (at most 60), `body?` (at most 200 characters), `actions` (at most 2; `{ label, command }`), `duration-ms?` (1,000 to 30,000). |
 | `dismiss-toast` | intent | `id`. Outcome `ok`. |
 
-The default duration is 5,000 ms, and a `danger` toast stays until dismissed. See [Notifications](/pages/api-notifications/) and [Intents](/pages/api-intents/).
+The default duration is 5,000 ms, and a `danger` toast stays until dismissed while a client is attached; a queued toast of any level, `danger` included, is discarded after its duration when no client attaches. See [Notifications](/pages/api-notifications/) and [Intents](/pages/api-intents/).
 
 ### Manifest
 
@@ -149,7 +149,7 @@ The toast uses the client's real toast stack, with a countdown bar drawn with `â
 | Title above 60 or body above 200 characters | `refused(invalid-argument)` | Shorten the text. |
 | More than 2 actions | `refused(invalid-argument)` | Keep two. |
 | Action command not declared | `refused(not-found)` | Declare it in the manifest. |
-| No client attached | `ok`; the toast is shown when a client attaches only if its duration allows | Use desktop notices for important news. |
+| No client attached | `ok`; the toast is shown on the first client attach only if it was queued less than its duration (default 5 s) earlier; an older toast, `danger` included, is discarded and never shown | Use desktop notices for important news. |
 
 Toast text goes through the same rich text rules as other labels. Reduced motion shows no animation.
 
@@ -185,6 +185,14 @@ notify.toast                      normal   <span class="t-ok">granted</span>
 </figure>
 
 The user can change the grant at any time in Settings > Plugins > com.example.exporter > Capabilities. A revocation re-activates the plugin with the reduced grant set, and the stubs of the declined imports return `not-permitted`.
+
+### Toasts are never the only signal
+
+A toast expires. An event the user must act on or learn about MUST also be available after the toast is gone.
+
+| ID | Rule | Exact value | Source |
+|---|---|---|---|
+| CAP-883 | Persistent twin of a toast | A toast for an error or an action-needed event MUST be paired with a persistent text signal (panel row or status line) that remains after the toast duration. A toast with no persistent twin for such an event is refused by the plugin check with `a11y.toast-only` | `src/docs/notifications.md` |
 
 ### Related pages
 

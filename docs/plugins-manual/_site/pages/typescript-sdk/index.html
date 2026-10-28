@@ -395,7 +395,7 @@
 
 <p>The TypeScript SDK, <code>@ilium/plugin-sdk</code>, gives a TypeScript plugin generated types for the WIT contract, <code>definePlugin</code> and <code>defineScene</code> to bind the plugin's exports, <code>async</code> wrappers for slow host calls, and a test double for running handlers without the host. Bun 1.2 or newer bundles and runs it; tests run with <code>bun test</code>.</p>
 <p>The host loads a plugin as a WebAssembly component. It calls the plugin's exports with batches of events and applies the submissions the plugin returns. The SDK maps both directions to ordinary functions, objects and promises.</p>
-<p>The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the Rust SDK reference page mirrors this one section by section; see <a href="/pages/rust-sdk/">Rust SDK reference</a>. The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and nineteen grants.</p>
+<p>The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the Rust SDK reference page mirrors this one section by section; see <a href="/pages/rust-sdk/">Rust SDK reference</a>. The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and 23 grants.</p>
 <h3 id="you-will-need">You will need</h3>
 <ul>
 <li>Bun 1.2 or newer.</li>
@@ -429,7 +429,7 @@ ilium-plugin-sdk = { version = &quot;0.1&quot;, features = [&quot;testing&quot;]
   &quot;scripts&quot;: { &quot;test&quot;: &quot;bun test&quot; }
 }
 </code></pre>
-<p>The generated files are <code>manifest.json</code>, <code>Cargo.toml</code> and <code>src/lib.rs</code> for Rust, and <code>manifest.json</code>, <code>package.json</code> and <code>src/main.ts</code> for TypeScript. <code>ilium plugin new</code> does not run <code>bun install</code>; run it yourself. A folder that holds both <code>Cargo.toml</code> and <code>package.json</code> stops the build with <code>toolchain.language-ambiguous</code>.</p>
+<p>The generated files are <code>manifest.json</code>, <code>Cargo.toml</code> and <code>src/lib.rs</code> for Rust, and <code>manifest.json</code>, <code>package.json</code> and <code>src/&lt;side&gt;.ts</code> for TypeScript (<code>src/server.ts</code>, <code>src/client.ts</code> or <code>src/scene.ts</code>). <code>ilium plugin new</code> does not run <code>bun install</code>; run it yourself. A folder that holds both <code>Cargo.toml</code> and <code>package.json</code> stops the build with <code>toolchain.language-ambiguous</code>.</p>
 <h2 id="how-a-plugin-is-built">How a plugin is built</h2>
 <p><code>ilium plugin build</code> compiles the plugin for WASI Preview 2, wraps the result as a component and writes one file per declared side to <code>dist/</code>, named after the manifest <code>entry</code> (for example <code>dist/server.wasm</code>). <code>ilium plugin pack</code> writes the <code>.iliumpkg</code> package to the same folder. The build runs on the author's machine. The host checks the file inventory and the signature at install time, so an SDK build never skips those checks. A component links only the imports its manifest requests, so the build needs no extra flag for the optional host services.</p>
 <figure>
@@ -1100,13 +1100,13 @@ const model = icon({ slot: 'model.claude', label: 'Claude' });
 <pre><code class="language-rust">// types::ui::{VideoSource, MediaFit}
 let clip = tree.video(VideoSource::Asset(&quot;loops/shore.webm&quot;.into()))
     .autoplay(true).looped(true).fit(MediaFit::Cover).key(&quot;clip&quot;);
-let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(&quot;term&quot;); // needs terminal.raw-input
+let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(&quot;term&quot;); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 </code></pre>
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">import { video, terminalView } from '@ilium/plugin-sdk/ui/build';
 
 const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, { key: 'clip', autoplay: true, loop: true, fit: 'cover' });
-const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.raw-input
+const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 </code></pre>
 <h3 id="hover-pointer-drag-feedback-popovers-and-theme-tokens">Hover, pointer, drag feedback, popovers and theme tokens</h3>
 <p><strong>Rust</strong></p>
@@ -1304,11 +1304,11 @@ let ids = vector::embed(&amp;[&quot;notes on retries&quot;.to_string()], &quot;s
 let child = process::spawn(SpawnSpec { process: spec, stdin_open: true, line_mode: true })?;
 child.write_stdin(b&quot;ping\n&quot;)?;
 // durable timers and journal.
-timers::at(&quot;nightly&quot;, 86_400_000, true)?;
-journal::log_event(&quot;moved&quot;, &amp;payload)?;
+timers::at(1_790_000_000_000, &quot;nightly&quot;)?; // epoch in ms, then the timer name
+journal::log_event(None, &quot;moved&quot;, &amp;payload)?;
 // kernel settings and keymap (read-only).
-let value = kernel_settings::read(&quot;terminal.scrollback&quot;)?;
-let chord = keymap::bindings(&quot;palette.open&quot;)?;
+let value = kernel_settings::read(&quot;terminal&quot;)?; // the tab; JSON text
+let bindings = keymap::bindings();
 // client requests: ask the attached client to do something.
 let answer = client_requests::request(&quot;pick-file&quot;, &amp;args).await?;
 // sessions (server): list and send to another session.
@@ -1392,7 +1392,7 @@ const all = sessions.list();
 </tr>
 </tbody>
 </table>
-<p><code>gpu</code> is <code>@unstable</code>: import it only from a scene and expect it to change. Ten of the 23 grants are high risk and prompt the user with a separate consent line: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code> and <code>settings.write-kernel:&lt;tab-id&gt;</code>. See <a href="/pages/reference-capabilities/">Capabilities</a> and <a href="/pages/security/">Security</a>.</p>
+<p><code>gpu</code> is <code>@unstable</code>: import it only from a scene and expect it to change. Eleven of the 23 grants are high risk and prompt the user with a separate consent line: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code>, <code>settings.write-kernel:&lt;tab-id&gt;</code> and <code>panes.create-command:&lt;program&gt;</code>. See <a href="/pages/reference-capabilities/">Capabilities</a> and <a href="/pages/security/">Security</a>.</p>
 <h2 id="settings-rows-meters-and-row-state">Settings rows, meters and row state</h2>
 <p>The manifest <code>settings</code> object declares 18 row types. The plugin updates a row's state at run time without republishing the manifest.</p>
 <p><strong>Rust</strong></p>
@@ -1469,7 +1469,7 @@ use ilium_plugin_sdk::exports::HookHandler;
 
 // Owner: needs extensions.provide:com.example.notes/after-save
 let entries = extensions::list(&quot;com.example.notes/recognisers&quot;)?;
-let request = extensions::run_hook(&quot;com.example.notes/after-save&quot;, &amp;payload_json).await;
+let outcome = extensions::run_hook(&quot;com.example.notes/after-save&quot;, &amp;payload_json).await;
 // Outcome ok: take the reply. refused(extension.vetoed): do not perform the action.
 
 // Contributor: needs extensions.contribute:com.example.notes/after-save
@@ -1663,7 +1663,7 @@ test('badge is set when agent works', async () =&gt; {
 <h2 id="package-surface">Package surface</h2>
 <p>The SDK does not build packages. The <code>ilium plugin</code> command does that, from the files of the project. A plugin author touches the package in three places: the manifest, the <code>help/</code> folder and the <code>dist/</code> output. The build stages, the package layout and the signing steps are in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a> and <a href="/pages/packages/">Packages</a>. <code>ilium plugin pack</code> builds an unsigned package. <code>ilium plugin sign</code> signs it.</p>
 <h2 id="sdk-versioning-policy">SDK versioning policy</h2>
-<p>The SDK version has its own number, separate from the contract <code>ilium:plugin@0.1.0</code>. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. <code>ilium plugin check</code> fails with <code>component.api-version-mismatch</code> when the component and the manifest name different contract versions. See <a href="/pages/versioning/">Versioning</a>.</p>
+<p>The SDK version has its own number, separate from the contract <code>ilium:plugin@0.1.0</code>. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. <code>ilium plugin check</code> fails with <code>manifest.api-version</code> when the component and the manifest name different contract versions. See <a href="/pages/versioning/">Versioning</a>.</p>
 <h2 id="edge-cases">Edge cases</h2>
 <ul>
 <li>A batch holds at most 256 events and a submission list at most 256 entries; a larger list traps the instance with <code>trap.submission-batch</code>.</li>

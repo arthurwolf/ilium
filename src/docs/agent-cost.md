@@ -129,9 +129,13 @@ Notes:
 
 **Sort tree by cost** (`sort_by_cost`, default off) orders every group and project by descending spend. It overrides the order chosen in Settings -> User Interface while on. Your manual order is untouched and returns when you switch it off. Turning it on starts cost tracking even if no indicator is enabled.
 
+## Spending medals
+
+By default, Ilium places gold, silver and bronze at the far right of the three agent rows with the greatest token spend in the preceding twelve hours. This works even when a model lacks a price, because medals rank timestamped token usage rather than estimated dollars. Turn **Spending medals** off in Settings -> Agent Cost, choose a different rolling period, or award a separate set for each provider instead of ranking Claude and Codex together. The three glyphs are shared icon assignments: choose them from the rich picker in either Agent Cost or Settings -> Icons.
+
 ## Prices and `[cost.prices]`
 
-Ilium contains a built-in table of list prices per million tokens (input, output, cache read, cache write). Models are matched by the **longest model-name prefix**, so dated snapshots such as `claude-haiku-4-5-20251001` match their family. Built-in families cover the current Claude Fable, Opus, Sonnet and Haiku lines and the GPT-5.6 Sol, Terra and Luna lines. Anthropic rows follow Anthropic's published table (cache writes assume the 1.25x five-minute rate); OpenAI rows are third-party reports of published prices with a 0.1x cache read and no cache-write charge.
+Ilium contains a built-in table of list prices per million tokens (input, output, cache read, cache write). Models are matched by the **longest model-name prefix**, so dated snapshots such as `claude-haiku-4-5-20251001` match their family. Built-in families cover the current Claude Fable, Opus, Sonnet and Haiku lines, GPT-5.6 Sol, Terra and Luna, and Codex `gpt-5-codex` through `gpt-5.3-codex`. Anthropic rows follow Anthropic's published table (cache writes assume the 1.25x five-minute rate); OpenAI rows use published API list-price estimates with a 0.1x cache read and no cache-write charge.
 
 To add or override a model, add a table under `[cost.prices]` keyed by the model-name prefix:
 
@@ -166,6 +170,9 @@ quota_budget_percent = 10.0
 history_days = 90
 sparkline_window_minutes = 360
 sparkline_cells = 8
+medals_enabled = true
+medal_window_minutes = 720
+medal_scope = "global"          # "global" or "per_provider"
 sort_by_cost = false
 
 [cost.meter]

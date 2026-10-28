@@ -36,6 +36,9 @@ pub(crate) struct AnimationPickerSave {
     pub location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) enum ConfigurationIntent {
+    NumberRead {
+        token: Arc<()>,
+    },
     ValueDialog {
         token: Arc<()>,
     },
@@ -64,6 +67,7 @@ pub(crate) enum ConfigurationIntent {
     TextTriggers {
         dialog: Option<ilium_ipc::TextTrigger>,
     },
+    CustomAgents,
     Onboarding {
         revision: u64,
         dismiss: bool,

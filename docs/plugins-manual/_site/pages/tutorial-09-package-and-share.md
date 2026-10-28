@@ -69,7 +69,7 @@ The source manifest in the project omits `files`:
 ```json
 {
   "api": "ilium:plugin@0.1.0",
-  "id": "example.agent-tools",
+  "id": "com.example.agent-tools",
   "name": "Agent tools",
   "version": "0.1.0",
   "publisher": "Example Developer",
@@ -83,7 +83,7 @@ The source manifest in the project omits `files`:
     "server": ["agent.read", "agent.control", "tree.read", "tree.decorate", "notify.desktop",
       "sound.play", "fs.read:project", "jobs.run"],
     "client": ["agent.read", "tree.read", "tree.metadata", "ui.panels", "editor.edit",
-      "topics.subscribe:example.agent-tools/*", "panes.create", "panes.provide-kind"],
+      "topics.subscribe:com.example.agent-tools/*", "panes.create", "panes.provide-kind"],
     "scene": []
   },
   "contributes": {
@@ -109,7 +109,7 @@ The lengths and hashes shown here are placeholders. Your build writes the real v
 
 Points to notice:
 
-- The help topic gets a global id, `example.agent-tools/agent-tools`. Topic ids always start with the plugin id.
+- The help topic gets a global id, `com.example.agent-tools/agent-tools`. Topic ids always start with the plugin id.
 - `description` and `publisher` appear in the review dialog. The dialog does not show the code.
 - The `files` entry is required in a packed manifest only. The source manifest may leave it out.
 
@@ -124,7 +124,7 @@ Contribution keys and grants need nothing special at pack time, because `pack` h
   },
   "contributes": {
     "tree_toolbar": [
-      { "id": "scan", "icon": "search", "label": "Scan TODO", "command": "example.agent-tools/scan",
+      { "id": "scan", "icon": "search", "label": "Scan TODO", "command": "com.example.agent-tools/scan",
         "caption": "TODO" }
     ],
     "status_segments": [
@@ -136,7 +136,7 @@ Contribution keys and grants need nothing special at pack time, because `pack` h
 
 Fixed caps apply per plugin: 4 `tree_toolbar` entries and 2 `status_segments`. More than the cap refuses the package with `manifest.contribution-limit`. The key `limits_tier: "first-party"` is accepted only for bundled T1 plugins whose id starts with `ilium.`; any other package that sets it is refused with `manifest.limits-tier` (decision D12). A third-party package therefore never sets it.
 
-Nine of the grants are high risk: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript` and `settings.read-kernel:api`. They always need an explicit choice, even for a T1 plugin, and the dialog draws them in the warning style.
+Many grants are high risk. The full set is every row marked **H** in [Capabilities](/pages/reference-capabilities/); it includes `agent.control` from the example above and, among the newer grants, `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api` and `settings.write-kernel:<tab-id>`. High-risk grants always need an explicit choice, even for a T1 plugin, and the dialog draws them in the warning style.
 
 ### The path from project to install
 
@@ -182,7 +182,7 @@ The command prints one line per event. For this package the output has this shap
 
 ```jsonl
 {"type":"progress","step":"pack","message":"Computing the files inventory of 5 entries"}
-{"type":"artifact","path":"dist/example.agent-tools-0.1.0.iliumpkg","sha256":"<hex>","bytes":187941}
+{"type":"artifact","path":"dist/com.example.agent-tools-0.1.0.iliumpkg","sha256":"<hex>","bytes":187941}
 {"type":"summary","duration_ms":412,"warnings":0,"errors":0}
 {"type":"result","ok":true,"exit_code":0}
 ```
@@ -192,7 +192,7 @@ The `artifact` line gives the path relative to the project folder, the SHA-256 o
 To check the archive without installing it, run the verify command. It recomputes every hash of the package and compares it with the `files` list:
 
 ```bash
-ilium plugin inspect dist/example.agent-tools-0.1.0.iliumpkg --verify
+ilium plugin inspect dist/com.example.agent-tools-0.1.0.iliumpkg --verify
 ```
 
 A clean package prints no `diff` record and exits with 0. A changed file prints one `diff` record per difference, and the command exits with 1 and the code `inspect.hash-mismatch`. The command works offline and needs no running Ilium.
@@ -203,7 +203,7 @@ A T2 package is signed by a publisher key that the user trusts. It runs in the s
 
 ```bash
 ilium plugin keygen --publisher-id com.example --publisher "Example Developer" --out ~/keys/example
-ilium plugin sign dist/example.agent-tools-0.1.0.iliumpkg --key ~/keys/example/publisher.key
+ilium plugin sign dist/com.example.agent-tools-0.1.0.iliumpkg --key ~/keys/example/publisher.key
 ```
 
 The `--publisher` value must match the `publisher` field of the manifest, and the plugin `id` must start with the publisher id and a dot (`com.example.`). Otherwise `sign` stops with `sign.publisher-mismatch`, or the install stops with `manifest.publisher-mismatch` or `manifest.id-publisher`.
@@ -212,7 +212,7 @@ Sign the archive last. A later `pack` writes a new archive without a signature, 
 
 ```bash
 ilium plugin trust add ~/keys/example/publisher.pub
-ilium plugin install dist/example.agent-tools-0.1.0.iliumpkg
+ilium plugin install dist/com.example.agent-tools-0.1.0.iliumpkg
 ```
 
 If the key is not trusted yet, the install dialog offers `Trust publisher` and shows the key fingerprint. Declining refuses the install.
@@ -224,7 +224,7 @@ The dialog appears before the plugin is enabled. It shows the name, the version,
 The dialog is the canonical review dialog of [Security](/pages/security/#verifying-a-package). This is the same dialog for an unsigned package.
 
 <figure>
-<pre class="term"><span class="t-hi">╭─ Install example.agent-tools 0.1.0 ──────────╮</span>
+<pre class="term"><span class="t-hi">╭─ Install com.example.agent-tools 0.1.0 ──╮</span>
 │ Name (self-declared): Example Developer      │
 │ Unsigned T3 · dev badge after install        │
 │                                              │
@@ -255,13 +255,13 @@ Points to notice:
 
 Some capabilities ask again at first use, because the grant alone does not name the target. These are separate small prompts and not part of the install dialog:
 
-- `open-external` asks once for each target origin, and the answer is remembered for the plugin (decision D25).
-- `http:setting:<key>` hosts, which the plugin reads from its own setting, ask for each new host before the first request (decision D23).
-- Geocoding through `location.geocode` shows a consent notice on first use, because place names go to the host's geocoding provider (decision D14).
+- `open-external` asks once for each target origin, and the answer is remembered for the plugin (SEC-043).
+- `http:setting:<key>` hosts, which the plugin reads from its own setting, ask for each new host before the first request (SEC-074).
+- Geocoding through `location.geocode` shows a consent notice on first use, because place names go to the host's geocoding provider (see [Design decisions](/pages/design-decisions/), D14).
 
 <figure>
 <pre class="term"><span class="t-hi">╭  ≡ ● · Open link─────────────────────────────────────╮</span>
-│ example.agent-tools wants to open                    │
+│ com.example.agent-tools wants to open                │
 │ https://docs.example.com/aurora in your browser.     │
 │                                                      │
 │        <span class="t-dim">N Cancel</span>        Y Open                        │
@@ -274,7 +274,7 @@ Some capabilities ask again at first use, because the grant alone does not name 
 Install the unsigned package with the flag that the T3 tier needs:
 
 ```bash
-ilium plugin install dist/example.agent-tools-0.1.0.iliumpkg --allow-unsigned
+ilium plugin install dist/com.example.agent-tools-0.1.0.iliumpkg --allow-unsigned
 ```
 
 Without `--allow-unsigned`, the install stops before the dialog.
@@ -284,15 +284,15 @@ Without `--allow-unsigned`, the install stops before the dialog.
 The plugin appears in Settings > Plugins. A T3 plugin keeps a `dev` badge there. Read the first lines of its log to confirm that the archive loads:
 
 <figure>
-<pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.agent-tools --tail 3
-<span class="t-dim">2026-10-11 09:14:02</span> <span class="t-ok">info </span>  example.agent-tools activated
-<span class="t-dim">2026-10-11 09:14:03</span> <span class="t-ok">info </span>  example.agent-tools ready
-<span class="t-dim">2026-10-11 09:14:04</span> <span class="t-warn">warn </span>  example.agent-tools refused notify: not-permitted
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs com.example.agent-tools --tail 3
+<span class="t-dim">2026-10-11 09:14:02</span> <span class="t-ok">info </span>  com.example.agent-tools activated
+<span class="t-dim">2026-10-11 09:14:03</span> <span class="t-ok">info </span>  com.example.agent-tools ready
+<span class="t-dim">2026-10-11 09:14:04</span> <span class="t-warn">warn </span>  com.example.agent-tools refused notify: not-permitted
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. The warn line shows a declined grant. A clean log has no warn or error lines from the first activation.</figcaption>
 </figure>
 
-Revoke a grant later with Settings > Plugins > example.agent-tools > Capabilities, or with `ilium plugin grants example.agent-tools --revoke notify.desktop`.
+Revoke a grant later with Settings > Plugins > com.example.agent-tools > Capabilities, or with `ilium plugin grants com.example.agent-tools --revoke notify.desktop`.
 
 ### Share
 

@@ -394,7 +394,7 @@
 <h1>Requirements for pane primitives</h1>
 
 <p>Normative behaviour of the terminal, agent, editor and basic pane primitives.</p>
-<p>The rows follow the format and the observation channels of the <a href="/pages/reference-requirements/">requirements index</a>. The id prefix is <code>PRI</code>.</p>
+<p>The rows follow the format and the observation channels of the <a href="/pages/reference-requirements/">requirements index</a>. The id prefix is <code>PRI</code>. The id PRI-009 is intentionally unused: it was retired and ids are never reused, so the numbering runs from PRI-008 to PRI-010.</p>
 <table>
 <thead>
 <tr>
@@ -407,7 +407,7 @@
 <tbody>
 <tr>
 <td>[PRI-001]</td>
-<td>A terminal read MUST need terminal.read-screen. read-cells MUST accept at most 1,000 rows per call and return quota-exceeded above that.</td>
+<td>A screen read MUST need terminal.read-screen. read-cells is a separate grant, terminal.read-cells, and MUST accept at most 1,000 rows per call and return quota-exceeded above that.</td>
 <td><a href="/pages/primitives-terminal/#edge-cases-and-errors">edge cases and errors</a></td>
 <td>(sync-return) read-cells with 1,001 rows -&gt; quota-exceeded.</td>
 </tr>
@@ -443,9 +443,9 @@
 </tr>
 <tr>
 <td>[PRI-007]</td>
-<td>A pointer claim MUST belong to one plugin at a time. A second claim on the same cell MUST return conflict.</td>
+<td>A pointer claim MUST belong to one plugin at a time. A whole-pane claim belongs to one pane, so a second whole claim on the same pane MUST return conflict.</td>
 <td><a href="/pages/primitives-terminal-pointer/">primitives terminal pointer</a></td>
-<td>(sync-return) two plugins claim one cell -&gt; the second gets conflict.</td>
+<td>(sync-return) two plugins claim one pane -&gt; the second gets conflict.</td>
 </tr>
 <tr>
 <td>[PRI-008]</td>
