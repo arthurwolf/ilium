@@ -214,11 +214,9 @@ fn malformed_grants_have_capability_diagnostics_instead_of_generic_schema() {
     let mut value = source();
     value["capabilities"] = json!({"client":["Tree.Read"]});
     let errors = codes(&value, CheckMode::Check);
-    assert!(
-        errors
-            .iter()
-            .any(|code| code.starts_with("manifest.grant-"))
-    );
+    assert!(errors
+        .iter()
+        .any(|code| code.starts_with("manifest.grant-")));
     assert!(!errors.contains(&"manifest.schema".into()));
 }
 
@@ -274,11 +272,9 @@ fn grant_side_validation_precedes_tier_admission() {
     let mut value = source();
     value["capabilities"] = json!({"client":["sessions.cross"]});
     let errors = validate_json(&value.to_string(), &context(CheckMode::Check));
-    assert!(
-        errors.iter().any(
-            |error| error.code.as_str() == "manifest.grant-side" && error.stage.unwrap().0 == 4
-        )
-    );
+    assert!(errors
+        .iter()
+        .any(|error| error.code.as_str() == "manifest.grant-side" && error.stage.unwrap().0 == 4));
 }
 
 #[test]

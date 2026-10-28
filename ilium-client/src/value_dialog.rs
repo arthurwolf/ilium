@@ -204,6 +204,9 @@ pub struct NumberDialogState {
     pub title: String,
     pub draft: TextPromptState,
     pub error: Option<String>,
+    /// Persistence/read state survives ordinary draft validation edits.
+    pub notice: Option<String>,
+    pub(crate) draft_edited: bool,
 }
 
 impl NumberDialogState {
@@ -212,6 +215,8 @@ impl NumberDialogState {
             title: title.into(),
             draft: TextPromptState::new(initial),
             error: None,
+            notice: None,
+            draft_edited: false,
         }
     }
 
@@ -286,6 +291,7 @@ impl ValueDialogState {
                     PromptOutcome::Cancel => DialogOutcome::Cancel,
                     PromptOutcome::Continue => {
                         if number.draft.buf != previous {
+                            number.draft_edited = true;
                             number.error = None;
                         }
                         DialogOutcome::Continue
@@ -323,7 +329,10 @@ impl ValueDialogState {
                 choice.reveal_highlight(screen);
                 choice.notice = None;
             }
-            Self::Number(number) => number.error = None,
+            Self::Number(number) => {
+                number.draft_edited |= !text.is_empty();
+                number.error = None;
+            }
         }
         DialogOutcome::Continue
     }
@@ -788,7 +797,7 @@ impl<'a> PreparedValueDialog<'a> {
     fn render_number(&self, frame: &mut Frame, number: &NumberDialogState, styles: DialogStyles) {
         let value = editor_text("Value: ", &number.draft, self.layout.editor.width);
         paint(frame, self.layout.editor, &value, styles.normal);
-        if let Some(error) = &number.error {
+        if let Some(error) = number.notice.as_ref().or(number.error.as_ref()) {
             if self.layout.document.width > 0 && self.layout.document.height > 0 {
                 frame.render_widget(
                     Paragraph::new(error.as_str())
@@ -802,7 +811,7 @@ impl<'a> PreparedValueDialog<'a> {
             frame,
             self.layout.status,
             &clip_cells(
-                if number.error.is_some() {
+                if number.notice.is_some() || number.error.is_some() {
                     "F9: full diagnostic · Enter applies · Esc cancels"
                 } else {
                     "Enter applies · Esc cancels"

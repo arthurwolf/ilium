@@ -20,7 +20,7 @@ Spawning a PTY and typing into it are kernel-native. Fleet drives them through t
 
 ### See it
 
-<figure><img src="/assets/demos/05-ask-for-update.gif" alt="A dialog asks for a status update and sends it to every agent" loading="lazy"><figcaption>Ask for update: one short message goes to one agent or to all of them.</figcaption></figure>
+<figure><img src="/assets/demos/05-ask-for-update.gif" alt="Ilium asks two idle local agent fixtures for a status update while a working fixture is skipped" loading="lazy"><figcaption>Ask for status update sends the built-in prompt to two idle local fixtures. The working fixture receives no input.</figcaption></figure>
 
 ### What the user sees
 

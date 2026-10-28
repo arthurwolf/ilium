@@ -1,6 +1,10 @@
 //! Deterministic file-input hashing for build freshness (DEV-095/305).
-use std::{collections::BTreeMap, io::Read, path::{Path, PathBuf}};
 use sha2::{Digest, Sha256};
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 /// Hash project files, including manifest, lockfiles and toolchain configuration.
 /// Generated root directories `dist`, `target`, `node_modules`, `.ilium` and
@@ -20,7 +24,8 @@ pub fn project_input_hash_with_toolchain(
     project: &Path,
     versions: &BTreeMap<String, String>,
 ) -> Result<String, String> {
-    let root = std::fs::symlink_metadata(project).map_err(|error| format!("project input root: {error}"))?;
+    let root = std::fs::symlink_metadata(project)
+        .map_err(|error| format!("project input root: {error}"))?;
     if !root.is_dir() || root.file_type().is_symlink() {
         return Err("project input root must be a real directory".into());
     }
@@ -34,11 +39,14 @@ pub fn project_input_hash_with_toolchain(
             let name = entry.file_name();
             let name = name.to_str().ok_or("project input path is not UTF-8")?;
             if relative.as_os_str().is_empty()
-                && matches!(name, "dist" | "target" | "node_modules" | ".ilium" | ".git") {
+                && matches!(name, "dist" | "target" | "node_modules" | ".ilium" | ".git")
+            {
                 continue;
             }
             let path = relative.join(name);
-            let kind = entry.file_type().map_err(|error| format!("project input type: {error}"))?;
+            let kind = entry
+                .file_type()
+                .map_err(|error| format!("project input type: {error}"))?;
             if kind.is_symlink() {
                 return Err(format!("project input symlink refused: {}", path.display()));
             }
@@ -47,24 +55,37 @@ pub fn project_input_hash_with_toolchain(
             } else if kind.is_file() {
                 files.push(path);
             } else {
-                return Err(format!("project input is not a regular file: {}", path.display()));
+                return Err(format!(
+                    "project input is not a regular file: {}",
+                    path.display()
+                ));
             }
         }
     }
     // UTF-8 byte order, with portable slash separators, independent of read_dir.
-    let mut files = files.into_iter().map(|path| {
-        let portable = path.components().map(|part| part.as_os_str().to_str()
-            .ok_or_else(|| "project input path is not UTF-8".to_owned()))
-            .collect::<Result<Vec<_>, _>>()?.join("/");
-        Ok((portable, path))
-    }).collect::<Result<Vec<_>, String>>()?;
+    let mut files = files
+        .into_iter()
+        .map(|path| {
+            let portable = path
+                .components()
+                .map(|part| {
+                    part.as_os_str()
+                        .to_str()
+                        .ok_or_else(|| "project input path is not UTF-8".to_owned())
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join("/");
+            Ok((portable, path))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     files.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let mut hash = Sha256::new();
     hash.update(b"ilium-project-inputs\0\x01");
     hash.update((files.len() as u64).to_le_bytes());
     for (portable, path) in files {
         let absolute = project.join(path);
-        let before = std::fs::symlink_metadata(&absolute).map_err(|error| format!("project input {portable}: {error}"))?;
+        let before = std::fs::symlink_metadata(&absolute)
+            .map_err(|error| format!("project input {portable}: {error}"))?;
         if !before.is_file() || before.file_type().is_symlink() {
             return Err(format!("project input changed type: {portable}"));
         }
@@ -72,24 +93,39 @@ pub fn project_input_hash_with_toolchain(
             .map_err(|error| format!("project input root: {error}"))?;
         let components = Path::new(&portable).components().collect::<Vec<_>>();
         for component in &components[..components.len() - 1] {
-            directory = directory.open_directory(component.as_os_str())
+            directory = directory
+                .open_directory(component.as_os_str())
                 .map_err(|error| format!("project input directory: {error}"))?;
         }
-        let mut file = directory.open_regular(components[components.len() - 1].as_os_str())
+        let mut file = directory
+            .open_regular(components[components.len() - 1].as_os_str())
             .map_err(|error| format!("project input {portable}: {error}"))?;
-        let opened = file.metadata().map_err(|error| format!("project input metadata: {error}"))?;
+        let opened = file
+            .metadata()
+            .map_err(|error| format!("project input metadata: {error}"))?;
         field(&mut hash, portable.as_bytes());
         hash.update(opened.len().to_le_bytes());
         let mut read = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
         loop {
-            let count = file.read(&mut buffer).map_err(|error| format!("project input {portable}: {error}"))?;
-            if count == 0 { break; }
-            read = read.checked_add(count as u64).ok_or("project input byte count overflow")?;
+            let count = file
+                .read(&mut buffer)
+                .map_err(|error| format!("project input {portable}: {error}"))?;
+            if count == 0 {
+                break;
+            }
+            read = read
+                .checked_add(count as u64)
+                .ok_or("project input byte count overflow")?;
             hash.update(&buffer[..count]);
         }
-        let after = file.metadata().map_err(|error| format!("project input metadata: {error}"))?;
-        if read != opened.len() || after.len() != opened.len() || after.modified().ok() != opened.modified().ok() {
+        let after = file
+            .metadata()
+            .map_err(|error| format!("project input metadata: {error}"))?;
+        if read != opened.len()
+            || after.len() != opened.len()
+            || after.modified().ok() != opened.modified().ok()
+        {
             return Err(format!("project input changed while hashing: {portable}"));
         }
     }

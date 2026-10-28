@@ -424,7 +424,7 @@
 <p><strong>Intent.</strong> A request that a plugin sends to change Ilium, such as <code>rename-node</code> or <code>send-input</code>. An intent travels inside a submission. Each submission completes with exactly one outcome. See <a href="/pages/reference-events-and-intents/">Events and intents</a>.</p>
 <p><strong>Job.</strong> A unit of background work that a plugin starts with <code>jobs.start</code>. A job runs the <code>job-runner.run</code> export in a second instance of the same component, with its own deadline and memory limit. The plugin reads the result with <code>take-output</code>. See <a href="/pages/background-jobs/">Background jobs</a>.</p>
 <p><strong>Kernel.</strong> The part of Ilium that is native code and not a plugin (tier T0). It owns the tree, the panes, the settings store, the snapshot and the recovery page.</p>
-<p><strong>Key id.</strong> The fingerprint of a publisher public key: the SHA-256 of the key bytes, written as 8 groups of 4 hexadecimal characters. See <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</p>
+<p><strong>Key id.</strong> The fingerprint of a publisher public key: the SHA-256 of the key bytes, written as 64 lowercase hexadecimal characters in 16 groups of 4. See <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</p>
 <p><strong>Lock file.</strong> The file <code>ilium-plugins.lock</code> in a project. It records the exact version and package hash of each plugin, so <code>install --locked</code> gives the same set everywhere. See <a href="/pages/reference-dependency-resolution/">Versions and dependencies</a>.</p>
 <p><strong>Mirror.</strong> A copy of a registry on another host or share. Clients check the signatures of the original registry, never the mirror operator. See <a href="/pages/reference-registry/">Registry reference</a>.</p>
 <p><strong>Namespace.</strong> The first part of a plugin id, such as <code>com.example</code>, that one publisher owns in a registry. See <a href="/pages/reference-registry/">Registry reference</a>.</p>
@@ -436,13 +436,13 @@
 <p><strong>Provider.</strong> A plugin that supplies a service to others: a service provider for a named interface, or an inference provider for model calls. The host routes calls to the provider. See <a href="/pages/services/">Services</a>.</p>
 <p><strong>Publisher id.</strong> The identifier of a publisher, stored with the signing key and equal to the start of every plugin id that the key signs. It is different from the display name in <code>publisher</code>. See <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</p>
 <p><strong>Registry.</strong> An optional source of plugins: signed JSON files and package blobs on an HTTPS host or file share. Ilium ships with none configured (decision D27). See <a href="/pages/reference-registry/">Registry reference</a>.</p>
-<p><strong>Replacement.</strong> A plugin that lists another plugin in <code>replaces</code> and provides its whole <code>surface</code>. The replaced core plugin is turned off while the replacement is on. See <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>.</p>
+<p><strong>Replacement.</strong> A plugin that lists another plugin in <code>replaces</code> and provides its whole <code>surface</code>. The replaced core plugin is turned off while the replacement is on. See <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>.</p>
 <p><strong>Reproducible build.</strong> A build in which two machines make the same package bytes from the same source. See <a href="/pages/guide-publishing/#reproducible-builds">Publishing guide</a>.</p>
 <p><strong>Restored state.</strong> The bytes that a plugin returns from <code>deactivate</code>. The host stores them and passes them back as <code>restored</code> on the next activation. The limit is 1 MiB. Larger bytes are dropped, and the next activation receives no value.</p>
 <p><strong>Retained mode.</strong> The rule that plugins run when an event arrives or a timer fires, and push their state to the host. The host keeps that state and draws it. A plugin's <code>views.render</code> is not called on every frame. See <a href="/pages/retained-mode/">Retained mode</a>.</p>
 <p><strong>SBOM.</strong> Software bill of materials: a list of the libraries inside a component, kept in <code>sbom.json</code>. See <a href="/pages/guide-publishing/#sbom">Publishing guide</a>.</p>
 <p><strong>Scene.</strong> An animated background, written as a <code>scene</code> component that implements the <code>renderer</code> export. A scene draws into a surface, and the host applies the shared look to the result. See <a href="/pages/api-scenes/">Scenes</a>.</p>
-<p><strong>Scope.</strong> A named area of the file system that a <code>fs</code> grant refers to, such as <code>project</code>, <code>data</code> or <code>cache</code>. See <a href="/pages/file-access/">File access</a>.</p>
+<p><strong>Scope.</strong> A named area of the file system that an <code>fs.*</code> grant refers to, such as <code>project</code>, <code>data</code> or <code>cache</code>. See <a href="/pages/file-access/">File access</a>.</p>
 <p><strong>Shared look.</strong> The colour, style and dithering settings that the user sets once and the host applies to every scene and surface. A plugin does not add its own brightness or palette controls. See <a href="/pages/accessibility-and-theming/">Accessibility and theming</a>.</p>
 <p><strong>Side.</strong> One of the three places a plugin runs: <code>server</code> (S), <code>client</code> (C) or <code>scene</code> (A, animation). Each side has its own component, grant list, instance, state and failure count. See <a href="/pages/worlds-and-sides/">Worlds and sides</a>.</p>
 <p><strong>Surface.</strong> A pixel buffer that a plugin writes into. It is shown either by a <code>surface</code> widget or as the frame of a scene. The formats are listed in <a href="#reference-values">Reference values</a>.</p>
@@ -467,7 +467,7 @@
 <p><strong>Durable timer.</strong> A timer made with <code>timers.at</code> that survives a restart. It fires once, late, as <code>durable-timer-fired</code>.</p>
 <p><strong>First-party limits tier.</strong> The value <code>"first-party"</code> of the manifest key <code>limits_tier</code>. It raises the settings caps and is allowed only for bundled <code>ilium.*</code> plugins (error <code>manifest.limits-tier</code>).</p>
 <p><strong>Frame slot.</strong> A place in a pane frame (header icon, header text, footer row or banner) that a plugin fills with <code>set-frame-slot</code>.</p>
-<p><strong>High-risk grant (H).</strong> A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Nine grants are high risk in the contract.</p>
+<p><strong>High-risk grant (H).</strong> A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Eleven grants are high risk in the contract; <code>settings.read-kernel</code> is high only for the <code>api</code> tab.</p>
 <p><strong>Host catalogue.</strong> A catalogue owned by the kernel, such as <code>ilium.palettes</code>, <code>ilium.dithers</code>, <code>ilium.filters</code>, <code>ilium.style-presets</code> or <code>ilium.icons</code>.</p>
 <p><strong>Input journal.</strong> The record of <code>send-input</code> submissions made with <code>journal: true</code>. An entry without a recorded outcome after a crash is reported once as <code>input-uncertain</code> and never replayed.</p>
 <p><strong>Intent, lifecycle.</strong> An intent that changes a pane's process: <code>freeze-pane</code>, <code>unfreeze-pane</code>, <code>replace-pane-command</code>, <code>terminate-pane-process</code> or <code>resize-pane</code>. It needs <code>panes.lifecycle</code>.</p>
@@ -503,7 +503,7 @@
 <p><strong>Trap.</strong> The instance aborts. The host counts one failure and restarts the side after 1 s, then 5 s, and disables it at the third failure within 10 minutes. See <a href="/pages/reference-errors-and-limits/">Errors and limits reference</a>.</p>
 <p><strong>ABI fault and semantic fault.</strong> An ABI fault is a breach of the binary contract, such as a bad pointer or a malformed record, and traps the instance. A semantic fault is a valid call that the host refuses, and it returns an error code to the plugin. See <a href="/pages/reference-errors-and-limits/">Errors and limits reference</a>.</p>
 <h3 id="internal-decision-ids">Internal decision ids</h3>
-<p>Some pages cite short ids such as L2 to L6, AX5, E9, C78, A21 and X5. They come from the design notes. L2 to L6 are section labels in <a href="/pages/reference-errors-and-limits/">Errors and limits reference</a>, and AX5 is a decision in <a href="/pages/design-decisions/">Design decisions</a>. E9, C78, A21 and X5 have no page that defines them, and a reader can ignore them. The requirement ids written in square brackets with a prefix and a number are the ones that tests use.</p>
+<p>Some pages cite short ids such as L2 to L6, AX5, E9 and C78. They come from the design notes. L2 to L6 are section labels in <a href="/pages/reference-errors-and-limits/">Errors and limits reference</a>, and AX5 is a decision in <a href="/pages/design-decisions/">Design decisions</a>. E9 and C78 have no page that defines them, and a reader can ignore them. The requirement ids written in square brackets with a prefix and a number are the ones that tests use.</p>
 <h2 id="for-users">For users</h2>
 <p>These terms appear in the Plugins tab, in dialogs and in <code>ilium plugin list</code>. Each entry says what the word means for a person who installs and manages plugins. The longer pages are <a href="/pages/user-plugins-overview/">Plugins for users</a>, <a href="/pages/user-install-and-manage/">Install and manage plugins</a> and <a href="/pages/user-permissions-explained/">Permissions explained</a>.</p>
 <table>
@@ -676,7 +676,7 @@
 </tr>
 <tr>
 <td><code>cancelled</code></td>
-<td>Stopped by the plugin, the user, a shutdown, or a refusal of its batch.</td>
+<td>Stopped by the plugin, the user, or a shutdown. (A sibling of a refused submission is <code>refused(cancelled)</code>, not <code>cancelled</code>.)</td>
 </tr>
 </tbody>
 </table>
@@ -805,7 +805,7 @@
 </table>
 <p>Grants are recorded per plugin, per side, and per user configuration. They are not recorded per project. A high-risk grant (H) is never checked by default in the install dialog.</p>
 <h3 id="further-grants">Further grants</h3>
-<p>Twenty-three grant rows are new. Ten are high risk (H).</p>
+<p>Twenty-three grant rows are new. Eleven are high risk (H).</p>
 <table>
 <thead>
 <tr>
@@ -981,7 +981,7 @@
 </tbody>
 </table>
 <h3 id="further-manifest-errors">Further manifest errors</h3>
-<p><code>manifest.catalog-unknown</code>, <code>manifest.contribution-limit</code>, <code>manifest.contribution-target</code>, <code>manifest.row-format</code>, <code>manifest.limits-tier</code>, <code>manifest.when-key</code>, <code>manifest.client-request-unknown</code>, <code>manifest.asset-size</code>, <code>manifest.visible-when</code>, <code>manifest.menu-depth</code>, <code>manifest.settings-source</code>, <code>manifest.cli-field</code> and <code>manifest.scene-prerender</code>. Each refuses the install and names the key path. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p><code>manifest.catalog-unknown</code>, <code>manifest.contribution-limit</code>, <code>manifest.contribution-target</code>, <code>manifest.row-format</code>, <code>manifest.limits-tier</code>, <code>manifest.when-key</code>, <code>manifest.client-request-unknown</code>, <code>manifest.asset-size</code>, <code>manifest.visible-when</code>, <code>manifest.menu-depth</code>, <code>manifest.settings-source</code>, <code>manifest.cli-field</code> and <code>manifest.scene-prerender</code>. Each refuses the install and names the key path. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h3 id="renders">Renders</h3>
 <p>The status bar and a pane frame as the client draws them:</p>
 <pre class="term">╭──≡ ● · Fix auth <span class="t-hi">3 files</span>──────────────────────────╮
@@ -1264,7 +1264,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/reference-manifest/">Manifest reference</a></li>
 <li><a href="/pages/reference-capabilities/">Capability table</a></li>
 <li><a href="/pages/reference-events-and-intents/">Events and intents</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/security/">Security model</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
 <li><a href="/pages/debugging/">Debugging</a></li>

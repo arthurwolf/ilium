@@ -46,7 +46,7 @@ An agent file that states an old fact does more harm than none. This page separa
 ## Release checklist
 
 1. Update the pages that the change touches, and add new pages to `_data/nav.yml`.
-2. Update the kit files under `_agent-kit/`. Check each fact against [the manual pages](/pages/landing/): command names and flags ([Set up a toolchain](/pages/getting-started-toolchain/)), deadlines and limits ([Errors and limits](/pages/errors-and-limits/)), SDK names ([Rust SDK](/pages/rust-sdk/), [TypeScript SDK](/pages/typescript-sdk/)), manifest keys ([Manifest keys](/pages/reference-manifest/)).
+2. Update the kit files under `_agent-kit/`. Check each fact against [the manual pages](/pages/landing/): command names and flags ([Set up a toolchain](/pages/getting-started-toolchain/)), deadlines and limits ([Errors and limits](/pages/reference-errors-and-limits/)), SDK names ([Rust SDK](/pages/rust-sdk/), [TypeScript SDK](/pages/typescript-sdk/)), manifest keys ([Manifest keys](/pages/reference-manifest/)).
 3. Set the `contract:` stamp in every kit file to the released contract version. Search for stale stamps:
 
 <pre class="term"><span class="t-prompt">$</span> rg -L "contract: 0.1" _agent-kit

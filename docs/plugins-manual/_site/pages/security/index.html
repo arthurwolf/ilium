@@ -485,7 +485,7 @@
 <td>T1 bundled</td>
 <td>First-party WebAssembly embedded in the release</td>
 <td>In-process Wasmtime</td>
-<td>The manifest ceiling, granted automatically. High-risk (H) grants are asked for once, at first activation</td>
+<td>The manifest ceiling, granted automatically. High-risk (H) grants are asked for at first activation, and the question returns at each server start until the user has answered Not now three times ([SEC-111])</td>
 </tr>
 <tr>
 <td>T2 signed</td>
@@ -755,9 +755,9 @@ Bundled plugins keep working.
 </table>
 <p>Four argument forms deserve a note: <code>http:setting:&lt;key&gt;</code>, <code>settings.read-kernel:&lt;kernel-tab-id&gt;</code>, and the agent scopes <code>agent-sessions:gemini</code>, <code>agent-config:gemini</code> and <code>agent-config:antigravity</code> of <code>fs.read</code> and <code>fs.watch</code>. The agent scopes are read only, and <code>fs.write:agent-sessions:&lt;agent&gt;</code> is refused at install with <code>manifest.grant-scope</code>.</p>
 <p>Grants without an argument, such as <code>tree.read</code> or <code>agent.read</code>, take none. The <a href="/pages/reference-capabilities/">Capability table</a> lists every grant.</p>
-<p>Each grant has a risk mark. <code>always</code> grants are always on. <code>normal</code> grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include <code>panes.signal</code>, <code>terminal.write</code>, <code>agent.read-prompts</code>, <code>agent.control</code>, <code>process.run</code>, <code>panes.create-command</code>, <code>inference.provide</code>, <code>clipboard.read</code>, <code>location.observer</code>, file writes outside <code>data</code> and <code>cache</code>, file reads that reach a sensitive path ([SEC-061]), and the nine grants in the next section. Grants are recorded per plugin and per side in the grant store ([SEC-112]).</p>
+<p>Each grant has a risk mark. <code>always</code> grants are always on. <code>normal</code> grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include <code>panes.signal</code>, <code>terminal.write</code>, <code>agent.read-prompts</code>, <code>agent.control</code>, <code>process.run</code>, <code>panes.create-command</code>, <code>inference.provide</code>, <code>clipboard.read</code>, <code>location.observer</code>, file writes outside <code>data</code> and <code>cache</code>, file reads that reach a sensitive path ([SEC-061]), and the ten grants in the next section (nine in its table, plus <code>settings.write-kernel:&lt;tab-id&gt;</code>, which is T1 only and listed after it). Grants are recorded per plugin and per side in the grant store ([SEC-112]).</p>
 <h2 id="more-high-risk-grants">More high-risk grants</h2>
-<p>These nine grants are high risk. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.</p>
+<p>These ten grants are high risk: the nine in the table and <code>settings.write-kernel:&lt;tab-id&gt;</code>, described after it. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.</p>
 <table>
 <thead>
 <tr>
@@ -851,19 +851,19 @@ Bundled plugins keep working.
 <tr>
 <td><code>open-external</code></td>
 <td>The user</td>
-<td>The first time a plugin opens each target origin (D25)</td>
+<td>The first time a plugin opens each target origin (SEC-043)</td>
 <td>The intent completes as <code>refused(not-permitted)</code></td>
 </tr>
 <tr>
 <td><code>http:setting:&lt;key&gt;</code></td>
 <td>The user</td>
-<td>When the setting holds a host the plugin has not used before (D23)</td>
+<td>When the setting holds a host the plugin has not used before (SEC-074)</td>
 <td>The request fails with <code>not-permitted</code>, and the host is not contacted</td>
 </tr>
 <tr>
 <td><code>location.geocode</code></td>
 <td>The user</td>
-<td>The first time a plugin geocodes. The host service is Photon, with Nominatim as fallback (D14)</td>
+<td>The first time a plugin geocodes. The host service is Photon, with Nominatim as fallback (decision D14 in the <a href="/pages/design-decisions/">Design decisions</a>)</td>
 <td>Calls return <code>not-permitted</code></td>
 </tr>
 <tr>
@@ -1059,13 +1059,18 @@ Bundled plugins keep working.
 <td>Grant. Write is H</td>
 </tr>
 <tr>
-<td><code>agent-sessions:&lt;agent&gt;</code>, <code>agent-config:&lt;agent&gt;</code></td>
-<td>Agent transcript or configuration folder, read only. includes <code>gemini</code> and, for configuration, <code>antigravity</code></td>
+<td><code>agent-sessions:&lt;agent&gt;</code></td>
+<td>Agent transcript folder, read only. Includes <code>gemini</code></td>
 <td>Grant, H</td>
 </tr>
 <tr>
+<td><code>agent-config:&lt;agent&gt;</code></td>
+<td>Agent configuration folder, read and write (<code>fs.read</code> H, <code>fs.write</code> H). Includes <code>gemini</code> and <code>antigravity</code></td>
+<td>Grant, H for read and H for write</td>
+</tr>
+<tr>
 <td><code>path:&lt;template&gt;</code></td>
-<td>Template with <code>{home}</code>, <code>{config}</code>, <code>{data}</code>, <code>{cache}</code>, <code>{project}</code></td>
+<td>Template with <code>{home}</code>, <code>{config}</code>, <code>{data}</code>, <code>{cache}</code>, <code>{project}</code>, <code>{worktrees}</code></td>
 <td>Grant. Literal absolute paths are H</td>
 </tr>
 </tbody>
@@ -1142,7 +1147,7 @@ Bundled plugins keep working.
 </tr>
 <tr>
 <td>Status segments and frame slots</td>
-<td>10 updates per second per segment or slot</td>
+<td>10 updates per second per slot (a status segment id is a slot)</td>
 <td>Updates are coalesced</td>
 </tr>
 <tr>

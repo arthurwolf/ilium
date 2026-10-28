@@ -14,7 +14,7 @@ Requirement ids such as `PKG-560` can be cited by tests. See [Requirements: mani
 
 ## The schema file
 
-The schema describes a source manifest and a packed manifest. In a source manifest `files` may be missing. The schema accepts both, and stage 5 requires `files` in a packed manifest (`manifest.key-missing`).
+The schema describes a source manifest and a packed manifest. In a source manifest `files` may be missing. The schema accepts both, and stage 3 requires `files` in a packed manifest (`manifest.key-missing`).
 
 | Id | Rule |
 |---|---|
@@ -78,6 +78,22 @@ The schema describes a source manifest and a packed manifest. In a source manife
     },
     "homepage": {"type": "string", "maxLength": 256, "pattern": "^https://[^\\s]+$"},
     "repository": {"type": "string", "maxLength": 256, "pattern": "^https://[^\\s]+$"},
+    "data_use": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["what", "where", "purpose", "opt_in"],
+        "properties": {
+          "what": {"type": "string", "minLength": 1, "maxLength": 200},
+          "where": {"type": "string", "minLength": 1, "maxLength": 200},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 200},
+          "opt_in": {"type": "boolean"}
+        }
+      }
+    },
+    "security_contact": {"type": "string", "minLength": 1, "maxLength": 200},
     "server": {
       "type": "object",
       "additionalProperties": false,
@@ -911,7 +927,7 @@ Exit codes are those of [Distribution commands](/pages/reference-plugin-distribu
 
 ## Error catalogue
 
-This catalogue has 247 codes, of which 92 are in the `manifest.*` family. A code that appears in an older page and is not here is in the table of retired codes below.
+This catalogue has 253 codes, of which 94 are in the `manifest.*` family. A code that appears in an older page and is not here is in the table of retired codes below.
 
 | Id | Rule |
 |---|---|
@@ -948,7 +964,7 @@ Raised while the reader opens the `.iliumpkg` file. The reader collects up to 10
 | `package.old-format` | 1 | 1 | `{path} is an .iliumanim package. Port it with the steps in the porting guide.` |
 | `package.precompiled-forbidden` | 1 | 1 | `{entry}: precompiled .cwasm files are not allowed.` |
 
-### Manifest parse and schema codes (`manifest.*`, stages 2 and 3)
+### Manifest parse and schema codes (`manifest.*` and one `package.*` code, stages 2 and 3)
 
 Stage 2 stops at its first error. Stage 3 collects all errors. Every message carries the JSON pointer of the value.
 
@@ -987,6 +1003,8 @@ Stage 2 stops at its first error. Stage 3 collects all errors. Every message car
 | `manifest.settings-glyph` | 3 | 1 | `{pointer}: "{value}" is not a single-cell glyph.` |
 | `manifest.settings-source` | 3 | 1 | `{pointer}: a row needs exactly one of options and source.` |
 | `manifest.sound-id-taken` | 3 | 1 | `{pointer}: the sound id "{id}" is used twice or is reserved.` |
+| `manifest.sound-format` | 3 | 1 | `{pointer}: the sound file "{path}" is missing or is not WAV PCM or OGG Vorbis.` |
+| `package.api-unsupported` | 3 | 1 | `The api {api} is outside the window of this Ilium ({window}).` |
 
 ### Semantic codes (`manifest.*`, stage 4)
 
@@ -1055,11 +1073,9 @@ Signature checks stop at the first error. Trust checks assign the tier. The Exit
 
 | Code | Stage | Exit | Message template |
 |---|---|---|---|
-| `package.api-unsupported` | 3 | 1 | `The api {api} is outside the window of this Ilium ({window}).` |
 | `package.signature-format` | 7 | 1 | `The signature entry is not a valid ilium-sig/1 document: {reason}.` |
 | `manifest.signature-invalid` | 7 | 1 | `The signature of {id} does not match manifest.json.` |
 | `trust.declined` | 8 | 1 | `Key {key_id} was not trusted. Nothing was installed.` |
-| `trust.unsigned` | 8 | 1 | `{id} has no signature. Install it with --allow-unsigned only if you built it.` |
 | `trust.key-unknown` | 8 | 1 | `{id} is signed by the key {key_id}, which you do not trust.` |
 | `trust.key-revoked` | 8 | 1 | `The key {key_id} was revoked on {date}: {reason}.` |
 | `trust.bundled-tampered` | 8 | 1 | `The bundled plugin {id} does not match this Ilium release.` |
@@ -1068,7 +1084,6 @@ Signature checks stop at the first error. Trust checks assign the tier. The Exit
 | `package.publisher-key-changed` | 8 | 1 | `{id} was installed with key {old_key_id}. This package uses {new_key_id}.` |
 | `trust.key-malformed` | C | 1 | `{path} is not a valid public key file: {reason}.` |
 | `trust.key-exists` | C | 1 | `{path} already exists. keygen does not overwrite keys.` |
-| `trust.key-permissions` | C | 1 | `{path} can be read by other users. Run: chmod 600 {path}` |
 | `trust.already-trusted` | C | 1 | `The key {key_id} is already trusted.` |
 | `trust.not-found` | C | 5 | `No trusted key {key_id}.` |
 | `trust.in-use` | C | 1 | `The key {key_id} signed {count} installed plugins: {ids}. Use --force to continue.` |
@@ -1151,11 +1166,12 @@ See [Install and update](/pages/reference-install-and-update/).
 | `migration.data-newer` | I | 1 | `{id} {version} supports data version {supported}. The stored data is at {stamp}. Use --restore-backup or --discard-data.` |
 | `migration.interrupted` | I | 1 | `The migration of {id} was interrupted {attempts} times. The update was rolled back.` |
 | `migration.failed` | I | 1 | `The migration of {id} failed: {reason}. The update was rolled back.` |
-| `migration.backup-too-large` | I | 1 | `The data of {id} is {size}, over the backup limit of {limit}. Pass --no-backup or raise migration_backup_mib.` |
+| `migration.backup-too-large` | I | 1 | `The data of {id} is {size}, over the backup limit of {limit}. Pass --no-backup.` |
+| `migration.io` | I | 1 | `The data directory of {id} cannot be written: {reason}. The update was rolled back.` |
+| `migration.skipped` | - | - | Log line only, not a failure: `{id} {version} has no migrator. The data version was stamped as {stamp}.` |
 | `install.bundled` | C | 1 | `{id} is part of Ilium and cannot be changed.` |
 | `install.scope-unsupported` | C | 1 | `Only user scope installs are available.` |
 | `install.unsigned` | 8 | 1 | `{id} is unsigned. Pass --allow-unsigned to install it.` |
-| `install.downgrade` | 9 | 1 | `{id} {installed} is installed. {version} is lower. Use --allow-downgrade.` |
 | `install.review-required` | 11 | 1 | `No person can review the grants. Pass --yes.` |
 | `install.review-declined` | 11 | 1 | `The review was declined.` |
 | `install.needs-input` | 11 | 1 | `A decision is needed and no person can answer. {what}` |
@@ -1168,6 +1184,7 @@ See [Install and update](/pages/reference-install-and-update/).
 | `package.corrupt` | L | 1 | `The stored copy of {id} {version} fails its hash check.` |
 | `package.cache-missing` | L | 1 | `The cached package of {id} {version} is gone.` |
 | `plugin.not-found` | C | 5 | `No plugin with the id {id}.` |
+| `plugin.not-running` | C | 1 | `{id} is not running.` |
 | `plugin.not-removable` | C | 1 | `{id} cannot be removed.` |
 | `plugin.already-installed` | C | 1 | `{id} is already installed.` |
 | `plugin.server-missing` | C | 1 | `No server is running for this project.` |
@@ -1276,6 +1293,8 @@ Older pages use the spellings below. They are not printed. A host that reads old
 | `policy.grant` | `policy.grant-forbidden` | Detail shown next to the locked row. A denied grant never fails an install. |
 | `policy.source` | `policy.source-denied` | The source (registry URL, mirror or local file) is not in the admin `allowed_sources` list. |
 | `policy.json` | `policy.invalid` | Same. |
+| `trust.unsigned` | `install.unsigned` | An unsigned package without `--allow-unsigned` is an install refusal at stage 8. |
+| `trust.key-permissions` | `sign.key-permissions` | Only `sign` reads the secret key file. |
 | `install.declined` | `install.review-declined` | Same meaning. Both appear in older pages; new text uses install.review-declined. |
 | `install.disk-full` | `install.no-space (before writing), install.io (during)` | The check before writing is install.no-space. |
 | `signature.invalid` | `manifest.signature-invalid` | Install pipeline text of older pages. |
@@ -1291,8 +1310,8 @@ Older pages use the spellings below. They are not printed. A host that reads old
 | Id | Rule |
 |---|---|
 | [PKG-577] | A host MUST NOT print a retired code. A test that expects a retired code is wrong and MUST be updated to the replacement. |
-| [PKG-581] | The host MUST refuse an install whose package source (registry URL, mirror or local file) is not in the administrator `allowed_sources` list with `policy.source-denied`. |
-| [PKG-582] | A `cli` contribution that names a kernel subcommand (plugin, session, recap, progress, chat, kill-session, help, version) MUST be refused with `manifest.cli-name-reserved`; `manifest.cli-name-taken` MUST be used only for a name that another installed plugin owns. |
+| [PKG-581] | The host MUST refuse an install whose package source (registry URL, mirror or local file) is not in the administrator `allowed_sources` list with `policy.blocked` (detail `policy.source-denied`). |
+| [PKG-582] | A `cli` contribution that names a name owned by the kernel itself (plugin, session, kill-session, help, version) MUST be refused with `manifest.cli-name-reserved`. The names `recap`, `progress`, `wait`, `chat`, `panes`, `broadcast`, `new-pane` and `voice` are owned by bundled core plugins: only that core plugin may declare its own, and any other plugin is refused with `manifest.cli-name-taken`, which is used for a name that another installed plugin owns. |
 | [PKG-583] | An extension point that declares a risk level lower than the grant its handlers receive, or an unknown risk, MUST be refused with `manifest.point-risk`. |
 
 ## Edge cases

@@ -679,9 +679,12 @@ impl HostHarness {
 
     /// Builds the host and activates the plugin.
     pub fn build(self) -> Result<HarnessHandle, HostError> {
-        let wasm_sources = usize::from(self.wat_text.is_some()) + usize::from(self.wasm_bytes.is_some());
+        let wasm_sources =
+            usize::from(self.wat_text.is_some()) + usize::from(self.wasm_bytes.is_some());
         if wasm_sources > 1 || (wasm_sources != 0 && self.native_guest.is_some()) {
-            return Err(HostError::EngineError("select exactly one native, WAT, or Wasm guest source".into()));
+            return Err(HostError::EngineError(
+                "select exactly one native, WAT, or Wasm guest source".into(),
+            ));
         }
         let wasm_bytes = match (self.wat_text.clone(), self.wasm_bytes.clone()) {
             (Some(text), None) => Some(wat::parse_str(&text)
@@ -745,20 +748,35 @@ impl HostHarness {
         let guest: Box<dyn crate::instance::GuestExports> = if let Some(bytes) = wasm_bytes {
             // These are direct test fixtures, not admitted packages. Full world validation
             // remains a separate package gate; WasmGuest rejects all unlinked imports.
-            let engine = Arc::new(crate::engine::PluginEngine::with_quota(crate::engine::EngineConfig {
-                epoch_tick_ms: 10, cache_dir: None, process,
-            }, &quota)?);
+            let engine = Arc::new(crate::engine::PluginEngine::with_quota(
+                crate::engine::EngineConfig {
+                    epoch_tick_ms: 10,
+                    cache_dir: None,
+                    process,
+                },
+                &quota,
+            )?);
             let compiled = engine.compile(&bytes)?;
             let limits = crate::calls::ResolvedLimits(resolved.clone());
             let (sender, receiver) = std::sync::mpsc::sync_channel(1);
             let now = Instant::now();
-            scheduler.enqueue(&plugin, CallKind::Activate, now, Box::new(move || {
-                let result = crate::wasm_guest::WasmGuest::instantiate(engine, &compiled, limits)
-                    .map(|guest| Box::new(guest) as Box<dyn crate::instance::GuestExports>);
-                let _ = sender.send(result);
-            }));
+            scheduler.enqueue(
+                &plugin,
+                CallKind::Activate,
+                now,
+                Box::new(move || {
+                    let result =
+                        crate::wasm_guest::WasmGuest::instantiate(engine, &compiled, limits)
+                            .map(|guest| Box::new(guest) as Box<dyn crate::instance::GuestExports>);
+                    let _ = sender.send(result);
+                }),
+            );
             scheduler.tick(now);
-            receiver.recv().map_err(|_| HostError::EngineError("component instantiation worker ended without a result".into()))??
+            receiver.recv().map_err(|_| {
+                HostError::EngineError(
+                    "component instantiation worker ended without a result".into(),
+                )
+            })??
         } else {
             let slot = Arc::new(Mutex::new(
                 self.native_guest.unwrap_or_else(|| Box::new(NullGuest)),
@@ -767,12 +785,22 @@ impl HostHarness {
             Box::new(SharedGuest { slot, script: extras_script.clone() })
         };
         let instance = PluginInstance::from_guest(guest);
-        let clamp_logs = self.limits.0.iter().filter_map(|(name, requested)| {
-            let key = name.parse::<LimitKey>().ok()?;
-            let effective = resolved.get(&key)?;
-            (*requested > *effective).then(|| LogLine { plugin: plugin.0.clone(), level: "warn".into(),
-                message: format!("manifest limit {name} clamped from {requested} to {effective}") })
-        }).collect();
+        let clamp_logs = self
+            .limits
+            .0
+            .iter()
+            .filter_map(|(name, requested)| {
+                let key = name.parse::<LimitKey>().ok()?;
+                let effective = resolved.get(&key)?;
+                (*requested > *effective).then(|| LogLine {
+                    plugin: plugin.0.clone(),
+                    level: "warn".into(),
+                    message: format!(
+                        "manifest limit {name} clamped from {requested} to {effective}"
+                    ),
+                })
+            })
+            .collect();
         let handle = HarnessHandle {
             plugin: plugin.clone(),
             side: self.side,
@@ -804,12 +832,24 @@ impl HostHarness {
             world: Mutex::new(world),
             second: Mutex::new(None),
         };
-        let activation = Activation { plugin, api: "ilium:plugin@0.1.0".into(), instance: 1,
-            side: self.side.as_str().into(), settings_json: serde_json::to_string(
-                &self.settings.into_iter().collect::<serde_json::Map<String, Value>>()
-            ).map_err(|error| HostError::EngineError(error.to_string()))?,
-            granted: harness_lock(&handle.admission.grants).iter().map(|grant| grant.as_str().to_owned()).collect(),
-            restored: None };
+        let activation = Activation {
+            plugin,
+            api: "ilium:plugin@0.1.0".into(),
+            instance: 1,
+            side: self.side.as_str().into(),
+            settings_json: serde_json::to_string(
+                &self
+                    .settings
+                    .into_iter()
+                    .collect::<serde_json::Map<String, Value>>(),
+            )
+            .map_err(|error| HostError::EngineError(error.to_string()))?,
+            granted: harness_lock(&handle.admission.grants)
+                .iter()
+                .map(|grant| grant.as_str().to_owned())
+                .collect(),
+            restored: None,
+        };
         handle.scheduler.begin_activation(&handle.plugin);
         let result = handle.execute(CallKind::Activate, move |instance| {
             instance.activate(activation)
@@ -1533,7 +1573,11 @@ impl HarnessHandle {
 struct HarnessAdmission { grants: Arc<Mutex<Vec<Grant>>> }
 impl HarnessAdmission {
     fn permits(&self, name: &str) -> bool {
-        Grant::parse(name).is_ok_and(|needed| harness_lock(&self.grants).iter().any(|grant| grant.covers(&needed)))
+        Grant::parse(name).is_ok_and(|needed| {
+            harness_lock(&self.grants)
+                .iter()
+                .any(|grant| grant.covers(&needed))
+        })
     }
 }
 impl SubmissionAdmission for HarnessAdmission {
@@ -1774,7 +1818,11 @@ impl HarnessHandle {
             total.traps += report.traps;
             // Keep completed requests with their dispatcher owner until older
             // completion handoffs have drained; never accumulate retry buffers.
-            let results = if completion_blocked { Vec::new() } else { self.dispatcher.take_outcomes_for(&self.origin(), 256) };
+            let results = if completion_blocked {
+                Vec::new()
+            } else {
+                self.dispatcher.take_outcomes_for(&self.origin(), 256)
+            };
             if !results.is_empty() {
                 harness_lock(&self.observations)
                     .outcomes
@@ -1975,11 +2023,18 @@ impl HarnessHandle {
 
     /// The `ilium:primitives/basic` interface as the plugin sees it.
     pub fn basic(&self) -> impl HostBasic + '_ {
-        BasicImport::new(self.kernel.clone(), self.plugin.0.clone(),
+        BasicImport::new(
+            self.kernel.clone(),
+            self.plugin.0.clone(),
             self.admission.grants.clone(),
-            |message| harness_lock(&self.observations).logs.push(LogLine {
-                plugin: self.plugin.0.clone(), level: "warn".into(), message: message.into(),
-            }))
+            |message| {
+                harness_lock(&self.observations).logs.push(LogLine {
+                    plugin: self.plugin.0.clone(),
+                    level: "warn".into(),
+                    message: message.into(),
+                })
+            },
+        )
     }
 
     /// The `ilium:host/audio` interface as the plugin sees it.

@@ -13,7 +13,7 @@ A position reveals where the user is. That is why the grant is high risk (H), an
 - **Grant:** `location.observer`, risk high (H). It takes no argument and grants access to `location.current` only.
 - **Side:** client plugins and scene plugins (the animation world). The server world has no location import.
 - **Language:** Rust with the `ilium-plugin-sdk` crate, or TypeScript with the `@ilium/plugin-sdk` package. Both SDKs need no extra setup for this import.
-- **Manifest:** list `location.observer` in the plugin's capabilities. A plugin that does not list it gets a stub that returns nothing; see [Edge cases](#edge-cases-and-errors).
+- **Manifest:** list `location.observer` in the plugin's capabilities. A plugin that does not list it traps when it calls `current`, because that is a plugin bug; see [Edge cases](#edge-cases-and-errors).
 - **User approval:** the user must check the grant at install (T2 and T3 packages) or accept it at first activation (T1 bundled plugins). See [What the user sees](#what-the-user-sees).
 
 ### Surface
@@ -174,7 +174,7 @@ The prompt for a bundled plugin looks like this:
 <pre class="term">
 ╭─ Plugin example.live-weather asks for ─────────────────────────────╮
 │ Plugin example.live-weather asks for:                              │
-│ [x] location.observer  high risk  Read the observer position       │
+│ [ ] location.observer  high risk  Read the observer position       │
 │                                                                    │
 │                          [ Allow selected ]      [ Not now ]       │
 ╰────────────────────────────────────────────────────────────────────╯
@@ -235,6 +235,6 @@ const request = reverse({ lat: 38.72, lon: -9.14 });
 - [scenes](/pages/api-scenes/) for the scene contract that feature 99 uses.
 - [http](/pages/api-http/) for the data requests that follow the position.
 - [capabilities](/pages/capabilities/) for the full grant list and the risk tiers.
-- [errors and limits](/pages/errors-and-limits/) for the error codes that other imports use.
+- [errors and limits](/pages/reference-errors-and-limits/) for the error codes that other imports use.
 
 Interface: `ilium:host/location@0.1.0`, part of `ilium:plugin@0.1.0`.

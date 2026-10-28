@@ -432,7 +432,7 @@ variant intent {
   editor-open(editor-open-spec),
   // appended in this order
   freeze-pane(freeze-pane-spec),
-  unfreeze-pane(freeze-pane-spec),
+  unfreeze-pane(unfreeze-pane-spec),
   replace-pane-command(replace-pane-command-spec),
   terminate-pane-process(terminate-pane-process-spec),
   resize-pane(resize-pane-spec),
@@ -738,7 +738,7 @@ variant intent {
 <li><strong>[HST-492]</strong> The added latency of a forwarded submission MUST be at most 3 ms at the 99th percentile on an idle local connection (B15).</li>
 </ul>
 <h3 id="send-input-check-order">Send-input check order</h3>
-<p>For <code>send-input</code>, two checks run at batch level before the list below, over the whole batch: shape (key present, total text across all stages at most 65,536 bytes, otherwise <code>invalid-argument</code>) and the grant <code>terminal.write</code> (otherwise <code>not-permitted</code>). The kernel then checks each submission in this order. <code>agent-action</code> uses the same order, with its own grant. The first failing check decides the outcome.</p>
+<p>For <code>send-input</code>, two checks run at batch level before the list below, over the whole batch: shape (key present, total text across all stages at most 65,536 bytes, otherwise <code>invalid-argument</code>) and the grants: <code>terminal.write</code>, then <code>terminal.raw-input</code> if <code>raw</code> or <code>mouse</code> is set, then <code>terminal.input-lock</code> if <code>lock-user-input</code> is set (otherwise <code>not-permitted</code>). The page <a href="/pages/api-intent-send-input/">send-input</a> has the full order. The kernel then checks each submission in this order. <code>agent-action</code> uses the same order, with its own grant. The first failing check decides the outcome.</p>
 <ol>
 <li>Dedup key. A reserved key gives <code>duplicate(&lt;original&gt;)</code>.</li>
 <li>The pane exists and is a terminal pane. Otherwise <code>not-found</code> or <code>unsupported</code>.</li>
@@ -749,7 +749,7 @@ variant intent {
 <li>No other plugin holds the input lock of the pane. Otherwise <code>conflict</code> with the message <code>input-locked</code>.</li>
 <li>The input is accepted: the key is reserved, the rate token is taken and the text is written. A refused attempt never takes a rate token.</li>
 </ol>
-<p><code>agent-action</code> is refused with <code>conflict</code> and the message <code>agent is working</code> while the agent is working. By default an action is allowed in the <code>idle</code>, <code>done</code>, <code>awaiting-approval</code> and <code>menu</code> states, unless its signature says otherwise.</p>
+<p><code>agent-action</code> is refused with <code>conflict</code> when the current activity is not allowed. The message names that activity, for example <code>agent is working</code> or <code>agent is idle</code>. By default an action is allowed in the <code>idle</code>, <code>done</code>, <code>awaiting-approval</code> and <code>menu</code> states, unless its signature says otherwise.</p>
 <h3 id="limits">Limits</h3>
 <table>
 <thead>
@@ -840,7 +840,7 @@ use ilium_plugin_sdk::dedup;
 use ilium_plugin_sdk::host::log::{self, Level};
 use ilium_plugin_sdk::types::events::AgentActivityEvent;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
-use ilium_plugin_sdk::types::tree::AgentActivity;
+use ilium_plugin_sdk::types::tree::{AgentActivity, TitleSource};
 
 #[ilium_plugin(side = &quot;server&quot;)]
 #[derive(Default)]
@@ -854,7 +854,12 @@ impl Handler for FinishTitler {
                 Event::AgentActivityChanged(AgentActivityEvent { node, current, .. })
                     if current == AgentActivity::Done =&gt;
                 {
-                    let spec = RenameNodeSpec { node, title: &quot;Agent finished&quot;.to_string() };
+                    let spec = RenameNodeSpec {
+                        node,
+                        title: &quot;Agent finished&quot;.to_string(),
+                        source: TitleSource::Plugin,
+                        expected_revision: None,
+                    };
                     let key = dedup::key_for(&amp;[&quot;finished&quot;, &amp;node.to_string()]);
                     submissions.push(Submission::keyed(Intent::RenameNode(spec), key));
                 }
@@ -1068,7 +1073,7 @@ if (outcome.tag === 'ok-epoch') {
 <td><code>set-status-segment</code></td>
 <td><code>segment</code> (own <code>status_segments</code> id), <code>content: rich-text</code>, <code>tooltip: option&lt;tooltip&gt;</code>, <code>tone: option&lt;tone&gt;</code></td>
 <td><code>ui.chrome</code></td>
-<td><code>ok</code>; at most 10 per second per segment</td>
+<td><code>ok</code>; at most 10 per second per slot (the segment id is the slot)</td>
 </tr>
 <tr>
 <td><code>clear-status-segment</code></td>
@@ -1269,7 +1274,7 @@ function freezeAndTell(pane: bigint): Submission[] {
 <li><code>failed(timed-out)</code> on <code>invoke-command</code> means the command did not reply within 30 seconds. The command may still finish later, so check its effect before a retry.</li>
 <li><code>cancelled</code> means another submission in the same batch was refused. Fix the refused one, then resubmit the whole group.</li>
 <li><code>duplicate(&lt;original&gt;)</code> is not an error. It confirms that an earlier submission with the same key already took effect.</li>
-<li>A trap ends the plugin instance. The kernel restarts it under the restart rule in <a href="/pages/errors-and-limits/">errors and limits</a>.</li>
+<li>A trap ends the plugin instance. The kernel restarts it under the restart rule in <a href="/pages/reference-errors-and-limits/">errors and limits</a>.</li>
 </ul>
 <h3 id="what-the-user-sees">What the user sees</h3>
 <ul>
@@ -1293,7 +1298,7 @@ function freezeAndTell(pane: bigint): Submission[] {
 <ul>
 <li><a href="/pages/api-events/">Events</a>: the events that start a batch, and <code>request-completed</code>.</li>
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a>: how the outcome and the take functions relate.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a>: the error codes and the per-call caps.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a>: the error codes and the per-call caps.</li>
 <li><a href="/pages/api-tree/">Tree</a>, <a href="/pages/api-panes/">panes</a>, <a href="/pages/api-commands/">commands</a>, <a href="/pages/api-notifications/">notifications</a> and <a href="/pages/api-messages-and-topics/">messages and topics</a>: the reads that go with these intents.</li>
 <li>Capabilities: <a href="/pages/capability-tree-write/">tree.write</a>, <a href="/pages/capability-terminal-write/">terminal.write</a>, <a href="/pages/capability-agent-control/">agent.control</a>, <a href="/pages/capability-panes-signal/">panes.signal</a>, <a href="/pages/capability-notify-desktop/">notify.desktop</a> and <a href="/pages/capability-editor-edit/">editor.edit</a>.</li>
 <li>Deep pages: <a href="/pages/api-intent-send-input/">send-input stages</a>, <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle</a>, <a href="/pages/api-intent-tree-structure/">tree structure</a> and <a href="/pages/api-intent-chrome/">chrome intents</a>.</li>

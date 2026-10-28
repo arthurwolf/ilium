@@ -451,6 +451,6 @@ Concurrency is not an error: a job past `concurrent_jobs` waits in the queue. A 
 - [inference](/pages/api-inference/) for the call used in the second example.
 - [codec](/pages/api-codec/) for work that fits under 16 MiB and needs no job.
 - [Capability: jobs.run](/pages/capability-jobs-run/) for the grant.
-- [Errors and limits](/pages/errors-and-limits/) for the full code table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full code table.
 
 Checked against `ilium:plugin@0.1.0`.

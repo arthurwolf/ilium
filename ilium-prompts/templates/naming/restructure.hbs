@@ -14,7 +14,9 @@ Every output node/container needs an "animation" definition-key string, even whe
 
 Protected splits: each listed id appears once with exact ordered pane children. Never invent, omit, duplicate, dissolve, or nest a split view. Preserve membership/order; omit unchanged orientation/container title/icon/expansion/layout. Move whole splits into ordinary groups; retitle only allowed panes.
 
-name-fixed="true": preserve title/short_title/icon exactly. Every fixed group appears once as existing_group with its listed id, even if moved or its children regrouped.
+name-fixed="true": preserve title/short_title/icon exactly. Every ordinary fixed group appears once as existing_group with its listed id, even if moved or its children regrouped.
+
+Worktree rows marked kind="worktree", membership="immutable" and output="omit-wrapper" are immutable checkout ownership shown only as current-structure context, never output nodes or existing_group entries. Member rows identify their fixed checkout with worktree_owner. Include each listed member pane once using its pane id; pane titles may change when allowed. Ilium preserves each member under its worktree directly beneath the project, regardless of proposed grouping. Never suggest transferring members between checkouts or moving a worktree into an ordinary group.
 
 Shell command_hint: identifiable running/last/output program plus one subcommand (git commit, cargo build, npm run) or essential flags (ps faux, ls -la), under20 characters; otherwise "". Exclude paths/arguments/quotes/commits/URLs/env/pipelines/redirections. No brackets or repetition in titles: Ilium prefixes it. Ignore prior [...] title prefixes. Other kinds: command_hint="".
 

@@ -19,7 +19,7 @@ The kernel never runs Git. The plugin creates the branch and the folder with `gi
 - **Grant `fs.read:project`** for the folder passed as `repository`.
 - **Grant `fs.write:worktrees`** (risk H) for the folder passed as `path`. The `worktrees` scope is rooted at the setting `workspace.worktree_root`. Its default is `<parent of the project>/<project name>.worktrees/`.
 - **Side and language.** Server side only, in Rust or TypeScript. The client world has no `workspace` import.
-- **Tier.** The grant is H for every tier. A T1 bundled plugin is asked once, at its first activation. A T2 or T3 plugin shows it in the install review dialog, unchecked.
+- **Tier.** The grant is H for every tier. A T1 bundled plugin is asked at its first activation, and again at each following server start after `Not now`, for three prompts in total. A T2 or T3 plugin shows it in the install review dialog, unchecked.
 
 ### Grant syntax
 
@@ -155,7 +155,7 @@ For a T2 or T3 package, the install review dialog lists the grant in the server 
 
 </figure>
 
-A T1 bundled plugin is activated first without its high-risk grants. The first activation shows one prompt, "Plugin <name> asks for:", with a checkbox for `workspace.manage` and the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times. After that the user grants it from Settings > Plugins.
+A T1 bundled plugin is activated first without its high-risk grants. The first activation shows one prompt, "Plugin <name> asks for:", with a checkbox for `workspace.manage` and the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start; there are three prompts in total. After that the user grants it from Settings > Plugins.
 
 The user can also inspect and revoke the grant from the command line:
 
@@ -258,7 +258,7 @@ export function releaseWorktree(workspaceId: bigint): void {
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md` use this capability:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/) use this capability:
 
 - 67 Agent in a new Git worktree: `workspace.manage`, `process.run:git`, `fs.write:worktrees`.
 - 68 Agent in an existing worktree: `workspace.manage`, `process.run:git`.

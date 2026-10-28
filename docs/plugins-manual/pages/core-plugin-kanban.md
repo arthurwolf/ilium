@@ -22,7 +22,7 @@ The pane itself, its place in the tree and its focus are kernel-native. The plug
 
 ### See it
 
-<figure><img src="/assets/demos/08-kanban.gif" alt="A Kanban board with three columns while a card moves from To do to Doing" loading="lazy"><figcaption>A board pane with three columns. The selected card moves one column to the right.</figcaption></figure>
+<figure><img src="/assets/demos/08-kanban.gif" alt="The current Ilium Kanban board moves a card to Doing, marks it complete, edits its note, then verifies the saved Markdown file" loading="lazy"><figcaption>The current board completes a card, edits its note, and reopens the Markdown file to verify the saved title and note. The visible agent panes are idle local CLI-shaped fixtures; no provider request is made, and the capture does not demonstrate live agent classification.</figcaption></figure>
 
 ### What the user sees
 

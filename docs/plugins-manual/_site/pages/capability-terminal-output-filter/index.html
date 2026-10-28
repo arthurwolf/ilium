@@ -447,7 +447,7 @@
 <td>string</td>
 <td>yes</td>
 <td>none</td>
-<td>Pattern, see <a href="#matching">Matching</a>. Up to 1 KiB.</td>
+<td>Pattern, see <a href="#matching">Matching</a>. Up to 512 bytes (the manifest schema <code>maxLength</code>).</td>
 </tr>
 <tr>
 <td><code>panes</code></td>
@@ -590,7 +590,7 @@ remove-output-filter: func(pane: node-id, filter-id: string);
 </tr>
 </tbody>
 </table>
-<p>Events of a plugin are dropped oldest first when its event queue is full, and the drop is counted in <code>events-dropped</code>.</p>
+<p><code>output-matched</code> is a drop-oldest event kind in the <a href="/pages/reference-runtime-model/">runtime model</a> (ABI-033): when the queue is full, the oldest queued drop-oldest event is evicted and counted in <code>events-dropped</code>. Events that are never dropped, such as <code>agent-activity-changed</code>, are not evicted. Matches above the rate limit are dropped and counted as described under Rate limit.</p>
 <h2 id="risk-and-tier-rules">Risk and tier rules</h2>
 <ul>
 <li>This grant is not marked high risk in the capability table.</li>
@@ -720,7 +720,7 @@ export const { lifecycle, handler } = definePlugin({
 <td><code>not-found</code>.</td>
 </tr>
 <tr>
-<td>Regex does not compile, or the pattern is over 1 KiB, or the compiled program is over 1 MiB</td>
+<td>Regex does not compile, or the pattern is over 512 bytes, or the compiled program is over 1 MiB</td>
 <td><code>invalid-argument</code>.</td>
 </tr>
 <tr>
@@ -797,11 +797,11 @@ silently.</p>
 <li><a href="/pages/capability-sound-play/">sound.play</a> and <a href="/pages/capability-notify-desktop/">notify.desktop</a>, the actions a text trigger usually runs.</li>
 <li><a href="/pages/primitives-terminal/">Terminal primitives</a> for the complete terminal interface.</li>
 <li><a href="/pages/api-events/">Events and intents</a> for the event envelope and the batch rules.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and quota model.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and quota model.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
 <h3 id="security">Security</h3>
-<p><strong>[SEC-046]</strong> Filter patterns are compiled with size limits; a catastrophic pattern is refused with <code>regex.too-large</code> or <code>regex.unsupported</code>. See <a href="/pages/reference-security-testing/">Security testing</a>.</p>
+<p><strong>[SEC-046]</strong> Filter patterns are compiled with size limits; a catastrophic pattern is refused with <code>invalid-argument</code>. See <a href="/pages/reference-security-testing/">Security testing</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-sound-play/"><small>Previous</small>Capability: sound.play</a><a class="next" href="/pages/capability-terminal-pointer/"><small>Next</small>terminal.pointer</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

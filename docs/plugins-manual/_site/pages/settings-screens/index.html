@@ -463,7 +463,7 @@
 <tr>
 <td><code>placement</code></td>
 <td>string</td>
-<td>Section only. <code>end</code> (default), <code>before:&lt;section&gt;</code> or <code>after:&lt;section&gt;</code>.</td>
+<td>Section only. <code>end</code> (default), <code>before:&lt;section&gt;</code> or <code>after:&lt;section&gt;</code>. <code>before:main</code> is refused at install with <code>manifest.settings-anchor</code>.</td>
 </tr>
 <tr>
 <td><code>scope</code></td>
@@ -617,7 +617,7 @@ render: func(view: view-target, area: area) -&gt; ui-tree;
     child 1: paragraph    lines: &quot;Badges count open items per tree row.&quot;
 </code></pre>
 <h3 id="widgets-a-settings-view-may-embed">Widgets a settings view may embed</h3>
-<p>A settings view is a normal view, so it may use the display widgets, <code>schema-form</code>, <code>button</code> and the <code>location-picker</code> (<a href="/pages/reference-settings-schema/">Settings schema reference</a>). It may not use the widgets that need a pane or a terminal. Kernel tabs never host view content. A view cannot reach the rows of a built-in tab; it can only open them through the link <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code>.</p>
+<p>A settings view is a normal view, so it may use the display widgets, <code>schema-form</code>, <code>button</code> and the <code>location-picker</code> (<a href="/pages/reference-settings-schema/">Settings schema reference</a>). It may not use <code>popup</code>, <code>dialog</code>, <code>menu</code>, <code>video</code>, <code>terminal-view</code> or any input widget other than <code>button</code>, <code>schema-form</code> and <code>location-picker</code> (<a href="/pages/api-ui/">UI API</a>); a tree that contains one traps with <code>ui.widget-not-allowed</code> on render. Kernel tabs never host view content. A view cannot reach the rows of a built-in tab; it can only open them through the link <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code>.</p>
 <p><strong>Rust</strong></p>
 <p>The Rust SDK builds the tree with <code>ilium_plugin_sdk::ui::build::Tree</code>. Each widget has one constructor. A node is attached to its parent with <code>.child(...)</code>, and <code>tree.finish(root)</code> returns the <code>UiTree</code>.</p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
@@ -735,7 +735,7 @@ export const { lifecycle, handler } = definePlugin({
 </tbody>
 </table>
 <p><code>set-json</code> reads the patch as an RFC 7396 JSON merge patch. A key set to <code>null</code> resets to its schema <code>default</code>. A key that is not in the schema is <code>invalid-argument</code> and the message names it. The patch is applied all or nothing: one invalid key stores nothing. A patch that changes no stored value succeeds and sends no <code>settings-changed</code>.</p>
-<p><code>settings-changed</code> carries a <code>settings-change</code> record: <code>keys</code> (the changed keys, sorted), <code>origin</code> (<code>user</code>, <code>plugin</code>, <code>reset</code>, <code>other-plugin</code> or <code>file</code>) and <code>scope</code>. In Rust it is <code>Event::SettingsChanged(change)</code>, and in TypeScript <code>{ tag: 'settings-changed', val: { keys, origin, scope } }</code>. A plugin has one code path for every change, including its own <code>set-json</code>.</p>
+<p><code>settings-changed</code> carries a <code>settings-change</code> record: <code>keys</code> (the changed keys, sorted), <code>origin</code> (<code>user</code>, <code>plugin</code>, <code>reset</code>, <code>other-plugin</code> or <code>file</code>) and <code>side</code> (<code>server</code> or <code>client</code>, the side that owns the keys). In Rust it is <code>Event::SettingsChanged(change)</code>, and in TypeScript <code>{ tag: 'settings-changed', val: { keys, origin, side } }</code>. A plugin has one code path for every change, including its own <code>set-json</code>.</p>
 <p><code>list-settings</code> returns <code>settings-ref</code> records with <code>plugin</code>, <code>tab</code>, <code>section</code> (when the entry is a section), <code>title</code>, <code>scope</code> and <code>kernel-tab</code> (when the section is in a built-in tab). A plugin without settings is not listed.</p>
 <h2 id="values-saved-from-a-page">Values saved from a page</h2>
 <p>Input widgets send a <code>ui-action</code> event, and the host applies a debounce before the plugin sees the value. Schema forms send no <code>ui-action</code> at all: the host validates and saves each change, and the owning plugin receives <code>settings-changed</code>.</p>
@@ -775,8 +775,8 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 </tbody>
 </table>
-<p>The rows of a plugin tab and of a section follow the same timing (see the <a href="/pages/settings-extension/">auto-save table</a>): toggles, choices and dialog confirmations write at once, number steps and typed text write 600 ms after the last change, and text areas write 1 s after the last change. Closing Settings flushes any pending write.</p>
-<p>Show a saving state while a <code>set-json</code> is pending, so the user can tell that a change has not reached the store yet.</p>
+<p>The rows of a plugin tab and of a section follow the same timing (see the <a href="/pages/settings-extension/">auto-save table</a>): toggles, choices and dialog confirmations write at once, number steps and typed text write 600 ms after the last change, text areas write 600 ms after the last change while the text is at most 10,000 bytes and 1 s after it above that. Closing Settings flushes any pending write.</p>
+<p><strong>[SET-032]</strong> The host MUST show the saving state on a row from the moment the user edits it until the write completes or is refused: the row's trailing marker reads <code>Saving…</code> (U+2026) while the 600 ms or 1 s debounce runs or a <code>set-json</code> is pending, and the marker disappears when the write completes or the save is refused. It is the same for the row of a plugin tab and for the schema-form of a view.</p>
 <figure>
 <pre class="term">╭  ≡ ● · General · plugin───────────────────────────────╮
 │<span class="t-hi">BADGES                                                 </span>│

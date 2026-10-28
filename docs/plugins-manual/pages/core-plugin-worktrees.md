@@ -20,7 +20,7 @@ The kernel never runs Git itself. The plugin runs `git worktree add` through pro
 
 ### See it
 
-<figure><img src="/assets/demos/25-worktree-agent.gif" alt="A new agent starts in a fresh Git worktree and its branch shows in the tree" loading="lazy"><figcaption>The command creates the worktree, opens a pane inside it and shows the branch in the tree.</figcaption></figure>
+<figure><img src="/assets/demos/25-worktree-agent.gif" alt="Ilium creates a Git worktree; a local Codex-shaped fixture runs inside it and the terminal shows its branch and file diff. Typing is shortened and three editorial captions were added." loading="lazy"><figcaption>A documented local Codex-shaped fixture runs from its absolute path inside the worktree; the built-in provider launch is not intercepted or represented. Typing is shortened, and three editorial captions were added.</figcaption></figure>
 
 ### What the user sees
 

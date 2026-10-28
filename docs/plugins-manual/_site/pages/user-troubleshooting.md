@@ -34,6 +34,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 | A plugin shows **Failed** | It failed 3 times within 10 minutes | Read its log, then turn it on again (see below, and [Plugin health for users](/pages/user-plugin-health/)) |
 | A plugin shows **Refused** | Ilium checked it at start and refused to run it | Read the code in the row. Reinstall the package or get a new version |
 | A plugin shows **Blocked by policy** | Your administrator forbids it | Ask your administrator |
+| A plugin shows **Blocked** with `trust.key-revoked` or `registry.takedown` | The publisher key was revoked as compromised, or the registry took the version down | Do not turn it on unless you accept the risk. Install an update from the publisher, or run `ilium plugin enable <id> --accept-risk`. See [Install and manage plugins](/pages/user-install-and-manage/) |
 | A plugin shows **Waiting for <owner>** | It depends on a plugin that is off or removed | Turn on or install the owner |
 | A panel or pane is empty | A permission was declined, or the plugin is off | Check the Capabilities tab and the log |
 | A pane says "Plugin <name> is not installed" | The plugin that made the pane was removed | Install it again, or close the pane |
@@ -53,7 +54,7 @@ Start it in one of three ways:
 
 1. From a terminal: `ilium --safe-mode`.
 2. From the recovery page, press the Safe mode action. Ilium restarts the client with third-party plugins off.
-3. If Ilium fails to start twice in a row while a plugin starts, Ilium offers safe mode at the next start. (Pending decision: the offer after two failed starts is proposed.)
+3. If Ilium crashes during start three times within 5 minutes, the next start uses safe mode with third-party plugins off (LIF-186).
 
 In safe mode, a banner stays at the top of the screen: "Safe mode: third-party plugins are off." The Plugins tab still works. Every third-party row shows **Off** with the reason `safe-mode`. You can read logs, uninstall plugins and use the bisect tool. You cannot turn a third-party plugin on until you leave safe mode.
 
@@ -95,7 +96,7 @@ The recovery page is a screen that belongs to Ilium itself, not to any plugin. N
 <figcaption>Rendered at 48 columns. Illustrative. The recovery page.</figcaption>
 </figure>
 
-Open the recovery page from the **Open Plugins page** link on any disabled plugin's rows, or from a failed-start notice, or with `Ctrl+B` then `:` and the Recovery entry when Settings is not available. (Pending decision: the direct key for the recovery page is not set.)
+Open the recovery page from the **Open Plugins page** link on any disabled plugin's rows, or from a failed-start notice, or with `Ctrl+B` then `:` and the Recovery entry when Settings is not available. The recovery page has no direct key of its own; those three routes are the only ones.
 
 | Action | Effect | Changes |
 |---|---|---|
@@ -122,7 +123,7 @@ ilium plugin bisect bad      # the problem is still there
 ilium plugin bisect reset    # stop and put everything back
 ```
 
-Bisect changes nothing on disk. The plugins it turns off are off for this run, as in safe mode, and `reset` or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.
+Bisect writes only its own state file, `<data>/plugins/bisect.json`, and changes no plugin file and no setting. The plugins it turns off are off for this run, as in safe mode, and `reset` or a restart brings them back. When bisect has found the plugin, it names it and offers to turn it off for good or to open its log.
 
 1. Run `ilium plugin bisect start`.
 2. Look at whether the problem is still there. Answer `good` when it is gone, `bad` when it is still there.
@@ -158,6 +159,7 @@ When a plugin stops with an error, Ilium starts it again after a delay: 1 s afte
 
 If you changed the plugin in the meantime, for example by updating it, the count also starts from zero.
 
+- [USR-176] The troubleshooting table MUST tell a user whose plugin shows `Blocked` with `trust.key-revoked` or `registry.takedown` that the block is not a failure, that the plugin stays off until `enable --accept-risk` or a signed update, and that the failure counter does not apply. Test: read the page text and assert that the row names both reasons, `--accept-risk` and the update route; block a plugin and assert that `ilium plugin list` shows no failure count for it.
 - [USR-100] The plugin MUST restart after 1 s, then after 5 s, and MUST stay off at the third failure within 10 minutes. Test: make a test plugin fail on start and measure.
 - [USR-101] Turning a plugin on MUST clear its failure count. Test: reach the stop, turn on, fail once, and assert a restart after 1 s.
 

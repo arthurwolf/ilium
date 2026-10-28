@@ -32,7 +32,7 @@ You can size the left panel in **Settings → Appearance**. The default policy i
 
 ### Reading a complete error
 
-Press **F9** to expand the current diagnostic. The viewer preserves the open dialog and its draft. Use **Up/Down**, the mouse wheel, **PageUp/PageDown**, or **Home/End** to read long errors; **Esc** or **F9** closes the viewer. Compact status rows and error tooltips show an F9 hint. Agent-creation errors also wrap and expand the footer popup when space permits.
+Press **F9** to expand the current diagnostic. **Ctrl+F9** opens local runtime diagnostics even when no error is showing, including connection stages, progress counters and queue admission. It does not query the server; a long idle stage alone does not prove a hang. The viewer preserves the open dialog and its draft. Use **Up/Down**, the mouse wheel, **PageUp/PageDown**, or **Home/End** to read long errors; **Esc** or **F9** closes the viewer. Compact status rows and error tooltips show an F9 hint. Agent-creation errors also wrap and expand the footer popup when space permits.
 
 ## The tree
 

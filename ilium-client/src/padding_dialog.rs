@@ -14,6 +14,7 @@ use crate::app::App;
 use crate::padding::{PaddingPanel, PaddingSettings, MAX_PADDING};
 use crate::padding_app::PaddingSide;
 use crate::theme;
+use crate::value_control::boolean_switch;
 
 const SETTINGS_WIDTH: u16 = 46;
 const BUTTON_WIDTH: u16 = 5;
@@ -106,14 +107,13 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
         *y += 1;
         if !is_tree {
             let shared = settings.right_panels_shared;
-            let text = if shared {
-                "[x] Same for terminal, editor and board"
-            } else {
-                "[ ] Same for terminal, editor and board"
-            };
+            let text = format!(
+                "{} Same for terminal, editor and board",
+                boolean_switch(shared)
+            );
             layout
                 .buttons
-                .push((row(*y), text.into(), DialogHit::Shared(!shared)));
+                .push((row(*y), text, DialogHit::Shared(!shared)));
             *y += 1;
             if !shared {
                 let mut x = column.x;
@@ -133,14 +133,10 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
             }
         }
         let config = *settings.panel(panel);
-        let linked_text = if config.linked {
-            "[x] Link all sides"
-        } else {
-            "[ ] Link all sides"
-        };
+        let linked_text = format!("{} Link all sides", boolean_switch(config.linked));
         layout
             .buttons
-            .push((row(*y), linked_text.into(), DialogHit::Linked(panel)));
+            .push((row(*y), linked_text, DialogHit::Linked(panel)));
         *y += 1;
         let value_row = |layout: &mut Layout,
                          y: &mut u16,
@@ -517,6 +513,7 @@ mod tests {
             .join("\n");
         for needle in [
             "Padding fine-tuning",
+            "[ON  ●] Link all sides",
             "Link all sides",
             "Preview",
             "Project",

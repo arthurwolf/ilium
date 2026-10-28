@@ -50,7 +50,7 @@ The host calls the plugin's `render` function when the view first opens, after `
 | `bar-chart` | Bars in groups | `selected` (a bar) when focusable |
 | `chart` | Datasets on axes | `selected` (a point) when focusable |
 | `canvas` | Shapes in a coordinate space | `activated` with a cell when focusable |
-| `calendar` | One month (unstable) | `selected` (a day) |
+| `calendar` | One month (unstable) | `selected` (a day); focusable by default |
 | `progress-row` | The state of one job | `activated` |
 | `meter` | A segmented bar | `selected` (a segment) when focusable |
 | `minimap` | The shape of a long text | `activated`, `scrolled` |
@@ -249,7 +249,7 @@ Mirrors `ratatui::widgets::Chart`. A chart has datasets, two axes and an optiona
 | | `bounds` | `tuple<f64, f64>` | The lowest and highest value on the axis. |
 | | `labels` | `list<styled-text>` | Tick labels drawn along the axis. |
 | `legend-position` | | `option<legend-position>` | `top`, `top-right`, `top-left`, `left`, `right`, `bottom`, `bottom-right` or `bottom-left`. None hides the legend. |
-| `render` | | `braille` or `text-line` | The render. Default `braille`. |
+| `render` | | `braille` or `text-line` | The render. Default `braille`. Where the terminal cannot draw Braille, the host falls back to `text-line`. |
 | `y-label-width` | | `option<u16>` | The width of the y labels in cells. |
 
 When the node is focusable, Left and Right move a cursor along the points and `selected` with `index(u32)` reports the point. Hovering a point shows it as a tooltip. Roles: the dataset styles, and `muted` for the axes.
@@ -483,18 +483,18 @@ const october = calendar(2026, 10, {
 | `message` | `option<string>` | A short line after the bar. |
 | `details` | `option<styled-lines>` | Longer text, shown as a tooltip on hover. |
 
-Actions: `activated` with `none`, on Enter or on a click. Roles: `accent` for running, `success` for done, `danger` for error, `warning` for a degraded monitor, and `muted` for waiting. Glyphs: `▶` running, `✓` done, `✕` error, `!` degraded, `○` waiting, and a bar of `█` over `░`.
+Actions: `activated` with `none`, on Enter or on a click. Roles: `accent` for running, `success` for done, `danger` for error, and `muted` for waiting. The state set is closed (`progress-state` in the WIT has no degraded state). Glyphs: `▶` running, `✓` done, `✕` error, `○` waiting, and a bar of `█` over `░`.
 
 <figure>
 <pre class="term">╭─ Progress ─────────────────────────────────────────────╮
 │ <span class="t-hi">▶ RUNNING  42%</span>  <span class="t-hi">████████</span><span class="t-dim">░░░░░░░░░░░░</span>  152 of 412       │
 │ <span class="t-ok">✓ DONE  100%</span>  <span class="t-ok">████████████████████</span><span class="t-dim"></span>                     │
 │ <span class="t-err">✕ ERROR  17%</span>  <span class="t-err">███</span><span class="t-dim">░░░░░░░░░░░░░░░░░</span>  3 failed           │
-│ <span class="t-warn">! MONITOR FAILED  0%</span>  <span class="t-dim">░░░░░░░░░░░░░░░░░░░░</span>             │
+│ <span class="t-err">✕ MONITOR FAILED  0%</span>  <span class="t-dim">░░░░░░░░░░░░░░░░░░░░</span>             │
 │ <span class="t-dim">○ NOT STARTED</span>                                          │
 ╰────────────────────────────────────────────────────────╯
 </pre>
-<figcaption>Rendered at 58 columns. Five <code>progress-row</code> states. The status prefix is bold in the state colour: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error and <code>warning</code> for a degraded monitor. The bar is <code>█</code> filled and <code>░</code> unfilled.</figcaption>
+<figcaption>Rendered at 58 columns. Five <code>progress-row</code> states. The status prefix is bold in the state colour: <code>accent</code> for running, <code>success</code> for done, <code>danger</code> for error and <code>muted</code> for waiting. The bar is <code>█</code> filled and <code>░</code> unfilled.</figcaption>
 </figure>
 
 **Rust**
@@ -753,7 +753,7 @@ A trap ends the plugin instance, and the host applies the [restart and disable r
 
 ## What the user sees
 
-The view repaints when the plugin returns a new tree. Most data widgets take no key input of their own and send nothing back, so a key press on them does nothing unless the plugin sets the `focusable` flag or the widget has an action of its own. Colours come from the theme and the shared look, and the user can switch to stable glyphs. Under reduced motion the plugin should avoid redrawing a chart faster than the data changes.
+The view repaints when the plugin returns a new tree. Most data widgets take no key input of their own and send nothing back, so a key press on them does nothing unless the plugin sets the `focusable` flag or the widget has an action of its own. Colours come from the theme and the shared look, and the user can switch to stable glyphs. Under reduced motion this is guidance, not a tested rule: a plugin should avoid redrawing a chart more often than its data changes.
 
 Requirement ids for this page: [WID-022], [WID-023], [WID-024]. See the [requirements index](/pages/reference-requirements/).
 
@@ -764,6 +764,6 @@ Requirement ids for this page: [WID-022], [WID-023], [WID-024]. See the [require
 - [Media and embedded](/pages/widgets-media-and-embedded/) for `surface`, `image` and `video`
 - [The UI model](/pages/ui-model/)
 - [Accessibility and theming](/pages/accessibility-and-theming/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.

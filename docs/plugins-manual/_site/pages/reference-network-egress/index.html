@@ -451,7 +451,7 @@
 <p><strong>[SEC-073]</strong> The connection is pinned to the checked address. The host connects to the exact address it validated and never resolves the name a second time. If a name resolves to several addresses and any one is in a refused class, the request is refused entirely.</p>
 <p><strong>[SEC-071]</strong> IP literals. <code>http:203.0.113.5</code> and <code>http:[2001:db8::1]</code> are valid grant arguments for public addresses. A literal that falls in a refused class is valid only as an explicit grant of that literal, is high risk, and the review dialog shows it. Wildcards never match literals. <code>http:*</code> is refused with <code>manifest.grant-wildcard</code>.</p>
 <p><strong>[SEC-074]</strong> Loopback. <code>http:localhost</code> requires an explicit port (<code>http:localhost:8080</code>), is high risk, and can never reach the Ilium HTTP API port or the Ilium socket of any session: the host refuses those destinations with <code>not-permitted</code> reason <code>reserved</code>. The port check compares the destination with the listener ports of all Ilium sessions of the user, not only the current one.</p>
-<p><code>http:setting:&lt;key&gt;</code> takes its host from a setting. The same address checks apply to the value. A setting that holds a private address needs the user consent of decision D23, shown with the address class named.</p>
+<p><code>http:setting:&lt;key&gt;</code> takes its host from a setting. The same address checks apply to the value. A setting that holds a private address needs the user consent of SEC-074 (decision D23 in the <a href="/pages/design-decisions/">Design decisions</a>), shown with the address class named.</p>
 <h2 id="redirects">Redirects</h2>
 <p><strong>[SEC-075]</strong> A request follows at most 5 redirects. Each hop is checked again against the plugin's grants and against the address classes. A redirect from <code>https</code> to <code>http</code> is refused with <code>not-permitted</code> reason <code>downgrade</code>.</p>
 <p><strong>[SEC-076]</strong> When a redirect changes the origin (scheme, host or port), the host removes the <code>Authorization</code>, <code>Proxy-Authorization</code> and <code>Cookie</code> request headers before it follows the hop.</p>
@@ -481,7 +481,7 @@
 <tbody>
 <tr>
 <td><code>inference</code> (default provider)</td>
-<td>The provider configured in Settings &gt; API; the default is the remote Kilo Gateway, no key</td>
+<td>The provider configured in Settings &gt; Inference; the default is the remote Kilo Gateway, no key</td>
 <td>Prompt text and options the plugin passes</td>
 <td>Review dialog names the provider and whether it is local or remote ([SEC-264])</td>
 <td>Privacy log</td>
@@ -497,7 +497,7 @@
 <td><code>location.geocode</code></td>
 <td>Photon, with Nominatim as fallback</td>
 <td>Place text</td>
-<td>First-use consent (D14)</td>
+<td>First-use consent (host geocoding, decision D14 in the <a href="/pages/design-decisions/">Design decisions</a>)</td>
 <td>Plugin log, audit</td>
 </tr>
 <tr>
@@ -518,7 +518,7 @@
 <td><code>open-external</code></td>
 <td>The user's desktop handler, not Ilium</td>
 <td>A URL or file path</td>
-<td>Origin consent (D25)</td>
+<td>Origin consent (SEC-043)</td>
 <td>Audit</td>
 </tr>
 <tr>

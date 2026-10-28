@@ -1,82 +1,40 @@
 //! Imports fixture: one plugin instance with a manifest, grants, a project directory, a manual
-//! clock and limits, exposing every host import bound to that instance (test plan lane
-//! imports-core, SET-*, WIT:ilium:host/*). Test support only.
+//! clock and limits. Clock, log, storage and the basic primitive use real adapters;
+//! unrelated imports remain explicit pending production implementations. Test support only.
 
+use super::fake_kernel::FakeKernel;
+use crate::imports::{
+    basic::BasicImport,
+    log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
+    storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
+};
+use crate::imports::{
+    clock::ClockImport, codec::CodecImport, fs::FsImport, http::HttpImport, jobs::JobsImport,
+    journal::JournalImport, panes::PanesImport, process::ProcessImport, settings::SettingsImport,
+    timers::TimersImport, tree::TreeImport,
+};
+use crate::storage::StorageContext;
+use crate::testing::harness::{HarnessHandle, HostHarness, NullGuest};
+use crate::telemetry::{LogConfig, LogLevel, PluginLogInstanceBudget, Refusal};
+use ilium_plugin_api::{grants::Grant, ids::parse_plugin_id, ProcessKind};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
-use ilium_plugin_api::generated::host::plugins::InstanceState;
 use ilium_plugin_api::generated::host::{
     Bucket, ChildHandle, FieldError, HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal,
     HostLog, HostPanes, HostProcess, HostSettings, HostStorage, HostTimers, HostTree,
 };
-use ilium_plugin_api::generated::types::intents::{
-    CreateGroupSpec, CreatePaneSpec, SetNodeLockedSpec,
-};
-use ilium_plugin_api::generated::types::tree::Placement;
 use ilium_plugin_api::generated::types::{
-    ErrorCode, Event, FsPath, Intent, MeterSegment, NodeId, Outcome, PluginError, RequestId,
-    RichSpan, RowState, StreamId, WatchId,
+    ErrorCode, Event, FsPath, MeterSegment, NodeId, Outcome, PluginError, RequestId, RichSpan,
+    RowState, StreamId, WatchId,
 };
-use ilium_plugin_api::ids::PluginId;
-use ilium_plugin_api::kernel::{KernelFacade, Origin};
 use ilium_plugin_api::side::Side;
 use ilium_plugin_api::Tier;
 
-use crate::imports::clock::ClockImport;
-use crate::imports::codec::CodecImport;
-use crate::imports::fs::FsImport;
-use crate::imports::http::HttpImport;
-use crate::imports::jobs::JobsImport;
-use crate::imports::journal::JournalImport;
-use crate::imports::log::LogImport;
-use crate::imports::panes::PanesImport;
-use crate::imports::process::ProcessImport;
-use crate::imports::settings::SettingsImport;
-use crate::imports::storage::{
-    StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState,
-};
-use crate::imports::timers::TimersImport;
-use crate::imports::tree::TreeImport;
-use crate::storage::StorageContext;
 use crate::telemetry::LogLine;
-use crate::testing::harness::{HarnessHandle, HostHarness, NullGuest};
-
-/// How the user changed a settings row (SET-020..024, 031, 050, 051).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UserInput {
-    /// A toggle.
-    Toggle,
-    /// A choice.
-    Choice,
-    /// A dialog confirmation.
-    DialogConfirm,
-    /// A number step.
-    NumberStep,
-    /// Typed text.
-    Typed,
-    /// A text area.
-    TextArea,
-}
-
-/// What a user save did (SET-020..024).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UserSave {
-    /// Saved.
-    Saved,
-    /// Still pending.
-    Pending,
-    /// Refused with a message.
-    Refused(String),
-}
-
-/// The settings-validate export of the fixture plugin: patch JSON, merged JSON.
-pub type SettingsValidate = Box<dyn FnMut(&str, &str) -> Result<(), Vec<FieldError>>>;
-
-/// The job-runner export of the fixture plugin: kind, input.
-pub type JobRunner = Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>;
 
 /// Pump rounds that `pump` and `advance` ask the production harness to run.
 const PUMP_ROUNDS: u32 = 64;
@@ -89,50 +47,6 @@ const SETTINGS_PATCH_LIMIT_BYTES: usize = 256 * 1024;
 
 /// Longest text value a settings patch may carry, in characters (SET-024).
 const SETTINGS_TEXT_LIMIT_CHARS: usize = 4096;
-
-/// Bucket quota of the fixture's storage engine, in bytes.
-/// The default bucket quota of api-storage.md (16 MiB), the ceiling for tiers 2 and 3.
-const FIXTURE_BUCKET_LIMIT_BYTES: usize = 16 * 1024 * 1024;
-
-/// Shared quota of the fixture's storage engine, in bytes.
-const FIXTURE_SHARED_LIMIT_BYTES: usize = 128 * 1024 * 1024;
-
-/// Numbers the storage roots of fixtures built in this process.
-static STORAGE_ROOT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-/// A fresh directory for one fixture's storage engine, unique within this process.
-fn fixture_storage_root() -> PathBuf {
-    let sequence = STORAGE_ROOT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "ilium-imports-fixture-{}-{sequence}",
-        std::process::id()
-    ))
-}
-
-/// The production storage import of the fixture plugin, opened on its own root.
-/// Storage is always granted (api-storage.md), so the fixture always holds one.
-fn open_fixture_storage(root: &Path, tier: Tier, side: Side) -> StorageImport {
-    let plugin = PluginId("test.imports".to_owned());
-    let context = StorageImportContext {
-        plugin: plugin.clone(),
-        side,
-        scope: StorageContext {
-            project: None,
-            session: None,
-            data_version: 1,
-        },
-        tier,
-        bucket_limit_bytes: FIXTURE_BUCKET_LIMIT_BYTES,
-        shared_limit_bytes: FIXTURE_SHARED_LIMIT_BYTES,
-    };
-    let authorization = Arc::new(Mutex::new(StorageAuthorization::new(
-        plugin,
-        side,
-        StorageInstanceState::Active,
-    )));
-    StorageImport::open(root, context, authorization, |_, _| {})
-        .unwrap_or_else(|error| panic!("imports fixture storage did not open: {}", error.message))
-}
 
 /// Refuses a settings patch that is too large or holds a text value over 4096 characters (SET-024).
 fn check_patch_limits(patch_json: &str) -> Result<(), String> {
@@ -173,63 +87,151 @@ fn merge_settings_patch(stored_json: &str, patch_json: &str) -> Result<String, S
     serde_json::to_string(&merged).map_err(|error| error.to_string())
 }
 
-/// Creates a node through the fake kernel's intent path and returns its id.
-/// A refused intent is a fixture misuse, so it panics with the node kind named.
-fn create_fixture_node(harness: &HarnessHandle, intent: Intent, kind_text: &str) -> NodeId {
-    match harness.kernel().apply_intent(&Origin::Kernel, intent) {
-        Outcome::OkNode(node) => node,
-        _ => panic!("imports fixture could not create {kind_text}"),
-    }
+/// How the user changed a settings row (SET-020..024, 031, 050, 051).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserInput {
+    /// A toggle.
+    Toggle,
+    /// A choice.
+    Choice,
+    /// A dialog confirmation.
+    DialogConfirm,
+    /// A number step.
+    NumberStep,
+    /// Typed text.
+    Typed,
+    /// A text area.
+    TextArea,
 }
 
-/// The create-pane intent of a terminal pane, under an optional parent.
-fn terminal_pane_spec(parent: Option<NodeId>, title: &str) -> CreatePaneSpec {
-    CreatePaneSpec {
-        parent,
-        title: title.to_owned(),
-        content_kind: "terminal".to_owned(),
-        cwd: None,
-        command: None,
-        initial_input: None,
-    }
+/// What a user save did (SET-020..024).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserSave {
+    /// Saved.
+    Saved,
+    /// Still pending.
+    Pending,
+    /// Refused with a message.
+    Refused(String),
 }
 
-/// The create-group intent of an empty group, under an optional parent.
-fn empty_group_spec(parent: Option<NodeId>, title: &str) -> CreateGroupSpec {
-    CreateGroupSpec {
-        parent,
-        title: title.to_owned(),
-        placement: Placement::InsideLast,
-        children: Vec::new(),
+/// The settings-validate export of the fixture plugin: patch JSON, merged JSON.
+pub type SettingsValidate = Box<dyn FnMut(&str, &str) -> Result<(), Vec<FieldError>>>;
+
+/// The job-runner export of the fixture plugin: kind, input.
+pub type JobRunner = Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>;
+
+#[derive(Clone)]
+struct FixtureClock(Arc<Mutex<ClockState>>);
+struct ClockState {
+    wall: u64,
+    monotonic: u64,
+}
+impl HostClock for FixtureClock {
+    fn now_unix_millis(&mut self) -> u64 {
+        self.0.lock().unwrap().wall
+    }
+    fn monotonic_millis(&mut self) -> u64 {
+        self.0.lock().unwrap().monotonic
     }
 }
-
-/// Builder inputs that have no production sink yet; kept so the setters stay total.
-struct FixtureConfig {
-    manifest_json: Option<String>,
-    project_root: Option<PathBuf>,
-    limits: Vec<(String, u64)>,
-    also_install: Vec<String>,
-    settings_validate: Option<SettingsValidate>,
-    settings_validate_latency: Option<Duration>,
-    job_runner: Option<JobRunner>,
-    websocket_feature: bool,
+impl LogClock for FixtureClock {
+    fn now(&self) -> Result<LogTime, Refusal> {
+        let clock = self.0.lock().map_err(|_| Refusal {
+            code: "log.clock-poisoned".into(),
+            message: "fixture clock poisoned".into(),
+        })?;
+        // Gregorian civil date from epoch days; UTC is the fixture's explicit
+        // local timezone. Wall corrections never change its duration clock.
+        let seconds = clock.wall / 1000;
+        let days = (seconds / 86400) as i64 + 719468;
+        let era = days / 146097;
+        let day_of_era = days - era * 146097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+        let mut year = year_of_era + era * 400;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month_phase = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month_phase + 2) / 5 + 1;
+        let month = month_phase + if month_phase < 10 { 3 } else { -9 };
+        year += i64::from(month <= 2);
+        if year > 9999 {
+            return Err(Refusal {
+                code: "log.clock-range".into(),
+                message: "wall clock exceeds log timestamp range".into(),
+            });
+        }
+        Ok(LogTime {
+            local_timestamp: format!(
+                "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+                seconds / 3600 % 24,
+                seconds / 60 % 60,
+                seconds % 60
+            ),
+            monotonic_millis: clock.monotonic,
+        })
+    }
+}
+#[derive(Default)]
+struct FixtureDiagnostics(Mutex<Option<ErrorCode>>);
+impl LogDiagnostics for FixtureDiagnostics {
+    fn failed(&self, _failure: LogFailure) {
+        *self.0.lock().unwrap() = Some(ErrorCode::Io);
+    }
+}
+struct FixtureStorage {
+    import: StorageImport,
+    clock: FixtureClock,
+    errors: Arc<FixtureDiagnostics>,
+}
+impl HostStorage for FixtureStorage {
+    fn get(&mut self, bucket: Bucket, key: String) -> Option<Vec<u8>> {
+        self.import.get(bucket, key)
+    }
+    fn put(&mut self, bucket: Bucket, key: String, value: Vec<u8>) -> Result<(), PluginError> {
+        self.import.put(bucket, key, value)
+    }
+    fn remove(&mut self, bucket: Bucket, key: String) -> Result<(), PluginError> {
+        self.import.remove(bucket, key)
+    }
+    fn keys(&mut self, bucket: Bucket, prefix: String) -> Vec<String> {
+        self.import.keys(bucket, prefix)
+    }
+    fn write_batch(
+        &mut self,
+        bucket: Bucket,
+        entries: Vec<ilium_plugin_api::generated::host::Entry>,
+    ) -> Result<(), PluginError> {
+        self.import.write_batch(bucket, entries)
+    }
+    fn lease(&mut self, key: String, ttl_millis: u32) -> bool {
+        let wall = self.clock.0.lock().unwrap().wall;
+        match self
+            .import
+            .lease_at(&key, ttl_millis, UNIX_EPOCH + Duration::from_millis(wall))
+        {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                *self.errors.0.lock().unwrap() = Some(error.code);
+                false
+            }
+        }
+    }
 }
 
 /// Builds an [`ImportsFixture`].
-#[derive(Default)]
 pub struct ImportsFixtureBuilder {
-    tier: Option<Tier>,
-    side: Option<Side>,
+    tier: Tier,
+    side: Side,
     grants: Vec<String>,
-    manifest_json: Option<String>,
-    project_root: Option<PathBuf>,
-    limits: Vec<(String, u64)>,
-    also_install: Vec<String>,
-    settings_validate: Option<SettingsValidate>,
-    settings_validate_latency: Option<Duration>,
-    job_runner: Option<JobRunner>,
-    websocket_feature: bool,
+    manifest: String,
+    project: Option<PathBuf>,
+    limits: BTreeMap<String, u64>,
+    additional: Vec<String>,
+    validate: Option<SettingsValidate>,
+    validate_latency: Duration,
+    runner: Option<JobRunner>,
+    websocket: bool,
 }
 
 impl std::fmt::Debug for ImportsFixtureBuilder {
@@ -239,100 +241,186 @@ impl std::fmt::Debug for ImportsFixtureBuilder {
 }
 
 impl ImportsFixtureBuilder {
-    /// The tier.
-    pub fn tier(mut self, tier: Tier) -> ImportsFixtureBuilder {
-        self.tier = Some(tier);
-        self
-    }
-
-    /// The side.
-    pub fn side(mut self, side: Side) -> ImportsFixtureBuilder {
-        self.side = Some(side);
-        self
-    }
-
-    /// The grants.
-    pub fn grants(mut self, grants: &[&str]) -> ImportsFixtureBuilder {
-        self.grants = grants.iter().map(|grant| (*grant).to_owned()).collect();
-        self
-    }
-
-    /// The manifest; installs `test.imports` unless the JSON sets another id.
-    pub fn manifest_json(mut self, json: &str) -> ImportsFixtureBuilder {
-        self.manifest_json = Some(json.to_owned());
-        self
-    }
-
-    /// The project root backing the `project` fs scope.
-    pub fn project_root(mut self, root: &Path) -> ImportsFixtureBuilder {
-        self.project_root = Some(root.to_path_buf());
-        self
-    }
-
-    /// A named limit (`fs_read_all_mib`, `fs_write_mib`, `journal_entries`, `storage_bucket_mib`, `node_metadata_kib`).
-    pub fn limit(mut self, name: &str, value: u64) -> ImportsFixtureBuilder {
-        self.limits.push((name.to_owned(), value));
-        self
-    }
-
-    /// Installs a second plugin.
-    pub fn also_install(mut self, manifest_json: &str) -> ImportsFixtureBuilder {
-        self.also_install.push(manifest_json.to_owned());
-        self
-    }
-
-    /// The fake settings-validate export.
-    pub fn settings_validate(mut self, validate: SettingsValidate) -> ImportsFixtureBuilder {
-        self.settings_validate = Some(validate);
-        self
-    }
-
-    /// The virtual latency of the fake settings-validate export.
-    pub fn settings_validate_latency(mut self, latency: Duration) -> ImportsFixtureBuilder {
-        self.settings_validate_latency = Some(latency);
-        self
-    }
-
-    /// The fake job-runner export.
-    pub fn job_runner(mut self, runner: JobRunner) -> ImportsFixtureBuilder {
-        self.job_runner = Some(runner);
-        self
-    }
-
-    /// Whether the websocket feature is on.
-    pub fn websocket_feature(mut self, on: bool) -> ImportsFixtureBuilder {
-        self.websocket_feature = on;
-        self
-    }
-
-    /// Builds the fixture on the production host harness, with an in-process guest that
-    /// exports nothing, so every import call reaches the production import implementations.
-    pub fn build(self) -> ImportsFixture {
+    /// Fallible setup for tests that deliberately exercise invalid configuration.
+    /// This validates fixture identities and limits; it does not claim package
+    /// admission or instantiate a WebAssembly guest.
+    pub fn try_build(self) -> Result<ImportsFixture, String> {
+        let manifest: serde_json::Value =
+            serde_json::from_str(&self.manifest).map_err(|error| error.to_string())?;
+        if !manifest.is_object() {
+            return Err("fixture manifest must be an object".into());
+        }
+        let plugin = match manifest.get("id") {
+            Some(value) => value.as_str().ok_or("plugin id must be a string")?,
+            None => "test.imports",
+        }
+        .to_owned();
+        let plugin_id = parse_plugin_id(&plugin).map_err(|_| "invalid plugin identity")?;
+        let grants = self
+            .grants
+            .iter()
+            .map(|grant| Grant::parse(grant).map_err(|error| format!("invalid grant: {error:?}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut additional = Vec::new();
+        let mut identities = std::collections::BTreeSet::from([plugin.clone()]);
+        for text in self.additional {
+            let value: serde_json::Value =
+                serde_json::from_str(&text).map_err(|error| error.to_string())?;
+            let id = value["id"]
+                .as_str()
+                .ok_or("additional fixture plugin requires id")?;
+            parse_plugin_id(id).map_err(|_| "invalid additional plugin identity")?;
+            if !identities.insert(id.to_owned()) {
+                return Err("duplicate fixture plugin identity".into());
+            }
+            additional.push(value);
+        }
+        let requested = ilium_plugin_api::limits::Limits(self.limits.clone());
+        let resolved = ilium_plugin_api::limits::clamp(&requested, self.tier)
+            .map_err(|error| error.message)?;
+        let bytes_for = |name: &str| -> Result<usize, String> {
+            let key = name
+                .parse::<ilium_plugin_api::limits::LimitKey>()
+                .map_err(|_| "unknown limit")?;
+            usize::try_from(resolved[&key])
+                .ok()
+                .and_then(|value| value.checked_mul(1024 * 1024))
+                .ok_or_else(|| "limit exceeds address space".into())
+        };
+        let root = tempfile::Builder::new()
+            .prefix("ilium-imports-")
+            .tempdir()
+            .map_err(|error| error.to_string())?;
+        let project = match self.project {
+            Some(project) => std::fs::canonicalize(project).map_err(|error| error.to_string())?,
+            None => {
+                let project = root.path().join("project");
+                std::fs::create_dir(&project).map_err(|error| error.to_string())?;
+                project
+            }
+        };
+        if !project.is_dir() {
+            return Err("fixture project root must be a directory".into());
+        }
+        let data_version = match manifest.get("data_version") {
+            None => 1,
+            Some(value) => value
+                .as_u64()
+                .and_then(|value| u32::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or("invalid fixture data version")?,
+        };
+        let scope = StorageContext {
+            project: Some(project),
+            session: Some("imports-fixture".into()),
+            data_version,
+        };
+        let errors = Arc::new(FixtureDiagnostics::default());
+        let storage_authorization = Arc::new(Mutex::new(StorageAuthorization::new(
+            plugin_id.clone(),
+            self.side,
+            StorageInstanceState::Active,
+        )));
+        let storage_errors = errors.clone();
+        let storage = StorageImport::open(
+            &root.path().join("storage"),
+            StorageImportContext {
+                plugin: plugin_id,
+                side: self.side,
+                scope,
+                tier: self.tier,
+                bucket_limit_bytes: bytes_for("storage_bucket_mib")?,
+                shared_limit_bytes: bytes_for("shared_cache_mib")?,
+            },
+            storage_authorization.clone(),
+            move |_, error| {
+                *storage_errors.0.lock().unwrap() = Some(error.code);
+            },
+        )
+        .map_err(|error| error.message)?;
+        let clock = FixtureClock(Arc::new(Mutex::new(ClockState {
+            wall: 1_893_456_000_000,
+            monotonic: 0,
+        })));
+        let logger = Arc::new(Mutex::new(
+            PluginLogger::open(
+                &root.path().join("logs"),
+                &plugin,
+                self.tier,
+                LogConfig {
+                    threshold: LogLevel::Trace,
+                    ..LogConfig::for_tier(self.tier)
+                },
+                1024,
+                &[],
+            )
+            .map_err(|error| error.code)?,
+        ));
+        let budget = Arc::new(Mutex::new(
+            PluginLogInstanceBudget::new(1, self.side).map_err(|error| error.code)?,
+        ));
+        let log_import = LogImport::new(
+            logger.clone(),
+            budget.clone(),
+            Arc::new(clock.clone()),
+            errors.clone(),
+        )
+        .map_err(|error| error.code)?;
+        let kernel = Arc::new(FakeKernel::new(if self.side == Side::Server {
+            ProcessKind::Server
+        } else {
+            ProcessKind::Client
+        }));
+        kernel.state().current_plugin = plugin.clone();
+        if let Some(kinds) = manifest["contributes"]["pane_kinds"].as_array() {
+            for kind in kinds {
+                if kind["primitive"] == "basic" {
+                    let id = kind["id"].as_str().ok_or("basic pane kind requires id")?;
+                    if id
+                        .strip_prefix(&format!("{plugin}."))
+                        .is_none_or(|local| local.is_empty())
+                    {
+                        return Err("fixture pane kind must belong to its plugin".into());
+                    }
+                    kernel.register_pane_kind(
+                        &plugin,
+                        id,
+                        ilium_plugin_api::generated::types::tree::PrimitiveKind::Basic,
+                    );
+                }
+            }
+        }
         let grant_refs: Vec<&str> = self.grants.iter().map(String::as_str).collect();
-        let tier = self.tier.unwrap_or(Tier::T3);
-        let side = self.side.unwrap_or(Side::Server);
-        let storage_import = open_fixture_storage(&fixture_storage_root(), tier, side);
         let harness = HostHarness::new()
-            .tier(tier)
-            .side(side)
+            .tier(self.tier)
+            .side(self.side)
             .grants(&grant_refs)
+            .kernel(kernel.clone())
             .with_native_guest(Box::new(NullGuest))
             .build()
-            .unwrap_or_else(|error| panic!("imports fixture harness did not build: {error}"));
-        ImportsFixture {
-            harness,
-            config: FixtureConfig {
-                manifest_json: self.manifest_json,
-                project_root: self.project_root,
-                limits: self.limits,
-                also_install: self.also_install,
-                settings_validate: self.settings_validate,
-                settings_validate_latency: self.settings_validate_latency,
-                job_runner: self.job_runner,
-                websocket_feature: self.websocket_feature,
+            .map_err(|error| format!("imports fixture harness did not build: {error}"))?;
+        Ok(ImportsFixture {
+            log_import,
+            logger,
+            budget,
+            clock: clock.clone(),
+            storage_import: FixtureStorage {
+                import: storage,
+                clock,
+                errors: errors.clone(),
             },
-            log_import: LogImport,
-            clock_import: ClockImport,
+            storage_authorization,
+            grants: Arc::new(Mutex::new(grants)),
+            kernel,
+            plugin,
+            manifest,
+            errors,
+            stopped: false,
+            next_node: 1,
+            _additional: additional,
+            validate: self.validate,
+            validate_latency: self.validate_latency,
+            harness,
             codec_import: CodecImport,
             fs_import: FsImport,
             http_import: HttpImport,
@@ -343,10 +431,84 @@ impl ImportsFixtureBuilder {
             settings_import: SettingsImport,
             timers_import: TimersImport,
             tree_import: TreeImport,
-            storage_import,
             save_trace: Vec::new(),
             validate_trap_pending: false,
-        }
+            _runner: self.runner,
+            _websocket: self.websocket,
+            _limits: self.limits,
+            root,
+        })
+    }
+    /// The tier.
+    pub fn tier(mut self, _tier: Tier) -> ImportsFixtureBuilder {
+        self.tier = _tier;
+        self
+    }
+
+    /// The side.
+    pub fn side(mut self, _side: Side) -> ImportsFixtureBuilder {
+        self.side = _side;
+        self
+    }
+
+    /// The grants.
+    pub fn grants(mut self, _grants: &[&str]) -> ImportsFixtureBuilder {
+        self.grants = _grants.iter().map(|grant| (*grant).into()).collect();
+        self
+    }
+
+    /// The manifest; installs `test.imports` unless the JSON sets another id.
+    pub fn manifest_json(mut self, _json: &str) -> ImportsFixtureBuilder {
+        self.manifest = _json.into();
+        self
+    }
+
+    /// The project root backing the `project` fs scope.
+    pub fn project_root(mut self, _root: &Path) -> ImportsFixtureBuilder {
+        self.project = Some(_root.into());
+        self
+    }
+
+    /// A named limit (`fs_read_all_mib`, `fs_write_mib`, `journal_entries`, `storage_bucket_mib`, `node_metadata_kib`).
+    pub fn limit(mut self, _name: &str, _value: u64) -> ImportsFixtureBuilder {
+        self.limits.insert(_name.into(), _value);
+        self
+    }
+
+    /// Installs a second plugin.
+    pub fn also_install(mut self, _manifest_json: &str) -> ImportsFixtureBuilder {
+        self.additional.push(_manifest_json.into());
+        self
+    }
+
+    /// The fake settings-validate export.
+    pub fn settings_validate(mut self, _validate: SettingsValidate) -> ImportsFixtureBuilder {
+        self.validate = Some(_validate);
+        self
+    }
+
+    /// The virtual latency of the fake settings-validate export.
+    pub fn settings_validate_latency(mut self, _latency: Duration) -> ImportsFixtureBuilder {
+        self.validate_latency = _latency;
+        self
+    }
+
+    /// The fake job-runner export.
+    pub fn job_runner(mut self, _runner: JobRunner) -> ImportsFixtureBuilder {
+        self.runner = Some(_runner);
+        self
+    }
+
+    /// Whether the websocket feature is on.
+    pub fn websocket_feature(mut self, _on: bool) -> ImportsFixtureBuilder {
+        self.websocket = _on;
+        self
+    }
+
+    /// Builds the fixture.
+    pub fn build(self) -> ImportsFixture {
+        self.try_build()
+            .unwrap_or_else(|error| panic!("invalid imports fixture setup: {error}"))
     }
 }
 
@@ -405,10 +567,8 @@ impl JobInstance {
 
 /// One plugin instance with every host import bound to it (test plan lane imports-core).
 pub struct ImportsFixture {
+    // Last: adapters drop before the owned directory is removed.
     harness: HarnessHandle,
-    config: FixtureConfig,
-    log_import: LogImport,
-    clock_import: ClockImport,
     codec_import: CodecImport,
     fs_import: FsImport,
     http_import: HttpImport,
@@ -419,11 +579,30 @@ pub struct ImportsFixture {
     settings_import: SettingsImport,
     timers_import: TimersImport,
     tree_import: TreeImport,
-    storage_import: StorageImport,
     /// Steps of the last `user_save`, in the order they ran.
     save_trace: Vec<String>,
     /// Set by `make_next_validate_trap`; consumed by the next settings-validate call.
     validate_trap_pending: bool,
+    log_import: LogImport,
+    logger: Arc<Mutex<PluginLogger>>,
+    budget: Arc<Mutex<PluginLogInstanceBudget>>,
+    clock: FixtureClock,
+    storage_import: FixtureStorage,
+    storage_authorization: Arc<Mutex<StorageAuthorization>>,
+    grants: Arc<Mutex<Vec<Grant>>>,
+    kernel: Arc<FakeKernel>,
+    plugin: String,
+    manifest: serde_json::Value,
+    errors: Arc<FixtureDiagnostics>,
+    stopped: bool,
+    next_node: u64,
+    _additional: Vec<serde_json::Value>,
+    validate: Option<SettingsValidate>,
+    validate_latency: Duration,
+    _runner: Option<JobRunner>,
+    _websocket: bool,
+    _limits: BTreeMap<String, u64>,
+    root: tempfile::TempDir,
 }
 
 impl std::fmt::Debug for ImportsFixture {
@@ -432,10 +611,156 @@ impl std::fmt::Debug for ImportsFixture {
     }
 }
 
+impl Drop for ImportsFixture {
+    fn drop(&mut self) {
+        // Owned adapter handles may outlive the fixture; dropping their runtime
+        // owner revokes authority before its private persistence is removed.
+        if let Ok(mut grants) = self.grants.lock() {
+            grants.clear();
+        }
+        if let Ok(mut authorization) = self.storage_authorization.lock() {
+            authorization.set_state(StorageInstanceState::Inactive);
+        }
+    }
+}
+
 impl ImportsFixture {
+    /// The real primitive adapter, sharing current grants and authoritative
+    /// registered kinds with this fixture's kernel.
+    pub fn basic(&self) -> BasicImport<'static> {
+        let log = Mutex::new(
+            LogImport::new(
+                self.logger.clone(),
+                self.budget.clone(),
+                Arc::new(self.clock.clone()),
+                self.errors.clone(),
+            )
+            .expect("fixture logger setup is valid"),
+        );
+        let errors = self.errors.clone();
+        BasicImport::new(
+            self.kernel.clone(),
+            self.plugin.clone(),
+            self.grants.clone(),
+            move |message| {
+                *errors.0.lock().unwrap() = Some(ErrorCode::NotPermitted);
+                log.lock().unwrap().log(
+                    ilium_plugin_api::generated::host::log::Level::Warn,
+                    message.into(),
+                );
+            },
+        )
+    }
+    /// Explicit current-grant replacement, observed by already borrowed adapters.
+    pub fn replace_grants(&mut self, grants: &[&str]) -> Result<(), String> {
+        if self.stopped {
+            return Err("fixture instance is stopped".into());
+        }
+        let replacement = grants
+            .iter()
+            .map(|grant| Grant::parse(grant).map_err(|error| format!("invalid grant: {error:?}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        *self.grants.lock().unwrap() = replacement;
+        Ok(())
+    }
+    /// Add an actual pane of a kind already registered by the fixture manifest.
+    pub fn add_basic_pane(&mut self, kind: &str, title: &str, columns: u16, rows: u16) -> NodeId {
+        self.insert_node(
+            None,
+            title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Pane,
+            Some(kind.into()),
+            columns,
+            rows,
+        )
+    }
+    pub fn kernel(&self) -> Arc<FakeKernel> {
+        self.kernel.clone()
+    }
+    pub fn manifest(&self) -> &serde_json::Value {
+        &self.manifest
+    }
+    fn insert_node(
+        &mut self,
+        parent: Option<NodeId>,
+        title: &str,
+        class: ilium_plugin_api::generated::types::tree::NodeClass,
+        kind: Option<String>,
+        columns: u16,
+        rows: u16,
+    ) -> NodeId {
+        let id = NodeId(self.next_node);
+        self.next_node = self
+            .next_node
+            .checked_add(1)
+            .expect("fixture node identity exhausted");
+        let mut state = self.kernel.state();
+        assert!(
+            parent.is_none_or(|id| state.nodes.iter().any(|node| node.id == id)),
+            "fixture parent must exist"
+        );
+        state.nodes.push(ilium_plugin_api::kernel::TreeNode {
+            id,
+            parent,
+            class,
+            content_kind: kind,
+            title: title.into(),
+            cwd: None,
+            agent: None,
+            locked: false,
+            revision: 1,
+        });
+        state.sizes.insert(id, (columns, rows));
+        state.epoch = state.epoch.saturating_add(1);
+        id
+    }
+    fn persisted_logs(&self) -> Vec<LogLine> {
+        let mut records = Vec::new();
+        for suffix in [".4", ".3", ".2", ".1", ""] {
+            let path = self
+                .root
+                .path()
+                .join("logs")
+                .join(format!("{}.log{suffix}", self.plugin));
+            let text = match std::fs::read_to_string(path) {
+                Ok(text) => text,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => panic!("fixture log read failed: {error}"),
+            };
+            for line in text.lines() {
+                let Some(level) = line.get(20..25) else {
+                    panic!("malformed persisted fixture log")
+                };
+                let Some(rest) = line.get(33..) else {
+                    panic!("malformed persisted fixture log")
+                };
+                let Some((plugin, message)) = rest.split_once(' ') else {
+                    panic!("malformed persisted fixture log")
+                };
+                records.push(LogLine {
+                    plugin: plugin.into(),
+                    level: level.trim().into(),
+                    message: message.into(),
+                });
+            }
+        }
+        records
+    }
     /// Starts a builder.
     pub fn builder() -> ImportsFixtureBuilder {
-        ImportsFixtureBuilder::default()
+        ImportsFixtureBuilder {
+            tier: Tier::T2,
+            side: Side::Server,
+            grants: Vec::new(),
+            manifest: "{}".into(),
+            project: None,
+            limits: BTreeMap::new(),
+            additional: Vec::new(),
+            validate: None,
+            validate_latency: Duration::ZERO,
+            runner: None,
+            websocket: false,
+        }
     }
 
     /// The `log` import.
@@ -445,7 +770,7 @@ impl ImportsFixture {
 
     /// The `clock` import.
     pub fn clock(&mut self) -> &mut dyn HostClock {
-        &mut self.clock_import
+        &mut self.clock
     }
 
     /// The `codec` import.
@@ -509,24 +834,41 @@ impl ImportsFixture {
             jobs_import: JobsImport,
             settings_import: SettingsImport,
             clock_import: ClockImport,
-            log_import: LogImport,
+            log_import: LogImport::new(
+                self.logger.clone(),
+                self.budget.clone(),
+                Arc::new(self.clock.clone()),
+                self.errors.clone(),
+            )
+            .expect("fixture logger setup is valid"),
         }
     }
 
     /// Moves the manual clock and runs due work.
-    pub fn advance(&mut self, by: Duration) {
-        self.harness.advance_clock(by);
-        self.harness.pump(PUMP_ROUNDS);
+    pub fn advance(&mut self, _by: Duration) {
+        {
+            let mut clock = self.clock.0.lock().unwrap();
+            clock.wall = clock
+                .wall
+                .saturating_add(crate::imports::clock::duration_millis(_by));
+            clock.monotonic = clock
+                .monotonic
+                .saturating_add(crate::imports::clock::duration_millis(_by));
+        }
+        self.kernel.state().clock = Duration::from_millis(self.clock.0.lock().unwrap().monotonic);
+        self.harness.advance_clock(_by);
+        self.pump();
     }
 
     /// Runs pending work without moving the clock.
     pub fn pump(&mut self) {
+        self.log_import.tick();
         self.harness.pump(PUMP_ROUNDS);
     }
 
     /// Sets the wall clock.
     pub fn set_wall_clock_unix_millis(&mut self, _millis: u64) {
-        blocked("a settable wall clock in the harness")
+        self.clock.0.lock().unwrap().wall = _millis;
     }
 
     /// Keeps async requests pending.
@@ -551,20 +893,21 @@ impl ImportsFixture {
 
     /// Every log line so far.
     pub fn logs(&self) -> Vec<LogLine> {
-        self.harness.logs()
+        self.persisted_logs()
     }
 
     /// Every event delivered to the fixture plugin.
     pub fn events(&self) -> Vec<Event> {
-        let kernel = self.harness.kernel();
-        let state = kernel.state();
-        let events: Vec<Event> = state.events.iter().cloned().collect();
-        events
+        self.kernel.state().events.iter().cloned().collect()
     }
 
     /// Every event delivered to a plugin.
-    pub fn events_of(&self, plugin: &str) -> Vec<Event> {
-        self.harness.emitted_events(plugin)
+    pub fn events_of(&self, _plugin: &str) -> Vec<Event> {
+        if _plugin == self.plugin {
+            self.events()
+        } else {
+            Vec::new()
+        }
     }
 
     /// The settings target last opened.
@@ -596,7 +939,7 @@ impl ImportsFixture {
 
     /// Whether the plugin instance is stopped.
     pub fn plugin_is_stopped(&self) -> bool {
-        matches!(self.harness.state(), InstanceState::Stopped)
+        self.stopped
     }
 
     /// The note of a settings row.
@@ -690,7 +1033,8 @@ impl ImportsFixture {
             Ok(merged_json) => merged_json,
             Err(reason) => return UserSave::Refused(reason),
         };
-        if let Some(latency) = self.config.settings_validate_latency {
+        {
+            let latency = self.validate_latency;
             if latency > SETTINGS_VALIDATE_BUDGET {
                 return UserSave::Refused(format!(
                     "settings-validate answered after {} ms",
@@ -698,7 +1042,7 @@ impl ImportsFixture {
                 ));
             }
         }
-        if let Some(validate) = self.config.settings_validate.as_mut() {
+        if let Some(validate) = self.validate.as_mut() {
             self.save_trace.push("settings-validate".to_owned());
             if std::mem::take(&mut self.validate_trap_pending) {
                 self.save_trace.push("settings-validate trapped".to_owned());
@@ -743,6 +1087,11 @@ impl ImportsFixture {
 
     /// Stops the plugin instance.
     pub fn stop_plugin(&mut self) {
+        let mut grants = self.grants.lock().unwrap();
+        let mut authorization = self.storage_authorization.lock().unwrap();
+        grants.clear();
+        authorization.set_state(StorageInstanceState::Inactive);
+        self.stopped = true;
         self.harness.deactivate_plugin();
     }
 
@@ -799,66 +1148,74 @@ impl ImportsFixture {
     }
 
     /// Adds a terminal pane.
-    pub fn add_terminal_pane(&mut self, title: &str, columns: u16, rows: u16) -> NodeId {
-        let pane = create_fixture_node(
-            &self.harness,
-            Intent::CreatePane(terminal_pane_spec(None, title)),
-            "a terminal pane",
-        );
-        self.harness.kernel().set_pane_size(pane, columns, rows);
-        pane
+    pub fn add_terminal_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
+        self.insert_node(
+            None,
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Pane,
+            Some("ilium.terminal".into()),
+            _columns,
+            _rows,
+        )
     }
 
     /// Adds a pane restored from a snapshot.
-    pub fn add_restored_pane(&mut self, title: &str, columns: u16, rows: u16) -> NodeId {
-        let pane = self.add_terminal_pane(title, columns, rows);
-        self.harness.kernel().set_pane_restored(pane, true);
+    pub fn add_restored_pane(&mut self, _title: &str, _columns: u16, _rows: u16) -> NodeId {
+        let pane = self.add_terminal_pane(_title, _columns, _rows);
+        self.kernel.set_pane_restored(pane, true);
         pane
     }
 
     /// Adds a group.
-    pub fn add_group(&mut self, title: &str) -> NodeId {
-        create_fixture_node(
-            &self.harness,
-            Intent::CreateGroup(empty_group_spec(None, title)),
-            "a group",
+    pub fn add_group(&mut self, _title: &str) -> NodeId {
+        self.insert_node(
+            None,
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Folder,
+            None,
+            0,
+            0,
         )
     }
 
     /// Adds a group under a parent.
-    pub fn add_group_under(&mut self, parent: NodeId, title: &str) -> NodeId {
-        create_fixture_node(
-            &self.harness,
-            Intent::CreateGroup(empty_group_spec(Some(parent), title)),
-            "a group under a parent",
+    pub fn add_group_under(&mut self, _parent: NodeId, _title: &str) -> NodeId {
+        self.insert_node(
+            Some(_parent),
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Folder,
+            None,
+            0,
+            0,
         )
     }
 
     /// Adds a terminal pane under a parent.
     pub fn add_terminal_pane_under(
         &mut self,
-        parent: NodeId,
-        title: &str,
-        columns: u16,
-        rows: u16,
+        _parent: NodeId,
+        _title: &str,
+        _columns: u16,
+        _rows: u16,
     ) -> NodeId {
-        let pane = create_fixture_node(
-            &self.harness,
-            Intent::CreatePane(terminal_pane_spec(Some(parent), title)),
-            "a terminal pane under a parent",
-        );
-        self.harness.kernel().set_pane_size(pane, columns, rows);
-        pane
+        self.insert_node(
+            Some(_parent),
+            _title,
+            ilium_plugin_api::generated::types::tree::NodeClass::Pane,
+            Some("ilium.terminal".into()),
+            _columns,
+            _rows,
+        )
     }
 
     /// Exits a pane.
-    pub fn exit_pane(&mut self, pane: NodeId) {
-        self.harness.kernel().remove_node(pane);
+    pub fn exit_pane(&mut self, _pane: NodeId) {
+        self.kernel.remove_node(_pane);
     }
 
     /// Focuses a pane.
-    pub fn focus_pane(&mut self, pane: NodeId) {
-        self.harness.kernel().state().focus = Some(pane);
+    pub fn focus_pane(&mut self, _pane: NodeId) {
+        self.kernel.state().focus = Some(_pane);
     }
 
     /// Records a host journal entry (`pane-created`, `pane-exited`, `input-sent`).
@@ -871,41 +1228,101 @@ impl ImportsFixture {
     }
 
     /// Takes a storage lease as a second caller.
-    pub fn other_caller_lease(&mut self, key: &str, ttl_millis: u32) -> bool {
-        self.storage_import
-            .try_lease(key, ttl_millis)
-            .unwrap_or(false)
+    pub fn other_caller_lease(&mut self, _key: &str, _ttl_millis: u32) -> bool {
+        let context = self.storage_import.import.context();
+        let caller = crate::storage::PluginStorage::open_with_context(
+            &self.root.path().join("storage"),
+            context.plugin.clone(),
+            context.scope.clone(),
+            context.tier,
+            context.bucket_limit_bytes,
+            context.shared_limit_bytes,
+        )
+        .expect("fixture storage context was admitted");
+        match caller.lease_at(
+            _key,
+            _ttl_millis,
+            UNIX_EPOCH + Duration::from_millis(self.clock.0.lock().unwrap().wall),
+        ) {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                *self.errors.0.lock().unwrap() = Some(error.code);
+                false
+            }
+        }
     }
 
     /// Makes the on-disk data version of a bucket newer.
     pub fn make_bucket_data_version_newer(&mut self, _bucket: Bucket) {
-        blocked("a bucket data-version writer")
+        let context = self.storage_import.import.context();
+        let mut newer = context.scope.clone();
+        newer.data_version = newer
+            .data_version
+            .checked_add(1)
+            .expect("fixture data version exhausted");
+        let engine = crate::storage::PluginStorage::open_with_context(
+            &self.root.path().join("storage"),
+            context.plugin.clone(),
+            newer.clone(),
+            context.tier,
+            context.bucket_limit_bytes,
+            context.shared_limit_bytes,
+        )
+        .expect("fixture storage context was admitted");
+        engine
+            .stamp_bucket_after_migration(_bucket.as_str(), newer.data_version)
+            .expect("fixture newer bucket stamp write");
     }
 
     /// The code of the last refused infallible import call.
     pub fn last_import_error_code(&self) -> Option<ErrorCode> {
-        blocked("the last refused import error record")
+        *self.errors.0.lock().unwrap()
     }
 
     /// Sets the agent signature of a node.
     pub fn set_agent(&mut self, _node: NodeId, _signature: &str) {
-        blocked("an agent signature setter on nodes")
+        if let Some(node) = self
+            .kernel
+            .state()
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == _node)
+        {
+            node.agent = Some(ilium_plugin_api::generated::types::tree::AgentView {
+                signature: _signature.into(),
+                activity: ilium_plugin_api::generated::types::tree::AgentActivity::None,
+                objective: None,
+                goal: None,
+            });
+        }
     }
 
     /// Locks a node.
-    pub fn lock_node(&mut self, node: NodeId) {
-        let outcome = self.harness.kernel().apply_intent(
-            &Origin::Kernel,
-            Intent::SetNodeLocked(SetNodeLockedSpec { node, locked: true }),
-        );
-        if !matches!(outcome, Outcome::Ok) {
-            panic!("imports fixture could not lock the node");
+    pub fn lock_node(&mut self, _node: NodeId) {
+        if let Some(node) = self
+            .kernel
+            .state()
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == _node)
+        {
+            node.locked = true;
+            node.revision = node.revision.saturating_add(1);
         }
     }
 
     /// Renames a node.
-    pub fn rename_node(&mut self, node: NodeId, title: &str) {
-        self.harness.kernel().set_manual_title(node, title);
+    pub fn rename_node(&mut self, _node: NodeId, _title: &str) {
+        if let Some(node) = self
+            .kernel
+            .state()
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == _node)
+        {
+            node.title = _title.into();
+            node.revision = node.revision.saturating_add(1);
+        }
     }
 
     /// Reads node metadata as a second installed plugin.
@@ -944,7 +1361,7 @@ mod tests {
 
     #[test]
     fn builder_debug_text_names_the_builder() {
-        let builder = ImportsFixtureBuilder::default();
+        let builder = ImportsFixture::builder();
         assert_eq!(format!("{builder:?}"), "ImportsFixtureBuilder");
     }
 

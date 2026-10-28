@@ -18,7 +18,7 @@ The `settings.write-kernel:<kernel-tab-id>` capability lets one first-party plug
 - A value that fails the tab schema MUST fail with `invalid-argument` and change nothing. A write is all or nothing.
 - A successful write MUST be persisted before the call returns and MUST produce one `kernel-settings-changed` event naming the tab and the changed keys.
 - Keybindings are not part of any kernel tab. No grant writes a binding.
-- A secret key MUST NOT be written through this call. The owner uses the secrets import.
+- A secret key MUST NOT be written through this call. The owner stores it through the secrets store ([secrets](/pages/reference-secrets/)).
 
 ### Errors
 

@@ -436,10 +436,10 @@ open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-option
 </table>
 <h3 id="behaviour">Behaviour</h3>
 <ul>
-<li><strong>Hover.</strong> The enter delay (500 ms), the leave grace (150 ms) and the tooltip delay are one host setting for all widgets; a plugin cannot change them. A tooltip is placed below, or above when there is no room, and never covers the pointer cell.</li>
+<li><strong>Hover.</strong> The enter delay (500 ms), the leave grace (150 ms) are one host setting for all widgets; a plugin cannot change them. A tooltip's own <code>delay-ms</code> (0..2000) overrides only the default 500 ms show delay of that one tooltip; a value above 2000 is clamped to 2000. A tooltip is placed below, or above when there is no room, and never covers the pointer cell.</li>
 <li><strong>Pinnable.</strong> <code>pinnable</code> adds a pin glyph to the popup title. The pin keeps it open until Escape or a click on the pin.</li>
 <li><strong>Dismiss on leave.</strong> With <code>dismiss-on-leave</code> the popup closes when the pointer leaves both the popup and its anchor for longer than the grace time.</li>
-<li><strong>Focus.</strong> Focus moves into an opened popup and returns to the anchor on close. Escape closes the topmost popup and sends <code>closed</code>.</li>
+<li><strong>Focus.</strong> Focus moves into an opened popup and returns to the anchor on close. Escape closes the topmost popup and sends <code>closed</code> only when that popup has <code>close-on-escape</code> true; with false, Escape is ignored by the popup and the popup stays open until another dismissal. A <code>modal</code> popup blocks pointer and key input to every widget outside it until it closes (pointer clicks outside are swallowed and do not dismiss it unless <code>dismiss-on-leave</code> applies); a non-modal popup leaves the rest of the UI interactive.</li>
 <li><strong>Stack.</strong> At most 4 popups per view; a fifth is <code>quota-exceeded</code>.</li>
 <li><strong>Disabled.</strong> A node with <code>disabled-reason</code> is drawn muted, takes no input, and its reason shows as the tooltip.</li>
 </ul>

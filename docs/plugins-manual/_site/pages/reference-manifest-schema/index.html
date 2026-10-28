@@ -402,7 +402,7 @@
 <li>The output records and exit codes: <a href="/pages/reference-plugin-cli/">Plugin command line</a> and <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>.</li>
 </ul>
 <h2 id="the-schema-file">The schema file</h2>
-<p>The schema describes a source manifest and a packed manifest. In a source manifest <code>files</code> may be missing. The schema accepts both, and stage 5 requires <code>files</code> in a packed manifest (<code>manifest.key-missing</code>).</p>
+<p>The schema describes a source manifest and a packed manifest. In a source manifest <code>files</code> may be missing. The schema accepts both, and stage 3 requires <code>files</code> in a packed manifest (<code>manifest.key-missing</code>).</p>
 <table>
 <thead>
 <tr>
@@ -483,6 +483,22 @@
     },
     &quot;homepage&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 256, &quot;pattern&quot;: &quot;^https://[^\\s]+$&quot;},
     &quot;repository&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 256, &quot;pattern&quot;: &quot;^https://[^\\s]+$&quot;},
+    &quot;data_use&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;maxItems&quot;: 8,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;additionalProperties&quot;: false,
+        &quot;required&quot;: [&quot;what&quot;, &quot;where&quot;, &quot;purpose&quot;, &quot;opt_in&quot;],
+        &quot;properties&quot;: {
+          &quot;what&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 1, &quot;maxLength&quot;: 200},
+          &quot;where&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 1, &quot;maxLength&quot;: 200},
+          &quot;purpose&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 1, &quot;maxLength&quot;: 200},
+          &quot;opt_in&quot;: {&quot;type&quot;: &quot;boolean&quot;}
+        }
+      }
+    },
+    &quot;security_contact&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 1, &quot;maxLength&quot;: 200},
     &quot;server&quot;: {
       &quot;type&quot;: &quot;object&quot;,
       &quot;additionalProperties&quot;: false,
@@ -1423,7 +1439,7 @@
 </tbody>
 </table>
 <h2 id="error-catalogue">Error catalogue</h2>
-<p>This catalogue has 247 codes, of which 92 are in the <code>manifest.*</code> family. A code that appears in an older page and is not here is in the table of retired codes below.</p>
+<p>This catalogue has 253 codes, of which 94 are in the <code>manifest.*</code> family. A code that appears in an older page and is not here is in the table of retired codes below.</p>
 <table>
 <thead>
 <tr>
@@ -1594,7 +1610,7 @@
 </tr>
 </tbody>
 </table>
-<h3 id="manifest-parse-and-schema-codes-manifest-stages-2-and-3">Manifest parse and schema codes (<code>manifest.*</code>, stages 2 and 3)</h3>
+<h3 id="manifest-parse-and-schema-codes-manifest-and-one-package-code-stages-2-and-3">Manifest parse and schema codes (<code>manifest.*</code> and one <code>package.*</code> code, stages 2 and 3)</h3>
 <p>Stage 2 stops at its first error. Stage 3 collects all errors. Every message carries the JSON pointer of the value.</p>
 <table>
 <thead>
@@ -1803,6 +1819,18 @@
 <td>3</td>
 <td>1</td>
 <td><code>{pointer}: the sound id "{id}" is used twice or is reserved.</code></td>
+</tr>
+<tr>
+<td><code>manifest.sound-format</code></td>
+<td>3</td>
+<td>1</td>
+<td><code>{pointer}: the sound file "{path}" is missing or is not WAV PCM or OGG Vorbis.</code></td>
+</tr>
+<tr>
+<td><code>package.api-unsupported</code></td>
+<td>3</td>
+<td>1</td>
+<td><code>The api {api} is outside the window of this Ilium ({window}).</code></td>
 </tr>
 </tbody>
 </table>
@@ -2129,12 +2157,6 @@
 </thead>
 <tbody>
 <tr>
-<td><code>package.api-unsupported</code></td>
-<td>3</td>
-<td>1</td>
-<td><code>The api {api} is outside the window of this Ilium ({window}).</code></td>
-</tr>
-<tr>
 <td><code>package.signature-format</code></td>
 <td>7</td>
 <td>1</td>
@@ -2151,12 +2173,6 @@
 <td>8</td>
 <td>1</td>
 <td><code>Key {key_id} was not trusted. Nothing was installed.</code></td>
-</tr>
-<tr>
-<td><code>trust.unsigned</code></td>
-<td>8</td>
-<td>1</td>
-<td><code>{id} has no signature. Install it with --allow-unsigned only if you built it.</code></td>
 </tr>
 <tr>
 <td><code>trust.key-unknown</code></td>
@@ -2205,12 +2221,6 @@
 <td>C</td>
 <td>1</td>
 <td><code>{path} already exists. keygen does not overwrite keys.</code></td>
-</tr>
-<tr>
-<td><code>trust.key-permissions</code></td>
-<td>C</td>
-<td>1</td>
-<td><code>{path} can be read by other users. Run: chmod 600 {path}</code></td>
 </tr>
 <tr>
 <td><code>trust.already-trusted</code></td>
@@ -2624,7 +2634,19 @@
 <td><code>migration.backup-too-large</code></td>
 <td>I</td>
 <td>1</td>
-<td><code>The data of {id} is {size}, over the backup limit of {limit}. Pass --no-backup or raise migration_backup_mib.</code></td>
+<td><code>The data of {id} is {size}, over the backup limit of {limit}. Pass --no-backup.</code></td>
+</tr>
+<tr>
+<td><code>migration.io</code></td>
+<td>I</td>
+<td>1</td>
+<td><code>The data directory of {id} cannot be written: {reason}. The update was rolled back.</code></td>
+</tr>
+<tr>
+<td><code>migration.skipped</code></td>
+<td>-</td>
+<td>-</td>
+<td>Log line only, not a failure: <code>{id} {version} has no migrator. The data version was stamped as {stamp}.</code></td>
 </tr>
 <tr>
 <td><code>install.bundled</code></td>
@@ -2643,12 +2665,6 @@
 <td>8</td>
 <td>1</td>
 <td><code>{id} is unsigned. Pass --allow-unsigned to install it.</code></td>
-</tr>
-<tr>
-<td><code>install.downgrade</code></td>
-<td>9</td>
-<td>1</td>
-<td><code>{id} {installed} is installed. {version} is lower. Use --allow-downgrade.</code></td>
 </tr>
 <tr>
 <td><code>install.review-required</code></td>
@@ -2721,6 +2737,12 @@
 <td>C</td>
 <td>5</td>
 <td><code>No plugin with the id {id}.</code></td>
+</tr>
+<tr>
+<td><code>plugin.not-running</code></td>
+<td>C</td>
+<td>1</td>
+<td><code>{id} is not running.</code></td>
 </tr>
 <tr>
 <td><code>plugin.not-removable</code></td>
@@ -3242,6 +3264,16 @@
 <td>Same.</td>
 </tr>
 <tr>
+<td><code>trust.unsigned</code></td>
+<td><code>install.unsigned</code></td>
+<td>An unsigned package without <code>--allow-unsigned</code> is an install refusal at stage 8.</td>
+</tr>
+<tr>
+<td><code>trust.key-permissions</code></td>
+<td><code>sign.key-permissions</code></td>
+<td>Only <code>sign</code> reads the secret key file.</td>
+</tr>
+<tr>
 <td><code>install.declined</code></td>
 <td><code>install.review-declined</code></td>
 <td>Same meaning. Both appear in older pages; new text uses install.review-declined.</td>
@@ -3312,11 +3344,11 @@
 </tr>
 <tr>
 <td>[PKG-581]</td>
-<td>The host MUST refuse an install whose package source (registry URL, mirror or local file) is not in the administrator <code>allowed_sources</code> list with <code>policy.source-denied</code>.</td>
+<td>The host MUST refuse an install whose package source (registry URL, mirror or local file) is not in the administrator <code>allowed_sources</code> list with <code>policy.blocked</code> (detail <code>policy.source-denied</code>).</td>
 </tr>
 <tr>
 <td>[PKG-582]</td>
-<td>A <code>cli</code> contribution that names a kernel subcommand (plugin, session, recap, progress, chat, kill-session, help, version) MUST be refused with <code>manifest.cli-name-reserved</code>; <code>manifest.cli-name-taken</code> MUST be used only for a name that another installed plugin owns.</td>
+<td>A <code>cli</code> contribution that names a name owned by the kernel itself (plugin, session, kill-session, help, version) MUST be refused with <code>manifest.cli-name-reserved</code>. The names <code>recap</code>, <code>progress</code>, <code>wait</code>, <code>chat</code>, <code>panes</code>, <code>broadcast</code>, <code>new-pane</code> and <code>voice</code> are owned by bundled core plugins: only that core plugin may declare its own, and any other plugin is refused with <code>manifest.cli-name-taken</code>, which is used for a name that another installed plugin owns.</td>
 </tr>
 <tr>
 <td>[PKG-583]</td>
@@ -3377,7 +3409,7 @@
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-schema-file">The schema file</a></li><li class="l2"><a href="#stages-and-exit-codes">Stages and exit codes</a></li><li class="l2"><a href="#error-catalogue">Error catalogue</a></li><li class="l3"><a href="#archive-codes-package-stage-1">Archive codes (package.*, stage 1)</a></li><li class="l3"><a href="#manifest-parse-and-schema-codes-manifest-stages-2-and-3">Manifest parse and schema codes (manifest.*, stages 2 and 3)</a></li><li class="l3"><a href="#semantic-codes-manifest-stage-4">Semantic codes (manifest.*, stage 4)</a></li><li class="l3"><a href="#inventory-and-component-codes-stages-5-and-6">Inventory and component codes (stages 5 and 6)</a></li><li class="l3"><a href="#signature-and-trust-codes-stages-7-and-8">Signature and trust codes (stages 7 and 8)</a></li><li class="l3"><a href="#policy-codes-stage-9">Policy codes (stage 9)</a></li><li class="l3"><a href="#dependency-codes-stage-10">Dependency codes (stage 10)</a></li><li class="l3"><a href="#install-transaction-codes">Install transaction codes</a></li><li class="l3"><a href="#result-codes">Result codes</a></li><li class="l3"><a href="#registry-client-codes">Registry client codes</a></li><li class="l3"><a href="#usage-tool-and-session-codes">Usage, tool and session codes</a></li><li class="l2"><a href="#retired-and-orphan-codes">Retired and orphan codes</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-schema-file">The schema file</a></li><li class="l2"><a href="#stages-and-exit-codes">Stages and exit codes</a></li><li class="l2"><a href="#error-catalogue">Error catalogue</a></li><li class="l3"><a href="#archive-codes-package-stage-1">Archive codes (package.*, stage 1)</a></li><li class="l3"><a href="#manifest-parse-and-schema-codes-manifest-and-one-package-code-stages-2-and-3">Manifest parse and schema codes (manifest.* and one package.* code, stages 2 and 3)</a></li><li class="l3"><a href="#semantic-codes-manifest-stage-4">Semantic codes (manifest.*, stage 4)</a></li><li class="l3"><a href="#inventory-and-component-codes-stages-5-and-6">Inventory and component codes (stages 5 and 6)</a></li><li class="l3"><a href="#signature-and-trust-codes-stages-7-and-8">Signature and trust codes (stages 7 and 8)</a></li><li class="l3"><a href="#policy-codes-stage-9">Policy codes (stage 9)</a></li><li class="l3"><a href="#dependency-codes-stage-10">Dependency codes (stage 10)</a></li><li class="l3"><a href="#install-transaction-codes">Install transaction codes</a></li><li class="l3"><a href="#result-codes">Result codes</a></li><li class="l3"><a href="#registry-client-codes">Registry client codes</a></li><li class="l3"><a href="#usage-tool-and-session-codes">Usage, tool and session codes</a></li><li class="l2"><a href="#retired-and-orphan-codes">Retired and orphan codes</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

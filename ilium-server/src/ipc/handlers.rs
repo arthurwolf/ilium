@@ -9,6 +9,8 @@
 
 use ilium_core::animation_recommendation::RecommendedRestructurePlan;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use ilium_agent_debug::{
@@ -143,6 +145,7 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::SubmitTerminalText { pane_id, .. } => Some(*pane_id),
         ClientRequest::QueryRepoFacts { project, .. } => Some(*project),
         ClientRequest::CreateAgentInWorkspace { parent_group, .. } => Some(*parent_group),
+        ClientRequest::CreateCustomAgentInWorkspace { parent_group, .. } => Some(*parent_group),
         ClientRequest::RefreshPaneGitStatus { pane_id, .. } => Some(*pane_id),
         ClientRequest::RemoveWorkspace { pane_id, .. } => Some(*pane_id),
         ClientRequest::ClosePaneWithWorkspaceDisposition { pane_id, .. } => Some(*pane_id),
@@ -165,60 +168,63 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
     }
 }
 
-pub async fn handle_request(
-    state: &Arc<ServerState>,
+pub fn handle_request<'a>(
+    state: &'a Arc<ServerState>,
     request: ClientRequest,
-    direct_tx: &DirectEventSender,
-) -> bool {
-    // Dialog snapshots are hints; lifecycle/working-directory changes invalidate
-    // them. Launch admission always performs fresh Git and ownership checks.
-    if matches!(
-        &request,
-        ClientRequest::NewPane { .. }
-            | ClientRequest::ClosePane { .. }
-            | ClientRequest::ChangeProjectFolder { .. }
-            | ClientRequest::CreateAgentInWorkspace { .. }
-            | ClientRequest::PruneWorkspace { .. }
-            | ClientRequest::RemoveWorkspace { .. }
-            | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
-            | ClientRequest::ReplacePaneWithCommand { .. }
-    ) {
-        state.repo_discovery_cache.invalidate();
-        state.repo_facts_cache.invalidate();
-    }
-    let operation = request.diagnostic_name();
-    let requested_node = request_error_node(&request);
-    let target = {
-        let tree = state.tree.read().await;
-        requested_node.filter(|node_id| tree.get(*node_id).is_some())
-    };
-    // A request aimed at a node that no longer exists (a duplicate close, a
-    // click racing a restructure) has no node to attach a retained error to.
-    // Filing it as session-wide would mark every node with a blocking error
-    // that nothing ever clears, so its failure stays a transient status line.
-    let scoped_tx = if requested_node.is_some() && target.is_none() {
-        direct_tx.clone()
-    } else {
-        direct_tx.with_error_scope(state, target, operation)
-    };
-    let should_close = handle_scoped_request(state, request, &scoped_tx).await;
-    if matches!(
-        operation,
-        "rename_node"
-            | "move_node"
-            | "reparent_node"
-            | "new_group"
-            | "new_project"
-            | "new_folder"
-            | "change_project_folder"
-            | "create_split_view"
-            | "set_node_bookmarked"
-            | "set_node_expanded"
-            | "set_node_locked_closed"
-    ) {
-        scoped_tx.finish_synchronous_mutation();
-    }
-    should_close
+    direct_tx: &'a DirectEventSender,
+) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+    Box::pin(async move {
+        // Dialog snapshots are hints; lifecycle/working-directory changes invalidate
+        // them. Launch admission always performs fresh Git and ownership checks.
+        if matches!(
+            &request,
+            ClientRequest::NewPane { .. }
+                | ClientRequest::ClosePane { .. }
+                | ClientRequest::ChangeProjectFolder { .. }
+                | ClientRequest::CreateAgentInWorkspace { .. }
+                | ClientRequest::CreateCustomAgentInWorkspace { .. }
+                | ClientRequest::PruneWorkspace { .. }
+                | ClientRequest::RemoveWorkspace { .. }
+                | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
+                | ClientRequest::ReplacePaneWithCommand { .. }
+        ) {
+            state.repo_discovery_cache.invalidate();
+            state.repo_facts_cache.invalidate();
+        }
+        let operation = request.diagnostic_name();
+        let requested_node = request_error_node(&request);
+        let target = {
+            let tree = state.tree.read().await;
+            requested_node.filter(|node_id| tree.get(*node_id).is_some())
+        };
+        // A request aimed at a node that no longer exists (a duplicate close, a
+        // click racing a restructure) has no node to attach a retained error to.
+        // Filing it as session-wide would mark every node with a blocking error
+        // that nothing ever clears, so its failure stays a transient status line.
+        let scoped_tx = if requested_node.is_some() && target.is_none() {
+            direct_tx.clone()
+        } else {
+            direct_tx.with_error_scope(state, target, operation)
+        };
+        let should_close = handle_scoped_request(state, request, &scoped_tx).await;
+        if matches!(
+            operation,
+            "rename_node"
+                | "move_node"
+                | "reparent_node"
+                | "new_group"
+                | "new_project"
+                | "new_folder"
+                | "change_project_folder"
+                | "create_split_view"
+                | "set_node_bookmarked"
+                | "set_node_expanded"
+                | "set_node_locked_closed"
+        ) {
+            scoped_tx.finish_synchronous_mutation();
+        }
+        should_close
+    })
 }
 
 async fn handle_scoped_request(
@@ -227,6 +233,13 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::Resource {
+            request_id,
+            request,
+        } => {
+            crate::resources::handle(state, request_id, request, direct_tx).await;
+            false
+        }
         ClientRequest::ApplyRecap {
             pane_id,
             session_id,
@@ -260,35 +273,16 @@ async fn handle_scoped_request(
             let max_bytes = usize::try_from(max_bytes)
                 .unwrap_or(usize::MAX)
                 .min(TERMINAL_HISTORY_MAX_BYTES);
-            let history = {
-                let panes = state.panes.read().await;
-                match panes.get(&pane_id) {
-                    Some(PaneResource::Terminal(runtime)) => Some(
-                        runtime
-                            .session
-                            .output_history_before(before_sequence, max_bytes),
-                    ),
-                    _ => None,
+            match terminal_history_event(state, pane_id, before_sequence, max_bytes).await {
+                Ok(event) => send_direct(direct_tx, event).await,
+                Err(message) => {
+                    tracing::warn!(pane_id = pane_id.0, %message, "terminal history capture failed");
+                    // Record the request-scoped diagnostic even when queue or
+                    // byte pressure refuses this best-effort wire error. A
+                    // failed native capture must not start a new storage wait.
+                    let _ = direct_tx.try_send(ServerEvent::Error { message });
                 }
-            };
-            let event = match history {
-                Some(history) => ServerEvent::TerminalHistory {
-                    pane_id,
-                    first_sequence: history.first_sequence,
-                    before_sequence: history.before_sequence,
-                    bytes: history.bytes,
-                    reaches_journal_start: history.reaches_journal_start,
-                },
-                // A pane that no longer exists has no older output to show.
-                None => ServerEvent::TerminalHistory {
-                    pane_id,
-                    first_sequence: before_sequence,
-                    before_sequence,
-                    bytes: Vec::new(),
-                    reaches_journal_start: true,
-                },
-            };
-            send_direct(direct_tx, event).await;
+            }
             false
         }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
@@ -320,12 +314,10 @@ async fn handle_scoped_request(
             false
         }
         ClientRequest::Attach { session, .. } => {
-            handle_attach(state, &session, direct_tx, true).await;
-            false
+            handle_attach(state, &session, direct_tx, true).await
         }
         ClientRequest::AttachInteractive { session, .. } => {
-            handle_attach(state, &session, direct_tx, false).await;
-            false
+            handle_attach(state, &session, direct_tx, false).await
         }
         ClientRequest::DiscardTerminalDelivery { .. } => {
             // Intercepted by `ipc::connection`: delivery watermarks belong to
@@ -480,7 +472,16 @@ async fn handle_scoped_request(
             request_id,
             project,
         } => {
-            let result = crate::workspace::repo_facts(state, project).await;
+            // Like inventory, a cache-miss Git query needs a fresh poll stack:
+            // the generic dispatcher's large debug frame must not nest below it.
+            // The awaited guard cancels this read-only task with its caller.
+            let facts_state = Arc::clone(state);
+            let result = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+                crate::workspace::repo_facts(&facts_state, project).await
+            }))
+            .join()
+            .await
+            .unwrap_or_else(|error| Err(format!("repository facts task failed: {error}")));
             let _ = direct_tx
                 .send(ServerEvent::RepoFactsReported {
                     request_id,
@@ -490,13 +491,40 @@ async fn handle_scoped_request(
                 .await;
             false
         }
-        ClientRequest::CreateAgentInWorkspace {
-            request_id,
-            parent_group,
-            provider,
-            spec,
-            initial_input,
-        } => {
+        request @ (ClientRequest::CreateAgentInWorkspace { .. }
+        | ClientRequest::CreateCustomAgentInWorkspace { .. }) => {
+            let (request_id, parent_group, provider, custom_agent, spec, initial_input) =
+                match request {
+                    ClientRequest::CreateAgentInWorkspace {
+                        request_id,
+                        parent_group,
+                        provider,
+                        spec,
+                        initial_input,
+                    } => (
+                        request_id,
+                        parent_group,
+                        provider,
+                        None,
+                        spec,
+                        initial_input,
+                    ),
+                    ClientRequest::CreateCustomAgentInWorkspace {
+                        request_id,
+                        parent_group,
+                        identity,
+                        spec,
+                        initial_input,
+                    } => (
+                        request_id,
+                        parent_group,
+                        identity.base_provider,
+                        Some(identity),
+                        spec,
+                        initial_input,
+                    ),
+                    _ => unreachable!("matched workspace creation request"),
+                };
             // The connection reader must be free to observe EOF. A client
             // disconnect cancels only at safe coordinator boundaries; it
             // must never drop a future while Git has an in-flight mutation.
@@ -511,6 +539,7 @@ async fn handle_scoped_request(
                         parent_group,
                         project_override: None,
                         provider,
+                        custom_agent,
                         spec,
                         initial_input,
                         wait_for_prompt: false,
@@ -970,7 +999,7 @@ async fn handle_scoped_request(
             }
         },
         ClientRequest::SetPaneFocus { pane_id, focused } => {
-            handle_set_pane_focus(state, pane_id, focused).await;
+            handle_set_pane_focus(state, pane_id, focused, direct_tx).await;
             false
         }
         ClientRequest::RestartServer => {
@@ -1598,7 +1627,7 @@ async fn handle_attach(
     session: &str,
     direct_tx: &DirectEventSender,
     include_terminal_output: bool,
-) {
+) -> bool {
     if session != state.session_name {
         send_direct_error(
             direct_tx,
@@ -1608,8 +1637,9 @@ async fn handle_attach(
             ),
         )
         .await;
-        return;
+        return false;
     }
+    crate::resources::send_snapshot(state, direct_tx).await;
     loop {
         match state.recovery.attach_status().await {
             crate::recovery::AttachStatus::Pending { pane_count } => {
@@ -1642,23 +1672,38 @@ async fn handle_attach(
                     ServerEvent::SessionRecoveryAvailable { pane_count },
                 )
                 .await;
-                return;
+                return false;
             }
             crate::recovery::AttachStatus::Resolving(completion) => {
                 if let Err(message) = crate::recovery::wait_for_result(completion).await {
                     send_direct_error(direct_tx, message.to_string()).await;
-                    return;
+                    return false;
                 }
             }
             crate::recovery::AttachStatus::Failed(message) => {
                 send_direct_error(direct_tx, message.to_string()).await;
-                return;
+                return false;
             }
             crate::recovery::AttachStatus::Settled => break,
         }
     }
 
-    send_initial_state(state, direct_tx, include_terminal_output).await;
+    // Only capacity waiting is bounded. Recovery resolution, seed building,
+    // queue delivery and actual socket flushing keep their existing semantics.
+    if let Err(error) = send_initial_state(
+        state,
+        direct_tx,
+        include_terminal_output,
+        Some(std::time::Duration::from_secs(30)),
+    )
+    .await
+    {
+        // Sending an error would itself need the exhausted General storage.
+        // The reader closes this failed attachment and releases its cursor.
+        tracing::warn!(%error, "initial attach seed failed; closing connection without completing synchronization");
+        return true;
+    }
+    false
 }
 
 /// Sends one ordered, complete client render-cache seed. Both normal attach
@@ -1668,25 +1713,29 @@ async fn send_initial_state(
     state: &ServerState,
     direct_tx: &DirectEventSender,
     include_terminal_output: bool,
-) {
+    storage_admission_timeout: Option<std::time::Duration>,
+) -> Result<(), String> {
     let synchronization = if include_terminal_output {
         TerminalOutputSynchronization::All
     } else {
         TerminalOutputSynchronization::None
     };
-    let (events, producer_storage) =
-        match admitted_state_synchronization_events(state, synchronization, true).await {
-            Ok(batch) => batch,
-            Err(error) => {
-                send_direct_error(direct_tx, error).await;
-                return;
-            }
-        };
+    let (events, producer_storage) = admitted_state_synchronization_events(
+        state,
+        synchronization,
+        true,
+        storage_admission_timeout,
+    )
+    .await?;
     for event in events {
-        let _ = direct_tx
+        direct_tx
             .send_with_storage(event, producer_storage.clone())
-            .await;
+            .await
+            .map_err(|_| {
+                "initial state delivery failed before the complete seed was queued".to_owned()
+            })?;
     }
+    Ok(())
 }
 
 /// Extra bytes reserved per synchronized pane for output that arrives between
@@ -1720,11 +1769,11 @@ impl TerminalOutputSynchronization<'_> {
     fn estimate_for(
         &self,
         pane_id: NodeId,
-        session: &ilium_pty::PtySession,
-    ) -> Option<TerminalOutputEstimate> {
+        session: &ilium_pty::PtyCaptureHandle,
+    ) -> Result<Option<TerminalOutputEstimate>, ilium_pty::PtyCaptureError> {
         let (after_sequence, estimate, snapshot) = match self {
-            Self::All => match session.attach_snapshot() {
-                Some(snapshot) => (
+            Self::All => match session.try_attach_snapshot() {
+                Ok(snapshot) => (
                     0,
                     PtyOutputRecoveryEstimate::Snapshot {
                         through_sequence: snapshot.through_sequence,
@@ -1732,65 +1781,65 @@ impl TerminalOutputSynchronization<'_> {
                     },
                     Some(snapshot),
                 ),
-                // An unreadable parser cannot rebuild its screen; the retained
-                // journal is the only remaining evidence of what it showed.
-                None => (
+                // Only a permanently unavailable parser may use journal
+                // evidence. Busy never falls through to a blocking capture.
+                Err(ilium_pty::PtyCaptureError::ParserPoisoned) => (
                     0,
-                    PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
+                    PtyOutputRecoveryEstimate::Replay(session.try_output_replay_estimate()?),
                     None,
                 ),
+                Err(error) => return Err(error),
             },
-            Self::None => return None,
+            Self::None => return Ok(None),
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
                     .copied()
                     .unwrap_or_default();
-                (
-                    after_sequence,
-                    session.output_recovery_estimate_after(after_sequence)?,
-                    None,
-                )
+                let Some(estimate) = session.try_output_recovery_estimate_after(after_sequence)?
+                else {
+                    return Ok(None);
+                };
+                (after_sequence, estimate, None)
             }
         };
-        Some(TerminalOutputEstimate {
+        Ok(Some(TerminalOutputEstimate {
             input: session.input_handle(),
             estimate,
             after_sequence,
             snapshot,
-        })
+        }))
     }
 
     fn event_from_estimate(
         &self,
         pane_id: NodeId,
-        session: &ilium_pty::PtySession,
+        session: &ilium_pty::PtyCaptureHandle,
         estimated: &TerminalOutputEstimate,
-    ) -> Option<ServerEvent> {
-        match self {
+    ) -> Result<Option<ServerEvent>, ilium_pty::PtyCaptureError> {
+        Ok(match self {
             Self::All => match (&estimated.estimate, &estimated.snapshot) {
                 (PtyOutputRecoveryEstimate::Snapshot { .. }, Some(snapshot)) => {
                     Some(terminal_snapshot_event(pane_id, snapshot.clone()))
                 }
-                (PtyOutputRecoveryEstimate::Replay(replay_estimate), None) => {
-                    let replay = session.output_replay_through_if_retained(*replay_estimate)?;
-                    Some(terminal_replay_event(pane_id, replay))
-                }
+                (PtyOutputRecoveryEstimate::Replay(replay_estimate), None) => session
+                    .try_output_replay_through_if_retained(*replay_estimate)?
+                    .map(|replay| terminal_replay_event(pane_id, replay)),
                 _ => None,
             },
             Self::None => None,
-            Self::RecoverAfter(_) => match session
-                .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
-            {
-                PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
-                    pane_id,
-                    first_sequence: estimated.after_sequence.saturating_add(1),
-                    sequence: chunk.sequence,
-                    bytes: chunk.bytes.to_vec(),
+            Self::RecoverAfter(_) => session
+                .try_output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
+                .map(|recovery| match recovery {
+                    PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
+                        pane_id,
+                        first_sequence: estimated.after_sequence.saturating_add(1),
+                        sequence: chunk.sequence,
+                        bytes: chunk.bytes.to_vec(),
+                    },
+                    PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
                 }),
-                PtyOutputRecovery::Replay(replay) => Some(terminal_replay_event(pane_id, replay)),
-            },
-        }
+        })
     }
 }
 
@@ -1866,8 +1915,122 @@ pub(crate) async fn admitted_resynchronization_events(
         state,
         TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
         false,
+        None,
     )
     .await
+}
+
+const TERMINAL_CAPTURE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const TERMINAL_CAPTURE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+// A failed full forwarder capture owns its pending gap until repair or pane
+// cancellation. Poison can fail immediately, so this has a slower cadence than
+// the short retries inside one bounded capture attempt.
+const TERMINAL_FORWARDER_RECOVERY_RETRY_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(1);
+
+fn terminal_capture_retry_at(
+    now: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    (now < deadline).then(|| (now + TERMINAL_CAPTURE_RETRY_INTERVAL).min(deadline))
+}
+
+/// The closure owns no server registry guard. Native try-lock guards are
+/// synchronous locals and are dropped before every sleep, error or return.
+async fn retry_terminal_capture<T>(
+    pane_id: NodeId,
+    operation: &'static str,
+    mut capture: impl FnMut() -> Result<T, ilium_pty::PtyCaptureError>,
+) -> Result<T, String> {
+    let started = tokio::time::Instant::now();
+    let deadline = started + TERMINAL_CAPTURE_BUSY_TIMEOUT;
+    let mut busy_attempts = 0u64;
+    loop {
+        match capture() {
+            Ok(value) => return Ok(value),
+            Err(error @ (ilium_pty::PtyCaptureError::ParserBusy | ilium_pty::PtyCaptureError::JournalBusy)) => {
+                busy_attempts = busy_attempts.saturating_add(1);
+                let Some(retry_at) = terminal_capture_retry_at(tokio::time::Instant::now(), deadline) else {
+                    let waited_ms = started.elapsed().as_millis();
+                    tracing::warn!(pane_id = ?pane_id, operation, busy_attempts, waited_ms = %waited_ms, reason = %error, "terminal capture contention deadline expired");
+                    return Err(format!("terminal capture contention deadline expired: pane={}, operation={operation}, waited_ms={waited_ms}, busy_attempts={busy_attempts}, reason={error}; no delivery watermark was advanced", pane_id.0));
+                };
+                tokio::time::sleep_until(retry_at).await;
+            }
+            Err(error) => return Err(format!("terminal capture unavailable: pane={}, operation={operation}, reason={error}; no delivery watermark was advanced", pane_id.0)),
+        }
+    }
+}
+
+async fn terminal_capture_handle(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Option<ilium_pty::PtyCaptureHandle> {
+    let panes = state.panes.read().await;
+    match panes.get(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => Some(runtime.session.capture_handle()),
+        _ => None,
+    }
+}
+
+/// Capture one exact session after releasing the pane registry. Keeping the
+/// adapter callback explicit centralizes the no-registry-guard retry contract
+/// for history and the forwarder's full recovery path.
+async fn capture_terminal_journal<T>(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected_input: Option<&PtyInput>,
+    operation: &'static str,
+    mut capture: impl FnMut(&ilium_pty::PtyCaptureHandle) -> Result<T, ilium_pty::PtyCaptureError>,
+) -> Result<Option<(PtyInput, T)>, String> {
+    let Some(handle) = terminal_capture_handle(state, pane_id).await else {
+        return Ok(None);
+    };
+    let input = handle.input_handle();
+    if expected_input.is_some_and(|expected| !expected.same_session(&input)) {
+        return Ok(None);
+    }
+    let captured = retry_terminal_capture(pane_id, operation, || capture(&handle)).await?;
+    Ok(Some((input, captured)))
+}
+
+async fn terminal_history_event(
+    state: &ServerState,
+    pane_id: NodeId,
+    before_sequence: u64,
+    max_bytes: usize,
+) -> Result<ServerEvent, String> {
+    let Some((input, history)) =
+        capture_terminal_journal(state, pane_id, None, "terminal history", |handle| {
+            handle.try_output_history_before(before_sequence, max_bytes)
+        })
+        .await?
+    else {
+        // A pane absent before capture has no older output to show.
+        return Ok(ServerEvent::TerminalHistory {
+            pane_id,
+            first_sequence: before_sequence,
+            before_sequence,
+            bytes: Vec::new(),
+            reaches_journal_start: true,
+        });
+    };
+    let panes = state.panes.read().await;
+    if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
+        if input.same_session(&runtime.session.input_handle()))
+    {
+        return Err(format!(
+            "terminal session changed during history capture: pane={}; retry history for the current session",
+            pane_id.0
+        ));
+    }
+    Ok(ServerEvent::TerminalHistory {
+        pane_id,
+        first_sequence: history.first_sequence,
+        before_sequence: history.before_sequence,
+        bytes: history.bytes,
+        reaches_journal_start: history.reaches_journal_start,
+    })
 }
 
 pub(crate) async fn admitted_terminal_recovery_prefix(
@@ -1879,16 +2042,13 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
     // A selected, silent PTY still has a valid current screen. Sequence zero
     // means no output, rather than no initial state; send it once on reveal.
     if through_sequence == 0 && after_sequence == 0 {
-        let snapshot = {
-            let panes = state.panes.read().await;
-            match panes.get(&pane_id) {
-                Some(PaneResource::Terminal(runtime)) => runtime.session.attach_snapshot(),
-                _ => None,
-            }
-        };
-        let Some(snapshot) = snapshot else {
+        let Some(capture) = terminal_capture_handle(state, pane_id).await else {
             return Ok(None);
         };
+        let snapshot = retry_terminal_capture(pane_id, "zero-sequence visible recovery", || {
+            capture.try_attach_snapshot()
+        })
+        .await?;
         let storage = reserve_connection_event_storage(
             state,
             snapshot.bytes.len(),
@@ -1897,24 +2057,31 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
             Some(pane_id),
         )
         .await?;
+        let Some(current) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        if !capture.input_handle().same_session(&current.input_handle()) {
+            return Err(format!(
+                "terminal session changed during zero-sequence recovery: pane={}",
+                pane_id.0
+            ));
+        }
         return Ok(Some((terminal_snapshot_event(pane_id, snapshot), storage)));
     }
     if through_sequence <= after_sequence {
         return Ok(None);
     }
     for _attempt in 0..8 {
-        let (expected_input, estimate) = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
-            };
-            let Some(estimate) = runtime
-                .session
-                .output_recovery_estimate_after(after_sequence)
-            else {
-                return Ok(None);
-            };
-            (runtime.session.input_handle(), estimate)
+        let Some(capture) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let expected_input = capture.input_handle();
+        let Some(estimate) = retry_terminal_capture(pane_id, "recovery estimate", || {
+            capture.try_output_recovery_estimate_after(after_sequence)
+        })
+        .await?
+        else {
+            return Ok(None);
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
@@ -1930,50 +2097,51 @@ pub(crate) async fn admitted_terminal_recovery_prefix(
             Some(pane_id),
         )
         .await?;
-        let event = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
+        let event = retry_terminal_capture(pane_id, "visible recovery copy", || {
+            let recovery = capture.try_output_recovery_prefix_through(
+                after_sequence,
+                through_sequence,
+                TERMINAL_RECOVERY_EVENT_MAX_BYTES,
+            )?;
+            let recovery = match recovery {
+                Some(recovery) => Some(recovery),
+                // Retention can pass the target; only rebase after a
+                // successful capture, never after journal contention.
+                None => capture.try_output_recovery_prefix_after(
+                    after_sequence,
+                    TERMINAL_RECOVERY_EVENT_MAX_BYTES,
+                )?,
             };
-            if !expected_input.same_session(&runtime.session.input_handle()) {
-                None
-            } else {
-                let recovery = runtime
-                    .session
-                    .output_recovery_prefix_through(
-                        after_sequence,
-                        through_sequence,
-                        TERMINAL_RECOVERY_EVENT_MAX_BYTES,
-                    )
-                    .or_else(|| {
-                        // Retention can advance past the captured target while
-                        // other selected panes are being written. Rebase to
-                        // the current retained journal instead of failing the
-                        // whole connection for a stale watermark.
-                        runtime.session.output_recovery_prefix_after(
-                            after_sequence,
-                            TERMINAL_RECOVERY_EVENT_MAX_BYTES,
-                        )
-                    });
-                match recovery {
-                    Some(PtyOutputRecovery::Delta(chunk)) => Some(ServerEvent::ScreenUpdate {
-                        pane_id,
-                        first_sequence: after_sequence.saturating_add(1),
-                        sequence: chunk.sequence,
-                        bytes: chunk.bytes.to_vec(),
-                    }),
-                    // A replay rebuilds the whole journal on the client; the
-                    // current screen snapshot shows the same state at once.
-                    // The journal replay remains only when no snapshot exists.
-                    Some(PtyOutputRecovery::Replay(replay)) => {
-                        Some(match runtime.session.attach_snapshot() {
-                            Some(snapshot) => terminal_snapshot_event(pane_id, snapshot),
-                            None => terminal_replay_event(pane_id, replay),
-                        })
-                    }
-                    None => None,
+            Ok(match recovery {
+                Some(PtyOutputRecovery::Delta(chunk)) => Some(ServerEvent::ScreenUpdate {
+                    pane_id,
+                    first_sequence: after_sequence.saturating_add(1),
+                    sequence: chunk.sequence,
+                    bytes: chunk.bytes.to_vec(),
+                }),
+                // A replay rebuilds the whole journal on the client; the
+                // current screen snapshot shows the same state at once.
+                // The journal replay remains only when no snapshot exists.
+                Some(PtyOutputRecovery::Replay(replay)) => {
+                    Some(match capture.try_attach_snapshot() {
+                        Ok(snapshot) => terminal_snapshot_event(pane_id, snapshot),
+                        Err(ilium_pty::PtyCaptureError::ParserPoisoned) => {
+                            terminal_replay_event(pane_id, replay)
+                        }
+                        Err(error) => return Err(error),
+                    })
                 }
-            }
+                None => None,
+            })
+        })
+        .await?;
+        let Some(current) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let event = if expected_input.same_session(&current.input_handle()) {
+            event
+        } else {
+            None
         };
         if let Some(event) = event {
             return Ok(Some((event, producer_storage)));
@@ -1989,18 +2157,16 @@ pub(crate) async fn admitted_terminal_recovery_event(
     after_sequence: u64,
 ) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
     for _attempt in 0..8 {
-        let (expected_input, estimate) = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
-            };
-            let Some(estimate) = runtime
-                .session
-                .output_recovery_estimate_after(after_sequence)
-            else {
-                return Ok(None);
-            };
-            (runtime.session.input_handle(), estimate)
+        let Some(capture) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let expected_input = capture.input_handle();
+        let Some(estimate) = retry_terminal_capture(pane_id, "recovery estimate", || {
+            capture.try_output_recovery_estimate_after(after_sequence)
+        })
+        .await?
+        else {
+            return Ok(None);
         };
         let byte_len = match estimate {
             PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
@@ -2015,27 +2181,25 @@ pub(crate) async fn admitted_terminal_recovery_event(
             Some(pane_id),
         )
         .await?;
-        let event = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                return Ok(None);
-            };
-            if !expected_input.same_session(&runtime.session.input_handle()) {
-                None
-            } else {
-                runtime
-                    .session
-                    .output_recovery_if_unchanged(after_sequence, estimate)
-                    .map(|recovery| match recovery {
-                        PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
-                            pane_id,
-                            first_sequence: after_sequence.saturating_add(1),
-                            sequence: chunk.sequence,
-                            bytes: chunk.bytes.to_vec(),
-                        },
-                        PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
-                    })
-            }
+        let recovery = retry_terminal_capture(pane_id, "recovery copy", || {
+            capture.try_output_recovery_if_unchanged(after_sequence, estimate)
+        })
+        .await?;
+        let Some(current) = terminal_capture_handle(state, pane_id).await else {
+            return Ok(None);
+        };
+        let event = if expected_input.same_session(&current.input_handle()) {
+            recovery.map(|recovery| match recovery {
+                PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
+                    pane_id,
+                    first_sequence: after_sequence.saturating_add(1),
+                    sequence: chunk.sequence,
+                    bytes: chunk.bytes.to_vec(),
+                },
+                PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
+            })
+        } else {
+            None
         };
         if let Some(event) = event {
             return Ok(Some((event, producer_storage)));
@@ -2045,12 +2209,56 @@ pub(crate) async fn admitted_terminal_recovery_event(
     Err("terminal output changed repeatedly; retry recovery".to_owned())
 }
 
-pub(crate) async fn terminal_output_sequence(state: &ServerState, pane_id: NodeId) -> Option<u64> {
+pub(crate) async fn terminal_output_sequence(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Result<Option<u64>, String> {
+    let Some(capture) = terminal_capture_handle(state, pane_id).await else {
+        return Ok(None);
+    };
+    let estimate = retry_terminal_capture(pane_id, "writer sequence target", || {
+        capture.try_output_replay_estimate()
+    })
+    .await?;
+    let Some(current) = terminal_capture_handle(state, pane_id).await else {
+        return Ok(None);
+    };
+    if !capture.input_handle().same_session(&current.input_handle()) {
+        return Err(format!(
+            "terminal session changed during writer sequence capture: pane={}",
+            pane_id.0
+        ));
+    }
+    Ok(Some(estimate.through_sequence))
+}
+
+/// Current screen of a terminal pane, sent before its history replay so a
+/// selected pane shows content while the replayed backlog parses.
+pub(crate) async fn terminal_screen_preview(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Option<ServerEvent> {
     let panes = state.panes.read().await;
     let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
         return None;
     };
-    Some(runtime.session.output_replay_estimate().through_sequence)
+    Some(screen_preview_event(pane_id, &runtime.session))
+}
+
+/// The live screen with the journal position it reflects. The position is
+/// read after the screen, so the screen is never newer than the sequence the
+/// client waits to parse through.
+pub(crate) fn screen_preview_event(
+    pane_id: NodeId,
+    session: &ilium_pty::PtySession,
+) -> ServerEvent {
+    let bytes = session.current_screen_preview();
+    let through_sequence = session.output_head_sequence();
+    ServerEvent::ScreenPreview {
+        pane_id,
+        through_sequence,
+        bytes,
+    }
 }
 
 async fn reserve_connection_event_storage(
@@ -2116,6 +2324,7 @@ async fn admitted_state_synchronization_events(
     state: &ServerState,
     synchronization: TerminalOutputSynchronization<'_>,
     include_initial_sync_complete: bool,
+    storage_admission_timeout: Option<std::time::Duration>,
 ) -> Result<
     (
         Vec<ServerEvent>,
@@ -2127,18 +2336,18 @@ async fn admitted_state_synchronization_events(
     // whether pane output, the pane set or the tree kept moving.
     let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
-        let (estimates, snapshot_bytes) = {
+        let (captures, snapshot_bytes) = {
             let tree = state.tree.read().await;
             let panes = state.panes.read().await;
-            let estimates = panes
+            let captures: Vec<_> = panes
                 .iter()
                 .filter_map(|(pane_id, resource)| match resource {
-                    PaneResource::Terminal(runtime) => synchronization
-                        .estimate_for(*pane_id, &runtime.session)
-                        .map(|estimate| (*pane_id, estimate)),
-                    PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
+                    PaneResource::Terminal(runtime) => {
+                        Some((*pane_id, runtime.session.capture_handle()))
+                    }
+                    _ => None,
                 })
-                .collect::<HashMap<_, _>>();
+                .collect();
             let snapshot_bytes = crate::snapshot_io::estimated_tree_bytes(&tree)
                 .checked_mul(2)
                 .and_then(|bytes| {
@@ -2153,8 +2362,18 @@ async fn admitted_state_synchronization_events(
             let Some(snapshot_bytes) = snapshot_bytes else {
                 return Err("state snapshot admission size overflow".to_owned());
             };
-            (estimates, snapshot_bytes)
+            (captures, snapshot_bytes)
         };
+        let mut estimates = HashMap::new();
+        for (pane_id, capture) in &captures {
+            if let Some(estimate) = retry_terminal_capture(*pane_id, "attach estimate", || {
+                synchronization.estimate_for(*pane_id, capture)
+            })
+            .await?
+            {
+                estimates.insert(*pane_id, estimate);
+            }
+        }
         let estimated_payload_bytes = estimates.values().try_fold(0usize, |total, estimate| {
             let bytes = match estimate.estimate {
                 PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
@@ -2172,14 +2391,22 @@ async fn admitted_state_synchronization_events(
             .and_then(|bytes| bytes.checked_add(snapshot_bytes))
             .and_then(|bytes| output_growth_allowance.and_then(|growth| bytes.checked_add(growth)))
             .ok_or_else(|| "state synchronization admission size overflow".to_owned())?;
-        let producer_storage = reserve_connection_event_storage(
+        let admission = reserve_connection_event_storage(
             state,
             estimated_payload_bytes,
             estimates.len().saturating_add(1),
             ConnectionEventStorageClass::General,
             None,
-        )
-        .await?;
+        );
+        let producer_storage = match storage_admission_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, admission)
+                .await
+                .map_err(|_| format!(
+                    "initial attach seed storage admission exceeded {} seconds; no complete seed was queued",
+                    timeout.as_secs(),
+                ))??,
+            None => admission.await?,
+        };
 
         // Revalidate the current tree's measured retained size against the
         // reservation before cloning the retry fence or the queued snapshot.
@@ -2195,6 +2422,20 @@ async fn admitted_state_synchronization_events(
             }
             tree.clone()
         };
+
+        let mut prepared_events = HashMap::new();
+        for (pane_id, capture) in &captures {
+            if estimates.contains_key(pane_id) {
+                let event = retry_terminal_capture(*pane_id, "fresh attach output copy", || {
+                    let Some(fresh) = synchronization.estimate_for(*pane_id, capture)? else {
+                        return Ok(None);
+                    };
+                    synchronization.event_from_estimate(*pane_id, capture, &fresh)
+                })
+                .await?;
+                prepared_events.insert(*pane_id, event);
+            }
+        }
 
         let built = {
             let tree = state.tree.read().await;
@@ -2219,9 +2460,19 @@ async fn admitted_state_synchronization_events(
                 let mut stale = false;
                 let mut stale_reason: Option<(&'static str, Option<NodeId>)> = None;
                 for (pane_id, resource) in panes.iter() {
+                    if let Some(identity) = custom_agent_identity(resource) {
+                        replay_events.push(ServerEvent::PaneCustomAgentIdentity {
+                            pane_id: *pane_id,
+                            identity: Some(identity.clone()),
+                        });
+                    }
                     match resource {
                         PaneResource::Terminal(runtime) => {
-                            if matches!(runtime.origin, TerminalOrigin::Frozen { .. }) {
+                            if matches!(
+                                runtime.origin,
+                                TerminalOrigin::Frozen { .. }
+                                    | TerminalOrigin::CustomAgent { frozen: true, .. }
+                            ) {
                                 replay_events.push(ServerEvent::PaneFrozen {
                                     pane_id: *pane_id,
                                     result: Ok(()),
@@ -2235,21 +2486,15 @@ async fn admitted_state_synchronization_events(
                                     break;
                                 }
                                 matched_estimates.insert(*pane_id);
-                                // A busy pane has advanced (or evicted its oldest
-                                // journal chunks) since the estimate, which was taken
-                                // before an awaited reservation. Estimating again and
-                                // building from that fresh estimate shrinks the race to
-                                // two adjacent journal reads; the reservation headroom
-                                // and the final byte check bound the growth.
-                                let fresh = synchronization
-                                    .estimate_for(*pane_id, &runtime.session)
-                                    .unwrap_or_else(|| estimate.clone());
-                                match synchronization.event_from_estimate(
-                                    *pane_id,
-                                    &runtime.session,
-                                    &fresh,
-                                ) {
-                                    Some(event) => replay_events.push(event),
+                                match prepared_events.remove(pane_id).flatten() {
+                                    Some(event) => {
+                                        if let Some(preview) =
+                                            screen_preview_before_replay(*pane_id, runtime, &event)
+                                        {
+                                            replay_events.push(preview);
+                                        }
+                                        replay_events.push(event);
+                                    }
                                     None => {
                                         stale = true;
                                         stale_reason = Some((
@@ -2285,14 +2530,18 @@ async fn admitted_state_synchronization_events(
                     );
                     None
                 } else {
+                    // The admitted snapshot is authoritative for this seed.
+                    // Release source guards before awaiting recap storage and
+                    // never acquire a nested tree read behind a queued writer.
+                    drop(panes);
+                    drop(tree);
+                    let recap_events = super::recaps::replay_events(state, &snapshot).await;
                     let mut events = vec![ServerEvent::PaneStateSnapshot {
                         tree: snapshot,
                         detection_evidence,
                     }];
                     events.extend(replay_events);
-                    events.extend(super::recaps::replay_events(state).await);
-                    drop(panes);
-                    drop(tree);
+                    events.extend(recap_events);
                     let statuses = state.workspace_git_status_cache.read().await;
                     let status_replays: Vec<_> = match &events[0] {
                         ServerEvent::PaneStateSnapshot { tree, .. } => statuses
@@ -2400,7 +2649,17 @@ async fn state_synchronization_events(
             .flat_map(|(pane_id, resource)| match resource {
                 PaneResource::Terminal(runtime) => {
                     let mut events = Vec::new();
-                    if matches!(runtime.origin, TerminalOrigin::Frozen { .. }) {
+                    if let Some(identity) = custom_agent_identity(resource) {
+                        events.push(ServerEvent::PaneCustomAgentIdentity {
+                            pane_id: *pane_id,
+                            identity: Some(identity.clone()),
+                        });
+                    }
+                    if matches!(
+                        runtime.origin,
+                        TerminalOrigin::Frozen { .. }
+                            | TerminalOrigin::CustomAgent { frozen: true, .. }
+                    ) {
                         events.push(ServerEvent::PaneFrozen {
                             pane_id: *pane_id,
                             result: Ok(()),
@@ -2409,6 +2668,11 @@ async fn state_synchronization_events(
                     if let Some(event) =
                         terminal_output_synchronization.event_for(*pane_id, &runtime.session)
                     {
+                        if let Some(preview) =
+                            screen_preview_before_replay(*pane_id, runtime, &event)
+                        {
+                            events.push(preview);
+                        }
                         events.push(event);
                     }
                     if let Some(session_id) = runtime.session_id.clone() {
@@ -2426,17 +2690,24 @@ async fn state_synchronization_events(
                     pane_id: *pane_id,
                     path: path.clone(),
                 }],
-                PaneResource::Unrestored(_) => Vec::new(),
+                PaneResource::Unrestored(_) => custom_agent_identity(resource)
+                    .map(|identity| ServerEvent::PaneCustomAgentIdentity {
+                        pane_id: *pane_id,
+                        identity: Some(identity.clone()),
+                    })
+                    .into_iter()
+                    .collect(),
             })
             .collect();
         (snapshot, detection_evidence, replay_events)
     };
+    let recap_events = super::recaps::replay_events(state, &snapshot).await;
     let mut events = vec![ServerEvent::PaneStateSnapshot {
         tree: snapshot,
         detection_evidence,
     }];
     events.extend(replay_events);
-    events.extend(super::recaps::replay_events(state).await);
+    events.extend(recap_events);
     let statuses = state.workspace_git_status_cache.read().await;
     let status_replays: Vec<_> = match &events[0] {
         ServerEvent::PaneStateSnapshot { tree, .. } => statuses
@@ -2501,7 +2772,11 @@ pub(crate) async fn handle_session_recovery_resolution(
     // `should_forward_terminal_event`). `false` matches the same
     // `AttachInteractive` contract `handle_attach` already applies before a
     // recovery decision is pending.
-    send_initial_state(state, direct_tx, false).await;
+    // Recovery already committed. Preserve its unbounded admission semantics;
+    // the pre-seed attach deadline must not cancel accepted restore work.
+    if let Err(error) = send_initial_state(state, direct_tx, false, None).await {
+        send_direct_error(direct_tx, error).await;
+    }
 }
 
 /// Shared plumbing for tree-only mutations, including project path changes:
@@ -4589,7 +4864,12 @@ async fn save_agent_detection_settings_reserved(
 /// unread-work indicator, so it must clear after the user opens that pane. No
 /// error is surfaced for a missing pane because focus can harmlessly race pane
 /// closure.
-async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focused: bool) {
+async fn handle_set_pane_focus(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    focused: bool,
+    direct_tx: &DirectEventSender,
+) {
     let focus_checkpoint = {
         let mut tree = state.tree.write().await;
         match tree.mark_node_focused(pane_id) {
@@ -4611,24 +4891,34 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
         state.request_snapshot_save();
     }
 
-    let (detection_was_forced, is_terminal) = {
+    // The focused pane's current screen goes out on the direct channel, which
+    // the connection writer serves ahead of the ordered output backlog, so a
+    // selected pane shows its content without waiting for the backlog of
+    // every other pane's retained output to drain.
+    let (detection_was_forced, is_terminal, focus_screen_preview) = {
         let mut panes = state.panes.write().await;
         match panes.get_mut(&pane_id) {
             Some(PaneResource::Terminal(runtime)) => {
                 runtime.detection_schedule.client_focused = focused;
+                let focus_screen_preview =
+                    focused.then(|| screen_preview_event(pane_id, &runtime.session));
                 (
                     crate::detection::force_check(
                         &mut runtime.detection_schedule,
                         std::time::Instant::now(),
                     ),
                     true,
+                    focus_screen_preview,
                 )
             }
             Some(PaneResource::Editor { .. } | PaneResource::Unrestored(_)) | None => {
-                (false, false)
+                (false, false, None)
             }
         }
     };
+    if let Some(event) = focus_screen_preview {
+        send_direct(direct_tx, event).await;
+    }
 
     // The server remains authoritative for the acknowledgement. A client must
     // wait for this broadcast rather than mutating its cached tree locally, so
@@ -4705,6 +4995,26 @@ fn editor_pane_name(path: &std::path::Path) -> String {
         .unwrap_or_else(|| "untitled".to_string())
 }
 
+fn custom_agent_identity(
+    resource: &PaneResource,
+) -> Option<&ilium_core::custom_agent::CustomAgentIdentity> {
+    let origin = match resource {
+        PaneResource::Terminal(runtime) => runtime
+            .deferred_workspace_origin
+            .as_ref()
+            .unwrap_or(&runtime.origin),
+        PaneResource::Unrestored(unrestored) => match &unrestored.kind {
+            PaneSnapshotKind::Terminal(origin) => origin,
+            _ => return None,
+        },
+        PaneResource::Editor { .. } => return None,
+    };
+    match origin {
+        TerminalOrigin::CustomAgent { identity, .. } => Some(identity),
+        _ => None,
+    }
+}
+
 /// Fully-resolved server work for one pane-creation request. Initial input is
 /// deliberately transient: crash recovery should relaunch the agent session,
 /// never re-submit the original task a second time.
@@ -4779,7 +5089,44 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 close_on_exit: false,
             }
         }
+        NewPaneKind::CustomAgent {
+            identity,
+            initial_input,
+        } => {
+            let name = identity.profile_id.clone();
+            let command_line = identity.base_provider.command_line().to_string();
+            NewPanePlan {
+                spawn_kind: PaneSnapshotKind::Terminal(TerminalOrigin::CustomAgent {
+                    identity,
+                    command_line,
+                    frozen: false,
+                }),
+                name,
+                content_kind: PaneContentKind::Terminal,
+                initial_input,
+                close_on_exit: false,
+            }
+        }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn custom_agent_request_keeps_profile_identity_and_transient_prompt() {
+    let identity = ilium_core::custom_agent::CustomAgentIdentity {
+        profile_id: "work".into(),
+        base_provider: BuiltinAgentProvider::Codex,
+    };
+    let plan = new_pane_plan(NewPaneKind::CustomAgent {
+        identity: identity.clone(),
+        initial_input: Some("initial request".into()),
+    });
+    assert_eq!(plan.initial_input.as_deref(), Some("initial request"));
+    assert!(
+        matches!(plan.spawn_kind, PaneSnapshotKind::Terminal(TerminalOrigin::CustomAgent {
+        identity: actual, command_line, frozen: false,
+    }) if actual == identity && command_line == "codex")
+    );
 }
 
 async fn handle_new_pane(
@@ -4909,6 +5256,19 @@ async fn create_pane(
     // Make the pane addressable on every attached client before a semantic
     // initial-prompt event can arrive for it.
     broadcast_and_persist(state).await;
+    if let Some(identity) = state
+        .panes
+        .read()
+        .await
+        .get(&pane_id)
+        .and_then(custom_agent_identity)
+        .cloned()
+    {
+        state.broadcast(ServerEvent::PaneCustomAgentIdentity {
+            pane_id,
+            identity: Some(identity),
+        });
+    }
     let _ = crate::agent_debug::record(
         state,
         pane_id,
@@ -5105,7 +5465,14 @@ async fn handle_freeze_pane(
     if outcome.is_ok() {
         let mut panes = state.panes.write().await;
         if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
-            runtime.origin = TerminalOrigin::Frozen { resume_command };
+            runtime.origin = match &runtime.origin {
+                TerminalOrigin::CustomAgent { identity, .. } => TerminalOrigin::CustomAgent {
+                    identity: identity.clone(),
+                    command_line: resume_command,
+                    frozen: true,
+                },
+                _ => TerminalOrigin::Frozen { resume_command },
+            };
         }
     }
     if outcome.is_ok() {
@@ -5140,7 +5507,12 @@ async fn handle_unfreeze_pane(
         let panes = state.panes.read().await;
         match panes.get(&pane_id) {
             Some(PaneResource::Terminal(runtime)) => match &runtime.origin {
-                TerminalOrigin::Frozen { resume_command } => {
+                TerminalOrigin::Frozen { resume_command }
+                | TerminalOrigin::CustomAgent {
+                    command_line: resume_command,
+                    frozen: true,
+                    ..
+                } => {
                     if BuiltinAgentProvider::resume_binding(resume_command).is_some() {
                         Ok(resume_command.clone())
                     } else if let Some(provider) =
@@ -5254,6 +5626,33 @@ where
     outcome
 }
 
+fn replacement_terminal_origin(
+    current: Option<&TerminalOrigin>,
+    command_line: &str,
+) -> TerminalOrigin {
+    let destination_provider = BuiltinAgentProvider::from_command_line(command_line)
+        .or_else(|| {
+            BuiltinAgentProvider::resume_binding(command_line).map(|(provider, _)| provider)
+        })
+        .or_else(|| {
+            crate::pane::generated_claude_session_id(command_line)
+                .map(|_| BuiltinAgentProvider::Claude)
+        });
+    match current {
+        Some(TerminalOrigin::CustomAgent { identity, .. })
+            if destination_provider == Some(identity.base_provider)
+                || identity.base_provider.resume_picker_command() == Some(command_line) =>
+        {
+            TerminalOrigin::CustomAgent {
+                identity: identity.clone(),
+                command_line: command_line.to_string(),
+                frozen: false,
+            }
+        }
+        _ => TerminalOrigin::Command(command_line.to_string()),
+    }
+}
+
 /// Replaces one terminal pane with a new pane running `command_line` in the
 /// same parent, position, launch directory, and worktree ownership. The new
 /// pane is spawned before the old one is closed, so a spawn failure leaves
@@ -5276,7 +5675,14 @@ async fn handle_replace_pane_with_command(
         .await;
         return;
     };
-    let origin = TerminalOrigin::Command(command_line.clone());
+    let origin = {
+        let panes = state.panes.read().await;
+        let current = match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => Some(&runtime.origin),
+            _ => None,
+        };
+        replacement_terminal_origin(current, &command_line)
+    };
     let publish_guard = state.workspace_spawn_lock.lock().await;
     let custody_ticket = if custody_ticket.is_some() {
         custody_ticket
@@ -5359,8 +5765,15 @@ async fn handle_replace_pane_with_command(
         .pane_cwd(pane_id)
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| state.session_cwd.clone());
+    // A fixed worktree admits panes only after their provenance is known.
+    // Stage its replacement under the project, then let the provenance setter
+    // rejoin the existing checkout owner before restoring the sibling position.
+    let creation_parent = tree
+        .worktree_container_for_node(parent)
+        .and_then(|_| tree.project_ancestor(parent))
+        .unwrap_or(parent);
     let new_pane_id = match tree.add_pane(
-        parent,
+        creation_parent,
         origin.default_pane_name().to_string(),
         PaneContentKind::Terminal,
     ) {
@@ -5381,9 +5794,9 @@ async fn handle_replace_pane_with_command(
         !title_grants_under_lock(&tree, &panes, &continuity_evidence, &HashMap::new()).is_empty()
     };
     let placed = tree
-        .move_node(new_pane_id, parent, position)
-        .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()))
+        .set_pane_launch_cwd(new_pane_id, cwd.clone())
         .and_then(|()| tree.set_pane_workspace(new_pane_id, workspace.clone()))
+        .and_then(|()| tree.move_node(new_pane_id, parent, position))
         .and_then(|()| {
             tree.inherit_pane_title_with_verified_continuity(
                 pane_id,
@@ -5751,6 +6164,38 @@ async fn spawn_and_register_pane_in_directory_with_custody_ticket(
         .await
 }
 
+/// Field order preserves session-first shutdown when request cancellation
+/// occurs while waiting for tree/pane registration locks.
+struct PendingPaneRegistration {
+    resource: PaneResource,
+    output_receiver: Option<(
+        tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+        PtyInput,
+    )>,
+    _native_scope: Option<crate::native_terminal_spawn::NativeSpawnScope>,
+    _editor_spawn_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+    _editor_repository: Option<crate::workspace_prune::SpawnRepositoryAdmission>,
+}
+
+async fn refuse_unregistered_pane_spawn(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    reason: String,
+) -> RegisterPaneError {
+    let mut tree = state.tree.write().await;
+    let panes = state.panes.read().await;
+    if !panes.contains_key(&pane_id) {
+        let _ = tree.remove_node(pane_id);
+    }
+    drop(panes);
+    drop(tree);
+    state.events.publish(ServerEvent::Error {
+        message: format!("pane {} was not started: {reason}", pane_id.0),
+    });
+    broadcast_and_persist(state).await;
+    RegisterPaneError::Admission(reason)
+}
+
 /// A missing saved worktree is restored as a project-root shell while its
 /// original launch command remains available for a later safe recovery.
 pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
@@ -5762,114 +6207,109 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     inherited_custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
 ) -> Result<(), RegisterPaneError> {
     let (detection_config, _) = state.agent_detection_settings_snapshot().await;
-    let before_admission = ilium_platform::secure_fs::spawn_directory_generation(cwd);
+    let before_admission = crate::workspace_prune::spawn_directory_generation(state, cwd).await;
     let is_terminal = matches!(&kind, PaneSnapshotKind::Terminal(_));
+    // Isolate the large debug admission poll frame from the nested connection
+    // and pane-creation frames on the server's unchanged 2 MiB worker stack.
+    // The guard aborts admission if its awaiting owner is cancelled; returning
+    // the result transfers repository lock/lease ownership back to this scope.
+    let admission_state = Arc::clone(state);
+    let admission_cwd = cwd.to_path_buf();
     let repository_admission =
-        crate::workspace_prune::spawn_repository_admission(state, cwd, is_terminal).await;
-    let _spawn_guard = state.workspace_spawn_lock.lock().await;
-    let after_admission = ilium_platform::secure_fs::spawn_directory_generation(cwd);
-    let directory_unchanged = matches!(
-        (&before_admission, &after_admission),
-        (Ok(before), Ok(after)) if before == after
-    );
-    if repository_admission.is_err() || !directory_unchanged {
-        let mut tree = state.tree.write().await;
-        let panes = state.panes.read().await;
-        // Never tear down an already registered resource as a side effect of failed admission.
-        if !panes.contains_key(&pane_id) {
-            let _ = tree.remove_node(pane_id);
-        }
-        drop(panes);
-        drop(tree);
-        let reason = repository_admission
-            .as_ref()
-            .err()
-            .cloned()
-            .unwrap_or_else(|| {
-                "launch directory disappeared, changed identity, or is unsafe".into()
-            });
-        // Restore retains the failure on its placeholder; a fresh creation
-        // retains it on the surviving parent in handle_new_pane.
-        state.events.publish(ServerEvent::Error {
-            message: format!("pane {} was not started: {reason}", pane_id.0),
-        });
-        broadcast_and_persist(state).await;
-        return Err(RegisterPaneError::Admission(reason));
-    }
-    // A node removed while this caller waited must never cause even a transient PTY spawn.
-    if state.tree.read().await.get(pane_id).is_none() {
-        return Err(RegisterPaneError::NodeRemoved(pane_id));
-    }
-    // Reserve custody only after both admission and the node-generation
-    // fence pass. It is still durable before the PTY launch begins.
-    let custody_ticket = if is_terminal {
-        if inherited_custody_ticket.is_some() {
-            Ok(inherited_custody_ticket)
-        } else {
-            match repository_admission.as_ref().ok().and_then(Option::as_ref) {
-                Some(admission) => admission.begin_custody().await,
-                None => Ok(None),
-            }
-        }
-    } else {
-        Ok(None)
+        crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+            crate::workspace_prune::spawn_repository_admission(
+                &admission_state,
+                &admission_cwd,
+                is_terminal,
+            )
+            .await
+        }))
+        .join()
+        .await
+        .unwrap_or_else(|error| Err(format!("launch repository admission task failed: {error}")));
+    let repository_admission = match repository_admission {
+        Ok(admission) => admission,
+        Err(reason) => return Err(refuse_unregistered_pane_spawn(state, pane_id, reason).await),
     };
-    let custody_ticket = match custody_ticket {
-        Ok(ticket) => ticket,
-        Err(reason) => {
-            let mut tree = state.tree.write().await;
-            let panes = state.panes.read().await;
-            if !panes.contains_key(&pane_id) {
-                let _ = tree.remove_node(pane_id);
-            }
-            drop(panes);
-            drop(tree);
-            state.broadcast(ServerEvent::Error {
-                message: format!("pane {} was not started: {reason}", pane_id.0),
-            });
-            broadcast_and_persist(state).await;
-            return Err(RegisterPaneError::Admission(reason));
-        }
+    let before_generation = match before_admission {
+        Ok(generation) => generation,
+        Err(reason) => return Err(refuse_unregistered_pane_spawn(state, pane_id, reason).await),
     };
-    let (resource, output_receiver) = match kind {
-        PaneSnapshotKind::Editor { path } => (PaneResource::Editor { path }, None),
-        PaneSnapshotKind::Terminal(origin) => {
-            let worktree_root = if deferred_workspace.is_none() {
-                state
-                    .tree
-                    .read()
-                    .await
-                    .pane_workspace(pane_id)
-                    .map(|workspace| workspace.worktree_root.clone())
-            } else {
-                None
-            };
-            let identity = pane::PaneIdentityEnv {
-                pane_id,
-                session_name: &state.session_name,
-                socket_path: &state.socket_path,
-                worktree_root: worktree_root.as_deref(),
-            };
-            let execution = state.execution.get().ok_or_else(|| {
-                PtyError::Io(
-                    std::io::Error::other("server execution admission is not initialized").into(),
+    let pending = match kind {
+        PaneSnapshotKind::Editor { path } => {
+            let (spawn_guard, after_generation) =
+                match crate::workspace_prune::fenced_spawn_directory_generation(state, cwd).await {
+                    Ok(value) => value,
+                    Err(reason) => {
+                        return Err(refuse_unregistered_pane_spawn(state, pane_id, reason).await)
+                    }
+                };
+            if before_generation != after_generation {
+                return Err(refuse_unregistered_pane_spawn(
+                    state,
+                    pane_id,
+                    "launch directory changed identity during admission".into(),
                 )
-            })?;
-            let quota = execution.pty_quota_group();
-            ilium_platform::startup_timing::record("spawn_begin", 0, pane_id.0, 0, 0);
-            let spawned = pane::spawn_terminal_session(&origin, cwd, &identity, &quota)?;
-            ilium_platform::startup_timing::record(
-                "pty_ready",
-                0,
-                pane_id.0,
-                spawned.session.process_id().unwrap_or(0),
-                0,
-            );
+                .await);
+            }
+            PendingPaneRegistration {
+                resource: PaneResource::Editor { path },
+                output_receiver: None,
+                _native_scope: None,
+                _editor_spawn_guard: Some(spawn_guard),
+                _editor_repository: repository_admission,
+            }
+        }
+        PaneSnapshotKind::Terminal(origin) => {
+            // Publish durable protection before the native job or spawn fence.
+            // Dropping a ticket never clears its refusal token from disk.
+            let custody_ticket = if inherited_custody_ticket.is_some() {
+                Ok(inherited_custody_ticket)
+            } else {
+                match &repository_admission {
+                    Some(admission) => admission.begin_custody().await,
+                    None => Ok(None),
+                }
+            };
+            let custody_ticket = match custody_ticket {
+                Ok(ticket) => ticket,
+                Err(reason) => {
+                    return Err(refuse_unregistered_pane_spawn(state, pane_id, reason).await)
+                }
+            };
+            let native = crate::native_terminal_spawn::spawn(
+                state,
+                crate::native_terminal_spawn::NativeSpawnRequest {
+                    pane_id,
+                    origin,
+                    cwd: cwd.to_path_buf(),
+                    before_generation,
+                    repository: repository_admission,
+                    custody_ticket,
+                    deferred_workspace: deferred_workspace.is_some(),
+                },
+            )
+            .await;
+            let native = match native {
+                Ok(native) => native,
+                Err(crate::native_terminal_spawn::NativeSpawnError::Spawn(error)) => {
+                    return Err(RegisterPaneError::Spawn(error));
+                }
+                Err(crate::native_terminal_spawn::NativeSpawnError::NodeRemoved(pane_id)) => {
+                    return Err(RegisterPaneError::NodeRemoved(pane_id));
+                }
+                Err(crate::native_terminal_spawn::NativeSpawnError::Admission(reason)) => {
+                    return Err(refuse_unregistered_pane_spawn(state, pane_id, reason).await);
+                }
+            };
+            let crate::native_terminal_spawn::NativeSpawned {
+                spawned,
+                origin,
+                custody_ticket,
+                scope,
+            } = native;
             let pending_generated_session_id = spawned.session_id;
             let session = spawned.session;
-            // Subscribe before registration so the receiver retains output
-            // produced during the short registration window. The task itself
-            // starts only after the runtime is addressable (below).
             let output_receiver = (session.subscribe_output_bytes(), session.input_handle());
             let mut runtime = crate::pane::TerminalPaneRuntime::new(
                 session,
@@ -5882,10 +6322,13 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
                 runtime.deferred_workspace_origin = Some(original_origin);
                 runtime.missing_workspace = Some(reason);
             }
-            (
-                PaneResource::Terminal(Box::new(runtime)),
-                Some(output_receiver),
-            )
+            PendingPaneRegistration {
+                resource: PaneResource::Terminal(Box::new(runtime)),
+                output_receiver: Some(output_receiver),
+                _native_scope: Some(scope),
+                _editor_spawn_guard: None,
+                _editor_repository: None,
+            }
         }
     };
 
@@ -5909,11 +6352,21 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     let tree = state.tree.read().await;
     if tree.get(pane_id).is_none() {
         drop(tree);
-        teardown_pane_resource(pane_id, resource);
+        drop(pending);
         return Err(RegisterPaneError::NodeRemoved(pane_id));
     }
 
     let mut panes = state.panes.write().await;
+    // No await between dismantling the cleanup envelope and publication.
+    // The registry then owns the session; these guards still cover registration.
+    let PendingPaneRegistration {
+        resource,
+        output_receiver,
+        _native_scope,
+        _editor_spawn_guard,
+        _editor_repository,
+    } = pending;
+    let custom_identity = custom_agent_identity(&resource).cloned();
     panes.insert(pane_id, resource);
     if let Some((output_receiver, input)) = output_receiver {
         let forward_task = tokio::spawn(forward_output_bytes(
@@ -5930,6 +6383,11 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     }
     drop(panes);
     drop(tree);
+
+    state.broadcast(ServerEvent::PaneCustomAgentIdentity {
+        pane_id,
+        identity: custom_identity,
+    });
 
     if is_terminal {
         *state.last_terminal_working_directory.lock().await = Some(cwd.to_path_buf());
@@ -5955,10 +6413,39 @@ async fn forward_output_bytes(
 async fn forward_output_with_owner_status(
     state: Arc<ServerState>,
     pane_id: NodeId,
+    receiver: tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+    input: PtyInput,
+    owner_status: tokio::sync::watch::Receiver<OwnerStatus>,
+) {
+    let recovery_state = Arc::clone(&state);
+    let recovery_input = input.clone();
+    forward_output_with_recovery(
+        state,
+        pane_id,
+        receiver,
+        input,
+        owner_status,
+        move |after_sequence| {
+            let state = Arc::clone(&recovery_state);
+            let input = recovery_input.clone();
+            async move {
+                broadcast_terminal_recovery_after(&state, pane_id, &input, after_sequence).await
+            }
+        },
+    )
+    .await;
+}
+
+async fn forward_output_with_recovery<Recovery>(
+    state: Arc<ServerState>,
+    pane_id: NodeId,
     mut receiver: tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
     input: PtyInput,
     mut owner_status: tokio::sync::watch::Receiver<OwnerStatus>,
-) {
+    mut recover_output: impl FnMut(u64) -> Recovery,
+) where
+    Recovery: std::future::Future<Output = Result<Option<u64>, String>>,
+{
     let mut activity_gate = OutputActivityGate::new();
     let mut subscription_cache = TerminalSubscriptionCache::new();
     let mut text_trigger_tracker = crate::text_triggers::Matcher::default();
@@ -5966,6 +6453,10 @@ async fn forward_output_with_owner_status(
     // while nobody subscribed. Lag recovery starts after it, never at the
     // beginning of the entire bounded journal.
     let mut covered_sequence = 0_u64;
+    // One pending repair per owned forwarder, including a source that became
+    // silent or closed after lag. No new task, queue or storage bank is added.
+    let mut recovery_retry_at = None;
+    let mut output_closed = false;
     let (trigger_delivery_sender, trigger_delivery_receiver) = tokio::sync::mpsc::channel(64);
     let trigger_delivery_task = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(
         crate::text_triggers::run_deliveries(
@@ -6005,10 +6496,30 @@ async fn forward_output_with_owner_status(
                 }
             }
         }
+        if let Some(retry_at) = recovery_retry_at {
+            if !subscription_cache.has_subscribers(&state, pane_id) {
+                // Hidden panes are repaired by each connection on reveal.
+                recovery_retry_at = None;
+            } else if tokio::time::Instant::now() >= retry_at {
+                attempt_forwarder_recovery(
+                    pane_id,
+                    &mut covered_sequence,
+                    &mut recovery_retry_at,
+                    &mut recover_output,
+                )
+                .await;
+            }
+        }
+        if output_closed && recovery_retry_at.is_none() {
+            break;
+        }
         // Continue forwarding already-published bytes after a terminal status;
         // this task remains owned/cancelled by the same pane runtime as before.
         let received = tokio::select! {
-            received = receiver.recv() => received,
+            received = receiver.recv(), if !output_closed => received,
+            _ = tokio::time::sleep_until(recovery_retry_at.unwrap_or_else(tokio::time::Instant::now)), if recovery_retry_at.is_some() => {
+                continue;
+            },
             changed = owner_status.changed(), if !owner_finished => {
                 if changed.is_err() {
                     owner_finished = true;
@@ -6055,15 +6566,16 @@ async fn forward_output_with_owner_status(
                                     bytes: bytes.clone(),
                                 });
                                 covered_sequence = sequence;
-                            } else if let Some(sequence) = broadcast_terminal_recovery_after(
-                                &state,
-                                pane_id,
-                                &input,
-                                covered_sequence,
-                            )
-                            .await
-                            {
-                                covered_sequence = sequence;
+                            } else if recovery_retry_at.is_none() {
+                                // Preserve the original recovery-before-
+                                // trigger-processing order on the first try.
+                                attempt_forwarder_recovery(
+                                    pane_id,
+                                    &mut covered_sequence,
+                                    &mut recovery_retry_at,
+                                    &mut recover_output,
+                                )
+                                .await;
                             }
                         }
                         crate::text_triggers::process_output(
@@ -6088,15 +6600,14 @@ async fn forward_output_with_owner_status(
                         tracing::warn!(
                             "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                         );
-                        if let Some(sequence) = broadcast_terminal_recovery_after(
-                            &state,
-                            pane_id,
-                            &input,
-                            covered_sequence,
-                        )
-                        .await
-                        {
-                            covered_sequence = sequence;
+                        if recovery_retry_at.is_none() {
+                            attempt_forwarder_recovery(
+                                pane_id,
+                                &mut covered_sequence,
+                                &mut recovery_retry_at,
+                                &mut recover_output,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -6116,18 +6627,26 @@ async fn forward_output_with_owner_status(
                 // journal is repaired only if they become visible. Avoid a
                 // potentially 32 MiB replay allocation and an irrelevant IPC
                 // broadcast merely because a hidden forwarder fell behind.
-                if subscription_cache.has_subscribers(&state, pane_id) {
-                    if let Some(sequence) =
-                        broadcast_terminal_recovery_after(&state, pane_id, &input, covered_sequence)
-                            .await
-                    {
-                        covered_sequence = sequence;
-                    }
+                if subscription_cache.has_subscribers(&state, pane_id)
+                    && recovery_retry_at.is_none()
+                {
+                    attempt_forwarder_recovery(
+                        pane_id,
+                        &mut covered_sequence,
+                        &mut recovery_retry_at,
+                        &mut recover_output,
+                    )
+                    .await;
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                 drain_trigger_deliveries = true;
-                break;
+                output_closed = true;
+                // A final missing tail still needs repair; a closed source
+                // cannot provide another chunk to wake this owner.
+                if recovery_retry_at.is_none() {
+                    break;
+                }
             }
         }
     }
@@ -6138,6 +6657,36 @@ async fn forward_output_with_owner_status(
         // the semantic writer also fences its exact original PTY identity.
         if let Err(error) = trigger_delivery_task.join().await {
             tracing::error!(pane_id = pane_id.0, %error, "text trigger delivery owner failed during drain");
+        }
+    }
+}
+
+/// The same forwarder owner retains one gap and one retry instant. Neither a
+/// failed attempt nor unrelated output/status wakes may advance the watermark
+/// or postpone that instant. Log only the first failure of an incident; the
+/// existing capture helper separately reports each fixed Busy deadline.
+async fn attempt_forwarder_recovery<Recovery>(
+    pane_id: NodeId,
+    covered_sequence: &mut u64,
+    retry_at: &mut Option<tokio::time::Instant>,
+    recover_output: &mut impl FnMut(u64) -> Recovery,
+) where
+    Recovery: std::future::Future<Output = Result<Option<u64>, String>>,
+{
+    match recover_output(*covered_sequence).await {
+        Ok(sequence) => {
+            if let Some(sequence) = sequence {
+                *covered_sequence = sequence;
+            }
+            *retry_at = None;
+        }
+        Err(error) => {
+            if retry_at.is_none() {
+                tracing::warn!(pane_id = pane_id.0, after_sequence = *covered_sequence, %error,
+                    "terminal output recovery deferred; pending repair retained");
+            }
+            *retry_at =
+                Some(tokio::time::Instant::now() + TERMINAL_FORWARDER_RECOVERY_RETRY_INTERVAL);
         }
     }
 }
@@ -6239,15 +6788,49 @@ async fn collect_output_burst_with_window(
     }
 }
 
-/// Repairs a forwarder gap with the exact tail it has not yet covered. Keep
-/// the pane read lock through the synchronous broadcast so a replacement
-/// cannot interleave its new tree state before this old-session event.
+/// Copies the exact missing tail outside registry guards. Journal contention
+/// refuses after the existing fixed deadline; the forwarder owns later retry.
 async fn broadcast_terminal_recovery_after(
     state: &ServerState,
     pane_id: NodeId,
     expected_input: &PtyInput,
     after_sequence: u64,
+) -> Result<Option<u64>, String> {
+    let Some((input, recovery)) = capture_terminal_journal(
+        state,
+        pane_id,
+        Some(expected_input),
+        "output forwarder recovery",
+        |handle| handle.try_output_recovery_after(after_sequence),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let Some(recovery) = recovery else {
+        return Ok(None);
+    };
+    Ok(
+        broadcast_captured_terminal_recovery(state, pane_id, &input, after_sequence, recovery)
+            .await,
+    )
+}
+
+/// A replacement must not interleave its new tree state before old-session
+/// bytes. All journal copying is complete before this short registry fence;
+/// only identity validation and the existing synchronous broadcast run inside.
+async fn broadcast_captured_terminal_recovery(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected_input: &PtyInput,
+    after_sequence: u64,
+    recovery: PtyOutputRecovery,
 ) -> Option<u64> {
+    let through_sequence = match &recovery {
+        PtyOutputRecovery::Delta(chunk) => chunk.sequence,
+        PtyOutputRecovery::Replay(replay) => replay.through_sequence,
+    };
+    let event = terminal_recovery_output_event(pane_id, after_sequence, recovery);
     let panes = state.panes.read().await;
     let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
         return None;
@@ -6255,14 +6838,9 @@ async fn broadcast_terminal_recovery_after(
     if !expected_input.same_session(&runtime.session.input_handle()) {
         return None;
     }
-    let event = terminal_recovery_from_session(pane_id, &runtime.session, after_sequence)?;
-    let through_sequence = match &event {
-        ServerEvent::ScreenUpdate { sequence, .. } => *sequence,
-        ServerEvent::TerminalReplay {
-            through_sequence, ..
-        } => *through_sequence,
-        _ => return None,
-    };
+    if let Some(preview) = screen_preview_before_replay(pane_id, runtime, &event) {
+        state.broadcast(preview);
+    }
     state.broadcast(event);
     Some(through_sequence)
 }
@@ -6283,21 +6861,30 @@ pub(crate) async fn terminal_recovery_event(
     terminal_recovery_from_session(pane_id, &runtime.session, after_sequence)
 }
 
+#[cfg(test)]
 fn terminal_recovery_from_session(
     pane_id: NodeId,
     session: &ilium_pty::PtySession,
     after_sequence: u64,
 ) -> Option<ServerEvent> {
-    match session.output_recovery_after(after_sequence)? {
-        ilium_pty::PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
+    session
+        .output_recovery_after(after_sequence)
+        .map(|recovery| terminal_recovery_output_event(pane_id, after_sequence, recovery))
+}
+
+fn terminal_recovery_output_event(
+    pane_id: NodeId,
+    after_sequence: u64,
+    recovery: PtyOutputRecovery,
+) -> ServerEvent {
+    match recovery {
+        PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
             pane_id,
             first_sequence: after_sequence.saturating_add(1),
             sequence: chunk.sequence,
             bytes: chunk.bytes.to_vec(),
-        }),
-        ilium_pty::PtyOutputRecovery::Replay(replay) => {
-            Some(terminal_replay_event(pane_id, replay))
-        }
+        },
+        PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
     }
 }
 
@@ -6311,6 +6898,22 @@ fn terminal_snapshot_event(pane_id: NodeId, snapshot: ilium_pty::PtyScreenSnapsh
         bytes: snapshot.bytes,
         is_complete: snapshot.is_complete,
     }
+}
+
+/// Live screen sent before any replay, so the receiver can show the current
+/// screen while the replayed history parses. The preview is a snapshot only
+/// and never changes history. The size of the event is not a test: attach
+/// replays are capped at `TERMINAL_RECOVERY_EVENT_MAX_BYTES`, so a size
+/// threshold above that cap would never send a preview on the attach path.
+fn screen_preview_before_replay(
+    pane_id: NodeId,
+    runtime: &crate::pane::TerminalPaneRuntime,
+    event: &ServerEvent,
+) -> Option<ServerEvent> {
+    let ServerEvent::TerminalReplay { .. } = event else {
+        return None;
+    };
+    Some(screen_preview_event(pane_id, &runtime.session))
 }
 
 /// Converts one atomically captured PTY journal snapshot into the protocol
@@ -6827,6 +7430,19 @@ async fn acknowledge_progress_outcome_for_input(
     pane_id: NodeId,
     expected_input: Option<&PtyInput>,
 ) {
+    // Most keys have no unread progress outcome. Avoid two session-wide
+    // exclusive locks for this overwhelmingly common no-op. A new outcome
+    // after this read remains unread until the next user action.
+    if !state
+        .tree
+        .read()
+        .await
+        .pane_progress(pane_id)
+        .iter()
+        .any(|progress| progress.has_unread_outcome())
+    {
+        return;
+    }
     let acknowledged = {
         let mut tree = state.tree.write().await;
         let mut panes = state.panes.write().await;
@@ -8565,6 +9181,34 @@ async fn handle_kill_session(state: &Arc<ServerState>) -> crate::recovery::Resol
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn custom_agent_replacement_preserves_only_compatible_profile_identity() {
+        use crate::pane::TerminalOrigin;
+        use ilium_core::custom_agent::CustomAgentIdentity;
+        use ilium_core::BuiltinAgentProvider;
+        let identity = CustomAgentIdentity {
+            profile_id: "work".into(),
+            base_provider: BuiltinAgentProvider::Claude,
+        };
+        let origin = TerminalOrigin::CustomAgent {
+            identity: identity.clone(),
+            command_line: "claude".into(),
+            frozen: true,
+        };
+        for command in [
+            "claude",
+            "claude --resume",
+            "claude --session-id 44444444-4444-4444-8444-444444444444",
+        ] {
+            assert!(
+                matches!(super::replacement_terminal_origin(Some(&origin), command), TerminalOrigin::CustomAgent { identity: ref actual, frozen: false, .. } if actual == &identity)
+            );
+        }
+        assert!(
+            matches!(super::replacement_terminal_origin(Some(&origin), "codex"), TerminalOrigin::Command(command) if command == "codex")
+        );
+    }
+
     // The `unwrap`s sit inside closures that are only sized, never called.
     #[allow(clippy::unnecessary_literal_unwrap)]
     #[test]
@@ -10257,6 +10901,88 @@ mod tests {
         assert!(agent_detection_settings_save_cost(&oversized_path, &valid).is_err());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn replacing_shared_worktree_member_preserves_owner_directory_and_sibling() {
+        let directory = tempfile::tempdir().expect("isolated replacement fixture");
+        let state = snapshot_io_handler_state(&directory);
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("execution bank"))
+            .is_ok());
+        let root = directory.path().join("worktree");
+        let launch_cwd = root.join("src");
+        std::fs::create_dir_all(&launch_cwd).unwrap();
+        let workspace = ilium_core::PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: directory.path().join(".git"),
+            worktree_root: root,
+            branch: "agent/shared".into(),
+            base_ref: "main".into(),
+            base_commit: "fixture".into(),
+            created_by_ilium: false,
+            created_at_unix: 0,
+        };
+        let (old, sibling, owner, sibling_before) = {
+            let mut tree = state.tree.write().await;
+            let project = tree.add_project(directory.path().to_path_buf()).unwrap();
+            let old = tree
+                .add_pane(project, "old", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(old, launch_cwd.clone()).unwrap();
+            tree.set_pane_workspace(old, Some(workspace.clone()))
+                .unwrap();
+            let sibling = tree
+                .add_pane(project, "sibling", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(sibling, launch_cwd.clone())
+                .unwrap();
+            tree.set_pane_workspace(sibling, Some(workspace.clone()))
+                .unwrap();
+            let owner = tree.worktree_container_for_node(old).unwrap();
+            (old, sibling, owner, tree.get(sibling).unwrap().clone())
+        };
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            handle_replace_pane_with_command(&state, old, "exec cat".into(), &sender, None, None),
+        )
+        .await
+        .expect("replacement finishes");
+        while let Ok(reply) = replies.try_recv() {
+            assert!(!matches!(reply, ServerEvent::Error { .. }), "{reply:?}");
+        }
+        let replacement = {
+            let tree = state.tree.read().await;
+            assert!(
+                tree.get(old).is_none(),
+                "successful replacement closes only old member"
+            );
+            assert_eq!(tree.get(sibling), Some(&sibling_before));
+            let children = tree.children_of(owner).unwrap();
+            assert_eq!(children.len(), 2);
+            assert_eq!(children[1], sibling);
+            let replacement = children[0];
+            assert_ne!(replacement, old);
+            assert_eq!(tree.worktree_container_for_node(replacement), Some(owner));
+            assert_eq!(tree.pane_cwd(replacement), Some(launch_cwd.as_path()));
+            assert_eq!(tree.pane_workspace(replacement), Some(&workspace));
+            tree.validate().unwrap();
+            replacement
+        };
+        assert!(matches!(
+            state.panes.read().await.get(&replacement),
+            Some(PaneResource::Terminal(_))
+        ));
+        handle_close_pane(&state, replacement, &sender).await;
+        handle_close_pane(&state, sibling, &sender).await;
+        state
+            .execution
+            .get()
+            .expect("execution bank")
+            .request_shutdown();
+    }
+
     #[test]
     fn pane_replacement_reservations_are_per_pane_and_released_on_drop() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -11115,7 +11841,8 @@ mod tests {
             assert!(tree.get(pane_id).unwrap().has_activity_since_focus());
         }
 
-        handle_set_pane_focus(&state, pane_id, true).await;
+        let (direct_tx, _direct_rx) = DirectEventSender::channel(16);
+        handle_set_pane_focus(&state, pane_id, true, &direct_tx).await;
         assert!(matches!(
             events.recv().await,
             Ok(ServerEvent::NodeFocusCheckpointChanged {
@@ -11492,6 +12219,75 @@ mod tests {
         execution.request_shutdown();
     }
 
+    /// Catches a recap replay that reacquires the source tree while attach
+    /// already holds its read guard and a writer is queued ahead of that read.
+    #[tokio::test]
+    async fn attach_recap_replay_completes_with_a_tree_writer_already_queued() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let directory = tempfile::tempdir().expect("isolated attach recap state");
+        let state = snapshot_io_handler_state(&directory);
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server execution"))
+            .is_ok());
+        let execution = state.execution.get().expect("execution owner");
+        let quota = execution.client.quota_group();
+        let before = quota.snapshot();
+        let pressure = execution
+            .client
+            .try_reserve_storage(before.limits.worker_bytes - before.worker_bytes)
+            .expect("hold General admission before attach snapshot construction");
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
+        let mut attach = Box::pin(handle_attach(
+            &state,
+            &state.session_name,
+            &direct_tx,
+            false,
+        ));
+        let mut context = Context::from_waker(Waker::noop());
+
+        // The first pending point is storage admission, after the estimate
+        // released tree and panes. Taking panes now gates the final build.
+        assert!(attach.as_mut().poll(&mut context).is_pending());
+        assert!(
+            state.tree.try_write().is_ok(),
+            "estimate must release tree before byte admission"
+        );
+        let panes = state
+            .panes
+            .try_write()
+            .expect("estimate must release panes before byte admission");
+        drop(pressure);
+        assert!(attach.as_mut().poll(&mut context).is_pending());
+        assert!(
+            state.tree.try_write().is_err(),
+            "final snapshot build must now be holding its tree read"
+        );
+
+        // Polling the real writer once places it ahead of any later reader.
+        // Keep it queued: recap replay must use the already captured tree.
+        let mut writer = Box::pin(state.tree.write());
+        assert!(writer.as_mut().poll(&mut context).is_pending());
+        drop(panes);
+        let completed =
+            tokio::time::timeout(std::time::Duration::from_secs(1), attach.as_mut()).await;
+        drop(attach);
+        drop(writer);
+        execution.request_shutdown();
+        completed.expect("attach deadlocked while recap replay reacquired the source tree");
+        drop(direct_tx);
+        let mut saw_sync_complete = false;
+        while let Some(event) = direct_rx.recv().await {
+            saw_sync_complete |= matches!(event, ServerEvent::InitialStateSyncComplete);
+        }
+        assert!(
+            saw_sync_complete,
+            "attach must deliver a complete seed, not silently close"
+        );
+    }
+
     #[tokio::test]
     async fn initial_state_snapshot_stays_byte_admitted_until_direct_queue_consumes_it() {
         let (state, _pane_id, _directory) =
@@ -11500,7 +12296,9 @@ mod tests {
         assert!(state.execution.get().is_some());
         let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
 
-        send_initial_state(&state, &direct_tx, false).await;
+        send_initial_state(&state, &direct_tx, false, None)
+            .await
+            .expect("initial state storage and queue admission");
         drop(direct_tx);
 
         let mut snapshot_storage = None;
@@ -13094,6 +13892,7 @@ mod tests {
             missing_sequence.saturating_sub(1),
         )
         .await
+        .expect("journal capture succeeds")
         .expect("retained output needs a recovery broadcast");
         let published_event = tokio::time::timeout(std::time::Duration::from_secs(1), async {
             loop {
@@ -13124,7 +13923,8 @@ mod tests {
                 &other_input,
                 missing_sequence.saturating_sub(1),
             )
-            .await,
+            .await
+            .expect("stale identity is a clean refusal, not a capture error"),
             None,
             "a replaced pane owner must not broadcast its predecessor's output"
         );
@@ -13694,6 +14494,279 @@ mod tests {
             .await
             .contains_key(&project_id));
     }
+    // A capture callback deliberately reports native contention, then uses the
+    // real journal. Holding the registry read across that retry is the bug.
+    #[tokio::test(flavor = "current_thread")]
+    async fn journal_capture_retries_without_pinning_the_pane_registry() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("journal-registry-progress").await;
+        let mut attempts = 0;
+        let result = capture_terminal_journal(
+            &state,
+            pane_id,
+            None,
+            "history registry progress regression",
+            |capture| {
+                assert!(
+                    state.panes.try_write().is_ok(),
+                    "native capture must run after releasing the registry"
+                );
+                attempts += 1;
+                if attempts == 1 {
+                    Err(ilium_pty::PtyCaptureError::JournalBusy)
+                } else {
+                    capture.try_output_history_before(u64::MAX, 1024)
+                }
+            },
+        )
+        .await;
+        teardown_state_panes(&state);
+        assert!(result.unwrap().is_some());
+    }
+
+    async fn forwarder_journal_fixture(
+        name: &str,
+    ) -> (
+        Arc<ServerState>,
+        NodeId,
+        PtyInput,
+        ilium_pty::PtyOutputChunk,
+        ilium_pty::PtyOutputReplay,
+        tempfile::TempDir,
+    ) {
+        let (state, pane_id, directory) = state_with_one_terminal_pane(name).await;
+        let (input, mut changed) = {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture terminal missing");
+            };
+            runtime.abort_background_tasks();
+            (
+                runtime.session.input_handle(),
+                runtime.session.subscribe_screen_changed(),
+            )
+        };
+        for marker in [
+            b"JOURNAL-FIRST\r".as_slice(),
+            b"JOURNAL-SECOND\r".as_slice(),
+        ] {
+            input.write(marker).unwrap().wait().await.unwrap();
+            let visible = &marker[..marker.len() - 1];
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let capture = terminal_capture_handle(&state, pane_id).await.unwrap();
+                    let history = retry_terminal_capture(pane_id, "fixture output", || {
+                        capture.try_output_history_before(u64::MAX, 1024 * 1024)
+                    })
+                    .await
+                    .unwrap();
+                    if history
+                        .bytes
+                        .windows(visible.len())
+                        .any(|bytes| bytes == visible)
+                    {
+                        break;
+                    }
+                    changed.changed().await.unwrap();
+                }
+            })
+            .await
+            .expect("fixture marker did not reach the real journal");
+        }
+        let replay = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                panic!("fixture terminal missing");
+            };
+            runtime.session.output_replay()
+        };
+        assert!(
+            replay.through_sequence >= 2,
+            "separate writes must yield a gap"
+        );
+        let capture = terminal_capture_handle(&state, pane_id).await.unwrap();
+        let recovery = retry_terminal_capture(pane_id, "fixture last chunk", || {
+            capture.try_output_recovery_after(replay.through_sequence - 1)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        let PtyOutputRecovery::Delta(chunk) = recovery else {
+            panic!("tiny fixture must retain its last chunk");
+        };
+        state.replace_terminal_subscriptions(
+            false,
+            &HashSet::new(),
+            false,
+            &HashSet::from([pane_id]),
+        );
+        (state, pane_id, input, chunk, replay, directory)
+    }
+
+    async fn assert_silent_forwarder_repair(close_stream: bool) {
+        let (state, pane_id, input, chunk, replay, _directory) =
+            forwarder_journal_fixture("journal-silent-repair").await;
+        let (_status_sender, status_receiver) = tokio::sync::watch::channel(OwnerStatus::Running);
+        let (sender, receiver) = tokio::sync::broadcast::channel(4);
+        sender.send(chunk).unwrap();
+        let sender = (!close_stream).then_some(sender);
+        let refused = Arc::new(tokio::sync::Notify::new());
+        let recovery_state = Arc::clone(&state);
+        let recovery_input = input.clone();
+        let recovery_refused = Arc::clone(&refused);
+        let attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recovery_attempts = Arc::clone(&attempts);
+        let allow_repair = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let recovery_allowed = Arc::clone(&allow_repair);
+        let mut events = state.events.subscribe_owned();
+        let mut task = tokio::spawn(forward_output_with_recovery(
+            Arc::clone(&state),
+            pane_id,
+            receiver,
+            input,
+            status_receiver,
+            move |after_sequence| {
+                let state = Arc::clone(&recovery_state);
+                let input = recovery_input.clone();
+                let refused = Arc::clone(&recovery_refused);
+                let attempts = Arc::clone(&recovery_attempts);
+                let allowed = Arc::clone(&recovery_allowed);
+                async move {
+                    attempts.lock().unwrap().push(tokio::time::Instant::now());
+                    if !allowed.load(std::sync::atomic::Ordering::SeqCst) {
+                        refused.notify_one();
+                        Err("synthetic exhausted journal-capture deadline".to_owned())
+                    } else {
+                        broadcast_terminal_recovery_after(&state, pane_id, &input, after_sequence)
+                            .await
+                    }
+                }
+            },
+        ));
+        let first_refusal = tokio::time::timeout(Duration::from_secs(2), async {
+            refused.notified().await;
+        })
+        .await;
+        // An immediately failing source must not run a 10 ms poison/error
+        // loop. This bound is independent of the production interval value.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        allow_repair.store(true, std::sync::atomic::Ordering::SeqCst);
+        let repaired = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if let ServerEvent::ScreenUpdate {
+                    pane_id: event_pane,
+                    first_sequence,
+                    sequence,
+                    bytes,
+                } = events.recv().await.unwrap()
+                {
+                    if event_pane == pane_id {
+                        break (first_sequence, sequence, bytes);
+                    }
+                }
+            }
+        })
+        .await;
+        drop(sender);
+        let completed = tokio::time::timeout(Duration::from_secs(2), &mut task).await;
+        if completed.is_err() {
+            task.abort();
+            let _ = task.await;
+        }
+        teardown_state_panes(&state);
+        let (first_sequence, sequence, bytes) =
+            repaired.expect("the owned timer must repair a silent source after a refused capture");
+        assert_eq!(first_sequence, 1);
+        assert!(sequence >= replay.through_sequence);
+        assert!(
+            bytes.starts_with(&replay.bytes),
+            "no missing prefix may be dropped"
+        );
+        assert!(
+            first_refusal.is_ok(),
+            "the fixture must force a capture refusal"
+        );
+        let attempts = attempts.lock().unwrap();
+        assert!(
+            attempts
+                .windows(2)
+                .all(|pair| { pair[1].duration_since(pair[0]) >= Duration::from_millis(250) }),
+            "immediate refusal must use a paced retry even on a loaded runner"
+        );
+        assert!(
+            matches!(completed, Ok(Ok(()))),
+            "EOF must drain the pending repair and finish"
+        );
+    }
+
+    // Removing the pending-repair timer strands this silent, open source.
+    #[tokio::test(flavor = "current_thread")]
+    async fn refused_recovery_is_retried_without_another_output_chunk() {
+        assert_silent_forwarder_repair(false).await;
+    }
+
+    // Treating EOF as permission to drop a pending gap loses the final bytes.
+    #[tokio::test(flavor = "current_thread")]
+    async fn refused_final_recovery_is_retried_after_the_output_stream_closes() {
+        assert_silent_forwarder_repair(true).await;
+    }
+
+    // Removing the final same-session check would publish old bytes after a
+    // queued writer installed a replacement at exactly the same pane id.
+    #[tokio::test(flavor = "current_thread")]
+    async fn prepared_recovery_cannot_overtake_a_queued_terminal_replacement() {
+        let (state, pane_id, input, _, replay, _directory) =
+            forwarder_journal_fixture("journal-replacement-old").await;
+        let (other, other_id, _other_directory) =
+            state_with_one_terminal_pane("journal-replacement-new").await;
+        let replacement = other.panes.write().await.remove(&other_id).unwrap();
+        let capture = terminal_capture_handle(&state, pane_id).await.unwrap();
+        let recovery = retry_terminal_capture(pane_id, "prepare replacement regression", || {
+            capture.try_output_recovery_after(0)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        let mut events = state.events.subscribe_owned();
+        let held = state.panes.read().await;
+        let mut replace = Box::pin(async {
+            state
+                .panes
+                .write()
+                .await
+                .insert(pane_id, replacement)
+                .unwrap()
+        });
+        std::future::poll_fn(|context| {
+            assert!(std::future::Future::poll(replace.as_mut(), context).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let mut publish = Box::pin(broadcast_captured_terminal_recovery(
+            &state, pane_id, &input, 0, recovery,
+        ));
+        std::future::poll_fn(|context| {
+            assert!(std::future::Future::poll(publish.as_mut(), context).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(held);
+        let original = replace.await;
+        let published = publish.await;
+        let stale = std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
+            matches!(event, ServerEvent::ScreenUpdate { pane_id: id, sequence, .. }
+                if id == pane_id && sequence >= replay.through_sequence)
+        });
+        teardown_pane_resource(pane_id, original);
+        teardown_state_panes(&state);
+        teardown_state_panes(&other);
+        assert_eq!(published, None);
+        assert!(
+            !stale,
+            "replacement must fence every prepared old-session event"
+        );
+    }
+
     mod title_safety_regressions {
         include!("title_safety_tests.rs");
     }
@@ -13705,5 +14778,61 @@ mod tests {
     mod ordered_owner_regressions {
         use super::*;
         include!("ordered_owner_regressions.rs");
+    }
+}
+
+#[cfg(test)]
+mod terminal_capture_retry_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_contention_never_moves_the_original_capture_deadline() {
+        let started = tokio::time::Instant::now();
+        let deadline = started + TERMINAL_CAPTURE_BUSY_TIMEOUT;
+        for wake in 0..10_000u64 {
+            let now = started + std::time::Duration::from_micros(wake * 500);
+            assert!(terminal_capture_retry_at(now, deadline).is_some_and(|retry| retry <= deadline));
+        }
+        assert_eq!(terminal_capture_retry_at(deadline, deadline), None);
+        assert_eq!(
+            terminal_capture_retry_at(deadline + std::time::Duration::from_secs(1), deadline),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_contention_can_exceed_all_eight_data_churn_attempts() {
+        let mut calls = 0;
+        let value = retry_terminal_capture(NodeId(42), "synthetic contention regression", || {
+            calls += 1;
+            if calls <= 12 {
+                Err(ilium_pty::PtyCaptureError::ParserBusy)
+            } else {
+                Ok(77)
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(value, 77);
+        assert_eq!(calls, 13);
+    }
+
+    #[tokio::test]
+    async fn poisoned_capture_does_not_retry_or_relabel_itself_as_contention() {
+        let mut calls = 0;
+        let result = retry_terminal_capture::<()>(
+            NodeId(43),
+            "synthetic poisoned source regression",
+            || {
+                calls += 1;
+                Err(ilium_pty::PtyCaptureError::JournalPoisoned)
+            },
+        )
+        .await;
+        assert_eq!(calls, 1);
+        let error = result.unwrap_err();
+        assert!(error.contains("unavailable"));
+        assert!(error.contains("43"));
+        assert!(error.contains("poisoned"));
     }
 }

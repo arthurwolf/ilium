@@ -669,7 +669,7 @@ export const { lifecycle, handler, detector } = definePlugin({
 <td>The manifest signature is not registered, <code>detector</code> is not called for the plugin, and <code>register_signature</code> returns <code>not-permitted</code>. Agents only this plugin recognises stay unidentified.</td>
 </tr>
 <tr>
-<td>A field breaks a P5 limit</td>
+<td>A field breaks a limit of the signature fields table</td>
 <td><code>invalid-argument</code>, with the field path, for example <code>process_names[2]: empty name</code>.</td>
 </tr>
 <tr>
@@ -689,12 +689,16 @@ export const { lifecycle, handler, detector } = definePlugin({
 <td>A trap counts as a failure under the restart rule. A missed deadline keeps the last activity.</td>
 </tr>
 <tr>
+<td><code>classify</code> returns an <code>objective</code> or <code>goal</code> over 1,024 bytes</td>
+<td>The value is cut at the last whole UTF-8 character within 1,024 bytes and a warning is logged. The classification is still used.</td>
+</tr>
+<tr>
 <td>An action has no entry in the signature</td>
 <td><code>agent-action</code> returns <code>refused(unsupported)</code>.</td>
 </tr>
 <tr>
 <td>An action is not allowed in the current activity</td>
-<td><code>agent-action</code> returns <code>refused(conflict)</code>, for example <code>agent is working</code>.</td>
+<td><code>agent-action</code> returns <code>refused(conflict)</code>, with a message named after the current activity, for example <code>agent is working</code> or <code>agent is awaiting approval</code>.</td>
 </tr>
 <tr>
 <td><code>session_scope</code> is absent</td>
@@ -839,6 +843,7 @@ export const { lifecycle, handler, detector } = definePlugin({
 <ul>
 <li>A signature has at most 32 actions, and each action's <code>keys</code> is at most 1 KiB.</li>
 <li>Each <code>identify</code> and <code>classify</code> call has a 20 ms soft deadline (<code>detector_deadline_ms</code>, T1 ceiling 50 ms). The rules for a slow detector and the per-poll budget are in the detection loop section above.</li>
+<li>The <code>objective</code> and <code>goal</code> returned by <code>classify</code> are each at most 1,024 bytes of UTF-8. A longer value is cut, not refused.</li>
 <li>The <code>id</code>, <code>process_names</code> and <code>aliases</code> limits are those of the table in the signature fields section.</li>
 </ul>
 <h2 id="see-also">See also</h2>
@@ -851,7 +856,7 @@ export const { lifecycle, handler, detector } = definePlugin({
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
 <h3 id="security">Security</h3>
-<p><strong>[SEC-042]</strong> <code>agent.signatures</code> changes how agents are detected, so a wrong signature can hide an agent's state. The grant is high risk and signatures are validated against the regex limits of [SEC-046]. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
+<p><strong>[SEC-042]</strong> <code>agent.signatures</code> changes how agents are detected, so a wrong signature can hide an agent's state. The grant is normal risk (the constraints of [SEC-042] in the sandbox reference keep it so) and signatures are validated against the regex limits of [SEC-046]. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-agent-read-prompts/"><small>Previous</small>agent.read-prompts</a><a class="next" href="/pages/capability-always-granted/"><small>Next</small>Always-granted capabilities</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

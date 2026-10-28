@@ -1619,7 +1619,7 @@
 <td>37</td>
 <td><code>set-status-segment</code></td>
 <td>ui.chrome</td>
-<td>10 per second per segment</td>
+<td>10 per second per slot (the segment id is the slot)</td>
 </tr>
 <tr>
 <td>38</td>
@@ -2130,20 +2130,20 @@
 </tbody>
 </table>
 <p><strong>Rust test sketch</strong></p>
-<pre><code class="language-rust">use ilium_plugin_sdk::testing::{FakeHost, Grants};
+<pre><code class="language-rust">use ilium_plugin_sdk::testing::{FakeHost, Side};
 
 #[test]
 fn clipboard_write_needs_its_grant() {
-    let mut host = FakeHost::client(Grants::none());
+    let mut host = FakeHost::new().side(Side::Client);
     let result = host.call_clipboard_write(&quot;hello&quot;);
     assert_eq!(result.unwrap_err().code, ErrorCode::NotPermitted);
 }
 </code></pre>
 <p><strong>TypeScript test sketch</strong></p>
-<pre><code class="language-ts">import { FakeHost, grants } from '@ilium/plugin-sdk/testing';
+<pre><code class="language-ts">import { createFakeHost } from '@ilium/plugin-sdk/testing';
 
 test('clipboard write needs its grant', () =&gt; {
-  const host = new FakeHost('client', grants());
+  const host = createFakeHost().side('client');
   expect(() =&gt; host.clipboard.writeText('hello')).toThrow(expect.objectContaining({ code: 'not-permitted' }));
 });
 </code></pre>

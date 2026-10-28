@@ -68,7 +68,7 @@ impl MenuProvider for Actions {
             MenuEntry::new("freeze", if frozen { "Unfreeze" } else { "Freeze" }).icon("❄"),
             MenuEntry::new("copy", "Copy").submenu(),
             MenuEntry::new("copy-last", "Last answer").parent("copy"),
-            MenuEntry::new("close", "Close pane").danger().separator_before()
+            MenuEntry::new("close", "Close pane").danger().separator_before(true)
                 .disabled_reason_if(context.pane.is_none(), "No pane here"),
         ]
     }
@@ -106,7 +106,7 @@ A `menu` widget inside a popup anchored `at-pointer` is a context menu for a vie
 | Provider over 20 ms | static entries only |
 | Over 64 entries | cut with `… N more` |
 | Submenu depth over 2 | `manifest.menu-depth` (static) or truncated (dynamic) |
-| Entry command unknown | install refused or entry disabled |
+| Entry command unknown (not declared in `contributes.commands`) | The entry is left out of the menu, the rest opens normally, and the host writes one `warn` line naming the entry id to the plugin log. The install is not refused |
 
 ### See also
 

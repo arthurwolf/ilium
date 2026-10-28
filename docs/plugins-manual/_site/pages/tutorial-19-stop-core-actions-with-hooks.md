@@ -107,7 +107,7 @@ Points to notice:
 - `handler` is a name that your code dispatches on. It reaches you as `call.extension`. The `id` is for the user: it is shown on the Extensions tab and is unique per contributor and point.
 - `priority` runs from 0 to 100. Lower runs first, and ties go in plugin id order. Quiet night runs at 20 so that it refuses before other handlers spend their time. The user can override the order, as step 5 shows.
 - Each grant names one point. There is no wildcard, and no grant that covers every point. A wildcard fails with `manifest.grant-wildcard`.
-- `@0.1.0` asks for a minimum version of the point. The core plugin's point is at that version or newer in the same major. Otherwise the extension is dormant.
+- `@0.1.0` asks for a minimum version of the point. The core plugin's point must satisfy the caret range `>=0.1.0 <0.2.0`. Otherwise the extension is dormant.
 - `activation: ["startup"]` keeps the plugin loaded so that the first call does not pay a start. A lazy plugin would start on the first hook call, and that call would count against its 20 ms.
 
 ### Step 2: the handlers
@@ -310,7 +310,7 @@ The mode of the point decides what a chain does with your reply.
 Three rules limit the damage that a handler can do.
 
 1. **Fail open.** A timeout, a trap or an error counts as `pass`. A slow handler never blocks a notice. It is logged as `extension.handler-timeout`.
-2. **Three strikes.** Three breaches in a row disable that extension until the plugin restarts. The Plugins screen shows `stopped after 3 timeouts` and a Reset button. The other two extensions of the package keep running.
+2. **Three strikes.** Three breaches in a row disable that extension until the plugin restarts. The Plugins screen shows `stopped after 3 failures` and a Reset button. The other two extensions of the package keep running.
 3. **A 100 ms chain.** The whole chain has a cap of 100 ms. Handlers after the cap are skipped and logged, so the action goes on.
 
 A handler runs in the contributor's own instance. A T1 plugin shares the Ilium process, so a call is cheap. A T2 or T3 plugin costs one helper round trip per call, so do not use a hook on a path hotter than about 100 calls per second.
@@ -512,7 +512,7 @@ If a handler became slow, for example by reading a file, the log would show the 
 <span class="t-dim">2026-10-12 00:12:15 warn example.quiet-hours</span>
 <span class="t-warn">deadline breach in hook-handler: limit 20 ms</span>
 <span class="t-dim">2026-10-12 00:12:19 warn example.quiet-hours</span>
-<span class="t-err">quiet-night stopped after 3 timeouts</span>
+<span class="t-err">quiet-night stopped after 3 failures</span>
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. Notices went through during these breaches, because a timeout counts as pass. The user presses Reset to turn the extension on again.</figcaption>
 </figure>

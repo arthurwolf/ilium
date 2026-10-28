@@ -299,7 +299,8 @@ The probe is a shell command line (at most 16 KiB). It must print exactly one JS
 | --- | --- | --- |
 | `job_id` | yes | A stable, non-empty identifier of the task, at most 256 bytes. It must not change between probes of one monitor. |
 | `status` | yes | One of `not-started-yet`, `running`, `error`, `done`. |
-| `percent` | yes | A finite number from 0 to 100. `done` is shown as exactly 100; any other value for `done` is rejected. |
+| `percent` | no | A finite number from 0 to 100 when progress is measurable. Omit it when progress is unavailable; `done` is shown as exactly 100. |
+| `indeterminate` | no | Set to `true` when progress cannot be measured. The gauge and estimate are hidden. |
 | `message` | recommended | One line, at most 2048 bytes, always visible in the pane footer. It should make sense to someone who has not read the agent's session. |
 | `details` | optional | Multi-line text, at most 8192 bytes, shown when the user hovers the footer. |
 | `eta_seconds` | optional | Whole seconds the task still needs (at most 315360000). Replaces the pace-based ETA in the footer when present. |
@@ -796,3 +797,27 @@ ilium --reset-session new-session scratch
 | `new-pane` prints `no confirmation received from the server` | The server is busy or the session is not the one you meant. Check `ilium ls` and `--session-name`. |
 | `chat send` says the project does not have a chatroom | Run `ilium chat init` first. |
 | After installing a new build the old behaviour persists | A running server keeps its old executable. Use `ilium --restart-server` (panes are relaunched from the snapshot) when you are ready. |
+
+## Shared resource queues
+
+`ilium resource` (alias `ilium ressource`) coordinates exclusive access across linked projects on this machine. Commands connect to an existing project server; they never start or restart one. Use `--project PATH` and optionally `--session NAME` to select it. Agent operations infer the current pane or accept `--agent PANE` / `--agent SESSION/PANE`.
+
+| Command | Result |
+|---|---|
+| `resource list [--all]` / `resource show SLUG` | Project bindings or the user-wide catalog, including queue and gate state |
+| `resource create --name NAME --slug SLUG [--kind KIND] [--device-identity ID] [--description TEXT] [--rules TEXT]` | Create one shared resource and bind this project |
+| `resource link RESOURCE_ID --slug SLUG` | Bind an existing shared resource |
+| `resource edit SLUG [--name NAME] [--description TEXT] [--rules TEXT] [--kind KIND] [--device-identity ID \| --clear-device-identity]` | Edit the shared definition |
+| `resource unlink SLUG` / `resource archive SLUG` | Remove this binding, or archive an unused shared resource |
+| `resource repair SLUG` | Retry managed instruction/settings projection and read back its synchronization state |
+| `resource rebind PROJECT_ID PROJECT_PATH --expected-revision N` | Rebind a moved project using its stable identity and current catalog revision |
+| `resource reserve [AGENT] SLUG DURATION` | Return a reservation ID, ownership generation or FIFO position and estimate |
+| `resource wait RESERVATION` | Block until acquisition or explicit error; show native queue progress |
+| `resource status [RESERVATION]` | Read authoritative status; authenticated acquisition readback acknowledges delivery |
+| `resource release RESERVATION` | Release the current generation after actual hardware use stops |
+| `resource cancel RESERVATION` | Cancel the agent's queued claim |
+| `resource estimate RESERVATION DURATION` | Update the estimate without extending or expiring ownership |
+| `resource gate SLUG open\|paused\|unavailable [--reason TEXT]` | Change availability without clearing occupancy |
+| `resource recover SLUG --expected-revision N --reason TEXT` | Interactive, revision-bound revocation or subsequent clearance confirmation |
+
+Mutations return a timestamped request key. Reuse it with `--request-id KEY` when retrying an uncertain response; changing the payload under the same key is rejected. Durations use explicit units, for example `20m` or `1h30m`, from one second through seven days. Interrupted waits retain reservations. Estimates never expire ownership or prove that hardware is safe. User cancellation additionally requires `--reason TEXT --expected-revision N` and fresh interactive confirmation. See [Resource queues](resource-queues.md) for recovery and GPU/USB-board workflows.

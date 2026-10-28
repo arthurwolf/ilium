@@ -20,7 +20,7 @@ The scene host, the cached loops and the frame pacing are part of the client ker
 
 ### See it
 
-<figure><img src="/assets/demos/26-animations.gif" alt="Animated scenes behind the panes, switched from the Animations tab" loading="lazy"><figcaption>Scenes behind the panes. The shared look comes from the Animations tab, not from the scene.</figcaption></figure>
+<figure><img src="/assets/demos/26-animations.gif" alt="Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified." loading="lazy"><figcaption>Historical gallery capture. The current-build Voxel preview has not passed visual review.</figcaption></figure>
 
 ### What the user sees
 
@@ -100,6 +100,8 @@ A scene package has a `scene` entry and no server or client side. Each scene lis
 ### Complete manifest
 
 This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+
+The `capabilities` list of this manifest is the grant set of one sample scene package, the one that holds the video, location, GPU and space-weather scenes. The grant table above names the grants of every scene family, including `http:lichess.org`, `http:*.wikipedia.org`, `minecraft-saves`, `codec.inflate` and `jobs`. A scene package declares only the grants of the scenes it contains, so those other grants belong to the packages that ship those scenes and are not in this manifest.
 
 ```json
 {
@@ -572,7 +574,7 @@ Other plugins change what `ilium.core.scenes` does through the points below. The
 
 `contributes.scenes` entries add scenes. This plugin hosts the built-in ones.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.scenes"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.scenes"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Bundles a slow cloud scene
 

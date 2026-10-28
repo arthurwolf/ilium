@@ -399,7 +399,7 @@
 <h3 id="you-will-need">You will need</h3>
 <ul>
 <li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code> and <code>serde_json</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>.</li>
-<li>Grants, with the reason for each in the table of step 5: <code>inference</code>, <code>agent.read-prompts</code>, <code>tree.read</code>, <code>tree.write</code>, <code>services.provide:ilium.core.titles/suggest</code>, <code>extensions.provide:ilium.core.titles/before-apply-title</code> and <code>extensions.provide:ilium.core.titles/title-styles</code>.</li>
+<li>Grants, with the reason for each in the table of step 5: <code>inference</code>, <code>agent.read-prompts</code>, <code>tree.read</code>, <code>tree.write</code>, <code>services.provide:ilium.core.titles/suggest</code>, <code>extensions.provide:ilium.core.titles/before-apply-title</code>, <code>extensions.provide:ilium.core.titles/title-styles</code> and <code>topics.subscribe:ilium.extensions/changed</code>.</li>
 <li><code>"unstable": ["plugin-services"]</code>, because <code>suggest</code> is a plugin-defined service (dev mode, T2 and T3).</li>
 <li>An AI provider that the user has set up. The titles come from <a href="/pages/core-plugin-inference/">Inference providers</a>.</li>
 <li>A scratch folder for package inspection: <code>/media/arthur/tmp/titles-lite/</code> with a <code>.scratch-reaper</code> file in it.</li>
@@ -615,6 +615,7 @@ use ilium_plugin_sdk::host::services;
 use ilium_plugin_sdk::host::topics;
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::TitleSource;
 use serde_json::{json, Value};
 
 const BEFORE_APPLY: &amp;str = &quot;ilium.core.titles/before-apply-title&quot;;
@@ -748,7 +749,7 @@ impl TitlesLite {
 fn apply(node: NodeId, title: &amp;str, submissions: &amp;mut Vec&lt;Submission&gt;) {
     let key = dedup::key_for(&amp;[&quot;title&quot;, &amp;node.to_string(), title]);
     submissions.push(Submission::keyed(
-        Intent::RenameNode(RenameNodeSpec { node, title: title.to_string(), expected_revision: None }),
+        Intent::RenameNode(RenameNodeSpec { node, title: title.to_string(), source: TitleSource::Inferred, expected_revision: None }),
         key,
     ));
     let payload = json!({ &quot;node&quot;: node, &quot;title&quot;: title }).to_string();
@@ -933,7 +934,7 @@ export const { lifecycle, handler, serviceProvider } = definePlugin({
 <li>The review dialog at install says what the replacement does. The user confirms.</li>
 <li>The kernel turns <code>ilium.core.titles</code> off and turns <code>example.titles-lite</code> on.</li>
 <li>The registry keeps every contribution that was made to <code>ilium.core.titles/title-styles</code> and <code>before-apply-title</code>. They apply to the replacement, because it provides the points of the same names.</li>
-<li>The settings tab, the commands and the pane kinds of the built-in plugin disappear. The Titles settings tab is not in the rail while the replacement is on. The command <code>ilium.core.titles/tidy</code> and the preview panel are gone too.</li>
+<li>The settings tab, the commands and the pane kinds of the built-in plugin disappear. The Titles settings tab is not in the rail while the replacement is on. Every command that <code>ilium.core.titles</code> contributes, for example its tree-tidying action, and the preview panel are gone too, unless the replacement contributes a command with the same id.</li>
 <li>Stored data stays on disk. The replacement does not read it. It cannot see the titles history, the style choice or the prompt text of the built-in plugin.</li>
 </ol>
 <p>Turning Titles Lite off, or uninstalling it, turns the built-in plugin back on. It finds its data as it left it. Titles that the replacement applied to panes stay on the panes. A title is a property of the pane, not of the plugin.</p>

@@ -50,7 +50,7 @@ max_risk = "normal"
 "example.git-tools" = ["process.run:git"]
 ```
 
-`max_risk = "normal"` refuses high-risk grants. The preapproved list shows that a specific plugin may still receive `process.run:git`. A grant in `preapproved` is not checked against `max_risk`, so list only what you reviewed.
+`max_risk = "normal"` refuses high-risk grants. To give one plugin a high-risk grant such as `process.run:git`, leave `max_risk` at `high` and list the grant in `preapproved`. `max_risk` has no exception: it locks off every high-risk grant, and a `preapproved` entry for such a grant is locked off too ([SEC-198]). Use `preapproved` for normal-risk grants you reviewed.
 
 ### An offline site
 
@@ -85,7 +85,7 @@ Ilium does not install `force_enabled` plugins for the user. The policy states w
 
 ## CI and headless use
 
-Where no client is attached, no one can approve a dialog ([SEC-116]). Use `preapproved` for the exact plugins your pipeline needs, and set `allow_unsigned = false`. A pipeline step that tries `ilium plugin install --yes` fails with `approval.no-client`. Pipelines can verify packages without installing:
+Where no client is attached, no one can approve a dialog ([SEC-116]). Use `preapproved` for the exact plugins your pipeline needs, and set `allow_unsigned = false`. `ilium plugin install --yes` skips the review dialog for normal grants only. A high-risk grant needs `--grant <grant>` and a new key needs `--trust <key_id>`. `install.review-required` appears only when no client is attached and `--yes` is not given. Pipelines can verify packages without installing:
 
 ```text
 ilium plugin inspect ./dist/example.team-rules-1.0.0.iliumpkg

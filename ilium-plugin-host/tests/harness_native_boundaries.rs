@@ -321,11 +321,22 @@ fn repeated_completion_backpressure_retains_every_outcome_until_guest_accepts_it
     // 256 (reference-errors-and-limits.md API-073). Each callback submits 256
     // requests together: its first 64 reach the missing-node kernel check, and
     // the remaining 192 must complete as capacity refusals, never disappear.
-    assert!(host.logs().iter().any(|line| line.message.contains("pending_requests clamped from 256 to 64")));
+    assert!(host.logs().iter().any(|line| line
+        .message
+        .contains("pending_requests clamped from 256 to 64")));
     for result in &outcomes {
-        let RequestRef::Submission(correlation) = &result.request else { unreachable!() };
-        let expected = if (correlation - 1) % 256 < 64 { ErrorCode::NotFound } else { ErrorCode::Busy };
-        assert!(matches!(&result.outcome, Outcome::Refused(error) if error.code == expected),
-            "correlation {correlation} should be refused({expected:?}), got {:?}", result.outcome);
+        let RequestRef::Submission(correlation) = &result.request else {
+            unreachable!()
+        };
+        let expected = if (correlation - 1) % 256 < 64 {
+            ErrorCode::NotFound
+        } else {
+            ErrorCode::Busy
+        };
+        assert!(
+            matches!(&result.outcome, Outcome::Refused(error) if error.code == expected),
+            "correlation {correlation} should be refused({expected:?}), got {:?}",
+            result.outcome
+        );
     }
 }

@@ -466,7 +466,7 @@
 </table>
 <p><code>settings</code> tabs with <code>"render": "view"</code> and <code>onboarding_steps</code> no longer carry a <code>view</code> key. The host finds the view through the view target. The <code>id</code> of a settings tab must differ from every other settings tab and section id of the same plugin, or the manifest is refused with <code>manifest.settings-id-clash</code>.</p>
 <h2 id="the-host-imports">The host imports</h2>
-<p>All functions are in the <code>ui</code> interface. Each one needs <code>ui.panels</code> or the <code>panes.provide-kind</code> grant, except <code>invalidate</code>, which the plugin may call for its own views at any time.</p>
+<p>All functions are in the <code>ui</code> interface. Each one needs <code>ui.panels</code> or the <code>panes.provide-kind</code> grant, except <code>invalidate</code>, which the plugin may call for its own views at any time. The functions with no error code (<code>close-panel</code>, <code>close-popup</code>, <code>widget-state</code>, <code>display-width</code> and <code>theme</code>, as in <a href="/pages/api-ui/">UI</a>) cannot refuse. When the grant is declined they return their plain result: <code>display-width</code> and <code>theme</code> still answer, <code>widget-state</code> returns nothing because no view is registered, and <code>close-panel</code> and <code>close-popup</code> do nothing.</p>
 <table>
 <thead>
 <tr>
@@ -656,7 +656,7 @@
 
 <h2 id="when-the-grant-is-declined">When the grant is declined</h2>
 <ul>
-<li>Every <code>ui</code> import returns <code>not-permitted</code>.</li>
+<li>Every <code>ui</code> import that has an error code returns <code>not-permitted</code>. <code>invalidate</code>, <code>close-panel</code>, <code>close-popup</code>, <code>widget-state</code>, <code>display-width</code> and <code>theme</code> have no error code, as in <a href="/pages/api-ui/">UI</a>: none of them returns <code>not-permitted</code>. <code>invalidate</code>, <code>close-panel</code> and <code>close-popup</code> are no-ops, <code>widget-state</code> returns nothing, and <code>display-width</code> and <code>theme</code> return their normal values.</li>
 <li>The <code>panels</code>, <code>settings</code> tabs with <code>"render": "view"</code> and <code>onboarding_steps</code> contributions are not registered.</li>
 <li>The <code>open-view</code> intent is refused with <code>not-permitted</code>.</li>
 <li>A settings page that is not registered does not appear in the Settings screen.</li>
@@ -666,8 +666,8 @@
 <p>The manifest declares the panel, a command that opens it, and the <code>views</code> export.</p>
 <pre><code class="language-json">{
   &quot;id&quot;: &quot;example-plugin&quot;,
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;, &quot;exports&quot;: [&quot;views&quot;] },
   &quot;capabilities&quot;: { &quot;client&quot;: [&quot;ui.panels&quot;] },
-  &quot;exports&quot;: [&quot;views&quot;],
   &quot;contributes&quot;: {
     &quot;commands&quot;: [{ &quot;id&quot;: &quot;open-run-log&quot;, &quot;title&quot;: &quot;Open run log&quot; }],
     &quot;panels&quot;: [
@@ -872,7 +872,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><a href="/pages/widgets-media-and-embedded/">widgets-media-and-embedded</a> for <code>surface</code>, which <code>write-surface</code> fills.</li>
 <li><a href="/pages/settings-screens/">settings-screens</a> for how settings pages are listed.</li>
 <li><a href="/pages/capability-panes-provide-kind/">capability-panes-provide-kind</a> for panes whose body is a view.</li>
-<li><a href="/pages/errors-and-limits/">errors-and-limits</a> for the trap and restart rules.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors-and-limits</a> for the trap and restart rules.</li>
 <li><a href="/pages/tutorial-03-panel/">tutorial-03-panel</a> for a step-by-step panel.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>

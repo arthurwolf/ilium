@@ -375,6 +375,6 @@ A pane can be as narrow as 40 columns, and the solver gives each segment only wh
 - [The UI model](/pages/ui-model/)
 - [Widget catalogue](/pages/widgets-index/)
 - [Accessibility and theming](/pages/accessibility-and-theming/) for density and reduced motion
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.

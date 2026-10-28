@@ -412,7 +412,7 @@
 <h2 id="redaction">Redaction</h2>
 <p><strong>[SEC-243]</strong> The host replaces secrets in text it writes. Algorithm:</p>
 <ol>
-<li>Collect the current secret values of all plugins and the kernel that are at least 6 characters long. Shorter values are not redacted (and the settings page warns when a <code>secret</code> row accepts values shorter than 6).</li>
+<li>Collect the current secret values of all plugins and the kernel that are at least 6 characters long. Shorter values are not redacted (the settings page shows the fixed hint <code>Short secrets are not redacted in logs</code> under a <code>secret</code> row while its stored value is shorter than 6 characters; the value is still accepted).</li>
 <li>For each value, build the variants: the raw bytes, the base64 form (standard and URL-safe, with and without padding), the percent-encoded form, and the hexadecimal form.</li>
 <li>Replace every occurrence of each variant, case-sensitively, with <code>&lt;redacted&gt;</code>. Longer values are replaced first.</li>
 </ol>
@@ -420,7 +420,7 @@
 <p><strong>[SEC-249]</strong> Diagnostics reports (<code>ilium.core.diagnostics/report-sections</code>) pass through redaction before they are shown or saved. A section that contains a secret in a form the algorithm cannot match is the contributor's defect.</p>
 <p><strong>[SEC-246]</strong> Rotation. When a secret changes, the host overwrites the old value in the store, forgets it for redaction purposes after 60 s (so late log lines are still redacted), and keeps no copy.</p>
 <h2 id="guidance-for-plugin-authors">Guidance for plugin authors</h2>
-<p><strong>[SEC-247]</strong> A plugin SHOULD: never log a secret or a request that carries one; send secrets in headers, not in query strings (URLs are logged on errors and shown in consent prompts); keep a secret in memory only as long as a request needs it and overwrite buffers it controls; avoid placing a secret in a place a command line shows; and name the row clearly so the user knows what to enter. Rust and TypeScript examples follow.</p>
+<p><strong>[SEC-247]</strong> The following is guidance and has no automated test, except that a secret in a log line or a query string is a review item. A plugin SHOULD: never log a secret or a request that carries one; send secrets in headers, not in query strings (URLs are logged on errors and shown in consent prompts); keep a secret in memory only as long as a request needs it and overwrite buffers it controls; avoid placing a secret in a place a command line shows; and name the row clearly so the user knows what to enter. Rust and TypeScript examples follow.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::{http::{self, Request}, settings};
 use ilium_plugin_sdk::prelude::*;

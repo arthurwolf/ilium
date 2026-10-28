@@ -86,7 +86,10 @@ impl Grant {
             ));
         }
         if !(3..=256).contains(&text.chars().count()) {
-            return Err(grant_error("manifest.grant-argument", "capability must contain 3 to 256 characters"));
+            return Err(grant_error(
+                "manifest.grant-argument",
+                "capability must contain 3 to 256 characters",
+            ));
         }
         let grant = Grant(text.to_owned());
         validate_argument(&grant)?;
@@ -164,81 +167,693 @@ macro_rules! row {
 }
 
 static GRANTS: &[GrantInfo] = &[
-    row!("tree.read", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/tree@0.1.0"]),
-    row!("tree.write", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/tree@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("tree.metadata", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/tree@0.1.0"]),
-    row!("tree.decorate", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/tree@0.1.0"]),
-    row!("tree.restructure", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/tree@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("tree.attention", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/tree@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("panes.read", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/panes@0.1.0"]),
-    row!("panes.create", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("panes.signal", false, High, &Tier::ALL, &[Side::Server], None, &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("panes.lifecycle", false, High, &Tier::ALL, &[Side::Server], None, &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("panes.provide-kind", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:host/panes@0.1.0"]),
-    row!("terminal.read-screen", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/terminal@0.1.0"]),
-    row!("terminal.read-cells", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/terminal@0.1.0"]),
-    row!("terminal.history", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/terminal@0.1.0"]),
-    row!("terminal.output-filter", false, Low, &Tier::ALL, &[Side::Server], None, &["ilium:primitives/terminal@0.1.0"]),
-    row!("terminal.write", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/terminal@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("terminal.input-lock", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/terminal@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("terminal.raw-input", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/terminal@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("terminal.pointer", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:primitives/terminal@0.1.0"]),
-    row!("agent.read", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/agent@0.1.0"]),
-    row!("agent.read-prompts", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/agent@0.1.0"]),
-    row!("agent.control", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/agent@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("agent.signatures", false, Low, &Tier::ALL, &[Side::Server], None, &["ilium:primitives/agent@0.1.0"]),
-    row!("agent.transcript", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:primitives/agent@0.1.0"]),
-    row!("editor.read", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:primitives/editor@0.1.0"]),
-    row!("editor.edit", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:primitives/editor@0.1.0"]),
-    row!("editor.provide", false, High, &Tier::ALL, &[Side::Client], None, &["ilium:primitives/editor@0.1.0"]),
-    row!("ui.panels", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:host/ui-host@0.1.0"]),
-    row!("ui.chrome", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/intents-host@0.1.0"]),
-    row!("keys.intercept", false, High, &Tier::ALL, &[Side::Client], None, &["ilium:host/keys@0.1.0"]),
-    row!("keymap.read", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:host/keymap@0.1.0"]),
-    row!("commands.invoke", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/commands@0.1.0"]),
-    row!("fs.read", true, Low, &Tier::ALL, &[Side::Server, Side::Client, Side::Scene], None, &["ilium:host/fs@0.1.0"]),
-    row!("fs.write", true, Low, &Tier::ALL, &[Side::Server, Side::Client, Side::Scene], None, &["ilium:host/fs@0.1.0"]),
-    row!("fs.watch", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/fs@0.1.0"]),
-    row!("fs.pick", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:host/fs@0.1.0"]),
-    row!("jobs.run", false, Low, &Tier::ALL, &[Side::Server, Side::Client, Side::Scene], None, &["ilium:host/jobs@0.1.0"]),
-    row!("http", true, Low, &Tier::ALL, &[Side::Server, Side::Client, Side::Scene], None, &["ilium:host/http@0.1.0"]),
-    row!("process.run", true, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/process@0.1.0"]),
-    row!("panes.create-command", true, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("process.long-lived", false, High, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/process@0.1.0"]),
-    row!("inference", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/inference@0.1.0"]),
-    row!("inference.provide", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/inference@0.1.0"]),
-    row!("inference.embed", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/inference@0.1.0"]),
-    row!("services.use", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/services@0.1.0"]),
-    row!("services.provide", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/services@0.1.0"]),
-    row!("sound.play", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/sounds@0.1.0", "ilium:host/intents-host@0.1.0"]),
-    row!("notify.desktop", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/intents-host@0.1.0"]),
-    row!("notify.toast", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/intents-host@0.1.0"]),
-    row!("open-external", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/intents-host@0.1.0"]),
-    row!("clipboard.read", false, High, &Tier::ALL, &[Side::Client], None, &["ilium:host/clipboard@0.1.0"]),
-    row!("clipboard.write", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:host/clipboard@0.1.0"]),
-    row!("audio.capture", false, High, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/audio@0.1.0"]),
-    row!("audio.loopback", false, High, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/audio@0.1.0"]),
-    row!("audio.playback", false, Low, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/audio@0.1.0"]),
-    row!("media.video", false, Low, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/media@0.1.0"]),
-    row!("location.observer", false, High, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/location@0.1.0"]),
-    row!("location.geocode", false, Low, &Tier::ALL, &[Side::Client, Side::Scene], None, &["ilium:host/geocode@0.1.0"]),
-    row!("messages.peer", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/topics@0.1.0"]),
-    row!("topics.subscribe", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/topics@0.1.0"]),
-    row!("sessions.cross", false, High, &[Tier::T1, Tier::T2], &[Side::Server], None, &["ilium:host/sessions@0.1.0"]),
-    row!("cli.contribute", false, Low, &Tier::ALL, &[Side::Server], None, &["ilium:host/cli@0.1.0"]),
-    row!("http-api.route", true, Low, &Tier::ALL, &[Side::Server], None, &["ilium:host/http-api@0.1.0"]),
-    row!("workspace.manage", false, High, &Tier::ALL, &[Side::Server], None, &["ilium:host/workspace@0.1.0"]),
-    row!("settings.read-all", false, High, &[Tier::T1], &[Side::Client], None, &["ilium:host/settings@0.1.0"]),
-    row!("settings.write-all", false, High, &[Tier::T1], &[Side::Client], None, &["ilium:host/settings@0.1.0"]),
-    row!("settings.contribute", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/settings@0.1.0"]),
-    row!("settings.write-kernel", true, High, &[Tier::T1], &[Side::Server], None, &["ilium:host/kernel-settings@0.1.0"]),
-    row!("settings.read-kernel", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/kernel-settings@0.1.0"]),
-    row!("plugins.manage", false, High, &[Tier::T1], &[Side::Client], None, &["ilium:host/plugins@0.1.0"]),
-    row!("help.read", false, Low, &Tier::ALL, &[Side::Client], None, &["ilium:host/help@0.1.0"]),
-    row!("journal.read", false, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/journal@0.1.0"]),
-    row!("gpu.kernels", false, Low, &Tier::ALL, &[Side::Scene], Some("gpu-kernels"), &["ilium:host/gpu@0.1.0"]),
-    row!("extensions.provide", true, Low, &Tier::ALL, &[Side::Server, Side::Client, Side::Scene], None, &["ilium:host/extensions@0.1.0"]),
-    row!("extensions.contribute", true, Low, &Tier::ALL, &[Side::Server, Side::Client], None, &["ilium:host/extensions@0.1.0"]),
+    row!(
+        "tree.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/tree@0.1.0"]
+    ),
+    row!(
+        "tree.write",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/tree@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "tree.metadata",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/tree@0.1.0"]
+    ),
+    row!(
+        "tree.decorate",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/tree@0.1.0"]
+    ),
+    row!(
+        "tree.restructure",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/tree@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "tree.attention",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/tree@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "panes.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/panes@0.1.0"]
+    ),
+    row!(
+        "panes.create",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "panes.signal",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "panes.lifecycle",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "panes.provide-kind",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/panes@0.1.0"]
+    ),
+    row!(
+        "terminal.read-screen",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:primitives/terminal@0.1.0"]
+    ),
+    row!(
+        "terminal.read-cells",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:primitives/terminal@0.1.0"]
+    ),
+    row!(
+        "terminal.history",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:primitives/terminal@0.1.0"]
+    ),
+    row!(
+        "terminal.output-filter",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:primitives/terminal@0.1.0"]
+    ),
+    row!(
+        "terminal.write",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &[
+            "ilium:primitives/terminal@0.1.0",
+            "ilium:host/intents-host@0.1.0"
+        ]
+    ),
+    row!(
+        "terminal.input-lock",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &[
+            "ilium:primitives/terminal@0.1.0",
+            "ilium:host/intents-host@0.1.0"
+        ]
+    ),
+    row!(
+        "terminal.raw-input",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &[
+            "ilium:primitives/terminal@0.1.0",
+            "ilium:host/intents-host@0.1.0"
+        ]
+    ),
+    row!(
+        "terminal.pointer",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:primitives/terminal@0.1.0"]
+    ),
+    row!(
+        "agent.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:primitives/agent@0.1.0"]
+    ),
+    row!(
+        "agent.read-prompts",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:primitives/agent@0.1.0"]
+    ),
+    row!(
+        "agent.control",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &[
+            "ilium:primitives/agent@0.1.0",
+            "ilium:host/intents-host@0.1.0"
+        ]
+    ),
+    row!(
+        "agent.signatures",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:primitives/agent@0.1.0"]
+    ),
+    row!(
+        "agent.transcript",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:primitives/agent@0.1.0"]
+    ),
+    row!(
+        "editor.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:primitives/editor@0.1.0"]
+    ),
+    row!(
+        "editor.edit",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:primitives/editor@0.1.0"]
+    ),
+    row!(
+        "editor.provide",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:primitives/editor@0.1.0"]
+    ),
+    row!(
+        "ui.panels",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/ui-host@0.1.0"]
+    ),
+    row!(
+        "ui.chrome",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "keys.intercept",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/keys@0.1.0"]
+    ),
+    row!(
+        "keymap.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/keymap@0.1.0"]
+    ),
+    row!(
+        "commands.invoke",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/commands@0.1.0"]
+    ),
+    row!(
+        "fs.read",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client, Side::Scene],
+        None,
+        &["ilium:host/fs@0.1.0"]
+    ),
+    row!(
+        "fs.write",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client, Side::Scene],
+        None,
+        &["ilium:host/fs@0.1.0"]
+    ),
+    row!(
+        "fs.watch",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/fs@0.1.0"]
+    ),
+    row!(
+        "fs.pick",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/fs@0.1.0"]
+    ),
+    row!(
+        "jobs.run",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client, Side::Scene],
+        None,
+        &["ilium:host/jobs@0.1.0"]
+    ),
+    row!(
+        "http",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client, Side::Scene],
+        None,
+        &["ilium:host/http@0.1.0"]
+    ),
+    row!(
+        "process.run",
+        true,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/process@0.1.0"]
+    ),
+    row!(
+        "panes.create-command",
+        true,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/panes@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "process.long-lived",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/process@0.1.0"]
+    ),
+    row!(
+        "inference",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/inference@0.1.0"]
+    ),
+    row!(
+        "inference.provide",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/inference@0.1.0"]
+    ),
+    row!(
+        "inference.embed",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/inference@0.1.0"]
+    ),
+    row!(
+        "services.use",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/services@0.1.0"]
+    ),
+    row!(
+        "services.provide",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/services@0.1.0"]
+    ),
+    row!(
+        "sound.play",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/sounds@0.1.0", "ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "notify.desktop",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "notify.toast",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "open-external",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/intents-host@0.1.0"]
+    ),
+    row!(
+        "clipboard.read",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/clipboard@0.1.0"]
+    ),
+    row!(
+        "clipboard.write",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/clipboard@0.1.0"]
+    ),
+    row!(
+        "audio.capture",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Client, Side::Scene],
+        None,
+        &["ilium:host/audio@0.1.0"]
+    ),
+    row!(
+        "audio.loopback",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Client, Side::Scene],
+        None,
+        &["ilium:host/audio@0.1.0"]
+    ),
+    row!(
+        "audio.playback",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client, Side::Scene],
+        None,
+        &["ilium:host/audio@0.1.0"]
+    ),
+    row!(
+        "media.video",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client, Side::Scene],
+        None,
+        &["ilium:host/media@0.1.0"]
+    ),
+    row!(
+        "location.observer",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Client, Side::Scene],
+        None,
+        &["ilium:host/location@0.1.0"]
+    ),
+    row!(
+        "location.geocode",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client, Side::Scene],
+        None,
+        &["ilium:host/geocode@0.1.0"]
+    ),
+    row!(
+        "messages.peer",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/topics@0.1.0"]
+    ),
+    row!(
+        "topics.subscribe",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/topics@0.1.0"]
+    ),
+    row!(
+        "sessions.cross",
+        false,
+        High,
+        &[Tier::T1, Tier::T2],
+        &[Side::Server],
+        None,
+        &["ilium:host/sessions@0.1.0"]
+    ),
+    row!(
+        "cli.contribute",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:host/cli@0.1.0"]
+    ),
+    row!(
+        "http-api.route",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:host/http-api@0.1.0"]
+    ),
+    row!(
+        "workspace.manage",
+        false,
+        High,
+        &Tier::ALL,
+        &[Side::Server],
+        None,
+        &["ilium:host/workspace@0.1.0"]
+    ),
+    row!(
+        "settings.read-all",
+        false,
+        High,
+        &[Tier::T1],
+        &[Side::Client],
+        None,
+        &["ilium:host/settings@0.1.0"]
+    ),
+    row!(
+        "settings.write-all",
+        false,
+        High,
+        &[Tier::T1],
+        &[Side::Client],
+        None,
+        &["ilium:host/settings@0.1.0"]
+    ),
+    row!(
+        "settings.contribute",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/settings@0.1.0"]
+    ),
+    row!(
+        "settings.write-kernel",
+        true,
+        High,
+        &[Tier::T1],
+        &[Side::Server],
+        None,
+        &["ilium:host/kernel-settings@0.1.0"]
+    ),
+    row!(
+        "settings.read-kernel",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/kernel-settings@0.1.0"]
+    ),
+    row!(
+        "plugins.manage",
+        false,
+        High,
+        &[Tier::T1],
+        &[Side::Client],
+        None,
+        &["ilium:host/plugins@0.1.0"]
+    ),
+    row!(
+        "help.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Client],
+        None,
+        &["ilium:host/help@0.1.0"]
+    ),
+    row!(
+        "journal.read",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/journal@0.1.0"]
+    ),
+    row!(
+        "gpu.kernels",
+        false,
+        Low,
+        &Tier::ALL,
+        &[Side::Scene],
+        Some("gpu-kernels"),
+        &["ilium:host/gpu@0.1.0"]
+    ),
+    row!(
+        "extensions.provide",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client, Side::Scene],
+        None,
+        &["ilium:host/extensions@0.1.0"]
+    ),
+    row!(
+        "extensions.contribute",
+        true,
+        Low,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/extensions@0.1.0"]
+    ),
 ];
 
 /// The grant table of this API version (reference-capabilities.md).
@@ -264,8 +879,19 @@ pub fn check_grant(grant: &Grant, tier: Tier, side: Side) -> Result<(), Diagnost
         ));
     }
     validate_argument(grant)?;
-    if !entry.tiers.contains(&tier) || tier != Tier::T1 && grant.argument().is_some_and(|argument| argument.starts_with("path:/")) {
-        return Err(grant_error("manifest.grant-tier", format!("capability {:?} is not available at tier {tier}", grant.family())));
+    if !entry.tiers.contains(&tier)
+        || tier != Tier::T1
+            && grant
+                .argument()
+                .is_some_and(|argument| argument.starts_with("path:/"))
+    {
+        return Err(grant_error(
+            "manifest.grant-tier",
+            format!(
+                "capability {:?} is not available at tier {tier}",
+                grant.family()
+            ),
+        ));
     }
     if !entry.sides.contains(&side) {
         return Err(grant_error(

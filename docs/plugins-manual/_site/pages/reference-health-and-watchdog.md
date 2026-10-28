@@ -27,7 +27,7 @@ Degraded conditions. A condition holds while the counter inside its time span me
 | Condition | Threshold | Time span |
 |---|---|---|
 | Near-misses | 5 or more calls that ended within their deadline but took at least 80% of it | the last 5 minutes |
-| Event queue | the queue held more than 75% of `event_queue` (768 of 1,024 by default) at any sample | the last 1 minute |
+| Event queue | the queue held at least 75% of `event_queue` (768 of 1,024 by default) at any sample | the last 1 minute |
 | Rate limits | 1 or more results of `rate-limited` returned to the plugin | the last 5 minutes |
 | Quota hits | 1 or more results of `quota-exceeded` returned to the plugin | the last 5 minutes |
 | Failures in the window | 1 or more counted failures, and the instance is active again | the failure window |
@@ -65,7 +65,7 @@ Time in host calls. A host call that a plugin makes in the middle of an export i
 
 ### Async tasks, pending requests and orphans
 
-- Each asynchronous request has its own timeout (for example 30 s for a command or service reply, 120 s for inference). See [Errors and limits](/pages/errors-and-limits/).
+- Each asynchronous request has its own timeout (for example 30 s for a command or service reply, 120 s for inference). See [Errors and limits](/pages/reference-errors-and-limits/).
 - When an instance is dropped or deactivated, every request it has pending completes as `cancelled`, every timer and watch ends, and no code runs for them. Exceptions: on a trap, completions of submissions are delivered to the new instance, and on revocation requests that need the revoked grant complete as `failed(revoked)` (see [Scheduling, deadlines and cancellation](/pages/reference-host-scheduling/)).
 - A task that never completes is handled by its timeout. The plugin gets `timed-out`.
 
@@ -74,7 +74,7 @@ Time in host calls. A host call that a plugin makes in the middle of an export i
 
 ### The sandbox helper (T2 and T3)
 
-Third-party plugins run in a helper process. One helper hosts the T2 and T3 instances of one session server, at most 8 instances per helper. T1 plugins run in the Ilium process and have no helper.
+Third-party plugins run in a helper process. Each T2 or T3 plugin side runs in its own helper, and a helper never hosts two plugins (see [HST-150]). T1 plugins run in the Ilium process and have no helper.
 
 | Item | Rule |
 |---|---|
@@ -139,13 +139,13 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 | A plugin is stuck inside a slow host call | The call returns, then the epoch traps it at the next safe point. |
 | `activate` never returns | The activate deadline traps it. One failure counts. |
 | A T1 plugin loops while the UI waits for its render | The render deadline traps it within 30 ms on the client. The view shows its last good frame, marked stale. |
-| The machine sleeps during a call | The monotonic clock may not advance; the host treats a jump larger than 5 s as a clock skip and does not count the call as a breach. |
+| The machine sleeps during a call | The monotonic clock may not advance; the host treats a gap of more than 1 s as a clock skip and does not count the call as a breach. |
 
 ### See also
 
 - [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)
 - [Lifecycle](/pages/lifecycle/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Performance](/pages/performance/)
 - [Debugging](/pages/debugging/)
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)

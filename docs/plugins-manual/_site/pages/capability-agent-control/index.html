@@ -516,14 +516,14 @@ An agent action can clear the agent's context, change its mode or answer a promp
 <li>The pane exists. Otherwise <code>refused(not-found)</code>.</li>
 <li>The pane is restored and its process has started. Otherwise <code>refused(pane-not-ready)</code>.</li>
 <li>The signature declares the action id. Otherwise <code>refused(unsupported)</code>.</li>
-<li>The activity is in the action's <code>allowed_when</code> list. Otherwise <code>refused(conflict)</code> with the message <code>agent is working</code>.</li>
+<li>The activity is in the action's <code>allowed_when</code> list. Otherwise <code>refused(conflict)</code>. The message names the current activity: <code>agent is working</code>, <code>agent is idle</code>, <code>agent is done</code>, <code>agent is awaiting approval</code> or <code>agent is in a menu</code>, named after the current activity.</li>
 <li>The plugin has not exceeded the rate of 20 <code>send-input</code> or <code>agent-action</code> submissions per second for that pane. Otherwise <code>refused(rate-limited)</code>.</li>
 <li>The key is reserved and the keys are written to the pane.</li>
 </ol>
 <p>A submission refused at steps 1 to 8 does not reserve its key. A retry with the same key, after the cause is fixed, is valid. A submission accepted at step 9 keeps its key reserved even if the write later fails, and that failure completes as <code>failed(code)</code>. A retry of such an action needs a new key.</p>
 <h3 id="choosing-the-dedup-key">Choosing the dedup key</h3>
 <p>The key identifies one user request. It is reserved for 10 minutes per plugin, so a retry after a lost reply reuses the key and does nothing a second time. The SDK helper <code>dedup::key_for</code> joins its parts with <code>:</code> and replaces disallowed characters with <code>-</code>, and <code>Submission::keyed</code> sets the key. <code>dedup::key_for(&amp;["compact", "42", "7"])</code> gives <code>compact:42:7</code>. TypeScript has no helper, so the plugin builds the string itself.</p>
-<p>From build phase 5 on, the kernel journals <code>send-input</code> and <code>agent-action</code> keys in the snapshot before the write. A server restart then does not repeat the keys. Keys reserved before that phase do not survive a restart.</p>
+<p>From Phase 5 of the <a href="/pages/roadmap/">roadmap</a> on, the kernel journals <code>send-input</code> and <code>agent-action</code> keys in the snapshot before the write. A server restart then does not repeat the keys. Keys reserved before Phase 5 ships do not survive a restart.</p>
 <h2 id="toolbar-state">Toolbar state</h2>
 <p><code>set-toolbar-state</code> works on a button that the plugin contributed in <code>toolbar_buttons</code>. The <code>button</code> argument is that button's <code>id</code>. Any other id gives <code>not-found</code>.</p>
 <ul>
@@ -757,7 +757,7 @@ export const { handler } = definePlugin({
 <tr>
 <td><code>agent-action</code></td>
 <td><code>refused(conflict)</code></td>
-<td>The activity is not in <code>allowed_when</code>. The message is <code>agent is working</code>. The key is not reserved, so the same key can be used later.</td>
+<td>The activity is not in <code>allowed_when</code>. The message names the current activity: <code>agent is working</code>, <code>agent is idle</code>, <code>agent is done</code>, <code>agent is awaiting approval</code> or <code>agent is in a menu</code>, named after the current activity. The key is not reserved, so the same key can be used later.</td>
 </tr>
 <tr>
 <td><code>agent-action</code></td>

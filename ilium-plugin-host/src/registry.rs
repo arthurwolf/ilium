@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
-use ilium_plugin_api::{Diagnostic, error::Code, grants::Grant, ids::PluginId};
-use serde_json::{Value, json};
+use ilium_plugin_api::{error::Code, grants::Grant, ids::PluginId, Diagnostic};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::error::HostError;
@@ -87,7 +87,13 @@ impl InstalledRegistry {
         let guard = lock(&self.path.with_file_name("installed.lock"))?;
         let before = read_bytes(&self.path)?;
         let document = self.read()?;
-        Ok(InstalledTransaction { path: self.path.clone(), before, document, committed: false, _lock: guard })
+        Ok(InstalledTransaction {
+            path: self.path.clone(),
+            before,
+            document,
+            committed: false,
+            _lock: guard,
+        })
     }
 
     pub fn list(&self) -> Result<Vec<InstalledRecord>, HostError> {
@@ -164,16 +170,23 @@ pub struct InstalledTransaction {
     _lock: ExclusiveFileLock,
 }
 impl InstalledTransaction {
-    pub fn document(&self) -> &Value { &self.document }
+    pub fn document(&self) -> &Value {
+        &self.document
+    }
     pub fn record(&self, id: &str) -> Option<&Value> {
-        self.document["plugins"].as_array()?.iter().find(|row| row["id"] == id)
+        self.document["plugins"]
+            .as_array()?
+            .iter()
+            .find(|row| row["id"] == id)
     }
     pub fn put_complete_record(&mut self, record: Value) -> Result<(), HostError> {
         validate_row(&record)?;
-        let rows = self.document["plugins"].as_array_mut().ok_or_else(corrupt)?;
+        let rows = self.document["plugins"]
+            .as_array_mut()
+            .ok_or_else(corrupt)?;
         rows.retain(|row| row["id"] != record["id"]);
         rows.push(record);
-        rows.sort_by(|a,b| a["id"].as_str().cmp(&b["id"].as_str()));
+        rows.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
         validate_installed(&self.document)
     }
     pub fn commit(&mut self) -> Result<(), HostError> {
@@ -187,15 +200,19 @@ impl InstalledTransaction {
     /// Restore exactly the registry bytes observed under this lock. This is for
     /// pre-notification transaction failure, never an activation/data rollback.
     pub fn rollback(&mut self) -> Result<(), HostError> {
-        if !self.committed { return Ok(()); }
+        if !self.committed {
+            return Ok(());
+        }
         match &self.before {
             Some(bytes) => write_bytes(&self.path, bytes)?,
             None => {
                 match std::fs::remove_file(&self.path) {
-                    Ok(()) => {}, Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-                    Err(failure) => return Err(error("install.io",failure.to_string())),
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(failure) => return Err(error("install.io", failure.to_string())),
                 }
-                secure_fs::sync_parent_directory(&self.path).map_err(|e| error("install.io",e.to_string()))?;
+                secure_fs::sync_parent_directory(&self.path)
+                    .map_err(|e| error("install.io", e.to_string()))?;
             }
         }
         self.committed = false;
@@ -534,7 +551,11 @@ fn validate_row(row: &Value) -> Result<(), HostError> {
                 && member(&row["update"]["state"], &["staged", "migrating", "trial"])
                 && row["update"]["attempts"].as_u64().is_some_and(|n| n <= 2)
                 && utc(&row["update"]["started_at"])));
-    if valid { Ok(()) } else { Err(corrupt()) }
+    if valid {
+        Ok(())
+    } else {
+        Err(corrupt())
+    }
 }
 fn validate_installed(value: &Value) -> Result<(), HostError> {
     if !exact(value, &["format", "plugins", "purge_tombstones"])

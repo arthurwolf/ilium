@@ -544,7 +544,7 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
       if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'com.example.watcher/start') {
-        child = spawn({ process: { program: 'tail', args: ['-f', '/var/log/syslog'] }, stdinOpen: false, lineMode: true });
+        child = spawn({ process: { program: 'tail', arguments: ['-f', '/var/log/syslog'], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 600_000 }, stdinOpen: false, lineMode: true });
       } else if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'com.example.watcher/stop') {
         child?.signal('terminate');
         child = undefined;
@@ -639,7 +639,7 @@ process.long-lived                high     <span class="t-warn">declined</span>
 <li><a href="/pages/capability-process-run/">process.run</a>.</li>
 <li><a href="/pages/capability-jobs-run/">jobs.run</a>.</li>
 <li><a href="/pages/api-process-control/">Process control</a>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a>.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</li>
 </ul>
 <h3 id="security">Security</h3>
 <p>Long-lived children follow the same confinement as <code>process.run</code> ([SEC-032], [SEC-033]). See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>

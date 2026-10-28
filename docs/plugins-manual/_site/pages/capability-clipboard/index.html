@@ -742,15 +742,15 @@ export function copyNoteLink(notePath: string): 'copied' | 'unsupported' | 'not-
 and <code>retryAfterMs</code> (present only for rate and quota errors). Any other thrown value is a bug, so
 the example rethrows it.</p>
 <h2 id="who-requests-it">Who requests it</h2>
-<p>Among the first-party plugins in the feature map, four request <code>clipboard.write</code>: the text
-selection and right-click menu, the agent toolbar, and the two Smart Copy plugins (light and AI).
+<p>Among the first-party plugins in the feature map, three request <code>clipboard.write</code>: the text
+selection and right-click menu, and the two Smart Copy plugins (light and AI).
 No first-party plugin requests <code>clipboard.read</code>.</p>
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a> for the screen text that Smart
   Copy works from.</li>
 <li><a href="/pages/capability-help-read/">help.read</a> for topics that explain the copy shortcuts.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and the trap rule.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and the trap rule.</li>
 <li><a href="/pages/api-clipboard/">clipboard API</a> for the full import reference.</li>
 </ul>
 <h3 id="security">Security</h3>

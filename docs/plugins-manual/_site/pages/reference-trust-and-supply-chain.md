@@ -2,7 +2,7 @@
 
 ## Trust and supply chain
 
-This page defines how a package proves where it came from, how Ilium decides to trust a publisher, and how a package is stopped when it turns out to be bad. It also fixes the format of signatures, keys and fingerprints, so that two implementations agree and a test author can build fixtures. There is no registry in version 0.1.0 (decision D3), so every rule here works on files the user already holds.
+This page defines how a package proves where it came from, how Ilium decides to trust a publisher, and how a package is stopped when it turns out to be bad. It also fixes the format of signatures, keys and fingerprints, so that two implementations agree and a test author can build fixtures. No registry is configured by default (decision D3 covers signing and trust; the optional registry is decision D27, see [Registry](/pages/reference-registry/)), so every rule here works on files the user already holds.
 
 A **publisher** is the person or organisation that signs a package. A **key** is an Ed25519 key pair; the **public key** is shared, and the **private key** signs. A **fingerprint** is a short, fixed-size name for a public key. A **trust store** is the list of public keys the user trusts. **Pinning** means that the first key seen for a plugin id is remembered, and later versions must match. A **blocklist** is a list of packages, plugin ids or keys the host refuses.
 
@@ -35,7 +35,7 @@ A **publisher** is the person or organisation that signs a package. A **key** is
 
 ## The trust store
 
-**[SEC-144]** The trust store ([SEC-112]) holds public keys the user trusts. A key may be trusted under one publisher name; one publisher name may have several keys. `ilium plugin trust remove <fingerprint>` removes a key. Installed plugins signed by it stop loading at the next activation and show `Publisher no longer trusted`; they are not uninstalled and their data stays. Trusting the key again reactivates them.
+**[SEC-144]** The trust store ([SEC-112]) holds public keys the user trusts. A key may be trusted under one publisher name; one publisher name may have several keys. `ilium plugin trust remove <key_id>` removes a key. Installed plugins signed by it stop loading at the next activation and show `Publisher no longer trusted`; they are not uninstalled and their data stays. Trusting the key again reactivates them.
 
 ## Key pinning and rotation
 
@@ -73,10 +73,13 @@ The host accepts the new key for `plugin_id` only if the statement verifies unde
   "entries": [
     { "kind": "package-sha256", "value": "<64 hex>", "reason": "malware" },
     { "kind": "plugin", "id": "example.bad", "versions": ">=1.0.0 <1.4.2", "reason": "grant bypass" },
-    { "kind": "publisher-key", "value": "<fingerprint>", "reason": "key compromise" }
+    { "kind": "publisher-key", "value": "<fingerprint>", "reason": "key compromise" },
+    { "kind": "runtime", "advisory": "<advisory id>", "versions": "<Wasmtime version range>", "reason": "sandbox escape" }
   ]
 }
 ```
+
+A `runtime` entry names an advisory (`advisory`, a non-empty string), the affected runtime versions (`versions`, a semver range) and a `reason`. It matches when the running Wasmtime version, as recorded in the build metadata ([SEC-170]), lies in `versions`. It does not match a package or a plugin; its effect is the one in [SEC-171]. It comes only from the signed release blocklist, never from a policy or user blocklist.
 
 **[SEC-149]** A package that matches an entry is refused at install with `package.blocked`, and an installed plugin that matches is disabled at the next load with a notice `Blocked: <reason>`. Its data is kept. The audit log records `blocklist-hit`. A blocked plugin cannot be enabled by `plugins.manage`, the Plugins screen or the CLI.
 
@@ -103,7 +106,7 @@ A `.iliumpkg` is a ZIP file. ZIP has many ambiguities that attackers use. The re
 
 **[SEC-154]** `ilium plugin inspect <file>` prints, without installing and without running any plugin code: the manifest, each grant with its risk, the signer fingerprint and verification result, the tier it would install as, each file's size and hash, and the optional provenance entries. Output is JSONL: one `manifest` line, one `grant` line per grant, one `file` line per file, one `signature` line, one `summary` line.
 
-**[SEC-156]** `ilium plugin verify <id>` re-checks an installed plugin against [SEC-153] and prints the result.
+**[SEC-156]** `ilium plugin verify <id or file>` re-checks an installed plugin (by id) or a package file (by path) against [SEC-153] and prints the result. A file is checked offline and without installing; a name that is not an installed id and not an existing file fails with `plugin.not-found` (exit 5).
 
 **[SEC-155]** Optional provenance. A package MAY contain `sbom.spdx.json` (an SPDX 2.3 document of the guest dependencies) and `provenance.json` (an in-toto statement of how the package was built). Both are listed in `files`, hashed like every other file, and shown in Details. The host does not trust them; it displays them.
 
@@ -119,6 +122,16 @@ A `.iliumpkg` is a ZIP file. ZIP has many ambiguities that attackers use. The re
 
 **[SEC-173]** SDK provenance. The Rust crate `ilium-plugin-sdk` and the npm package `@ilium/plugin-sdk` are released from the Ilium repository by CI, with signed tags. The npm package is published with provenance (`npm publish --provenance`). Templates created by `ilium plugin new` pin the exact SDK version and commit the lock file. A plugin build SHOULD use `--locked` (Rust) and `npm ci` (TypeScript).
 
+### Licence attribution
+
+**[SEC-420]** Release attribution file. Every Ilium release MUST ship a `THIRD-PARTY-NOTICES` file next to the binaries. It lists every third-party crate linked into the shipped binaries and `.cwasm` components (Wasmtime and its Cranelift, WASI and component-model crates included) with its name, exact version, SPDX licence expression and the full licence text. The file is generated from `Cargo.lock` by CI, never written by hand.
+
+**[SEC-421]** Notice completeness. The list in `THIRD-PARTY-NOTICES` MUST equal the set of packages in `Cargo.lock` that reach a shipped target. A crate that is in the build and absent from the file, or in the file and absent from the build, fails the release check.
+
+**[SEC-422]** Licence policy. A dependency whose licence is outside the allow list of the repository (`deny.toml`, permissive licences and the Apache-2.0 WITH LLVM-exception expression Wasmtime uses) fails the release check. A dependency with no declared licence also fails.
+
+**[SEC-423]** Runtime visibility. `ilium --version --verbose` prints the path of the notices file and the Wasmtime licence expression. An installed binary without the notices file next to it prints `notices: missing`.
+
 ## Advice for publishers
 
 **[SEC-174]** A publisher SHOULD keep the private key encrypted, store a backup offline, and sign only on a clean build machine. On suspected compromise the publisher should: stop signing; publish a rotation statement if the old key is still under their control (see [Security response](/pages/reference-security-response/)); ask the Ilium project for a blocklist entry for the key; ship a fixed version signed by a new key; and tell users to uninstall and trust the new key.
@@ -126,7 +139,7 @@ A `.iliumpkg` is a ZIP file. ZIP has many ambiguities that attackers use. The re
 ## Worked example
 
 ```text
-ilium plugin keygen --publisher "Example Corp" --out ~/keys/example
+ilium plugin keygen --publisher-id com.example --publisher "Example Corp" --out ~/keys/example
 ilium plugin sign ./dist/example.notes-1.2.0.iliumpkg --key ~/keys/example/publisher.key
 ilium plugin inspect ./dist/example.notes-1.2.0.iliumpkg
 ilium plugin trust add ~/keys/example/publisher.pub

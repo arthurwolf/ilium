@@ -680,7 +680,7 @@
 <tr>
 <td><code>quota-exceeded</code></td>
 <td>completion</td>
-<td>The <code>data</code> plus <code>cache</code> disk limit (<code>disk_mib</code>, 256 MiB by default) is full.</td>
+<td>The plugin's own <code>data</code> plus <code>cache</code> disk limit (<code>disk_mib</code>, 256 MiB by default) is full. A physically full disk instead completes with <code>io</code> and the message <code>no-space</code>.</td>
 </tr>
 <tr>
 <td><code>io</code></td>
@@ -849,7 +849,7 @@ export const { lifecycle, handler } = definePlugin({
 </figure>
 
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code>:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a>:</p>
 <ul>
 <li>32 Agent debug history appends to the <code>data</code> scope, which needs no grant.</li>
 <li>37 Configure agent: <code>fs.write:agent-config:claude</code> and <code>fs.write:agent-config:codex</code>.</li>
@@ -869,7 +869,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/api-fs/">fs</a> for the full function surface, including locks.</li>
 <li><a href="/pages/capability-workspace-manage/">Workspace manage</a> for worktrees, which need <code>fs.write:worktrees</code>.</li>
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for how completions are delivered.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the common error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the common error codes.</li>
 </ul>
 <h3 id="security">Security</h3>
 <p>The authoritative file scope table is in <a href="/pages/reference-sandbox/">Sandbox reference</a> ([SEC-058] to [SEC-062]). Writes outside <code>data</code> and <code>cache</code> are high risk.</p>

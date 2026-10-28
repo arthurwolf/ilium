@@ -33,7 +33,7 @@ The attacker classes are A1, A3 and A8 in the [Threat model](/pages/reference-th
 
 **[SEC-243]** The host replaces secrets in text it writes. Algorithm:
 
-1. Collect the current secret values of all plugins and the kernel that are at least 6 characters long. Shorter values are not redacted (and the settings page warns when a `secret` row accepts values shorter than 6).
+1. Collect the current secret values of all plugins and the kernel that are at least 6 characters long. Shorter values are not redacted (the settings page shows the fixed hint `Short secrets are not redacted in logs` under a `secret` row while its stored value is shorter than 6 characters; the value is still accepted).
 2. For each value, build the variants: the raw bytes, the base64 form (standard and URL-safe, with and without padding), the percent-encoded form, and the hexadecimal form.
 3. Replace every occurrence of each variant, case-sensitively, with `<redacted>`. Longer values are replaced first.
 
@@ -45,7 +45,7 @@ The step applies to plugin log lines, `process-run` log lines and audit records,
 
 ## Guidance for plugin authors
 
-**[SEC-247]** A plugin SHOULD: never log a secret or a request that carries one; send secrets in headers, not in query strings (URLs are logged on errors and shown in consent prompts); keep a secret in memory only as long as a request needs it and overwrite buffers it controls; avoid placing a secret in a place a command line shows; and name the row clearly so the user knows what to enter. Rust and TypeScript examples follow.
+**[SEC-247]** The following is guidance and has no automated test, except that a secret in a log line or a query string is a review item. A plugin SHOULD: never log a secret or a request that carries one; send secrets in headers, not in query strings (URLs are logged on errors and shown in consent prompts); keep a secret in memory only as long as a request needs it and overwrite buffers it controls; avoid placing a secret in a place a command line shows; and name the row clearly so the user knows what to enter. Rust and TypeScript examples follow.
 
 **Rust**
 

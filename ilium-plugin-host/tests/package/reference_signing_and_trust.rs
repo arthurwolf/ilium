@@ -137,7 +137,10 @@ fn pkg_201_signature_binds_the_manifest_hash() {
     // Change a valid display-name byte so schema validation cannot mask the
     // cryptographic requirement to bind the exact stored manifest bytes.
     let raw = data_of(&vector_signed(), "manifest.json");
-    let offset = raw.windows(b"Example".len()).position(|part| part == b"Example").expect("publisher display name");
+    let offset = raw
+        .windows(b"Example".len())
+        .position(|part| part == b"Example")
+        .expect("publisher display name");
     let changed = patch_data(&vector_signed(), "manifest.json", offset, b'Z', true);
     let tampered = read_package(&changed).expect("CRC repaired, must read");
     let failure = verify(

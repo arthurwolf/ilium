@@ -417,7 +417,7 @@
 <tr>
 <td><code>id</code></td>
 <td>string</td>
-<td>Unique within the plugin. The host namespaces it as <code>&lt;plugin-id&gt;.&lt;id&gt;</code>.</td>
+<td>Unique within the plugin. The global id is <code>&lt;plugin-id&gt;/&lt;local-id&gt;</code>, for example <code>example.todo/scan</code> (<a href="/pages/api-commands/">commands</a>).</td>
 </tr>
 <tr>
 <td><code>title</code></td>
@@ -432,7 +432,7 @@
 <tr>
 <td><code>keywords</code></td>
 <td>list of string, optional</td>
-<td>At most 8 words matched by the filter but not shown.</td>
+<td>At most 8 strings of 1 to 24 characters each, without spaces, matched by the filter but not shown.</td>
 </tr>
 <tr>
 <td><code>palette</code></td>
@@ -441,7 +441,7 @@
 </tr>
 </tbody>
 </table>
-<p>The filter is the host's, as for <a href="/pages/api-catalogs/">catalogues</a>: case-insensitive substring over title, category and keywords, prefix matches first. Enabled state and the check mark come from <code>commands.set-state</code> (see <a href="/pages/api-commands/">commands</a>). A disabled command stays visible and dim.</p>
+<p>The filter is the host's, as for <a href="/pages/api-catalogs/">catalogues</a>: case-insensitive substring over title, id, category and keywords, prefix matches first. Enabled state and the check mark come from <code>commands.set-state</code> (see <a href="/pages/api-commands/">commands</a>). A disabled command stays visible and dim.</p>
 <figure>
 <pre class="term">╭  ≡ ● · Commands ──────────────────────────────╮
 │ > fix▏                                        │
@@ -459,17 +459,20 @@
 <h3 id="running-a-command">Running a command</h3>
 <p>Choosing an entry invokes it: the plugin receives <code>command-invoked</code> with origin <code>palette</code>. The command can also be bound to a key through the keymap, shown in a menu, run by a toast button or a row action; see <a href="/pages/api-commands/">commands</a>.</p>
 <p><strong>Rust</strong></p>
-<pre><code class="language-rust">fn on_event(&amp;mut self, event: Event) -&gt; Vec&lt;Submission&gt; {
-    match event {
-        Event::CommandInvoked(invoked) if invoked.command == &quot;scan&quot; =&gt; self.start_scan(),
-        _ =&gt; Vec::new(),
-    }
+<pre><code class="language-rust">fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+    batch
+        .into_iter()
+        .flat_map(|event| match event {
+            Event::CommandInvoked(invoked) if invoked.command == &quot;example.todo/scan&quot; =&gt; self.start_scan(),
+            _ =&gt; Vec::new(),
+        })
+        .collect()
 }
 </code></pre>
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">onEvents(batch) {
   return batch.flatMap((event) =&gt;
-    event.tag === 'command-invoked' &amp;&amp; event.val.command === 'scan' ? startScan() : []);
+    event.tag === 'command-invoked' &amp;&amp; event.val.command === 'example.todo/scan' ? startScan() : []);
 }
 </code></pre>
 <h3 id="errors-and-limits">Errors and limits</h3>

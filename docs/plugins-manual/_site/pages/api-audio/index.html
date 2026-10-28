@@ -397,8 +397,8 @@
 <p>Use this import in client plugins and scenes. The server world has no audio import.</p>
 <h3 id="what-you-need">What you need</h3>
 <ul>
-<li><strong>Grants.</strong> <code>audio.capture</code> opens a microphone (H). <code>audio.loopback</code> captures what the computer plays (H). <code>audio.playback</code> plays samples. Listing devices needs no grant of its own: <code>audio.devices</code> returns only the devices that your granted capabilities allow.</li>
-<li><strong>Worlds.</strong> The import is in the client world (<code>ilium:client</code>) and the animation world (<code>ilium:anim</code>).</li>
+<li><strong>Grants.</strong> <code>audio.capture</code> opens a microphone (H). <code>audio.loopback</code> captures what the computer plays (H). <code>audio.playback</code> plays samples. Listing devices has no error code, because <code>devices</code> returns a plain list. It lists devices only while you hold at least one audio grant; with none granted it returns an empty list.</li>
+<li><strong>Worlds.</strong> The import is in the client world (<code>ilium:client/base</code>) and the animation world (<code>ilium:anim/base</code>).</li>
 <li><strong>Manifest.</strong> Declare each grant under the side that uses it in <code>manifest.json</code>:</li>
 </ul>
 <pre><code class="language-json">{
@@ -459,7 +459,7 @@
 <td><code>audio.playback</code></td>
 <td>async</td>
 <td><code>Result&lt;(), PluginError&gt;</code></td>
-<td>Plays samples. Completes when playback ends.</td>
+<td>Plays samples. The WIT function returns <code>result&lt;request-id, plugin-error&gt;</code>: a request id at once, and the host delivers <code>request-completed</code> with that id when playback ends. The SDK <code>await</code> resolves at that completion with this result type.</td>
 </tr>
 </tbody>
 </table>
@@ -748,7 +748,7 @@ audio.closeCapture(capture);
 <tr>
 <td><code>devices</code></td>
 <td>none</td>
-<td>Returns an empty list when every audio grant is declined. A plugin with no audio grant in its manifest traps when it calls <code>devices</code>.</td>
+<td>Never fails. Returns an empty list when no audio grant is held (none declared, all declined or revoked); with a grant held, an empty list means the computer has no audio device.</td>
 </tr>
 <tr>
 <td><code>open-capture</code></td>
@@ -796,7 +796,7 @@ audio.closeCapture(capture);
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for how <code>play</code> completes.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the generated names.</li>
 <li><a href="/pages/api-media/">Media</a> for video decoding.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/settings-extension/"><small>Previous</small>Extending Settings</a><a class="next" href="/pages/api-cli/"><small>Next</small>cli</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

@@ -456,10 +456,16 @@ fn read_entries_inner(bytes: &[u8]) -> Result<(Vec<ArchiveEntry>, Vec<Diagnostic
         total_uncompressed += u64::from(length);
         let mut entry_errors = Vec::new();
         if u64::from(length) > u64::from(compressed) * 200 {
-            entry_errors.push(failure("package.zip-invalid", "entry compression ratio exceeds 200 to 1"));
+            entry_errors.push(failure(
+                "package.zip-invalid",
+                "entry compression ratio exceeds 200 to 1",
+            ));
         }
         if total_uncompressed > 512 * 1024 * 1024 {
-            entry_errors.push(failure("package.zip-invalid", "total uncompressed size exceeds 512 MiB"));
+            entry_errors.push(failure(
+                "package.zip-invalid",
+                "total uncompressed size exceeds 512 MiB",
+            ));
         }
         check_header(bytes, cursor, true, &mut entry_errors)?;
         for result in [

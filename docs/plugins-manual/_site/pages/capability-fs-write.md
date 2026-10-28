@@ -125,7 +125,7 @@ Every write function may also return `not-permitted`, `revoked` and `internal`. 
 | `revoked` | call | The grant was revoked while the call was running. |
 | `conflict` | completion | `create-new` found a file, a folder has the target name, another holder has a lock on the path, or a rename targets a non-empty folder. |
 | `not-found` | completion | The parent folder is missing, or the source of a rename or remove does not exist. |
-| `quota-exceeded` | completion | The `data` plus `cache` disk limit (`disk_mib`, 256 MiB by default) is full. |
+| `quota-exceeded` | completion | The plugin's own `data` plus `cache` disk limit (`disk_mib`, 256 MiB by default) is full. A physically full disk instead completes with `io` and the message `no-space`. |
 | `io` | completion | An operating system error other than a missing file. |
 | `revoked` | completion | A write still pending when its grant is revoked completes as `failed(revoked)`. |
 
@@ -278,7 +278,7 @@ Writes outside `data` and `cache` appear in the plugin log. The user reads them 
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md`:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 32 Agent debug history appends to the `data` scope, which needs no grant.
 - 37 Configure agent: `fs.write:agent-config:claude` and `fs.write:agent-config:codex`.
@@ -299,7 +299,7 @@ Requirement ids for this page: [CAP-008]. See the [requirements index](/pages/re
 - [fs](/pages/api-fs/) for the full function surface, including locks.
 - [Workspace manage](/pages/capability-workspace-manage/) for worktrees, which need `fs.write:worktrees`.
 - [Requests and outcomes](/pages/requests-and-outcomes/) for how completions are delivered.
-- [Errors and limits](/pages/errors-and-limits/) for the common error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the common error codes.
 
 ### Security
 

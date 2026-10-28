@@ -215,7 +215,7 @@ fn rendered(terminal: &Terminal<TestBackend>) -> String {
         .join("\n")
 }
 
-fn draw(fixture: &Fixture) -> String {
+fn draw_terminal(fixture: &Fixture) -> Terminal<TestBackend> {
     let area = fixture.app.layout.screen_area;
     let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
     terminal
@@ -223,7 +223,28 @@ fn draw(fixture: &Fixture) -> String {
             crate::settings_ui::render(frame, frame.area(), &fixture.app, fixture.state());
         })
         .unwrap();
-    rendered(&terminal)
+    terminal
+}
+
+fn draw(fixture: &Fixture) -> String {
+    rendered(&draw_terminal(fixture))
+}
+
+/// Read actual content cells in display order, treating wrapped row boundaries
+/// as whitespace. Navigation and frame glyphs must not interrupt a diagnostic.
+fn draw_content_words(fixture: &Fixture) -> String {
+    let terminal = draw_terminal(fixture);
+    let buffer = terminal.backend().buffer();
+    let content = fixture.content();
+    let rows = (content.y..content.bottom())
+        .map(|row| {
+            (content.x..content.right())
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    rows.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 // ------------------------------------------------------------- opening
@@ -278,7 +299,7 @@ fn a_missing_configuration_file_reads_as_not_set() {
         fixture.app.optimization.panel(AgentKind::Codex).current,
         CurrentSetting::NoFile
     );
-    assert!(draw(&fixture).contains("does not exist"));
+    assert!(draw_content_words(&fixture).contains("does not exist"));
 }
 
 #[test]
@@ -540,7 +561,19 @@ fn apply_confirm_writes_one_key_keeps_a_record_and_revert_restores_it() {
     assert!(text.contains("Apply to Codex?"));
     assert!(text.contains("model_auto_compact_token_limit"));
     assert!(text.contains(&format!("123,456 -> {}", group_thousands(recommended))));
-    assert!(text.contains("config.toml"));
+    // A long task TMPDIR can wrap even the basename across modal rows.
+    let modal = crate::compaction_ui::modal_layout_for_tests(screen());
+    let lines = crate::compaction_ui::modal_lines_for_tests(pending, modal.text_area.width);
+    let file_rows: Vec<_> = lines
+        .iter()
+        .skip_while(|line| !line.starts_with("File"))
+        .take_while(|line| !line.starts_with("Key"))
+        .map(|line| line.chars().skip(8).collect::<String>())
+        .collect();
+    assert_eq!(file_rows.concat(), pending.plan.path.display().to_string());
+    for row in file_rows {
+        assert!(text.contains(&row), "missing displayed file row: {row}");
+    }
     assert!(text.contains("NEW Codex sessions"));
     assert!(text.contains("Cancel") && text.contains("Apply"));
 
@@ -660,7 +693,7 @@ fn a_stale_file_is_reported_in_the_tab_and_nothing_is_written() {
         .panel(AgentKind::Codex)
         .record
         .is_none());
-    assert!(draw(&fixture).contains("changed since it was read"));
+    assert!(draw_content_words(&fixture).contains("changed since it was read"));
 }
 
 #[test]

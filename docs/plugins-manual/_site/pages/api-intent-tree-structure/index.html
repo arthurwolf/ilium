@@ -398,7 +398,7 @@
 <pre><code class="language-json">&quot;capabilities&quot;: { &quot;server&quot;: [&quot;tree.read&quot;, &quot;tree.write&quot;, &quot;tree.restructure&quot;] }
 </code></pre>
 <h3 id="records">Records</h3>
-<pre><code class="language-wit">variant placement { before, after, inside-first, inside-last }           // as for move-node
+<pre><code class="language-wit">enum placement { before, after, inside-first, inside-last }           // as for move-node
 
 record create-group-spec   { parent: node-id, title: string, placement: placement, children: list&lt;node-id&gt; }
 record create-folder-spec  { parent: node-id, title: string, path: option&lt;fs-path&gt; }
@@ -589,11 +589,15 @@ if let Outcome::OkNode(token) = result.outcome {
 </tr>
 <tr>
 <td>Token from before a server restart</td>
-<td><code>refused(not-found)</code> or <code>refused(conflict)</code>; tokens do not survive restarts</td>
+<td><code>refused(not-found)</code>; tokens do not survive restarts, so a token minted before the restart is unknown. <code>refused(conflict)</code> is only for a token still known whose nodes changed since</td>
 </tr>
 <tr>
-<td>A node that does not exist or a locked node that must move</td>
-<td><code>refused(not-found)</code>, <code>refused(conflict)</code></td>
+<td>A node that does not exist</td>
+<td><code>refused(not-found)</code></td>
+</tr>
+<tr>
+<td>A locked node that must be closed</td>
+<td><code>refused(conflict)</code>; a locked node can be moved or renamed, because the lock blocks only closing</td>
 </tr>
 </tbody>
 </table>

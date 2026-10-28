@@ -478,7 +478,7 @@ ilium plugin build
 <p>The source manifest in the project omits <code>files</code>:</p>
 <pre><code class="language-json">{
   &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
-  &quot;id&quot;: &quot;example.agent-tools&quot;,
+  &quot;id&quot;: &quot;com.example.agent-tools&quot;,
   &quot;name&quot;: &quot;Agent tools&quot;,
   &quot;version&quot;: &quot;0.1.0&quot;,
   &quot;publisher&quot;: &quot;Example Developer&quot;,
@@ -492,7 +492,7 @@ ilium plugin build
     &quot;server&quot;: [&quot;agent.read&quot;, &quot;agent.control&quot;, &quot;tree.read&quot;, &quot;tree.decorate&quot;, &quot;notify.desktop&quot;,
       &quot;sound.play&quot;, &quot;fs.read:project&quot;, &quot;jobs.run&quot;],
     &quot;client&quot;: [&quot;agent.read&quot;, &quot;tree.read&quot;, &quot;tree.metadata&quot;, &quot;ui.panels&quot;, &quot;editor.edit&quot;,
-      &quot;topics.subscribe:example.agent-tools/*&quot;, &quot;panes.create&quot;, &quot;panes.provide-kind&quot;],
+      &quot;topics.subscribe:com.example.agent-tools/*&quot;, &quot;panes.create&quot;, &quot;panes.provide-kind&quot;],
     &quot;scene&quot;: []
   },
   &quot;contributes&quot;: {
@@ -513,7 +513,7 @@ ilium plugin build
 <p>The lengths and hashes shown here are placeholders. Your build writes the real values.</p>
 <p>Points to notice:</p>
 <ul>
-<li>The help topic gets a global id, <code>example.agent-tools/agent-tools</code>. Topic ids always start with the plugin id.</li>
+<li>The help topic gets a global id, <code>com.example.agent-tools/agent-tools</code>. Topic ids always start with the plugin id.</li>
 <li><code>description</code> and <code>publisher</code> appear in the review dialog. The dialog does not show the code.</li>
 <li>The <code>files</code> entry is required in a packed manifest only. The source manifest may leave it out.</li>
 </ul>
@@ -525,7 +525,7 @@ ilium plugin build
   },
   &quot;contributes&quot;: {
     &quot;tree_toolbar&quot;: [
-      { &quot;id&quot;: &quot;scan&quot;, &quot;icon&quot;: &quot;search&quot;, &quot;label&quot;: &quot;Scan TODO&quot;, &quot;command&quot;: &quot;example.agent-tools/scan&quot;,
+      { &quot;id&quot;: &quot;scan&quot;, &quot;icon&quot;: &quot;search&quot;, &quot;label&quot;: &quot;Scan TODO&quot;, &quot;command&quot;: &quot;com.example.agent-tools/scan&quot;,
         &quot;caption&quot;: &quot;TODO&quot; }
     ],
     &quot;status_segments&quot;: [
@@ -535,7 +535,7 @@ ilium plugin build
 }
 </code></pre>
 <p>Fixed caps apply per plugin: 4 <code>tree_toolbar</code> entries and 2 <code>status_segments</code>. More than the cap refuses the package with <code>manifest.contribution-limit</code>. The key <code>limits_tier: "first-party"</code> is accepted only for bundled T1 plugins whose id starts with <code>ilium.</code>; any other package that sets it is refused with <code>manifest.limits-tier</code> (decision D12). A third-party package therefore never sets it.</p>
-<p>Nine of the grants are high risk: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code> and <code>settings.read-kernel:api</code>. They always need an explicit choice, even for a T1 plugin, and the dialog draws them in the warning style.</p>
+<p>Many grants are high risk. The full set is every row marked <strong>H</strong> in <a href="/pages/reference-capabilities/">Capabilities</a>; it includes <code>agent.control</code> from the example above and, among the newer grants, <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code> and <code>settings.write-kernel:&lt;tab-id&gt;</code>. High-risk grants always need an explicit choice, even for a T1 plugin, and the dialog draws them in the warning style.</p>
 <h3 id="the-path-from-project-to-install">The path from project to install</h3>
 <figure>
 <svg viewBox="0 0 400 320" role="img" aria-label="Steps from pack to an enabled plugin" width="600" height="480">
@@ -573,31 +573,31 @@ ilium plugin build
 </code></pre>
 <p>The command prints one line per event. For this package the output has this shape:</p>
 <pre><code class="language-jsonl">{&quot;type&quot;:&quot;progress&quot;,&quot;step&quot;:&quot;pack&quot;,&quot;message&quot;:&quot;Computing the files inventory of 5 entries&quot;}
-{&quot;type&quot;:&quot;artifact&quot;,&quot;path&quot;:&quot;dist/example.agent-tools-0.1.0.iliumpkg&quot;,&quot;sha256&quot;:&quot;&lt;hex&gt;&quot;,&quot;bytes&quot;:187941}
+{&quot;type&quot;:&quot;artifact&quot;,&quot;path&quot;:&quot;dist/com.example.agent-tools-0.1.0.iliumpkg&quot;,&quot;sha256&quot;:&quot;&lt;hex&gt;&quot;,&quot;bytes&quot;:187941}
 {&quot;type&quot;:&quot;summary&quot;,&quot;duration_ms&quot;:412,&quot;warnings&quot;:0,&quot;errors&quot;:0}
 {&quot;type&quot;:&quot;result&quot;,&quot;ok&quot;:true,&quot;exit_code&quot;:0}
 </code></pre>
 <p>The <code>artifact</code> line gives the path relative to the project folder, the SHA-256 of the archive and its size in bytes. Use <code>--out &lt;file&gt;</code> to write the archive somewhere else.</p>
 <p>To check the archive without installing it, run the verify command. It recomputes every hash of the package and compares it with the <code>files</code> list:</p>
-<pre><code class="language-bash">ilium plugin inspect dist/example.agent-tools-0.1.0.iliumpkg --verify
+<pre><code class="language-bash">ilium plugin inspect dist/com.example.agent-tools-0.1.0.iliumpkg --verify
 </code></pre>
 <p>A clean package prints no <code>diff</code> record and exits with 0. A changed file prints one <code>diff</code> record per difference, and the command exits with 1 and the code <code>inspect.hash-mismatch</code>. The command works offline and needs no running Ilium.</p>
 <h3 id="sign-for-t2-optional">Sign for T2 (optional)</h3>
 <p>A T2 package is signed by a publisher key that the user trusts. It runs in the same sandbox as a T3 package, and the review dialog shows its signature state. Create the key pair once for each publisher, and keep the private key outside the project tree:</p>
 <pre><code class="language-bash">ilium plugin keygen --publisher-id com.example --publisher &quot;Example Developer&quot; --out ~/keys/example
-ilium plugin sign dist/example.agent-tools-0.1.0.iliumpkg --key ~/keys/example/publisher.key
+ilium plugin sign dist/com.example.agent-tools-0.1.0.iliumpkg --key ~/keys/example/publisher.key
 </code></pre>
 <p>The <code>--publisher</code> value must match the <code>publisher</code> field of the manifest, and the plugin <code>id</code> must start with the publisher id and a dot (<code>com.example.</code>). Otherwise <code>sign</code> stops with <code>sign.publisher-mismatch</code>, or the install stops with <code>manifest.publisher-mismatch</code> or <code>manifest.id-publisher</code>.</p>
 <p>Sign the archive last. A later <code>pack</code> writes a new archive without a signature, so the signature must be added again. The person who installs the package needs your <code>publisher.pub</code> file. They add it once:</p>
 <pre><code class="language-bash">ilium plugin trust add ~/keys/example/publisher.pub
-ilium plugin install dist/example.agent-tools-0.1.0.iliumpkg
+ilium plugin install dist/com.example.agent-tools-0.1.0.iliumpkg
 </code></pre>
 <p>If the key is not trusted yet, the install dialog offers <code>Trust publisher</code> and shows the key fingerprint. Declining refuses the install.</p>
 <h3 id="review-dialog">Review dialog</h3>
 <p>The dialog appears before the plugin is enabled. It shows the name, the version, the publisher, the package state and the description. Below that it lists one row per capability, grouped by side. A row with a HIGH label needs an explicit choice from the user.</p>
 <p>The dialog is the canonical review dialog of <a href="/pages/security/#verifying-a-package">Security</a>. This is the same dialog for an unsigned package.</p>
 <figure>
-<pre class="term"><span class="t-hi">╭─ Install example.agent-tools 0.1.0 ──────────╮</span>
+<pre class="term"><span class="t-hi">╭─ Install com.example.agent-tools 0.1.0 ──╮</span>
 │ Name (self-declared): Example Developer      │
 │ Unsigned T3 · dev badge after install        │
 │                                              │
@@ -628,13 +628,13 @@ ilium plugin install dist/example.agent-tools-0.1.0.iliumpkg
 </ul>
 <p>Some capabilities ask again at first use, because the grant alone does not name the target. These are separate small prompts and not part of the install dialog:</p>
 <ul>
-<li><code>open-external</code> asks once for each target origin, and the answer is remembered for the plugin (decision D25).</li>
-<li><code>http:setting:&lt;key&gt;</code> hosts, which the plugin reads from its own setting, ask for each new host before the first request (decision D23).</li>
-<li>Geocoding through <code>location.geocode</code> shows a consent notice on first use, because place names go to the host's geocoding provider (decision D14).</li>
+<li><code>open-external</code> asks once for each target origin, and the answer is remembered for the plugin (SEC-043).</li>
+<li><code>http:setting:&lt;key&gt;</code> hosts, which the plugin reads from its own setting, ask for each new host before the first request (SEC-074).</li>
+<li>Geocoding through <code>location.geocode</code> shows a consent notice on first use, because place names go to the host's geocoding provider (see <a href="/pages/design-decisions/">Design decisions</a>, D14).</li>
 </ul>
 <figure>
 <pre class="term"><span class="t-hi">╭  ≡ ● · Open link─────────────────────────────────────╮</span>
-│ example.agent-tools wants to open                    │
+│ com.example.agent-tools wants to open                │
 │ https://docs.example.com/aurora in your browser.     │
 │                                                      │
 │        <span class="t-dim">N Cancel</span>        Y Open                        │
@@ -645,21 +645,21 @@ ilium plugin install dist/example.agent-tools-0.1.0.iliumpkg
 </figure>
 
 <p>Install the unsigned package with the flag that the T3 tier needs:</p>
-<pre><code class="language-bash">ilium plugin install dist/example.agent-tools-0.1.0.iliumpkg --allow-unsigned
+<pre><code class="language-bash">ilium plugin install dist/com.example.agent-tools-0.1.0.iliumpkg --allow-unsigned
 </code></pre>
 <p>Without <code>--allow-unsigned</code>, the install stops before the dialog.</p>
 <h3 id="after-install">After install</h3>
 <p>The plugin appears in Settings &gt; Plugins. A T3 plugin keeps a <code>dev</code> badge there. Read the first lines of its log to confirm that the archive loads:</p>
 <figure>
-<pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.agent-tools --tail 3
-<span class="t-dim">2026-10-11 09:14:02</span> <span class="t-ok">info </span>  example.agent-tools activated
-<span class="t-dim">2026-10-11 09:14:03</span> <span class="t-ok">info </span>  example.agent-tools ready
-<span class="t-dim">2026-10-11 09:14:04</span> <span class="t-warn">warn </span>  example.agent-tools refused notify: not-permitted
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs com.example.agent-tools --tail 3
+<span class="t-dim">2026-10-11 09:14:02</span> <span class="t-ok">info </span>  com.example.agent-tools activated
+<span class="t-dim">2026-10-11 09:14:03</span> <span class="t-ok">info </span>  com.example.agent-tools ready
+<span class="t-dim">2026-10-11 09:14:04</span> <span class="t-warn">warn </span>  com.example.agent-tools refused notify: not-permitted
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. The warn line shows a declined grant. A clean log has no warn or error lines from the first activation.</figcaption>
 </figure>
 
-<p>Revoke a grant later with Settings &gt; Plugins &gt; example.agent-tools &gt; Capabilities, or with <code>ilium plugin grants example.agent-tools --revoke notify.desktop</code>.</p>
+<p>Revoke a grant later with Settings &gt; Plugins &gt; com.example.agent-tools &gt; Capabilities, or with <code>ilium plugin grants com.example.agent-tools --revoke notify.desktop</code>.</p>
 <h3 id="share">Share</h3>
 <p>A registry is optional (decision D27). Without one, you share the file. With one, <code>ilium plugin publish &lt;file&gt; --registry &lt;url&gt;</code> uploads a signed package to a registry (<a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a>). The package is a file, and you pass it on by any channel you choose, such as e-mail, a shared folder or a file host. If the package is signed, send <code>publisher.pub</code> with it, and send the SHA-256 of the package and the key fingerprint by another route. The registry protocol is in <a href="/pages/reference-registry/">Registry reference</a>, and the steps in <a href="/pages/guide-publishing/">Publishing guide</a>. The full release routine, with changelog, support and key loss, is in <a href="/pages/guide-publishing-and-support/">Publishing and support</a>. Before every release you MUST run <code>ilium plugin check</code>, <code>lint</code> and <code>test</code>. [AUT-320]</p>
 <ul>

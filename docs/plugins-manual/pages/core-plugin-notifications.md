@@ -19,7 +19,7 @@ The kernel keeps the policy. The look of an attention mark, the done prefix and 
 
 ### See it
 
-<figure><img src="/assets/demos/05-ask-for-update.gif" alt="Two agents idle and one at an approval prompt, the moment the notification plugin fires" loading="lazy"><figcaption>An agent asks for approval. The sound and attention mark fire on that prompt.</figcaption></figure>
+<figure><img src="/assets/demos/05-ask-for-update.gif" alt="Ilium shows two idle local agent fixtures and a working local fixture during a status update request" loading="lazy"><figcaption>Local fixtures show idle and working activity during Ask for status update. This capture does not demonstrate an approval notification or sound.</figcaption></figure>
 
 The recording shows the approval prompt. No recording shows the desktop toast or the mute toggle, so those parts use renders.
 

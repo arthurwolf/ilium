@@ -14,7 +14,7 @@ Painting the background and applying colour, filters and dithering to each cell 
 
 ### See it
 
-<figure><img src="/assets/demos/26-animations.gif" alt="The Animations settings tab changes the scene and the shared look of the background" loading="lazy"><figcaption>The Animations tab: pick a scene, then change colour, palette and dithering. The preview updates as the controls change.</figcaption></figure>
+<figure><img src="/assets/demos/26-animations.gif" alt="Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified." loading="lazy"><figcaption>Historical gallery capture. The current-build Voxel preview has not passed visual review.</figcaption></figure>
 
 ### What the user sees
 
@@ -451,7 +451,7 @@ Other plugins change what `ilium.core.ambient` does through the points below. Th
 
 Every scene receives the palette in its constructor.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.ambient"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.ambient"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds a four-colour palette
 

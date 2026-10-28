@@ -292,6 +292,6 @@ A plugin must not retry a `grab` that returned `not-permitted`. It should fall b
 - [terminal.pointer](/pages/capability-terminal-pointer/) for the mouse half of the Smart Copy feature.
 - [terminal.write](/pages/capability-terminal-write/) for the input that a grab takes away from the pane.
 - [Capabilities](/pages/capabilities/) for the grant model and the review dialog.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the grab quotas.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the grab quotas.
 
 Checked against the API version `ilium:plugin@0.1.0`.

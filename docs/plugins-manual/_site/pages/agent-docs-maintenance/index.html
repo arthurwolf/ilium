@@ -467,7 +467,7 @@
 <h2 id="release-checklist">Release checklist</h2>
 <ol>
 <li>Update the pages that the change touches, and add new pages to <code>_data/nav.yml</code>.</li>
-<li>Update the kit files under <code>_agent-kit/</code>. Check each fact against <a href="/pages/landing/">the manual pages</a>: command names and flags (<a href="/pages/getting-started-toolchain/">Set up a toolchain</a>), deadlines and limits (<a href="/pages/errors-and-limits/">Errors and limits</a>), SDK names (<a href="/pages/rust-sdk/">Rust SDK</a>, <a href="/pages/typescript-sdk/">TypeScript SDK</a>), manifest keys (<a href="/pages/reference-manifest/">Manifest keys</a>).</li>
+<li>Update the kit files under <code>_agent-kit/</code>. Check each fact against <a href="/pages/landing/">the manual pages</a>: command names and flags (<a href="/pages/getting-started-toolchain/">Set up a toolchain</a>), deadlines and limits (<a href="/pages/reference-errors-and-limits/">Errors and limits</a>), SDK names (<a href="/pages/rust-sdk/">Rust SDK</a>, <a href="/pages/typescript-sdk/">TypeScript SDK</a>), manifest keys (<a href="/pages/reference-manifest/">Manifest keys</a>).</li>
 <li>Set the <code>contract:</code> stamp in every kit file to the released contract version. Search for stale stamps:</li>
 </ol>
 <pre class="term"><span class="t-prompt">$</span> rg -L "contract: 0.1" _agent-kit

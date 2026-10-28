@@ -315,11 +315,33 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
         scrollbar_x.saturating_sub(content_inner.x),
         content_inner.height,
     );
+    let horizontal_inset = if content_area.width >= 100 {
+        2
+    } else if content_area.width >= 56 {
+        1
+    } else {
+        0
+    };
+    let (vertical_top_inset, vertical_bottom_inset) = if content_area.height >= 34 {
+        (2, 1)
+    } else if content_area.height >= 24 {
+        (1, 0)
+    } else {
+        (0, 0)
+    };
+    let content_area = Rect::new(
+        content_area.x.saturating_add(horizontal_inset),
+        content_area.y.saturating_add(vertical_top_inset),
+        content_area.width.saturating_sub(horizontal_inset),
+        content_area
+            .height
+            .saturating_sub(vertical_top_inset.saturating_add(vertical_bottom_inset)),
+    );
     let content_scrollbar_area = Rect::new(
         scrollbar_x,
-        content_inner.y,
+        content_area.y,
         scrollbar_width,
-        content_inner.height,
+        content_area.height,
     );
     let help_rail_area = Rect::new(
         content_scrollbar_area.right(),
@@ -434,6 +456,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     render_header(frame, layout.header_area);
     render_tab_list(frame, layout.tab_list_area, state.tab);
     if state.tab == SettingsTab::Icons {
+        if let Some(editor) = &state.tree_layout_editor {
+            crate::tree_layout_settings::render(frame, layout.content_area, app, editor);
+            return;
+        }
         render_icons_tab(frame, layout.content_area, app, state);
         render_icons_scrollbar(frame, layout.content_area, state.scroll);
         render_settings_help_anchors(frame, &layout, app, state);
@@ -486,6 +512,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::TextTriggers => {
             let view = text_trigger_view(app, state.selected_row, layout.content_area.width);
             render_scrollable(frame, layout.content_area, view.lines, state.scroll);
+        }
+        SettingsTab::CustomAgents => {
+            render_scrollable(
+                frame,
+                layout.content_area,
+                custom_agent_lines(app, state),
+                state.scroll,
+            );
         }
         SettingsTab::Appearance => {
             let lines = appearance_view(
@@ -974,6 +1008,14 @@ pub fn settings_help_anchors(
                 state.selected_row == app.text_trigger_settings.triggers.len(),
             );
         }
+        SettingsTab::CustomAgents => push_help_anchor(
+            &mut anchors,
+            layout,
+            "CUSTOMAGENT-01",
+            1,
+            state.scroll,
+            true,
+        ),
         SettingsTab::Appearance => {
             let view = appearance_view(
                 &app.ui_settings,
@@ -1018,6 +1060,8 @@ pub fn settings_help_anchors(
                     AppearanceRow::TerminalTextSelection => "AP-23",
                     AppearanceRow::LockClosedEnabled => "AP-24",
                     AppearanceRow::ProjectSeparators => "AP-25",
+                    AppearanceRow::ResourceGrouping => "AP-36",
+                    AppearanceRow::TreeToolbarAlwaysVisible => "AP-34",
                     AppearanceRow::AutoRemoveEmptyGroups => "AP-26",
                     AppearanceRow::AutoFreeze => "AP-27",
                     AppearanceRow::AutoFreezeAfter => "AP-28",
@@ -1324,6 +1368,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Titles => "≔",
         SettingsTab::Triggers => "⚑",
         SettingsTab::TextTriggers => "¶",
+        SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
         SettingsTab::Api => "⇄",
         SettingsTab::About => "ⓘ",
@@ -1561,6 +1606,131 @@ struct TextTriggerView {
     add_line: usize,
 }
 
+fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
+    use crate::custom_agent_editor::EditorRow;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "CUSTOM AGENTS",
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Values are plaintext in Ilium's owner-only configuration file."),
+        Line::from("Changes apply on the next launch or restart."),
+        Line::from(""),
+    ];
+    if let Some(editor) = &state.custom_agent_editor {
+        for (index, row) in editor.rows().into_iter().enumerate() {
+            let (label, value) = match row {
+                EditorRow::Name => ("Name".to_owned(), editor.draft.name.clone()),
+                EditorRow::Icon => ("Icon".to_owned(), editor.draft.icon.clone()),
+                EditorRow::Provider => (
+                    "Base".to_owned(),
+                    format!("{:?}", editor.draft.base_provider),
+                ),
+                EditorRow::EnvironmentKey(index) => (
+                    format!("Variable {} name", index + 1),
+                    editor.draft.environment[index].key.clone(),
+                ),
+                EditorRow::EnvironmentValue(index) => (
+                    format!("Variable {} value", index + 1),
+                    editor.displayed_value(index).unwrap_or_default(),
+                ),
+                EditorRow::RemoveEnvironment(index) => (
+                    format!("Remove variable {}", index + 1),
+                    "[ Remove ]".to_owned(),
+                ),
+                EditorRow::AddEnvironment => ("Add variable".to_owned(), "[ Add ]".to_owned()),
+                EditorRow::RevealValues => (
+                    "Show values".to_owned(),
+                    if editor.reveal_values { "On" } else { "Off" }.to_owned(),
+                ),
+                EditorRow::Save => (
+                    "Save profile".to_owned(),
+                    if state.custom_agent_save_pending {
+                        "Saving…"
+                    } else {
+                        "[ Save ]"
+                    }
+                    .to_owned(),
+                ),
+                EditorRow::Cancel => ("Cancel".to_owned(), "[ Cancel ]".to_owned()),
+            };
+            let value = value
+                .chars()
+                .map(|character| match character {
+                    '\n' => "\\n".to_owned(),
+                    '\r' => "\\r".to_owned(),
+                    '\t' => "\\t".to_owned(),
+                    other if other.is_control() => "�".to_owned(),
+                    other => other.to_string(),
+                })
+                .collect::<String>();
+            let selected = index == state.selected_row;
+            let padding = 30usize.saturating_sub(label.chars().count());
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} {label}", if selected { "›" } else { " " }),
+                    if selected {
+                        theme::selected_style()
+                    } else {
+                        Style::new()
+                    },
+                ),
+                leader_span(padding),
+                Span::raw(value),
+            ]));
+        }
+        lines.push(Line::from(if state.custom_agent_editing {
+            "Type to edit; Enter finishes; Esc cancels editing."
+        } else {
+            "Enter edits or activates; arrows navigate; Esc cancels."
+        }));
+    } else {
+        for (index, profile) in app.custom_agents.profiles.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} {} {}  ({:?}, {} variables)  [Delete]",
+                if index == state.selected_row {
+                    "›"
+                } else {
+                    " "
+                },
+                profile.icon,
+                profile.name,
+                profile.base_provider,
+                profile.environment.len()
+            )));
+        }
+        let missing = crate::custom_agent_settings::missing_profiles(app);
+        for (index, identity) in missing.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} [ Restore missing profile {} ({:?}) ]",
+                if state.selected_row == app.custom_agents.profiles.len() + index {
+                    "›"
+                } else {
+                    " "
+                },
+                identity.profile_id,
+                identity.base_provider
+            )));
+        }
+        lines.push(Line::from(format!(
+            "{} [ Add custom agent ]",
+            if state.selected_row == app.custom_agents.profiles.len() + missing.len() {
+                "›"
+            } else {
+                " "
+            }
+        )));
+        lines.push(Line::from(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." }));
+    }
+    lines
+}
+
+pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Rect) -> u16 {
+    (custom_agent_lines(app, state).len().min(u16::MAX as usize) as u16).saturating_sub(area.height)
+}
+
 /// Readable, measured list surface for server-executed regexp responses.
 /// Each rule has a distinct status/target heading and wrapped match/reply rows.
 fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerView {
@@ -1582,7 +1752,7 @@ fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerV
     let mut row_lines = Vec::with_capacity(app.text_trigger_settings.triggers.len());
     for (index, trigger) in app.text_trigger_settings.triggers.iter().enumerate() {
         let cursor = if index == selected_row { "›" } else { " " };
-        let enabled = if trigger.enabled { "ON" } else { "OFF" };
+        let enabled = on_off(trigger.enabled);
         let row_start = lines.len();
         lines.push(Line::from(vec![
             Span::styled(
@@ -1742,6 +1912,10 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::TextTriggers => text_trigger_view(app, selected_row, content_area.width)
             .lines
             .len() as u16,
+        SettingsTab::CustomAgents => match &app.mode {
+            crate::app::Mode::Settings(state) => custom_agent_lines(app, state).len() as u16,
+            _ => 0,
+        },
         SettingsTab::Appearance => {
             appearance_view(&app.ui_settings, selected_row, content_area.width)
                 .lines
@@ -2029,7 +2203,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
         lines.push(Line::from(""));
     }
     let table = Paragraph::new(lines)
-        .block(theme::block(true).title(theme::chrome_title("Icon assignments")));
+        .block(theme::block(true).title(theme::chrome_title("Icon assignments · L Tree layout")));
     frame.render_widget(table, left);
     for (index, target) in crate::agent_monitoring::general_icon_targets()
         .into_iter()
@@ -2094,6 +2268,11 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             &app.tree,
             &mut preview_tree_state,
             crate::tree_ui::TreeRenderOptions {
+                custom_toolbar_profiles: None,
+                custom_toolbar_selected: None,
+                custom_toolbar_hovered: None,
+                custom_toolbar_pending: None,
+                custom_agent_labels: None,
                 focused: false,
                 elapsed_ms: app.started_at.elapsed().as_millis(),
                 terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
@@ -2114,6 +2293,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 show_worktree_branch_line: app.git_settings.branch_line
                     == crate::config::GitBranchLine::WorktreeOnly,
                 tree_order: app.ui_settings.tree_order,
+                row_layout: &app.ui_settings.tree_row_layout,
                 show_project_separators: app.ui_settings.show_project_separators,
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
@@ -2126,6 +2306,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 hover: crate::tree_ui::TreeHoverState::default(),
                 sidebar_files: &Default::default(),
                 chatroom_projects: &Default::default(),
+                resources: Some(&app.resources),
                 panes: &app.panes,
             },
         );
@@ -2961,11 +3142,7 @@ fn title_style_lines(
         Line::from(""),
         column(
             "For Codex, use the official thread name",
-            if use_codex_thread_names {
-                "☑ On"
-            } else {
-                "☐ Off"
-            },
+            crate::value_control::boolean_switch(use_codex_thread_names),
             Style::new().add_modifier(Modifier::BOLD),
         ),
         Line::from(Span::styled(
@@ -3848,12 +4025,8 @@ fn selected_sound_label(
         .unwrap_or_else(|| format!("{} (unavailable)", path.display()))
 }
 
-fn checkbox_value(is_enabled: bool) -> String {
-    if is_enabled {
-        "[x] Enabled".to_string()
-    } else {
-        "[ ] Disabled".to_string()
-    }
+fn sound_toggle_value(is_enabled: bool) -> String {
+    crate::value_control::boolean_switch(is_enabled).to_owned()
 }
 
 fn sound_row_value(
@@ -3866,9 +4039,9 @@ fn sound_row_value(
         SoundRow::Source => format!("‹ {} ›", settings.source.label()),
         SoundRow::File => format!("‹ {} ›", selected_sound_label(settings, discovery)),
         SoundRow::Preview => "[ Play ]".to_string(),
-        SoundRow::NotifyEnabled => checkbox_value(notifications.enabled),
+        SoundRow::NotifyEnabled => sound_toggle_value(notifications.enabled),
         SoundRow::NotifySuppressRedundant => {
-            checkbox_value(notifications.suppress_redundant_task_outcomes)
+            sound_toggle_value(notifications.suppress_redundant_task_outcomes)
         }
         SoundRow::NotifyCoalesce => {
             if notifications.task_coalesce_seconds == 0 {
@@ -3879,15 +4052,15 @@ fn sound_row_value(
         }
         notify_row if notify_row.notification_event().is_some() => notify_row
             .notification_event()
-            .map(|event| checkbox_value(notifications.event_flag(event)))
+            .map(|event| sound_toggle_value(notifications.event_flag(event)))
             .unwrap_or_default(),
         event_row => event_row
             .event()
             .map(|event| {
                 if settings.events.is_enabled(event) {
-                    "[x] Enabled".to_string()
+                    crate::value_control::boolean_switch(true).to_owned()
                 } else {
-                    "[ ] Disabled".to_string()
+                    crate::value_control::boolean_switch(false).to_owned()
                 }
             })
             .unwrap_or_default(),
@@ -4057,12 +4230,30 @@ pub(crate) fn described_settings_scroll_for_selection(
     area: Rect,
     state: &SettingsState,
 ) -> u16 {
-    let rows = match state.tab {
-        SettingsTab::Sound => sound_description_geometry(area.width).row_lines,
-        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width).row_lines,
+    let line = match state.tab {
+        SettingsTab::Sound => sound_description_geometry(area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::Appearance => {
+            let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                .get(state.selected_row)
+                .copied();
+            let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            view.row_lines
+                .iter()
+                .find(|(row, _)| Some(*row) == selected)
+                .map(|(_, line)| usize::from(*line))
+                // Wide layouts replace the first selector with sizing cards.
+                .or_else(|| (selected == Some(AppearanceRow::LeftPanelSizingMode)).then_some(0))
+        }
         _ => return state.scroll,
     };
-    let Some(line) = rows.get(state.selected_row).copied() else {
+    let Some(line) = line else {
         return state.scroll;
     };
     let line = line.min(usize::from(u16::MAX)) as u16;
@@ -4579,6 +4770,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::MinimumTerminalWidth => "Minimum terminal width",
         AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::ProjectSeparators => "Project separators",
+        AppearanceRow::ResourceGrouping => "Group agents under resources",
+        AppearanceRow::TreeToolbarAlwaysVisible => "Tree toolbar always visible",
         AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
         AppearanceRow::ColorScheme => "Color theme",
@@ -4638,8 +4831,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
         }
+        AppearanceRow::ResourceGrouping => "Display owners and FIFO waiters beneath shared resource rows. Pane parents and split layouts stay unchanged.",
         AppearanceRow::ProjectSeparators => {
             "Draw a frame-style line after each project’s full tree, except the last. Saved for this project."
+        }
+        AppearanceRow::TreeToolbarAlwaysVisible => {
+            "Keep the bottom tree action toolbar visible while another panel has focus."
         }
         AppearanceRow::TreeRowManagementControls => {
             "Show rename and move up/down buttons when a tree row is hovered."
@@ -4728,20 +4925,10 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
         }
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
-        AppearanceRow::ProjectSeparators => {
-            if ui.show_project_separators {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::TreeRowManagementControls => {
-            if ui.show_tree_row_management_controls {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::ResourceGrouping => on_off(ui.resource_queue_grouping),
+        AppearanceRow::ProjectSeparators => on_off(ui.show_project_separators),
+        AppearanceRow::TreeToolbarAlwaysVisible => on_off(ui.tree_toolbar_always_visible),
+        AppearanceRow::TreeRowManagementControls => on_off(ui.show_tree_row_management_controls),
         AppearanceRow::AgentIdentifierMode => ui.agent_identifiers.mode.label().to_string(),
         AppearanceRow::ColorScheme => match ui.color_scheme {
             ColorScheme::Dark => "Dark".to_string(),
@@ -4749,70 +4936,16 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         },
         AppearanceRow::MotionLevel => ui.motion_level.label().to_string(),
         AppearanceRow::SidebarDensity => ui.sidebar_density.label().to_string(),
-        AppearanceRow::UseStableGlyphs => {
-            if ui.use_stable_glyphs {
-                "On".to_string()
-            } else {
-                "Off (normal icons)".to_string()
-            }
-        }
-        AppearanceRow::ShowInferredTitleIcons => {
-            if ui.show_inferred_title_icons {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AgentDebugMenu => {
-            if ui.agent_debug_menu_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::ContextMenuIcons => {
-            if ui.show_context_menu_icons {
-                "On".to_string()
-            } else {
-                "Off (text only)".to_string()
-            }
-        }
-        AppearanceRow::AgentToolbar => {
-            if ui.agent_toolbar_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::ShowToolbarLabels => {
-            if ui.show_toolbar_labels {
-                "On".to_string()
-            } else {
-                "Off (icons only)".to_string()
-            }
-        }
-        AppearanceRow::SectionFrames => {
-            if ui.section_frames_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::LastPrompt => {
-            if ui.last_prompt_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::UseStableGlyphs => on_off(ui.use_stable_glyphs),
+        AppearanceRow::ShowInferredTitleIcons => on_off(ui.show_inferred_title_icons),
+        AppearanceRow::AgentDebugMenu => on_off(ui.agent_debug_menu_enabled),
+        AppearanceRow::ContextMenuIcons => on_off(ui.show_context_menu_icons),
+        AppearanceRow::AgentToolbar => on_off(ui.agent_toolbar_enabled),
+        AppearanceRow::ShowToolbarLabels => on_off(ui.show_toolbar_labels),
+        AppearanceRow::SectionFrames => on_off(ui.section_frames_enabled),
+        AppearanceRow::LastPrompt => on_off(ui.last_prompt_enabled),
         AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
-        AppearanceRow::ProgressMonitor => {
-            if ui.progress_monitor_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::ProgressMonitor => on_off(ui.progress_monitor_enabled),
         AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
         AppearanceRow::ProgressFillStyle => {
             let frames = &ui.icons.task_progress_frames;
@@ -4827,63 +4960,15 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 frames.last().map_or("", String::as_str),
             )
         }
-        AppearanceRow::TerminalTextSelection => {
-            if ui.terminal_text_selection_enabled {
-                "On".to_string()
-            } else {
-                "Off (raw mouse forwarded)".to_string()
-            }
-        }
-        AppearanceRow::LockClosedEnabled => {
-            if ui.lock_closed_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoRemoveEmptyGroups => {
-            if ui.auto_remove_empty_groups {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreeze => {
-            if ui.auto_freeze_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::TerminalTextSelection => on_off(ui.terminal_text_selection_enabled),
+        AppearanceRow::LockClosedEnabled => on_off(ui.lock_closed_enabled),
+        AppearanceRow::AutoRemoveEmptyGroups => on_off(ui.auto_remove_empty_groups),
+        AppearanceRow::AutoFreeze => on_off(ui.auto_freeze_enabled),
         AppearanceRow::AutoFreezeAfter => format_duration(ui.auto_freeze_after_seconds),
-        AppearanceRow::AutoFreezeDone => {
-            if ui.auto_freeze_done {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreezeIdle => {
-            if ui.auto_freeze_idle {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreezeWaitingApproval => {
-            if ui.auto_freeze_waiting_approval {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreezeWaitingBackground => {
-            if ui.auto_freeze_waiting_background {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::AutoFreezeDone => on_off(ui.auto_freeze_done),
+        AppearanceRow::AutoFreezeIdle => on_off(ui.auto_freeze_idle),
+        AppearanceRow::AutoFreezeWaitingApproval => on_off(ui.auto_freeze_waiting_approval),
+        AppearanceRow::AutoFreezeWaitingBackground => on_off(ui.auto_freeze_waiting_background),
     }
 }
 
@@ -5145,11 +5230,7 @@ pub(crate) fn settings_choice_control(
         let first = models.iter().find(|model| !model.trim().is_empty());
         let can_step = fallback
             || if value.trim().is_empty() {
-                first.is_some_and(|first| {
-                    models
-                        .iter()
-                        .any(|model| !model.trim().is_empty() && model != first)
-                })
+                first.is_some()
             } else {
                 models
                     .iter()
@@ -5307,7 +5388,7 @@ fn setting_lines(rows: &[(&str, String, &str)], selected_row: usize) -> Vec<Line
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled((*label).to_string(), label_style),
             leader_span(padding),
-            Span::styled(format!("‹ {value} ›"), control_style),
+            Span::styled(setting_control_value(value), control_style),
         ]));
         lines.push(Line::from(Span::styled(
             format!("    {description}"),
@@ -5319,6 +5400,16 @@ fn setting_lines(rows: &[(&str, String, &str)], selected_row: usize) -> Vec<Line
         )));
     }
     lines
+}
+
+fn setting_control_value(value: &str) -> String {
+    if value == crate::value_control::boolean_switch(true)
+        || value == crate::value_control::boolean_switch(false)
+    {
+        value.to_owned()
+    } else {
+        format!("‹ {value} ›")
+    }
 }
 const TERMINAL_HELP_TOPICS: [(usize, &str); 3] = [(0, "TERM-01"), (1, "TERM-02"), (4, "TERM-03")];
 #[cfg(test)]
@@ -5547,7 +5638,7 @@ fn attention_lines(
     settings: &crate::attention::AttentionSettings,
     selected: usize,
 ) -> Vec<Line<'static>> {
-    setting_lines(
+    let mut lines = setting_lines(
         &[
             (
                 "Attention mode",
@@ -5589,7 +5680,21 @@ fn attention_lines(
             ),
         ],
         selected,
-    )
+    );
+    if let Some(heading) = lines.first_mut() {
+        *heading = Line::from(Span::styled(
+            "  QUEUE AND ARRIVAL",
+            Style::new().add_modifier(Modifier::BOLD),
+        ));
+    }
+    let divider_line = 1 + 4 * usize::from(APPEARANCE_ROW_HEIGHT) + 2;
+    if let Some(divider) = lines.get_mut(divider_line) {
+        *divider = Line::from(Span::styled(
+            "  ── ARRIVAL PRESENTATION ──",
+            theme::border_style(false),
+        ));
+    }
+    lines
 }
 
 fn git_lines(settings: &GitSettings, error: Option<&str>, selected: usize) -> Vec<Line<'static>> {
@@ -5655,10 +5760,9 @@ fn debug_view(settings: &DebugSettings, selected: usize, width: u16) -> Describe
         selected,
     );
     let value = on_off(settings.file_logging_enabled);
-    let control_width = usize::from(ROW_LEFT_INSET)
-        + usize::from(LABEL_COLUMN_WIDTH)
-        + 1
-        + format!("‹ {value} ›").width();
+    let control_value = setting_control_value(&value);
+    let control_width =
+        usize::from(ROW_LEFT_INSET) + usize::from(LABEL_COLUMN_WIDTH) + 1 + control_value.width();
     if usize::from(width) < control_width {
         let label_style = if selected == 0 {
             Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -5674,7 +5778,7 @@ fn debug_view(settings: &DebugSettings, selected: usize, width: u16) -> Describe
             Span::raw("  "),
             Span::styled("File logging", label_style),
             Span::raw(" "),
-            Span::styled(format!("‹ {value} ›"), value_style),
+            Span::styled(control_value, value_style),
         ]);
     }
     described_settings_view(lines, 1, width)
@@ -5719,21 +5823,21 @@ fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     let claude_status = &app.reset_monitor_state.claude;
     let status_label = |provider: ResetProvider, enabled: bool| {
         if !enabled {
-            return "Off".to_owned();
+            return on_off(false);
         }
         let status = app.reset_monitor_state.provider(provider);
         if let Some(error) = &status.last_error {
-            return format!("On · F9 details · check failed: {error}");
+            return format!("{} · F9 details · check failed: {error}", on_off(true));
         }
         if status.last_checked.is_none() {
-            return "On · checking…".to_owned();
+            return format!("{} · checking…", on_off(true));
         }
         if status.scheduled.is_some() {
-            return "On · reset announced".to_owned();
+            return format!("{} · reset announced", on_off(true));
         }
         match provider {
-            ResetProvider::Claude => "On · history only".to_owned(),
-            ResetProvider::Codex => "On · no scheduled reset".to_owned(),
+            ResetProvider::Claude => format!("{} · history only", on_off(true)),
+            ResetProvider::Codex => format!("{} · no scheduled reset", on_off(true)),
         }
     };
     let mut lines = setting_lines(
@@ -5808,9 +5912,9 @@ fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
             (
                 "Voice control",
                 if settings.enabled {
-                    state
+                    format!("{} · {state}", on_off(true))
                 } else {
-                    "Off".to_owned()
+                    on_off(false)
                 },
                 "Starts or stops the owned microphone, Realtime session, and speaker actor.",
             ),
@@ -5892,11 +5996,7 @@ fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     )
 }
 fn on_off(value: bool) -> String {
-    if value {
-        "On".into()
-    } else {
-        "Off".into()
-    }
+    crate::value_control::boolean_switch(value).to_owned()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6850,7 +6950,7 @@ mod number_control_tests {
     }
 
     #[test]
-    fn empty_model_with_one_distinct_discovered_option_disables_cycle_but_keeps_catalog() {
+    fn empty_model_with_one_distinct_discovered_option_enables_initial_selection() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("synthetic-single-model".into(), directory.path().into());
         app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
@@ -6877,14 +6977,14 @@ mod number_control_tests {
                 Position::new(geometry.previous.x, geometry.previous.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::PreviousChoice)
         );
         assert_eq!(
             control.hit(
                 Position::new(geometry.next.x, geometry.next.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::NextChoice)
         );
         assert_eq!(
             control.hit(
@@ -6893,6 +6993,17 @@ mod number_control_tests {
             ),
             Some(ControlAction::OpenChoices)
         );
+        // Once selected, the single distinct model has nowhere to cycle.
+        app.inference_settings.ollama.model = "synthetic-only-model".into();
+        let (_, selected_control) =
+            settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
+        let selected = selected_control.geometry();
+        for point in [selected.previous, selected.next] {
+            assert_eq!(
+                selected_control.hit(Position::new(point.x, point.y), PointerButton::Left),
+                None
+            );
+        }
         app.ollama_models.push("synthetic-second-model".into());
         let (_, control) =
             settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
@@ -7139,6 +7250,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn boolean_switch_states_use_the_same_seven_terminal_cells() {
+        assert_eq!(on_off(false), "[○ OFF]");
+        assert_eq!(on_off(true), "[ON  ●]");
+        assert_eq!(UnicodeWidthStr::width(on_off(false).as_str()), 7);
+        assert_eq!(UnicodeWidthStr::width(on_off(true).as_str()), 7);
+    }
+
+    #[test]
     fn simple_setting_rows_show_dividers_without_moving_click_rows() {
         let lines = setting_lines(
             &[
@@ -7171,6 +7290,40 @@ mod tests {
             simple_content_hit(content, 0, Position::new(5, 3), 2),
             None,
             "divider rows stay inert"
+        );
+    }
+
+    #[test]
+    fn attention_page_adds_hierarchy_without_changing_row_geometry() {
+        let lines = attention_lines(&crate::attention::AttentionSettings::default(), 0);
+        assert_eq!(
+            lines.len(),
+            1 + crate::app::AttentionRow::ALL.len() * usize::from(APPEARANCE_ROW_HEIGHT)
+        );
+        let heading = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(heading.contains("QUEUE AND ARRIVAL"));
+
+        let arrival_divider = 1 + 4 * usize::from(APPEARANCE_ROW_HEIGHT) + 2;
+        let divider = lines[arrival_divider]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(divider.contains("ARRIVAL PRESENTATION"));
+
+        let content = Rect::new(0, 0, 100, 30);
+        assert_eq!(
+            simple_content_hit(
+                content,
+                0,
+                Position::new(LABEL_COLUMN_WIDTH + ROW_LEFT_INSET + 1, 1),
+                crate::app::AttentionRow::ALL.len(),
+            ),
+            Some((0, -1))
         );
     }
 
@@ -7500,9 +7653,10 @@ mod tests {
             let screen = Rect::new(0, 0, width, height);
             let layout = compute_layout(screen);
             assert!(layout.tab_list_area.right() <= layout.content_area.x);
-            // Text keeps one padding cell before the scrollbar on wide frames.
+            // Adaptive inner padding plus the ordinary gap separate text from
+            // the dedicated scrollbar column.
             assert!(layout.content_area.right() <= layout.content_scrollbar_area.x);
-            assert!(layout.content_scrollbar_area.x - layout.content_area.right() <= 1);
+            assert!(layout.content_scrollbar_area.x - layout.content_area.right() <= 3);
             assert_eq!(
                 layout.content_scrollbar_area.right(),
                 layout.help_rail_area.x
@@ -7519,6 +7673,17 @@ mod tests {
                 assert!(region.bottom() <= screen.bottom());
             }
         }
+    }
+
+    #[test]
+    fn settings_content_padding_grows_with_available_space() {
+        let roomy = compute_layout(Rect::new(0, 0, 160, 40));
+        let compact = compute_layout(Rect::new(0, 0, 80, 24));
+        assert!(roomy.content_area.x >= roomy.content_frame_area.x + 3);
+        assert!(compact.content_area.x > compact.content_frame_area.x);
+        assert!(roomy.content_area.y >= roomy.content_frame_area.y + 3);
+        assert!(roomy.content_area.height < roomy.content_frame_area.height);
+        assert_eq!(compact.content_area.y, compact.content_frame_area.y + 1);
     }
 
     #[test]
@@ -8587,9 +8752,9 @@ mod tests {
         }
         let progress_row = crate::app::AgentMonitoringRow::AttentionProgressReports;
         assert!(view.row_lines.iter().any(|(row, _)| *row == progress_row));
-        assert_eq!(monitoring_row_value(progress_row, &app), "Off");
+        assert_eq!(monitoring_row_value(progress_row, &app), "[○ OFF]");
         app.ui_settings.attention_progress_reports = true;
-        assert_eq!(monitoring_row_value(progress_row, &app), "On");
+        assert_eq!(monitoring_row_value(progress_row, &app), "[ON  ●]");
         let enabled_view = agent_monitoring_view(&app, 0, 160);
         assert!(enabled_view
             .lines
@@ -8601,9 +8766,9 @@ mod tests {
             monitoring_row_label(model_icon_row),
             "Use model icons in the tree"
         );
-        assert_eq!(monitoring_row_value(model_icon_row, &app), "Off");
+        assert_eq!(monitoring_row_value(model_icon_row, &app), "[○ OFF]");
         app.ui_settings.agent_tree_model_icons = true;
-        assert_eq!(monitoring_row_value(model_icon_row, &app), "On");
+        assert_eq!(monitoring_row_value(model_icon_row, &app), "[ON  ●]");
     }
 
     fn sizing_text(view: &AppearanceView) -> String {
@@ -8612,6 +8777,42 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn appearance_keyboard_selection_keeps_controls_visible_at_compact_heights() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("appearance-scroll-test".into(), directory.path().into());
+        for mode in LeftPanelSizingMode::ALL {
+            app.ui_settings.left_panel_sizing.mode = mode;
+            let rows = AppearanceRow::visible(mode);
+            for width in [38, 56, SIZING_CARDS_MINIMUM_CONTENT_WIDTH, 120] {
+                let area = Rect::new(7, 3, width, 18);
+                let mut state = SettingsState {
+                    tab: SettingsTab::Appearance,
+                    ..SettingsState::default()
+                };
+                for selected in (0..rows.len()).chain((0..rows.len()).rev()) {
+                    state.selected_row = selected;
+                    state.scroll = described_settings_scroll_for_selection(&app, area, &state);
+                    let view = appearance_view(&app.ui_settings, selected, width);
+                    let line = view
+                        .row_lines
+                        .iter()
+                        .find(|(row, _)| *row == rows[selected])
+                        .map(|(_, line)| *line)
+                        .unwrap_or(0);
+                    assert!(
+                        line >= state.scroll,
+                        "{mode:?} width {width} row {selected}"
+                    );
+                    assert!(
+                        line < state.scroll + area.height,
+                        "{mode:?} width {width} row {selected} below viewport"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -8944,7 +9145,13 @@ mod tests {
         assert!(rendered.contains("Project separators"));
         assert_eq!(
             appearance_row_value(AppearanceRow::ProjectSeparators, &ui),
-            "Off"
+            "[○ OFF]"
+        );
+        assert!(rendered.contains("Tree toolbar always visible"));
+        assert!(rendered.contains("Keep the bottom tree action toolbar visible"));
+        assert_eq!(
+            appearance_row_value(AppearanceRow::TreeToolbarAlwaysVisible, &ui),
+            "[ON  ●]"
         );
         assert!(AppearanceRow::visible(LeftPanelSizingMode::Fixed)
             .contains(&AppearanceRow::ProjectSeparators));
@@ -8952,7 +9159,7 @@ mod tests {
         assert!(rendered.contains("Show rename and move up/down buttons"));
         assert_eq!(
             appearance_row_value(AppearanceRow::TreeRowManagementControls, &ui),
-            "Off"
+            "[○ OFF]"
         );
         assert!(rendered.contains("Agent identifier"));
         assert!(rendered.contains("Selected icon"));
@@ -8960,7 +9167,7 @@ mod tests {
         assert!(!rendered.contains("Codex icon"));
         assert!(!rendered.contains("Antigravity icon"));
         assert!(rendered.contains("Use stable glyphs"));
-        assert!(rendered.contains("Off (normal icons)"));
+        assert!(rendered.contains("[○ OFF]"));
         assert!(rendered.contains("Agent debug menu"));
         assert!(rendered.contains("persist prompts, detection evidence, session phases"));
         assert!(rendered.contains("forces fresh detection snapshots"));
@@ -9545,7 +9752,7 @@ mod tests {
         .collect::<Vec<_>>()
         .join("\n");
         assert!(rendered.contains("System beep"));
-        assert!(rendered.contains("[x] Enabled"));
+        assert!(rendered.contains("[ON  ●]"));
         assert!(rendered.contains("Agent needs approval"));
         assert!(rendered.contains("/usr/share/sounds"));
         assert!(rendered.contains("freedesktop / stereo / complete"));
@@ -9564,7 +9771,7 @@ mod tests {
             .join("\n");
 
         assert!(rendered.contains("Confirm terminal submissions"));
-        assert!(rendered.contains("Off"));
+        assert!(rendered.contains("OFF"));
         assert!(rendered.contains("stages dictated text visibly"));
     }
 
@@ -9597,7 +9804,7 @@ mod tests {
             .join(" ");
 
         assert!(rendered.contains("File logging"));
-        assert!(rendered.contains("Off"));
+        assert!(rendered.contains("OFF"));
         assert!(rendered.contains("LLM requests/responses"));
         assert!(rendered.contains("Credential headers/URL parameters are redacted"));
         assert!(rendered.contains("binary audio is summarized"));
@@ -9643,7 +9850,7 @@ mod tests {
 
         let layout = compute_layout(terminal.backend().buffer().area);
         assert!(layout.content_area.right() <= 40);
-        assert!(layout.content_area.width >= "  File logging ‹ Off ›".width() as u16);
+        assert!("[○ OFF]".width() <= 7);
         let rows = (0..12)
             .map(|y| {
                 (0..40)
@@ -9652,7 +9859,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(rows.iter().any(|row| row.contains("File logging")));
-        assert!(rows.iter().any(|row| row.contains("‹ Off ›")));
+        assert!(rows.iter().any(|row| row.contains("[○ OFF]")));
         assert!(rows.iter().any(|row| row.contains("Write major")));
     }
 

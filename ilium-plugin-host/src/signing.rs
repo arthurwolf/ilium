@@ -1,6 +1,6 @@
 //! Package signing, trust and verification (reference-packaging.md PKG-200..260).
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use ilium_plugin_api::Code;
 use serde::{Deserialize, Serialize};
@@ -10,8 +10,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use ilium_plugin_api::Tier;
 use ilium_plugin_api::manifest::Diagnostic;
+use ilium_plugin_api::Tier;
 
 use crate::package::PackageArchive;
 
@@ -386,14 +386,22 @@ fn parse_signature_document(signature_bytes: &[u8]) -> Result<SignatureEnvelope,
         let decoded = URL_SAFE_NO_PAD.decode(&entry.signature).ok();
         if entry.algorithm != "ed25519"
             || entry.key_id.len() != 64
-            || !entry.key_id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || !entry
+                .key_id
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             || !publisher_id_valid(&entry.publisher_id)
             || !timestamp_valid(&entry.signed_at)
             || !seen.insert(&entry.key_id)
             || entry.signature.len() != 86
-            || !decoded.is_some_and(|bytes| bytes.len() == 64 && URL_SAFE_NO_PAD.encode(bytes) == entry.signature)
+            || !decoded.is_some_and(|bytes| {
+                bytes.len() == 64 && URL_SAFE_NO_PAD.encode(bytes) == entry.signature
+            })
         {
-            return Err(failure("package.signature-format", "Malformed signature fields or duplicate key"));
+            return Err(failure(
+                "package.signature-format",
+                "Malformed signature fields or duplicate key",
+            ));
         }
     }
     Ok(envelope)

@@ -39,7 +39,7 @@ The `gpu.kernels` capability lets an animation scene run the host's own image ke
 |---|---|---|
 | `gpu.kernels` | yes | the only form, development builds only |
 | `gpu.kernels:blur` | no | no argument |
-| `device.gpu` | no | a name that never existed; see the animation migration notes |
+| `device.gpu` | no | a name that never existed; see [porting iliumanim](/pages/porting-iliumanim/) |
 
 Normal risk, unstable. In release builds the grant is unknown and the manifest is refused with `manifest.grant-unknown`.
 
@@ -110,7 +110,7 @@ Call the helper from the scene's frame function. Keep the original buffer: a fai
 | Release build | grant unknown, manifest refused | Gate the feature behind a development build. |
 | Grant declined | `not-permitted` | Draw without the effect. |
 | Unknown kernel name | `invalid-argument` | Use the enum. |
-| Pixel buffer size mismatch | `invalid-argument` | Match width, height and format. |
+| Pixel buffer size mismatch | `invalid-argument` | Match width, height and format (4 bytes per pixel, RGBA, 8 bits per channel, so the buffer is exactly `width * height * 4` bytes). |
 | Buffer too large | `quota-exceeded` | Process tiles. |
 | No GPU | CPU fallback with the same result | Nothing. |
 

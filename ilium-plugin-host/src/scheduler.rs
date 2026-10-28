@@ -914,7 +914,11 @@ pub fn event_queue_policy(event: &Event) -> QueuePolicy {
             QueuePolicy::Coalesce
         }
         Event::EditorPointer(pointer)
-            if pointer.pointer.kind == ilium_plugin_api::generated::types::ui::PointerKind::Move => QueuePolicy::Coalesce,
+            if pointer.pointer.kind
+                == ilium_plugin_api::generated::types::ui::PointerKind::Move =>
+        {
+            QueuePolicy::Coalesce
+        }
         Event::UiAction(action)
             if matches!(
                 action.kind,

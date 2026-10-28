@@ -14,6 +14,10 @@ fn catalog_covers_every_settings_help_id_once_with_complete_content() {
         .map(|topic| topic.id.clone())
         .collect::<BTreeSet<_>>();
     let expected = expected_ids();
+    let grouping = catalog::by_id("AP-36").expect("resource grouping help exists");
+    assert!(grouping.explanation.contains("real pane parents"));
+    assert!(grouping.states.contains("Default On"));
+    assert!(grouping.specimen.contains("waiting badges"));
 
     assert_eq!(topics.len(), expected.len(), "catalog topic count");
     assert_eq!(ids.len(), topics.len(), "catalog IDs must be unique");
@@ -110,6 +114,9 @@ fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     add_range(&mut ids, "AP", 1, 26);
     ids.insert("AP-33".to_owned());
+    ids.insert("AP-36".to_owned());
+    ids.insert("AP-34".to_owned());
+    add_range(&mut ids, "COST", 24, 27);
     for id in crate::animation_rows::help_ids() {
         ids.insert(id);
     }

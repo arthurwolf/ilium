@@ -7,8 +7,8 @@ A plugin learns what happens through events and changes the world through intent
 ## You will need
 
 - The grants for each event and intent you use. The tables below name them. See [Capabilities](/pages/capabilities/).
-- A server or client side. In Rust, `#[ilium_plugin(side = "server")]` or `side = "client"`. In TypeScript, `side: 'server'` or `side: 'client'` in `definePlugin`. A scene plugin exports `renderer` instead of `handler`.
-- The `lifecycle` and `handler` exports. Both are required, so the manifest never lists them in `exports`.
+- A server or client side. In Rust, `#[ilium_plugin(side = "server")]` or `side = "client"`. In TypeScript, `side: 'server'` or `side: 'client'` in `definePlugin`. A scene plugin also exports `renderer`.
+- The `lifecycle` and `handler` exports (and `renderer` for a scene plugin). They are required, so the manifest never lists them in `exports`.
 - Rust stable 1.90 or later with the `wasm32-wasip2` target, or Bun 1.2 or later for TypeScript.
 - Background from [Worlds and sides](/pages/worlds-and-sides/).
 
@@ -24,7 +24,7 @@ The handler is the `Handler` trait in Rust and the `onEvents` function in TypeSc
 
 An instance runs one call at a time, so a handler never re-enters itself.
 
-The `on-events` deadline is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A breach traps the instance, which follows the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule): restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See [Errors and limits](/pages/errors-and-limits/).
+The `on-events` deadline is 20 ms by default for every tier. A manifest may request up to 50 ms, and only a T1 plugin gets above 20 ms (T2 and T3 ceiling: 20 ms). A breach traps the instance, which follows the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule): restart after 1 s, then 5 s, and disable at the third failure within 10 minutes, with a notice in the tree footer. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ## Event catalogue
 
@@ -45,13 +45,13 @@ An event reaches a plugin only when the plugin holds the listed grant. Lazily ac
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch: u64` | `agent.read-prompts` | Never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | Drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | Never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, drag, wheel), `button` | `terminal.pointer`, while claimed | Coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button` | `terminal.pointer`, while claimed | Coalesced (drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | Never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | Coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | Never dropped |
 | `settings-changed` | `settings-change { keys, origin, side }` | always (own) | Coalesced |
 | `timer-fired` | `timer-id` | always (own) | Coalesced by timer |
-| `request-completed` | `request-result` | always (own) | Never dropped |
+| `request-completed` | `request-result` | none (own timers) | Never dropped |
 | `job-progress` | `request-id`, `percent` | always (own) | Coalesced by job |
 | `message` | `from`, `channel`, `payload` | own sides, or the sender's `messages.peer` | Never dropped |
 | `topic-published` | `topic`, `from`, `payload-json` | `topics.subscribe` | Drop oldest, counted |
@@ -101,7 +101,7 @@ The contract adds 18 events after `events-dropped`, so the catalogue holds 56 ev
 | `client-request` | `call`, `kind`, `payload-json` | client side, own `client_requests` | Never dropped |
 | `kernel-settings-changed` | `tab`, `keys` | `settings.read-kernel:<tab>` | Coalesced by tab |
 | `keymap-changed` | none | `keymap.read` | Coalesced |
-| `durable-timer-fired` | `timer`, `name`, `late-by-millis` | always (own) | Never dropped |
+| `durable-timer-fired` | `timer`, `name`, `late-by-millis` | none (own timers) | Never dropped |
 | `input-uncertain` | `pane`, `dedup-key` | the grant of the original `send-input` | Never dropped |
 | `display-mode-changed` | `mode` | own `display_modes` | Coalesced |
 
@@ -201,7 +201,7 @@ The kernel runs two batch-level checks over the whole list, in index order, befo
   <line x1="150" y1="96" x2="150" y2="114" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
   <rect x="20" y="114" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
   <text x="150" y="135" font-size="11" text-anchor="middle" fill="currentColor">Per submission: dedup-key</text>
-  <text x="296" y="135" font-size="10" fill="currentColor">duplicate(original)</text>
+  <text x="296" y="135" font-size="10" fill="currentColor">duplicate(request-ref)</text>
   <line x1="150" y1="148" x2="150" y2="166" stroke="currentColor" marker-end="url(#ev-arrow-checks)"/>
   <rect x="20" y="166" width="260" height="34" rx="6" fill="none" stroke="currentColor"/>
   <text x="150" y="187" font-size="11" text-anchor="middle" fill="currentColor">Per submission: target checks</text>
@@ -227,7 +227,7 @@ The SDK helper `dedup::key_for(parts: &[&str])` joins its parts with `:` and rep
 
 For `send-input`, two checks run at batch level before this list (see Batch checks): shape (key present, total text across all stages at most 65,536 bytes, otherwise `refused(invalid-argument)`) and the grant `terminal.write` (otherwise `refused(not-permitted)`). The kernel then checks each submission in this order. The first failing check decides the outcome.
 
-1. Dedup key already reserved. Then `duplicate(original)`.
+1. Dedup key already reserved. Then `duplicate(request-ref)`.
 2. Pane exists and is a terminal pane. Otherwise `refused(not-found)` or `refused(unsupported)`.
 3. The pane is restored, which means its process has started. Otherwise `refused(pane-not-ready)`.
 4. The rate limit has room. Otherwise `refused(rate-limited)`.
@@ -248,7 +248,7 @@ Every intent needs its grant. The outcome column lists the codes beyond `ok`.
 | `set-node-locked` | `node`, `locked` | `tree.write` | `refused(not-found)` |
 | `create-pane` | `parent`, `title`, `content-kind`, `cwd`, `command`, `initial-input` | `panes.create` (and `terminal.write` for `initial-input`) | `ok-node`; `refused(not-found)`, `failed(io)` |
 | `signal-pane` | `pane`, `signal` (interrupt, terminate, kill, hangup) | `panes.signal` | `refused(not-found)`, `refused(pane-not-ready)` |
-| `send-input` | `pane`, `text`, `delivery` (Typed, Submitted, Pasted), `prompt-epoch` | `terminal.write` | `refused(pane-not-ready)`, `refused(rate-limited)`, `refused(conflict)` |
+| `send-input` | `pane`, `text`, `delivery` (Typed, Submitted, Pasted), `prompt-epoch`, `stages` (at most 16, total delay at most 10 s), `raw` and `mouse` (need `terminal.raw-input`), `if-current`, `lock-user-input` (at most 2 s, needs `terminal.input-lock`), `journal` | `terminal.write` | `refused(pane-not-ready)`, `refused(rate-limited)`, `refused(conflict)` |
 | `agent-action` | `pane`, `action-id` | `agent.control` | `refused(unsupported)`, `refused(conflict)` |
 | `set-decoration` | `node`, `slot`, `content`, `icon`, `sort-key`, `persist` | `tree.decorate` | `refused(not-found)`, `refused(invalid-argument)`, `refused(quota-exceeded)` |
 | `clear-decoration` | `node`, `slot` | `tree.decorate` | As `set-decoration` |
@@ -259,7 +259,7 @@ Every intent needs its grant. The outcome column lists the codes beyond `ok`.
 | `invoke-command` | `command`, `arguments-json` | `commands.invoke` | `refused(not-found)`, `failed(timed-out)` after 30 s |
 | `message` | `to`, `channel`, `payload` | `messages.peer:<plugin-id>` | `refused(not-found)`, `refused(invalid-argument)` over 1 MiB |
 | `editor-apply-edits` | `buffer`, `base-revision`, `edits` | `editor.edit` | `refused(conflict)` for a stale revision, `refused(invalid-argument)` for overlapping edits |
-| `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit` | `ok-node`; `refused(not-permitted)`, `failed(not-found)`, `failed(io)` |
+| `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit`, `fs.read` | `ok-node`; `refused(not-permitted)`, `failed(not-found)`, `failed(io)` |
 
 ## Extended intents
 
@@ -355,6 +355,12 @@ let submission = Submission::keyed(
         text: "/compact".into(),
         delivery: Delivery::Submitted,
         prompt_epoch: None,
+        stages: Vec::new(),
+        raw: None,
+        mouse: None,
+        if_current: None,
+        lock_user_input: false,
+        journal: true,
     }),
     key,
 );
@@ -412,7 +418,7 @@ Rust `FakeHost` (feature `testing`) and TypeScript `createFakeHost()` from `@ili
 - [Requests and outcomes](/pages/requests-and-outcomes/)
 - [Retained mode](/pages/retained-mode/)
 - [Lifecycle](/pages/lifecycle/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/)
 - [Reference: events and intents](/pages/reference-events-and-intents/)
 

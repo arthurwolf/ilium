@@ -55,7 +55,7 @@ A view is rendered by the `views` export. The host calls `render(view, area)` wh
 
 ## The host imports
 
-All functions are in the `ui` interface. Each one needs `ui.panels` or the `panes.provide-kind` grant, except `invalidate`, which the plugin may call for its own views at any time.
+All functions are in the `ui` interface. Each one needs `ui.panels` or the `panes.provide-kind` grant, except `invalidate`, which the plugin may call for its own views at any time. The functions with no error code (`close-panel`, `close-popup`, `widget-state`, `display-width` and `theme`, as in [UI](/pages/api-ui/)) cannot refuse. When the grant is declined they return their plain result: `display-width` and `theme` still answer, `widget-state` returns nothing because no view is registered, and `close-panel` and `close-popup` do nothing.
 
 | WIT function | Rust | TypeScript | Returns | Meaning |
 |---|---|---|---|---|
@@ -143,7 +143,7 @@ Escape is reserved by the host. It closes the topmost popup first, then the topm
 
 ## When the grant is declined
 
-- Every `ui` import returns `not-permitted`.
+- Every `ui` import that has an error code returns `not-permitted`. `invalidate`, `close-panel`, `close-popup`, `widget-state`, `display-width` and `theme` have no error code, as in [UI](/pages/api-ui/): none of them returns `not-permitted`. `invalidate`, `close-panel` and `close-popup` are no-ops, `widget-state` returns nothing, and `display-width` and `theme` return their normal values.
 - The `panels`, `settings` tabs with `"render": "view"` and `onboarding_steps` contributions are not registered.
 - The `open-view` intent is refused with `not-permitted`.
 - A settings page that is not registered does not appear in the Settings screen.
@@ -156,8 +156,8 @@ The manifest declares the panel, a command that opens it, and the `views` export
 ```json
 {
   "id": "example-plugin",
+  "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views"] },
   "capabilities": { "client": ["ui.panels"] },
-  "exports": ["views"],
   "contributes": {
     "commands": [{ "id": "open-run-log", "title": "Open run log" }],
     "panels": [
@@ -335,7 +335,7 @@ The run log panel from the Rust example, after two presses of Refresh, looks lik
 - [widgets-media-and-embedded](/pages/widgets-media-and-embedded/) for `surface`, which `write-surface` fills.
 - [settings-screens](/pages/settings-screens/) for how settings pages are listed.
 - [capability-panes-provide-kind](/pages/capability-panes-provide-kind/) for panes whose body is a view.
-- [errors-and-limits](/pages/errors-and-limits/) for the trap and restart rules.
+- [errors-and-limits](/pages/reference-errors-and-limits/) for the trap and restart rules.
 - [tutorial-03-panel](/pages/tutorial-03-panel/) for a step-by-step panel.
 
 Checked against the API version `ilium:plugin@0.1.0`.

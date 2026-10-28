@@ -523,7 +523,7 @@
 </tbody>
 </table>
 <h3 id="what-does-not-port">What does not port</h3>
-<p>Ilium has no editor-language protocol, no debugger protocol, no webview, no extension-to-extension object access, no Node.js and no way to load native modules. A plugin cannot run arbitrary code in the host. Work that needs a long process is started with <code>process.run</code> and the <code>process.long-lived</code> grant, and then the plugin only reads its output.</p>
+<p>Ilium has no editor-language protocol, no debugger protocol, no webview, no extension-to-extension object access, no Node.js and no way to load native modules. A plugin cannot run arbitrary code in the host. Work that needs a long process is started with <code>process.spawn</code> under the <code>process.long-lived</code> grant, and then the plugin only reads its output.</p>
 <h3 id="example-a-word-count-command">Example: a "Word count" command</h3>
 <p>VS Code:</p>
 <pre><code class="language-ts">vscode.commands.registerCommand('wc.count', () =&gt; {
@@ -537,10 +537,10 @@
   &quot;capabilities&quot;: { &quot;client&quot;: [&quot;editor.read&quot;, &quot;notify.toast&quot;] } }
 </code></pre>
 <pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
-import { editor } from '@ilium/plugin-sdk/host/editor';
+import { editor } from '@ilium/plugin-sdk/primitives/editor';
 import { intents } from '@ilium/plugin-sdk/host/intents';
 
-export default definePlugin({
+export const { lifecycle, handler } = definePlugin({
   side: 'client',
   handler: {
     onCommand(id: string) {
@@ -697,7 +697,7 @@ fn handle(event: Event) {
 </tr>
 <tr>
 <td><code>split-window</code>, <code>new-window</code></td>
-<td><code>panes.create</code>, the <code>create-split</code> intent</td>
+<td><code>panes.create</code>, the <code>create-split</code> intent (grant <code>tree.restructure</code>, high risk)</td>
 </tr>
 <tr>
 <td><code>run-shell</code> hooks on events</td>
@@ -746,7 +746,7 @@ fn handle(event: Event) {
 <tr>
 <td>Failure</td>
 <td>An error message, the editor continues</td>
-<td>A trap, restart after 1 s, 5 s, 30 s, disabled at the third failure in 10 minutes</td>
+<td>A trap, restart after 1 s, then 5 s, disabled at the third failure in 10 minutes</td>
 </tr>
 <tr>
 <td>State</td>

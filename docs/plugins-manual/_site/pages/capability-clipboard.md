@@ -275,8 +275,8 @@ the example rethrows it.
 
 ## Who requests it
 
-Among the first-party plugins in the feature map, four request `clipboard.write`: the text
-selection and right-click menu, the agent toolbar, and the two Smart Copy plugins (light and AI).
+Among the first-party plugins in the feature map, three request `clipboard.write`: the text
+selection and right-click menu, and the two Smart Copy plugins (light and AI).
 No first-party plugin requests `clipboard.read`.
 
 ## See also
@@ -284,7 +284,7 @@ No first-party plugin requests `clipboard.read`.
 - [terminal.read-screen](/pages/capability-terminal-read-screen/) for the screen text that Smart
   Copy works from.
 - [help.read](/pages/capability-help-read/) for topics that explain the copy shortcuts.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the trap rule.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the trap rule.
 - [clipboard API](/pages/api-clipboard/) for the full import reference.
 
 ### Security

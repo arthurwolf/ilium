@@ -441,6 +441,10 @@ Every call returns a plugin error with one of these codes. The table lists the c
 | `remove` | `invalid-argument` (scope root) | `not-found`, `conflict` (lock), `io` |
 | `rename` | `invalid-argument` (two different scopes) | `not-found`, `conflict` (target is a non-empty folder or locked), `io` |
 | `watch` | `not-found`, `invalid-argument` (not watchable), `quota-exceeded` (64 watches) | None |
+| `unwatch` | None (an unknown id is ignored) | None |
+| `read-with-revision` | `invalid-argument` (bad path) | `not-found`, `io`, `quota-exceeded` (over 64 MiB) |
+| `write-atomic` | `invalid-argument` (bad path, over 16 MiB) | `conflict` (the file changed since the read: stale `expected` revision, or `expected` is none and the file exists, or a lock holds it), `not-found`, `quota-exceeded`, `io` |
+| `tail` | `not-found`, `invalid-argument` (bad path, `max-bytes` over 1 MiB), `io` | None |
 | `lock` | `invalid-argument` (bad path) | `conflict` (held and timeout 0), `timed-out`, `not-found` |
 | `pick` | `busy` (a picker is already open) | `cancelled` when the user cancels |
 
@@ -474,7 +478,7 @@ Every call returns a plugin error with one of these codes. The table lists the c
 - [Capabilities and grants](/pages/capabilities/)
 - [Requests and outcomes](/pages/requests-and-outcomes/)
 - [Background jobs](/pages/background-jobs/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Security](/pages/security/)
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/)
 

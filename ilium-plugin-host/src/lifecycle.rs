@@ -5,12 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use ilium_plugin_api::Side;
 use ilium_plugin_api::generated::host::plugins::{
     HealthState, InstanceState, PackageState, PluginInfo, SideState,
 };
 use ilium_plugin_api::{Code, Diagnostic};
 use ilium_plugin_api::ids::PluginId;
+use ilium_plugin_api::Side;
 
 use crate::error::HostError;
 

@@ -676,6 +676,11 @@ export function resetNotes(index: number): void {
 <td>A vector length differs from the dimensions of the index</td>
 </tr>
 <tr>
+<td><code>upsert</code>, <code>top-k</code>, <code>remove-entries</code>, <code>drop-index</code></td>
+<td><code>not-found</code></td>
+<td>The <code>index-id</code> does not exist (never created, already dropped or owned by another plugin). <code>remove-entries</code> ignores an id that is not in the index. <code>drop-index</code> has no error channel, so an unknown id is ignored</td>
+</tr>
+<tr>
 <td><code>top-k</code></td>
 <td><code>invalid-argument</code></td>
 <td>The query length differs from the dimensions, or <code>k</code> is 0 or above 100</td>

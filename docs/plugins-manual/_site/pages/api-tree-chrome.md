@@ -65,6 +65,8 @@ A decoration is text and an icon that a plugin attaches to one node, in one of i
 
 The host steps the frames itself. The plugin makes one call, not one per frame. When the user turns on reduced motion, the host shows the first frame only.
 
+The samples on this page and in the core plugin pages call `baseDecoration(node, slot, text)`. It is a helper each sample plugin defines for itself, not host API: it returns a `set-decoration` value with the given `node` and `slot`, a `content` of one run of `text` in the default tone, and every other field at its plain default (no icon, `persist` false, no frames, `always` visibility). The caller then spreads it and overrides the fields it needs, such as `sortKey` or `trailing`.
+
 Manifest, declared once per plugin:
 
 ```json
@@ -350,7 +352,7 @@ export const virtualRows: VirtualRowsProvider = {
     const page = loadPage(parent, cursor); // must answer within 20 ms: read from a cache
     const rows: VirtualRowChild[] = page.items.map((item) => ({
       id: item.id,
-      label: { spans: [{ text: item.title }] },
+      label: [{ text: item.title }],
       icon: '🔎',
       expandable: false,
       command: 'run-search',
@@ -385,7 +387,7 @@ The status bar shows the mode, then segments separated by a long dash with space
 
 | Intent | Fields | Notes |
 |---|---|---|
-| `set-status-segment` | `segment`, `content` (rich text), `tooltip`, `tone` | At most 10 per second per segment; faster calls are refused with `rate-limited`. |
+| `set-status-segment` | `segment`, `content` (rich text), `tooltip`, `tone` | At most 10 per second per slot (the segment id is the slot); faster calls are refused with `rate-limited`. |
 | `clear-status-segment` | `segment` | Removes the segment. |
 
 A click on the segment arrives as `command-invoked` with origin `status-segment`.
@@ -413,7 +415,7 @@ export function showQuota(percentUsed: number): Submission {
       tag: 'set-status-segment',
       val: {
         segment: 'quota',
-        content: { spans: [{ text: `quota ${percentUsed}%` }] },
+        content: [{ text: `quota ${percentUsed}%` }],
         tooltip: { text: 'Tokens used in this 5 hour window' },
         tone: percentUsed >= 90 ? 'warning' : 'info',
       },
@@ -459,7 +461,7 @@ export function showModel(pane: bigint, model: string): Submission {
   return {
     intent: {
       tag: 'set-frame-slot',
-      val: { pane, slot: 'model', content: { spans: [{ text: model }] }, icon: '🧩', tooltip: undefined },
+      val: { pane, slot: 'model', content: [{ text: model }], icon: '🧩', tooltip: undefined },
     },
     correlation: 1n,
     dedupKey: undefined,

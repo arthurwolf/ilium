@@ -103,6 +103,53 @@ impl<T> Drop for AbortOnDropHandle<T> {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn cancelling_join_aborts_the_owned_child() {
+        struct DropNotice(Option<tokio::sync::oneshot::Sender<()>>);
+
+        impl Drop for DropNotice {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();
+        let owner = AbortOnDropHandle::new(tokio::spawn(async move {
+            let _drop_notice = DropNotice(Some(stopped_tx));
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        }));
+        started_rx.await.expect("the owned child started");
+
+        let (polled_tx, polled_rx) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut joining = Box::pin(owner.join());
+            // Cancel an already-polled pending join, rather than an unstarted future.
+            std::future::poll_fn(|context| {
+                assert!(std::future::Future::poll(joining.as_mut(), context).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+            let _ = polled_tx.send(());
+            let _ = joining.await;
+        });
+        polled_rx
+            .await
+            .expect("join was polled while the child was pending");
+        waiter.abort();
+        assert!(waiter
+            .await
+            .expect_err("the waiter was cancelled")
+            .is_cancelled());
+        tokio::time::timeout(std::time::Duration::from_secs(5), stopped_rx)
+            .await
+            .expect("an abandoned join must not detach its child")
+            .expect("the aborted child ran its drop guard");
+    }
+
+    #[tokio::test]
     async fn cancelled_borrowed_settle_retains_original_handle_until_actual_exit() {
         let (release, gate) = tokio::sync::oneshot::channel();
         let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

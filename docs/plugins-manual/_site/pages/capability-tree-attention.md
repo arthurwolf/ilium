@@ -91,7 +91,7 @@ impl Handler for Attention {
         for event in batch {
             match event {
                 Event::CommandInvoked(invoked) if invoked.command == "com.example.attention/build-done" => {
-                    if let Some(node) = invoked.pane {
+                    if let Some(node) = invoked.context.pane {
                         submissions.push(Submission::new(Intent::MarkAttention(MarkAttentionSpec {
                             node, reason: "Build finished".into(),
                         })));
@@ -120,9 +120,9 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     const submissions: Submission[] = [];
     for (const event of batch) {
-      if (event.tag === 'command-invoked' && event.val.command === 'com.example.attention/build-done' && event.val.pane !== undefined) {
+      if (event.tag === 'command-invoked' && event.val.command === 'com.example.attention/build-done' && event.val.context.pane !== undefined) {
         submissions.push({
-          intent: { tag: 'mark-attention', val: { node: event.val.pane, reason: 'Build finished' } },
+          intent: { tag: 'mark-attention', val: { node: event.val.context.pane, reason: 'Build finished' } },
           correlation: 1n,
           dedupKey: undefined,
         });
@@ -144,7 +144,7 @@ A plugin never needs to clear a mark that the user acknowledged: the kernel clea
 | Grant missing or declined | `refused(not-permitted)` | Show the status in the plugin's own panel. |
 | `reason` above 80 characters | `refused(invalid-argument)` | Shorten the reason. |
 | Node not found | `refused(not-found)` | Re-read the tree. |
-| Marking too often | `refused(rate-limited)` | Coalesce marks per node. |
+| Marking too often (more than 10 `mark-attention` and `ack-attention` submissions per second for one node by one plugin, the two calls together, sliding 1 s window, per [limits](/pages/reference-errors-and-limits/)) | `refused(rate-limited)` with `retry-after-ms` | Coalesce marks per node. |
 | Ack of an unmarked node | `ok` (no change) | Nothing. |
 | Grant revoked later | later submissions `refused(not-permitted)`; existing marks stay | Nothing. |
 

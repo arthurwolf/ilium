@@ -2,7 +2,7 @@
 
 ## http streams
 
-A stream is an HTTP response that the plugin reads piece by piece while it is still arriving. Use it for server-sent events, newline-delimited JSON, long downloads and live feeds, where `fetch` (which waits for the whole body) does not fit. Streams are specified in section 6.30. They use the same `http:<host-pattern>` grant as [http](/pages/api-http/), so read that page for request, header and host-pattern rules.
+A stream is an HTTP response that the plugin reads piece by piece while it is still arriving. Use it for server-sent events, newline-delimited JSON, long downloads and live feeds, where `fetch` (which waits for the whole body) does not fit. Streams are specified in the `http-stream` functions of the [WIT reference](/pages/reference-wit/#512-http). They use the same `http:<host-pattern>` grant as [http](/pages/api-http/), so read that page for request, header and host-pattern rules.
 
 ### What you need
 
@@ -29,7 +29,7 @@ open-websocket: func(url: string, protocols: list<string>) -> result<stream-id, 
 send-websocket: func(stream: stream-id, text: string) -> result<_, plugin-error>;
 ```
 
-Events (section 12.1):
+Events (defined in the [WIT reference](/pages/reference-wit/#412-events)):
 
 | Event | Payload | Delivery |
 |---|---|---|
@@ -255,7 +255,7 @@ The host, not the plugin, keeps requests polite, so several plugins cannot flood
 | `Retry-After` | A server `Retry-After` makes the call, or the stream, fail with `rate-limited` and `retry-after-ms` set. Wait that long before the next open. |
 | ETag cache for `fetch` | The host sends `If-None-Match` for a URL it has seen and returns a cached `304` as the cached `200`. The plugin always sees a `200` with the full body. |
 | Back-pressure | While the plugin's event queue is full, the host stops reading the socket instead of dropping data. |
-| Session cap | At most 64 open streams for the whole session and 32 connections. |
+| Session cap | At most 64 open streams for the whole session and 32 open network connections (one TCP and TLS connection to a remote host; streams to one host share a connection only when the server speaks HTTP/2). Over either cap `open-stream` fails at once with `quota-exceeded`. |
 
 ### Hosts from a setting
 
@@ -291,7 +291,7 @@ The setting row itself looks like any text row, with leaders:
 
 ### WebSocket (unstable)
 
-`open-websocket` and `send-websocket` exist only when the feature `websocket` is enabled for development builds (`@unstable(feature = websocket)`). The functions are absent from stable builds. Server frames arrive as `http-stream-data` events and the end as `http-stream-closed`. Send text with `send-websocket`. The grant is the same `http:<host-pattern>`, for a `wss://` URL.
+`open-websocket` and `send-websocket` exist only when the feature `websocket` is enabled for development builds (`@unstable(feature = websocket)`). A plugin that does not opt in to the feature cannot import them. On a host built without the feature, a plugin that did opt in gets `unsupported` from `open-websocket`. Server frames arrive as `http-stream-data` events and the end as `http-stream-closed`. Send text with `send-websocket`. The grant is the same `http:<host-pattern>`, for a `wss://` URL.
 
 ### Errors and limits
 
@@ -309,7 +309,8 @@ The setting row itself looks like any text row, with leaders:
 | Limit | Value |
 |---|---|
 | `http_streams` per plugin | 4 default, 16 T1 ceiling, 4 T2 and T3 ceiling |
-| Streams per session | 64 |
+| Streams per session | 64 (`quota-exceeded` over the cap) |
+| Open connections per session | 32 (`quota-exceeded` over the cap) |
 | Chunk | at most 1 MiB; larger records are split |
 
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.feed --tail 4
@@ -327,7 +328,7 @@ Illustrative, not generated. A plugin log of a stream that the server closed wit
 - [Capability: http](/pages/capability-http/) for the grant and its review text.
 - [Events](/pages/api-events/) for the delivery policy of stream events.
 - [Settings](/pages/api-settings/) for the rows that hold a host.
-- [Errors and limits](/pages/errors-and-limits/) for the shared codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the shared codes.
 
 ### Security
 

@@ -243,7 +243,7 @@ To pick the tab from code, call `ui.set-widget-state` with `tab(1)` on the key `
 | `modal` | `bool` | When true, input stays in the popup. Default: true. |
 | `width`, `height` | `constraint` | The size, see [Popup size and placement](#popup-size-and-placement). Default: 60% each. |
 
-`open-popup-with` takes an anchor and options. The anchors are `centered((width, height))`, `at-cell((column, row))`, `below-key("key")`, `at-key("key")`, `at-tree-node(node)` and `at-pointer`. The options are `modal`, `pinnable`, `dismiss-on-leave` and `close-on-escape`. [The UI model](/pages/ui-model/) explains each anchor.
+`open-popup-with` takes an anchor and options. The anchors are `centered((width, height))`, `at-cell((column, row))`, `below-key("key")`, `at-key({ key, side })`, `at-tree-node(node)` and `at-pointer`. The options are `modal`, `pinnable`, `dismiss-on-leave` and `close-on-escape`. [The UI model](/pages/ui-model/) explains each anchor.
 
 Actions: `closed` with `none` when the host closes the popup, for example after Escape. Escape follows the order in [Escape](/pages/ui-model/#escape), and a modal popup cannot refuse the close. A click outside closes a non-modal popup. `close-popup` sends nothing. Roles: `border`, and `accent` for the title.
 
@@ -735,7 +735,7 @@ export const { lifecycle, handler, views } = definePlugin({
 - [Collections](/pages/widgets-collections/)
 - [Views and the ui import](/pages/api-ui/)
 - [The UI model](/pages/ui-model/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Tutorial: a panel with a table and a layout](/pages/tutorial-03-panel/)
 
 API version: `ilium:plugin@0.1.0`.

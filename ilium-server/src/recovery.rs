@@ -175,8 +175,14 @@ impl RecoveryOwner {
 
     /// Worktree pruning must retain its protection while either the exact
     /// pending original or an accepted resolution still belongs to this owner.
-    /// Settle an already completed task before inspecting; no new task is begun.
+    /// The atomic fence is sufficient while protected. Do not wait for the
+    /// slot here: a prune caller can hold the repository/spawn fence needed by
+    /// a restore that a slot-owning drainer is joining. Once semantic work
+    /// opens the fence, settle the completed task before inspecting its slot.
     pub(crate) async fn is_unresolved(&self) -> bool {
+        if self.preserves_original() {
+            return true;
+        }
         let mut slot = self.slot.lock().await;
         settle_if_completed(&mut slot).await;
         self.preserves_original()
@@ -665,6 +671,71 @@ mod tests {
             .await
             .expect("disk shutdown");
         execution.request_shutdown();
+    }
+
+    #[tokio::test]
+    async fn pruning_protection_does_not_wait_for_a_drain_that_needs_the_spawn_fence() {
+        let directory = tempfile::tempdir().expect("directory");
+        let state = state(&directory);
+        install_saved_tree(&state).await;
+
+        // Real prune transactions hold this fence when they query recovery.
+        // The accepted restore needs the same fence before publishing its tree.
+        let publication_guard = state.workspace_spawn_lock.lock().await;
+        let reached = state.recovery.before_restore_publication.notified();
+        tokio::pin!(reached);
+        reached.as_mut().enable();
+        let completion = state
+            .recovery
+            .admit(Arc::clone(&state), true)
+            .await
+            .expect("real restore admitted");
+        tokio::time::timeout(Duration::from_secs(5), reached)
+            .await
+            .expect("real restore waits for the prune-owned spawn fence");
+
+        // Poll the actual drainer until it owns the slot and awaits that
+        // restore. This witnesses the cycle instead of relying on a sleep.
+        let mut close = Box::pin(state.recovery.close_and_drain());
+        std::future::poll_fn(|context| {
+            assert!(Future::poll(close.as_mut(), context).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert!(state.recovery.slot.try_lock().is_err());
+        assert!(matches!(
+            state.recovery.admit(Arc::clone(&state), false).await,
+            Err(Refusal::Closed)
+        ));
+        let protected =
+            tokio::time::timeout(Duration::from_millis(250), state.recovery.is_unresolved()).await;
+
+        // Always break the fixture's cycle before reporting a RED result.
+        // The original task must still complete through its original drainer.
+        drop(publication_guard);
+        let drained = tokio::time::timeout(Duration::from_secs(5), close).await;
+        let completed =
+            tokio::time::timeout(Duration::from_secs(5), super::wait_for_result(completion)).await;
+        let restored_name = state
+            .tree
+            .read()
+            .await
+            .get(ROOT_ID)
+            .expect("restored root")
+            .name
+            .clone();
+        let snapshot_shutdown = persistence::shutdown_snapshot_service(&state).await;
+        state.execution.get().expect("bank").request_shutdown();
+
+        assert!(protected.expect("prune cannot await the slot while drain awaits its fence"));
+        drained
+            .expect("original drainer finishes")
+            .expect("restore succeeds");
+        completed
+            .expect("actual semantic completion arrives")
+            .expect("restore completed");
+        snapshot_shutdown.expect("disk shutdown");
+        assert_eq!(restored_name, "saved recovery");
     }
 
     #[tokio::test]

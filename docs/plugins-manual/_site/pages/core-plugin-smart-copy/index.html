@@ -401,7 +401,7 @@
 <li>Smart Copy (AI), where the inference model labels the regions worth copying (Smart Copy, Smart Copy (AI)).</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/04-smart-copy.gif" alt="A region of terminal output is selected and copied with Smart Copy" loading="lazy"><figcaption>Smart Copy in a terminal pane. The right-click menu offers the recognised regions.</figcaption></figure>
+<figure><img src="/assets/demos/04-smart-copy.gif" alt="Ilium Smart Copy selects a complete recalled lot code in a local fixture ledger" loading="lazy"><figcaption>Smart Copy highlights and copies a complete source lot code. The terminal and inference use disclosed local fixtures; the private clipboard is verified against the source bytes.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -458,7 +458,7 @@
   &quot;name&quot;: &quot;Smart copy&quot;,
   &quot;version&quot;: &quot;0.1.0&quot;,
   &quot;publisher&quot;: &quot;Ilium&quot;,
-  &quot;description&quot;: &quot;The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and &quot;,
+  &quot;description&quot;: &quot;The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and Smart Copy with the inference model choosing semantic regions.&quot;,
   &quot;license&quot;: &quot;MIT&quot;,
   &quot;server&quot;: {
     &quot;entry&quot;: &quot;server.wasm&quot;,
@@ -482,7 +482,6 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;service:copy&quot;,
     &quot;command:smart-copy&quot;
   ],
   &quot;contributes&quot;: {
@@ -495,6 +494,13 @@
       }
     ]
   },
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;points:recognisers&quot;,
+    &quot;points:after-copy&quot;,
+    &quot;topics:copied&quot;,
+    &quot;commands:smart-copy&quot;
+  ],
   &quot;limits_tier&quot;: &quot;first-party&quot;
 }
 </code></pre>
@@ -698,7 +704,7 @@ async fn rank(screen: String) -&gt; Vec&lt;String&gt; {
     };
     match inference::complete(request).await {
         Ok(completion) =&gt; completion.text.lines().take(3).map(str::to_string).collect(),
-        Err(_) =&gt; Vec::new(), // fall back to the light candidates
+        Err(_) =&gt; Vec::new(), // inference failed: the picker stays empty
     }
 }
 
@@ -731,7 +737,7 @@ async function rank(screen: string): Promise&lt;string[]&gt; {
     });
     return completion.text.split('\n').slice(0, 3);
   } catch {
-    return []; // fall back to the light candidates
+    return []; // inference failed: the picker stays empty
   }
 }
 
@@ -767,7 +773,7 @@ function picker(regions: string[]) {
 <td>hook (transform)</td>
 <td>Change the copied text before it reaches the clipboard, for example to remove secrets.</td>
 <td>text, kind, pane; reply: text</td>
-<td>standard</td>
+<td>high</td>
 </tr>
 </tbody>
 </table>
@@ -775,7 +781,7 @@ function picker(regions: string[]) {
 <ul>
 <li><code>ilium.core.smart-copy/copied</code>: { kind, length } after text is copied</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.smart-copy"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.smart-copy"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-replaces-anything-that-looks-like-an-api-token-with-removed-before-the-copy">Example: Replaces anything that looks like an API token with <code>[removed]</code> before the copy</h4>
 <p>A package adds a <code>transform</code> handler. Each handler gets the previous output and may replace it.</p>
 <pre><code class="language-json">{

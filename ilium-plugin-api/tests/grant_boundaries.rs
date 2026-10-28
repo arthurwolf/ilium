@@ -53,7 +53,10 @@ fn command_and_topic_patterns_cover_only_their_namespace() {
     let commands = grant("commands.invoke:example.notes/*");
     assert!(commands.covers(&grant("commands.invoke:example.notes/save")));
     assert!(!commands.covers(&grant("commands.invoke:example.notes-other/save")));
-    assert!(refuses_coverage(&commands, "commands.invoke:example.notes/save/all"));
+    assert!(refuses_coverage(
+        &commands,
+        "commands.invoke:example.notes/save/all"
+    ));
     let topics = grant("topics.subscribe:example.notes/*");
     assert!(topics.covers(&grant("topics.subscribe:example.notes/events/new")));
     assert!(!topics.covers(&grant("topics.subscribe:example.notes-other/events")));
@@ -90,14 +93,35 @@ fn private_network_and_configuration_permissions_are_high_risk() {
         assert!(is_high_risk(text), "{text}");
     }
     // Normative capability table allows configuration writes, but no watches.
-    assert!(check_grant(&grant("fs.write:agent-config:claude"), Tier::T2, Side::Server).is_ok());
-    assert_eq!(Grant::parse("fs.watch:agent-config:claude").unwrap_err().code, "manifest.grant-scope");
-    assert_eq!(check_grant(&grant("fs.read:path:/srv/logs/**"), Tier::T2, Side::Server).unwrap_err().code, "manifest.grant-tier");
+    assert!(check_grant(
+        &grant("fs.write:agent-config:claude"),
+        Tier::T2,
+        Side::Server
+    )
+    .is_ok());
+    assert_eq!(
+        Grant::parse("fs.watch:agent-config:claude")
+            .unwrap_err()
+            .code,
+        "manifest.grant-scope"
+    );
+    assert_eq!(
+        check_grant(&grant("fs.read:path:/srv/logs/**"), Tier::T2, Side::Server)
+            .unwrap_err()
+            .code,
+        "manifest.grant-tier"
+    );
 }
 
 #[test]
 fn malformed_arguments_cannot_gain_coverage_even_when_equal() {
-    for text in ["http:*", "http:localhost", "fs.read:path:{home}/../**", "process.run:git*", "extensions.provide:example.notes/*"] {
+    for text in [
+        "http:*",
+        "http:localhost",
+        "fs.read:path:{home}/../**",
+        "process.run:git*",
+        "extensions.provide:example.notes/*",
+    ] {
         assert!(Grant::parse(text).is_err(), "{text}");
     }
 }
@@ -108,9 +132,17 @@ fn cross_session_authority_requires_first_party_or_signed_tier() {
     assert_eq!(info("sessions.cross").unwrap().tiers, &[Tier::T1, Tier::T2]);
     for tier in [Tier::T1, Tier::T2] {
         assert!(check_grant(&cross, tier, Side::Server).is_ok());
-        assert_eq!(check_grant(&cross, tier, Side::Client).unwrap_err().code, "manifest.grant-side");
+        assert_eq!(
+            check_grant(&cross, tier, Side::Client).unwrap_err().code,
+            "manifest.grant-side"
+        );
     }
-    assert_eq!(check_grant(&cross, Tier::T3, Side::Server).unwrap_err().code, "manifest.grant-tier");
+    assert_eq!(
+        check_grant(&cross, Tier::T3, Side::Server)
+            .unwrap_err()
+            .code,
+        "manifest.grant-tier"
+    );
 }
 
 #[test]
@@ -118,20 +150,38 @@ fn explicit_absolute_path_templates_keep_their_documented_tier_boundary() {
     // The normative file-scope text allows a named file/folder as well as /**.
     for text in ["fs.read:path:/srv/logs", "fs.read:path:/srv/logs/**"] {
         let scope = grant(text);
-        assert!(check_grant(&scope, Tier::T1, Side::Server).is_ok(), "{text}");
+        assert!(
+            check_grant(&scope, Tier::T1, Side::Server).is_ok(),
+            "{text}"
+        );
         for tier in [Tier::T2, Tier::T3] {
-            assert_eq!(check_grant(&scope, tier, Side::Server).unwrap_err().code, "manifest.grant-tier", "{text}");
+            assert_eq!(
+                check_grant(&scope, tier, Side::Server).unwrap_err().code,
+                "manifest.grant-tier",
+                "{text}"
+            );
         }
     }
-    assert_eq!(Grant::parse("fs.read:/srv/logs").unwrap_err().code, "manifest.grant-scope");
+    assert_eq!(
+        Grant::parse("fs.read:/srv/logs").unwrap_err().code,
+        "manifest.grant-scope"
+    );
 }
 
 #[test]
 fn empty_program_is_a_program_error_and_management_is_bundled_only() {
     for text in ["process.run:", "panes.create-command:"] {
-        assert_eq!(Grant::parse(text).unwrap_err().code, "manifest.grant-program");
+        assert_eq!(
+            Grant::parse(text).unwrap_err().code,
+            "manifest.grant-program"
+        );
     }
-    assert_eq!(check_grant(&grant("plugins.manage"), Tier::T2, Side::Client).unwrap_err().code, "manifest.grant-tier");
+    assert_eq!(
+        check_grant(&grant("plugins.manage"), Tier::T2, Side::Client)
+            .unwrap_err()
+            .code,
+        "manifest.grant-tier"
+    );
 }
 
 #[test]
@@ -148,5 +198,8 @@ fn parse_enforces_length_and_argument_grammar_before_admission() {
     let limit = format!("topics.subscribe:{}", "a".repeat(239));
     assert_eq!(limit.len(), 256);
     assert!(Grant::parse(&limit).is_ok());
-    assert_eq!(Grant::parse(&(limit + "a")).unwrap_err().code, "manifest.grant-argument");
+    assert_eq!(
+        Grant::parse(&(limit + "a")).unwrap_err().code,
+        "manifest.grant-argument"
+    );
 }

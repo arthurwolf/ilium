@@ -26,7 +26,7 @@ A terminal screen can show secrets: tokens printed by a command, passwords typed
 ## You will need
 
 - The grant `terminal.read-screen` on every side that reads screens. Grants are per side: a server-side read needs the grant on the server side, and a client-side read needs it on the client side.
-- [panes.read](/pages/capability-panes-read/) if the plugin must discover which panes exist and what kind they are. An event such as `agent-activity-changed` already carries the pane's node id, so a plugin that reacts to events needs no extra grant to get the id.
+- [panes.read](/pages/capability-panes-read/) if the plugin must discover which panes exist and what kind they are. An event such as `agent-activity-changed` already carries the pane's node id, but receiving that event needs [agent.read](/pages/capability-agent-read/), so the examples below list `agent.read` beside `terminal.read-screen`.
 - A plugin written in Rust with `ilium-plugin-sdk`, or in TypeScript with `@ilium/plugin-sdk`. The two read functions are synchronous, so they need no `await`.
 
 ## Grant syntax
@@ -66,13 +66,13 @@ The `Selection` record has `first_row`, `first_column`, `last_row` and `last_col
 - **Row text.** Each row is the printed characters of its cells, with escape sequences and trailing blanks removed. A wide character, such as a CJK glyph, appears once in the string, and its second cell is not repeated.
 - **Revision.** The revision is a counter per pane. It starts at 0 when the host starts the pane and rises whenever either part changes. It is not saved in the snapshot, so it starts again after a restart. Compare revisions only within one run of the plugin. When `revision` equals the value you stored, the screen has not changed and you can skip the work.
 - **Selection.** The coordinates count from the top of the visible area. `text` holds only the part of the selection inside the visible area, with lines joined by a newline. A selection that lies entirely in the scrollback returns none.
-- **Snapshot semantics.** Each call is a snapshot. A later call can return different rows, and the host does not push screen changes. To react to new output, use [terminal.output-filter](/pages/capability-terminal-output-filter/) for text patterns, or [agent.read](/pages/capability-agent-read/) for activity changes, and then read the screen.
+- **Snapshot semantics.** Each call is a snapshot. A later call can return different rows, and the call itself never blocks or pushes. To learn that the screen changed, use the `screen-changed` event of [terminal.read-cells](/pages/capability-terminal-read-cells/), or use [terminal.output-filter](/pages/capability-terminal-output-filter/) for text patterns, or [agent.read](/pages/capability-agent-read/) for activity changes, and then read the screen.
 
 ## Risk and tier rules
 
 - The grant is not marked H (high risk). The review dialog still shows the privacy warning above, and the user should read it before granting.
 - A T1 bundled plugin receives it automatically, up to its manifest ceiling.
-- A T2 or T3 plugin lists the grant in the review dialog, checked by default. The user can uncheck it before installing and can revoke it later. Revoking ends in-flight calls with `revoked`.
+- A T2 or T3 plugin lists the grant in the review dialog, checked by default. The user can uncheck it before installing and can revoke it later. After a revoke, reads return none.
 - The grant reads screens only. Typing into them needs `terminal.write`, and mouse control needs `terminal.pointer`.
 
 ## What the review dialog says
@@ -162,7 +162,7 @@ The manifest requests the grant on the server side and declares the slot:
 ```json
 {
   "capabilities": {
-    "server": ["terminal.read-screen", "tree.decorate"]
+    "server": ["terminal.read-screen", "agent.read", "tree.decorate"]
   },
   "contributes": {
     "decoration_slots": [{ "id": "errors", "placement": "badge", "priority": 40 }]
@@ -236,7 +236,7 @@ A plugin should treat none as "nothing to show now". It should not retry in a lo
 
 - In the review dialog, the row "Read text shown in terminals" with the grant name at the right edge.
 - In a first-party feature that needs the grant, such as workspace search, an empty state when the grant is declined.
-- In a `terminal-view` widget, which embeds a pane's screen (W30). Without the grant the widget draws an empty frame with the text `not permitted`.
+- In a `terminal-view` widget, which embeds a pane's screen. Without the grant the widget draws an empty frame with the text `not permitted`.
 
 ## Minimal example
 
@@ -245,7 +245,7 @@ The manifest excerpt requests the grant on the client side, where a copy feature
 ```json
 {
   "capabilities": {
-    "client": ["terminal.read-screen", "clipboard.write"]
+    "client": ["terminal.read-screen", "agent.read", "clipboard.write"]
   }
 }
 ```

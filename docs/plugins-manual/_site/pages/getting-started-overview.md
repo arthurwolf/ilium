@@ -102,7 +102,7 @@ A batch holds at most 256 events, and one `on-events` call may return at most 25
 
 A grant is a name, or a name with one argument after the first colon, such as `tree.read` or `http:api.example.com`. A plugin lists its grants per side in `capabilities`. Grants are recorded per side and per user configuration, not per project. Normal grants are checked by default in the install dialog. High-risk grants, marked H, are never checked by default. A bundled plugin gets its normal grants up to the manifest ceiling and is asked once for each H grant at first activation.
 
-The contract includes 19 further grants for terminal cell reads, history and raw input, pane lifecycle, tree restructuring, attention marks, client chrome, external opening, cross-session control, long-lived children, kernel settings and keymap reads, agent transcripts, geocoding, embeddings, toasts and the pane journal. Nine of them are high risk. The [capability reference](/pages/capabilities/) lists every one.
+The contract includes 23 further grants for terminal cell reads, history and raw input, pane lifecycle, tree restructuring, attention marks, client chrome, external opening, cross-session control, long-lived children, kernel settings and keymap reads, agent transcripts, geocoding, embeddings, toasts and the pane journal. Eleven of them are high risk. The [capability reference](/pages/capabilities/) lists every one.
 
 Two outcomes matter when you write code:
 
@@ -126,7 +126,7 @@ Every installed plugin has one tier. The tier decides where its code runs and ho
 
 The limits differ by tier. The manifest asks for values in `limits`, and the host clamps them to the tier ceiling. A request above the ceiling is clamped and logged, never refused.
 
-A T1 plugin may also set the top-level manifest key `limits_tier` to `"first-party"`. The host verifies the tier and then applies the higher ceilings of [Errors and limits](/pages/errors-and-limits/). The table below shows the standard ceilings.
+A T1 plugin may also set the top-level manifest key `limits_tier` to `"first-party"`. The host verifies the tier and then applies the higher ceilings of [Errors and limits](/pages/reference-errors-and-limits/). The table below shows the standard ceilings.
 
 | Limit | Default | T1 ceiling | T2 and T3 ceiling |
 |---|---|---|---|
@@ -305,7 +305,7 @@ Every fallible call returns a `plugin-error` with one of these codes. The retry 
 | `cancelled` | The plugin, the user or a shutdown cancelled the request. | Maybe |
 | `unsupported` | The host or platform cannot do it. | No |
 | `pane-not-ready` | A restored terminal pane has not started its process yet. | Yes |
-| `revoked` | The grant set changed during the call. The plugin is re-activated. | No |
+| `revoked` | The grant set changed while this call was in flight. The plugin is re-activated. Calls made after that return `not-permitted`. | No |
 | `io` | An operating system I/O error other than a missing file. | Maybe |
 | `network` | DNS, connect, TLS or transport failure. | Yes |
 | `internal` | A host bug or a trap inside a job instance. | No |
@@ -323,5 +323,5 @@ Rules that apply to every plugin:
 - [Tutorial step 1](/pages/tutorial-01-agent-badge/) adds the first decoration.
 - [Lifecycle](/pages/lifecycle/) describes activation, deactivation and restarts in full.
 - [Capabilities](/pages/capabilities/) lists every grant and what it unlocks.
-- [Errors and limits](/pages/errors-and-limits/) gives the full error and limit tables.
+- [Errors and limits](/pages/reference-errors-and-limits/) gives the full error and limit tables.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) describe the two SDKs.

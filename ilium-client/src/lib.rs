@@ -65,6 +65,7 @@ pub mod compaction_ui;
 pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
+mod connection_health;
 mod context_menu_layout;
 pub mod control;
 pub mod cost_app;
@@ -74,6 +75,8 @@ pub mod cost_overlay;
 pub mod cost_settings;
 pub mod cost_settings_ui;
 pub mod cost_tracker;
+pub mod custom_agent_editor;
+mod custom_agent_settings;
 pub mod debug_logging;
 pub mod document_preparation;
 mod editor_capture_budget;
@@ -136,6 +139,7 @@ pub mod recap;
 pub mod recap_state;
 pub mod recap_ui;
 pub mod recap_worker;
+mod redraw_schedule;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;
@@ -147,6 +151,7 @@ pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
 pub mod render_cache;
 pub mod reset_planning;
+pub mod resource_queue;
 pub mod restructure;
 pub mod scheduled_input;
 pub mod screen_transfer;
@@ -307,7 +312,7 @@ const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
-const MAX_PENDING_SERVER_EVENTS: usize = 256;
+pub(crate) const MAX_PENDING_SERVER_EVENTS: usize = 256;
 /// Byte ceiling for a same-pane raw-output run merged in one client turn.
 /// Event count alone is insufficient because a server frame can itself carry
 /// a large burst.
@@ -317,25 +322,13 @@ const MAX_MERGED_SCREEN_BYTES_PER_BATCH: usize = 64 * 1024;
 /// bounded so a key-repeat or pointer flood cannot starve incoming terminal
 /// frames forever.
 const MAX_INPUT_EVENTS_PER_BATCH: usize = 64;
+/// Counts alone cannot bound expensive projections or input actions. Check
+/// between originals so yielding never loses or splits an admitted event.
+const MAX_EVENT_BATCH_TIME: Duration = Duration::from_millis(4);
 /// Maximum character-oriented key events replayed from one admitted paste in
 /// one UI turn. The original input lease stays with the continuation between
 /// turns, and later input cannot overtake it.
 const MAX_PASTE_KEYS_PER_TURN: usize = 128;
-/// Terminal output is visual state, not input acknowledgement. Capping its
-/// redraw cadence at 30 Hz leaves CPU for parsing and input while every
-/// keyboard/pointer-driven change still bypasses this limit immediately.
-const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
-
-/// Remaining delay before output-only damage may trigger another draw.
-fn output_redraw_delay(now: Instant, last_draw_at: Instant) -> Duration {
-    OUTPUT_FRAME_INTERVAL.saturating_sub(now.saturating_duration_since(last_draw_at))
-}
-
-/// Input and semantic state changes bypass output-only frame limiting.
-fn output_redraw_is_due(needs_immediate_redraw: bool, now: Instant, last_draw_at: Instant) -> bool {
-    needs_immediate_redraw || output_redraw_delay(now, last_draw_at).is_zero()
-}
-
 /// Event count and byte count are independent fairness limits.
 #[cfg(test)]
 fn screen_updates_fit(current_bytes: usize, incoming_bytes: usize) -> bool {
@@ -652,6 +645,10 @@ fn apply_presented_frame(
     mut presented: crate::presentation::PresentedFrame,
     animation_presentations: &mut std::collections::VecDeque<(u64, crate::app::EmittedGeometry)>,
 ) -> Result<bool, ClientError> {
+    if let Some(health) = &app.presentation_health {
+        health.acknowledge(presented.frame.frame_id);
+    }
+
     let mut redraw = false;
     if let Some((frame_id, geometry)) = animation_presentations.pop_front() {
         if frame_id != presented.frame.frame_id {
@@ -1030,11 +1027,16 @@ async fn run_inner(
     app.animation_frame.configure_resources(ambient_resources);
     let keyboard_enhancement_pushed = guard._guard.keyboard_enhancement_state();
     // The presenter does not emit a frame until the owned query resolves.
-    let backend =
-        CrosstermBackend::new(crate::presentation::TerminalOutput::new(std::io::stdout()));
-    let mut presenter = crate::presentation::Presenter::start_with_cleanup(
+    let presentation_health = crate::presentation::PresentationHealth::new();
+    app.presentation_health = Some(std::sync::Arc::clone(&presentation_health));
+    let backend = CrosstermBackend::new(crate::presentation::TerminalOutput::with_health(
+        std::io::stdout(),
+        std::sync::Arc::clone(&presentation_health),
+    ));
+    let mut presenter = crate::presentation::Presenter::start_with_health_cleanup(
         backend,
         &crate::execution::process_quota(),
+        std::sync::Arc::clone(&presentation_health),
         move || drop(guard),
     )
     .map_err(ClientError::TerminalSetup)?;
@@ -1077,6 +1079,7 @@ async fn run_inner(
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
 
+    app.custom_agents = config.custom_agents;
     app.apply_ui_settings(config.ui);
     app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
@@ -1166,6 +1169,10 @@ async fn run_inner(
             ),
         }
     };
+    // Wait registry revisions are scoped to this server transport incarnation.
+    app.resources.wait_revision=None;
+    app.resources.waits.clear();
+    app.connection_health = Some(std::sync::Arc::clone(&connection.health));
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
     // Tells the server this connection hosts the voice session, so
     // `ilium voice say` can offer typed sentences to it. One-shot CLI
@@ -1329,7 +1336,7 @@ async fn run_inner(
     // every iteration was wasted work under load.
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
-    let mut last_draw_at = Instant::now();
+    let mut redraw_schedule = redraw_schedule::RedrawSchedule::new(Instant::now());
     let mut detection_freshness_checked_at = crate::scheduled_input::unix_millis_now();
     let mut last_animation_frame_bucket = None;
     let mut last_onboarding_animation_active = false;
@@ -1337,7 +1344,30 @@ async fn run_inner(
     let mut last_recorded_surface = None;
     let mut last_streamed_pane_order: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
+    let mut presentation_warning_logged = false;
+    let mut next_presentation_health_check = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut next_presentation_warning_refresh = tokio::time::Instant::now();
     'event_loop: while app.exit_reason.is_none() {
+        // Independent of redraw/ACK progress. Never write diagnostic output to
+        // the stalled terminal: logging has its own bounded sink owner.
+        let presentation_check_now = tokio::time::Instant::now();
+        if presentation_check_now >= next_presentation_health_check {
+            next_presentation_health_check = presentation_check_now + Duration::from_secs(5);
+        }
+        if presentation_health.stalled() {
+            if !presentation_warning_logged || presentation_check_now >= next_presentation_warning_refresh {
+            next_presentation_warning_refresh = presentation_check_now + Duration::from_secs(5);
+            let report = format!("Terminal presentation has made no phase progress for at least 5 seconds: {}", presentation_health.report());
+            app.presentation_warning = Some(report.clone());
+            if !presentation_warning_logged {
+                tracing::warn!(presentation = %report, "terminal presentation stalled; UI event loop remains active");
+                presentation_warning_logged = true;
+            }
+            }
+        } else {
+            app.presentation_warning = None;
+            presentation_warning_logged = false;
+        }
         // A ready ACK proves which geometry reached the terminal. Consume it
         // before routing native or deferred input against the previous frame.
         while let Ok(acknowledgement) = presenter.acknowledgements.try_recv() {
@@ -1508,8 +1538,8 @@ async fn run_inner(
             needs_redraw = true;
             tick_delay = tick_delay.min(Duration::from_millis(250));
         }
-        if needs_redraw && !needs_immediate_redraw && presenter.outstanding_frames() == 0 {
-            tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
+        if needs_redraw && presenter.outstanding_frames() == 0 {
+            tick_delay = tick_delay.min(redraw_schedule.delay(needs_immediate_redraw, now));
         }
         if let Some(interval) = app
             .reset_monitor_state
@@ -1526,6 +1556,9 @@ async fn run_inner(
 
         let onboarding_actor_notification = onboarding_voice.actor_notification();
         tokio::select! {
+            // A blocked presenter need not produce an ACK or another event.
+            // This timer is owned by the existing loop, with no helper task.
+            _ = tokio::time::sleep_until(next_presentation_health_check) => {}
             () = async {
                 match &onboarding_actor_notification {
                     Some(notification) => notification.notified().await,
@@ -2010,14 +2043,18 @@ async fn run_inner(
             freshness_now,
         );
         detection_freshness_checked_at = freshness_now;
-        let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
+        let can_draw = redraw_schedule.delay(needs_immediate_redraw, Instant::now()).is_zero();
         // Reserve before composition: graphics uploads and exact animation
         // receipts must follow the ordered frame that really reaches output.
         if needs_redraw && can_draw && presenter.outstanding_frames() == 0 {
+            let mut refusal_reason = "presentation_slots";
             let reservation = match presenter.try_reserve() {
-                Some(reservation) => app.admit_composition_metadata()
-                    .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?
-                    .then_some(reservation),
+                Some(reservation) => {
+                    refusal_reason = "composition_metadata";
+                    app.admit_composition_metadata()
+                        .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?
+                        .then_some(reservation)
+                },
                 None => None,
             };
             if let Some(reservation) = reservation {
@@ -2051,8 +2088,14 @@ async fn run_inner(
                 animation_presentations.push_back((presentation_frame_id, geometry));
             needs_redraw = false;
             needs_immediate_redraw = false;
-            last_draw_at = Instant::now();
+            if let Some(waited) = redraw_schedule.submitted(Instant::now()) {
+                tracing::info!(wait_ms = waited.as_millis() as u64, "client frame storage admission recovered");
+            }
             last_animation_frame_bucket = animation_frame_bucket;
+            } else if let Some(waited) = redraw_schedule.admission_refused(Instant::now()) {
+                tracing::warn!(reason = refusal_reason, wait_ms = waited.as_millis() as u64,
+                    retry_ms = redraw_schedule::FRAME_INTERVAL.as_millis() as u64,
+                    "client redraw waiting for frame storage admission");
             }
         }
     }
@@ -2119,7 +2162,7 @@ async fn run_inner(
             app.collect_terminal_baselines();
             dispatch_pending_app_work(&mut app, &mut naming_workers, &mut icon_search_workers, home_dir.as_deref());
             if let Some(reason) = app.projection_admission_failure {
-                return Err(ClientError::TerminalSetup(std::io::Error::other(format!("unrecoverable incoming projection admission failure: {reason:?}"))));
+                return Err(ClientError::TerminalSetup(std::io::Error::other(app.projection_admission_details.clone().unwrap_or_else(|| format!("unrecoverable incoming projection admission failure: {reason:?}")))));
             }
             let event = take_pending_server_event(&mut app).or_else(|| {
                 app.projection_admission_wake.is_none().then(|| connection.events.try_recv().ok()).flatten()
@@ -4184,7 +4227,11 @@ fn apply_server_events(
 ) -> ServerEventDamage {
     let mut next = Some(first);
     let mut damage = ServerEventDamage::default();
-    for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
+    let batch_started = Instant::now();
+    for index in 0..MAX_SERVER_EVENTS_PER_BATCH {
+        if index != 0 && batch_started.elapsed() >= MAX_EVENT_BATCH_TIME {
+            break;
+        }
         let received = match next.take().or_else(|| take_pending_server_event(app)) {
             Some(event) => event,
             None => match events_rx.try_recv() {
@@ -4192,6 +4239,9 @@ fn apply_server_events(
                 Err(_) => break,
             },
         };
+        // Terminal payloads cannot remove a node or evict debug-log entries.
+        // Avoid scanning every retained projection for each output chunk.
+        let needs_projection_prune = terminal_event_pane(received.view()).is_none();
         let event_damage = server_event_damage(app, received.view());
         damage.needs_redraw |= event_damage.needs_redraw;
         damage.needs_immediate_redraw |= event_damage.needs_immediate_redraw;
@@ -4208,19 +4258,24 @@ fn apply_server_events(
                 retention.as_ref(),
             ) {
                 Ok(update) => update,
-                Err(reason) => {
+                Err(error) => {
+                    let reason = error.reason();
                     app.pending_terminal_events.push_front(
                         crate::connection::Received::with_retention(event, retention),
                     );
-                    if matches!(
-                        reason,
-                        ilium_execution::RejectReason::Closed
-                            | ilium_execution::RejectReason::InvalidCost
-                            | ilium_execution::RejectReason::AccountingPoisoned
-                    ) {
+                    if error.is_permanent()
+                        || matches!(
+                            reason,
+                            ilium_execution::RejectReason::Closed
+                                | ilium_execution::RejectReason::InvalidCost
+                                | ilium_execution::RejectReason::AccountingPoisoned
+                        )
+                    {
                         app.status_message = Some(format!(
-                            "Incoming projection cannot be admitted: {reason:?}"
+                            "Incoming projection cannot be admitted: {error:?}; original event retained; stream delivery stopped"
                         ));
+                        tracing::error!(?error, ?reason, "incoming projection admission is permanently impossible; original event retained");
+                        app.projection_admission_details = app.status_message.clone();
                         app.projection_admission_failure = Some(reason);
                         app.exit_reason = Some(crate::app::ClientExitReason::Quit);
                     } else {
@@ -4260,8 +4315,10 @@ fn apply_server_events(
         {
             app.status_message = None;
         }
-        app.incoming_projection
-            .prune(&app.tree, &app.agent_debug_logs);
+        if needs_projection_prune {
+            app.incoming_projection
+                .prune(&app.tree, &app.agent_debug_logs);
+        }
         if !app.pending_terminal_events.is_empty() {
             break;
         }
@@ -4638,8 +4695,28 @@ fn advance_pending_key_paste(
         return false;
     };
 
+    // Pasted text is data, not commands. A replayed key may open a dialog or
+    // enter the leader state (Enter/Tab can be the leader on some bases); the
+    // remaining characters would then drive shortcut handlers such as Quit or
+    // Detach. Stop the replay the moment the mode changes.
+    let starting_mode = std::mem::discriminant(&app.mode);
+    let mut mode_changed = false;
     for key in replay.next_keys(MAX_PASTE_KEYS_PER_TURN) {
+        if std::mem::discriminant(&app.mode) != starting_mode {
+            mode_changed = true;
+            break;
+        }
         app.handle_event(Event::Key(key));
+    }
+    if !mode_changed && std::mem::discriminant(&app.mode) != starting_mode {
+        mode_changed = true;
+    }
+    if mode_changed {
+        app.status_message =
+            Some("Paste stopped: it changed the interface mode, remaining text discarded".into());
+        replay.retire_original();
+        dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+        return true;
     }
     if replay.path_rejected() {
         app.status_message = Some("The instruction-file path must be one line".into());
@@ -4778,6 +4855,7 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
 ) -> Option<S::Item> {
     let mut next = Some(first);
     let mut received = 1;
+    let batch_started = Instant::now();
     loop {
         let event = match next.take() {
             Some(event) => event,
@@ -4823,6 +4901,11 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
             event
         };
         if !dispatch(event) {
+            return next;
+        }
+        if batch_started.elapsed() >= MAX_EVENT_BATCH_TIME {
+            // Return a consumed lookahead; leave every other original in its
+            // receiver. The next UI turn resumes at this exact boundary.
             return next;
         }
         if received == MAX_INPUT_EVENTS_PER_BATCH && next.is_none() {
@@ -5505,21 +5588,31 @@ mod responsiveness_tests {
             !rx.is_empty(),
             "release remains upstream behind the retained gesture prefix"
         );
-        app.commit_emitted_geometry(app.capture_emitted_geometry(2));
-        let first = deferred.take_front().unwrap();
-        assert!(dispatch_ready_input_events(
-            &mut app,
-            &mut rx,
-            ReadyInputWorkers {
-                naming_workers: &mut naming,
-                icon_search_workers: &mut icons,
-                home_dir: None,
-            },
-            first,
-            &mut deferred,
-            &mut editor
-        )
-        .is_none());
+        // A UI turn may yield after the unchanged 4 ms budget, even with a
+        // ready gesture suffix. Resume backlog before upstream on later turns;
+        // custody, FIFO order, and eventual release are the contract here.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut emission = 2;
+        let mut next = Some(deferred.take_front().unwrap());
+        while let Some(first) = next {
+            assert!(Instant::now() < deadline, "retained gesture did not drain");
+            app.commit_emitted_geometry(app.capture_emitted_geometry(emission));
+            emission += 1;
+            assert!(dispatch_ready_input_events(
+                &mut app,
+                &mut rx,
+                ReadyInputWorkers {
+                    naming_workers: &mut naming,
+                    icon_search_workers: &mut icons,
+                    home_dir: None,
+                },
+                first,
+                &mut deferred,
+                &mut editor
+            )
+            .is_none());
+            next = deferred.take_front().or_else(|| rx.try_recv().ok());
+        }
         assert!(deferred.is_empty());
         assert!(rx.is_empty());
         for quota in [press_quota, drag_quota, release_quota] {
@@ -5557,6 +5650,43 @@ mod responsiveness_tests {
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn key_paste_stops_when_a_pasted_key_changes_the_mode() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "paste-mode-change-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        // With Ctrl+M as leader, a pasted Enter enters the leader state and a
+        // following `q` would otherwise kill the whole session.
+        app.keyboard_settings.shortcut_base = crate::keymap::ShortcutBase::parse("m").unwrap();
+        let (original, _quota) = terminal_input_owner::paste_fixture("\nqqq".to_owned());
+        let client = crate::execution::test_client();
+        let mut replay = crate::paste_cursor::PasteReplay::new(original);
+        replay.reserve_retirement(&client.retirement()).unwrap();
+        app.pending_key_paste = Some(replay);
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+
+        while app.pending_key_paste.is_some() {
+            advance_pending_key_paste(&mut app, &mut naming, &mut icons, None);
+        }
+
+        assert!(app.exit_reason.is_none());
+        assert!(app.pending_key_paste.is_none());
+        // The guard, not luck, ended the replay: it reports the discarded rest.
+        assert!(
+            app.status_message
+                .as_deref()
+                .is_some_and(|message| message.starts_with("Paste stopped")),
+            "status was {:?}, mode {:?}",
+            app.status_message,
+            std::mem::discriminant(&app.mode)
+        );
     }
 
     #[test]
@@ -5683,19 +5813,55 @@ mod responsiveness_tests {
 
     #[test]
     fn output_redraws_are_limited_but_input_redraws_are_immediate() {
-        let last_draw_at = Instant::now();
-        let early = last_draw_at + Duration::from_millis(5);
+        let started = Instant::now();
+        let schedule = redraw_schedule::RedrawSchedule::new(started);
+        let early = started + Duration::from_millis(5);
+        assert_eq!(schedule.delay(false, early), Duration::from_millis(28));
+        assert_eq!(schedule.delay(true, early), Duration::ZERO);
         assert_eq!(
-            output_redraw_delay(early, last_draw_at),
-            Duration::from_millis(28)
+            schedule.delay(false, started + redraw_schedule::FRAME_INTERVAL),
+            Duration::ZERO
         );
-        assert!(!output_redraw_is_due(false, early, last_draw_at));
-        assert!(output_redraw_is_due(true, early, last_draw_at));
-        assert!(output_redraw_is_due(
-            false,
-            last_draw_at + OUTPUT_FRAME_INTERVAL,
-            last_draw_at,
-        ));
+    }
+
+    #[test]
+    fn metadata_pressure_preserves_emitted_geometry_until_scheduled_retry() {
+        let mut app = App::new("synthetic-redraw-pressure".into(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 80, 24));
+        assert!(app.admit_composition_metadata().unwrap());
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        let revision = app.emitted_layout_revision();
+        assert!(app.pointer_geometry_is_current());
+        let quota = crate::execution::process_quota();
+        let before = quota.snapshot();
+        let pressure = quota
+            .reserve_external_storage(before.limits.worker_bytes - before.worker_bytes)
+            .unwrap();
+        let now = Instant::now();
+        let mut schedule = crate::redraw_schedule::RedrawSchedule::new(now);
+        assert!(!app.admit_composition_metadata().unwrap());
+        let _ = schedule.admission_refused(now);
+        assert_eq!(app.emitted_layout_revision(), revision);
+        assert!(app.pointer_geometry_is_current());
+        assert_eq!(quota.snapshot().worker_bytes, before.limits.worker_bytes);
+        drop(pressure);
+        for immediate in [false, true] {
+            assert_eq!(
+                schedule.delay(immediate, now + Duration::from_millis(32)),
+                Duration::from_millis(1)
+            );
+        }
+        let retry_at = now + crate::redraw_schedule::FRAME_INTERVAL;
+        assert!(schedule.delay(false, retry_at).is_zero());
+        assert!(app.admit_composition_metadata().unwrap());
+        // Admission alone cannot acknowledge a newer emitted frame.
+        assert_eq!(app.emitted_layout_revision(), revision);
+        assert!(app.pointer_geometry_is_current());
+        let metadata_bytes = usize::from(app.layout.tree_area.height) * (64 * 1024) + 4096;
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            before.worker_bytes + metadata_bytes
+        );
     }
 
     #[test]
@@ -6240,3 +6406,7 @@ mod responsiveness_tests {
         assert_eq!(app.status_message.as_deref(), Some("Voice (typed): second"));
     }
 }
+
+pub mod tree_layout_settings;
+
+pub mod tree_row_layout;

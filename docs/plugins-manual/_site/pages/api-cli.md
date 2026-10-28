@@ -52,13 +52,13 @@ The interface provides a JSON-lines output form, a plain text form, a separate s
 
 ### Manifest
 
-The `cli` key under `contributes` declares the subcommands. It holds one object, or a list of at most 8 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see [CLI compatibility](/pages/reference-cli-compatibility/)) is refused with `manifest.cli-name-reserved`. Each entry has these fields; five are optional.
+The `cli` key under `contributes` declares the subcommands. It holds one object, or a list of at most 8 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see [CLI compatibility](/pages/reference-cli-compatibility/)) is refused with `manifest.cli-name-reserved`. Each entry has these fields; six are optional.
 
 ```json
 {
   "capabilities": { "server": ["cli.contribute"] },
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "tally",
       "summary": "Count lines of text read from standard input",
       "arguments_schema": { "type": "object", "properties": { "label": { "type": "string" } } },
@@ -66,7 +66,7 @@ The `cli` key under `contributes` declares the subcommands. It holds one object,
       "stdin": "optional",
       "requires_server": false,
       "argument_groups": ["pane-selector"]
-    }
+    }]
   }
 }
 ```
@@ -428,7 +428,7 @@ When the grant is declined, the subcommand is hidden from help and the command f
 | No `cli.contribute` grant | The subcommand is hidden from help. `ilium <name>` fails with `unknown command`. Calls return `not-permitted`. |
 | Caller disconnects early | `cli-cancelled` arrives. Later writes return `not-found`. |
 | Plugin restarts, is disabled or is uninstalled while open | The invocation ends with exit code 1 and `plugin stopped` on standard error. |
-| Handler traps | The plugin restarts under the rule in [errors and limits](/pages/errors-and-limits/), and the open invocation ends as above. |
+| Handler traps | The plugin restarts under the rule in [errors and limits](/pages/reference-errors-and-limits/), and the open invocation ends as above. |
 | Output form mismatch | `invalid-argument`; the write is dropped. |
 
 <div class="warn">

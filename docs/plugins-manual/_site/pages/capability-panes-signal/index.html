@@ -533,7 +533,7 @@ enum signal { interrupt, terminate, kill, hangup }
 </tr>
 </tbody>
 </table>
-<p>Escalate in order: send <code>interrupt</code>, then <code>terminate</code>, and send <code>kill</code> only when <code>terminate</code> has failed to end the process. The signal goes to the child process that the pane started. An <code>ok</code> outcome means the signal was sent, not that the process exited. To confirm the exit, wait for the <code>pane-exited</code> event. It carries <code>status</code> and <code>signal</code>, for example <code>SIGKILL</code>, and <code>status</code> is <code>None</code> when a signal ended the process.</p>
+<p>Escalate in order: send <code>interrupt</code>, then <code>terminate</code>, and send <code>kill</code> only when no <code>pane-exited</code> event has arrived 2 seconds after <code>terminate</code>. The signal goes to the child process that the pane started. An <code>ok</code> outcome means the signal was sent, not that the process exited. To confirm the exit, wait for the <code>pane-exited</code> event. It carries <code>status</code> and <code>signal</code>, for example <code>SIGKILL</code>, and <code>status</code> is <code>None</code> when a signal ended the process.</p>
 <p>Each submission completes exactly once. The completion arrives as a <code>request-completed</code> event whose request reference is <code>submission(&lt;correlation&gt;)</code>. The <code>signal-pane</code> intent does not need a dedup key, because only <code>send-input</code> and <code>agent-action</code> require one. Without a key, every submission sends its signal. With a key, a repeat of that key within 10 minutes completes as <code>duplicate</code> and sends nothing.</p>
 <h2 id="outcomes-and-errors">Outcomes and errors</h2>
 <table>
@@ -576,7 +576,7 @@ enum signal { interrupt, terminate, kill, hangup }
 <ul>
 <li><strong>Refused batches.</strong> When the grant is missing, the whole batch is refused, including other submissions such as <code>send-input</code>. Submit signals in their own batch when the other submissions must still run.</li>
 <li><strong>Pane closed before the host handles the signal.</strong> The outcome is <code>refused(not-found)</code>. Treat the pane as already stopped.</li>
-<li><strong>Ignored signals.</strong> A program may ignore <code>interrupt</code> or <code>terminate</code>. Escalate only after the process has had time to respond, and check <code>pane-exited</code> first.</li>
+<li><strong>Ignored signals.</strong> A program may ignore <code>interrupt</code> or <code>terminate</code>. Check <code>pane-exited</code> first, then escalate only after a grace of 2 seconds (the same grace as <a href="/pages/capability-process-long-lived/">long-lived processes</a>) has passed without it.</li>
 <li><strong>Revocation.</strong> The user can revoke the grant in Settings &gt; Plugins &gt; the plugin &gt; Capabilities, or with <code>ilium plugin grants &lt;id&gt; --revoke panes.signal</code>. The plugin then receives <code>deactivate(revoked)</code>. Pending requests that need the revoked capability complete as <code>failed(revoked)</code>.</li>
 <li><strong>Grant added later.</strong> When the user grants <code>panes.signal</code> after install, the plugin receives <code>deactivate(granted)</code> and is re-activated with the new set.</li>
 </ul>
@@ -704,7 +704,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/capability-panes-read/">panes.read</a> for the pane events that supply pane ids and exit status.</li>
 <li><a href="/pages/api-process-control/">Process control</a> for the <code>process</code> import and the same <code>signal-pane</code> intent in context.</li>
 <li><a href="/pages/api-intents/">Intents</a> for submissions, correlation numbers and the outcome shapes.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error code table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error code table.</li>
 <li><a href="/pages/security/">Security</a> for the risk tiers behind high-risk grants.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>

@@ -94,7 +94,7 @@ impl Handler for ScrollSearch {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.scrollsearch/errors" { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             // Async wrapper: submits search-history, then take-matches when ready.
             match terminal::search_history(pane, "error:", 200).block_on() {
                 Ok(matches) => log::log(Level::Info, &format!("{} matches", matches.len())),
@@ -119,9 +119,9 @@ export const { lifecycle, handler } = definePlugin({
   async onEvents(batch: Event[]): Promise<Submission[]> {
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.scrollsearch/errors' || event.val.pane === undefined) continue;
+      if (event.val.command !== 'com.example.scrollsearch/errors' || event.val.context.pane === undefined) continue;
       try {
-        const matches = await searchHistory(event.val.pane, 'error:', 200);
+        const matches = await searchHistory(event.val.context.pane, 'error:', 200);
         log('info', `${matches.length} matches`);
       } catch (error) {
         log('warn', `search failed: ${String(error)}`);

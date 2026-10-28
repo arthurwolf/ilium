@@ -67,6 +67,7 @@ pub mod process_control;
 pub mod process_info;
 pub mod provider_admission; // Native-account finite-provider slot ownership.
 pub mod pty_io;
+pub mod resource_fs;
 pub mod runtime_dir;
 pub mod secure_fs;
 pub mod startup_timing;

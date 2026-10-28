@@ -397,7 +397,7 @@
 <p><strong>You need:</strong> <code>terminal.write</code> for any <code>send-input</code>. Raw bytes and mouse events also need <code>terminal.raw-input</code> (high risk). <code>lock-user-input</code> needs <code>terminal.input-lock</code> (high risk). <code>agent.read</code> is needed to read the activity that a precondition compares with. The grants belong in the manifest of the side that submits. The base grant is described in <a href="/pages/capability-terminal-write/">terminal.write</a>; the general rules for intents are in <a href="/pages/api-intents/">intents</a>.</p>
 <h3 id="records">Records</h3>
 <pre><code class="language-wit">// Excerpt of ilium:types/intents in reference-wit
-variant delivery { typed, submitted, pasted }
+enum delivery { typed, submitted, pasted }
 record input-stage { text: string, delay-ms: u16, delivery: delivery }
 record terminal-mouse { kind: pointer-kind, button: pointer-button, column: u16, row: u16, modifiers: pointer-modifiers }
 record input-precondition { activity: option&lt;agent-activity&gt;, screen-revision: option&lt;u64&gt;, foreground: option&lt;string&gt; }
@@ -416,7 +416,7 @@ record send-input-spec {
   journal: bool,                              // write a journal entry before the PTY write
 }
 </code></pre>
-<p>The mandatory key is the <code>dedup-key</code> of the submission (the field is called <code>idempotency-key</code> in the intent table). It follows the format and window rules in <a href="/pages/api-intents/">intents</a>. <code>pointer-kind</code>, <code>pointer-button</code> and <code>pointer-modifiers</code> are the shared types also used by the <code>pointer</code> event: kinds <code>down</code>, <code>up</code>, <code>move</code>, <code>drag</code>, <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> and <code>wheel-right</code>; buttons <code>none</code>, <code>left</code>, <code>middle</code> and <code>right</code>; modifiers <code>shift</code>, <code>control</code> and <code>alt</code>.</p>
+<p>The mandatory key is the <code>dedup-key</code> of the submission. It follows the format and window rules in <a href="/pages/api-intents/">intents</a>. <code>pointer-kind</code>, <code>pointer-button</code> and <code>pointer-modifiers</code> are the shared types also used by the <code>pointer</code> event: kinds <code>down</code>, <code>up</code>, <code>move</code>, <code>drag</code>, <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> and <code>wheel-right</code>; buttons <code>none</code>, <code>left</code>, <code>middle</code> and <code>right</code>; modifiers <code>shift</code>, <code>control</code> and <code>alt</code>.</p>
 <h3 id="fields-and-rules">Fields and rules</h3>
 <table>
 <thead>
@@ -444,7 +444,7 @@ record send-input-spec {
 </tr>
 <tr>
 <td><code>lock-user-input</code></td>
-<td>Hold the user's keys for the duration of the stages, at most 2 s. Keys the user types meanwhile are queued, not lost.</td>
+<td>Hold the user's keys for the duration of the stages. The lock lasts as long as the stages, so a batch with <code>lock-user-input</code> whose total delay is over 2 s is refused with <code>invalid-argument</code>. Keys the user types meanwhile are queued, not lost.</td>
 </tr>
 <tr>
 <td><code>journal</code></td>
@@ -499,7 +499,7 @@ use ilium_plugin_sdk::types::intents::{InputPrecondition, InputStage, SendInputS
 use ilium_plugin_sdk::types::intents::Delivery;
 use ilium_plugin_sdk::types::tree::AgentActivity;
 
-fn compact(pane: NodeId) -&gt; Submission {
+fn compact(pane: NodeId, attempt: u32) -&gt; Submission {
     let spec = SendInputSpec {
         pane,
         text: String::new(),
@@ -519,13 +519,13 @@ fn compact(pane: NodeId) -&gt; Submission {
         lock_user_input: true,
         journal: true,
     };
-    Submission::keyed(Intent::SendInput(spec), format!(&quot;compact-{pane}&quot;))
+    Submission::keyed(Intent::SendInput(spec), format!(&quot;compact-{pane}-{attempt}&quot;))
 }
 </code></pre>
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">import type { Submission } from '@ilium/plugin-sdk/types';
 
-function compact(pane: bigint): Submission {
+function compact(pane: bigint, attempt: number): Submission {
   return {
     intent: {
       tag: 'send-input',
@@ -542,7 +542,7 @@ function compact(pane: bigint): Submission {
       },
     },
     correlation: 1n,
-    dedupKey: `compact-${pane}`,
+    dedupKey: `compact-${pane}-${attempt}`,
   };
 }
 </code></pre>
@@ -584,7 +584,7 @@ function compact(pane: bigint): Submission {
 <pre><code class="language-rust">Event::InputUncertain(InputUncertainEvent { pane, dedup_key }) =&gt; {
     // read the visible rows with terminal::read_cells (terminal.read-cells), decide, then:
     if !self.screen_shows(pane, &quot;/compact&quot;) {
-        out.push(compact(pane));   // build it with a new key suffix: the old key is reserved
+        out.push(compact(pane, 2));   // a new attempt number gives a new key: the old key is reserved and would complete as duplicate
     }
     log::log(Level::Warn, &amp;format!(&quot;input {dedup_key} on {pane} was uncertain&quot;));
 }
@@ -592,7 +592,7 @@ function compact(pane: bigint): Submission {
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">if (event.tag === 'input-uncertain') {
   // read the visible rows with readCells (terminal.read-cells), decide, then:
-  if (!screenShows(event.val.pane, '/compact')) out.push(compact(event.val.pane));   // with a new key suffix
+  if (!screenShows(event.val.pane, '/compact')) out.push(compact(event.val.pane, 2));   // new attempt number, new key
   log('warn', `input ${event.val.dedupKey} on ${event.val.pane} was uncertain`);
 }
 </code></pre>
@@ -614,7 +614,7 @@ function compact(pane: bigint): Submission {
 </thead>
 <tbody>
 <tr>
-<td>More than 16 stages, total delay over 10 s, <code>raw</code> over 64 KiB, lock over 2 s</td>
+<td>More than 16 stages, total delay over 10 s, <code>raw</code> over 64 KiB, <code>lock-user-input</code> with a total stage delay over 2 s</td>
 <td>batch refused, <code>invalid-argument</code></td>
 </tr>
 <tr>
@@ -649,7 +649,7 @@ function compact(pane: bigint): Submission {
 <span class="t-hi">›   <span class="w2">🦀</span> <span class="w2">🔒</span> ⠋ Fix auth</span>
 <span class="t-dim">›   <span class="w2">🖥️</span>    Shell</span>
 
-<span class="t-dim">pane 7 (claude)  send-input  compact-7</span>
+<span class="t-dim">pane 7 (claude)  send-input  compact-7-1</span>
 <span class="t-ok">0 ms     stage 1 typed   "/compact"</span>
 <span class="t-ok">120 ms   stage 2 submit  CR</span>
 <span class="t-ok">121 ms   outcome         ok-epoch(5)</span>

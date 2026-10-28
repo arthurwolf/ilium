@@ -18,7 +18,7 @@ Voice is the plugin form of Ilium's voice control. Hold F8 or press the voice bu
 
 ### See it
 
-<figure><img src="/assets/demos/02-voice-control.gif" alt="A voice command is spoken and Ilium runs it after the transcript appears" loading="lazy"><figcaption>Voice control: speak, read the transcript, run the command.</figcaption></figure>
+<figure><img src="/assets/demos/02-voice-control.gif" alt="Typed voice commands drive current Ilium through scripted local tools" loading="lazy"><figcaption>Typed commands pass through a scripted loopback model to real Ilium tools and a real shell running ls -lh. Agent panes are local fixtures; no microphone or hosted inference. F8 stops voice after Settings closes.</figcaption></figure>
 
 ### What the user sees
 

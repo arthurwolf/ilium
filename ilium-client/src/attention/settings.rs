@@ -94,7 +94,7 @@ impl Default for AttentionSettings {
         Self {
             mode: AttentionMode::Shared,
             press_sorts: true,
-            large_buttons: false,
+            large_buttons: true,
             show_briefing: true,
             turbo_concurrency: 16,
             expiry_seconds: 1_800,
@@ -142,7 +142,7 @@ mod tests {
         let settings = AttentionSettings::default();
         assert_eq!(settings.mode, AttentionMode::Shared);
         assert!(settings.press_sorts);
-        assert!(!settings.large_buttons);
+        assert!(settings.large_buttons);
         assert!(settings.show_briefing, "the briefing is on by default");
         assert_eq!(settings.turbo_concurrency, 16);
         assert_eq!(settings.expiry_seconds, 1_800);

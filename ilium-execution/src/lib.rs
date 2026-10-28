@@ -40,7 +40,8 @@ pub use budget::{
 pub use ilium_platform::owned_worker::WorkerExit;
 pub use ilium_platform::thread_priority::WorkerPriority;
 pub use job::{
-    Job, JobContext, JobOutcome, JobPoll, Receipt, Rejected, Retained, Retention, SkipReason,
+    retained_result_storage_bytes, retained_result_storage_overhead_bytes, Job, JobContext,
+    JobOutcome, JobPoll, Receipt, Rejected, Retained, Retention, SkipReason,
 };
 pub use pool::{
     Client, Execution, ExecutionConfig, ExecutionMonitor, ExternalReservation, Health,
@@ -48,7 +49,8 @@ pub use pool::{
     RetirementHandle, ShutdownMode, StartCleanupError, StartError, StartFailure,
 };
 pub use retirement::{
-    RetirementFailure, RetirementReservation, Retiring, RetiringArc, RETIREMENT_SLOTS,
+    retirement_storage_bytes, RetirementFailure, RetirementReservation, Retiring, RetiringArc,
+    RETIREMENT_SLOTS,
 };
 pub use serial::{
     SerialCustody, SerialFailure, SerialQueued, SerialRecovered, SerialRecoveryTicket,

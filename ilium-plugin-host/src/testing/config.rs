@@ -1,17 +1,10 @@
-//! A test rig for the config, settings and snapshot migration rules
-//! (reference-config-and-data-migration.md COR-030..COR-033).
-
+//! Deterministic configuration model for COR-030..033. This fixture models
+//! documents and section replies; it does not start guests, migrate a real server,
+//! or claim filesystem durability. Runtime and disk acceptance need separate tests.
+use ilium_plugin_api::grants::{check_grant, risk_of, Grant};
+use ilium_plugin_api::{ErrorCode, PluginError, Side, Tier};
 use std::collections::{BTreeMap, BTreeSet};
 
-use ilium_plugin_api::grants::{self, Grant};
-use ilium_plugin_api::{ErrorCode, PluginError, Side, Tier};
-
-use crate::settings;
-
-/// The largest snapshot section the host stores, whatever a plugin declares (COR-032).
-const SNAPSHOT_SECTION_CEILING_BYTES: usize = 262_144;
-
-/// A plugin the rig installs: id, tier, grants and snapshot sections.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginSpec {
     id: String,
@@ -19,523 +12,396 @@ pub struct PluginSpec {
     grants: Vec<String>,
     snapshot_sections: Vec<(String, u32, usize)>,
 }
-
 impl PluginSpec {
-    /// A plugin of `id` at `tier` (`"T1"`, `"T2"`, ...).
-    pub fn new(id: &str, tier: &str) -> PluginSpec {
-        PluginSpec {
-            id: id.to_string(),
-            tier: tier.to_string(),
-            grants: Vec::new(),
-            snapshot_sections: Vec::new(),
+    pub fn new(id: &str, tier: &str) -> Self {
+        Self {
+            id: id.into(),
+            tier: tier.into(),
+            grants: vec![],
+            snapshot_sections: vec![],
         }
     }
-
-    /// The grants the manifest declares.
-    pub fn grants(self, grants: &[&str]) -> PluginSpec {
-        PluginSpec {
-            grants: grants.iter().map(|grant| grant.to_string()).collect(),
-            ..self
-        }
+    pub fn grants(mut self, grants: &[&str]) -> Self {
+        self.grants = grants.iter().map(|value| (*value).into()).collect();
+        self
     }
-
-    /// A snapshot section the manifest declares (COR-032).
-    pub fn snapshot_section(self, name: &str, schema_version: u32, max_bytes: usize) -> PluginSpec {
-        let mut spec = self;
-        spec.snapshot_sections
-            .push((name.to_string(), schema_version, max_bytes));
-        spec
+    pub fn snapshot_section(mut self, name: &str, version: u32, max: usize) -> Self {
+        self.snapshot_sections.push((name.into(), version, max));
+        self
     }
 }
-
-/// The result of an install through the rig.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct InstallResult {
-    /// Whether the install succeeded.
     pub ok: bool,
-    /// The refusal codes when it did not.
     pub codes: Vec<String>,
 }
-
 impl InstallResult {
-    /// Same as the `ok` field.
     pub fn is_ok(&self) -> bool {
         self.ok
     }
 }
-
-/// A handle on one snapshot section of one plugin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SectionHandle {
     plugin: String,
     name: String,
 }
-
-/// The snapshot file as written.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotFile {
     sections: Vec<(String, u32, Vec<u8>)>,
     plugin_keys: Vec<String>,
 }
-
 impl SnapshotFile {
-    /// The bytes of a section, if present.
     pub fn section(&self, name: &str) -> Option<Vec<u8>> {
         self.sections
             .iter()
-            .find(|(section_name, _, _)| section_name == name)
-            .map(|(_, _, bytes)| bytes.clone())
+            .find(|entry| entry.0 == name)
+            .map(|entry| entry.2.clone())
     }
-
-    /// The schema version recorded for a section.
     pub fn schema_version(&self, name: &str) -> Option<u32> {
         self.sections
             .iter()
-            .find(|(section_name, _, _)| section_name == name)
-            .map(|(_, version, _)| *version)
+            .find(|entry| entry.0 == name)
+            .map(|entry| entry.1)
     }
-
-    /// The plugin storage keys that reached the file (must stay empty).
     pub fn plugin_keys(&self) -> Vec<String> {
         self.plugin_keys.clone()
     }
 }
-
-/// The last state of one plugin snapshot section.
-#[derive(Debug, Default)]
-struct StoredSection {
-    schema_version: u32,
-    max_bytes: usize,
-    /// The last value the snapshot holds; `None` until one is accepted.
-    data: Option<Vec<u8>>,
-}
-
-/// The config-migration rig: an isolated config, project config and snapshot file.
 #[derive(Debug, Default)]
 pub struct ConfigRig {
-    /// Installed plugin ids and the grant texts each one holds.
-    installed: BTreeMap<String, Vec<String>>,
-    /// Snapshot sections keyed by (plugin id, section name).
-    sections: BTreeMap<(String, String), StoredSection>,
+    plugins: BTreeMap<String, PluginSpec>,
+    sections: BTreeMap<String, (String, u32, usize, Vec<u8>)>,
     crashed: BTreeSet<String>,
+    storage: BTreeMap<(String, String), Vec<u8>>,
     snapshot: SnapshotFile,
-    config_text: String,
-    project_config_text: String,
-    logged_codes: Vec<String>,
+    config: String,
+    project: String,
+    codes: Vec<String>,
 }
-
-impl ConfigRig {
-    /// A rig with no plugins.
-    pub fn new() -> ConfigRig {
-        ConfigRig::default()
+fn error(message: &str) -> PluginError {
+    PluginError {
+        code: ErrorCode::InvalidArgument,
+        message: message.into(),
+        retry_after_ms: None,
     }
-
-    /// A rig with the core plugins installed (COR-030 kernel tabs).
-    pub fn with_core_plugins() -> ConfigRig {
-        let mut rig = ConfigRig::new();
-        rig.install(
-            &PluginSpec::new("ilium.core.terminal", "T1")
-                .grants(&["settings.write-kernel:terminal"]),
-        );
+}
+impl ConfigRig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Native Editor and Kanban tabs deliberately have no plugin owner in v1.
+    pub fn with_core_plugins() -> Self {
+        let mut rig = Self::new();
+        let owners = [
+            "settings",
+            "settings",
+            "agent-detect",
+            "cost",
+            "compaction",
+            "compaction",
+            "keys-help",
+            "terminal",
+            "",
+            "sessions",
+            "worktrees",
+            "",
+            "ambient-look",
+            "notifications",
+            "voice",
+            "cost",
+            "inference",
+            "inference",
+            "titles",
+            "titles",
+            "text-triggers",
+            "settings",
+            "fleet",
+            "settings",
+            "agent-setup",
+        ];
+        for (tab, owner) in crate::settings::kernel_tab_ids().iter().zip(owners) {
+            if owner.is_empty() {
+                continue;
+            }
+            let id = format!("ilium.core.{owner}");
+            let spec = rig
+                .plugins
+                .entry(id.clone())
+                .or_insert_with(|| PluginSpec::new(&id, "T1"));
+            spec.grants.push(format!("settings.write-kernel:{tab}"));
+        }
         rig
     }
-
-    /// Installs a plugin.
     pub fn install(&mut self, plugin: &PluginSpec) -> InstallResult {
-        let mut codes = Vec::new();
+        let mut codes = BTreeSet::new();
         let tier = match plugin.tier.as_str() {
-            "T1" => Some(Tier::T1),
-            "T2" => Some(Tier::T2),
-            "T3" => Some(Tier::T3),
-            _ => None,
+            "T1" => Tier::T1,
+            "T2" => Tier::T2,
+            "T3" => Tier::T3,
+            _ => {
+                codes.insert("manifest.schema".into());
+                Tier::T3
+            }
         };
-        if tier.is_none() {
-            codes.push("manifest.schema".to_string());
+        if plugin.id.is_empty()
+            || !plugin.id.contains('.')
+            || plugin
+                .id
+                .bytes()
+                .any(|b| !(b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-'))
+        {
+            codes.insert("manifest.id-invalid".into());
         }
-        for grant_text in &plugin.grants {
-            let grant = match Grant::parse(grant_text) {
-                Ok(grant) => grant,
-                Err(diagnostic) => {
-                    codes.push(diagnostic.code.0.to_string());
-                    continue;
+        if self.plugins.contains_key(&plugin.id) {
+            codes.insert("install.already-installed".into());
+        }
+        for text in &plugin.grants {
+            match Grant::parse(text) {
+                Err(_) => {
+                    codes.insert("manifest.grant-unknown".into());
                 }
+                Ok(grant) => {
+                    if let Err(diagnostic) = check_grant(&grant, tier, Side::Server) {
+                        codes.insert(diagnostic.code.as_str().to_owned());
+                    }
+                    if let Some(tab) = text.strip_prefix("settings.write-kernel:") {
+                        if !self.write_owners(tab).is_empty() {
+                            codes.insert("manifest.settings-owner".into());
+                        }
+                    }
+                }
+            }
+        }
+        if plugin.snapshot_sections.len() > 1
+            || plugin.snapshot_sections.iter().any(|(name, _, max)| {
+                name.is_empty() || *max == 0 || *max > 262144 || self.sections.contains_key(name)
+            })
+        {
+            codes.insert("manifest.schema".into());
+        }
+        if !codes.is_empty() {
+            return InstallResult {
+                ok: false,
+                codes: codes.into_iter().collect(),
             };
-            if let Some(tier) = tier {
-                if let Err(diagnostic) = grants::check_grant(&grant, tier, Side::Server) {
-                    codes.push(diagnostic.code.0.to_string());
-                    continue;
-                }
-            }
-            if self.kernel_write_held_elsewhere(&plugin.id, grant_text) {
-                codes.push("manifest.settings-owner".to_string());
-            }
         }
-        if codes.is_empty() {
-            self.installed
-                .insert(plugin.id.clone(), plugin.grants.clone());
-            for (name, schema_version, max_bytes) in &plugin.snapshot_sections {
-                let stored = self
-                    .sections
-                    .entry((plugin.id.clone(), name.clone()))
-                    .or_default();
-                stored.schema_version = *schema_version;
-                stored.max_bytes = *max_bytes;
-            }
-        } else {
-            self.logged_codes.extend(codes.iter().cloned());
+        self.plugins.insert(plugin.id.clone(), plugin.clone());
+        for (name, version, max) in &plugin.snapshot_sections {
+            self.sections
+                .insert(name.clone(), (plugin.id.clone(), *version, *max, vec![]));
         }
         InstallResult {
-            ok: codes.is_empty(),
-            codes,
+            ok: true,
+            codes: vec![],
         }
     }
-
-    /// Uninstalls a plugin; true when it was installed.
     pub fn uninstall(&mut self, id: &str) -> bool {
-        self.installed.remove(id).is_some()
+        self.plugins.remove(id).is_some()
     }
-
-    /// Whether a plugin is installed.
     pub fn is_installed(&self, id: &str) -> bool {
-        self.installed.contains_key(id)
+        self.plugins.contains_key(id)
     }
-
-    /// The settings tabs the kernel owns.
     pub fn kernel_tabs(&self) -> Vec<String> {
-        settings::kernel_tab_ids()
+        crate::settings::kernel_tab_ids()
             .iter()
-            .map(|tab| tab.to_string())
+            .map(|tab| (*tab).into())
             .collect()
     }
-
-    /// Who may write a settings tab.
     pub fn write_owners(&self, tab: &str) -> Vec<String> {
-        let grant_text = format!("settings.write-kernel:{tab}");
-        self.installed
-            .iter()
-            .filter(|(_, held)| held.contains(&grant_text))
-            .map(|(id, _)| id.clone())
+        let grant = format!("settings.write-kernel:{tab}");
+        self.plugins
+            .values()
+            .filter(|plugin| plugin.grants.contains(&grant))
+            .map(|plugin| plugin.id.clone())
             .collect()
     }
-
-    /// The risk level of a grant as the settings screen shows it.
-    pub fn risk_of(&self, grant: &str) -> Option<String> {
-        let parsed = Grant::parse(grant).ok()?;
-        Some(grants::risk_of(&[parsed]).as_str().to_string())
+    pub fn risk_of(&self, text: &str) -> Option<String> {
+        Grant::parse(text)
+            .ok()
+            .map(|grant| risk_of(&[grant]).as_str().into())
     }
-
-    /// A handle on a snapshot section of a plugin (COR-032).
-    pub fn section(
-        &mut self,
-        plugin: &str,
-        name: &str,
-        schema_version: u32,
-        max_bytes: usize,
-    ) -> SectionHandle {
-        let stored = self
-            .sections
-            .entry((plugin.to_string(), name.to_string()))
-            .or_default();
-        stored.schema_version = schema_version;
-        stored.max_bytes = max_bytes;
+    /// Declares a fixture handler's section. Invalid declarations yield unusable
+    /// handles; they never replace another owner's section or increase its quota.
+    pub fn section(&mut self, plugin: &str, name: &str, version: u32, max: usize) -> SectionHandle {
+        if self.is_installed(plugin)
+            && !name.is_empty()
+            && max > 0
+            && max <= 262144
+            && !self.sections.contains_key(name)
+            && !self.sections.values().any(|entry| entry.0 == plugin)
+        {
+            self.sections
+                .insert(name.into(), (plugin.into(), version, max, vec![]));
+        }
         SectionHandle {
-            plugin: plugin.to_string(),
-            name: name.to_string(),
+            plugin: plugin.into(),
+            name: name.into(),
         }
     }
-
-    /// Writes a snapshot section.
     pub fn write_section(
         &mut self,
         section: &SectionHandle,
         bytes: &[u8],
     ) -> Result<(), PluginError> {
-        if self.crashed.contains(&section.plugin) {
-            return Err(PluginError {
-                code: ErrorCode::Internal,
-                message: format!("plugin {} is not running", section.plugin),
-                retry_after_ms: None,
-            });
+        if !self.is_installed(&section.plugin) || self.crashed.contains(&section.plugin) {
+            return Err(error("section owner is unavailable"));
         }
-        let stored = self
+        let entry = self
             .sections
-            .entry((section.plugin.clone(), section.name.clone()))
-            .or_default();
-        let limit = stored.max_bytes.min(SNAPSHOT_SECTION_CEILING_BYTES);
-        if bytes.len() > limit {
-            // The previous value stays: an oversized write never replaces it.
-            self.logged_codes
-                .push("snapshot.section-too-large".to_string());
-            return Err(PluginError {
-                code: ErrorCode::InvalidArgument,
-                message: format!(
-                    "snapshot.section-too-large: {} bytes exceeds {limit}",
-                    bytes.len()
-                ),
-                retry_after_ms: None,
-            });
+            .get_mut(&section.name)
+            .ok_or_else(|| error("undeclared section"))?;
+        if entry.0 != section.plugin {
+            return Err(error("section belongs to another plugin"));
         }
-        stored.data = Some(bytes.to_vec());
-        Ok(())
+        if bytes.len() > entry.2 {
+            self.codes.push("snapshot.section-too-large".into());
+            return Err(error("snapshot.section-too-large"));
+        }
+        entry.3 = bytes.to_vec();
+        self.write_snapshot()
     }
-
-    /// Writes the snapshot file.
     pub fn write_snapshot(&mut self) -> Result<(), PluginError> {
-        let sections = self
-            .sections
-            .iter()
-            .filter_map(|((_, name), stored)| {
-                stored
-                    .data
-                    .as_ref()
-                    .map(|data| (name.clone(), stored.schema_version, data.clone()))
-            })
-            .collect();
-        self.snapshot = SnapshotFile {
-            sections,
-            plugin_keys: Vec::new(),
+        // Encode and decode the actual candidate, rather than return a canned result.
+        // Private plugin storage is deliberately not part of this fixture document.
+        let candidate = SnapshotFile {
+            sections: self
+                .sections
+                .iter()
+                .map(|(name, (_, version, _, bytes))| (name.clone(), *version, bytes.clone()))
+                .collect(),
+            plugin_keys: vec![],
         };
+        let bytes =
+            serde_json::to_vec(&candidate).map_err(|_| error("snapshot encoding failed"))?;
+        self.snapshot =
+            serde_json::from_slice(&bytes).map_err(|_| error("snapshot decoding failed"))?;
         Ok(())
     }
-
-    /// Reads the snapshot file back.
     pub fn snapshot(&self) -> SnapshotFile {
         self.snapshot.clone()
     }
-
-    /// Crashes a plugin instance.
     pub fn crash_plugin(&mut self, id: &str) {
-        self.crashed.insert(id.to_string());
+        self.crashed.insert(id.into());
     }
-
-    /// Makes a plugin store a key in plugin storage (never the snapshot).
-    pub fn plugin_stores_in_storage(&mut self, _id: &str, _key: &str, _value: &[u8]) {
-        // Plugin storage is its own bucket; the snapshot writer reads only sections (COR-032).
+    pub fn plugin_stores_in_storage(&mut self, id: &str, key: &str, value: &[u8]) {
+        if self.is_installed(id) {
+            self.storage.insert((id.into(), key.into()), value.to_vec());
+        }
     }
-
-    /// The log codes emitted so far.
     pub fn log_codes(&self) -> Vec<String> {
-        self.logged_codes.clone()
+        self.codes.clone()
     }
-
-    /// Replaces the user config file (COR-033).
     pub fn write_config(&mut self, contents: &str) {
-        self.config_text = contents.to_string();
-        if !parses_as_toml(contents) {
-            self.logged_codes.push("config.parse-error".to_string());
-        }
+        self.config = contents.into();
     }
-
-    /// The user config file as it is now.
     pub fn read_config(&self) -> String {
-        self.config_text.clone()
+        self.config.clone()
     }
-
-    /// Sets one setting through the settings screen.
     pub fn set_setting(&mut self, key: &str, value: &str) {
-        if !parses_as_toml(&self.config_text) {
-            // COR-090: an unparseable file is never rewritten.
-            self.logged_codes.push("config.parse-error".to_string());
-            return;
-        }
-        let (table, field) = split_key(key);
-        let edited = edit_field(&self.config_text, Syntax::Toml, table, field, value);
-        if parses_as_toml(&edited) {
-            self.config_text = edited;
-        } else {
-            self.logged_codes.push("settings.invalid-value".to_string());
+        match edit_toml(&self.config, key, value) {
+            Ok(text) => self.config = text,
+            Err(code) => self.codes.push(code.into()),
         }
     }
-
-    /// Replaces the project config file.
     pub fn write_project_config(&mut self, contents: &str) {
-        self.project_config_text = contents.to_string();
+        self.project = contents.into();
     }
-
-    /// The project config file as it is now.
     pub fn read_project_config(&self) -> String {
-        self.project_config_text.clone()
+        self.project.clone()
     }
-
-    /// Sets one project setting through the settings screen.
-    pub fn set_project_setting(&mut self, key: &str, value: &str) {
-        let (table, field) = split_key(key);
-        self.project_config_text =
-            edit_field(&self.project_config_text, Syntax::Yaml, table, field, value);
+    pub fn set_project_setting(&mut self, _key: &str, _value: &str) {
+        // No YAML parser/round-trip writer is available in this crate. Fail closed,
+        // preserving the original instead of pretending a line substitution is YAML.
+        self.codes.push("config.yaml-context-required".into());
     }
-
-    /// Every config key path the kernel and the plugins know.
     pub fn config_key_paths(&self) -> Vec<String> {
-        let Ok(table) = toml::from_str::<toml::Table>(&self.config_text) else {
-            return Vec::new();
-        };
-        let mut paths = Vec::new();
-        collect_key_paths("", &table, &mut paths);
-        paths
+        fn walk(value: &toml::Value, prefix: &str, result: &mut Vec<String>) {
+            if let Some(table) = value.as_table() {
+                for (key, value) in table {
+                    let path = if prefix.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    walk(value, &path, result);
+                }
+            } else {
+                result.push(prefix.into());
+            }
+        }
+        let mut result = vec![];
+        if let Ok(value) = self.config.parse::<toml::Value>() {
+            walk(&value, "", &mut result);
+        }
+        result
     }
-
-    /// Runs the plugin build step that regenerates config keys.
+    /// There is no guest build runner in this fixture: do not claim one ran.
     pub fn run_plugin_build(&mut self) {
-        // The build only adds keys: it renames and drops none, so the files stay as they are (COR-033).
-    }
-
-    /// Whether another installed plugin already holds the same kernel write grant.
-    fn kernel_write_held_elsewhere(&self, plugin_id: &str, grant_text: &str) -> bool {
-        grant_text.starts_with("settings.write-kernel:")
-            && self.installed.iter().any(|(id, held)| {
-                id != plugin_id && held.iter().any(|held_grant| held_grant == grant_text)
-            })
+        self.codes.push("config.build-context-required".into());
     }
 }
 
-/// The two config syntaxes the rig edits; both keep unknown lines byte for byte.
-#[derive(Debug, Clone, Copy)]
-enum Syntax {
-    Toml,
-    Yaml,
-}
-
-fn parses_as_toml(text: &str) -> bool {
-    toml::from_str::<toml::Table>(text).is_ok()
-}
-
-/// Splits `table.field`; a key without a dot is a top-level field.
-fn split_key(key: &str) -> (&str, &str) {
-    key.split_once('.').unwrap_or(("", key))
-}
-
-fn collect_key_paths(prefix: &str, table: &toml::Table, paths: &mut Vec<String>) {
-    for (key, value) in table {
-        let path = if prefix.is_empty() {
-            key.clone()
+/// A conservative, formatting-preserving edit of an existing simple TOML key.
+/// The complete document and replacement are parsed before and after the edit.
+/// Complex/quoted/dotted source syntax is refused rather than rewritten lossily.
+fn edit_toml(source: &str, path: &str, replacement: &str) -> Result<String, &'static str> {
+    let original: toml::Value = source.parse().map_err(|_| "config.parse-error")?;
+    let candidate: toml::Value = format!("value = {replacement}")
+        .parse()
+        .map_err(|_| "settings.invalid-value")?;
+    let value = candidate.get("value").ok_or("settings.invalid-value")?;
+    let keys: Vec<_> = path.split('.').collect();
+    let mut old = &original;
+    for key in &keys {
+        old = old.get(*key).ok_or("settings.unknown-key")?;
+    }
+    if old == value {
+        return Ok(source.into());
+    }
+    let mut table = String::new();
+    let mut output = String::new();
+    let mut found = false;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            table = trimmed[1..trimmed.len() - 1].to_owned();
+        }
+        let expected = if table.is_empty() {
+            keys.last().copied().unwrap_or("").to_owned()
         } else {
-            format!("{prefix}.{key}")
+            format!("{table}.{}", keys.last().copied().unwrap_or(""))
         };
-        match value {
-            toml::Value::Table(nested) => collect_key_paths(&path, nested, paths),
-            _ => paths.push(path),
-        }
-    }
-}
-
-/// Sets `field` under `table` by rewriting only that line. A missing field or table is added.
-fn edit_field(contents: &str, syntax: Syntax, table: &str, field: &str, value: &str) -> String {
-    let mut lines: Vec<String> = contents.split('\n').map(str::to_string).collect();
-    let mut scope = String::new();
-    let mut first_header: Option<usize> = None;
-    let mut table_header: Option<usize> = None;
-    let mut replaced = false;
-    for index in 0..lines.len() {
-        if let Some(name) = header_name(&lines[index], syntax) {
-            first_header.get_or_insert(index);
-            if name == table {
-                table_header.get_or_insert(index);
+        match line.split_once('=') {
+            Some((left, _))
+                if expected == path && left.trim() == keys.last().copied().unwrap_or("") =>
+            {
+                if found || line.contains('#') {
+                    return Err("config.edit-context-required");
+                }
+                let suffix = if line.ends_with('\n') { "\n" } else { "" };
+                output.push_str(&format!("{left}= {replacement}{suffix}"));
+                found = true;
             }
-            scope = name;
-            continue;
-        }
-        if matches!(syntax, Syntax::Yaml) && is_yaml_top_level_key(&lines[index]) {
-            scope.clear();
-        }
-        if scope == table && is_field_line(&lines[index], field, syntax) {
-            lines[index] = entry_line(syntax, leading_whitespace(&lines[index]), field, value);
-            replaced = true;
-            break;
+            _ => output.push_str(line),
         }
     }
-    if !replaced {
-        let nested_indent = match syntax {
-            Syntax::Toml => "",
-            Syntax::Yaml => "  ",
-        };
-        if table.is_empty() {
-            let new_line = entry_line(syntax, "", field, value);
-            match (syntax, first_header) {
-                (Syntax::Toml, Some(header)) => lines.insert(header, new_line),
-                _ => append_block(&mut lines, vec![new_line]),
-            }
-        } else if let Some(header) = table_header {
-            lines.insert(header + 1, entry_line(syntax, nested_indent, field, value));
-        } else {
-            let header_line = match syntax {
-                Syntax::Toml => format!("[{table}]"),
-                Syntax::Yaml => format!("{table}:"),
-            };
-            let new_line = entry_line(syntax, nested_indent, field, value);
-            append_block(&mut lines, vec![header_line, new_line]);
-        }
+    if !found {
+        return Err("config.edit-context-required");
     }
-    lines.join("\n")
-}
-
-/// The table name a header line opens, if the line is a header.
-fn header_name(line: &str, syntax: Syntax) -> Option<String> {
-    match syntax {
-        Syntax::Toml => {
-            let inner = line.trim().strip_prefix('[')?.strip_suffix(']')?;
-            Some(inner.trim().to_string())
-        }
-        Syntax::Yaml => {
-            if !is_yaml_top_level_key(line) {
-                return None;
-            }
-            line.trim_end()
-                .strip_suffix(':')
-                .map(|name| name.trim().to_string())
-        }
+    let updated: toml::Value = output.parse().map_err(|_| "config.edit-context-required")?;
+    let mut expected = original;
+    let mut target = &mut expected;
+    for key in &keys[..keys.len() - 1] {
+        target = target.get_mut(*key).ok_or("settings.unknown-key")?;
     }
-}
-
-fn is_yaml_top_level_key(line: &str) -> bool {
-    !line.is_empty() && !line.starts_with([' ', '\t', '#'])
-}
-
-fn is_field_line(line: &str, field: &str, syntax: Syntax) -> bool {
-    let separator = match syntax {
-        Syntax::Toml => '=',
-        Syntax::Yaml => ':',
-    };
-    line.trim_start()
-        .strip_prefix(field)
-        .is_some_and(|rest| rest.trim_start().starts_with(separator))
-}
-
-fn leading_whitespace(line: &str) -> &str {
-    &line[..line.len() - line.trim_start().len()]
-}
-
-fn entry_line(syntax: Syntax, indent: &str, field: &str, value: &str) -> String {
-    match syntax {
-        Syntax::Toml => format!("{indent}{field} = {}", toml_literal(value)),
-        Syntax::Yaml => format!("{indent}{field}: {value}"),
+    *target
+        .get_mut(keys[keys.len() - 1])
+        .ok_or("settings.unknown-key")? = value.clone();
+    if updated != expected {
+        return Err("config.edit-context-required");
     }
+    Ok(output)
 }
-
-/// Numbers and booleans are written bare; everything else becomes a TOML string.
-fn toml_literal(value: &str) -> String {
-    let is_scalar = value == "true"
-        || value == "false"
-        || value.parse::<i64>().is_ok()
-        || value.parse::<f64>().is_ok_and(f64::is_finite);
-    if is_scalar {
-        value.to_string()
-    } else {
-        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-    }
-}
-
-/// Appends a block after the last line, separated by one blank line.
-fn append_block(lines: &mut Vec<String>, block: Vec<String>) {
-    if lines.last().is_some_and(String::is_empty) {
-        lines.pop();
-    }
-    if !lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines.extend(block);
-    lines.push(String::new());
-}
-
 #[cfg(test)]
 mod tests {
     use super::{ConfigRig, InstallResult, PluginSpec};
