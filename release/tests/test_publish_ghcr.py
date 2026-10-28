@@ -79,6 +79,18 @@ def public_metadata():
 
 
 class PublisherTests(unittest.TestCase):
+    def test_changed_source_tag_stops_before_registry_login(self):
+        plan = {'tag': 'v0.1.1', 'commit': 'a' * 40}
+        with (patch.object(ghcr, 'parser') as parser,
+              patch.object(ghcr, 'prepare', return_value=plan),
+              patch.object(ghcr.pipeline, 'require_remote_tag',
+                           side_effect=release_tool.ReleaseError('tag changed')),
+              patch.object(ghcr, 'OrasClient') as client,
+              patch.object(ghcr, 'emit')):
+            parser.return_value.parse_args.return_value = SimpleNamespace()
+            self.assertEqual(ghcr.main([]), 1)
+            client.assert_not_called()
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -97,9 +109,16 @@ class PublisherTests(unittest.TestCase):
         self.intent = self.root / 'ghcr-intent.json'
 
     def inputs(self):
+        targets = {f'fixture-target-{index}': {} for index in range(5)}
+        receipts = {target: 'b' * 64 for target in targets}
+        metadata = {'tag': self.tag, 'commit': self.commit, 'archives': self.assets,
+                    'target_receipts': targets}
+        metadata_hash = release_tool.digest(json.dumps(metadata, sort_keys=True).encode())
         qualification = {'schema': 1, 'state': 'passed', 'publication_allowed': True,
                          'tag': self.tag, 'commit': self.commit, 'archives': self.assets,
-                         'public_transport_verified': False}
+                         'candidate_metadata_sha256': metadata_hash, 'qualified_assets': self.assets,
+                         'public_transport_verified': False,
+                         'installation_receipts': receipts}
         quality_file = self.candidate / 'qualification.json'
         quality_file.write_text(json.dumps(qualification))
         final = self.root / 'final-qualification.json'
@@ -113,7 +132,10 @@ class PublisherTests(unittest.TestCase):
                                          'publication_allowed': True,
                                          'public_transport_verified': True,
                                          'tag': self.tag, 'commit': self.commit,
-                                         'archives': self.assets}))
+                                         'archives': self.assets,
+                                         'candidate_metadata_sha256': metadata_hash,
+                                         'qualified_assets': self.assets,
+                                         'installation_receipts': receipts}))
         channel = self.root / 'final-channel-readback.json'
         channel.write_text(json.dumps({'schema': 1, 'state': 'passed',
                                        'immutable': True, 'tag': self.tag,
@@ -128,8 +150,29 @@ class PublisherTests(unittest.TestCase):
         environment = {'GITHUB_EVENT_NAME': 'push', 'GITHUB_REPOSITORY': ghcr.REPOSITORY,
                        'GITHUB_REF': 'refs/tags/' + self.tag, 'GITHUB_SHA': self.commit,
                        'GHCR_TOKEN': 'synthetic-token', 'GITHUB_ACTOR': 'fixture'}
-        metadata = {'tag': self.tag, 'commit': self.commit, 'archives': self.assets}
         return arguments, environment, metadata
+
+    def test_changed_qualification_asset_binding_blocks_registry_publication(self):
+        arguments, environment, metadata = self.inputs()
+        quality_file = self.candidate / 'qualification.json'
+        qualification = json.loads(quality_file.read_text())
+        qualification['qualified_assets'][self.payload.name] = '0' * 64
+        quality_file.write_text(json.dumps(qualification))
+        arguments.final_qualification.write_bytes(quality_file.read_bytes())
+        with patch.object(ghcr.pipeline, 'candidate_data', return_value=(metadata, [{}] * 5)), \
+             patch.object(ghcr.pipeline, 'publication_files', return_value=[self.payload]):
+            with self.assertRaisesRegex(release_tool.ReleaseError, 'qualified bytes'):
+                ghcr.prepare(arguments, environment)
+
+    def test_changed_public_qualification_binding_blocks_registry_publication(self):
+        arguments, environment, metadata = self.inputs()
+        completed = json.loads(arguments.completed_qualification.read_text())
+        completed['qualified_assets'][self.payload.name] = '0' * 64
+        arguments.completed_qualification.write_text(json.dumps(completed))
+        with patch.object(ghcr.pipeline, 'candidate_data', return_value=(metadata, [{}] * 5)), \
+             patch.object(ghcr.pipeline, 'publication_files', return_value=[self.payload]):
+            with self.assertRaisesRegex(release_tool.ReleaseError, 'qualified bytes'):
+                ghcr.prepare(arguments, environment)
 
     def test_payload_hash_mismatch_fails_before_registry_access(self):
         arguments, environment, metadata = self.inputs()

@@ -752,6 +752,14 @@ def candidate_data(directory, manifest, workspace):
     metadata = release_tool.read_json(directory / 'candidate.json')
     targets = release_tool.load_targets(manifest)
     version = release_tool.workspace_version(workspace, metadata['tag'])
+    version_file = directory / 'VERSION'
+    require(version_file.is_file() and not version_file.is_symlink() and
+            version_file.read_bytes() == (version + '\n').encode('ascii'),
+            'candidate VERSION differs from workspace and tag')
+    require(metadata.get('schema') == 1 and isinstance(metadata.get('commit'), str) and
+            re.fullmatch('[0-9a-f]{40}', metadata['commit']), 'candidate source identity is invalid')
+    require(git_identity(Path(workspace).resolve().parent) == metadata['commit'],
+            'candidate commit differs from current clean checkout')
     import validate_animation_smoke as animation_smoke
     expected_inputs = {'Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES}
     require(set(metadata.get('source_inputs', {})) == expected_inputs, 'candidate source inventory differs')
@@ -760,7 +768,6 @@ def candidate_data(directory, manifest, workspace):
     expected_names = set(metadata['archives']) | {'audits', 'site', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', *windows_installers.INSTALLER_NAMES, windows_installers.RECEIPT_NAME, *metadata.get('linux_packages', {}), *metadata.get('macos_packages', {})}
     actual_names = {path.name for path in directory.iterdir()}
     require(actual_names in (expected_names, expected_names | {'qualification.json'}), 'candidate aggregate file inventory differs')
-    require(metadata.get('schema') == 1 and re.fullmatch('[0-9a-f]{40}', metadata.get('commit', '')), 'candidate source identity is invalid')
     require(set(metadata['archives']) == {row['archive'] for row in targets} and set(metadata['target_receipts']) == {row['rust_target'] for row in targets}, 'candidate target/archive inventory differs')
     package_rows = [row for row in targets if row['os'] in ('linux', 'windows')]
     require(set(metadata.get('package_animation_smoke', {})) ==
@@ -1075,11 +1082,21 @@ def qualify_receipts(metadata, receipts, targets, *, public):
     require(set(receipts) == {row['rust_target'] for row in targets}, 'qualification requires all five native receipts')
     for target in targets:
         validate_install_receipt(metadata, receipts[target['rust_target']], target, public=public)
-    return {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': metadata['tag'], 'commit': metadata['commit'], 'archives': metadata['archives'], 'installation_receipts': {target: release_tool.digest(json.dumps(proof, sort_keys=True).encode()) for target, proof in receipts.items()}, 'public_transport_verified': public}
+    return {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': metadata['tag'], 'commit': metadata['commit'], 'archives': metadata['archives'], 'candidate_metadata_sha256': release_tool.digest(json.dumps(metadata, sort_keys=True).encode()), 'installation_receipts': {target: release_tool.digest(json.dumps(proof, sort_keys=True).encode()) for target, proof in receipts.items()}, 'public_transport_verified': public}
+
+
+def require_receipt_inventory(directory, prefix, targets):
+    expected = {prefix + row['rust_target'] for row in targets}
+    require(directory.is_dir() and not directory.is_symlink(), 'receipt directory inventory differs')
+    entries = list(directory.iterdir())
+    require({entry.name for entry in entries} == expected and
+            all(entry.is_dir() and not entry.is_symlink() for entry in entries),
+            'receipt directory inventory differs')
 
 
 def qualify(arguments):
     metadata, targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
+    require_receipt_inventory(arguments.receipts, arguments.receipt_prefix, targets)
     receipts = {row['rust_target']: release_tool.read_json(arguments.receipts / (arguments.receipt_prefix + row['rust_target']) / 'receipt.json') for row in targets}
     expected_metadata = copy.deepcopy(metadata)
     if arguments.previous:
@@ -1117,6 +1134,9 @@ def qualify(arguments):
             require(receipts[row['rust_target']].get('literal_public_command') == (WINDOWS_COMMAND if row['os'] == 'windows' else POSIX_COMMAND) and receipts[row['rust_target']].get('public_script_sha256') == metadata['installers']['install.ps1' if row['os'] == 'windows' else 'install.sh'], 'all-five final qualification requires literal public default commands and exact served script hashes')
     # This independent job reopens and audits all archives and all five native
     # receipts. No human approval or manually supplied success flag is accepted.
+    qualification['qualified_assets'] = asset_hashes(
+        path for path in publication_files(arguments.candidate)
+        if path.name != 'qualification.json')
     write_json(arguments.output, qualification)
     emit('result', command='qualify', state='passed', output=str(arguments.output.resolve()), public_transport_verified=arguments.public)
 
@@ -1142,6 +1162,35 @@ def publication_files(candidate):
     return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']), *sorted(metadata['macos_packages']))]
 
 
+def validate_qualified_publication(candidate, metadata, qualification):
+    # Reject incomplete envelopes before trusting their asset or receipt bindings.
+    expected_fields = {'schema', 'state', 'publication_allowed', 'tag', 'commit',
+                       'archives', 'candidate_metadata_sha256', 'installation_receipts',
+                       'public_transport_verified', 'qualified_assets'}
+    require(isinstance(qualification, dict) and set(qualification) == expected_fields and
+            type(qualification.get('schema')) is int and qualification['schema'] == 1 and
+            type(qualification.get('public_transport_verified')) is bool,
+            'publication qualification envelope differs')
+    receipts = qualification['installation_receipts']
+    targets = metadata.get('target_receipts')
+    require(isinstance(targets, dict) and bool(targets) and isinstance(receipts, dict) and
+            set(receipts) == set(targets) and
+            all(isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value)
+                for value in receipts.values()),
+            'publication installation receipt inventory differs')
+    require(qualification.get('state') == 'passed' and
+            qualification.get('publication_allowed') is True and
+            qualification.get('tag') == metadata['tag'] and
+            qualification.get('commit') == metadata['commit'] and
+            qualification.get('archives') == metadata['archives'] and
+            qualification.get('candidate_metadata_sha256') ==
+            release_tool.digest(json.dumps(metadata, sort_keys=True).encode()),
+            'publication requires unchanged automatic native qualification')
+    files = (path for path in publication_files(candidate) if path.name != 'qualification.json')
+    require(qualification.get('qualified_assets') == asset_hashes(files),
+            'publication assets differ from qualified bytes')
+
+
 def validate_release(release, tag, files, *, draft, immutable):
     require(release.get('tag_name') == tag and release.get('draft') is draft, 'release identity/draft state mismatch')
     if immutable:
@@ -1156,14 +1205,52 @@ def validate_release(release, tag, files, *, draft, immutable):
     require(inventory == {name: 'sha256:' + digest for name, digest in files.items()}, 'GitHub release asset digest inventory differs')
 
 
+def require_release_absent(tag):
+    # The by-tag endpoint only promises published releases; authenticated
+    # listings also include drafts and must be exhausted before creation.
+    for page in range(1, 1001):
+        releases = github(f'releases?per_page=100&page={page}')
+        require(isinstance(releases, list) and len(releases) <= 100 and
+                all(isinstance(item, dict) and isinstance(item.get('tag_name'), str)
+                    for item in releases), 'release listing is malformed')
+        require(all(item['tag_name'] != tag for item in releases),
+                'release tag already exists; replacement is forbidden')
+        if len(releases) < 100:
+            return
+    raise release_tool.ReleaseError('release listing exceeded safe page bound')
+
+
+def require_remote_tag(tag, commit):
+    require(isinstance(tag, str) and re.fullmatch(pages.TAG_PATTERN, tag), 'invalid release tag')
+    require(isinstance(commit, str) and re.fullmatch('[0-9a-f]{40}', commit), 'invalid candidate commit')
+    ref = 'refs/tags/' + tag
+    try:
+        result = subprocess.run(
+            ['git', 'ls-remote', '--exit-code', '--tags',
+             'https://github.com/' + REPOSITORY + '.git', ref, ref + '^{}'],
+            capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise release_tool.ReleaseError('remote tag lookup could not complete') from error
+    require(result.returncode == 0 and len(result.stdout) <= 4096, 'remote tag lookup failed or tag is absent')
+    refs = {}
+    for line in result.stdout.splitlines():
+        parts = line.split('\t')
+        require(len(parts) == 2 and re.fullmatch('[0-9a-f]{40}', parts[0]) and
+                parts[1] in (ref, ref + '^{}') and parts[1] not in refs,
+                'remote tag lookup returned malformed or unexpected refs')
+        refs[parts[1]] = parts[0]
+    require(ref in refs and refs.get(ref + '^{}', refs[ref]) == commit,
+            'remote tag does not resolve to candidate commit')
+
+
 def draft(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
     qualification = release_tool.read_json(arguments.candidate / 'qualification.json')
-    require(qualification.get('state') == 'passed' and qualification.get('commit') == metadata['commit'] and qualification.get('archives') == metadata['archives'], 'draft is not bound to native candidate qualification')
-    # There is no overwrite/retry-by-replacement path. A pre-existing tag is
-    # evidence requiring an explicit operator reconciliation outside this CLI.
-    releases = github('releases?per_page=100')
-    require(all(item.get('tag_name') != metadata['tag'] for item in releases), 'release tag already exists; replacement is forbidden')
+    validate_qualified_publication(arguments.candidate, metadata, qualification)
+    # An existing release requires reconciliation; never overwrite it here.
+    # This release lookup does not establish the source tag's identity.
+    require_release_absent(metadata['tag'])
+    require_remote_tag(metadata['tag'], metadata['commit'])
     repository = github('immutable-releases')
     require(repository.get('enabled') is True, 'repository release immutability is not enabled')
     write_json(arguments.output.with_suffix('.intent.json'), {'schema': 1, 'operation': 'create-draft', 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID'), 'assets': asset_hashes(publication_files(arguments.candidate))})
@@ -1183,7 +1270,8 @@ def draft(arguments):
 def publish(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
     qualification = release_tool.read_json(arguments.candidate / 'qualification.json')
-    require(qualification.get('state') == 'passed' and qualification.get('publication_allowed') is True and qualification.get('commit') == metadata['commit'] and qualification.get('archives') == metadata['archives'], 'publication requires unchanged automatic native qualification')
+    validate_qualified_publication(arguments.candidate, metadata, qualification)
+    require_remote_tag(metadata['tag'], metadata['commit'])
     baseline = load_baseline(arguments.baseline, metadata)
     assert_latest(baseline); assert_production(baseline)
     draft_receipt = release_tool.read_json(arguments.draft_receipt)
@@ -1204,6 +1292,8 @@ def publish(arguments):
 
 def latest(arguments):
     metadata, targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
+    require_receipt_inventory(arguments.receipts, arguments.receipt_prefix, targets)
+    require_remote_tag(metadata['tag'], metadata['commit'])
     receipts = {row['rust_target']: release_tool.read_json(arguments.receipts / (arguments.receipt_prefix + row['rust_target']) / 'receipt.json') for row in targets}
     qualify_receipts(metadata, receipts, targets, public=True)
     for row in targets:
@@ -1266,6 +1356,7 @@ def cloudflare(path, *, method='GET'):
 
 def deploy(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
+    require_remote_tag(metadata['tag'], metadata['commit'])
     baseline = load_baseline(arguments.baseline, metadata)
     assert_production(baseline)
     publication = release_tool.read_json(arguments.publication_receipt)

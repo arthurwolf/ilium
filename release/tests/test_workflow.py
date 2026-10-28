@@ -664,8 +664,205 @@ class PipelineTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.targets = release_tool.load_targets(ROOT / 'release/targets.toml')
 
+    def test_release_absence_fails_closed_on_listing_errors(self):
+        with patch.object(pipeline, 'github', side_effect=pipeline.HTTPFailure(404)):
+            with self.assertRaises(pipeline.HTTPFailure):
+                pipeline.require_release_absent('v0.1.1')
+        with patch.object(pipeline, 'github', return_value=[{'tag_name': 'v0.1.1'}]):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_release_absent('v0.1.1')
+
+    def test_release_absence_checks_all_authenticated_listing_pages_for_drafts(self):
+        first = [{'tag_name': f'v1.0.{index}'} for index in range(100)]
+        with patch.object(pipeline, 'github', side_effect=[first, []]) as github:
+            pipeline.require_release_absent('v0.1.1')
+            self.assertEqual(github.call_count, 2)
+        with patch.object(pipeline, 'github', side_effect=[first, [{'tag_name': 'v0.1.1', 'draft': True}]]):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_release_absent('v0.1.1')
+        with patch.object(pipeline, 'github', side_effect=pipeline.HTTPFailure(403)):
+            with self.assertRaises(pipeline.HTTPFailure):
+                pipeline.require_release_absent('v0.1.1')
+
+    def test_remote_tag_must_resolve_to_candidate_commit(self):
+        tag = 'v0.1.1'
+        commit = 'a' * 40
+        ref = 'refs/tags/' + tag
+        cases = [
+            (f'{commit}\t{ref}\n', True),
+            (f'{"b" * 40}\t{ref}\n{commit}\t{ref}^{{}}\n', True),
+            (f'{"b" * 40}\t{ref}\n', False),
+            (f'{commit}\trefs/tags/v0.1.2\n', False),
+            (f'{commit}\t{ref}\n{commit}\t{ref}\n', False),
+            (f'{commit}\t{ref}^{{}}\n', False),
+            ('', False),
+        ]
+        for output, valid in cases:
+            with self.subTest(output=output), patch.object(
+                    pipeline.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=output)):
+                if valid:
+                    pipeline.require_remote_tag(tag, commit)
+                else:
+                    with self.assertRaises(release_tool.ReleaseError):
+                        pipeline.require_remote_tag(tag, commit)
+        with patch.object(pipeline.subprocess, 'run', return_value=SimpleNamespace(returncode=2, stdout='')):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_remote_tag(tag, commit)
+        with patch.object(pipeline.subprocess, 'run') as run:
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_remote_tag('v0.1.1/other', commit)
+            run.assert_not_called()
+    def test_candidate_rejects_version_file_different_from_workspace(self):
+        (self.root / 'candidate.json').write_text('{"tag":"v0.1.1"}')
+        (self.root / 'VERSION').write_text('0.1.0\n')
+        with patch.object(pipeline.release_tool, 'load_targets', return_value=self.targets), \
+             patch.object(pipeline.release_tool, 'workspace_version', return_value='0.1.1'):
+            with self.assertRaisesRegex(ValueError, 'candidate VERSION differs'):
+                pipeline.candidate_data(self.root, ROOT / 'release/targets.toml', ROOT / 'Cargo.toml')
+
+    def test_candidate_rejects_a_different_checkout_commit(self):
+        (self.root / 'candidate.json').write_text(json.dumps(
+            {'schema': 1, 'tag': 'v0.1.1', 'commit': 'a' * 40}))
+        (self.root / 'VERSION').write_text('0.1.1\n')
+        with (patch.object(pipeline.release_tool, 'load_targets', return_value=self.targets),
+              patch.object(pipeline.release_tool, 'workspace_version', return_value='0.1.1'),
+              patch.object(pipeline, 'git_identity', return_value='b' * 40)):
+            with self.assertRaisesRegex(ValueError, 'candidate commit differs'):
+                pipeline.candidate_data(self.root, ROOT / 'release/targets.toml', ROOT / 'Cargo.toml')
+
+    def test_publication_and_channel_changes_recheck_tag_before_mutation(self):
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40}
+        args = SimpleNamespace(candidate=self.root, manifest=self.root, workspace=self.root,
+                               receipts=self.root, receipt_prefix='install-')
+        with (patch.object(pipeline, 'candidate_data', return_value=(metadata, [])),
+              patch.object(pipeline.release_tool, 'read_json', return_value={}),
+              patch.object(pipeline, 'validate_qualified_publication'),
+              patch.object(pipeline, 'require_receipt_inventory'),
+              patch.object(pipeline, 'require_remote_tag', side_effect=release_tool.ReleaseError('tag changed')),
+              patch.object(pipeline, 'github') as github,
+              patch.object(pipeline, 'upload_pages') as upload):
+            for operation in (pipeline.publish, pipeline.latest, pipeline.deploy):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(release_tool.ReleaseError, 'tag changed'):
+                        operation(args)
+            github.assert_not_called()
+            upload.assert_not_called()
+
+    def test_qualification_rejects_unexpected_receipt_directories(self):
+        receipts = self.root / 'receipts'
+        receipts.mkdir()
+        for target in self.targets:
+            directory = receipts / ('install-' + target['rust_target'])
+            directory.mkdir()
+            (directory / 'receipt.json').write_text('{}')
+        pipeline.require_receipt_inventory(receipts, 'install-', self.targets)
+        (receipts / 'unexpected').mkdir()
+        args = SimpleNamespace(candidate=self.root, manifest=ROOT / 'release/targets.toml',
+                               workspace=ROOT / 'Cargo.toml', receipts=receipts,
+                               receipt_prefix='install-', output=self.root / 'qualification.json',
+                               baseline=None, public=False, previous=False, literal=False,
+                               preview_tag=False, preview_receipt=None)
+        with (patch.object(pipeline, 'candidate_data', return_value=({}, self.targets)),
+              patch.object(pipeline, 'qualify_receipts', return_value={}),
+              patch.object(pipeline, 'validate_install_evidence'),
+              patch.object(pipeline, 'publication_files', return_value=[]),
+              patch.object(pipeline, 'github') as github):
+            for operation in (pipeline.qualify, pipeline.latest):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(ValueError, 'receipt directory inventory differs'):
+                        operation(args)
+            github.assert_not_called()
+
+    def test_receipt_inventory_rejects_symlinked_root_and_entry(self):
+        receipts = self.root / 'receipts'
+        receipts.mkdir()
+        for target in self.targets:
+            (receipts / ('install-' + target['rust_target'])).mkdir()
+        alias = self.root / 'alias'
+        try:
+            alias.symlink_to(receipts, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f'directory symlinks unavailable: {error}')
+        with self.assertRaisesRegex(ValueError, 'receipt directory inventory differs'):
+            pipeline.require_receipt_inventory(alias, 'install-', self.targets)
+        entry = receipts / ('install-' + self.targets[0]['rust_target'])
+        entry.rmdir()
+        entry.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'receipt directory inventory differs'):
+            pipeline.require_receipt_inventory(receipts, 'install-', self.targets)
+
+    def test_qualification_binds_package_and_installer_metadata(self):
+        # This deliberately uses synthetic metadata and a stubbed receipt validator;
+        # it tests binding, not whether a native installation actually passed.
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40,
+                    'archives': {'archive': 'b' * 64},
+                    'linux_packages': {'ilium.deb': 'c' * 64},
+                    'windows_installers': {'ilium.exe': 'd' * 64},
+                    'installers': {'install.sh': 'e' * 64}}
+        targets = [{'rust_target': 'synthetic-target'}]
+        receipts = {'synthetic-target': {'synthetic': True}}
+        with patch.object(pipeline, 'validate_install_receipt'):
+            original = pipeline.qualify_receipts(metadata, receipts, targets, public=False)
+            for section in ('linux_packages', 'windows_installers', 'installers'):
+                changed = deepcopy(metadata)
+                name = next(iter(changed[section]))
+                changed[section][name] = '0' * 64
+                modified = pipeline.qualify_receipts(changed, receipts, targets, public=False)
+                self.assertNotEqual(original['candidate_metadata_sha256'],
+                                    modified['candidate_metadata_sha256'])
+
+    def test_publication_rejects_assets_changed_after_qualification(self):
+        candidate = self.root / 'candidate'
+        candidate.mkdir()
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40,
+                    'archives': {'archive': 'b' * 64},
+                    'windows_installers': {'ilium.exe': 'c' * 64},
+                    'linux_packages': {'ilium.deb': 'd' * 64}, 'macos_packages': {},
+                    'target_receipts': {'synthetic-target': {}}}
+        (candidate / 'candidate.json').write_text(json.dumps(metadata))
+        for name in ('archive', 'ilium.exe', 'ilium.deb', 'SHA256SUMS', 'VERSION',
+                     'install.sh', 'install.ps1'):
+            (candidate / name).write_text('original ' + name)
+        with patch.object(pipeline, 'validate_install_receipt'):
+            qualification = pipeline.qualify_receipts(
+                metadata, {'synthetic-target': {}}, [{'rust_target': 'synthetic-target'}],
+                public=False)
+        qualification['qualified_assets'] = pipeline.asset_hashes(
+            path for path in pipeline.publication_files(candidate)
+            if path.name != 'qualification.json')
+        pipeline.validate_qualified_publication(candidate, metadata, qualification)
+        invalid_records = [
+            dict(qualification, schema=True),
+            dict(qualification, schema=2),
+            dict(qualification, public_transport_verified='false'),
+            dict(qualification, installation_receipts={}),
+            dict(qualification, installation_receipts={'synthetic-target': 'bad'}),
+            dict(qualification, installation_receipts={'synthetic-target': '0' * 64, 'extra': '1' * 64}),
+            {key: value for key, value in qualification.items() if key != 'installation_receipts'},
+            dict(qualification, unexpected=True),
+        ]
+        for invalid in invalid_records:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                pipeline.validate_qualified_publication(candidate, metadata, invalid)
+        for name in ('ilium.deb', 'ilium.exe', 'install.sh', 'SHA256SUMS', 'candidate.json'):
+            with self.subTest(asset=name):
+                path = candidate / name
+                original = path.read_bytes()
+                path.write_bytes(original + b' changed')
+                with self.assertRaises(ValueError):
+                    pipeline.validate_qualified_publication(candidate, metadata, qualification)
+                path.write_bytes(original)
+        changed_metadata = deepcopy(metadata)
+        changed_metadata['linux_packages']['ilium.deb'] = '0' * 64
+        (candidate / 'candidate.json').write_text(json.dumps(changed_metadata))
+        with self.assertRaises(ValueError):
+            pipeline.validate_qualified_publication(candidate, changed_metadata, qualification)
+
     def create_native_fixture(self):
         # Synthetic binaries/notices and receipts never enter release outputs.
+        identity = patch.object(pipeline, 'git_identity', return_value='a' * 40)
+        identity.start()
+        self.addCleanup(identity.stop)
         source = self.root / 'source'; (source / 'release/tests').mkdir(parents=True)
         shutil.copytree(ROOT / 'release/site', source / 'release/site')
         for filename in ('targets.toml', 'embedding-model.json', 'ort-source.json', 'ort-runtime.json', 'licence-sources.json', 'install.sh', 'install.ps1'):
