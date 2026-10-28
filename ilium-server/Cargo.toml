@@ -49,6 +49,7 @@ vt100 = "0.16.2"
 walkdir = "2.5.0"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 # Plugin platform test lanes (test-plan.md section 1.5).
 ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
 ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }

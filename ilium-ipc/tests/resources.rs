@@ -32,7 +32,7 @@ fn resource_snapshot_and_result_are_typed() {
     assert!(matches!(snapshot,ServerEvent::ResourceSnapshot{catalog,..} if catalog.revision==0));
     let result = ServerEvent::ResourceResult {
         request_id: 42,
-        result: Ok(ResourceReply {
+        result: Ok(Box::new(ResourceReply {
             active_waits: Vec::new(),
             wait_revision: 0,
             local_invocations: Vec::new(),
@@ -42,7 +42,7 @@ fn resource_snapshot_and_result_are_typed() {
             reservation: None,
             recovery_token: None,
             message: None,
-        }),
+        })),
     };
     assert!(matches!(
         result,
@@ -51,6 +51,36 @@ fn resource_snapshot_and_result_are_typed() {
             result: Ok(_)
         }
     ));
+}
+
+#[test]
+fn boxed_resource_reply_retains_payload_and_nested_capacity() {
+    let mut message = String::with_capacity(8192);
+    message.push_str("Synthetic resource reply");
+    let clock = ResourceClock {
+        unix_millis: 1,
+        monotonic_millis: 1,
+        boot_id: "synthetic-boot".into(),
+    };
+    let nested_bytes = message.capacity() + clock.boot_id.capacity();
+    let event = ServerEvent::ResourceResult {
+        request_id: 42,
+        result: Ok(Box::new(ResourceReply {
+            catalog: ResourceCatalog::default(),
+            clock,
+            result: None,
+            reservation: None,
+            recovery_token: None,
+            message: Some(message),
+            local_invocations: Vec::new(),
+            active_waits: Vec::new(),
+            wait_revision: 0,
+        })),
+    };
+    assert_eq!(
+        event.retained_bytes(),
+        std::mem::size_of::<ServerEvent>() + std::mem::size_of::<ResourceReply>() + nested_bytes
+    );
 }
 
 #[test]
@@ -207,7 +237,7 @@ fn every_resource_operation_and_event_roundtrips_with_owned_capacity() {
         },
         ServerEvent::ResourceResult {
             request_id: 99,
-            result: Ok(ResourceReply {
+            result: Ok(Box::new(ResourceReply {
                 active_waits: Vec::new(),
                 wait_revision: 0,
                 catalog: ResourceCatalog::default(),
@@ -217,7 +247,7 @@ fn every_resource_operation_and_event_roundtrips_with_owned_capacity() {
                 reservation: None,
                 recovery_token: Some("fixture".into()),
                 message: None,
-            }),
+            })),
         },
         ServerEvent::ResourceResult {
             request_id: 100,
@@ -367,7 +397,7 @@ fn resource_states_history_and_wait_associations_survive_bounded_wire_decode() {
                 .collect();
             let event = ServerEvent::ResourceResult {
                 request_id: 901,
-                result: Ok(ResourceReply {
+                result: Ok(Box::new(ResourceReply {
                     catalog,
                     clock: clock.clone(),
                     result: None,
@@ -377,7 +407,7 @@ fn resource_states_history_and_wait_associations_survive_bounded_wire_decode() {
                     local_invocations: vec![agent.clone()],
                     active_waits: vec![(agent.pane_id, id)],
                     wait_revision: 42,
-                }),
+                })),
             };
             let frame = ilium_ipc::encode_frame(&event).unwrap();
             let decoded: ServerEvent = ilium_ipc::decode_bounded_frame(&frame).unwrap();

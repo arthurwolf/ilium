@@ -1,4 +1,6 @@
 //! Client projection only. The shared server catalog remains authoritative.
+#[cfg(test)]
+mod action_tests;
 mod detail;
 mod dialog;
 mod help;
@@ -632,8 +634,10 @@ mod tests {
         app.resources.pending = Some(9);
         app.resources.recovery_intent = Some((project, command));
         app.show_resource(NodeId(99), ResourceId::from("other-resource"));
-        let mut catalog = ResourceCatalog::default();
-        catalog.revision = 18;
+        let catalog = ResourceCatalog {
+            revision: 18,
+            ..ResourceCatalog::default()
+        };
         app.receive_resource_reply(
             9,
             Ok(ilium_ipc::resource::ResourceReply {

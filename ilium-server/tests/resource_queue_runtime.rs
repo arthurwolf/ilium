@@ -1,6 +1,6 @@
 //! Real isolated servers and fake provider PTYs; no real device or user catalog.
 #![cfg(target_os = "linux")]
-use ilium_core::{resource_queue::*, NodeId, NodeKind, PaneStatus, ROOT_ID};
+use ilium_core::{resource_queue::*, AgentClass, NodeId, ROOT_ID};
 use ilium_ipc::{
     read_frame, resource::*, write_frame, ClientRequest, NewPaneKind, NewPaneWorkingDirectory,
     ServerEvent,
@@ -112,6 +112,7 @@ async fn rpc(
     request: ResourceRequest,
 ) -> Result<ResourceReply, ResourceError> {
     tokio::time::timeout(TIMEOUT, async {
+        let mut reported_busy = false;
         loop {
             write_frame(
                 stream,
@@ -131,10 +132,17 @@ async fn rpc(
                 }
             };
             if matches!(&result,Err(error) if error.code=="busy") {
+                if !reported_busy {
+                    eprintln!(
+                        "Resource RPC {id} {:?} first Busy: {result:?}",
+                        std::mem::discriminant(&request.operation)
+                    );
+                    reported_busy = true;
+                }
                 tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
-            return result;
+            return result.map(|reply| *reply);
         }
     })
     .await
@@ -167,6 +175,72 @@ fn link() -> ProjectResourceLink {
         sync_debt: None,
     }
 }
+async fn expected_event(
+    stream: &mut SessionStream,
+    label: &str,
+    predicate: impl Fn(&ServerEvent) -> bool,
+) -> ServerEvent {
+    let mut observed = std::collections::VecDeque::new();
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let event = read_frame::<ServerEvent, _>(stream).await.unwrap();
+            if observed.len() == 8 {
+                observed.pop_front();
+            }
+            observed.push_back(format!("{:?}", std::mem::discriminant(&event)));
+            if predicate(&event) {
+                return event;
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("resource runtime event {label}; recent kinds: {observed:?}"))
+}
+
+// Observe the wait connection itself: authentication/catalog admission may
+// return Busy before any waiting badge is published to the observer.
+async fn register_wait(stream: &mut SessionStream, request_id: u64, request: ResourceRequest) {
+    let pane = request.pane_id.unwrap();
+    let ResourceOperation::Wait { reservation_id } = &request.operation else {
+        panic!("wait registration requires a Wait request");
+    };
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            write_frame(
+                stream,
+                &ClientRequest::Resource {
+                    request_id,
+                    request: request.clone(),
+                },
+            )
+            .await
+            .unwrap();
+            loop {
+                match read_frame::<ServerEvent, _>(stream).await.unwrap() {
+                    ServerEvent::ResourceWaitChanged {
+                        pane_id,
+                        reservation_id: Some(id),
+                        ..
+                    } if pane_id == pane && id == *reservation_id => return,
+                    ServerEvent::ResourceResult {
+                        request_id: response_id,
+                        result,
+                    } if response_id == request_id => match result {
+                        Err(error) if error.code == "busy" => {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                            break;
+                        }
+                        result => panic!("queued wait ended before registration: {result:?}"),
+                    },
+                    _ => {}
+                }
+            }
+        }
+    })
+    .await
+    .expect("queued wait must register before its owner changes");
+}
+
 async fn spawn_agent(stream: &mut SessionStream, server: &Server) -> NodeId {
     std::fs::create_dir_all(server.project.join("fake-bin")).unwrap();
     let fixture = install(
@@ -187,44 +261,17 @@ async fn spawn_agent(stream: &mut SessionStream, server: &Server) -> NodeId {
     )
     .await
     .unwrap();
-    let event = common::expect_event(stream, TIMEOUT, |event| match event {
-        ServerEvent::PaneNodeChanged(node) => matches!(
-            node.kind,
-            NodeKind::Pane {
-                status: PaneStatus::Agent(_),
-                ..
-            }
-        ),
-        ServerEvent::TreeSnapshot(tree) => tree.panes().any(|node| {
-            matches!(
-                node.kind,
-                NodeKind::Pane {
-                    status: PaneStatus::Agent(_),
-                    ..
-                }
-            )
-        }),
-        _ => false,
+    let event = expected_event(stream, "new Codex agent detection", |event| {
+        matches!(event,
+            ServerEvent::PaneDetectedStateChanged { status, .. }
+            if status.agent_state().is_some_and(|state| state.class == AgentClass::Codex)
+        )
     })
     .await;
-    match event {
-        ServerEvent::PaneNodeChanged(node) => node.id,
-        ServerEvent::TreeSnapshot(tree) => {
-            tree.panes()
-                .find(|node| {
-                    matches!(
-                        node.kind,
-                        NodeKind::Pane {
-                            status: PaneStatus::Agent(_),
-                            ..
-                        }
-                    )
-                })
-                .unwrap()
-                .id
-        }
-        _ => unreachable!(),
-    }
+    let ServerEvent::PaneDetectedStateChanged { pane_id, .. } = event else {
+        unreachable!()
+    };
+    pane_id
 }
 async fn reserve(
     stream: &mut SessionStream,
@@ -317,9 +364,9 @@ async fn shared_resource_cross_project_wait_handoff_and_dead_owner_are_authorita
     )
     .await
     .unwrap();
-    let plain = common::expect_event(
+    let plain = expected_event(
         &mut a,
-        TIMEOUT,
+        "plain shell creation",
         |event| matches!(event,ServerEvent::TreeSnapshot(tree) if tree.panes().next().is_some()),
     )
     .await;
@@ -356,22 +403,19 @@ async fn shared_resource_cross_project_wait_handoff_and_dead_owner_are_authorita
         .unwrap();
     assert_eq!(queued.state, ReservationState::Queued);
     let (mut interrupted, _) = second.attach().await;
-    write_frame(
+    register_wait(
         &mut interrupted,
-        &ClientRequest::Resource {
-            request_id: 10,
-            request: request(
-                project_b,
-                Some(pane_b),
-                ResourceOperation::Wait {
-                    reservation_id: queued.id.clone(),
-                },
-            ),
-        },
+        10,
+        request(
+            project_b,
+            Some(pane_b),
+            ResourceOperation::Wait {
+                reservation_id: queued.id.clone(),
+            },
+        ),
     )
-    .await
-    .unwrap();
-    common::expect_event(&mut b,TIMEOUT,|event|matches!(event,ServerEvent::ResourceWaitChanged{pane_id,reservation_id:Some(id),..} if *pane_id==pane_b&&*id==queued.id)).await;
+    .await;
+    expected_event(&mut b,"interrupted wait badge",|event|matches!(event,ServerEvent::ResourceWaitChanged{pane_id,reservation_id:Some(id),..} if *pane_id==pane_b&&*id==queued.id)).await;
     drop(interrupted);
     assert_eq!(
         rpc(
@@ -393,21 +437,18 @@ async fn shared_resource_cross_project_wait_handoff_and_dead_owner_are_authorita
         ReservationState::Queued
     );
     let (mut waiting, _) = second.attach().await;
-    write_frame(
+    register_wait(
         &mut waiting,
-        &ClientRequest::Resource {
-            request_id: 12,
-            request: request(
-                project_b,
-                Some(pane_b),
-                ResourceOperation::Wait {
-                    reservation_id: queued.id.clone(),
-                },
-            ),
-        },
+        12,
+        request(
+            project_b,
+            Some(pane_b),
+            ResourceOperation::Wait {
+                reservation_id: queued.id.clone(),
+            },
+        ),
     )
-    .await
-    .unwrap();
+    .await;
     rpc(
         &mut a,
         13,
@@ -516,7 +557,7 @@ async fn shared_resource_cross_project_wait_handoff_and_dead_owner_are_authorita
     write_frame(&mut a, &ClientRequest::ClosePane { pane_id: pane_a })
         .await
         .unwrap();
-    common::expect_event(&mut b,TIMEOUT,|event|matches!(event,ServerEvent::ResourceSnapshot{catalog,..} if catalog.resources[&ResourceId::from("runtime-gpu")].reservations.iter().any(|q|q.id==acknowledged.id&&matches!(q.state,ReservationState::NeedsAttention{..})))).await;
+    expected_event(&mut b,"closed owner needs-attention snapshot",|event|matches!(event,ServerEvent::ResourceSnapshot{catalog,..} if catalog.resources[&ResourceId::from("runtime-gpu")].reservations.iter().any(|q|q.id==acknowledged.id&&matches!(q.state,ReservationState::NeedsAttention{..})))).await;
     let persisted = readback(&catalog).await;
     let record = &persisted.resources[&"runtime-gpu".into()];
     assert_eq!(persisted.links.len(), 2);

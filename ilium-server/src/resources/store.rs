@@ -1039,8 +1039,9 @@ mod process_tests {
                 reservation_id: ReservationId(format!("generated-claim-{operation}")),
                 estimate_seconds: 1 + random % 600,
             };
-            let command = if operation % 17 == 0 && replay.is_some() {
-                let (command, context) = replay.as_ref().unwrap();
+            let command = if let Some((command, context)) =
+                replay.as_ref().filter(|_| operation % 17 == 0)
+            {
                 mutation = context.clone();
                 command.clone()
             } else {

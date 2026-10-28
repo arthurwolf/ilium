@@ -17512,15 +17512,16 @@ impl App {
         let Some(id) = self.selected_node_id() else {
             return;
         };
-        if self.tree.get(id).is_some_and(Node::is_worktree) {
+        // Resource and foreign-invocation rows have no editable tree node.
+        // Verified local participant rows already resolve to their real pane.
+        let Some(node) = self.tree.get(id) else {
+            return;
+        };
+        if node.is_worktree() {
             self.status_message = Some("The worktree row uses its branch name".into());
             return;
         }
-        let current_name = self
-            .tree
-            .get(id)
-            .map(|node| node.name.clone())
-            .unwrap_or_default();
+        let current_name = node.name.clone();
         self.mode = Mode::Rename(TextPromptState::new(current_name));
     }
 
@@ -17973,6 +17974,12 @@ impl App {
     pub fn handle_tree_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
         match key.code {
+            KeyCode::Home => {
+                self.tree_state.select_first();
+            }
+            KeyCode::End => {
+                self.tree_state.select_last();
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.tree_state.key_up();
             }

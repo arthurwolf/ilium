@@ -3,11 +3,16 @@ use super::*;
 use ilium_core::AllocationSize;
 use ilium_execution::StorageAdmission;
 use std::{
-    mem::size_of,
+    mem::{size_of, size_of_val},
     ops::{Deref, DerefMut},
 };
 pub(super) const RESULT_BYTES: usize = crate::execution::GENERAL_RESULT_BYTES;
 const ENVELOPE_BYTES: usize = 4096;
+// Scratch is separate from submitted capture handles. Charging every operation's
+// full workspace to the general input bank can starve snapshots behind another
+// admitted capture even though the process has sufficient storage capacity.
+const WORKSPACE_BYTES: usize =
+    store::MAX_CATALOG_RETAINED_BYTES * 2 + store::MAX_CATALOG_BYTES as usize;
 /// Payload is destroyed before the lease. Shared catalogs clone only this Arc.
 pub(crate) struct ResourceMemory<T> {
     pub(super) value: T,
@@ -124,13 +129,20 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
     // of the general client's result allowance.
     let payload_storage =
         reserve_after_contention(state, RESULT_BYTES, "Resource worker allocation refused").await?;
+    let workspace_storage = reserve_after_contention(
+        state,
+        WORKSPACE_BYTES,
+        "Resource worker workspace allocation refused",
+    )
+    .await?;
+    let capture_bytes = size_of_val(&action).saturating_add(ENVELOPE_BYTES);
     let admission = client
         .reserve(
             ilium_execution::Lane::Io,
             ilium_execution::JobCost {
-                input_bytes: store::MAX_CATALOG_RETAINED_BYTES
-                    .saturating_mul(2)
-                    .saturating_add(store::MAX_CATALOG_BYTES as usize),
+                // Captured heap and peak workspace retain workspace_storage;
+                // submitted inline closure/lease handles still charge input.
+                input_bytes: capture_bytes,
                 // Heap payload is covered by payload_storage; the execution
                 // result still admits its wrapper and bounded error envelope.
                 result_bytes: size_of::<ResourceMemory<Result<T, ResourceError>>>()
@@ -156,10 +168,14 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
             }
             // Errors retain the same lease too, including after cancellation
             // when only the worker/result slot still owns the operation.
-            Ok::<_, std::convert::Infallible>(ResourceMemory {
+            let retained = ResourceMemory {
                 value,
                 storage: payload_storage,
-            })
+            };
+            // The callback owns this lease through physical completion, even
+            // when its requester has disconnected or cancelled the receipt.
+            drop(workspace_storage);
+            Ok::<_, std::convert::Infallible>(retained)
         })
         .await
         .map_err(|error| err("worker", error))?;

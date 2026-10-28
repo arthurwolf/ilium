@@ -41,6 +41,7 @@ async fn fixture(shared: Option<PathBuf>) -> Fixture {
     assert!(state
         .resources
         .set(ResourceService {
+            catalog_access: Default::default(),
             path: shared.unwrap_or_else(|| root.join("isolated-ledger/catalog.json")),
             incarnation: uuid::Uuid::new_v4().to_string(),
             waits: Default::default(),
@@ -125,8 +126,8 @@ async fn resource_snapshot_when_admitted(f: &Fixture) {
                 return;
             }
             Err(error)
-                if error.code == "admission"
-                    && error.message.contains("Busy")
+                if (error.code == "busy"
+                    || (error.code == "admission" && error.message.contains("Busy")))
                     && std::time::Instant::now() < deadline =>
             {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -655,7 +656,7 @@ async fn reply_to_event_mapping_preserves_charge_until_payload_drop() {
     assert!(held > baseline);
     let event = reply.map(|reply| ServerEvent::ResourceResult {
         request_id: 51,
-        result: Ok(reply),
+        result: Ok(Box::new(reply)),
     });
     assert_eq!(quota.snapshot().worker_bytes, held);
     assert!(matches!(
@@ -1495,4 +1496,569 @@ async fn catalog_io_progresses_with_retained_general_results() {
     assert!(execution.client.foundation.usage().result_bytes >= 64 * 1024);
     drop(result);
     drop(retained_general);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
+    const NOTICE: &str = "The project's shared resource instructions changed.";
+    async fn notice_count(transcript: &std::path::Path, expected: usize) {
+        let mut recheck = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            recheck.tick().await;
+            let count = std::fs::read_to_string(transcript)
+                .unwrap_or_default()
+                .matches(NOTICE)
+                .count();
+            assert!(count <= expected, "duplicate instruction notice: {count}");
+            if count == expected {
+                return;
+            }
+        }
+    }
+    struct OwnedObserver(tokio::task::JoinHandle<()>);
+    impl Drop for OwnedObserver {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let fixture = fixture(None).await;
+    drop(create(&fixture).await);
+    let (pane, transcript) = composer_fixture(&fixture).await;
+    let instructions = fixture.directory.path().join("CLAUDE.md");
+    let mut observed = service(&fixture.state).unwrap().changed.subscribe();
+    let mut observer = OwnedObserver(spawn(Arc::clone(&fixture.state)));
+    let mut stage = "waiting for the enablement notice";
+    let result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        notice_count(&transcript, 1).await;
+        let original = std::fs::read(&instructions).unwrap();
+        let original_modified = std::fs::metadata(&instructions)
+            .unwrap()
+            .modified()
+            .unwrap();
+        stage = "checking repeated reconnect snapshots and observer ticks";
+        for _ in 0..3 {
+            resource_snapshot_when_admitted(&fixture).await;
+            observed.changed().await.unwrap();
+        }
+        assert_eq!(std::fs::read(&instructions).unwrap(), original);
+        assert_eq!(
+            std::fs::metadata(&instructions)
+                .unwrap()
+                .modified()
+                .unwrap(),
+            original_modified
+        );
+        assert_eq!(
+            std::fs::read_to_string(&transcript)
+                .unwrap()
+                .matches(NOTICE)
+                .count(),
+            1
+        );
+
+        stage = "changing resource metadata";
+        let mut edited = definition();
+        edited.description = "Revised synthetic GPU instructions".into();
+        edited.rules = "Revised advisory rules; release after cleanup".into();
+        let edit = request(&fixture, ResourceCommand::Edit { definition: edited });
+        loop {
+            match execute(&fixture.state, edit.clone()).await {
+                Ok(reply) => {
+                    drop(reply);
+                    break;
+                }
+                Err(error) if error.code == "admission" && error.message.contains("Busy") => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("metadata edit failed: {error}"),
+            }
+        }
+        stage = "waiting for exactly one metadata-change notice";
+        notice_count(&transcript, 2).await;
+        let revised = std::fs::read(&instructions).unwrap();
+        assert_ne!(revised, original);
+        let revised_text = std::str::from_utf8(&revised).unwrap();
+        assert!(revised_text.contains("Revised synthetic GPU instructions"));
+        assert!(revised_text.contains("Revised advisory rules; release after cleanup"));
+        assert_eq!(
+            revised_text
+                .matches("<!-- ilium-agent-feature: resources")
+                .count(),
+            1
+        );
+        let revised_modified = std::fs::metadata(&instructions)
+            .unwrap()
+            .modified()
+            .unwrap();
+        let before_queue = snapshot_when_store_available(&fixture).await;
+        assert!(before_queue.links[0].sync_debt.is_none());
+
+        stage = "reserving an owner and adding a queued participant";
+        // Direct fixture actors keep grant-ready notices separate from the live
+        // composer whose metadata-change notices this test observes.
+        let owner = synthetic_agent(&fixture);
+        let mut waiter = owner.clone();
+        waiter.pane_id = NodeId(78);
+        waiter.invocation_id = "synthetic-queued-invocation".into();
+        waiter.label = "Synthetic queued participant".into();
+        for (agent, reservation) in [(owner, "notice-owner"), (waiter, "notice-waiter")] {
+            let now = clock().unwrap();
+            let context = MutationContext {
+                request_id: key(&now),
+                clock: now,
+                actor: ResourceActor::Agent(agent.clone()),
+                expected_revision: None,
+                eligibility: [(agent.invocation_id.clone(), InvocationEligibility::Live)].into(),
+            };
+            let command = ResourceCommand::Reserve {
+                resource_id: "test-gpu".into(),
+                reservation_id: reservation.into(),
+                estimate_seconds: 60,
+            };
+            loop {
+                match store(&fixture).transact(command.clone(), context.clone()) {
+                    Ok(_) => break,
+                    Err(store::ResourceStoreError::Busy) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    Err(error) => panic!("fixture reservation failed: {error}"),
+                }
+            }
+        }
+        let after_queue = snapshot_when_store_available(&fixture).await;
+        let record = &after_queue.resources[&ResourceId::from("test-gpu")];
+        assert_eq!(record.reservations.len(), 2);
+        assert_eq!(record.reservations[0].state, ReservationState::Owned);
+        assert_eq!(record.reservations[1].state, ReservationState::Queued);
+        assert!(after_queue.revision > before_queue.revision);
+        assert_eq!(
+            after_queue.links[0].desired_instruction_revision,
+            before_queue.links[0].desired_instruction_revision
+        );
+        stage = "checking queue-only revisions do not notify or rewrite instructions";
+        for _ in 0..3 {
+            resource_snapshot_when_admitted(&fixture).await;
+            observed.changed().await.unwrap();
+        }
+        assert_eq!(std::fs::read(&instructions).unwrap(), revised);
+        assert_eq!(
+            std::fs::metadata(&instructions)
+                .unwrap()
+                .modified()
+                .unwrap(),
+            revised_modified
+        );
+        assert_eq!(
+            std::fs::read_to_string(&transcript)
+                .unwrap()
+                .matches(NOTICE)
+                .count(),
+            2
+        );
+    })
+    .await;
+    observer.0.abort();
+    let _ = (&mut observer.0).await;
+    close_composer(&fixture, pane).await;
+    result
+        .unwrap_or_else(|error| panic!("instruction notice test timed out while {stage}: {error}"));
+}
+
+// An unrelated admitted I/O capture must not starve catalog operations, even
+// when another full conservative catalog capture cannot fit beside it.
+#[tokio::test]
+async fn catalog_io_progresses_with_retained_general_inputs() {
+    let fixture = fixture(None).await;
+    let execution = fixture.state.execution.get().unwrap();
+    let retained_general = execution
+        .client
+        .foundation
+        .try_reserve(
+            ilium_execution::Lane::Io,
+            ilium_execution::JobCost {
+                input_bytes: 300 * 1024 * 1024,
+                result_bytes: 0,
+            },
+        )
+        .unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        memory::io(&fixture.state, || {
+            Ok(PathBuf::from("synthetic-catalog-read"))
+        }),
+    )
+    .await
+    .expect("catalog I/O must not wait for unrelated general inputs to be dropped")
+    .unwrap();
+    assert_eq!(result.value, PathBuf::from("synthetic-catalog-read"));
+    assert!(execution.client.foundation.usage().input_bytes >= 300 * 1024 * 1024);
+    drop(result);
+    drop(retained_general);
+}
+
+// Cancelling an await must not release memory still owned by a physical worker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_catalog_io_retains_workspace_until_worker_exits() {
+    let fixture = fixture(None).await;
+    let execution = fixture.state.execution.get().unwrap();
+    let baseline = execution.client.quota_group().snapshot().worker_bytes;
+    let (entered, observed) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let state = Arc::clone(&fixture.state);
+    let task = tokio::spawn(async move {
+        memory::io(&state, move || {
+            entered.send(()).unwrap();
+            blocked.recv().unwrap();
+            Ok(PathBuf::from("synthetic-cancelled-catalog"))
+        })
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), observed)
+        .await
+        .unwrap()
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let retained = execution.client.quota_group().snapshot().worker_bytes;
+    assert!(
+        retained >= baseline + (286 + 128) * 1024 * 1024,
+        "cancelled worker must retain full catalog scratch and result custody"
+    );
+    release.send(()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while execution.client.quota_group().snapshot().worker_bytes > baseline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("finished physical worker must retire scratch and result custody");
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_observation_leaves_a_full_period_for_catalog_requests() {
+    let period = std::time::Duration::from_secs(1);
+    let mut interval = tokio::time::interval(period);
+    interval.tick().await;
+    tokio::time::advance(period * 5).await;
+    finish_observation_cycle(&mut interval);
+    assert!(tokio::time::timeout(period / 2, interval.tick())
+        .await
+        .is_err());
+    tokio::time::advance(period / 2).await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::ZERO, interval.tick())
+            .await
+            .is_ok()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attached_wait_survives_catalog_busy_until_grant_or_disconnect() {
+    for disconnect in [false, true] {
+        let fixture = fixture(None).await;
+        drop(create(&fixture).await);
+        let (owner_pane, _) = composer_fixture(&fixture).await;
+        let ResourceActor::Agent(owner) =
+            actor(&fixture.state, Some(owner_pane), fixture.directory.path())
+                .await
+                .unwrap()
+        else {
+            panic!("live owner actor")
+        };
+        let mut owner_request = request(
+            &fixture,
+            ResourceCommand::Reserve {
+                resource_id: "test-gpu".into(),
+                reservation_id: "busy-live-owner".into(),
+                estimate_seconds: 600,
+            },
+        );
+        owner_request.pane_id = Some(owner_pane);
+        let owned = execute(&fixture.state, owner_request)
+            .await
+            .unwrap()
+            .reservation
+            .clone()
+            .unwrap();
+        assert_eq!(owned.state, ReservationState::Owned);
+        let (pane, _) = composer_fixture(&fixture).await;
+        let ResourceActor::Agent(agent) =
+            actor(&fixture.state, Some(pane), fixture.directory.path())
+                .await
+                .unwrap()
+        else {
+            panic!("agent actor")
+        };
+        let claim = ReservationId::from("busy-attached-wait");
+        let now = clock().unwrap();
+        store(&fixture)
+            .transact(
+                ResourceCommand::Reserve {
+                    resource_id: "test-gpu".into(),
+                    reservation_id: claim.clone(),
+                    estimate_seconds: 60,
+                },
+                MutationContext {
+                    request_id: key(&now),
+                    clock: now,
+                    actor: ResourceActor::Agent(agent.clone()),
+                    expected_revision: None,
+                    eligibility: [(agent.invocation_id.clone(), InvocationEligibility::Live)]
+                        .into(),
+                },
+            )
+            .unwrap();
+        let mut request = ResourceRequest::new(
+            Some(fixture.project),
+            ResourceOperation::Wait {
+                reservation_id: claim.clone(),
+            },
+        );
+        request.pane_id = Some(pane);
+        let (sender, receiver) = DirectEventSender::channel(1);
+        let mut events = fixture.state.events.subscribe_owned();
+        let waiting = wait(&fixture.state, &request, &sender);
+        tokio::pin!(waiting);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                tokio::select! {
+                    result = &mut waiting => panic!("queued wait ended before attachment: {result:?}"),
+                    event = events.recv() => {
+                        if matches!(event.unwrap(), ServerEvent::ResourceWaitChanged {
+                            pane_id, reservation_id: Some(ref id), ..
+                        } if pane_id == pane && id == &claim) {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .expect("real queued waiter must publish its attachment");
+
+        // Acquire the actual stable catalog lock after authentication/attachment.
+        // Driving the waiter while acquiring it allows any in-flight read to finish.
+        let path = store(&fixture).catalog_path().to_path_buf();
+        let ledger = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Some(ledger) =
+                    ilium_platform::resource_fs::ResourceLedgerFile::try_lock(&path).unwrap()
+                {
+                    break ledger;
+                }
+                tokio::select! {
+                    result = &mut waiting => panic!("queued wait ended before contention: {result:?}"),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(5)) => {}
+                }
+            }
+        })
+        .await
+        .expect("test must acquire the isolated catalog lock");
+        assert!(matches!(
+            store(&fixture).snapshot(),
+            Err(store::ResourceStoreError::Busy)
+        ));
+        let resource_service = service(&fixture.state).unwrap();
+        // Wake an already-idle waiter, or leave an unseen revision for its next
+        // watch read. Either ordering forces a catalog read under this lock.
+        resource_service
+            .changed
+            .send_modify(|revision| *revision += 1);
+        let notification_revision = *resource_service.changed.borrow();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), &mut waiting)
+                .await
+                .is_err(),
+            "catalog contention must not finish an attached wait"
+        );
+        assert_eq!(
+            resource_service.waits.lock().unwrap().entries.get(&claim),
+            Some(&(pane, 1)),
+            "Busy must retain the attached waiting badge"
+        );
+
+        if disconnect {
+            drop(receiver);
+            let error = tokio::time::timeout(std::time::Duration::from_secs(5), &mut waiting)
+                .await
+                .expect("disconnect must cancel the Busy retry even while catalog stays locked")
+                .unwrap_err();
+            assert_eq!(error.code, "interrupted");
+            drop(ledger);
+            let persisted = store(&fixture).snapshot().unwrap();
+            assert_eq!(
+                locate(&persisted, &claim).unwrap().state,
+                ReservationState::Queued,
+                "disconnect removes attachment, not the durable queued claim"
+            );
+        } else {
+            // Apply a real domain release through the held durable ledger. No
+            // observer is spawned, and no watch notification follows the grant.
+            let catalog: ResourceCatalog = serde_json::from_slice(
+                &ledger
+                    .read_reconciled(store::MAX_CATALOG_BYTES)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                locate(&catalog, &claim).unwrap().state,
+                ReservationState::Queued
+            );
+            let now = clock().unwrap();
+            let transition = apply_resource_command(
+                &catalog,
+                ResourceCommand::Release {
+                    reservation_id: owned.id.clone(),
+                    ownership_generation: owned.ownership_generation,
+                },
+                &MutationContext {
+                    request_id: key(&now),
+                    clock: now,
+                    actor: ResourceActor::Agent(owner.clone()),
+                    expected_revision: None,
+                    eligibility: [(agent.invocation_id.clone(), InvocationEligibility::Live)]
+                        .into(),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                locate(&transition.catalog, &claim).unwrap().state,
+                ReservationState::Owned,
+                "live owner release must grant the queued live invocation before publication"
+            );
+            ledger
+                .replace(&serde_json::to_vec(&transition.catalog).unwrap())
+                .unwrap();
+            drop(ledger);
+            let reply = tokio::time::timeout(std::time::Duration::from_secs(10), &mut waiting)
+                .await
+                .expect("Busy retry must discover a grant without a new observer notification")
+                .unwrap();
+            assert_eq!(
+                reply.reservation.as_ref().unwrap().state,
+                ReservationState::Owned
+            );
+            drop(reply);
+            assert!(
+                !locate(&store(&fixture).snapshot().unwrap(), &claim)
+                    .unwrap()
+                    .acquisition_pending,
+                "successful wait must durably acknowledge acquisition"
+            );
+            drop(receiver);
+        }
+        assert_eq!(*resource_service.changed.borrow(), notification_revision);
+        assert!(!resource_service
+            .waits
+            .lock()
+            .unwrap()
+            .entries
+            .contains_key(&claim));
+        assert!(
+            matches!(events.try_recv().unwrap(), ServerEvent::ResourceWaitChanged {
+            pane_id, reservation_id: None, ..
+        } if pane_id == pane)
+        );
+        close_composer(&fixture, pane).await;
+        close_composer(&fixture, owner_pane).await;
+    }
+}
+
+#[tokio::test]
+async fn local_catalog_admission_waits_without_spending_worker_capacity() {
+    let fixture = fixture(None).await;
+    let service = service(&fixture.state).unwrap();
+    let held = service.catalog_access.lock().await;
+    let baseline = fixture.state.execution.get().unwrap().client.quota_group().snapshot();
+    let pending = read(&fixture.state);
+    tokio::pin!(pending);
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(20), &mut pending).await.is_err());
+    let queued = fixture.state.execution.get().unwrap().client.quota_group().snapshot();
+    assert_eq!(queued.worker_bytes, baseline.worker_bytes);
+    assert_eq!(queued.input_bytes, baseline.input_bytes);
+    drop(held);
+    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(5), &mut pending).await.unwrap().unwrap();
+    assert!(snapshot.resources.is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
+    let fixture = fixture(None).await;
+    drop(create(&fixture).await);
+    let (local_pane, _) = composer_fixture(&fixture).await;
+    let (foreign_process_pane, _) = composer_fixture(&fixture).await;
+    let ResourceActor::Agent(local) =
+        actor(&fixture.state, Some(local_pane), fixture.directory.path())
+            .await
+            .unwrap()
+    else {
+        panic!("local live actor")
+    };
+    let ResourceActor::Agent(mut foreign) = actor(
+        &fixture.state,
+        Some(foreign_process_pane),
+        fixture.directory.path(),
+    )
+    .await
+    .unwrap()
+    else {
+        panic!("foreign live process actor")
+    };
+    // Preserve a real process birth proof, but model another daemon's pane
+    // namespace. Its endpoint is deliberately unavailable: only Unknown is
+    // justified until the owning daemon can confirm the invocation.
+    foreign.runtime_generation = uuid::Uuid::new_v4().to_string();
+    foreign.pane_id = local_pane;
+    assert_ne!(foreign.invocation_id, local.invocation_id);
+    let proof = process_from_invocation(&foreign.invocation_id).unwrap();
+    assert!(resource_process_is_live(&proof).unwrap());
+    assert!(!service(&fixture.state)
+        .unwrap()
+        .path
+        .parent()
+        .unwrap()
+        .join(format!("server-{}.json", foreign.runtime_generation))
+        .exists());
+    for (claim, agent) in [("collision-local", &local), ("collision-foreign", &foreign)] {
+        let now = clock().unwrap();
+        store(&fixture)
+            .transact(
+                ResourceCommand::Reserve {
+                    resource_id: "test-gpu".into(),
+                    reservation_id: claim.into(),
+                    estimate_seconds: 600,
+                },
+                MutationContext {
+                    request_id: key(&now),
+                    clock: now,
+                    actor: ResourceActor::Agent(agent.clone()),
+                    expected_revision: None,
+                    eligibility: [
+                        (local.invocation_id.clone(), InvocationEligibility::Live),
+                        (foreign.invocation_id.clone(), InvocationEligibility::Live),
+                    ]
+                    .into(),
+                },
+            )
+            .unwrap();
+    }
+    let catalog = read(&fixture.state).await.unwrap();
+    let observed = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        evidence(&fixture.state, &catalog),
+    )
+    .await;
+    close_composer(&fixture, foreign_process_pane).await;
+    close_composer(&fixture, local_pane).await;
+    let observed = observed.unwrap().unwrap();
+    assert_eq!(observed.get(&local.invocation_id), Some(&InvocationEligibility::Live));
+    assert_eq!(
+        observed.get(&foreign.invocation_id),
+        Some(&InvocationEligibility::Unknown),
+        "a different live process in another daemon's same-numbered pane is not death evidence"
+    );
 }

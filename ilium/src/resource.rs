@@ -197,7 +197,8 @@ fn parse_agent(reference: &str) -> Result<(Option<String>, NodeId), String> {
     Ok((session, NodeId(pane)))
 }
 
-/// One correlated request, no polling and no timeout for a blocking resource wait.
+/// One correlated request; only an explicit Busy refusal permits resubmission.
+/// Blocking resource waits retain their unlimited observation lifetime.
 async fn exchange(
     connection: &mut Connection,
     request: ResourceRequest,
@@ -210,21 +211,47 @@ async fn exchange(
         .requests
         .send(ClientRequest::Resource {
             request_id,
-            request,
+            request: request.clone(),
         })
         .await
         .map_err(|e| error(operation, key, "outcome_unknown", e, 4))?;
     let receive = async {
+        let mut reported_busy = false;
         loop {
             let received = connection.events.recv().await.ok_or_else(|| error(operation,key,"outcome_unknown","Server disconnected; retain the reservation and retry status/wait with the same identifier",4))?;
-            let (event, _retention) = received.into_parts();
+            let (event, retention) = received.into_parts();
             if let ServerEvent::ResourceResult {
                 request_id: response_id,
                 result,
             } = event
             {
                 if response_id == request_id {
-                    return result.map_err(|e| {
+                    if let Err(refusal) = &result {
+                        if refusal.code == "busy" && !reported_busy {
+                            eprintln!(
+                                "Resource {operation} is retrying a busy request: {}",
+                                refusal.message
+                            );
+                            reported_busy = true;
+                        }
+                    }
+                    if matches!(&result, Err(error) if error.code == "busy") {
+                        // Explicit Busy permits a same-key retry. Keep both the
+                        // durable key and wire correlation; never retry an
+                        // uncertain outcome or revision conflict automatically.
+                        drop(retention);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        connection
+                            .requests
+                            .send(ClientRequest::Resource {
+                                request_id,
+                                request: request.clone(),
+                            })
+                            .await
+                            .map_err(|e| error(operation, key, "outcome_unknown", e, 4))?;
+                        continue;
+                    }
+                    return result.map(|reply| *reply).map_err(|e| {
                         let exit = match e.code.as_str() {
                             "cancelled"
                             | "revoked"

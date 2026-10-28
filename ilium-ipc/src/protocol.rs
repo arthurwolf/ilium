@@ -1692,7 +1692,7 @@ pub enum ServerEvent {
     },
     ResourceResult {
         request_id: u64,
-        result: Result<crate::resource::ResourceReply, crate::resource::ResourceError>,
+        result: Result<Box<crate::resource::ResourceReply>, crate::resource::ResourceError>,
     },
     ResourceWaitChanged {
         wait_revision: u64,

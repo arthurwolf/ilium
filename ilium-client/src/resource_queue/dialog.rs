@@ -793,7 +793,7 @@ fn content(
         let mut raw = dialog.fields[index].clone();
         if index == dialog.field {
             let cursor = dialog.cursor.min(raw.len());
-            raw.insert_str(cursor, "▏");
+            raw.insert(cursor, '▏');
         }
         let value = safe(&raw);
         let gap = usize::from(width)

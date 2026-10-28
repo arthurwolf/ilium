@@ -5,6 +5,42 @@ use std::process::Command;
 fn candidate() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ilium"))
 }
+
+/// The peer refuses attempts explicitly; the CLI must preserve every wire
+/// field rather than rebuilding the request or allocating a new mutation key.
+async fn busy_then_identical_retry(
+    stream: &mut ilium_transport::SessionStream,
+    original: ilium_ipc::ClientRequest,
+) -> ilium_ipc::ClientRequest {
+    use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
+    let ClientRequest::Resource { request_id, .. } = &original else {
+        panic!("expected correlated resource request");
+    };
+    for _ in 0..2 {
+        write_frame(
+            stream,
+            &ServerEvent::ResourceResult {
+                request_id: *request_id,
+                result: Err(ilium_ipc::resource::ResourceError {
+                    code: "busy".into(),
+                    message: "Synthetic catalog lock contention".into(),
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        let retried: ClientRequest =
+            tokio::time::timeout(std::time::Duration::from_secs(5), read_frame(stream))
+                .await
+                .expect("explicit Busy must retry")
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(&retried).unwrap(),
+            serde_json::to_value(&original).unwrap()
+        );
+    }
+    original
+}
 #[test]
 fn resource_help_and_spelling_alias_are_equivalent() {
     let canonical = candidate().args(["resource", "--help"]).output().unwrap();
@@ -65,7 +101,69 @@ fn missing_server_does_not_launch_an_authority() {
 /// This fixture verifies the CLI wire contract only; it is not hardware or
 /// cross-process authority qualification.
 #[tokio::test]
-async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
+async fn uncertain_and_stale_errors_are_structured_without_automatic_retry() {
+    use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
+    for (code, expected_exit) in [("outcome_unknown", 4), ("stale_revision", 2)] {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("refusal.sock");
+        let mut listener = ilium_transport::SessionEndpoint::from_path(&socket)
+            .bind()
+            .await
+            .unwrap();
+        let server = tokio::spawn(async move {
+            let mut stream = listener.accept().await.unwrap();
+            let attach: ClientRequest = read_frame(&mut stream).await.unwrap();
+            assert!(matches!(attach, ClientRequest::AttachInteractive { .. }));
+            let request: ClientRequest = read_frame(&mut stream).await.unwrap();
+            let ClientRequest::Resource { request_id, .. } = request else {
+                panic!("expected snapshot request");
+            };
+            write_frame(
+                &mut stream,
+                &ServerEvent::ResourceResult {
+                    request_id,
+                    result: Err(ilium_ipc::resource::ResourceError {
+                        code: code.into(),
+                        message: "Synthetic non-retryable result".into(),
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+            if let Ok(Ok(ClientRequest::Resource { .. })) = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                read_frame::<ClientRequest, _>(&mut stream),
+            )
+            .await
+            {
+                panic!("{code} must not resubmit a resource request");
+            }
+        });
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
+                .args(["--cwd"])
+                .arg(directory.path())
+                .args(["resource", "list", "--request-id", "1000:non-retry"])
+                .env(ilium_ipc::pane_env::PANE_ID, "42")
+                .env(ilium_ipc::pane_env::SESSION_NAME, "default")
+                .env(ilium_ipc::pane_env::SESSION_SOCKET, &socket)
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .expect("non-retryable result returns immediately")
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(output.status.code(), Some(expected_exit));
+        let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(record["code"], code);
+        assert_eq!(record["request_id"], "1000:non-retry");
+    }
+}
+
+#[tokio::test]
+async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_transport() {
     use ilium_core::{resource_queue::*, NodeId};
     use ilium_ipc::resource::{ResourceOperation, ResourceReply};
     use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
@@ -97,8 +195,10 @@ async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
         definition_revision: 1,
         archived: false,
     };
-    let mut catalog = ResourceCatalog::default();
-    catalog.revision = 4;
+    let mut catalog = ResourceCatalog {
+        revision: 4,
+        ..ResourceCatalog::default()
+    };
     catalog.resources.insert(
         definition.id.clone(),
         ResourceRecord {
@@ -126,6 +226,7 @@ async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
         let attach: ClientRequest = read_frame(&mut stream).await.unwrap();
         assert!(matches!(attach, ClientRequest::AttachInteractive { .. }));
         let request: ClientRequest = read_frame(&mut stream).await.unwrap();
+        let request = busy_then_identical_retry(&mut stream, request).await;
         let ClientRequest::Resource {
             request_id,
             request,
@@ -138,7 +239,7 @@ async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
             &mut stream,
             &ServerEvent::ResourceResult {
                 request_id,
-                result: Ok(ResourceReply {
+                result: Ok(Box::new(ResourceReply {
                     local_invocations: Vec::new(),
                     active_waits: Vec::new(),
                     wait_revision: 0,
@@ -148,12 +249,13 @@ async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
                     reservation: None,
                     recovery_token: None,
                     message: None,
-                }),
+                })),
             },
         )
         .await
         .unwrap();
         let request: ClientRequest = read_frame(&mut stream).await.unwrap();
+        let request = busy_then_identical_retry(&mut stream, request).await;
         let ClientRequest::Resource {
             request_id,
             request,
@@ -203,7 +305,7 @@ async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
             &mut stream,
             &ServerEvent::ResourceResult {
                 request_id,
-                result: Ok(ResourceReply {
+                result: Ok(Box::new(ResourceReply {
                     local_invocations: Vec::new(),
                     active_waits: Vec::new(),
                     wait_revision: 0,
@@ -218,7 +320,7 @@ async fn reserve_reports_queued_and_retains_retry_key_over_real_transport() {
                     reservation: Some(reservation),
                     recovery_token: None,
                     message: None,
-                }),
+                })),
             },
         )
         .await
@@ -352,7 +454,7 @@ async fn bare_status_excludes_foreign_and_replaced_invocations_with_same_pane_nu
             &mut stream,
             &ServerEvent::ResourceResult {
                 request_id,
-                result: Ok(ResourceReply {
+                result: Ok(Box::new(ResourceReply {
                     local_invocations: vec![local],
                     active_waits: Vec::new(),
                     wait_revision: 0,
@@ -362,7 +464,7 @@ async fn bare_status_excludes_foreign_and_replaced_invocations_with_same_pane_nu
                     reservation: None,
                     recovery_token: None,
                     message: None,
-                }),
+                })),
             },
         )
         .await
@@ -486,7 +588,7 @@ async fn blocking_wait_terminal_errors_and_disconnect_are_correlated_jsonl() {
                 &mut stream,
                 &ServerEvent::ResourceResult {
                     request_id,
-                    result: Ok(reply.clone()),
+                    result: Ok(Box::new(reply.clone())),
                 },
             )
             .await
@@ -527,7 +629,7 @@ async fn blocking_wait_terminal_errors_and_disconnect_are_correlated_jsonl() {
                     &mut stream,
                     &ServerEvent::ResourceResult {
                         request_id,
-                        result: Ok(reply),
+                        result: Ok(Box::new(reply)),
                     },
                 )
                 .await

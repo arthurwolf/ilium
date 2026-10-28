@@ -584,6 +584,7 @@ impl HeapBytes for ServerEvent {
                     .saturating_add(catalog.heap_bytes())
                     .saturating_add(clock.heap_bytes()),
             ),
+            // Result delegates through Box so the reply allocation and its nested capacities count.
             Self::ResourceResult { result, .. } => result.heap_bytes(),
             Self::ResourceWaitChanged { reservation_id, .. } => reservation_id.heap_bytes(),
             Self::TreeSnapshot(value0) => 0usize.saturating_add(value0.heap_bytes()),

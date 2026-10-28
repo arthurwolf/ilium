@@ -2,7 +2,7 @@
 //! exercise coordination only; no GPU or USB device is opened or reset.
 #![cfg(target_os = "linux")]
 
-use ilium_core::{resource_queue::*, NodeId, NodeKind, PaneStatus, SplitOrientation, Tree};
+use ilium_core::{resource_queue::*, AgentClass, NodeId, SplitOrientation, Tree};
 use ilium_ipc::{
     read_frame, resource::*, write_frame, ClientRequest, NewPaneKind, NewPaneWorkingDirectory,
     ServerEvent,
@@ -250,14 +250,22 @@ async fn event(
     })
 }
 async fn tree(stream: &mut SessionStream) -> Tree {
-    match event(stream, "initial tree snapshot", |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
+    tokio::time::timeout(TIMEOUT, async {
+        let mut initial = None;
+        loop {
+            match read_frame::<ServerEvent, _>(stream).await.unwrap() {
+                ServerEvent::PaneStateSnapshot { tree, .. } => initial = Some(tree),
+                ServerEvent::TreeSnapshot(tree) if initial.is_none() => return tree,
+                ServerEvent::TreeSnapshot(tree) => initial = Some(tree),
+                ServerEvent::InitialStateSyncComplete => {
+                    return initial.expect("attach completes with a pane-state snapshot");
+                }
+                _ => {}
+            }
+        }
     })
     .await
-    {
-        ServerEvent::TreeSnapshot(tree) => tree,
-        _ => unreachable!(),
-    }
+    .expect("tree snapshot or complete initial state")
 }
 async fn screen(tui: &PtySession, text: &str) {
     let deadline = tokio::time::Instant::now() + TIMEOUT;
@@ -266,6 +274,32 @@ async fn screen(tui: &PtySession, text: &str) {
             tokio::time::Instant::now() < deadline,
             "Missing {text:?} in candidate terminal:\n{}",
             tui.screen_text()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+// Retain the real terminal transitions when a menu action fails to open its
+// form. Screens include any rendered pending-request/error/status explanation;
+// the test cannot inspect the separate client's private App state directly.
+async fn click_menu_and_expect_form(tui: &PtySession, action: &str, expected: &str) {
+    let before = tui.screen_text();
+    let (column, row) = locate(tui, action);
+    tui.write(format!("\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").as_bytes())
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let mut first_changed = None;
+    loop {
+        let after = tui.screen_text();
+        if after.contains(expected) {
+            return;
+        }
+        if first_changed.is_none() && after != before {
+            first_changed = Some(after.clone());
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Missing {expected:?} after clicking menu action {action:?} at terminal column {column}, row {row} (1-based).\nBefore action:\n{before}\nFirst changed screen:\n{}\nFinal screen (including rendered pending/error/status text):\n{after}",
+            first_changed.as_deref().unwrap_or("[no changed screen observed]")
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -281,22 +315,85 @@ async fn dialog_closed(tui: &PtySession) {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+// Cell contents omit untouched blanks and can contain multiple Unicode code
+// points. Track each fragment's actual column instead of measuring a collapsed
+// string; neither empty cells nor wide/combining glyphs may move a click.
+fn text_cell_column(cells: impl IntoIterator<Item = (u16, String)>, text: &str) -> Option<u16> {
+    let mut line = String::new();
+    let mut columns = Vec::new();
+    for (column, contents) in cells {
+        columns.push((line.len(), column));
+        if contents.is_empty() {
+            line.push(' ');
+        } else {
+            line.push_str(&contents);
+        }
+    }
+    let index = line.find(text)?;
+    columns
+        .into_iter()
+        .rev()
+        .find_map(|(offset, column)| (offset <= index).then_some(column))
+}
 fn locate(tui: &PtySession, text: &str) -> (u16, u16) {
     tui.with_screen(|screen| {
         let (rows, columns) = screen.size();
-        (0..rows)
+        // Frame titles are not actionable tree/menu rows.
+        (1..rows)
             .find_map(|row| {
-                let line: String = (0..columns)
-                    .filter_map(|column| screen.cell(row, column))
-                    .map(|cell| cell.contents())
-                    .collect();
-                let index = line.find(text)?;
-                let column = unicode_width::UnicodeWidthStr::width(&line[..index]);
-                Some((u16::try_from(column).unwrap() + 1, row + 1))
+                let column = text_cell_column(
+                    (0..columns).filter_map(|column| {
+                        screen
+                            .cell(row, column)
+                            .map(|cell| (column, cell.contents().to_owned()))
+                    }),
+                    text,
+                )?;
+                Some((column + 1, row + 1))
             })
             .unwrap_or_else(|| panic!("Missing clickable {text:?}: {}", tui.screen_text()))
     })
 }
+
+#[test]
+fn menu_text_locator_preserves_empty_indentation_and_cell_coordinates() {
+    let mut cells = vec![String::new(); 20];
+    cells[0] = "│".into();
+    cells[10] = "│".into();
+    cells[12] = "🗂️".into();
+    cells.extend(
+        "New resource…"
+            .chars()
+            .map(|character| character.to_string()),
+    );
+    assert_eq!(
+        text_cell_column(
+            cells
+                .into_iter()
+                .enumerate()
+                .map(|(column, text)| (column as u16, text)),
+            "New resource"
+        ),
+        Some(20)
+    );
+}
+
+#[test]
+fn menu_text_locator_uses_columns_after_wide_and_combining_cells() {
+    let cells = ["│", "", "界", "", "e\u{301}", "", "N", "e", "w"];
+    assert_eq!(
+        text_cell_column(
+            cells
+                .into_iter()
+                .enumerate()
+                .map(|(column, text)| (column as u16, text.into())),
+            "New"
+        ),
+        Some(6)
+    );
+    assert_eq!(text_cell_column([(9, "label".into())], "missing"), None);
+}
+
 fn click(tui: &PtySession, text: &str, button: u8) {
     let (column, row) = locate(tui, text);
     tui.write(format!("\x1b[<{button};{column};{row}M\x1b[<{button};{column};{row}m").as_bytes())
@@ -349,7 +446,7 @@ async fn rpc(
             Err(error) if error.code == "busy" => {
                 tokio::time::sleep(Duration::from_millis(20)).await
             }
-            result => return result.unwrap(),
+            result => return *result.unwrap(),
         }
     }
 }
@@ -367,8 +464,9 @@ async fn spawn_agent(
     let fixture = ilium_test_fixtures::install(
         &directory,
         "codex",
-        &ilium_test_fixtures::FixtureBehavior::WorkingUntilMarker {
+        &ilium_test_fixtures::FixtureBehavior::WorkingUntilMarkerWithSize {
             marker_path: directory.join("finish"),
+            size_path: directory.join("terminal-size"),
         },
     );
     write_frame(
@@ -382,14 +480,21 @@ async fn spawn_agent(
     )
     .await
     .unwrap();
-    let pane = event(stream, "new fake agent detection", |event| matches!(event, ServerEvent::PaneNodeChanged(node) if matches!(node.kind,NodeKind::Pane{status:PaneStatus::Agent(_),..}) && !existing.contains(&node.id) )).await;
-    let ServerEvent::PaneNodeChanged(node) = pane else {
+    let pane = event(stream, "new fake Codex agent detection", |event| {
+        matches!(event,
+            ServerEvent::PaneDetectedStateChanged { pane_id, status, .. }
+            if !existing.contains(pane_id)
+                && status.agent_state().is_some_and(|state| state.class == AgentClass::Codex)
+        )
+    })
+    .await;
+    let ServerEvent::PaneDetectedStateChanged { pane_id, .. } = pane else {
         unreachable!()
     };
     write_frame(
         stream,
         &ClientRequest::RenameNode {
-            node_id: node.id,
+            node_id: pane_id,
             title: name.into(),
             short_title: None,
             inferred_icon: None,
@@ -397,8 +502,40 @@ async fn spawn_agent(
     )
     .await
     .unwrap();
-    event(stream, "fake agent rename snapshot", |event| matches!(event,ServerEvent::TreeSnapshot(tree) if tree.get(node.id).is_some_and(|node|node.name==name))).await;
-    node.id
+    event(stream, "fake agent renamed pane", |event| {
+        matches!(event,
+            ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some_and(|node| node.name == name)
+        )
+    })
+    .await;
+    pane_id
+}
+
+// Fresh child-side reports catch a real PTY resize even if the core tree and
+// calculated client viewport remain unchanged.
+async fn child_dimensions(path: &std::path::Path, after_sequence: u64) -> (u64, u16, u16) {
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                let values: Vec<u64> = text
+                    .split_whitespace()
+                    .filter_map(|value| value.parse().ok())
+                    .collect();
+                if let [sequence, rows, columns] = values.as_slice() {
+                    if *sequence > after_sequence && *rows > 0 && *columns > 0 {
+                        return (
+                            *sequence,
+                            u16::try_from(*rows).unwrap(),
+                            u16::try_from(*columns).unwrap(),
+                        );
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("no fresh child terminal dimensions at {}", path.display()))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -411,18 +548,21 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
             .resource_queue_grouping,
         "resource grouping defaults on"
     );
-    sandbox.cli(&["new-pane", "--", "cat"]).await;
+    let witness_dimensions = sandbox.project.join("witness-terminal-size");
+    sandbox.cli(&["new-pane", "--", "sh", "-c",
+        r#"n=0; while IFS= read -r line; do n=$((n+1)); { printf '%s ' "$n"; stty size; } > "$1.next"; mv "$1.next" "$1"; printf '%s\n' "$line"; done"#,
+        "resource-size-witness", witness_dimensions.to_str().unwrap()]).await;
     let mut control = sandbox.connect().await;
     let initial = tree(&mut control).await;
     let project = initial.project_ids()[0];
     let original_pane = initial.pane_ids_in_tree_order()[0];
     let tui = sandbox.tui();
-    screen(&tui, "QueueTui").await;
-    click(&tui, "QueueTui", 2);
+    assert_eq!(initial.get(project).unwrap().name, "project");
+    screen(&tui, "project").await;
+    click(&tui, "project", 2);
     screen(&tui, "New resource").await;
-    click(&tui, "New resource", 0);
-    screen(&tui, "Physical identity (optional)").await;
-    screen(&tui, "Tab: field").await;
+    click_menu_and_expect_form(&tui, "New resource", "Physical identity (optional)").await;
+    screen(&tui, "[Submit]  [Cancel]").await;
     tui.write(
         b"Synthetic GPU\tgpu\tTerminal acceptance only\tExplicit release\t\ttest-device:tui\r",
     )
@@ -490,12 +630,12 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
         .1 = shared_data;
     linked.cli(&["new-pane", "--", "cat"]).await;
     let linked_tui = linked.tui();
-    screen(&linked_tui, "QueueTui").await;
-    click(&linked_tui, "QueueTui", 2);
+    screen(&linked_tui, "project").await;
+    click(&linked_tui, "project", 2);
     screen(&linked_tui, "Link existing resource").await;
     click(&linked_tui, "Link existing resource", 0);
     screen(&linked_tui, "Search existing resources").await;
-    screen(&linked_tui, "Tab: field").await;
+    screen(&linked_tui, "[Submit]  [Cancel]").await;
     linked_tui
         .write(b"Synthetic GPU revised\tshared-gpu\r")
         .unwrap();
@@ -664,6 +804,24 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     assert_ne!(cat_position, agent_position);
     let split_id = split.parent_of(waiter).unwrap();
     let before_split = serde_json::to_value(split.get(split_id).unwrap()).unwrap();
+    write_frame(
+        &mut control,
+        &ClientRequest::KeyInput {
+            pane_id: original_pane,
+            bytes: b"resource-size-before\r".to_vec(),
+            submission: None,
+        },
+    )
+    .await
+    .unwrap();
+    let before_witness = child_dimensions(&witness_dimensions, 0).await;
+    let owner_dimensions = sandbox.project.join("QueueOwner/terminal-size");
+    let waiter_dimensions = sandbox.project.join("QueueWaiter/terminal-size");
+    let before_owner = child_dimensions(&owner_dimensions, 0).await;
+    let before_waiter = child_dimensions(&waiter_dimensions, 0).await;
+    let later_dimensions = sandbox.project.join("QueueLater/terminal-size");
+    let before_later = child_dimensions(&later_dimensions, 0).await;
+
     // Toggle while the split is actually selected, then Escape must restore
     // both live children rather than opening a fabricated resource terminal.
     click(&tui, "Synthetic GPU revised", 0);
@@ -686,6 +844,33 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     );
     assert_eq!(after_grouping.parent_of(waiter), Some(split_id));
     assert_eq!(after_grouping.parent_of(original_pane), Some(split_id));
+    write_frame(
+        &mut control,
+        &ClientRequest::KeyInput {
+            pane_id: original_pane,
+            bytes: b"resource-size-after\r".to_vec(),
+            submission: None,
+        },
+    )
+    .await
+    .unwrap();
+    let after_witness = child_dimensions(&witness_dimensions, before_witness.0).await;
+    let after_owner = child_dimensions(&owner_dimensions, before_owner.0).await;
+    let after_waiter = child_dimensions(&waiter_dimensions, before_waiter.0).await;
+    let after_later = child_dimensions(&later_dimensions, before_later.0).await;
+    for (before, after) in [
+        (before_witness, after_witness),
+        (before_owner, after_owner),
+        (before_waiter, after_waiter),
+        (before_later, after_later),
+    ] {
+        assert_eq!(
+            (after.1, after.2),
+            (before.1, before.2),
+            "display-only grouping resized a real child terminal"
+        );
+    }
+
     rpc(
         &mut control,
         project,
@@ -1647,7 +1832,26 @@ async fn interactive_recovery_rejects_stale_confirmation_and_preserves_other_wai
         ],
     );
     screen(&stale, "Type REVOKE").await;
-    screen(&stale, "RecoveryOwner").await;
+    let authoritative_owner = snapshot.catalog.resources[&resource_id]
+        .reservations
+        .iter()
+        .find(|claim| claim.id.0 == owner_id)
+        .unwrap();
+    assert_eq!(authoritative_owner.agent.pane_id, owner);
+    assert_eq!(
+        authoritative_owner.agent.label,
+        format!("Agent {}", owner.0)
+    );
+    // Recovery displays the durable invocation label, independently of a pane's
+    // mutable UI name. Assert both the exact actor label and reservation ID.
+    screen(
+        &stale,
+        &format!(
+            "current owner {} ({})",
+            authoritative_owner.agent.label, authoritative_owner.id
+        ),
+    )
+    .await;
     sandbox
         .cli(&[
             "resource",

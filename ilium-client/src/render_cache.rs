@@ -47,7 +47,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::ResourceResult { request_id, result } => {
-            app.receive_resource_reply(request_id, result);
+            app.receive_resource_reply(request_id, result.map(|reply| *reply));
             None
         }
         ServerEvent::ResourceWaitChanged {
@@ -796,6 +796,17 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     let selection_reconciliation = selection_reconciliation(app, &tree);
     app.track_tree_snapshot_change(&tree);
     app.tree = tree;
+    // Resource snapshots can arrive before the initial tree. Rebuild their
+    // display projection against the authoritative tree without resetting the
+    // observation clock or changing the retained catalog.
+    if let Some(catalog) = &app.resources.catalog {
+        app.resources.rows.rebuild(
+            &app.tree,
+            catalog,
+            &app.session_name,
+            &app.resources.local_invocations,
+        );
+    }
     if let Some(selected_setup_row) = selected_setup_row {
         let current_rows = app.agent_setup_rows();
         let replacement_index = current_rows

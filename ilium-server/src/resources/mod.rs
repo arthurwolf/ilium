@@ -45,6 +45,7 @@ impl WaitRegistry {
 }
 pub(crate) struct ResourceService {
     pub path: PathBuf,
+    catalog_access: tokio::sync::Mutex<()>,
     pub waits: std::sync::Mutex<WaitRegistry>,
     pub incarnation: String,
     pub changed: tokio::sync::watch::Sender<u64>,
@@ -80,6 +81,7 @@ impl ResourceService {
     pub fn new(path: PathBuf) -> Self {
         Self {
             waits: Default::default(),
+            catalog_access: Default::default(),
             path,
             incarnation: uuid::Uuid::new_v4().to_string(),
             changed: tokio::sync::watch::channel(0).0,
@@ -102,7 +104,18 @@ async fn decode_rpc(
     })
     .await
 }
+async fn catalog_access(state: &ServerState) -> Result<tokio::sync::MutexGuard<'_, ()>, ResourceError> {
+    // Queue local observers and commands fairly before taking the shared file
+    // lock. Admission is finite/cancellable and owns no worker or tree guard.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        service(state)?.catalog_access.lock(),
+    )
+    .await
+    .map_err(|_| err("busy", "Local catalog admission busy; retry the same request key"))
+}
 async fn read(state: &ServerState) -> Result<Catalog, ResourceError> {
+    let _access = catalog_access(state).await?;
     let path = service(state)?.path.clone();
     io(state, move || {
         store::ResourceStore::new(path)
@@ -126,6 +139,7 @@ async fn commit(
     mut context: MutationContext,
     eligibility: Option<Eligibility>,
 ) -> Result<ResourceMemory<store::CommittedResourceChange>, ResourceError> {
+    let _access = catalog_access(state).await?;
     let path = service(state)?.path.clone();
     // Try both locks without waiting while holding another lock. Keeping these
     // read guards until the durable transaction finishes fences tree moves and
@@ -341,6 +355,7 @@ async fn evidence(state: &ServerState, catalog: &Catalog) -> Result<Eligibility,
         ResourceMemory::from_parts(local, storage)
     };
     let process_claims = Arc::clone(&claims);
+    let local_incarnation = service(state)?.incarnation.clone();
     let mut eligibility = io(state, move || {
         let mut result = BTreeMap::new();
         for claim in &process_claims.value {
@@ -349,9 +364,9 @@ async fn evidence(state: &ServerState, catalog: &Catalog) -> Result<Eligibility,
                     Ok(false) => InvocationEligibility::Dead,
                     Err(_) => InvocationEligibility::Unknown,
                     Ok(true) => {
-                        if let Some((_, current)) =
-                            local.iter().find(|(pane, _)| *pane == claim.pane_id)
-                        {
+                        if let Some((_, current)) = local.iter().find(|(pane, _)| {
+                            claim.runtime_generation == local_incarnation && *pane == claim.pane_id
+                        }) {
                             match current {
                                 Some((pid, generation))
                                     if *pid == proof.process_id
@@ -585,9 +600,11 @@ async fn local_invocations(
     }
     Ok(ResourceMemory::from_parts(live, storage))
 }
+type ActiveWaitProjection = (u64, Vec<(NodeId, ReservationId)>);
+
 fn active_waits(
     state: &ServerState,
-) -> Result<ResourceMemory<(u64, Vec<(NodeId, ReservationId)>)>, ResourceError> {
+) -> Result<ResourceMemory<ActiveWaitProjection>, ResourceError> {
     let registry = service(state)?
         .waits
         .lock()
@@ -698,7 +715,7 @@ async fn handle_inner(
         Ok(reply) => {
             let event = reply.map(|reply| ServerEvent::ResourceResult {
                 request_id,
-                result: Ok(reply),
+                result: Ok(Box::new(reply)),
             });
             if let Err(error) = memory::send(state, replies, event).await {
                 let _ = replies
@@ -1049,7 +1066,7 @@ impl Drop for WaitGuard<'_> {
                     if *count == 0 {
                         waits.entries.remove(&self.reservation);
                         waits.revision = waits.revision.saturating_add(1);
-                        let _ = self.state.events.publish(ServerEvent::ResourceWaitChanged {
+                        self.state.events.publish(ServerEvent::ResourceWaitChanged {
                             wait_revision: waits.revision,
                             pane_id: self.pane,
                             reservation_id: None,
@@ -1087,7 +1104,7 @@ async fn wait(
             .lock()
             .map_err(|_| err("wait", "Wait registry unavailable"))?;
         if waits.attach(reservation_id.clone(), pane)? {
-            let _ = state.events.publish(ServerEvent::ResourceWaitChanged {
+            state.events.publish(ServerEvent::ResourceWaitChanged {
                 wait_revision: waits.revision,
                 pane_id: pane,
                 reservation_id: Some(reservation_id.clone()),
@@ -1114,6 +1131,16 @@ async fn wait(
                 }
                 _ => break Err(err("terminal", "Reservation is no longer queued or owned")),
             },
+            Err(error) if error.code == "busy" => {
+                // Contention is not a terminal reservation state. Keep the
+                // attachment while retrying; a missed observer revision must
+                // not leave the waiter asleep after the lock becomes free.
+                tokio::select! {
+                    _ = replies.closed() => break Err(err("interrupted", "Wait connection closed; reservation retained")),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+                }
+                continue;
+            }
             Err(error) => break Err(error),
         }
         tokio::select! {_=replies.closed()=>break Err(err("interrupted","Wait connection closed; reservation retained")),changed=updates.changed()=>if changed.is_err(){break Err(err("unavailable","Resource observer stopped"))}}
@@ -1173,6 +1200,12 @@ async fn repair_local_projections(
     }
     Ok(())
 }
+fn finish_observation_cycle(interval: &mut tokio::time::Interval) {
+    // Disk durability can take longer than one period. Never burst through
+    // missed observations and repeatedly reacquire the cross-process lock.
+    interval.reset();
+}
+
 pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
     // The observer is an independently owned task; place its reconciliation
     // state machine on the heap before passing it through Tokio's spawn frame.
@@ -1294,6 +1327,7 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
                         });
                 }
             }
+            finish_observation_cycle(&mut interval);
         }
     }))
 }

@@ -144,6 +144,11 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
     trace_mouse_event(app, &mouse);
     if !app.pointer_geometry_is_current() {
+        // A release still ends our held drag when a redraw invalidates its
+        // destination. Cancel it rather than replaying a structural gesture.
+        if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
+            app.clear_tree_drag();
+        }
         // A completed menu action changes mode before its matching release.
         // Discard that stale release without replacing the action's result.
         // Only a press is worth announcing: hover motion would overwrite the
