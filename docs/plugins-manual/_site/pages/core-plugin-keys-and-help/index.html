@@ -455,7 +455,7 @@
       { &quot;id&quot;: &quot;show-plugins&quot;, &quot;title&quot;: &quot;Manage plugins&quot;, &quot;category&quot;: &quot;Help&quot; }
     ],
     &quot;keybindings&quot;: [
-      { &quot;command&quot;: &quot;ilium.core.keys-and-help/show-keys&quot;, &quot;chord&quot;: &quot;?&quot;, &quot;mode&quot;: &quot;prefix&quot; }
+      { &quot;command&quot;: &quot;ilium.core.keys-and-help/show-keys&quot;, &quot;chord&quot;: &quot;F1&quot;, &quot;mode&quot;: &quot;prefix&quot; }
     ],
     &quot;panels&quot;: [
       { &quot;id&quot;: &quot;keys&quot;, &quot;title&quot;: &quot;Keys&quot;, &quot;modal&quot;: false },
@@ -501,7 +501,8 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;command:keys-and-help.open&quot;,
+    &quot;command:ilium.core.keys-and-help/show-keys&quot;,
+    &quot;command:ilium.core.keys-and-help/show-plugins&quot;,
     &quot;settings:keyboard&quot;
   ],
   &quot;contributes&quot;: {
@@ -524,7 +525,7 @@
     &quot;keybindings&quot;: [
       {
         &quot;command&quot;: &quot;ilium.core.keys-and-help/show-keys&quot;,
-        &quot;chord&quot;: &quot;?&quot;,
+        &quot;chord&quot;: &quot;F1&quot;,
         &quot;mode&quot;: &quot;prefix&quot;
       }
     ],
@@ -1098,6 +1099,7 @@ fn toggle(plugin_id: &amp;str, enabled: bool) -&gt; Result&lt;(), PluginError&gt
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import { list, setEnabled } from '@ilium/plugin-sdk/host/plugins';
+import { read as readKernel } from '@ilium/plugin-sdk/host/kernel-settings';
 
 // Manifest: commands with &quot;category&quot;: &quot;Help&quot;, as in the manifest above.
 let rows: Array&lt;{ id: string; name: string; enabled: boolean }&gt; = [];
@@ -1121,7 +1123,7 @@ export function toggle(pluginId: string, enabled: boolean): void {
 }
 </code></pre>
 <h4 id="6-reload-hints-after-a-kernel-change">6. Reload hints after a kernel change</h4>
-<p>The kernel settings tab for keys sends <code>kernel-settings-changed</code> with the keys that changed. The plugin reloads only the hint strings for those keys, not the whole reference.</p>
+<p>The Keyboard kernel settings tab (<code>keyboard</code>) sends <code>kernel-settings-changed</code> with the keys that changed. The plugin reloads only the hint strings for those keys, not the whole reference.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 
@@ -1129,9 +1131,14 @@ impl Handler for HintCache {
     fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
         for event in batch {
             let Event::KernelSettingsChanged(change) = event else { continue };
-            if change.tab != &quot;keys&quot; { continue; }
+            if change.tab != &quot;keyboard&quot; { continue; }
+            // `read` takes the tab only and returns the whole tab as JSON.
+            let Ok(text) = kernel_settings::read(&quot;keyboard&quot;) else { continue };
+            let Ok(values) = serde_json::from_str::&lt;serde_json::Value&gt;(&amp;text) else { continue };
             for key in &amp;change.keys {
-                self.hints.insert(key.clone(), kernel_settings::read(&quot;keys&quot;, key));
+                if let Some(value) = values.get(key) {
+                    self.hints.insert(key.clone(), value.to_string());
+                }
             }
         }
         Vec::new()
@@ -1141,9 +1148,11 @@ impl Handler for HintCache {
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">export function onEvents(events: Event[]): Submission[] {
   for (const event of events) {
-    if (event.tag !== 'kernel-settings-changed' || event.val.tab !== 'keys') continue;
+    if (event.tag !== 'kernel-settings-changed' || event.val.tab !== 'keyboard') continue;
+    // `read` takes the tab only and returns the whole tab as JSON.
+    const values = JSON.parse(readKernel('keyboard')) as Record&lt;string, unknown&gt;;
     for (const key of event.val.keys) {
-      hints.set(key, settings.readKernel('keys', key));
+      if (key in values) hints.set(key, JSON.stringify(values[key]));
     }
   }
   return [];
@@ -1187,7 +1196,7 @@ impl Handler for HintCache {
 <li><code>ilium.core.keys-and-help/changed</code>: { reason } after a remap</li>
 </ul>
 <p><code>contributes.help</code> topics and <code>contributes.keybindings</code> appear in the key reference.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.keys-and-help"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.keys-and-help"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-shows-a-hint-while-a-board-pane-has-focus">Example: Shows a hint while a board pane has focus</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

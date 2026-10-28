@@ -222,7 +222,7 @@ Compatibility works in two steps:
 - The host loads the current minor version and the previous one through hand-written adapters.
 - A plugin built for a newer minor than the host is refused at install. The message names both versions.
 
-Experimental items carry `@unstable(feature = <name>)` instead. Such an item is visible only to a plugin whose manifest lists the feature in the `unstable` key. In 0.1 there are two of them: `ui-calendar`, which enables the `calendar` widget, and `plugin-services`, which enables `services.call`. The `chart` widget is stable.
+Experimental items carry `@unstable(feature = <name>)` instead. Such an item is visible only to a plugin whose manifest lists the feature in the `unstable` key. In 0.1 there are two feature-gated items: `ui-calendar`, which enables the `calendar` widget, and `plugin-services`, which enables `services.call`. The `chart` widget is stable. `gpu` and WebSocket are also marked `@unstable`, but they are not part of the 0.1 contract and no manifest can enable them.
 
 ## The restart rule
 
@@ -238,19 +238,19 @@ A failure counts for 10 minutes and then expires. A successful run does not clea
 
 ## Decisions that closed the open items
 
-These answers replace the questions that the plan left open. Each one is recorded in the decisions file with its identifier.
+These answers replace the questions that the plan left open.
 
-| Question | Answer | Decision |
-|---|---|---|
-| Background-job model | Every job runs in a second instance of the component, in its own store. The plugin's own instance is never used | A21, X5 |
-| TypeScript compiler | `componentize-js`. `componentize-qjs` is not used | U8 |
-| Optional exports | Checked against the component's export list. The manifest lists only the optional exports | N9 |
-| Settings and payload schemas | A JSON-Schema subset, draft 2020-12, checked by one pinned validator | N28 |
-| Resource limits | The 0.1 defaults in the [errors and limits page](/pages/reference-errors-and-limits/). A measured value may replace one, and the change is dated in the decisions file | Section 3 |
-| `calendar` and `chart` | `chart` is stable. `calendar` stays unstable behind `ui-calendar` | W19, N33 |
-| Prompt text for plugins without the grant | Nothing is sent, not even a length or a hash | C3 |
-| Key-release events | Delivered only when the terminal supports the kitty keyboard protocol | C45 |
-| `device.gpu` | Not part of the contract (`gpu.kernels` is `@unstable`). A manifest that names it is refused with `manifest.grant-unknown` | Added by page writers (`porting-iliumanim`) |
+| Question | Answer |
+|---|---|
+| Background-job model | Every job runs in a second instance of the component, in its own store. The plugin's own instance is never used |
+| TypeScript compiler | `componentize-js`. `componentize-qjs` is not used |
+| Optional exports | Checked against the component's export list. The manifest lists only the optional exports |
+| Settings and payload schemas | A JSON-Schema subset, draft 2020-12, checked by one pinned validator |
+| Resource limits | The 0.1 defaults in the [errors and limits page](/pages/reference-errors-and-limits/). A measured value may replace one, and the change is dated in the release notes |
+| `calendar` and `chart` | `chart` is stable. `calendar` stays unstable behind `ui-calendar` |
+| Prompt text for plugins without the grant | Nothing is sent, not even a length or a hash |
+| Key-release events | Delivered only when the terminal supports the kitty keyboard protocol |
+| `device.gpu` | Not part of the contract (`gpu.kernels` is `@unstable`). A manifest that names it is refused with `manifest.grant-unknown` |
 
 ### See also
 

@@ -511,7 +511,7 @@
 <tr>
 <td><code>tree-changed</code></td>
 <td><code>list&lt;node-id&gt;</code></td>
-<td>Coalesced: pending lists merge into one event whose list holds each node once, in first-seen order, at the position of the newest change</td>
+<td>Coalesced: pending lists merge into one event whose list holds each node once, in the order each node was first seen in the pending events</td>
 </tr>
 <tr>
 <td><code>node-removed</code></td>
@@ -621,7 +621,7 @@ is fixed: "Read the workspace tree".</p>
 │ com.example.tree 0.1.0 by Example Ltd                                      │
 │                                                                            │
 │ <span class="t-hi">Server side</span>                                                                │
-│ [x] Reads the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
+│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
 │                                                                            │
 │ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
 ╰────────────────────────────────────────────────────────────────────────────╯
@@ -645,7 +645,7 @@ continues with empty answers:</p>
 <li><strong>Declined at install or on the prompt.</strong> <code>get</code> returns <code>none</code>. <code>children</code>, <code>roots</code> and <code>find</code>
   return empty lists. The first refused call of each plugin instance writes one warn line that
   names <code>tree.read</code> and the reason (<code>declined</code>). No tree events are delivered.</li>
-<li><strong>Revoked while running.</strong> The next read returns <code>none</code> or an empty list. The plugin receives
+<li><strong>Revoked while running.</strong> The next read returns <code>none</code> or an empty list (reads have no error channel, so this is the read-side form of the revoked outcome in ABI-043). The plugin receives
   <code>deactivate(revoked)</code>, and it is activated again with the reduced grant set. The restart does not
   count as a failure.</li>
 <li><strong>Granted later.</strong> The plugin receives <code>deactivate(granted)</code> and is activated again with the new
@@ -795,7 +795,7 @@ export const { lifecycle, handler } = definePlugin({
   short, and do the slow work in a job.</li>
 </ul>
 <h2 id="first-party-features-that-request-it">First-party features that request it</h2>
-<p>These rows of <code>feature-mapping.md</code> list <code>tree.read</code>: feature 5 (tree ordering), feature 6 (bookmarks,
+<p>These rows of <a href="/pages/reference-feature-traceability/">feature traceability</a> list <code>tree.read</code>: feature 5 (tree ordering), feature 6 (bookmarks,
 locks and removal of empty groups), feature 9 (workspace search), feature 42 (session naming),
 feature 43 (tree organisation) and feature 109 (the <code>ilium panes</code> command).</p>
 <h2 id="see-also">See also</h2>
@@ -804,7 +804,7 @@ feature 43 (tree organisation) and feature 109 (the <code>ilium panes</code> com
 <li><a href="/pages/capability-tree-metadata/">tree.metadata</a> for the plugin's own bytes on a node.</li>
 <li><a href="/pages/capability-tree-decorate/">tree.decorate</a> for badges and rows.</li>
 <li><a href="/pages/capability-agent-read/">agent.read</a> for the agent data in <code>node-view.agent</code>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and the trap rules.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and the trap rules.</li>
 <li><a href="/pages/events-and-intents/">Events and intents</a> for batching and delivery order.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>

@@ -639,15 +639,35 @@
 <h3 id="coverage">Coverage</h3>
 <p>Every user-visible feature of Ilium maps to exactly one core plugin. Each plugin page lists the features it covers by their names in the user documentation, so you can start from a feature you know and find the plugin that implements it.</p>
 <h3 id="how-the-samples-teach-the-abi">How the samples teach the ABI</h3>
-<p>The samples on these pages are short and focused. Together they illustrate the whole ABI: the matrix assigns each ABI area (API pages, widgets, settings row types, services, events and intents) one primary plugin, and that plugin's samples use it. Across the 30 pages there are 395 ABI pages linked from the "ABI used" sections, between 8 and 20 per plugin (counted by script over <code>core-plugin-*.md</code>). Each sample is given in Rust and in TypeScript, and every name in it appears on the linked ABI page. The <code>calendar</code> and <code>api-gpu</code> areas are unstable and the samples say so.</p>
-<p>Renders and samples marked Illustrative are not test oracles. When a page differs from <code>src/docs</code> at the baseline commit, <code>src/docs</code> wins and the page is a defect. The exact values a test uses are in the "Behaviour contract" table of each page: a table with one row per rule, an id of the form <code>&lt;plugin&gt;-B&lt;nn&gt;</code>, the exact value or text, and the baseline source (<code>src/docs/&lt;file&gt;.md#&lt;anchor&gt;</code>, or the source file of the baseline crate when the user documentation is silent). The test oracle for a plugin is that table, checked against the baseline binary through the golden outputs in <a href="/pages/reference-cli-compatibility/">CLI compatibility</a>.</p>
+<p>The samples on these pages are short and focused. Together they illustrate the whole ABI: the matrix assigns each ABI area (API pages, widgets, settings row types, services, events and intents) one primary plugin, and that plugin's samples use it. Across the 30 pages the "ABI used" sections hold 395 links to ABI pages (link occurrences, not distinct pages; the same page is linked by several plugins), between 8 and 20 per plugin. Each sample is given in Rust and in TypeScript, and every name in it appears on the linked ABI page. The <code>calendar</code> and <code>api-gpu</code> areas are unstable and the samples say so.</p>
+<p>Renders and samples marked Illustrative are not test oracles. When a page differs from <code>src/docs</code> at the baseline commit, <code>src/docs</code> wins and the page is a defect. The exact values a test uses are in the "Behaviour contract" table of the pages that have one (currently the scheduler, chatroom and progress pages; the other core-plugin pages state their values in prose): a table with one row per rule, an id of the form <code>&lt;plugin&gt;-B&lt;nn&gt;</code>, the exact value or text, and the baseline source (<code>src/docs/&lt;file&gt;.md#&lt;anchor&gt;</code>, or the source file of the baseline crate when the user documentation is silent). The test oracle for a plugin is that table, checked against the baseline binary through the golden outputs in <a href="/pages/reference-cli-compatibility/">CLI compatibility</a>.</p>
+<h3 id="alert-channels">Alert channels</h3>
+<p>The <code>notifications</code> core plugin sends sound, desktop notice and in-app text as separate channels. A failure or refusal in one channel MUST NOT drop another, and the in-app text is always sent.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Rule</th>
+<th>Exact value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CAP-885</td>
+<td>Core notifications fan-out</td>
+<td>For one event the in-app text is always delivered; a <code>refused</code> or <code>failed</code> result on the sound or desktop channel is logged and does not remove the other channels</td>
+<td><code>src/docs/notifications.md</code></td>
+</tr>
+</tbody>
+</table>
 <h3 id="security">Security</h3>
 <p>Replacement of core plugins follows [SEC-300] to [SEC-306] in <a href="/pages/reference-extension-security/">Extension security</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/getting-started-toolchain/"><small>Previous</small>Set up a toolchain</a><a class="next" href="/pages/core-plugin-tree/"><small>Next</small>Tree</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#all-core-plugins">All core plugins</a></li><li class="l2"><a href="#which-core-plugins-can-be-disabled">Which core plugins can be disabled</a></li><li class="l2"><a href="#how-other-plugins-work-with-core-plugins">How other plugins work with core plugins</a></li><li class="l2"><a href="#coverage">Coverage</a></li><li class="l2"><a href="#how-the-samples-teach-the-abi">How the samples teach the ABI</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#all-core-plugins">All core plugins</a></li><li class="l2"><a href="#which-core-plugins-can-be-disabled">Which core plugins can be disabled</a></li><li class="l2"><a href="#how-other-plugins-work-with-core-plugins">How other plugins work with core plugins</a></li><li class="l2"><a href="#coverage">Coverage</a></li><li class="l2"><a href="#how-the-samples-teach-the-abi">How the samples teach the ABI</a></li><li class="l2"><a href="#alert-channels">Alert channels</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

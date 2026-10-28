@@ -408,7 +408,7 @@
 <li>A value that fails the tab schema MUST fail with <code>invalid-argument</code> and change nothing. A write is all or nothing.</li>
 <li>A successful write MUST be persisted before the call returns and MUST produce one <code>kernel-settings-changed</code> event naming the tab and the changed keys.</li>
 <li>Keybindings are not part of any kernel tab. No grant writes a binding.</li>
-<li>A secret key MUST NOT be written through this call. The owner uses the secrets import.</li>
+<li>A secret key MUST NOT be written through this call. The owner stores it through the secrets store (<a href="/pages/reference-secrets/">secrets</a>).</li>
 </ul>
 <h3 id="errors">Errors</h3>
 <table>

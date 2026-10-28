@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::error::HostError;
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
-use ilium_plugin_api::{Diagnostic, error::Code};
-use serde_json::{Value, json};
+use ilium_plugin_api::{error::Code, Diagnostic};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// A request to append an audit event. `detail_json` is a strict metadata object,
@@ -571,11 +571,9 @@ impl AuditLog {
             summary.value["plugin_id"] == value["plugin_id"] && summary.kind == kind
         }) {
             let count = summary.value["count"].as_u64().unwrap_or(0);
-            summary.value["count"] = json!(
-                count
-                    .checked_add(1)
-                    .ok_or_else(|| failure("audit.state-invalid", "Refusal count exhausted"))?
-            );
+            summary.value["count"] = json!(count
+                .checked_add(1)
+                .ok_or_else(|| failure("audit.state-invalid", "Refusal count exhausted"))?);
         } else {
             // The front retry record moves into this durable slot; it is not an
             // additional record after this transaction succeeds.
@@ -679,8 +677,15 @@ impl AuditLog {
     /// permission or handle-enumeration checks return an error, never a fallback.
     pub fn read_verified(path: &Path) -> Result<Vec<Value>, HostError> {
         use std::path::Component;
-        if !path.is_absolute() || path.components().any(|part| matches!(part, Component::CurDir | Component::ParentDir)) {
-            return Err(failure("audit.io", "Audit read requires an absolute path without dot traversal"));
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, Component::CurDir | Component::ParentDir))
+        {
+            return Err(failure(
+                "audit.io",
+                "Audit read requires an absolute path without dot traversal",
+            ));
         }
         let directory = match readonly_directory(parent(path)) {
             Ok(directory) => directory,
@@ -688,13 +693,17 @@ impl AuditLog {
             Err(error) => return Err(io_error(error)),
         };
         let segments = readonly_segments(&directory)?;
-        let name = path.file_name().ok_or_else(|| failure("audit.io", "Audit file name is required"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| failure("audit.io", "Audit file name is required"))?;
         let active = match directory.open_regular(name) {
             Ok(file) => Some(file),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(io_error(error)),
         };
-        if active.is_none() && segments.is_empty() { return Ok(Vec::new()); }
+        if active.is_none() && segments.is_empty() {
+            return Ok(Vec::new());
+        }
         // An absent log has no private contents to validate. Do not reject an
         // otherwise ordinary parent directory or mutate its permissions.
         let directory_file = directory.try_clone_file().map_err(io_error)?;
@@ -702,7 +711,13 @@ impl AuditLog {
         // Creating a lock would violate this API's noncreating contract. Existing
         // logs without their writer lock cannot be read as a consistent snapshot.
         let lock_name = path.with_extension("lock");
-        let lock = directory.open_regular(lock_name.file_name().ok_or_else(|| failure("audit.io", "Audit lock name is required"))?).map_err(io_error)?;
+        let lock = directory
+            .open_regular(
+                lock_name
+                    .file_name()
+                    .ok_or_else(|| failure("audit.io", "Audit lock name is required"))?,
+            )
+            .map_err(io_error)?;
         secure_fs::validate_private_open_file(&lock).map_err(io_error)?;
         lock.lock_shared().map_err(io_error)?;
         // Rotation may have completed while waiting for the writer; enumerate and
@@ -716,7 +731,7 @@ impl AuditLog {
         }
         match directory.open_regular(name) {
             Ok(file) => readonly_scan(file, &mut head, true, &mut records)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(io_error(error)),
         }
         Ok(records)
@@ -1182,7 +1197,12 @@ fn scan_file(path: &Path, head: &mut ChainHead, active: bool) -> Result<(), Host
     file.read_to_end(&mut bytes).map_err(io_error)?;
     scan_bytes(&bytes, head, active, None)
 }
-fn scan_bytes(bytes: &[u8], head: &mut ChainHead, active: bool, mut records: Option<&mut Vec<Value>>) -> Result<(), HostError> {
+fn scan_bytes(
+    bytes: &[u8],
+    head: &mut ChainHead,
+    active: bool,
+    mut records: Option<&mut Vec<Value>>,
+) -> Result<(), HostError> {
     if !bytes.is_empty() && !bytes.ends_with(b"\n") {
         return Err(failure(
             "audit.chain-invalid",
@@ -1243,7 +1263,9 @@ fn scan_bytes(bytes: &[u8], head: &mut ChainHead, active: bool, mut records: Opt
         }
         head.seq = seq;
         head.hash = format!("{:x}", Sha256::digest(line));
-        if let Some(records) = records.as_mut() { records.push(value); }
+        if let Some(records) = records.as_mut() {
+            records.push(value);
+        }
     }
     if active {
         head.active_bytes = bytes.len() as u64;
@@ -1252,28 +1274,47 @@ fn scan_bytes(bytes: &[u8], head: &mut ChainHead, active: bool, mut records: Opt
 }
 fn readonly_directory(path: &Path) -> std::io::Result<secure_fs::NoFollowDirectory> {
     use std::path::Component;
-    let root = path.ancestors().last().ok_or_else(|| std::io::Error::other("Audit filesystem root is missing"))?;
+    let root = path
+        .ancestors()
+        .last()
+        .ok_or_else(|| std::io::Error::other("Audit filesystem root is missing"))?;
     let mut directory = secure_fs::NoFollowDirectory::open_root(root)?;
     for part in path.components() {
-        if let Component::Normal(name) = part { directory = directory.open_directory(name)?; }
+        if let Component::Normal(name) = part {
+            directory = directory.open_directory(name)?;
+        }
     }
     Ok(directory)
 }
-fn readonly_segments(directory: &secure_fs::NoFollowDirectory) -> Result<Vec<(u64, std::ffi::OsString)>, HostError> {
+fn readonly_segments(
+    directory: &secure_fs::NoFollowDirectory,
+) -> Result<Vec<(u64, std::ffi::OsString)>, HostError> {
     let mut segments = Vec::new();
     for name in directory.entry_names().map_err(io_error)? {
-        if let Some(sequence) = name.to_str().and_then(|name| name.strip_prefix("audit-"))
-            .and_then(|name| name.strip_suffix(".jsonl")).and_then(|name| name.parse::<u64>().ok()) {
+        if let Some(sequence) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("audit-"))
+            .and_then(|name| name.strip_suffix(".jsonl"))
+            .and_then(|name| name.parse::<u64>().ok())
+        {
             segments.push((sequence, name));
         }
     }
     segments.sort_by_key(|(sequence, _)| *sequence);
     if segments.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-        return Err(failure("audit.chain-invalid", "Ambiguous retained rotation sequence"));
+        return Err(failure(
+            "audit.chain-invalid",
+            "Ambiguous retained rotation sequence",
+        ));
     }
     Ok(segments)
 }
-fn readonly_scan(mut file: std::fs::File, head: &mut ChainHead, active: bool, records: &mut Vec<Value>) -> Result<(), HostError> {
+fn readonly_scan(
+    mut file: std::fs::File,
+    head: &mut ChainHead,
+    active: bool,
+    records: &mut Vec<Value>,
+) -> Result<(), HostError> {
     secure_fs::validate_private_open_file(&file).map_err(io_error)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(io_error)?;

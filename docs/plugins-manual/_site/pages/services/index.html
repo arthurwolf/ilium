@@ -640,7 +640,7 @@
 
 <p>The payload is checked against <code>params</code> before the provider runs, and a failing payload never reaches it. A <code>Done</code> answer or a <code>reply</code> value must match <code>result</code>. The caller has 30 seconds from the call to receive its reply.</p>
 <h2 id="activation-order">Activation order</h2>
-<p>At startup the kernel starts service providers before the consumers that require them. A provider that is installed but not running is started by the first call to its service, through the trigger <code>service:&lt;name&gt;</code>. The call waits up to the provider's activation deadline, then for the reply. At shutdown, services stop in their declared order. A cycle, where two plugins each require the other, is refused at install.</p>
+<p>At startup the kernel starts service providers before the consumers that require them. A provider that is installed but not running is started by the first call to its service, through the trigger <code>service:&lt;name&gt;</code>. The call waits up to the provider's activation deadline, then for the reply. At shutdown, a provider stops after its consumers, in reverse activation order. A cycle, where two plugins each require the other, is refused at install.</p>
 <pre class="term">
 <span class="t-prompt">$</span> ilium plugin logs com.example.notes-ui
 <span class="t-dim">info</span>  services.call com.example.titles/suggest

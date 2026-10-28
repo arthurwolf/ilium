@@ -447,13 +447,14 @@ impl Shared {
 
     fn try_reserve_retirement<T: Send + 'static>(
         &self,
+        storage_quota: &QuotaGroup,
         declared_bytes: usize,
     ) -> Result<RetirementReservation<T>, RejectReason> {
         if self.banks[Lane::Cpu.index()].config.threads == 0 {
             return Err(RejectReason::InvalidCost);
         }
         self.retirement
-            .try_reserve(&self.quota, declared_bytes, || {
+            .try_reserve(storage_quota, declared_bytes, || {
                 self.phase.load(Ordering::Acquire) == OPEN
             })
     }
@@ -831,7 +832,20 @@ impl RetirementHandle {
         &self,
         declared_bytes: usize,
     ) -> Result<RetirementReservation<T>, RejectReason> {
-        self.shared.try_reserve_retirement(declared_bytes)
+        self.try_reserve_with_storage_quota(&self.shared.quota, declared_bytes)
+    }
+
+    /// Charge envelope storage to an explicit bounded reserve while retaining
+    /// this bank's CPU owner, shutdown checks and shared retirement-slot limit.
+    /// Supply a composition-owned bounded reserve. Releases use that quota's
+    /// wake callback; this does not install the bank root's callback on it.
+    pub fn try_reserve_with_storage_quota<T: Send + 'static>(
+        &self,
+        storage_quota: &QuotaGroup,
+        declared_bytes: usize,
+    ) -> Result<RetirementReservation<T>, RejectReason> {
+        self.shared
+            .try_reserve_retirement(storage_quota, declared_bytes)
     }
 
     /// Nonblocking exceptional-custody handoff to this explicit owner. The

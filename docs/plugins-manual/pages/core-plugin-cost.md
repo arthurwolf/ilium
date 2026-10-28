@@ -20,7 +20,7 @@ Reading an agent's own session files is done by the kernel and exposed as typed 
 
 ### See it
 
-<figure><img src="/assets/demos/06-cost-and-stats.gif" alt="The statistics panel shows spend over time, a bar per model and a table of sessions" loading="lazy"><figcaption>The session statistics panel and the spend indicators in the tree.</figcaption></figure>
+<figure><img src="/assets/demos/06-cost-and-stats.gif" alt="Historical Costs and Stats capture from an older Ilium build; current-build live-resume acceptance remains unverified." loading="lazy"><figcaption>Historical capture; a current-build replacement has not passed its real-idle check.</figcaption></figure>
 
 ### What the user sees
 

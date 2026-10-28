@@ -55,6 +55,8 @@ A **hash chain** links each record to the one before it by including the previou
 | `h-grant-refused` | Summary of refused H calls, at most one record per plugin and kind per minute, with a count |
 | `project-trust` | A project is trusted or untrusted |
 | `safe-mode` | The server started in safe mode |
+| `audit-reset` | The server recreated a deleted log file, with `prev_hash` of zeros |
+| `audit-dropped` | Records were dropped while the disk was full ([SEC-225]); written when space returns, with the count |
 
 **[SEC-223]** Redaction. A record never contains terminal text, prompts, transcripts, file contents or request bodies. Argument values equal to a current plugin secret (and its base64 and percent-encoded forms) are replaced with `<redacted>` ([SEC-243]). Process arguments are logged in full otherwise.
 
@@ -62,7 +64,7 @@ A **hash chain** links each record to the one before it by including the previou
 
 **[SEC-224]** Rotation. The log rotates at `audit.max_mib` (default 64 MiB) or when the oldest record is older than `audit.keep_days` (default 365). The new file starts with a record whose `prev_hash` is the hash of the last line of the rotated file, and the old file is renamed `audit-<first seq>.jsonl` and kept until its age exceeds `keep_days`. Policy may change both values.
 
-**[SEC-225]** Disk full. If a record cannot be written, the server keeps running, keeps the record in memory (up to 1,000 records), retries every 10 s, and shows a notice. Security events have priority over the rest: when the in-memory queue is full, the oldest `h-grant-refused` and `egress-host-first-use` records are dropped first, and a `audit-dropped` record with the count is written when space returns.
+**[SEC-225]** Disk full. If a record cannot be written, the server keeps running, keeps the record in memory (up to 1,000 records), retries every 10 s, and shows a notice. When the in-memory queue is full, the oldest `h-grant-refused` and `egress-host-first-use` records are dropped first, no other record type is dropped while one of those two remains, the `audit-dropped` record is never dropped, and a `audit-dropped` record with the count is written when space returns.
 
 **[SEC-226]** Verification. `ilium plugin audit --verify` re-computes the chain and prints `ok` or the first broken `seq`. The chain detects edits by someone who cannot also rewrite the whole file; an attacker with write access to the file can rebuild it. For stronger assurance the policy can set `[audit] sink` to `syslog` or `journald` ([SEC-228]).
 

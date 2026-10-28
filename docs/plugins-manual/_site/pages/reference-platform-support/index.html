@@ -485,7 +485,7 @@
 <li><strong>[HST-382]</strong> A package for a platform that is not shipped MUST NOT be reported as supported in any user interface.</li>
 </ul>
 <h2 id="precompiled-artifacts">Precompiled artifacts</h2>
-<p>A <code>.cwasm</code> file is machine code for one target triple and one Wasmtime fingerprint. The release embeds, for every T1 plugin, the <code>.wasm</code> component and one <code>.cwasm</code> per shipped target triple. The host picks the <code>.cwasm</code> that matches the running triple and fingerprint. If none matches, it compiles the <code>.wasm</code> with <code>Component::new</code> and the compile cache, and logs <code>cwasm.fallback</code>.</p>
+<p>A <code>.cwasm</code> file is machine code for one target triple and one Wasmtime fingerprint. The release embeds, for every T1 plugin, the <code>.wasm</code> component and one <code>.cwasm</code> per shipped target triple. The host picks the <code>.cwasm</code> that matches the running triple and fingerprint. If none matches, it compiles the <code>.wasm</code> with <code>Component::new</code> and the compile cache, and logs <code>host.cwasm-incompatible</code>.</p>
 <table>
 <thead>
 <tr>
@@ -610,7 +610,7 @@
 <td>The plugin shows <code>Cannot start: sandbox unavailable</code> with the platform</td>
 </tr>
 <tr>
-<td><code>cwasm.fallback</code></td>
+<td><code>host.cwasm-incompatible</code></td>
 <td>No <code>.cwasm</code> for the triple or fingerprint</td>
 <td>Compiled at load; start is slower</td>
 </tr>

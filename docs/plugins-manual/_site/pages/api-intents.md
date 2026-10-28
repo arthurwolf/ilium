@@ -49,7 +49,7 @@ variant intent {
   editor-open(editor-open-spec),
   // appended in this order
   freeze-pane(freeze-pane-spec),
-  unfreeze-pane(freeze-pane-spec),
+  unfreeze-pane(unfreeze-pane-spec),
   replace-pane-command(replace-pane-command-spec),
   terminate-pane-process(terminate-pane-process-spec),
   resize-pane(resize-pane-spec),
@@ -202,7 +202,7 @@ For a forwarded intent:
 
 ### Send-input check order
 
-For `send-input`, two checks run at batch level before the list below, over the whole batch: shape (key present, total text across all stages at most 65,536 bytes, otherwise `invalid-argument`) and the grant `terminal.write` (otherwise `not-permitted`). The kernel then checks each submission in this order. `agent-action` uses the same order, with its own grant. The first failing check decides the outcome.
+For `send-input`, two checks run at batch level before the list below, over the whole batch: shape (key present, total text across all stages at most 65,536 bytes, otherwise `invalid-argument`) and the grants: `terminal.write`, then `terminal.raw-input` if `raw` or `mouse` is set, then `terminal.input-lock` if `lock-user-input` is set (otherwise `not-permitted`). The page [send-input](/pages/api-intent-send-input/) has the full order. The kernel then checks each submission in this order. `agent-action` uses the same order, with its own grant. The first failing check decides the outcome.
 
 1. Dedup key. A reserved key gives `duplicate(<original>)`.
 2. The pane exists and is a terminal pane. Otherwise `not-found` or `unsupported`.
@@ -213,7 +213,7 @@ For `send-input`, two checks run at batch level before the list below, over the 
 7. No other plugin holds the input lock of the pane. Otherwise `conflict` with the message `input-locked`.
 8. The input is accepted: the key is reserved, the rate token is taken and the text is written. A refused attempt never takes a rate token.
 
-`agent-action` is refused with `conflict` and the message `agent is working` while the agent is working. By default an action is allowed in the `idle`, `done`, `awaiting-approval` and `menu` states, unless its signature says otherwise.
+`agent-action` is refused with `conflict` when the current activity is not allowed. The message names that activity, for example `agent is working` or `agent is idle`. By default an action is allowed in the `idle`, `done`, `awaiting-approval` and `menu` states, unless its signature says otherwise.
 
 ### Limits
 
@@ -248,7 +248,7 @@ use ilium_plugin_sdk::dedup;
 use ilium_plugin_sdk::host::log::{self, Level};
 use ilium_plugin_sdk::types::events::AgentActivityEvent;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
-use ilium_plugin_sdk::types::tree::AgentActivity;
+use ilium_plugin_sdk::types::tree::{AgentActivity, TitleSource};
 
 #[ilium_plugin(side = "server")]
 #[derive(Default)]
@@ -262,7 +262,12 @@ impl Handler for FinishTitler {
                 Event::AgentActivityChanged(AgentActivityEvent { node, current, .. })
                     if current == AgentActivity::Done =>
                 {
-                    let spec = RenameNodeSpec { node, title: "Agent finished".to_string() };
+                    let spec = RenameNodeSpec {
+                        node,
+                        title: "Agent finished".to_string(),
+                        source: TitleSource::Plugin,
+                        expected_revision: None,
+                    };
                     let key = dedup::key_for(&["finished", &node.to_string()]);
                     submissions.push(Submission::keyed(Intent::RenameNode(spec), key));
                 }
@@ -384,7 +389,7 @@ if (outcome.tag === 'ok-epoch') {
 | Intent | Payload | Grant | Outcome |
 |---|---|---|---|
 | `open-external` | `target`: `url(string)`, `file(fs-path)` or `settings(string)` for `ilium://settings/...` | `open-external` | `ok` after the desktop handler started; `refused(not-permitted)` when the user declines; only `http`, `https` and `mailto` URLs |
-| `set-status-segment` | `segment` (own `status_segments` id), `content: rich-text`, `tooltip: option<tooltip>`, `tone: option<tone>` | `ui.chrome` | `ok`; at most 10 per second per segment |
+| `set-status-segment` | `segment` (own `status_segments` id), `content: rich-text`, `tooltip: option<tooltip>`, `tone: option<tone>` | `ui.chrome` | `ok`; at most 10 per second per slot (the segment id is the slot) |
 | `clear-status-segment` | `segment` | `ui.chrome` | `ok` |
 | `set-frame-slot` | `pane`, `slot` (own `pane_frame_slots` id), `content: rich-text`, `icon: option<string>`, `tooltip` | `ui.chrome` | `ok`; `refused(invalid-argument)` when the pane does not match the slot's `applies_to` |
 | `clear-frame-slot` | `pane`, `slot` | `ui.chrome` | `ok` |
@@ -519,7 +524,7 @@ Illustrative, not generated: the JSONL form follows the harness output of the ex
 - `failed(timed-out)` on `invoke-command` means the command did not reply within 30 seconds. The command may still finish later, so check its effect before a retry.
 - `cancelled` means another submission in the same batch was refused. Fix the refused one, then resubmit the whole group.
 - `duplicate(<original>)` is not an error. It confirms that an earlier submission with the same key already took effect.
-- A trap ends the plugin instance. The kernel restarts it under the restart rule in [errors and limits](/pages/errors-and-limits/).
+- A trap ends the plugin instance. The kernel restarts it under the restart rule in [errors and limits](/pages/reference-errors-and-limits/).
 
 ### What the user sees
 
@@ -546,7 +551,7 @@ Times are `epoch-ms` (`u64`, milliseconds since the Unix epoch, UTC) and duratio
 
 - [Events](/pages/api-events/): the events that start a batch, and `request-completed`.
 - [Requests and outcomes](/pages/requests-and-outcomes/): how the outcome and the take functions relate.
-- [Errors and limits](/pages/errors-and-limits/): the error codes and the per-call caps.
+- [Errors and limits](/pages/reference-errors-and-limits/): the error codes and the per-call caps.
 - [Tree](/pages/api-tree/), [panes](/pages/api-panes/), [commands](/pages/api-commands/), [notifications](/pages/api-notifications/) and [messages and topics](/pages/api-messages-and-topics/): the reads that go with these intents.
 - Capabilities: [tree.write](/pages/capability-tree-write/), [terminal.write](/pages/capability-terminal-write/), [agent.control](/pages/capability-agent-control/), [panes.signal](/pages/capability-panes-signal/), [notify.desktop](/pages/capability-notify-desktop/) and [editor.edit](/pages/capability-editor-edit/).
 - Deep pages: [send-input stages](/pages/api-intent-send-input/), [pane lifecycle](/pages/api-intent-pane-lifecycle/), [tree structure](/pages/api-intent-tree-structure/) and [chrome intents](/pages/api-intent-chrome/).

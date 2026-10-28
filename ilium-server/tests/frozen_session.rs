@@ -326,6 +326,198 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
+#[tokio::test]
+async fn custom_agent_identity_survives_freeze_and_unfreeze() {
+    use ilium_core::custom_agent::CustomAgentIdentity;
+
+    let fixtures = tempfile::tempdir().expect("fixture directory");
+    install(fixtures.path(), "claude", &FixtureBehavior::Idle);
+    let _fixture_path = FixturePath::prepend(fixtures.path());
+    let config_variable = ilium_server::paths::CONFIG_DIR_ENV;
+    let previous_config = std::env::var_os(config_variable);
+    struct RestoreConfig(Option<OsString>);
+    impl Drop for RestoreConfig {
+        fn drop(&mut self) {
+            if let Some(value) = self.0.take() {
+                std::env::set_var(ilium_server::paths::CONFIG_DIR_ENV, value);
+            } else {
+                std::env::remove_var(ilium_server::paths::CONFIG_DIR_ENV);
+            }
+        }
+    }
+    let _restore_config = RestoreConfig(previous_config);
+    std::env::set_var(config_variable, fixtures.path());
+    std::fs::write(fixtures.path().join("config.toml"), "[[custom_agents.profiles]]\nid = 'frozen-profile'\nname = 'Frozen profile'\nicon = '✦'\nbase_provider = 'Claude'\n").expect("write isolated profile");
+    let identity = CustomAgentIdentity {
+        profile_id: "frozen-profile".into(),
+        base_provider: BuiltinAgentProvider::Claude,
+    };
+    let session_name = "custom-frozen-profile-test";
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(100),
+        idle_poll_interval: Duration::from_millis(100),
+        auto_answer_interstitial_prompts: true,
+    };
+    let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
+    write_verified_claude_transcript(&server, SESSION_ID, &server.project_cwd);
+    let mut client = attach(&server, session_name).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            request_id: 42,
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::CustomAgent {
+                identity: identity.clone(),
+                initial_input: None,
+            },
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("launch custom profile");
+    let event = common::expect_event(&mut client, Duration::from_secs(20), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneCreateFinished { request_id: 42, .. }
+        )
+    })
+    .await;
+    let ServerEvent::PaneCreateFinished {
+        result: Ok(first_pane),
+        ..
+    } = event
+    else {
+        panic!("custom profile did not launch: {event:?}")
+    };
+    write_frame(
+        &mut client,
+        &ClientRequest::ReplacePaneWithCommand {
+            pane_id: first_pane,
+            command_line: format!("claude --resume {SESSION_ID}"),
+        },
+    )
+    .await
+    .expect("replace with known session");
+    let (frozen_pane, _) = wait_for_detected_replacement(&mut client, first_pane).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::FreezePane {
+            pane_id: frozen_pane,
+            resume_command: format!("claude --resume {SESSION_ID}"),
+        },
+    )
+    .await
+    .expect("freeze custom profile");
+    let event = common::expect_event(
+        &mut client,
+        Duration::from_secs(10),
+        |event| matches!(event, ServerEvent::PaneFrozen { pane_id, .. } if *pane_id == frozen_pane),
+    )
+    .await;
+    assert_eq!(
+        event,
+        ServerEvent::PaneFrozen {
+            pane_id: frozen_pane,
+            result: Ok(())
+        }
+    );
+    drop(client);
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session_name.into(),
+            hello: Default::default(),
+        },
+    )
+    .await
+    .expect("reattach frozen profile");
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(events.iter().any(|event| matches!(event, ServerEvent::PaneCustomAgentIdentity { pane_id, identity: Some(actual) } if *pane_id == frozen_pane && actual == &identity)));
+    write_frame(
+        &mut client,
+        &ClientRequest::UnfreezePane {
+            pane_id: frozen_pane,
+        },
+    )
+    .await
+    .expect("unfreeze custom profile");
+    let (replacement, _) = wait_for_detected_replacement(&mut client, frozen_pane).await;
+    drop(client);
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session_name.into(),
+            hello: Default::default(),
+        },
+    )
+    .await
+    .expect("reattach resumed profile");
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(events.iter().any(|event| matches!(event, ServerEvent::PaneCustomAgentIdentity { pane_id, identity: Some(actual) } if *pane_id == replacement && actual == &identity)));
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("stop isolated server");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+    drop(client);
+    drop(server);
+
+    let prompt_record = fixtures.path().join("submitted-prompt");
+    install(
+        fixtures.path(),
+        "codex",
+        &FixtureBehavior::RecordSubmittedPrompt {
+            transcript_path: prompt_record.clone(),
+        },
+    );
+    std::fs::write(fixtures.path().join("config.toml"), "[[custom_agents.profiles]]\nid = 'prompt-profile'\nname = 'Prompt profile'\nicon = '✦'\nbase_provider = 'Codex'\n").expect("write prompt profile");
+    let mut server =
+        TestServer::start_with_detection_config("custom-prompt-test", detection_config).await;
+    let mut client = attach(&server, "custom-prompt-test").await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            request_id: 43,
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::CustomAgent {
+                identity: CustomAgentIdentity {
+                    profile_id: "prompt-profile".into(),
+                    base_provider: BuiltinAgentProvider::Codex,
+                },
+                initial_input: Some("test initial prompt".into()),
+            },
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("launch profile with initial prompt");
+    let event = common::expect_event(&mut client, Duration::from_secs(20), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneCreateFinished { request_id: 43, .. }
+        )
+    })
+    .await;
+    assert!(
+        matches!(event, ServerEvent::PaneCreateFinished { result: Ok(_), .. }),
+        "prompt profile did not launch: {event:?}"
+    );
+    assert!(
+        common::wait_until(
+            || std::fs::read_to_string(&prompt_record)
+                .is_ok_and(|text| text.contains("test initial prompt")),
+            Duration::from_secs(30)
+        )
+        .await,
+        "profile initial prompt did not reach the provider"
+    );
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("stop prompt test server");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn unfreeze_preserves_worktree_ownership() {

@@ -64,7 +64,7 @@ The user-visible form of a chord is different: the client writes `Ctrl+Shift+K`,
 |---|---|---|---|---|
 | `keys.grab` | function | `grab(spec: &GrabSpec) -> Result<u64, PluginError>` | `grab(spec: GrabSpec): bigint` | Starts a grab and returns its id. TypeScript throws `PluginError`. |
 | `keys.release` | function | `release(grab: u64)` | `release(grab: bigint): void` | Ends a grab. It has no result, so an unknown or ended id does nothing. |
-| `GrabSpec.chords` | field | `Vec<String>` | `string[]` | The chords to take. One to 32 chords, each in the grammar above. |
+| `GrabSpec.chords` | field | `Vec<String>` | `string[]` | The chords to take. One to 32 chords, each in the grammar above. An empty list is `invalid-argument`. |
 | `GrabSpec.pane` | field | `Option<NodeId>` | `bigint \| undefined` | With a pane, the grab is active only while that pane has focus. Without one, it is active whatever has focus. |
 | `GrabSpec.until_release` | field | `bool` | `boolean` | When `true`, the grab ends when the matched key is released. Without release reports, it ends at the next key that does not match. |
 | `key-pressed` | event | `Event::KeyPressed(KeyEvent)` | `{ tag: 'key-pressed', val }` | A key that matches a grab was pressed, or an unconsumed key reached a `wants_keys` pane. Never dropped. |
@@ -416,7 +416,7 @@ Rules:
 
 - A grab with no pane is active whatever has focus, except in kernel modal dialogs such as the file picker.
 - A grab with a pane is active only while that pane has focus. It is suspended while another pane has focus and resumes when focus returns.
-- An `until-release` grab ends when focus changes.
+- An `until-release` grab is never suspended. It ends when focus changes, even if its pane is set and regains focus later.
 - Without release reports, an `until-release` grab ends at the next key that does not match. That key goes to the pane as usual. The plugin receives no event for the end, so copy or save inside the `key-pressed` handler when the result must not be lost.
 - A grab ends when its pane closes or its plugin stops. The plugin gets no event for it. A later `release` call for that id does nothing.
 - Revoking `keys.intercept` withdraws every grab of the plugin at once.
@@ -487,7 +487,7 @@ if (event.tag === 'ui-action' && event.val.key === 'chord' && event.val.kind ===
 │ <span class="t-dim">Enter capture · Esc cancel · Backspace clear</span>                  │
 ╰───────────────────────────────────────────────────────────────╯
 </pre>
-<figcaption>A settings panel with three <code>key-capture</code> rows. The border, title chrome and the grey <code>…</code> leaders are what the client draws; the strings <code>⌨ press keys…</code> and <code>! used by &lt;command&gt;</code> are those the widget specification names. The panel is composed by hand: the client build in this tree has no key-capture widget yet, so this is not a capture.</figcaption>
+<figcaption>A settings panel with three <code>key-capture</code> rows. The border, title chrome and the grey <code>…</code> leaders are what the client draws; the strings <code>⌨ press keys…</code> and <code>! used by &lt;command&gt;</code> are those the widget specification names. The figure is a composed illustration, not a screen capture.</figcaption>
 </figure>
 
 ### Errors and limits
@@ -495,17 +495,16 @@ if (event.tag === 'ui-action' && event.val.key === 'chord' && event.val.kind ===
 | Code | When it happens on `keys.grab` |
 |---|---|
 | `not-permitted` | The plugin lacks `keys.intercept`, or the user declined it. |
-| `invalid-argument` | A chord breaks the grammar, the list has more than 32 chords, or the client cannot report the chord. |
+| `invalid-argument` | A chord breaks the grammar, the list is empty or has more than 32 chords, or the client cannot report the chord. |
 | `not-found` | The `pane` does not exist. |
 | `conflict` | Another plugin already holds that chord in the same scope. Choose another chord or wait. |
-| `quota-exceeded` | The plugin holds its maximum of grabs. The limit `key_grabs` is 8 per plugin by default and 32 at most, and `session_key_grabs` caps all plugins together at 32. Release a grab, then retry. |
+| `quota-exceeded` | The plugin holds its maximum of grabs. The limit `key_grabs` is 8 per plugin by default and at most 32 for tier 1 and 8 for tiers 2 and 3. Release a grab, then retry. |
 | `revoked` | The grant was revoked while the call was in flight. |
 
 | Limit | Value |
 |---|---|
 | Chords per grab | 32 |
-| Grabs per plugin (`key_grabs`) | 8 by default, 32 at most |
-| Grabs per session, all plugins (`session_key_grabs`) | 32 |
+| Grabs per plugin (`key_grabs`) | 8 by default, 32 at most for tier 1, 8 for tiers 2 and 3 |
 | Chords per `key-capture` widget | 1 |
 | `mode_label` | 16 cells |
 

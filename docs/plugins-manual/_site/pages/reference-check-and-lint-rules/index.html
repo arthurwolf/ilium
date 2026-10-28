@@ -411,7 +411,7 @@
 <ul>
 <li><strong>[DEV-200]</strong> <code>check</code> MUST run exactly the install checks of <a href="/pages/packages/">Packages and manifests</a>, in the same order, with the same codes, and MUST NOT run any plugin code. It reports the install codes <code>manifest.*</code>. The install path uses no <code>package.*</code> codes, so <code>check</code> has none either. The rules of DEV-201 add further codes.</li>
 <li><strong>[DEV-201]</strong> <code>check</code> MUST add the component rules below, which report <code>component.*</code> and <code>signature.*</code> codes and two further <code>manifest.*</code> codes. They need built components and are skipped, with one <code>component.missing</code> finding per absent side, when <code>dist/</code> has no component for a declared side.</li>
-<li><strong>[DEV-202]</strong> Every <code>check</code> finding is an <code>error</code>, except <code>signature.absent</code>, <code>component.size-warning</code> and <code>check.stale-build</code>, which are <code>warn</code>, and <code>signature.fingerprint</code>, which is <code>info</code>. The severity column of the rule tables is normative.</li>
+<li><strong>[DEV-202]</strong> Every <code>check</code> finding is an <code>error</code>, except <code>signature.absent</code>, <code>check.stale-build</code> and <code>component.size-warning</code> from 8 to 32 MiB, which are <code>warn</code> (<code>component.size-warning</code> is an <code>error</code> above 32 MiB, DEV-206), and <code>signature.fingerprint</code>, which is <code>info</code>. The severity column of the rule tables is normative.</li>
 <li><strong>[DEV-203]</strong> <code>check</code> MUST NOT check trust. Whether a signing key is trusted depends on the user's machine. <code>check</code> verifies that a signature is valid for the manifest bytes and states the fingerprint in an <code>info</code> finding named <code>signature.fingerprint</code>.</li>
 </ul>
 <h3 id="component-rules">Component rules</h3>
@@ -619,7 +619,7 @@
 <td><code>lint.description-missing</code></td>
 <td>warn</td>
 <td>manifest</td>
-<td><code>description</code> is empty or longer than 280 characters</td>
+<td><code>description</code> is empty or longer than 280 characters (the manifest limit of 500 characters is a separate hard error)</td>
 <td>Write one short paragraph</td>
 </tr>
 <tr>
@@ -700,6 +700,20 @@
 <td>Plan for the cap</td>
 </tr>
 <tr>
+<td><code>lint.notice-missing</code></td>
+<td>warn</td>
+<td>project</td>
+<td>The package bundles third-party code (<code>bundled-dependencies</code> in the manifest) and the project has no <code>THIRD-PARTY-NOTICES</code> or <code>NOTICE</code> file</td>
+<td>Add the notice file</td>
+</tr>
+<tr>
+<td><code>lint.notice-incomplete</code></td>
+<td>warn</td>
+<td>project</td>
+<td>A bundled dependency named in the manifest has no entry in the notice file</td>
+<td>Add its licence text</td>
+</tr>
+<tr>
 <td><code>lint.readme-missing</code></td>
 <td>info</td>
 <td>project</td>
@@ -761,7 +775,7 @@
 <ul>
 <li><strong>[DEV-225]</strong> Plain <code>lint</code> MUST exit with 0 when only <code>warn</code> and <code>info</code> findings exist, and with 3 when an <code>error</code> finding exists.</li>
 <li><strong>[DEV-226]</strong> <code>lint --deny warnings</code> MUST exit with 3 when any unsuppressed <code>warn</code> or <code>error</code> finding exists. <code>info</code> findings never affect the exit code.</li>
-<li><strong>[DEV-227]</strong> <code>check</code> MUST exit with 3 when any <code>error</code> finding exists, and <code>check</code> has no deny flag, because its two <code>warn</code> findings (an unsigned package and a large component) are normal during development.</li>
+<li><strong>[DEV-227]</strong> <code>check</code> MUST exit with 3 when any <code>error</code> finding exists, and <code>check</code> has no deny flag, because its three <code>warn</code> findings (<code>signature.absent</code> for an unsigned package, <code>component.size-warning</code> for a component from 8 to 32 MiB and <code>check.stale-build</code>) are normal during development.</li>
 </ul>
 <h2 id="suppression">Suppression</h2>
 <p>A project suppresses a lint rule in a file named <code>lint.toml</code> in the project folder. Suppression is a per-project decision that a reviewer can read, so it carries a reason.</p>
@@ -777,7 +791,7 @@ reason = &quot;scans the project once at startup to fill the tree decorations&qu
 <ul>
 <li><strong>[DEV-230]</strong> <code>lint.toml</code> MUST be the only place that suppresses a lint rule. The manifest MUST NOT carry a suppression key, because unknown manifest keys fail the install.</li>
 <li><strong>[DEV-231]</strong> A <code>[[suppress]]</code> table MUST have <code>rule</code> and <code>reason</code>. <code>key_path</code> is optional and, when given, limits the suppression to findings with the same key path. A table without <code>reason</code> MUST produce <code>lint.suppression-reason-missing</code>.</li>
-<li><strong>[DEV-232]</strong> <code>check</code> rules MUST NOT be suppressible. A <code>rule</code> that names a <code>manifest.*</code>, <code>component.*</code> or <code>signature.*</code> code MUST produce <code>lint.suppression-unknown</code>.</li>
+<li><strong>[DEV-232]</strong> <code>check</code> rules MUST NOT be suppressible. A <code>rule</code> that names a <code>check.*</code>, <code>manifest.*</code>, <code>component.*</code> or <code>signature.*</code> code MUST produce <code>lint.suppression-unknown</code>.</li>
 <li><strong>[DEV-233]</strong> A suppressed finding MUST still be printed, with <code>suppressed</code> true, so a reviewer sees it. Suppressed findings do not count toward the exit code.</li>
 </ul>
 <h2 id="worked-example">Worked example</h2>

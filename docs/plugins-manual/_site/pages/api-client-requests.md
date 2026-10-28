@@ -62,7 +62,7 @@ Use it when the server side needs one answer from one client now. Use [messages 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | required | The request kind. Used as `kind` in `request` and in the `client-request` event. |
-| `timeout_ms` | integer, 1 to 30,000 | 5,000 | The timeout used when a caller does not pass its own. |
+| `timeout_ms` | integer, 1 to 30,000 | none | A ceiling for this kind. The caller always passes its own `timeout-millis`, so there is no default. |
 
 ### Surface
 
@@ -289,6 +289,8 @@ The user sees only the effect. A command such as `ilium voice say` is a server-s
 | completion | `not-found` | The client detached before it answered. |
 | completion | `timed-out` | No answer within the timeout. |
 | `take-answer` | none | Returns `none` when the answer was already taken or the request failed. |
+| `respond` | `not-found` | The call id is unknown, already answered, or the request timed out or was cancelled. The answer is dropped and `respond` returns the error to the client plugin. |
+| `respond` | `invalid-argument` | The outcome text is not valid JSON. |
 | manifest | `manifest.client-request-unknown` | The sides disagree about an export or a `client_requests` entry. |
 | manifest | `manifest.contribution-limit` | More than 16 `client_requests` entries. |
 
@@ -314,6 +316,6 @@ The user sees only the effect. A command such as `ilium voice say` is a server-s
 - [clipboard](/pages/api-clipboard/) for the call used in the clipboard example.
 - [cli](/pages/api-cli/) for the server-side commands that ask a client.
 - [Lifecycle](/pages/lifecycle/) for activation triggers.
-- [Errors and limits](/pages/errors-and-limits/) for the common error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the common error codes.
 
 Interface version: `ilium:host/client-requests`, version 0.1.

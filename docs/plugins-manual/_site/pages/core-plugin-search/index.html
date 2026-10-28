@@ -430,7 +430,7 @@
 <pre><code class="language-json">{
   &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
   &quot;id&quot;: &quot;ilium.core.search&quot;,
-  &quot;name&quot;: &quot;Workspace search&quot;,
+  &quot;name&quot;: &quot;Search&quot;,
   &quot;version&quot;: &quot;0.1.0&quot;,
   &quot;publisher&quot;: &quot;Ilium&quot;,
   &quot;server&quot;: {
@@ -495,9 +495,8 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;command:search&quot;,
-    &quot;job:index&quot;,
-    &quot;view:search.panel&quot;
+    &quot;command:ilium.core.search/open&quot;,
+    &quot;view:search&quot;
   ],
   &quot;contributes&quot;: {
     &quot;commands&quot;: [
@@ -627,12 +626,14 @@ export const { lifecycle, handler, views } = definePlugin({
 });
 </code></pre>
 <h4 id="2-search-by-meaning">2. Search by meaning</h4>
-<p>The server embeds pane titles and screen snippets into a vector index, then answers a query by cosine similarity and returns the top 20 ids with scores. The host does the maths. See the <a href="/pages/api-vector/">vector API</a> and the <a href="/pages/capability-inference-embed/">inference.embed grant</a>. An embed call takes at most 256 texts, so a large workspace is indexed in batches.</p>
+<p>The server embeds pane titles and screen snippets into a vector index, then answers a query by cosine similarity and returns the top 20 ids with scores. The host does the maths. See the <a href="/pages/api-vector/">vector API</a> and the <a href="/pages/capability-inference-embed/">inference.embed grant</a>. An embed call takes at most 256 texts, so the samples below split the corpus into batches of 256 (<code>EMBED_BATCH</code>) and embed each batch in turn.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::vector;
 use ilium_plugin_sdk::types::errors::PluginError;
 
 const PURPOSE: &amp;str = &quot;workspace search&quot;;
+/// `embed` accepts at most 256 texts per call.
+const EMBED_BATCH: usize = 256;
 
 pub struct MeaningIndex { index: u32 }
 
@@ -640,7 +641,10 @@ impl MeaningIndex {
     /// `items` holds (pane id, title and screen snippet).
     pub async fn build(items: &amp;[(String, String)]) -&gt; Result&lt;MeaningIndex, PluginError&gt; {
         let texts: Vec&lt;String&gt; = items.iter().map(|(_, text)| text.clone()).collect();
-        let vectors = vector::embed(&amp;texts, PURPOSE).await?;
+        let mut vectors: Vec&lt;Vec&lt;f32&gt;&gt; = Vec::with_capacity(texts.len());
+        for batch in texts.chunks(EMBED_BATCH) {
+            vectors.extend(vector::embed(batch, PURPOSE).await?);
+        }
         let dimensions = vectors.first().map_or(0, |vector| vector.len());
         let index = vector::create_index(&quot;workspace&quot;, dimensions as u16)?;
         let entries: Vec&lt;(String, Vec&lt;f32&gt;)&gt; =
@@ -660,9 +664,15 @@ impl MeaningIndex {
 <pre><code class="language-ts">import { createIndex, embed, topK, upsert } from '@ilium/plugin-sdk/host/vector';
 
 const PURPOSE = 'workspace search';
+// `embed` accepts at most 256 texts per call.
+const EMBED_BATCH = 256;
 
 export async function buildIndex(items: Array&lt;[string, string]&gt;): Promise&lt;number&gt; {
-  const vectors = await embed(items.map(([, text]) =&gt; text), PURPOSE);
+  const texts = items.map(([, text]) =&gt; text);
+  const vectors: number[][] = [];
+  for (let start = 0; start &lt; texts.length; start += EMBED_BATCH) {
+    vectors.push(...(await embed(texts.slice(start, start + EMBED_BATCH), PURPOSE)));
+  }
   const index = createIndex('workspace', vectors[0]?.length ?? 0);
   upsert(index, items.map(([id], position) =&gt; [id, vectors[position]] as [string, number[]]));
   return index;
@@ -847,7 +857,7 @@ impl Handler for LiveFilter {
 <ul>
 <li><code>ilium.core.search/query</code>: query: search all sources</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.search"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.search"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-issues-as-a-result-kind">Example: Adds issues as a result kind</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

@@ -1634,6 +1634,126 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_prefix_catalog_saves_nonadjacent_choice_and_keeps_practice_usable() {
+        use crate::{
+            keymap::ShortcutBase,
+            value_dialog::{DialogOutcome, ValueDialogState},
+            value_keyboard::KeyboardPrefix,
+        };
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use ratatui::layout::Rect;
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("config.toml"), "").unwrap();
+        let mut app = app_at(Step::KeyboardPractice);
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.settings_apply_keymap_preset(KeymapPreset::Tmux);
+        app.settle_filesystem_for_test();
+        app.onboarding.as_mut().unwrap().keyboard_editing = true;
+
+        let original_prefix = app.keyboard_settings.shortcut_base;
+        app.begin_keyboard_prefix_dialog(KeyboardPrefix::General);
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("onboarding editor opens the general-prefix catalog");
+        };
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("general prefix uses the complete choice catalog");
+        };
+        assert_eq!(choice.options().len(), 26);
+        let selected_index = choice
+            .options()
+            .iter()
+            .position(|option| Some(option.id.as_str()) == choice.highlighted_id.as_deref())
+            .unwrap();
+        let selected_id = choice.highlighted_id.clone().unwrap();
+        let target_id = if selected_id == "z" { "a" } else { "z" };
+        let target_index = choice
+            .options()
+            .iter()
+            .position(|option| option.id == target_id)
+            .unwrap();
+        let distance = selected_index.abs_diff(target_index);
+        assert!(
+            distance > 1,
+            "selection must exercise a non-adjacent option"
+        );
+        let direction = if target_index > selected_index {
+            KeyCode::Down
+        } else {
+            KeyCode::Up
+        };
+        let mut host = host;
+        for _ in 0..distance {
+            assert_eq!(
+                host.dialog.handle_key(Rect::new(0, 0, 80, 24), direction),
+                DialogOutcome::Continue
+            );
+        }
+        assert!(matches!(
+            &host.dialog,
+            ValueDialogState::Choice(choice)
+                if choice.highlighted_id.as_deref() == Some(target_id)
+        ));
+        assert_eq!(
+            host.dialog
+                .handle_key(Rect::new(0, 0, 80, 24), KeyCode::Enter),
+            DialogOutcome::Choose(target_id.into())
+        );
+
+        app.finish_value_dialog(host, DialogOutcome::Choose(target_id.into()));
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        app.settle_filesystem_for_test();
+
+        let saved_keyboard = crate::config::load(directory.path()).unwrap().keyboard;
+        let expected_prefix = ShortcutBase::parse(target_id).unwrap();
+        assert_ne!(expected_prefix, original_prefix);
+        assert_eq!(saved_keyboard.shortcut_base, expected_prefix);
+        assert_eq!(app.keyboard_settings.shortcut_base, expected_prefix);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.onboarding_progress.wizard.step, Step::KeyboardPractice);
+        assert!(app.onboarding.as_ref().unwrap().keyboard_editing);
+
+        // The editor closes normally after the durable selection, and the
+        // practice then accepts an action under the newly saved prefix.
+        handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(!app.onboarding.as_ref().unwrap().keyboard_editing);
+        let panes_before = app
+            .onboarding
+            .as_ref()
+            .unwrap()
+            .practice
+            .tree()
+            .panes()
+            .count();
+        assert!(handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(
+                KeyCode::Char(target_id.chars().next().unwrap()),
+                KeyModifiers::CONTROL,
+            )),
+        ));
+        assert!(app.onboarding.as_ref().unwrap().practice.prefix_pending());
+        assert!(handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+        ));
+        assert!(
+            app.onboarding
+                .as_ref()
+                .unwrap()
+                .practice
+                .tree()
+                .panes()
+                .count()
+                > panes_before
+        );
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
     fn keyboard_binding_capture_keeps_ownership_of_navigation_keys() {
         use crate::keymap::Action;
         let mut app = app_at(Step::KeyboardPractice);

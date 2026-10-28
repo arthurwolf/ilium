@@ -543,13 +543,14 @@ export const { handler, views } = definePlugin({
 
 | Case | Result |
 |---|---|
-| More than 256 `check-list` items, or more than `max-items` in a `list-editor` | `invalid-argument` on render. |
+| More than 256 `check-list` items, or more than `max-items` in a `list-editor` | The render traps with `ui.invalid-tree`; the previous tree stays, marked stale. |
 | More than 64 menu entries, or a submenu deeper than two levels | The menu is truncated with `… N more`. |
-| Two items with the same `id` | The tree is invalid and the instance traps. |
+| Two items with the same `id` | The tree is invalid and the render traps with `ui.duplicate-key`. |
 | An invalid item in a `list-editor` | Drawn with `✗` and the reason. It is not written and `changed` is not sent for it. |
 | A selected item removed by the next render | The selection moves to the nearest row. |
-| `menu` or `list-editor` in a settings page | `invalid-argument` on render. |
+| `menu` or `list-editor` in a settings page | The render traps with `ui.widget-not-allowed`. |
 | `set-widget-state` with a case the widget does not take | `invalid-argument`. |
+| A `disabled-reason` longer than 40 characters | The text is cut at 40 characters and ends with `…`; the entry stays disabled and the render succeeds. |
 
 ### See also
 

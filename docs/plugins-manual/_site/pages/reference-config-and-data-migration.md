@@ -27,7 +27,7 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented. Require
 1. **No key is renamed or moved.** Every key in `config.toml` and `.ilium/config.yaml` keeps its table and name. A feature that becomes a plugin keeps reading the kernel key through `settings.read-kernel:<tab>`. It does not copy the value to `[plugins."ilium.core.<name>"]`.
 2. **The plugin tables are additive.** The platform adds `[plugins]`, `[plugins.limits]` and `[plugins."<id>"]`. A build that does not know them MUST ignore and preserve them.
 3. **Unknown keys are preserved.** The kernel keeps every key it does not know when it rewrites a file, as it does today for the project YAML.
-4. **A value that fails validation fails its table, not the file.** The message names the key. The other tables still load.
+4. **A value that fails validation fails its table, not the file.** The message names the key. The other tables still load. A file that cannot be parsed at all is not a failed table: the host leaves it byte for byte unchanged, uses the built-in defaults for every key of that file for this run, never rewrites it while it is unparseable, prints one `warning` with the code `config.parse-error` naming the file and the line, and still boots ([COR-090]).
 5. **A format that changes gets a version.** `config.toml` carries an integer `config_version`. Absent means 0, the format of the build before plugins. The snapshot carries `version`. Each plugin section in a snapshot carries `schema_version`.
 6. **Migrations run once, on read, and are idempotent.** A migration reads the old shape, writes the new one to a temporary file in the same folder and renames it. Running it twice gives the same file.
 7. **A migration keeps a copy.** Before the first write of a new `version`, the kernel keeps the old file next to it as `<stem>.pre-migration.<old-version><ext>`, where the file name splits into stem and extension at the last dot and `<old-version>` is the old `version` number. For example `main.json` at version 3 is kept as `main.pre-migration.3.json`. Snapshots also keep the existing `.pre-restore.json` copies (see Session recovery in the user documentation).
@@ -118,7 +118,7 @@ The tables below are the complete list of keys the kernel knows today (see the [
 | `[sound]`: `source`, `file`, `design`, `events`. `[notifications]`: `enabled`, `agent_finished`, `approval_required`, `task_succeeded`, `task_failed`, `suppress_redundant_task_outcomes`, `task_coalesce_seconds` | Notifications | yes (server-owned) |
 | `[voice]` | `enabled`, `api_key`, `model`, `voice`, `reasoning_effort`, `input_mode`, `vad_eagerness`, `input_device_name`, `output_device_name`, `output_volume_percent`, `confirm_terminal_submissions`, `pause_media_while_active`, `custom_prompt` | Voice | yes |
 | `[reset_planning]` | `monitor_claude`, `monitor_codex`, `time_style` | Cost | yes |
-| `[inference]` | `selected_provider`, `title_style`, `restructure_prompt_token_limit`, `instructions`, and the provider tables `kilo_gateway`, `ollama`, `openai`, `anthropic`, `openrouter` | Inference, Titles | yes |
+| `[inference]` | `selected_provider`, `title_style`, `restructure_prompt_token_limit`, the sub-table `[inference.instructions]` (next row), and the provider tables `kilo_gateway`, `ollama`, `openai`, `anthropic`, `openrouter` | Inference, Titles | yes |
 | `[inference.instructions]` | seven instruction inputs | Inference, Titles, Recap, Smart copy | yes |
 | `[triggers]` | eight event keys, each with an action list; the key names are the event names in the Triggers tab of `src/docs/settings.md` | Titles | yes |
 | `[text_triggers]` | rule list | Text triggers | yes (server-owned) |
@@ -152,7 +152,7 @@ memory_mib = 64
 ```
 
 - `[plugins]` keys are owned by the plugin host. Other keys are refused with `config.unknown-key`.
-- `[plugins.limits]` sets a limit for every plugin. `[plugins."<id>".limits]` sets it for one plugin and wins. The effective value is `min(ceiling, first set of [plugins."<id>".limits] value, [plugins.limits] value, manifest value, default)` (LIF-143).
+- `[plugins.limits]` sets a limit for every plugin. `[plugins."<id>".limits]` sets it for one plugin and takes precedence over `[plugins.limits]`, but a plugin table can never raise a value above the ceiling. The effective value is `min(ceiling, v)`, where `v` is the first set of the `[plugins."<id>".limits]` value, the `[plugins.limits]` value, the manifest value and the default, in that order (LIF-143).
 - `[plugins."<id>"]` holds the plugin's own settings. The reserved key `limits` is the only sub-table the host reads there.
 - A core plugin keeps its values in the kernel tables listed above, not in `[plugins."ilium.core.<name>"]`. A core plugin MAY have a plugin table for values that are new in the plugin build, and each such key is listed on its page.
 - The always-granted `settings` import reads and writes only the plugin's own table. It never sees `[plugins.limits]` of another plugin.
@@ -191,7 +191,7 @@ Version 4 adds one field:
 |---|---|---|
 | `plugin_sections` | object, key is plugin id | One entry per plugin that offered a section. Each entry is `{ "schema_version": <int>, "data": <json> }` |
 
-The migration from 3 to 4 moves the three top-level fields and the two pane fields into `plugin_sections` under the ids of their owners (`ilium.core.diagnostics`, `ilium.core.progress`, `ilium.core.worktrees`, `ilium.core.scheduler`). The scheduler section is `plugin_sections["ilium.core.scheduler"] = {"schema_version":1,"data":{"panes":[{"pane_id":<n>,"scheduled_input":<v3 value or null>,"prompt_queue":<v3 value>}]}}`. The kernel keeps publishing the objective signal "scheduled input pending" from that section while the scheduler is disabled. It runs once, in the kernel, while no plugin exists. The old fields are removed from the file after the old file is kept as `<name>.pre-migration.3`. If the owner plugin is not installed, the section is kept as stored JSON and written back unchanged for 30 days of server time, then dropped with a warning in the lifecycle log (see Snapshot sections).
+The migration from 3 to 4 moves the three top-level fields and the two pane fields into `plugin_sections` under the ids of their owners (`ilium.core.diagnostics`, `ilium.core.progress`, `ilium.core.worktrees`, `ilium.core.scheduler`). The scheduler section is `plugin_sections["ilium.core.scheduler"] = {"schema_version":1,"data":{"panes":[{"pane_id":<n>,"scheduled_input":<v3 value or null>,"prompt_queue":<v3 value>}]}}`. The kernel keeps publishing the objective signal "scheduled input pending" from that section while the scheduler is disabled. It runs once, in the kernel, while no plugin exists. The old fields are removed from the file after the old file is kept as `<stem>.pre-migration.3<ext>` (rule 7). If the owner plugin is not installed, the section is kept as stored JSON and written back unchanged for 30 days of server time, then dropped with a warning in the lifecycle log (see Snapshot sections).
 
 ### Snapshot sections
 
@@ -243,7 +243,7 @@ These files belong to the agent tools, not to Ilium. Ilium edits only its own ma
 | `<project>/.gitignore` | project | `/CHATROOM.md` and `/CHATROOM.archive.md` lines | Chatroom |
 | Agent session files (Claude, Codex, Gemini, Antigravity) | global | Written only by Session convert (new files) and Compaction (resume files). Existing files are never edited | Session convert, Compaction |
 
-A write to any of these files uses `fs.write` with the scope `agent-config:<agent>` or `project`, with a revision check, so a change made by another process in the meantime is detected and the write is refused with `fs.conflict`. See [fs atomic writes](/pages/api-fs-atomic-and-tail/).
+A write to any of these files uses `fs.write` with the scope `agent-config:<agent>` or `project`, with a revision check, so a change made by another process in the meantime is detected and the write is refused with `conflict`. See [fs atomic writes](/pages/api-fs-atomic-and-tail/).
 
 ### A worked migration
 
@@ -336,14 +336,15 @@ The request names are the only contract here. The SDK helper names follow [Reque
 | The migration from 3 to 4 is interrupted | The next start reads the old file and runs it again | none |
 | A snapshot section is larger than its `max_bytes` (at most 256 KiB) | The section is dropped, the old value is kept | `snapshot.section-too-large` |
 | A section's plugin rejects its `schema_version` | The section is kept unchanged | `section-unsupported` |
-| The `.ilium/config.yaml` lock is held by another process | The write waits up to 2 s, then fails | `fs.locked` |
-| An agent file changed during a write | The write is refused, the user is told | `fs.conflict` |
+| The `.ilium/config.yaml` lock is held by another process | The write waits up to 2 s, then fails | `timed-out` |
+| An agent file changed during a write | The write is refused, the user is told | `conflict` |
 
 ### Requirements
 
 - [COR-030] A kernel tab MUST have at most one plugin that holds `settings.write-kernel:<tab>`, and a second declaration MUST fail with `manifest.settings-owner`. Test: install two fixture T1 plugins that ask for `settings.write-kernel:terminal`; the second install fails.
 - [COR-031] `settings.write-kernel:<tab>` MUST be T1 only and high risk, and `settings.read-kernel:<tab>` MUST be available to every tier. Test: a T2 package with the write grant fails with `manifest.grant-tier`; a T3 package with the read grant installs.
 - [COR-032] Plugin state in a snapshot MUST be stored only through `snapshot-sections` with a `schema_version`, a section larger than its `max_bytes` (at most 256 KiB) MUST be dropped without losing the previous value, and a failed plugin MUST NOT block the snapshot. Test: write a 300 KiB section, check the old value stays; crash the plugin, check that the file still has the last value.
+- [COR-090] A `config.toml` or `.ilium/config.yaml` that cannot be parsed MUST be left unchanged on disk and MUST NOT be rewritten while it stays unparseable. The host MUST use the built-in defaults for that file for the run, MUST print one `warning` with the code `config.parse-error` that names the file, and MUST still boot. Test: start a server with `config.toml` holding `[ui` and assert the bytes are unchanged, the warning, and a running server.
 - [COR-033] No key in `config.toml` or `.ilium/config.yaml` MAY be renamed or moved by the plugin build, and the plugin build MUST preserve unknown keys and tables. Test: run the plugin build on a fixture config with an unknown key, change one setting, compare the files with a diff that must show only that change.
 
 ### See also

@@ -498,7 +498,7 @@ dismiss-toast(string),                // the id
 <li><strong>Rate.</strong> 3 toasts per 10 seconds per plugin. The fourth within the window completes as <code>refused(rate-limited)</code>. Replacing by id counts as a toast.</li>
 <li><strong>Length.</strong> The title is cut by the plugin: over 60 characters is <code>invalid-argument</code>, not a silent cut. The body is rich text with at most 200 characters in total; over that is <code>invalid-argument</code>. Button labels are at most 24 characters.</li>
 <li><strong>Buttons.</strong> At most two. A button runs the named command with <code>origin: toast</code> and <code>context</code> set to the toast <code>id</code>. The toast closes when a button is pressed.</li>
-<li><strong>Accessibility.</strong> With reduced motion the gauge is drawn as a fixed text <code>5 s left</code> that updates once per second, not as a shrinking bar. A <code>danger</code> toast never closes by itself.</li>
+<li><strong>Accessibility.</strong> With reduced motion the gauge is drawn as a fixed text <code>5 s left</code> that updates once per second, not as a shrinking bar. A <code>danger</code> toast stays until dismissed while a client is attached.</li>
 <li><strong>Not a log.</strong> A toast is gone when it closes. Put the permanent record in the plugin <a href="/pages/api-log/">log</a>, or in a pane.</li>
 </ul>
 <h3 id="examples">Examples</h3>

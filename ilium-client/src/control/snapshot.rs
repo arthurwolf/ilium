@@ -762,6 +762,12 @@ fn right_panel_snapshot(target: &RightPanelTarget) -> Value {
     match target {
         RightPanelTarget::Empty => json!({ "kind": "empty" }),
         RightPanelTarget::Attention => json!({ "kind": "attention" }),
+        RightPanelTarget::Resource {
+            project_id,
+            resource_id,
+        } => {
+            json!({ "kind": "resource", "project_id": project_id.0, "resource_id": resource_id.0 })
+        }
         RightPanelTarget::Chatroom { project_id } => {
             json!({ "kind": "chatroom", "project_id": project_id.0 })
         }

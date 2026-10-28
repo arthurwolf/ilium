@@ -460,6 +460,16 @@
 <td>loopback; plain HTTP allowed</td>
 </tr>
 <tr>
+<td><code>http:127.0.0.1</code></td>
+<td>yes</td>
+<td>loopback IPv4 literal; plain HTTP allowed</td>
+</tr>
+<tr>
+<td><code>http:[::1]</code></td>
+<td>yes</td>
+<td>loopback IPv6 literal; plain HTTP allowed</td>
+</tr>
+<tr>
 <td><code>http:*</code></td>
 <td>no</td>
 <td>a bare <code>*</code> is refused</td>
@@ -739,7 +749,7 @@ export const { lifecycle, handler } = definePlugin({
 <p>A declined grant shows as unchecked and dimmed. The plugin's <code>granted</code> list in the activation context leaves it out, so a plugin can check its own status at start and tell the user what is missing.</p>
 <h3 id="when-a-grant-is-missing-or-declined">When a grant is missing or declined</h3>
 <p>A request to a host without a grant returns <code>not-permitted</code> at once. The host also writes one refusal line to the plugin log. The <code>reason</code> field is <code>declined</code> when the user unticked the row, and <code>not-granted</code> when the manifest asked for other hosts but not this one:</p>
-<pre><code class="language-json">{&quot;type&quot;:&quot;refusal&quot;,&quot;capability&quot;:&quot;http:api.example.com&quot;,&quot;function&quot;:&quot;http.fetch&quot;,&quot;reason&quot;:&quot;declined&quot;}
+<pre><code class="language-json">{&quot;type&quot;:&quot;refusal&quot;,&quot;grant&quot;:&quot;http:api.example.com&quot;,&quot;function&quot;:&quot;http.fetch&quot;,&quot;reason&quot;:&quot;declined&quot;}
 </code></pre>
 <p>A request that matches a granted host still works. A granted host that is down or unreachable returns <code>network</code>, not <code>not-permitted</code>.</p>
 <h3 id="errors">Errors</h3>
@@ -767,7 +777,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td><code>busy</code></td>
-<td>256 pending requests (1,024 at T1)</td>
+<td>64 pending requests (256 at T1)</td>
 <td>at the call</td>
 <td>yes, later</td>
 </tr>
@@ -826,7 +836,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/capability-inference/">inference</a> for requests that go through the AI admission gate.</li>
 <li><a href="/pages/capability-jobs-run/">jobs.run</a> for long downloads.</li>
 <li><a href="/pages/api-http/">api-http</a> for the full function reference.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error code table and every size limit.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error code table and every size limit.</li>
 <li><a href="/pages/capability-http-api-route/">capability-http-api-route</a> for the opposite direction: local requests that reach your plugin.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>

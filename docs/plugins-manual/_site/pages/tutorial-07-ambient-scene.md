@@ -74,7 +74,7 @@ The scene implements the `renderer` resource. Rust names come from `ilium_plugin
 | time | `time_millis: u64` | `timeMillis: bigint` | Milliseconds since the scene started. |
 | visible time | `wall_millis: u64` | `wallMillis: bigint` | Milliseconds since the scene was last made visible. |
 | clock | `now_unix_millis: u64` | `nowUnixMillis: bigint` | Wall-clock time in Unix milliseconds. |
-| size | `width: u32`, `height: u32` | `width`, `height` | Surface size in pixels: cells times the dither sub-cell factor. |
+| size | `width: u32`, `height: u32` | `width`, `height` | Surface size in pixels: cells times the dither sub-cell factor (the number of pixels that one cell holds along each axis, set by the user's active dither mode). |
 | palette | `palette_rgb: Vec<u32>` | `paletteRgb: number[]` | Current palette as `0xRRGGBB` values. Empty in greyscale and monotone modes. |
 
 `FrameSurface` takes the tone rows. `write_tones(first_row, &[u8])` (`writeTones`) writes `gray8` rows, one byte per pixel. The other methods are `write_rows`, `write_cell_colors`, `occupancy`, `pointer` and `present`. A `render` call that returns without `present` drops that frame, and a warning is logged once per second.
@@ -305,7 +305,7 @@ The TypeScript version has the same behaviour. `defineScene` takes the class, an
 **TypeScript**
 
 ```ts
-// scene/src/main.ts. The rings scene, step 7, in TypeScript.
+// scene/src/scene.ts. The rings scene, step 7, in TypeScript.
 import { defineScene } from '@ilium/plugin-sdk';
 import type { FrameInput, SceneSpec } from '@ilium/plugin-sdk/anim/renderer';
 import type { FrameSurface } from '@ilium/plugin-sdk/anim/surface';
@@ -411,7 +411,7 @@ The renderer returns no `plugin-error`, so a failure in the scene appears as a t
 | `render` returns without `present` | The frame is dropped and a warning is logged once per second. |
 | `write_tones` gets the wrong length | Only whole rows are written. A remainder is dropped and a warning is logged once per second. |
 | `readiness` stays `Preparing` for over 10 s | Counts as `Failed`. `render` is not called until the renderer restarts. |
-| A trap or a failed readiness | Counts as one failure. The restart waits 1 s after the first failure, 5 s after the second and 30 s after later ones. The third failure within 10 minutes disables the scene side of the plugin. |
+| A trap or a failed readiness | Counts as one failure. The restart waits 1 s after the first failure, 5 s after the second. The third failure within 10 minutes disables the scene side of the plugin. |
 | Ring count 12 on a small panel | Rings are closer together than a cell, so the pattern aliases. This is not an error. |
 
 ### What you see
@@ -460,7 +460,7 @@ A scene can ask for more than tones. These additions are optional and the rings 
 | Owner ids | surface | `surface.set_owner_ids(first_row, &ids)` | `surface.setOwnerIds(firstRow, ids)` | One `u16` per pixel, 0 for none. Maps pixels to logical objects. |
 | Frame receipt | surface | `surface.last_receipt()` | `surface.lastReceipt()` | `frame`, `presented_at_millis`, `dropped_before` and the `pointer_owner` under the pointer. |
 | Pointer | renderer | `fn wants_pointer(&self) -> bool` | `wantsPointer()` | A runtime answer, read after the constructor and after each `reconfigure`. `pointer` gives the cell, or none outside the scene. |
-| Pre-rendered loop | manifest `prerender` | none | none | `{{ frames, fps, cache_mib }}`. The host calls `render` for the frames once, caches them (at most 128 MiB, 30 fps) and plays the loop. |
+| Pre-rendered loop | manifest `prerender` | none | none | `{ frames, fps, cache_mib }`. The host calls `render` for the frames once, caches them (at most 128 MiB, 30 fps) and plays the loop. |
 | Fonts | scene world | `Font::new(asset)` then `rasterize(text, size_px)` | `new Font(asset)` | TTF or OTF from package assets, at most 4 MiB, rasterized to `mask8`. |
 
 A glyph cell is `column`, `row`, `text`, optional `fg` and `bg` colours as `0xRRGGBB`, and text modifiers. This draws the ring count in the centre of the panel:
@@ -470,42 +470,42 @@ A glyph cell is `column`, `row`, `text`, optional `fg` and `bg` colours as `0xRR
 ```rust
 // scene/src/lib.rs. In render, after surface.write_tones and before present.
 // Needs "glyph_plane": true on the scene in the manifest.
-let label = GlyphCell {{
+let label = GlyphCell {
     column: (frame.width / 2) as u16,
     row: (frame.height / 2) as u16,
     text: self.settings.ring_count.to_string(),
     fg: None,
     bg: None,
     add: Modifiers::default(),
-}};
+};
 surface.write_glyphs(&[label]);
 ```
 
 **TypeScript**
 
 ```ts
-// scene/src/main.ts. In render, after surface.writeTones and before present.
+// scene/src/scene.ts. In render, after surface.writeTones and before present.
 // Needs "glyph_plane": true on the scene in the manifest.
-surface.writeGlyphs([{{
+surface.writeGlyphs([{
   column: Math.floor(frame.width / 2),
   row: Math.floor(frame.height / 2),
   text: String(this.settings.ring_count),
   fg: undefined,
   bg: undefined,
-  add: {{}},
-}}]);
+  add: {},
+}]);
 ```
 
-The glyph is drawn after the shared look, so it follows the palette and the colour mode like the rings do. The surface size in `frame.width` and `frame.height` is in pixels. A glyph cell uses cell coordinates, so a scene divides by the dither sub-cell factor; the SDK pages do not yet expose that factor to a scene, which the gap list notes.
+The glyph is drawn after the shared look, so it follows the palette and the colour mode like the rings do. The surface size in `frame.width` and `frame.height` is in pixels. A glyph cell uses cell coordinates, and the scene API does not give a scene the dither sub-cell factor. A scene therefore cannot convert `frame.width` into a cell column exactly. The example above uses half the pixel size as the cell position, which is exact only where one cell holds one pixel; with a larger factor the label sits right of and below the centre. A scene that needs exact cell positions has to avoid the glyph plane until the SDK exposes the factor.
 
-A pre-rendered scene declares `modes: ["pre-rendered"]` and `prerender` in the manifest. The host runs the frames once and plays them with no further calls. A `prerender` on a scene that answers `wants_pointer` is the manifest error `manifest.scene-prerender`.
+A pre-rendered scene declares `modes: ["pre-rendered"]` and `prerender` in the manifest. The host runs the frames once and plays them with no further calls. Values out of range are the manifest error `manifest.scene-prerender`. A pre-rendered scene that answers `wants_pointer` with `true` is not refused: `pointer` returns `none` and the host logs a warning.
 
 ```json
-{{
+{
   "id": "rings-loop", "title": "Rings loop", "family": "procedural",
   "modes": ["pre-rendered"], "clip_seconds": 8,
-  "prerender": {{ "frames": 240, "fps": 30, "cache_mib": 32 }}
-}}
+  "prerender": { "frames": 240, "fps": 30, "cache_mib": 32 }
+}
 ```
 
 ### See also

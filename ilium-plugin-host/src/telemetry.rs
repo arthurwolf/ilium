@@ -1959,12 +1959,7 @@ impl PluginLog {
 
     /// Flushes a due instance suppression summary without consuming guest quota.
     /// The owning runtime must retain and tick the budget through final draining.
-    pub fn tick_instance(
-        &mut self,
-        at: &str,
-        now_ms: u64,
-        budget: &mut PluginLogInstanceBudget,
-    ) {
+    pub fn tick_instance(&mut self, at: &str, now_ms: u64, budget: &mut PluginLogInstanceBudget) {
         let result = (|| {
             if !valid_log_time(at) {
                 return Err(log_refusal(

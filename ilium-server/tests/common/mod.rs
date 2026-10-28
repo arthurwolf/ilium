@@ -465,6 +465,7 @@ impl TestServer {
         let socket_path = socket_dir.path().join(format!("{session_name}.sock"));
 
         let options = ServerOptions {
+            resource_catalog_path: None,
             session_name: session_name.to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),

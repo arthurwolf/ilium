@@ -29,9 +29,15 @@ fn shared_instance_budget_spans_writer_handles_and_summarizes_once() {
     first.tick_instance(AT, 1000, &mut budget);
     assert!(second.write_plugin_for_instance(AT, 1000, &mut budget, LogLevel::Info, "next"));
     let text = std::fs::read_to_string(directory.path().join("example.notes.log")).unwrap();
-    assert_eq!(text.matches("1 lines dropped in the last second").count(), 1);
+    assert_eq!(
+        text.matches("1 lines dropped in the last second").count(),
+        1
+    );
     assert!(!text.contains("blocked"));
-    assert!(!directory.path().join(".example.notes.log-rate.json").exists());
+    assert!(!directory
+        .path()
+        .join(".example.notes.log-rate.json")
+        .exists());
 }
 
 #[test]

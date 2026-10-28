@@ -400,7 +400,7 @@
 <li>timers that fire back into the plugin,</li>
 <li>a key-value store in three buckets, and the plugin's own settings values,</li>
 <li>compression, image decoding, hashing and text rasterizing,</li>
-<li>read and write access to four folders that belong to the plugin,</li>
+<li>read and write access to three folders (package, data, cache) that belong to the plugin,</li>
 <li>messages between the plugin's server side and client side,</li>
 <li>asking the host to render again a view the plugin declares.</li>
 </ul>
@@ -411,7 +411,7 @@
 <li>A manifest with no <code>capabilities</code> key behaves exactly like <code>"capabilities": {}</code>, and like a side
   with an empty list. The plugin then has the always-granted set and nothing else.</li>
 <li>The SDK for your language: the Rust crate <code>ilium-plugin-sdk</code> or the npm package
-  <code>@ilium/plugin-sdk</code>. Plugins depend only on that package (S1).</li>
+  <code>@ilium/plugin-sdk</code>. Plugins depend only on that package.</li>
 </ul>
 <p>The table uses these side letters: <code>S</code> is the server side, <code>C</code> the client side and <code>A</code> the scene
 (animation) side.</p>
@@ -441,13 +441,13 @@
 <tr>
 <td><code>timers</code></td>
 <td>S C</td>
-<td><code>set(after-millis, repeat-millis?) -&gt; timer-id</code>, <code>cancel(timer)</code></td>
+<td><code>set(after-millis, repeat-millis?) -&gt; result&lt;timer-id, plugin-error&gt;</code>, <code>cancel(timer)</code></td>
 <td>Timers that fire as the <code>timer-fired</code> event.</td>
 </tr>
 <tr>
 <td><code>storage</code></td>
 <td>S C A</td>
-<td><code>get</code>, <code>put</code>, <code>remove</code>, <code>keys</code> on <code>bucket</code>: <code>global</code>, <code>project</code>, <code>session</code></td>
+<td><code>get</code>, <code>put</code>, <code>remove</code>, <code>keys</code>, <code>write-batch</code> and <code>lease</code> on <code>bucket</code>: <code>global</code>, <code>project</code>, <code>session</code>, <code>shared</code></td>
 <td>Key-value entries that only this plugin can see.</td>
 </tr>
 <tr>
@@ -471,7 +471,7 @@
 <tr>
 <td><code>fs.read:data</code>, <code>fs.write:data</code></td>
 <td>S C A</td>
-<td>The read functions and the write functions (<code>write</code>, <code>remove</code>, <code>rename</code>)</td>
+<td>The read functions and the write functions (<code>write</code>, <code>remove</code>, <code>rename</code>, <code>create_dir</code>)</td>
 <td>The plugin's private data directory.</td>
 </tr>
 <tr>
@@ -558,11 +558,13 @@ and <code>bigint</code> for every <code>u64</code>.</p>
 </table>
 <p>The <code>TimerId</code> type is <code>ilium_plugin_sdk::types::ids::TimerId</code>.</p>
 <p>Storage, settings and codec signatures, in WIT form:</p>
-<pre><code class="language-wit">enum bucket { global, project, session }
+<pre><code class="language-wit">enum bucket { global, project, session, shared }
 get: func(bucket: bucket, key: string) -&gt; option&lt;list&lt;u8&gt;&gt;;
 put: func(bucket: bucket, key: string, value: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
 remove: func(bucket: bucket, key: string);
 keys: func(bucket: bucket, prefix: string) -&gt; list&lt;string&gt;;
+write-batch: func(bucket: bucket, entries: list&lt;entry&gt;) -&gt; result&lt;_, plugin-error&gt;;
+lease: func(key: string, ttl-millis: u32) -&gt; bool;
 
 get-json: func() -&gt; string;
 set-json: func(patch: string) -&gt; result&lt;_, plugin-error&gt;;
@@ -705,8 +707,8 @@ export const { lifecycle, handler } = definePlugin({
   },
 });
 </code></pre>
-<p>In TypeScript <code>put</code> and <code>get</code> throw a <code>PluginError</code> on failure, and <code>get</code> returns <code>undefined</code> for a
-missing key. <code>nowUnixMillis()</code> returns a <code>bigint</code>, so the example converts it with <code>toString()</code>.</p>
+<p>In TypeScript <code>put</code> throws a <code>PluginError</code> on failure. <code>get</code> has no failure channel (the WIT
+return is <code>option</code>): it returns <code>undefined</code> for a missing key and never throws. <code>nowUnixMillis()</code> returns a <code>bigint</code>, so the example converts it with <code>toString()</code>.</p>
 <h2 id="limits-errors-and-edge-cases">Limits, errors and edge cases</h2>
 <p>Always-granted imports never return <code>not-permitted</code> for capability reasons. They can still return
 the universal codes (<code>not-permitted</code> for a path escape, <code>revoked</code>, <code>internal</code>) and the codes below.</p>
@@ -760,6 +762,16 @@ the universal codes (<code>not-permitted</code> for a path escape, <code>revoked
 <td><code>quota-exceeded</code></td>
 </tr>
 <tr>
+<td><code>storage.write-batch</code></td>
+<td>more than 256 entries or 4 MiB of key and value bytes</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>storage.put</code> in <code>shared</code></td>
+<td>bucket over <code>shared_cache_mib</code></td>
+<td>oldest entries evicted, no error</td>
+</tr>
+<tr>
 <td><code>settings.set-json</code></td>
 <td>patch over 256 KiB, or a value that breaks the schema</td>
 <td><code>invalid-argument</code></td>
@@ -811,8 +823,8 @@ the universal codes (<code>not-permitted</code> for a path escape, <code>revoked
 </tr>
 </tbody>
 </table>
-<p>Timers are not persisted. A restart, a disable or an upgrade clears them, so a plugin re-arms its
-timers in <code>activate</code>. Storage survives restarts: the <code>session</code> bucket is deleted with its named
+<p>Ordinary timers are not persisted. A restart, a disable or an upgrade clears them, so a plugin re-arms its
+timers in <code>activate</code>. Durable timers (<code>timers.at</code>) are the exception: they survive a restart and a deactivation (see <a href="/pages/lifecycle/#durable-timers-and-further-triggers">lifecycle</a>). Storage survives restarts: the <code>session</code> bucket is deleted with its named
 session, and the <code>global</code> and <code>project</code> buckets are kept or deleted on uninstall, as the user
 chooses.</p>
 <p>Every check that the host can make from the call alone (syntax, size, scope) returns synchronously.
@@ -852,11 +864,11 @@ placeholders.</p>
   <a href="/pages/capability-messages-peer/">capability messages.peer</a> for messages between plugins.</li>
 <li><a href="/pages/capability-ui-panels/">Panels</a>, the capability that declares the views <code>ui.invalidate</code>
   redraws.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full table of error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full table of error codes.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
 <h3 id="security">Security</h3>
-<p>Always-granted calls are still audited where the audit log lists them; inference use is in the privacy log ([SEC-264]).</p>
+<p>Always-granted calls are not individually audited. The audit log records security decisions only (installs, grants, consents, trust, policy and sandbox events; see <a href="/pages/reference-audit-log/">audit log</a>), so storage, settings and <code>fs</code> writes, reads, timers, codec calls and log lines do not appear in it. Inference use is in the inference privacy log, which is kernel-owned ([SEC-305]).</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-agent-signatures/"><small>Previous</small>agent.signatures</a><a class="next" href="/pages/capability-audio/"><small>Next</small>Capability: audio</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

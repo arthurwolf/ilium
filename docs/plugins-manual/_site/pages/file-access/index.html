@@ -1019,6 +1019,26 @@ export function readNewLogBytes(path: { scope: string; path: string }, cursor: b
 <td>None</td>
 </tr>
 <tr>
+<td><code>unwatch</code></td>
+<td>None (an unknown id is ignored)</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>read-with-revision</code></td>
+<td><code>invalid-argument</code> (bad path)</td>
+<td><code>not-found</code>, <code>io</code>, <code>quota-exceeded</code> (over 64 MiB)</td>
+</tr>
+<tr>
+<td><code>write-atomic</code></td>
+<td><code>invalid-argument</code> (bad path, over 16 MiB)</td>
+<td><code>conflict</code> (the file changed since the read: stale <code>expected</code> revision, or <code>expected</code> is none and the file exists, or a lock holds it), <code>not-found</code>, <code>quota-exceeded</code>, <code>io</code></td>
+</tr>
+<tr>
+<td><code>tail</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code> (bad path, <code>max-bytes</code> over 1 MiB), <code>io</code></td>
+<td>None</td>
+</tr>
+<tr>
 <td><code>lock</code></td>
 <td><code>invalid-argument</code> (bad path)</td>
 <td><code>conflict</code> (held and timeout 0), <code>timed-out</code>, <code>not-found</code></td>
@@ -1060,7 +1080,7 @@ export function readNewLogBytes(path: { scope: string; path: string }, cursor: b
 <li><a href="/pages/capabilities/">Capabilities and grants</a></li>
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
 <li><a href="/pages/background-jobs/">Background jobs</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/security/">Security</a></li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
 </ul>

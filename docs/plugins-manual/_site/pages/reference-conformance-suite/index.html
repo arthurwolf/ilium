@@ -441,7 +441,7 @@
 <li><strong>[DEV-604]</strong> The case ids MUST be stable. A case MUST NOT change meaning. A changed rule gets a new case id, and the old id is retired in the retired list at the end of this page.</li>
 <li><strong>[DEV-605]</strong> Every case MUST be deterministic. It MUST use the fake clock and the default seed.</li>
 <li><strong>[DEV-606]</strong> One case MUST finish within 10,000 ms of wall time. A longer case is a <code>fail</code> with the message <code>case exceeded 10000 ms</code>.</li>
-<li><strong>[DEV-607]</strong> Durations in case expectations are fake-clock milliseconds, except the call time measured in fuel. A case that needs a deadline breach MUST use the built-in probe plugin <code>conformance-probe.wasm</code> with its fuel-burn import, never the plugin under test.</li>
+<li><strong>[DEV-607]</strong> Durations in case expectations are fake-clock milliseconds, except the call time measured in epoch-based wall-clock milliseconds (fuel is off and never enforces or measures deadlines, per HST-058 and LIF-127). A case that needs a deadline breach MUST use the built-in probe plugin <code>conformance-probe.wasm</code> with its busy-wait import, never the plugin under test.</li>
 </ul>
 <p>A record:</p>
 <pre><code class="language-json">{&quot;type&quot;:&quot;conformance&quot;,&quot;case&quot;:&quot;CONF-LIFE-02&quot;,&quot;title&quot;:&quot;activate stays under its deadline&quot;,&quot;subject&quot;:&quot;plugin&quot;,&quot;verdict&quot;:&quot;pass&quot;,&quot;duration_ms&quot;:41}
@@ -471,14 +471,14 @@
 <tr>
 <td>CONF-LIFE-02</td>
 <td><code>activate</code> stays under its deadline</td>
-<td>Subject P: activate the subject plugin and measure the fuel time. Subject H: the probe plugin burns fuel for 2,100 ms in <code>activate</code>.</td>
-<td>P: fuel time under the effective deadline. H: <code>trap.deadline</code>.</td>
+<td>Subject P: activate the subject plugin and measure the call time. Subject H: the probe plugin busy-waits for 2,100 ms in <code>activate</code>.</td>
+<td>P: call time under the effective deadline. H: <code>trap.deadline</code>.</td>
 <td>P H</td>
 </tr>
 <tr>
 <td>CONF-LIFE-03</td>
 <td><code>deactivate</code> over 500 ms is cut</td>
-<td>The probe plugin burns fuel for 600 ms in <code>deactivate</code></td>
+<td>The probe plugin busy-waits for 600 ms in <code>deactivate</code></td>
 <td>Instance dropped, restore bytes discarded, not counted as a failure (<code>failures()</code> unchanged)</td>
 <td>H</td>
 </tr>
@@ -520,8 +520,8 @@
 <tr>
 <td>CONF-EVT-02</td>
 <td>A batch of events stays under its deadline</td>
-<td>Subject P: deliver <code>sample_batch(256)</code> and measure the fuel time. Subject H: the probe plugin burns fuel for 25 ms in <code>on-events</code>.</td>
-<td>P: fuel time under 20 ms. H: <code>trap.deadline</code>.</td>
+<td>Subject P: deliver <code>sample_batch(256)</code> and measure the call time. Subject H: the probe plugin busy-waits for 25 ms in <code>on-events</code>.</td>
+<td>P: call time under 20 ms. H: <code>trap.deadline</code>.</td>
 <td>P H</td>
 </tr>
 <tr>
@@ -548,8 +548,8 @@
 <tr>
 <td>CONF-EVT-06</td>
 <td>More than 256 submissions trap</td>
-<td>Return 257 submissions</td>
-<td><code>trap.submission-batch</code></td>
+<td>Return 256 submissions (passes), then 257 submissions</td>
+<td>256: no trap; 257: <code>trap.submission-batch</code></td>
 <td>P S H</td>
 </tr>
 <tr>
@@ -605,7 +605,7 @@
 <td>CONF-GRANT-02</td>
 <td>Revocation takes effect at once</td>
 <td>Revoke, then call</td>
-<td><code>Err(not-permitted)</code> for an import, <code>refused(plugin-error{code: not-permitted})</code> for an intent</td>
+<td><code>Err(revoked)</code> for an import (HST-075), <code>refused(plugin-error{code: not-permitted})</code> for an intent</td>
 <td>H</td>
 </tr>
 <tr>
@@ -626,7 +626,7 @@
 <td>CONF-GRANT-05</td>
 <td>A function of a capability never requested traps</td>
 <td>Call a function of a capability the manifest never requested</td>
-<td><code>trap.import-not-requested</code></td>
+<td><code>host.capability-not-requested</code></td>
 <td>H</td>
 </tr>
 </tbody>
@@ -646,8 +646,8 @@
 <tr>
 <td>CONF-VIEW-01</td>
 <td>A render stays under its deadline</td>
-<td>Subject P: render each declared view at 80x24 and measure the fuel time. Subject H: the probe plugin burns fuel for 15 ms in <code>render</code>.</td>
-<td>P: fuel time under 10 ms. H: last good render stays, <code>trap.deadline</code> counted.</td>
+<td>Subject P: render each declared view at 80x24 and measure the call time. Subject H: the probe plugin busy-waits for 15 ms in <code>render</code>.</td>
+<td>P: call time under 10 ms. H: last good render stays, <code>trap.deadline</code> counted.</td>
 <td>P H</td>
 </tr>
 <tr>
@@ -695,22 +695,22 @@
 <tr>
 <td>CONF-STORE-02</td>
 <td>A value over 1 MiB is refused</td>
-<td>Put a value of 1,048,577 bytes</td>
-<td><code>Err(quota-exceeded)</code></td>
+<td>Put a value of 1,048,576 bytes (passes), then 1,048,577 bytes</td>
+<td>1,048,576: <code>ok</code>; 1,048,577: <code>Err(quota-exceeded)</code></td>
 <td>S H</td>
 </tr>
 <tr>
 <td>CONF-STORE-03</td>
 <td>A bucket over 16 MiB is refused</td>
-<td>Fill a bucket to 16 MiB plus 1 byte</td>
-<td><code>Err(quota-exceeded)</code></td>
+<td>Fill a bucket to exactly 16 MiB (passes), then add 1 byte</td>
+<td>16 MiB: <code>ok</code>; one more byte: <code>Err(quota-exceeded)</code></td>
 <td>S H</td>
 </tr>
 <tr>
 <td>CONF-MEM-01</td>
 <td>Memory over <code>memory_mib</code> traps</td>
-<td>The probe plugin allocates 40 MiB with the default 32</td>
-<td><code>trap.memory</code> (see the trap code table of <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a>)</td>
+<td>The probe plugin stays just under the default 32 MiB (passes), then allocates 40 MiB</td>
+<td>under: no trap; 40 MiB: <code>trap.memory</code> (see the trap code table of <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a>)</td>
 <td>H</td>
 </tr>
 <tr>
@@ -824,7 +824,7 @@
 <li><strong>[DEV-610]</strong> The catalogue above MUST be the minimum. A release of the suite MAY add cases and MUST NOT remove a case without a retirement note.</li>
 <li><strong>[DEV-611]</strong> Cases for the restart rule MUST use fake time. No case waits for real seconds.</li>
 <li><strong>[DEV-612]</strong> A case for a limit MUST test the value just under the limit (pass) and the value just over (fail), unless the table says otherwise.</li>
-<li><strong>[DEV-613]</strong> A <code>skip</code> MUST carry a reason: <code>grant-not-requested</code>, <code>side-not-built</code>, <code>subject-mismatch</code> or <code>needs-session</code>.</li>
+<li><strong>[DEV-613]</strong> A <code>skip</code> MUST carry a reason: <code>grant-not-requested</code>, <code>side-not-built</code>, <code>subject-mismatch</code>, <code>needs-session</code> or <code>needs-component</code>.</li>
 </ul>
 <h2 id="writing-a-plugin-specific-conformance-case">Writing a plugin-specific conformance case</h2>
 <p>A plugin author can add cases to the project. A case is a test function that uses <code>conformance::case</code>.</p>

@@ -84,6 +84,13 @@ pub enum NewPaneKind {
     /// command has exited. Used by `ilium new-pane` unless `--keep-open` is
     /// given. Appended so existing bincode variant indexes remain stable.
     CommandClosingOnExit(String),
+    /// Resolve the profile server-side at launch. Only non-secret identity and
+    /// optional initial input cross the wire; environment values stay in the
+    /// private configuration and in the spawned process environment.
+    CustomAgent {
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        initial_input: Option<String>,
+    },
 }
 
 /// Server-side starting-directory strategy for a newly spawned terminal.
@@ -1064,6 +1071,20 @@ pub enum ClientRequest {
         before_sequence: u64,
         max_bytes: u32,
     },
+    /// Native resource authority; separate from plugins and shell monitors.
+    Resource {
+        request_id: u64,
+        request: crate::resource::ResourceRequest,
+    },
+    /// Create a profile-backed agent in a new or existing workspace.
+    /// Only identity crosses IPC; environment values are resolved by the server.
+    CreateCustomAgentInWorkspace {
+        request_id: u64,
+        parent_group: NodeId,
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        spec: WorkspaceCreateSpec,
+        initial_input: Option<String>,
+    },
 }
 
 /// Which client path produced a stored recap.
@@ -1081,6 +1102,7 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::Resource { .. } => "resource",
             Self::Plugin(_) => "plugin",
             Self::TerminalHistory { .. } => "terminal_history",
             Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
@@ -1157,6 +1179,7 @@ impl ClientRequest {
             Self::UpdateAntigravityStatusline { .. } => "update_antigravity_statusline",
             Self::QueryRepoFacts { .. } => "query_repo_facts",
             Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
+            Self::CreateCustomAgentInWorkspace { .. } => "create_custom_agent_in_workspace",
             Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
             Self::RemoveWorkspace { .. } => "remove_workspace",
             Self::ClosePaneWithWorkspaceDisposition { .. } => {
@@ -1259,11 +1282,16 @@ pub enum ServerEvent {
     },
     /// A pane's detected status changed (agent identity/activity, or
     /// editor dirty state).
-    PaneStatusChanged { pane_id: NodeId, status: PaneStatus },
+    PaneStatusChanged {
+        pane_id: NodeId,
+        status: PaneStatus,
+    },
     /// Something went wrong that the client should surface to the user
     /// (e.g. a pane failed to spawn). Not used for routine
     /// request-rejected cases that have a more specific event already.
-    Error { message: String },
+    Error {
+        message: String,
+    },
     /// An agent pane's session/thread ID was just discovered (see
     /// `ilium-server`'s `session_id` module) -- sent whenever the active
     /// agent session changes. Kept separate from
@@ -1325,7 +1353,9 @@ pub enum ServerEvent {
         title_generation: u64,
     },
     /// A stored session snapshot awaits an explicit recovery decision.
-    SessionRecoveryAvailable { pane_count: usize },
+    SessionRecoveryAvailable {
+        pane_count: usize,
+    },
     /// The complete attach-time state stream has been delivered: tree,
     /// terminal replay, agent session identities, and editor paths. This is
     /// intentionally later than the first `TreeSnapshot`, so startup actions
@@ -1343,9 +1373,13 @@ pub enum ServerEvent {
     /// attached client applies this to its own process writer and rendered
     /// setting without echoing another request back to the server. Appended
     /// last to preserve every existing bincode discriminant.
-    DebugLoggingChanged { enabled: bool },
+    DebugLoggingChanged {
+        enabled: bool,
+    },
     /// The server accepted a live agent-debug recording/menu update.
-    AgentDebugMenuChanged { enabled: bool },
+    AgentDebugMenuChanged {
+        enabled: bool,
+    },
     /// One on-demand retained history response. `through_sequence` is the
     /// newest server sequence known even when the requested delta is empty.
     PaneDebugLogSnapshot {
@@ -1382,7 +1416,10 @@ pub enum ServerEvent {
     },
     /// Correlates a structurally invalid apply with the project job that
     /// initiated it, keeping the footer state truthful.
-    ProjectRestructureRejected { project_id: NodeId, message: String },
+    ProjectRestructureRejected {
+        project_id: NodeId,
+        message: String,
+    },
     /// A terminal pane's exactly-reconstructed last submitted line changed
     /// (see `ilium_core::Tree::set_last_prompt`). Sent as its own lightweight
     /// event rather than folded into `PanePromptSubmitted` because most
@@ -1409,7 +1446,9 @@ pub enum ServerEvent {
     /// The detached server accepted a live progress-monitor-enabled update --
     /// same shape as `DebugLoggingChanged`. Appended last to preserve every
     /// existing bincode discriminant.
-    ProgressMonitorEnabledChanged { enabled: bool },
+    ProgressMonitorEnabledChanged {
+        enabled: bool,
+    },
     /// The detached server accepted a live text-trigger update. Every
     /// attached client converges its rendered settings without sending a
     /// request back to the server.
@@ -1473,16 +1512,25 @@ pub enum ServerEvent {
         stage: WorkspaceCreateStage,
     },
     /// Correlated success once the pane exists in the authoritative tree.
-    WorkspaceCreated { request_id: u64, pane_id: NodeId },
+    WorkspaceCreated {
+        request_id: u64,
+        pane_id: NodeId,
+    },
     /// Correlated creation failure; no half-created pane is left behind.
-    WorkspaceCreateFailed { request_id: u64, error: String },
+    WorkspaceCreateFailed {
+        request_id: u64,
+        error: String,
+    },
     /// The latest server-owned runtime status for one workspace pane.
     PaneGitStatusChanged {
         pane_id: NodeId,
         status: WorkspaceGitStatus,
     },
     /// Correlated result of a successful worktree removal.
-    WorkspaceRemoved { request_id: u64, pane_id: NodeId },
+    WorkspaceRemoved {
+        request_id: u64,
+        pane_id: NodeId,
+    },
     /// Legacy refusal or uncertain completion. Read reasons: this event alone
     /// does not prove that a removal command left the checkout/files intact.
     WorkspaceRemovalBlocked {
@@ -1578,7 +1626,9 @@ pub enum ServerEvent {
     },
     /// Result of a requested Sound Studio preview after server-owned playback.
     /// Appended to preserve existing bincode discriminants.
-    SoundPreviewCompleted { succeeded: bool },
+    SoundPreviewCompleted {
+        succeeded: bool,
+    },
     /// One pane changed without moving (a new title, a presentation
     /// revision). Replaces that node in the client's tree; sending it instead
     /// of `TreeSnapshot` keeps a title change O(1) on the wire however many
@@ -1592,7 +1642,9 @@ pub enum ServerEvent {
         result: Result<String, String>,
     },
     /// Authoritative unresolved errors, replayed on attachment and recovery.
-    BlockingErrorsSnapshot { errors: Vec<BlockingError> },
+    BlockingErrorsSnapshot {
+        errors: Vec<BlockingError>,
+    },
     /// Exactly one terminal outcome for an admitted pane creation request.
     PaneCreateFinished {
         request_id: u64,
@@ -1644,5 +1696,29 @@ pub enum ServerEvent {
         #[serde(with = "crate::terminal_bytes")]
         bytes: Vec<u8>,
         reaches_journal_start: bool,
+    },
+    ResourceObservationFailed {
+        message: String,
+    },
+    ResourceSnapshot {
+        active_waits: Vec<(NodeId, ilium_core::resource_queue::ReservationId)>,
+        wait_revision: u64,
+        catalog: ilium_core::resource_queue::ResourceCatalog,
+        clock: ilium_core::resource_queue::ResourceClock,
+        local_invocations: Vec<ilium_core::resource_queue::AgentIdentity>,
+    },
+    ResourceResult {
+        request_id: u64,
+        result: Result<Box<crate::resource::ResourceReply>, crate::resource::ResourceError>,
+    },
+    ResourceWaitChanged {
+        wait_revision: u64,
+        pane_id: NodeId,
+        reservation_id: Option<ilium_core::resource_queue::ReservationId>,
+    },
+    /// Non-secret profile identity for a pane, or None when conversion clears it.
+    PaneCustomAgentIdentity {
+        pane_id: NodeId,
+        identity: Option<ilium_core::custom_agent::CustomAgentIdentity>,
     },
 }

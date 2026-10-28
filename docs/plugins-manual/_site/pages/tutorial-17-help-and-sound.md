@@ -317,7 +317,7 @@ The user can also take away the grant. Settings > Plugins > Capabilities lists `
 | A file in `files` is missing | `manifest.file-missing` |
 | The length does not match | `manifest.file-length` |
 | The hash does not match | `manifest.file-hash` |
-| A sound file is not WAV PCM or OGG Vorbis | package check fails |
+| A sound file is not WAV PCM or OGG Vorbis | `manifest.sound-format` |
 
 ### Points to notice
 

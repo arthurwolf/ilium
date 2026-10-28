@@ -81,7 +81,7 @@ The entry is named `signature` and holds a UTF-8 JSON document.
 |---|---|
 | [PKG-210] | `publisher.key` MUST be a PKCS#8 (RFC 5958) private key in PEM, with the label `PRIVATE KEY`, or `ENCRYPTED PRIVATE KEY` when protected by a passphrase. |
 | [PKG-211] | An encrypted key uses PBES2 with PBKDF2-HMAC-SHA256 (at least 600,000 iterations) and AES-256-CBC. `keygen` encrypts when `--passphrase-file` or the environment variable `ILIUM_KEY_PASSPHRASE` is given or when the user types a passphrase at the prompt. An empty passphrase is refused. |
-| [PKG-212] | `keygen` MUST create the file with mode 0600 and the folder with mode 0700. `sign` MUST refuse a key file that is readable by group or others (`trust.key-permissions`), on systems that have such modes. |
+| [PKG-212] | `keygen` MUST create the file with mode 0600 and the folder with mode 0700. `sign` MUST refuse a key file that is readable by group or others (`sign.key-permissions`), on systems that have such modes. |
 | [PKG-213] | `sign --key -` reads the PEM from standard input. The environment variable `ILIUM_PUBLISHER_KEY` MAY hold the PEM text for CI use. The host never writes a private key to a log. |
 
 **publisher.pub** is the public key. It is safe to share.
@@ -157,11 +157,12 @@ Store format:
 | `ilium plugin trust add --fingerprint <key_id> <package>` | Trusts the key that signed the package, only if its `key_id` equals the one given. Use this in scripts |
 | `ilium plugin trust list [--json]` | Lists the effective set with `key_id`, publisher id, status and source (user or system) |
 | `ilium plugin trust remove <key_id> [--force]` | Removes a user entry. See below |
+| `ilium plugin trust revoke <key_id> --reason <reason>` | Writes the key as revoked in the user store; `reason` is `compromised`, `superseded` or `retired` [PKG-243] |
 | `ilium plugin trust export <key_id>` | Writes the `publisher.pub` form to standard output |
 
 | Id | Rule |
 |---|---|
-| [PKG-225] | `ilium plugin install --trust <key_id>` trusts that exact key for this install and for later ones. It is the only non-interactive way to trust a key. A package signed by another key is refused with `trust.key-unknown`. |
+| [PKG-225] | `ilium plugin install --trust <key_id>` trusts that exact key for this install and for later ones. It is the non-interactive way to trust a key while installing; outside an install, `trust add --fingerprint <key_id> <package>` and `trust add <publisher.pub> --yes` are the non-interactive ways. A package signed by another key is refused with `trust.key-unknown`. |
 | [PKG-226] | `trust remove` of a key that signed installed plugins MUST be refused with `trust.in-use` and list the plugins, unless `--force` is given. With `--force` the plugins change to the package state `disabled-untrusted` ([plugin lifecycle states](/pages/reference-plugin-lifecycle-states/#package-states)): they stay installed, are stopped, keep their grants and settings, and show a badge. They leave that state when the key is trusted again, or with `ilium plugin enable <id> --accept-risk`. |
 | [PKG-227] | `trust remove` MUST NOT delete any plugin data. `trust remove` of a system entry is refused with `trust.system-entry`. |
 
@@ -170,7 +171,7 @@ Store format:
 | Id | Rule |
 |---|---|
 | [PKG-228] | A package with a valid signature from a trusted, non-revoked key is tier T2. |
-| [PKG-229] | A package with no `signature` entry is tier T3. It installs only with `--allow-unsigned`, or through `ilium plugin dev`. Without either it is refused with `trust.unsigned`. |
+| [PKG-229] | A package with no `signature` entry is tier T3. It installs only with `--allow-unsigned`, or through `ilium plugin dev`. Without either it is refused with `install.unsigned`. |
 | [PKG-230] | A package with a valid signature from a key that is not in the trust store prompts the user with the key details. If the user accepts, the key is added with `added_by: user` and the install continues as T2. If the user declines, the install stops with `trust.declined`. In a non-interactive run without `--trust`, it stops with `trust.key-unknown`. |
 | [PKG-231] | A package with an invalid signature is refused with `manifest.signature-invalid`, whatever the user could choose. There is no flag that installs it. |
 | [PKG-232] | A package signed by a revoked key is refused with `trust.key-revoked`. |
@@ -248,7 +249,7 @@ If the private key is lost and no copy exists, there is no recovery. Nobody can 
 | `package.signature-format` | `The signature entry of {package} is not a valid signature document: {detail}.` |
 | `trust.key-unknown` | `{package} is signed by key {key_id}, which is not trusted. Use --trust {key_id} to trust it.` |
 | `trust.declined` | `Key {key_id} was not trusted. Nothing was installed.` |
-| `trust.unsigned` | `{package} is not signed. Use --allow-unsigned to install it as a dev (T3) package.` |
+| `install.unsigned` | `{package} is not signed. Use --allow-unsigned to install it as a dev (T3) package.` |
 | `trust.key-revoked` | `Key {key_id} was revoked ({reason}). Nothing was installed.` |
 | `package.publisher-key-changed` | `{id} was signed by {old_key_id}. This update is signed by {new_key_id}. Import a rotation statement first.` |
 | `manifest.publisher-mismatch` | `The package says publisher "{manifest_publisher}". The key belongs to "{key_publisher}".` |

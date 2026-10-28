@@ -155,7 +155,7 @@ Some dangers come from two grants that are each harmless on their own.
 
 Read grants of normal risk expose private data: `terminal.read-screen`, `terminal.read-cells`, `fs.read:project`, `tree.read`, `agent.read`, `journal.read`. Egress grants of normal risk move data off the machine: `http`, `inference`, notify channels, `clipboard.write`, `messages.peer`, `services.use`. A plugin that holds one grant from each list can read a password echoed on screen, an API key in a project file or an agent's reply, and send it to a server. No high-risk grant is involved, so a user who only checks the pre-ticked rows is exposed.
 
-**[SEC-004]** The decision: the platform does not make these grants high risk, because most useful plugins hold such a pair. Instead the review dialog MUST show a **toxic combination row** whenever the requested set contains at least one data-read grant and at least one egress grant. The row is drawn in the warning style and reads: `This plugin can read your data and send data out.` The row is informational and cannot be unchecked. It lists the two groups of grants that triggered it. Details are in [Grant review and consent](/pages/reference-grant-review-and-consent/).
+**[SEC-004]** The decision: the platform does not make these grants high risk, because most useful plugins hold such a pair. Instead the review dialog MUST show a **toxic combination row** whenever the requested set contains at least one data-read grant and at least one egress grant. The row is drawn in the warning style and reads: `This plugin can read your data and send data out.` The row is informational and has no checkbox of its own. The user can still refuse the grants it lists. When the admin policy forbids the combination (SEC-005), the row instead reads `Blocked by your administrator`, and the grants of the combination are shown locked off. It lists the two groups of grants that triggered it. Details are in [Grant review and consent](/pages/reference-grant-review-and-consent/).
 
 **[SEC-005]** The admin policy MAY forbid the combination for chosen plugins with `[grants] deny_combinations`, see [Admin policy](/pages/reference-admin-policy/).
 
@@ -167,7 +167,7 @@ Inter-plugin channels bypass grants too. Plugin B can receive scrollback from pl
 
 - The review dialog MUST show a row `Receives data from other plugins` for a plugin that declares `messages.peer`, `services.use` of a service another plugin provides, or a topic subscription.
 - A receiver of `messages.peer` MUST declare `accepts_messages_from` in the manifest, a list of plugin ids. Messages from other ids are dropped with a log line, so a plugin cannot be sent unsolicited data.
-- `inference.provide` is high risk, because the provider receives every prompt that other plugins send. Its review wording is `Receives the text other plugins send to the AI model`.
+- `inference.provide` has normal risk (see the capability table) and is checked by default, but the provider receives every prompt that other plugins send. Its review wording is `Receives the text other plugins send to the AI model`.
 
 ## Side channels
 
@@ -197,7 +197,7 @@ Every mitigation in the table has at least one test. [Security testing](/pages/r
 |---|---|
 | A plugin holds a read grant and an egress grant | The review dialog shows the toxic combination row. Install proceeds if the user approves |
 | A plugin is later granted an egress grant through the Plugins screen | The row appears in the capability list from then on, and the grant change is audited |
-| The policy forbids the combination | The install succeeds, the combination row is locked off and reads `Blocked by your administrator`, and calls return `not-permitted` with the reason `policy` |
+| The policy forbids the combination | The install succeeds, the combination row reads `Blocked by your administrator` with its grants locked off, and calls return `not-permitted` with the reason `policy` |
 | A plugin that never declared `accepts_messages_from` is sent a peer message | The message is dropped and counted; the sender gets `not-permitted` with reason `unavailable` |
 
 ### See also

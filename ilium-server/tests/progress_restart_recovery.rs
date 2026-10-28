@@ -32,6 +32,7 @@ fn server_options(
     launch_directory: &Path,
 ) -> ServerOptions {
     ServerOptions {
+        resource_catalog_path: None,
         session_name: session_name.to_string(),
         socket_path,
         snapshot_path,

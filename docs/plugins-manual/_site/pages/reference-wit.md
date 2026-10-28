@@ -1126,7 +1126,7 @@ interface journal {
   record journal-entry { at: epoch-ms, pane: option<node-id>, source: string, kind: string, payload-json: string }
   /// payload-json is at most 4 KiB. The oldest entries are trimmed at limits.journal_entries.
   log-event: func(pane: option<node-id>, kind: string, payload-json: string) -> result<_, plugin-error>;
-  /// Own entries, newest last. limit is at most 1,000.
+  /// Own entries, newest last. limit is at most 1,000; a larger limit is clamped to 1,000.
   read: func(pane: option<node-id>, since: epoch-ms, limit: u32) -> list<journal-entry>;
 }
 ```
@@ -1363,7 +1363,7 @@ interface http {
   record http-request { method: string, url: string, headers: list<header>, body: option<list<u8>>, timeout-millis: u32 }
   record http-response { status: u16, headers: list<header>, body: list<u8> }
   enum stream-framing { raw, lines, server-sent-events, ndjson }
-  /// max-chunk-bytes at most 1 MiB.
+  /// max-chunk-bytes at most 64 KiB.
   record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
   /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
   fetch: func(request: http-request) -> result<request-id, plugin-error>;
@@ -1527,6 +1527,7 @@ interface services {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Async, take-reply. A call to the plugin's own service is queued, see Runtime model.
+  // @unstable(feature = plugin-services)
   call: func(service: string, method: string, payload-json: string) -> result<request-id, plugin-error>;
   take-reply: func(request: request-id) -> option<string>;
   /// Provider side, for deferred replies. Errors: not-found for an unknown call id.
@@ -1560,6 +1561,7 @@ interface ui-host {
   display-width: func(text: string) -> u16;
   theme: func() -> theme-tokens;
   theme-extras: func() -> theme-extras;
+  /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
   /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
   /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
   write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
@@ -1665,7 +1667,7 @@ interface audio {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   record audio-device { id: string, name: string, is-input: bool, is-default: bool }
-  /// Needs any audio grant.
+  /// Needs any audio grant; with none held it returns an empty list (no error code).
   devices: func() -> list<audio-device>;
   /// Delivers audio-frames. sample-rate 8,000 to 48,000. channels 1 or 2.
   open-capture: func(device: option<string>, sample-rate: u32, channels: u8) -> result<u64, plugin-error>;
@@ -1951,7 +1953,7 @@ interface terminal {
   record foreground-process { name: string, command-line: list<string>, cwd: option<string> }
   record history-match { row: u32, column: u16, length: u16 }
 
-  /// terminal.read-screen. Sync. max-rows at most 1,000.
+  /// terminal.read-screen. Sync. max-rows is clamped to 10,000.
   read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -> option<screen>;
   selection: func(pane: node-id) -> option<selection>;
   /// terminal.output-filter. regex is a bounded RE2-style expression. At most 8 filters per pane per plugin.
@@ -1980,6 +1982,7 @@ interface terminal {
   take-matches: func(request: request-id) -> option<list<history-match>>;
   /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.
   lock-input: func(pane: node-id, millis: u16) -> result<_, plugin-error>;
+  /// Releases this plugin's lock. No result: a no-op when no lock is held or the pane is missing.
   unlock-input: func(pane: node-id);
 }
 ```
@@ -2058,6 +2061,7 @@ interface editor {
   take-buffer: func(request: request-id) -> option<buffer-id>;
   /// editor.edit plus fs.write. Async, request-completed ok.
   save-buffer: func(buffer: buffer-id, path: option<fs-path>) -> result<request-id, plugin-error>;
+  /// Grant: editor.edit. Closes a buffer and frees its quota slot.
   close-buffer: func(buffer: buffer-id);
   viewport: func(pane: node-id) -> option<editor-viewport>;
   /// At most 4,096 marks per layer.
@@ -2121,8 +2125,9 @@ interface surface {
   resource frame-surface {
     /// Width and height in pixels.
     size: func() -> tuple<u32, u32>;
+    /// Rows are top to bottom. Rows that fall at or past the height are ignored.
     /// Rows are top to bottom. first-row plus the rows written must be within the height.
-    /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+    /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
     write-rows: func(first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
     /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
     write-cell-colors: func(first-row: u32, colors: list<u32>) -> result<_, plugin-error>;
@@ -2573,7 +2578,7 @@ The conversions above change names only. The SDKs add two wrapper forms on top o
 
 ## 11. Where each name is defined
 
-Every type is defined once. This index names the owner of each group of names. A page that needs a type links to the section.
+Every type is defined once, with two deliberate exceptions: `minimap-mark` is declared in `ilium:types/ui` (for `minimap-spec`) and in the `editor` primitive interface (for `set-minimap-marks`), and `menu-entry` is declared in `ilium:types/ui` (for `menu-spec`) and in the `menu-provider` export interface (for `menu-items`). A package cannot use a type from a package that depends on it, so each pair stays as two records with identical fields, and an SDK exposes each pair as one type. This index names the owner of each group of names. A page that needs a type links to the section.
 
 | Group | Interface | Section |
 |---|---|---|

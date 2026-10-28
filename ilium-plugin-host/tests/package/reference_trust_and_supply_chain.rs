@@ -25,8 +25,10 @@ fn trusted_fixture() -> CliFixture {
 #[derive(Default)]
 struct InstalledFixtureConsent(std::sync::atomic::AtomicUsize);
 impl ilium_plugin_host::install::Consent for InstalledFixtureConsent {
-    fn decide(&self, request: &ilium_plugin_host::install::ConsentRequest)
-        -> ilium_plugin_host::install::ConsentDecision {
+    fn decide(
+        &self,
+        request: &ilium_plugin_host::install::ConsentRequest,
+    ) -> ilium_plugin_host::install::ConsentDecision {
         assert_eq!(request.plugin, "example.minimal");
         assert_eq!(request.version, "0.1.0");
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -35,29 +37,53 @@ impl ilium_plugin_host::install::Consent for InstalledFixtureConsent {
 }
 
 fn installed_fixture() -> CliFixture {
-    use ilium_plugin_host::{audit::{AuditActor, AuditContext}, cli::local_install::factory,
-        signing::{SignedAt, SigningKey, sign}};
+    use ilium_plugin_host::{
+        audit::{AuditActor, AuditContext},
+        cli::local_install::factory,
+        signing::{sign, SignedAt, SigningKey},
+    };
     let mut fixture = trusted_fixture();
     // Keep the immutable signing vectors intact. Actual installation requires
     // callable lifecycle/handler exports and their matching real inventory.
     let unsigned = package_with_optional_artifacts(&[]);
     let seed: [u8; 32] = seed_of(0).try_into().expect("fixture signing seed");
     assert_eq!(key_id_of(0), VECTOR_KEY_ID);
-    let at = ilium_plugin_host::trust::utc_timestamp(fixture.env.now).expect("fixture signing time");
-    let signed = sign(&unsigned, &SigningKey::from_seed(seed), SignedAt(at)).expect("sign actual component fixture");
+    let at =
+        ilium_plugin_host::trust::utc_timestamp(fixture.env.now).expect("fixture signing time");
+    let signed = sign(&unsigned, &SigningKey::from_seed(seed), SignedAt(at))
+        .expect("sign actual component fixture");
     let path = fixture.work().join("installed-fixture.iliumpkg");
     write_file(&path, &signed);
     let consent = std::sync::Arc::new(InstalledFixtureConsent::default());
     let audit_context = AuditContext {
         session: "trust-supply-chain-install-fixture".into(),
-        actor: AuditActor { kind: "cli".into(), pane: None, plugin: None },
+        actor: AuditActor {
+            kind: "cli".into(),
+            pane: None,
+            plugin: None,
+        },
     };
-    let backend = factory(&fixture.env, consent.clone(), audit_context.clone()).expect("explicit local installation service");
-    fixture.env = fixture.env.clone().with_installer(backend).with_audit_context(audit_context);
-    let out = run_cli(&fixture, &["install", path.to_str().expect("fixture package path"), "--json"]);
+    let backend = factory(&fixture.env, consent.clone(), audit_context.clone())
+        .expect("explicit local installation service");
+    fixture.env = fixture
+        .env
+        .clone()
+        .with_installer(backend)
+        .with_audit_context(audit_context);
+    let out = run_cli(
+        &fixture,
+        &[
+            "install",
+            path.to_str().expect("fixture package path"),
+            "--json",
+        ],
+    );
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
     assert_eq!(consent.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(std::fs::read(&path).expect("unchanged package source"), signed);
+    assert_eq!(
+        std::fs::read(&path).expect("unchanged package source"),
+        signed
+    );
     fixture
 }
 
@@ -185,8 +211,13 @@ fn sec_141_flipped_signature_bytes_are_refused() {
     let trust = trust_of(0, "example");
     let document = data_of(&signed, "signature");
     let value: serde_json::Value = serde_json::from_slice(&document).expect("signature document");
-    let signature = value["signatures"][0]["signature"].as_str().expect("signature bytes");
-    let start = document.windows(signature.len()).position(|part| part == signature.as_bytes()).expect("stored signature");
+    let signature = value["signatures"][0]["signature"]
+        .as_str()
+        .expect("signature bytes");
+    let start = document
+        .windows(signature.len())
+        .position(|part| part == signature.as_bytes())
+        .expect("stored signature");
     // signed_at is informational and whitespace is not signed. Mutate the
     // cryptographic signature itself, whose every byte must be checked.
     for index in (start..start + signature.len()).step_by(5) {
@@ -629,10 +660,7 @@ fn sec_150_unicode_names_are_refused_by_the_ascii_path_contract() {
     ];
     v.sort_by(|a, b| a.name.cmp(&b.name));
     let got = first_error(&build(&v, &Tail::default()));
-    assert!(
-        got == "package.path-invalid",
-        "{got}"
-    );
+    assert!(got == "package.path-invalid", "{got}");
 }
 
 /// REQ: SEC-150
@@ -902,10 +930,24 @@ fn inspect(bytes: &[u8]) -> ilium_plugin_host::cli::CliOutput {
 fn sec_154_inspect_prints_manifest_file_signature_and_summary_lines() {
     let out = inspect(&vector_signed());
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
-    assert_eq!(records(&out, "inspect").iter().filter(|record| record["section"] == "manifest").count(), 1);
-    assert_eq!(records(&out, "inspect").iter().filter(|record| record["section"] == "signature").count(), 1);
+    assert_eq!(
+        records(&out, "inspect")
+            .iter()
+            .filter(|record| record["section"] == "manifest")
+            .count(),
+        1
+    );
+    assert_eq!(
+        records(&out, "inspect")
+            .iter()
+            .filter(|record| record["section"] == "signature")
+            .count(),
+        1
+    );
     assert_eq!(records(&out, "summary").len(), 1);
-    assert!(records(&out, "inspect").iter().any(|record| record["section"] == "file"));
+    assert!(records(&out, "inspect")
+        .iter()
+        .any(|record| record["section"] == "file"));
 }
 
 /// REQ: SEC-154
@@ -940,7 +982,15 @@ fn sec_154_inspect_does_not_install() {
 #[test]
 fn sec_154_inspect_of_an_unsigned_package_still_prints_a_signature_line() {
     let out = inspect(&vector_unsigned());
-    assert_eq!(records(&out, "inspect").iter().filter(|record| record["section"] == "signature").count(), 1, "{}", all_text(&out));
+    assert_eq!(
+        records(&out, "inspect")
+            .iter()
+            .filter(|record| record["section"] == "signature")
+            .count(),
+        1,
+        "{}",
+        all_text(&out)
+    );
     assert!(all_text(&out).contains("T3"));
 }
 
@@ -991,13 +1041,17 @@ const OPTIONAL_ARTIFACT_COMPONENT: &str = r#"(component
   (export "ilium:exports/handler@0.1.0" (instance $handler))
 )"#;
 fn package_with_optional_artifacts(extras: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut component = wat::parse_str(OPTIONAL_ARTIFACT_COMPONENT).expect("valid fixture component");
+    let mut component =
+        wat::parse_str(OPTIONAL_ARTIFACT_COMPONENT).expect("valid fixture component");
     component.extend_from_slice(&vector_component()[8..]);
     let mut listed = vec![("server.wasm", component.as_slice())];
     listed.extend_from_slice(extras);
     listed.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let manifest = manifest_text("", "server", "server.wasm", &listed);
-    let mut files: Vec<(&str, Vec<u8>)> = listed.iter().map(|(path, bytes)| (*path, bytes.to_vec())).collect();
+    let mut files: Vec<(&str, Vec<u8>)> = listed
+        .iter()
+        .map(|(path, bytes)| (*path, bytes.to_vec()))
+        .collect();
     files.push(("manifest.json", manifest));
     files.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     zip_of(&files)
@@ -1008,7 +1062,10 @@ fn package_with_optional_artifacts(extras: &[(&str, &[u8])]) -> Vec<u8> {
 fn sec_155_optional_sbom_and_provenance_are_accepted_when_listed() {
     let sbom: &[u8] = b"{\"spdxVersion\":\"SPDX-2.3\"}";
     let provenance: &[u8] = b"{\"_type\":\"https://in-toto.io/Statement/v1\"}";
-    let bytes = package_with_optional_artifacts(&[("provenance.json", provenance), ("sbom.spdx.json", sbom)]);
+    let bytes = package_with_optional_artifacts(&[
+        ("provenance.json", provenance),
+        ("sbom.spdx.json", sbom),
+    ]);
     // This contract checks optional archive contents without granting installation authority.
     let (_directory, installer) = installer();
     let report = installer.check(&bytes, ilium_plugin_api::manifest::CheckMode::Check);

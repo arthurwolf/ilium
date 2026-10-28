@@ -29,11 +29,13 @@ enum pane-lifecycle-state { running, frozen, restarting, exited }
 
 | Intent | Effect | Outcome |
 |---|---|---|
-| `freeze-pane` | The process is stopped with SIGSTOP on Unix. Output stops and the pane shows the frozen mark. | `ok`; `refused(unsupported)` on Windows |
+| `freeze-pane` | The process is stopped with SIGSTOP on Unix. Output stops and the pane shows the frozen mark. | `ok`; `refused(unsupported)` on Windows; `refused(conflict)` when the pane is already frozen or its process has exited |
 | `unfreeze-pane` | The process continues. | `ok`; `refused(conflict)` when the pane is not frozen |
-| `replace-pane-command` | The current process ends and the new `command` runs in the same pane, with `cwd` if given. `keep-scrollback` keeps the history above the new output. | `ok` once the new process runs. The durable resume binding stays with the kernel. |
-| `terminate-pane-process` | Sends a terminate request, waits `grace-ms`, then kills. At most 10,000 ms. | `ok` when the process has exited. The pane stays open and shows its exit status. |
+| `replace-pane-command` | The current process ends and the new `command` runs in the same pane, with `cwd` if given. `keep-scrollback` keeps the history above the new output. | `ok` once the new process runs; `refused(invalid-argument)` when the `cwd` does not exist or the program cannot be found, checked before the old process is ended, so the old process keeps running. The durable resume binding stays with the kernel. |
+| `terminate-pane-process` | Sends a terminate request, waits `grace-ms`, then kills. At most 10,000 ms. | `ok` when the process has exited. The pane stays open and shows its exit status. `refused(internal)` when the kill fails; the pane stays open and its status is unchanged. |
 | `resize-pane` | Asks the layout for `columns` and `rows`. A field left unset keeps its size. | `ok`; `refused(conflict)` when the layout cannot give the size. The message names the limiting neighbour. |
+
+An exited pane has no process to stop or continue, so `freeze-pane` and `unfreeze-pane` refuse it with `refused(conflict)`. `terminate-pane-process` on an exited pane is a no-op that returns `ok`, `resize-pane` and `replace-pane-command` still work on it (the latter starts a new process). Freezing a frozen pane is refused with `refused(conflict)`. `terminate-pane-process` on a frozen pane first sends SIGCONT so that the process can act on the terminate request, then proceeds as usual and returns `ok`. `replace-pane-command` on a frozen pane continues the old process, ends it, and starts the new one; the new process is not frozen and the frozen mark is cleared.
 
 Common refusals: `refused(not-permitted)` without the grant, `refused(not-found)` for a missing pane, `refused(pane-not-ready)` on a restored pane that has not started, `refused(invalid-argument)` for an empty command or a `grace-ms` over 10,000.
 
@@ -152,7 +154,9 @@ if (event.tag === 'pane-lifecycle-changed') {
 | Condition | Result |
 |---|---|
 | `freeze-pane` on Windows | `refused(unsupported)` |
+| `freeze-pane` on a frozen pane | `refused(conflict)` |
 | `unfreeze-pane` on a running pane | `refused(conflict)` |
+| `terminate-pane-process` or `replace-pane-command` on a frozen pane | The process is continued first, then the intent proceeds; the frozen mark is cleared and the outcome is `ok` |
 | `grace-ms` over 10,000 | `refused(invalid-argument)` |
 | Layout cannot satisfy `resize-pane` | `refused(conflict)`, message names the neighbour |
 | Pane not started after a restore | `refused(pane-not-ready)` |

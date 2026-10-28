@@ -646,7 +646,7 @@ export async function fetchNotes(url: string): Promise&lt;Uint8Array&gt; {
 </tr>
 </tbody>
 </table>
-<p>The server total of 1,024 MiB is the default of the pool. At activation an instance charges its effective <code>memory_mib</code> to the pool, and a sandbox helper charges its <code>memory_mib</code> plus 32 MiB [HST-164]. Growth below the limit never fails on the pool. An instance that grows past its cap traps at the growth call; the guest never sees <code>-1</code> from <code>memory.grow</code> [ABI-027]. A refusal because the pool is full is logged as <code>host-capacity</code> and the plugin can be started again when memory is free.</p>
+<p>The server total of 1,024 MiB is the default of the pool. At activation an instance charges its effective <code>memory_mib</code> to the pool, and a sandbox helper charges the sum of its hosted instances' <code>memory_mib</code> plus 32 MiB [HST-164]. Growth below the limit never fails on the pool. An instance that grows past its cap traps at the growth call; the guest never sees <code>-1</code> from <code>memory.grow</code> [ABI-027]. A refusal because the pool is full is logged as <code>host-capacity</code> and the plugin can be started again when memory is free.</p>
 <h2 id="8-json-in-strings">8. JSON in strings</h2>
 <p>A field or parameter whose name ends in <code>-json</code> carries UTF-8 JSON text. The host and the SDKs apply one rule to all of them [ABI-016].</p>
 <ul>
@@ -674,7 +674,7 @@ export async function fetchNotes(url: string): Promise&lt;Uint8Array&gt; {
 <tr>
 <td><code>wasi:cli</code> stdout and stderr</td>
 <td>Yes</td>
-<td>Written to the plugin log at <code>info</code> and <code>error</code>.</td>
+<td>Written to the plugin log at <code>info</code> and <code>warn</code>.</td>
 </tr>
 <tr>
 <td><code>wasi:cli</code> environment, arguments, exit</td>

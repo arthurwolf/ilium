@@ -38,13 +38,14 @@ pub const fn turn_name(turn: AgentTurn, completion_unread: bool) -> &'static str
     }
 }
 
-/// `project`, `group`, `split_view`, `folder`, or `pane`.
+/// `project`, `group`, `split_view`, `worktree`, `folder`, or `pane`.
 pub fn node_kind_name(node: &Node) -> &'static str {
     match &node.kind {
         NodeKind::Container(container) => match container.kind {
             ContainerKind::Project { .. } => "project",
             ContainerKind::Group => "group",
             ContainerKind::SplitView { .. } => "split_view",
+            ContainerKind::Worktree { .. } => "worktree",
         },
         NodeKind::Folder { .. } => "folder",
         NodeKind::Pane { .. } => "pane",
@@ -171,6 +172,14 @@ fn node_view_at(tree: &Tree, id: NodeId, options: ViewOptions, level: usize) -> 
                 }
                 ContainerKind::SplitView { orientation } => {
                     view.insert("orientation".into(), to_value(orientation));
+                }
+                ContainerKind::Worktree {
+                    repo_common_dir,
+                    worktree_root,
+                } => {
+                    view.insert("repo_common_dir".into(), path_value(repo_common_dir));
+                    view.insert("path".into(), path_value(worktree_root));
+                    view.insert("fixed_membership".into(), json!(true));
                 }
                 ContainerKind::Group => {}
             }

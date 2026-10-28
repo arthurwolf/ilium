@@ -20,7 +20,7 @@ Each operation needs a grant in the form `<grant>:<scope>`.
 
 Other rules that apply:
 
-- `fs.roots` needs any `fs` grant. The `package`, `data` and `cache` scopes are always granted, so a manifest does not list them.
+- `fs.roots` needs any `fs.*` grant. The `package`, `data` and `cache` scopes are always granted, so a manifest does not list them.
 - `fs.pick` without `fs.read:picked` or `fs.write:picked` fails at install with `manifest.grant-dependency`.
 - `fs.write:agent-sessions:<agent>` is refused at install.
 - `fs.read:path:` with a literal absolute path, `fs.watch:path:` with one, and `fs.write:worktrees` are high-risk grants. The user checks each one by hand.
@@ -40,14 +40,14 @@ Manifest example for a server side that reads and writes the project and watches
 | `data` | `/data` | the plugin's private data folder | always, read and write |
 | `cache` | `/cache` | the plugin's private cache folder, may be evicted | always, read and write |
 | `project` | `/project` | the session's canonical project folder | grant |
-| `worktrees` | `/worktrees` | the worktree folder set by `workspace.worktree_root` | grant, high risk for write |
+| `worktrees` | `/worktrees` | the worktree folder set by `workspace.worktree_root` | grant, high risk for read and for write |
 | `picked` | `/picked/<n>` | each path the user chose in the picker | grant per pick |
 | `agent-sessions:claude`, `agent-sessions:codex`, `agent-sessions:antigravity`, `agent-sessions:gemini` | `/agent-sessions/<agent>` | the agent's transcript folder | grant, high risk |
 | `agent-config:claude`, `agent-config:codex`, `agent-config:gemini`, `agent-config:antigravity` | `/agent-config/<agent>` | the agent's configuration folder | grant, high risk for write |
 | `minecraft-saves` | `/minecraft-saves` | the platform's Minecraft saves folder | grant |
 | `path:<template>` | `/paths/<n>` | a template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}`, `{worktrees}`, optionally ending in `/**` | grant |
 
-Every scope except `package` can be watched, and `picked` only for folders. A path that leaves the scope root through `..` or a symbolic link is refused with `not-permitted`. Synchronous `std::fs` code also works, because the component sees only the preopens.
+Every scope except `package` and the `agent-config` scopes can be watched (a watch on `agent-config` is refused with `manifest.grant-scope`), and `picked` only for folders. A path that leaves the scope root through `..` or a symbolic link is refused with `not-permitted`. Synchronous `std::fs` code also works, because the component sees only the preopens.
 
 ### Surface
 
@@ -55,7 +55,7 @@ Every scope except `package` can be watched, and `picked` only for folders. A pa
 
 | Function | Grant | Kind | Result and meaning |
 |---|---|---|---|
-| `roots` | any `fs` grant | sync | List of `(scope, writable)` pairs for the granted scopes. |
+| `roots` | any `fs.*` grant | sync | List of `(scope, writable)` pairs for the granted scopes. |
 | `metadata(path)` | `fs.read` | sync | `fs-metadata` of one entry. `not-found` when it is absent. |
 | `list_dir(path, max_entries)` | `fs.read` | sync | Children of a folder, at most 4,096. Each is a `dir-entry`. |
 | `read(path, offset, max_bytes)` | `fs.read` | sync | Bytes from `offset`, at most 1 MiB per call. |
@@ -69,7 +69,7 @@ Every scope except `package` can be watched, and `picked` only for folders. A pa
 | `unwatch(watch)` | `fs.watch` | sync | Stops a watch. |
 | `lock(path, exclusive, timeout_millis)` | `fs.read` and `fs.write` | async | Takes a lock and returns a `lock-id`. |
 | `unlock(lock)` | none | sync | Releases a lock. |
-| `pick(spec)` | `fs.pick` | async | Opens the picker. The chosen path arrives in a `picked/<n>` scope. |
+| `pick(spec)` | `fs.pick` | async | Opens the picker and returns a `request-id`. Retrieve the chosen path with `take_picked(request)` (WIT `take-picked`), which returns `option<fs-path>`: `none` means the user cancelled. The path arrives in a `picked/<n>` scope. |
 | `read_with_revision(path)` | `fs.read` | async | Whole file plus its revision token. See [atomic write and tail](/pages/api-fs-atomic-and-tail/). |
 | `write_atomic(path, data, expected)` | `fs.write` | async | Replaces the file only if it is still at `expected`, or does not exist when `expected` is none. Fails with `conflict` otherwise. |
 | `tail(path, cursor, max_bytes)` | `fs.read` | sync | Bytes appended since `cursor`, at most 1 MiB, with the next cursor and a `truncated` flag. |

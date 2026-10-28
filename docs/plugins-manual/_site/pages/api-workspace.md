@@ -231,7 +231,7 @@ After `release` succeeds, the folder is still on disk. To remove it, the plugin 
 
 ### Live sessions across projects
 
-One Ilium server runs per project session. A workspace plugin often needs to see the others: which sessions are running, and how busy they are. The `sessions` interface (server side, grant `sessions.cross`, medium to high risk) lists the user's live sessions and runs one command of the same plugin in another session.
+One Ilium server runs per project session. A workspace plugin often needs to see the others: which sessions are running, and how busy they are. The `sessions` interface (server side, grant `sessions.cross`, high risk) lists the user's live sessions and runs one command of the same plugin in another session.
 
 ```wit
 // Excerpt of ilium:host/sessions in reference-wit
@@ -249,7 +249,7 @@ take-reply: func(request: request-id) -> option<string>;
 | `send` | `send(request)` | `send(request)` | Runs one command of this same plugin in the named session. Returns a request id. |
 | `take-reply` | `take_reply(id)` | `takeReply(id)` | The reply text once the request completed, else none. |
 
-Rules. The target session must have the same plugin installed and enabled, with `sessions.cross` granted there. The command must be one that the plugin declares. Kernel commands of another session cannot be reached. The request carries the caller's plugin id and session name, so the receiving command can tell who asked. A target that is not found is `not-found`; a target without the plugin or grant is `not-permitted`. A completion can fail with `timed-out` or `network`.
+Rules. The target session must have the same plugin installed and enabled, with `sessions.cross` granted there. The command must be one that the plugin declares. Kernel commands of another session cannot be reached. The request carries the caller's plugin id and session name, so the receiving command can tell who asked. A target that is not found is `not-found`; a target without the plugin or grant is `not-permitted`. `take-reply` has no error channel: a completion that fails with `timed-out` or `network` is reported by the outcome of the `request-completed` event, and `take-reply` then returns none.
 
 **Rust**
 
@@ -346,6 +346,9 @@ Illustrative, not generated. Each line is a plugin log entry. The retry in the s
 | `register` | `not-found` | The repository is not a Git repository, or the `owner` node does not exist. |
 | `register` | `conflict` | The `path` is already registered. |
 | `register` | `invalid-argument` | The branch name is empty or not a valid Git branch name. |
+| `send` | `not-found` | The target session is not running. |
+| `send` | `not-permitted` | The target has not got the plugin installed and enabled with `sessions.cross` granted, or the command is a kernel command. |
+| `send` | `invalid-argument` | The command is not one that the plugin declares, or `arguments-json` is not valid JSON. |
 | `release` | `not-found` | The id is not registered. A second release of the same id gives this too. |
 | `release` | `conflict` | The worktree is in use (see `in_use`). Try again after the process ends. |
 

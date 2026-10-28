@@ -301,7 +301,9 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     if !settings.panels.shows_right()
         || matches!(
             app.right_panel_target,
-            RightPanelTarget::Chatroom { .. } | RightPanelTarget::Attention
+            RightPanelTarget::Chatroom { .. }
+                | RightPanelTarget::Resource { .. }
+                | RightPanelTarget::Attention
         )
     {
         finish_field(app, presentation, painted_bits);
@@ -422,7 +424,9 @@ fn screen_occupancy(
         if settings.panels.shows_right()
             && !matches!(
                 app.right_panel_target,
-                RightPanelTarget::Chatroom { .. } | RightPanelTarget::Attention
+                RightPanelTarget::Chatroom { .. }
+                    | RightPanelTarget::Resource { .. }
+                    | RightPanelTarget::Attention
             )
         {
             let viewports = app.pane_viewports();

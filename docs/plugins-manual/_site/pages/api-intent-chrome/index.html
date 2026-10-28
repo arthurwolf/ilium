@@ -459,7 +459,7 @@ const slot = { tag: 'set-frame-slot', val: {
   pane, slot: 'branch', content: richText('main'), icon: '🌿', tooltip: undefined } } as const;
 </code></pre>
 <h3 id="open-external">open-external</h3>
-<p><code>open-external</code> hands a target to the desktop. <code>url</code> accepts <code>http</code>, <code>https</code> and <code>mailto</code> only. <code>file</code> opens a path with the desktop handler. <code>settings</code> takes an <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code> link and opens the Settings screen at that row, which is how a plugin points at a kernel setting it may not write. The first time a plugin opens a target origin the user is asked, and the answer is remembered for that plugin. A declined request is <code>refused(not-permitted)</code>. The <code>open_target</code> allowlist stays in the kernel.</p>
+<p><code>open-external</code> hands a target to the desktop. <code>url</code> accepts <code>http</code>, <code>https</code> and <code>mailto</code> only. <code>file</code> opens a path with the desktop handler. <code>settings</code> takes an <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code> link and opens the Settings screen at that row, which is how a plugin points at a kernel setting it may not write. The first time a plugin opens a target origin the user is asked, and the answer is remembered for that plugin. A declined request is <code>refused(not-permitted)</code>. There is no separate allowlist of targets: the only checks are the scheme list above (a URL with any other scheme is <code>refused(not-permitted)</code>, SEC-043) and the per-origin consent, and both run in the kernel, never in the plugin.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">let url = Intent::OpenExternal(OpenExternalSpec { target: ExternalTarget::Url(&quot;https://status.example.com&quot;.into()) });
 let settings = Intent::OpenExternal(OpenExternalSpec { target: ExternalTarget::Settings(&quot;ilium://settings/keyboard#chords&quot;.into()) });
@@ -471,8 +471,10 @@ const settings = { tag: 'open-external', val: { target: { tag: 'settings', val: 
 <h3 id="titles-and-icons-rename-node-source-and-inferred-icons">Titles and icons: rename-node source and inferred icons</h3>
 <p><code>rename-node</code> gains <code>source</code> (<code>plugin</code> or <code>inferred</code>) and <code>expected-revision</code>. A stale <code>expected-revision</code> is <code>refused(conflict)</code>. A title with the source <code>inferred</code> never replaces a title the user set by hand, so an automatic titler cannot overwrite a manual name. <code>set-inferred-icon</code> follows the same rule for icons: a manual icon wins and the intent is <code>refused(conflict)</code>. <code>icon</code> is a catalogue id or a glyph, and none clears the inferred icon. <code>source</code> names the origin of the inference.</p>
 <p><strong>Rust</strong></p>
-<pre><code class="language-rust">let rename = Intent::RenameNode(RenameNodeSpec {
-    node, title: &quot;Fix auth&quot;.into(), source: TitleOrigin::Inferred, expected_revision: Some(view.revision),
+<pre><code class="language-rust">use ilium_plugin_sdk::types::tree::TitleSource;
+
+let rename = Intent::RenameNode(RenameNodeSpec {
+    node, title: &quot;Fix auth&quot;.into(), source: TitleSource::Inferred, expected_revision: Some(view.revision),
 });
 let icon = Intent::SetInferredIcon(SetInferredIconSpec { node, icon: Some(&quot;🔧&quot;.into()), source: &quot;titler&quot;.into() });
 </code></pre>
@@ -572,7 +574,7 @@ const ack = { tag: 'ack-attention', val: node } as const;
 </tr>
 <tr>
 <td><code>open-external</code> declined, or a scheme other than <code>http</code>, <code>https</code>, <code>mailto</code></td>
-<td><code>refused(not-permitted)</code> or <code>refused(invalid-argument)</code></td>
+<td><code>refused(not-permitted)</code></td>
 </tr>
 <tr>
 <td><code>mark-attention</code> reason over 80 characters</td>

@@ -627,7 +627,7 @@
 <h4 id="settings">Settings</h4>
 <p>A plugin adds a settings tab, a section in a kernel tab, or its own view-rendered tab. There are 18 row types, from <code>toggle</code> and <code>choice</code> to <code>location</code>, <code>map</code>, <code>multi-choice</code> and <code>meter</code>. See <a href="/pages/settings-extension/">Settings extension</a>, <a href="/pages/settings-screens/">Settings screens</a> and <a href="/pages/reference-settings-schema/">Settings schema reference</a>.</p>
 <h4 id="capabilities">Capabilities</h4>
-<p>One grant per feature, such as <code>tree.decorate</code>, <code>agent.read</code> or <code>fs.read:&lt;scope&gt;</code>. There are 19 further grants, nine of them high risk. The user sees every grant in the review dialog before it takes effect. The <a href="/pages/capabilities/">capability reference</a> lists them all with their sides and risk. The pages in the groups below describe each grant and what it unlocks.</p>
+<p>One grant per feature, such as <code>tree.decorate</code>, <code>agent.read</code> or <code>fs.read:&lt;scope&gt;</code>. There are 23 further grants, eleven of them high risk. The user sees every grant in the review dialog before it takes effect. The <a href="/pages/capabilities/">capability reference</a> lists them all with their sides and risk. The pages in the groups below describe each grant and what it unlocks.</p>
 <table>
 <thead>
 <tr>
@@ -666,7 +666,7 @@
 </tr>
 <tr>
 <td>Platform</td>
-<td><a href="/pages/capability-services/"><code>services</code></a>, <a href="/pages/capability-topics-subscribe/"><code>topics.subscribe</code></a>, <a href="/pages/capability-messages-peer/"><code>messages.peer</code></a>, <a href="/pages/capability-inference/"><code>inference</code></a>, <a href="/pages/capability-inference-provide/"><code>inference.provide</code></a>, <a href="/pages/capability-workspace-manage/"><code>workspace.manage</code></a>, <a href="/pages/capability-settings-all/"><code>settings.all</code></a>, <a href="/pages/capability-plugins-manage/"><code>plugins.manage</code></a>, <a href="/pages/capability-help-read/"><code>help.read</code></a>, <a href="/pages/capability-always-granted/">always granted</a></td>
+<td><a href="/pages/capability-services/"><code>services</code></a>, <a href="/pages/capability-topics-subscribe/"><code>topics.subscribe</code></a>, <a href="/pages/capability-messages-peer/"><code>messages.peer</code></a>, <a href="/pages/capability-inference/"><code>inference</code></a>, <a href="/pages/capability-inference-provide/"><code>inference.provide</code></a>, <a href="/pages/capability-workspace-manage/"><code>workspace.manage</code></a>, <a href="/pages/capability-settings-all/"><code>settings.read-all</code></a>, <a href="/pages/capability-plugins-manage/"><code>plugins.manage</code></a>, <a href="/pages/capability-help-read/"><code>help.read</code></a>, <a href="/pages/capability-always-granted/">always granted</a></td>
 </tr>
 </tbody>
 </table>
@@ -693,7 +693,7 @@
 </tr>
 <tr>
 <td>Quality</td>
-<td><a href="/pages/testing/">Testing</a>, <a href="/pages/debugging/">Debugging</a>, <a href="/pages/performance/">Performance</a>, <a href="/pages/errors-and-limits/">Errors and limits</a>, <a href="/pages/security/">Security</a></td>
+<td><a href="/pages/testing/">Testing</a>, <a href="/pages/debugging/">Debugging</a>, <a href="/pages/performance/">Performance</a>, <a href="/pages/reference-errors-and-limits/">Errors and limits</a>, <a href="/pages/security/">Security</a></td>
 </tr>
 <tr>
 <td>Concepts</td>
@@ -1226,7 +1226,7 @@ export const { lifecycle, handler } = definePlugin({
 <h3 id="what-the-user-sees">What the user sees</h3>
 <ul>
 <li><strong>Review dialog:</strong> before a T2 or T3 package installs, the dialog lists each requested capability with a checkbox, drawn as <code>[x]</code> and <code>[ ]</code>. Declined rows are dimmed. High-risk capabilities start unchecked and are drawn in the warning style.</li>
-<li><strong>First activation of a bundled plugin:</strong> a T1 plugin with high-risk capabilities asks once, with the buttons <code>Allow selected</code> and <code>Not now</code>. <code>Not now</code> asks again at the next server start, at most three times.</li>
+<li><strong>First activation of a bundled plugin:</strong> a T1 plugin with high-risk capabilities shows a prompt at first activation, with the buttons <code>Allow selected</code> and <code>Not now</code>. <code>Not now</code> asks again at the next server start, at most three prompts in total, then Settings &gt; Plugins.</li>
 <li><strong>Disabled plugins:</strong> the tree footer shows the notice below. Settings &gt; Plugins lists the same plugin with its last error.</li>
 </ul>
 <figure>
@@ -1255,7 +1255,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
 <li><a href="/pages/worlds-and-sides/">Sides and worlds</a> and <a href="/pages/lifecycle/">Lifecycle</a></li>
 <li><a href="/pages/capabilities/">Capabilities</a> and <a href="/pages/security/">Security</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="next" href="/pages/getting-started-first-plugin/"><small>Next</small>Your first plugin in five minutes</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

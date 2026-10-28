@@ -9,7 +9,7 @@ Use a job for work that is too long for an event handler, such as scanning a lar
 ### What you need
 
 - The `jobs.run` grant. It takes no argument.
-- A `job-runner` export. Add `"job-runner"` to the manifest `exports` list of the side that runs the job, and implement it: the `JobRunner` trait in Rust, or the `run` member of `definePlugin` in TypeScript. The `with-jobs` world fragment adds the import and export (section 8.5 of the API). See [exports](/pages/api-exports/).
+- A `job-runner` export. Add `"job-runner"` to the manifest `exports` list of the side that runs the job, and implement it: the `JobRunner` trait in Rust, or the `run` member of `definePlugin` in TypeScript. The `with-jobs` world fragment adds the import and export (see [exports](/pages/api-exports/) for the world fragments). See [exports](/pages/api-exports/).
 - One `contributes.jobs` entry for every job kind the plugin starts.
 - A side that supports jobs: `server`, `client` or `scene`. A scene declares the grant in `capabilities.scene`.
 
@@ -91,7 +91,7 @@ Each limit has a default, a ceiling for the plugin's tier, and an effect when it
 | Queued jobs | 16 | 64 | 16 | `busy` |
 | Pending requests per plugin | 64 | 256 | 64 | `busy` |
 
-The per-kind values in `contributes.jobs` override the CPU and memory defaults for that kind, within the same ceilings. Time spent in `wait-request` counts against the wall-clock deadline only. All plugins in one server or client share `session_job_workers`, which defaults to `min(4, cores / 2)` with a minimum of 1. Jobs queue when those workers are busy.
+The per-kind values in `contributes.jobs` override the CPU and memory defaults for that kind, within the same ceilings. Time spent in `wait-request` counts against the wall-clock deadline only. All plugins in one server or client share one pool of job worker instances per server or client. Its size is fixed by the host, is not a setting and cannot be changed by a plugin; it is `min(4, cores / 2)` with a minimum of 1. Jobs queue when those workers are busy.
 
 ### How a job runs
 
@@ -126,7 +126,7 @@ The starting side gets a request id at once. A job waits in the queue while the 
 |---|---|
 | Grant declined, or revoked while the plugin runs | `start` returns `not-permitted`, and `run` is never called. Pending jobs that need the grant complete as `failed(revoked)`. |
 | Kind not listed in `contributes.jobs` | `start` returns `invalid-argument`. |
-| Input over the input limit | `start` returns `invalid-argument` at once. Nothing is queued. |
+| Input over `job_io_mib` (input and output together; default 16 MiB, ceiling 64 for tier 1 and 16 for tiers 2 and 3) | `start` returns `invalid-argument` at once. Nothing is queued. |
 | Job queue full | `start` returns `busy`. Jobs within the queue limit wait without an error. |
 | Output over the output limit | The job completes as `failed(invalid-argument)`. |
 | CPU or wall-clock deadline passed | `failed(timed-out)`. |

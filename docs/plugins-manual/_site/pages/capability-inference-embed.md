@@ -52,7 +52,7 @@ Normal risk. The text goes to the provider the user selected, as with [inference
 | `vector.top-k` | function | `top-k(index, query, k) -> result<list<tuple<string, f32>>, plugin-error>`; `k` at most 100. |
 | `vector.drop-index` | function | Delete an index. |
 
-See [Inference](/pages/api-inference/) and the entry limits in [Errors and limits](/pages/errors-and-limits/).
+See [Inference](/pages/api-inference/) and the vector entry limits in [Errors and limits](/pages/reference-errors-and-limits/).
 
 ### Manifest
 
@@ -149,9 +149,14 @@ Use the same model and dimension for the index and the queries. Changing the pro
 | Grant missing or declined | `not-permitted` | Fall back to keyword search. |
 | Provider without embeddings | `unsupported` | Tell the user which provider to select. |
 | More than 256 texts or a text above 8 KiB | `invalid-argument` | Split the batch. |
+| `k` above 100 in `top-k` | `invalid-argument` | Ask for at most 100 results and page by query. |
 | Wrong vector dimension for the index | `invalid-argument` | Create a new index. |
 | Index over the entry limit | `quota-exceeded` | Remove old entries. |
 | Provider unreachable | `network` | Retry later. |
+| `top-k`, `remove-entries` or `drop-index` names an index id that does not exist (never created, already dropped or owned by another plugin) | `not-found` | Create the index again and re-embed. |
+| `top-k` query vector has the wrong dimension | `invalid-argument` | Fix the call. |
+| `remove-entries` lists an id that is not in the index | Ignored, the other ids are removed | Nothing. |
+| `drop-index` on an index twice | `not-found` on the second call | Treat as done. |
 
 Index files count against the plugin storage quota.
 

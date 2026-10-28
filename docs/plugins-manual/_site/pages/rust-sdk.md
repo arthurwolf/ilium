@@ -6,7 +6,7 @@ The Rust SDK, `ilium-plugin-sdk`, gives a Rust plugin four things: generated bin
 
 The host loads a plugin as a WebAssembly component. It calls the plugin's exports with batches of events and applies the submissions the plugin returns. The plugin calls host imports when it needs the host to act. The SDK maps both directions to ordinary Rust types, traits and `Result` values.
 
-The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see [TypeScript SDK reference](/pages/typescript-sdk/). The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and nineteen grants.
+The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see [TypeScript SDK reference](/pages/typescript-sdk/). The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and 23 grants.
 
 ### You will need
 
@@ -48,7 +48,7 @@ ilium-plugin-sdk = { version = "0.1", features = ["testing"] }
 }
 ```
 
-The generated files are `manifest.json`, `Cargo.toml` and `src/lib.rs` for Rust, and `manifest.json`, `package.json` and `src/main.ts` for TypeScript. `ilium plugin new` does not run `bun install`; run it yourself. A folder that holds both `Cargo.toml` and `package.json` stops the build with `toolchain.language-ambiguous`.
+The generated files are `manifest.json`, `Cargo.toml` and `src/lib.rs` for Rust, and `manifest.json`, `package.json` and `src/<side>.ts` for TypeScript (`src/server.ts`, `src/client.ts` or `src/scene.ts`). `ilium plugin new` does not run `bun install`; run it yourself. A folder that holds both `Cargo.toml` and `package.json` stops the build with `toolchain.language-ambiguous`.
 
 ## How a plugin is built
 
@@ -582,7 +582,7 @@ The spinner steps its frames in the host (`⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ �
 // types::ui::{VideoSource, MediaFit}
 let clip = tree.video(VideoSource::Asset("loops/shore.webm".into()))
     .autoplay(true).looped(true).fit(MediaFit::Cover).key("clip");
-let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key("term"); // needs terminal.raw-input
+let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key("term"); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 ```
 
 **TypeScript**
@@ -591,7 +591,7 @@ let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(
 import { video, terminalView } from '@ilium/plugin-sdk/ui/build';
 
 const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, { key: 'clip', autoplay: true, loop: true, fit: 'cover' });
-const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.raw-input
+const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 ```
 
 ### Hover, pointer, drag feedback, popovers and theme tokens
@@ -743,11 +743,11 @@ let ids = vector::embed(&["notes on retries".to_string()], "search").await?;
 let child = process::spawn(SpawnSpec { process: spec, stdin_open: true, line_mode: true })?;
 child.write_stdin(b"ping\n")?;
 // durable timers and journal.
-timers::at("nightly", 86_400_000, true)?;
-journal::log_event("moved", &payload)?;
+timers::at(1_790_000_000_000, "nightly")?; // epoch in ms, then the timer name
+journal::log_event(None, "moved", &payload)?;
 // kernel settings and keymap (read-only).
-let value = kernel_settings::read("terminal.scrollback")?;
-let chord = keymap::bindings("palette.open")?;
+let value = kernel_settings::read("terminal")?; // the tab; JSON text
+let bindings = keymap::bindings();
 // client requests: ask the attached client to do something.
 let answer = client_requests::request("pick-file", &args).await?;
 // sessions (server): list and send to another session.
@@ -778,12 +778,12 @@ const stream = await http.stream({ request, framing: 'server-sent-events', maxCh
 const ids = await vector.embed(['notes on retries'], 'search');
 const child = proc.spawn({ process: spec, stdinOpen: true, lineMode: true });
 child.writeStdin(new TextEncoder().encode('ping\n'));
-timers.setDurable('nightly', 86_400_000n, true);
-journal.append('moved', payload);
-const value = kernel.get('terminal.scrollback');
-const chord = keymap.lookup('palette.open');
+timers.at(1_790_000_000_000n, 'nightly');
+journal.logEvent(undefined, 'moved', payloadJson);
+const value = kernel.read('terminal');
+const chord = keymap.bindings();
 const answer = await clientRequests.request('pick-file', args);
-const all = sessions.list();
+const all = sessions.listLive();
 ```
 
 Terminal, agent, editor and basic primitives gain the following functions, each behind the grant named in the table.
@@ -797,7 +797,7 @@ Terminal, agent, editor and basic primitives gain the following functions, each 
 | cli | additions listed on [cli](/pages/api-cli/) | same, camelCase | `cli` |
 | ui | `open_popup_with`, `theme_extras` | `openPopupWith`, `themeExtras` | `ui.chrome` for chrome surfaces |
 
-`gpu` is `@unstable`: import it only from a scene and expect it to change. Nine of the grants in this table are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript` and `settings.read-kernel:api`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
+`gpu` is `@unstable`: import it only from a scene and expect it to change. Eleven of the 23 grants are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>` and `panes.create-command:<program>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
 
 ## Settings rows, meters and row state
 
@@ -808,7 +808,7 @@ The manifest `settings` object declares 18 row types. The plugin updates a row's
 ```rust
 // Meter row filled from the plugin, and a state banner on a row.
 ui::set_meter("usage.spend", vec![MeterSegment { label: "today".into(), value: 4.2, tone: Tone::Info }])?;
-ui::set_row_state("provider.key", RowState { kind: RowStateKind::Warning, message: "Key expires in 3 days".into() })?;
+ui::set_row_state("provider.key", RowState { kind: RowStateKind::Error, message: Some("Key is invalid".into()) })?;
 ```
 
 **TypeScript**
@@ -816,7 +816,7 @@ ui::set_row_state("provider.key", RowState { kind: RowStateKind::Warning, messag
 ```ts
 // Meter row filled from the plugin, and a state banner on a row.
 setMeter('usage.spend', [{ label: 'today', value: 4.2, tone: 'info' }]);
-setRowState('provider.key', { kind: 'warning', message: 'Key expires in 3 days' });
+setRowState('provider.key', { kind: 'error', message: 'Key is invalid' });
 ```
 
 The manifest side, identical for both languages:
@@ -900,7 +900,7 @@ use ilium_plugin_sdk::exports::HookHandler;
 
 // Owner: needs extensions.provide:com.example.notes/after-save
 let entries = extensions::list("com.example.notes/recognisers")?;
-let request = extensions::run_hook("com.example.notes/after-save", &payload_json).await;
+let outcome = extensions::run_hook("com.example.notes/after-save", &payload_json).await;
 // Outcome ok: take the reply. refused(extension.vetoed): do not perform the action.
 
 // Contributor: needs extensions.contribute:com.example.notes/after-save
@@ -1089,13 +1089,13 @@ The SDK does not build packages. The `ilium plugin` command does that, from the 
 
 ## SDK versioning policy
 
-The SDK version has its own number, separate from the contract `ilium:plugin@0.1.0`. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. `ilium plugin check` fails with `component.api-version-mismatch` when the component and the manifest name different contract versions. See [Versioning](/pages/versioning/).
+The SDK version has its own number, separate from the contract `ilium:plugin@0.1.0`. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. `ilium plugin check` fails with `manifest.api-version` when the component and the manifest name different contract versions. See [Versioning](/pages/versioning/).
 
 ## Edge cases
 
 - A batch holds at most 256 events and a submission list at most 256 entries; a larger list traps the instance with `trap.submission-batch`.
 - A crashed instance restarts after 1 s, then 5 s; the third failure within 10 minutes disables the plugin until the user enables it.
-- `on_events` has a 20 ms deadline, `render` 10 ms, `activate` 2000 ms and `deactivate` 500 ms. A breach traps the instance.
+- `on_events` has a 20 ms deadline, `render` 10 ms, `activate` 2000 ms and `deactivate` 500 ms. A breach of `on_events`, `render` or `activate` traps the instance. A breach of `deactivate` drops the instance, discards the restore bytes, logs `deactivate.deadline` and does not count as a failure.
 - Instance memory is capped at 32 MiB (the `memory_mib` manifest key can raise it, up to 128 MiB for T2 and T3 plugins).
 - A log message over 16 KiB is cut and ends with `…[truncated]`.
 - An await that never completes is cancelled with `timed-out` when its request timeout elapses.

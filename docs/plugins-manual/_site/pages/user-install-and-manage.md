@@ -49,8 +49,8 @@ Ilium checks the file before any code in it runs. A file that fails a check is n
 2. The signature, if any, verifies, and the signer is a key you trust or that you are now asked to trust.
 3. The version of the plugin interface fits this version of Ilium.
 4. The description of the plugin (the manifest) is valid.
-5. Your administrator's policy allows this plugin.
-6. You see the permission review and answer it.
+5. You see the permission review and answer it.
+6. Your administrator's policy allows this plugin.
 7. The files are unpacked and prepared, then recorded.
 
 The complete list with every error code is in [Install, update and uninstall](/pages/reference-install-update-uninstall/#the-install-pipeline).
@@ -58,7 +58,7 @@ The complete list with every error code is in [Install, update and uninstall](/p
 - [USR-010] Installing MUST NOT run any code of the package before the user has answered the permission review. Test: install a package whose start function writes a file, decline the review, and assert that the file does not exist.
 - [USR-011] A failed install MUST leave the installed plugins and their settings unchanged and MUST print one error that names the failed check. Test: install a package with a bad file hash, list plugins before and after, and compare.
 
-Without a terminal, for example in a script, the review cannot be shown. Then `--yes` accepts all normal permissions, and a high-risk permission is accepted only if you name it with `--grant`.
+Without a client to show the review, for example in a script with no attached Ilium client, the install fails with `install.review-required` unless you pass `--yes`. With a client attached, `--yes` accepts all normal permissions, and a high-risk permission is accepted only if you name it with `--grant`.
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin install notes.iliumpkg
@@ -79,7 +79,8 @@ A signed (T2) package carries the signature of a publisher. A publisher is a per
 │ Example Labs signed Notes 1.2.0.             │
 │                                              │
 │ Key fingerprint:                             │
-│ 3F2A…9C01                                    │
+│ 3F2A 91C0 7B44 D1E8 0A5C 6E92 B3F7 48AD      │
+│ 5C10 E2B9 77D3 04FA 8B61 C9E5 2D38 9C01      │
 │                                              │
 │ You have not trusted this key before.        │
 │ Trusting it lets you install and update      │
@@ -91,11 +92,11 @@ A signed (T2) package carries the signature of a publisher. A publisher is a per
 <figcaption>Rendered at 48 columns. Illustrative. The trust prompt for an unknown key.</figcaption>
 </figure>
 
-Choose **Details** to see the full fingerprint, 32 characters in 8 groups of 4. Choose **Cancel** and the install stops: nothing is installed. A trusted key is stored in your own trust list. You can manage the list with `ilium plugin trust list`, `ilium plugin trust add <publisher.pub>` and `ilium plugin trust remove <publisher>`. Removing a key does not remove the plugins that it signed. They stay installed and show `untrusted`; Ilium does not update them silently, because updates are always your decision.
+Choose **Details** to see the full fingerprint, 64 lowercase hexadecimal characters in 16 groups of 4. Choose **Cancel** and the install stops: nothing is installed. A trusted key is stored in your own trust list. You can manage the list with `ilium plugin trust list`, `ilium plugin trust add <publisher.pub>` and `ilium plugin trust remove <publisher>`. Removing a key does not remove the plugins that it signed. They stay installed and show `untrusted`; Ilium does not update them silently, because updates are always your decision.
 
-- [USR-120] Ilium MUST show the full key fingerprint on request and the short form (first 4 and last 4 characters joined by an ellipsis) in the prompt, and MUST NOT trust a key without an explicit user answer. Test: install a package signed by an unknown key and assert that the prompt appears and that declining installs nothing.
-- [USR-121] Removing a trusted key MUST NOT remove, disable or change any installed plugin, and MUST mark plugins that it signed as `untrusted` in `ilium plugin list`. Test: remove the key and list.
-- [USR-122] An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced silently by a different key. Test: install version 1 signed by key A, then offer version 2 signed by unknown key B, and assert that the trust prompt appears and that the dialog names both fingerprints.
+- [USR-120] Ilium MUST show the full key fingerprint (64 lowercase hexadecimal characters in groups of 4) in the prompt, and the short form (the first 8 characters) only beside a full form or in the trust list (SEC-177), and MUST NOT trust a key without an explicit user answer. Test: install a package signed by an unknown key and assert that the prompt appears and that declining installs nothing.
+- [USR-121] Removing a trusted key MUST NOT uninstall any plugin or change its files, grants or data. The plugins it signed stop loading at the next activation (SEC-144) and MUST be marked plugins that it signed as `untrusted` in `ilium plugin list`. Test: remove the key and list.
+- [USR-122] An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced by a different key unless the old key endorsed it with a rotation statement (SEC-142); otherwise the update is refused with `package.publisher-key-changed`. Test: install version 1 signed by key A, then offer version 2 signed by unendorsed key B, and assert that the update is refused with `package.publisher-key-changed`.
 
 Unsigned packages (T3) carry no signature. They need `--allow-unsigned`. They get a `dev` badge in the list and the permissions of a T2 plugin at most. Install one only if you built it or reviewed it yourself.
 
@@ -128,9 +129,9 @@ Bundled plugins (T1) need no install. A few of them ask for a high-risk ability 
 <figcaption>Rendered at 48 columns. Illustrative. The first-start prompt of a bundled plugin.</figcaption>
 </figure>
 
-**Allow selected** gives the checked rows. **Not now** gives none and asks again at the next start. It asks at most 3 more times, then stops asking. The plugin works without those abilities, with those features unavailable. You can give them later in the Capabilities tab.
+**Allow selected** gives the checked rows. **Not now** gives none and asks again at the next start. It asks again at the next start, up to three **Not now** answers in total, then stops asking. The plugin works without those abilities, with those features unavailable. You can give them later in the Capabilities tab.
 
-- [USR-014] The first-start prompt MUST appear at most once per start, MUST NOT block other plugins, and after **Not now** MUST appear at most 3 more times in total. Test: answer Not now at four consecutive starts and assert that the fifth start shows no prompt.
+- [USR-014] The first-start prompt MUST appear at most once per start, MUST NOT block other plugins, and after **Not now** MUST stop appearing after the third **Not now** answer (three in total, counted per plugin, as in SEC-111). Test: answer Not now at three consecutive starts and assert that the fourth start shows no prompt.
 
 ### Turn a plugin on or off
 
@@ -138,7 +139,16 @@ Select the plugin in **Settings > Plugins** and press `Space`. Or run `ilium plu
 
 If a plugin keeps failing, Ilium turns it off by itself. It restarts a failing plugin after 1 s, then after 5 s, and at the third failure within 10 minutes it stays off and the row shows the reason. Turning it on again resets the count. See [Lifecycle](/pages/lifecycle/).
 
-Row states in the Plugins tab are defined once, in [Settings, plugin rows](/pages/core-plugin-settings/#plugin-row-states). They are `On`, `Off`, `Failed`, `Restarting`, `Waiting for <owner>`, `Blocked by policy` and `Refused`. A plugin that shows `Failed` is explained in [Plugin health for users](/pages/user-plugin-health/).
+Row states in the Plugins tab are defined once, in [Settings, plugin rows](/pages/core-plugin-settings/#plugin-row-states). They are `On`, `Off`, `Failed`, `Restarting`, `Waiting for <owner>`, `Blocked by policy`, `Blocked` (key revoked or registry takedown) and `Refused`. A plugin that shows `Failed` is explained in [Plugin health for users](/pages/user-plugin-health/).
+
+### A plugin that shows Blocked
+
+A plugin shows **Blocked** when its publisher key was revoked as `compromised`, or when the registry took down the version you have installed. Ilium stops the plugin at once and keeps its permissions, settings and data. The row shows the reason: `trust.key-revoked` or `registry.takedown`, with the registry's reason text for a takedown. The state survives a restart.
+
+To use the plugin again, run `ilium plugin enable <id> --accept-risk`, or install an update signed by another trusted key of the same publisher. A plain `enable` without `--accept-risk` is refused with `plugin.blocked`. There is no Install button for a blocked plugin in the store.
+
+- [USR-174] A plugin whose key was revoked as `compromised`, or whose installed version a registry takedown names, MUST stop at once, MUST show `Blocked` with the reason `trust.key-revoked` or `registry.takedown`, and MUST keep its grants, settings and data. Test: revoke the signing key as `compromised`, assert that the plugin is stopped and the row says `Blocked`, then compare the grant file, settings and data folder before and after.
+- [USR-175] `ilium plugin enable <id>` on a blocked plugin MUST fail with `plugin.blocked` and leave it blocked. `ilium plugin enable <id> --accept-risk` MUST turn it on and clear the block. Test: enable without the flag and assert the error and the state, then enable with the flag and assert `On`.
 
 ### Update a plugin
 
@@ -152,7 +162,7 @@ There is no automatic update. To update, get the new package file and install it
 
 - [USR-123] An update MUST show only permissions that the installed version did not request, and MUST keep the answers already given. Test: update from a package with two grants to one with three and assert one new row.
 - [USR-124] A failed update MUST restore the previous version and its data and MUST show "Update failed, rolled back". Test: update to a package whose activation fails and assert the version in `ilium plugin list`.
-- [USR-125] Ilium MUST NOT check for, download or install updates by itself. Test: with two plugins installed, run for one hour with request logging and assert that no update request is made.
+- [USR-125] Ilium MUST NOT check for, download or install updates by itself unless the user has set `[plugins] auto_update` to `notify` or `install`; the default is `off`. Test: with two plugins installed and the default setting, run for one hour with request logging and assert that no update request is made; then set `auto_update = notify` and assert that a check is made.
 
 ### Remove a plugin
 
@@ -176,6 +186,8 @@ Select the plugin and press `d`, or run `ilium plugin uninstall <id>`. Ilium ask
 </figure>
 
 On the command line, `--keep-data` keeps the data and `--purge` deletes data, settings and log. The two flags exclude each other. Without a terminal and without a flag, the data is kept. A reinstall of the same id asks for permissions again and may read the kept data. The table of what each choice deletes is in [Plugin files on disk](/pages/reference-plugin-files/#what-each-action-leaves-behind).
+
+To keep a copy of a plugin's data before you purge it or move to another machine, run `ilium plugin export <id> --out <file>`. On the new machine install the same plugin and run `ilium plugin import <id> --from <file>`. The archive holds data, storage and settings values, never permissions or keys. A purge in a terminal reminds you of this command first.
 
 Removing a plugin has effects on other plugins. They stop being fed by it but they are not deleted:
 
@@ -226,7 +238,7 @@ Each plugin can have its own settings pages inside Settings. Their values are sa
 
 | What you see | Code | What to do |
 |---|---|---|
-| Cannot install <name> <version>. (on Windows or macOS) | `policy.tier-denied` | Use Linux for third-party plugins |
+| Cannot install <name> <version>. (on Windows or macOS) | `package.platform-unsupported` | Use Linux for third-party plugins |
 | The file is damaged | `package.manifest-missing` or `package.entry-unexpected`, `manifest.file-hash` | Download the file again and compare its checksum |
 | The signature does not verify | `manifest.signature-invalid` | Do not install. Ask the publisher |
 | The publisher key is not trusted and you declined | `trust.declined` | Trust the key after checking its fingerprint |
@@ -239,7 +251,7 @@ Each plugin can have its own settings pages inside Settings. Their values are sa
 
 ### Edge cases
 
-- **Installing the same file twice** does nothing and succeeds. A different file with the same version fails with `install.same-version-different-content`.
+- **Installing the same file twice** does nothing and succeeds. A different file with the same version fails with `package.version-reused`.
 - **Two Ilium windows** share the same plugins. A change in one appears in the other within 2 s.
 - **The file moves while installing.** Ilium copies it first. Moving it does not harm the install.
 - **A plugin id that starts with `ilium.`** is reserved. A third-party package with such an id is refused.

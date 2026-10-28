@@ -141,6 +141,8 @@ These rules apply to the whole file before any key is read.
 | `categories` | list of string | no | none | 1 to 3 distinct values from the [category list](/pages/reference-registry/#search-and-categories) | PKG-021 |
 | `keywords` | list of string | no | none | At most 8 distinct words of 1 to 24 characters without spaces | PKG-022 |
 | `homepage`, `repository` | string | no | none | An `https://` address of at most 256 characters | PKG-023 |
+| `data_use` | list of object | no | none | At most 8 entries `{ "what", "where", "purpose", "opt_in" }`, strings of at most 200 characters, `opt_in` boolean | SEC-267 |
+| `security_contact` | string | no | none | An email address or an `https://` address, at most 200 characters | SEC-268 |
 | `server`, `client`, `scene` | object | at least one | none | One component per side, see [Components and exports](#components-and-exports) | PKG-024 |
 | `capabilities` | object | no | none | One grant list per side | PKG-025 |
 | `activation` | list of string | no | lazy | At most 32 distinct triggers | PKG-026 |
@@ -165,10 +167,10 @@ There is no key for the tier and none for the publisher id. The tier comes from 
 | [PKG-016] | `version` MUST be a SemVer 2.0.0 string with three numeric parts and an optional prerelease and build part. A leading `v` is refused. Details: [Versions and dependencies](/pages/reference-dependency-resolution/#plugin-versions). | `manifest.version-invalid` |
 | [PKG-017] | `publisher` is a display name. It MUST equal the display name stored with the signing key (PKG-219) for a signed package. It is not an identity. | `manifest.publisher-mismatch`, `manifest.display-name` |
 | [PKG-018] | `description` is one paragraph shown in the review dialog and the store. | `manifest.display-name` |
-| [PKG-019] | `license` is shown and stored. The host checks only the length. A registry publish may require a known SPDX expression. | `manifest.schema` |
-| [PKG-020] | An icon name that the client does not know is drawn as the default plugin icon. It is a warning in `check` and never an install error. | `manifest.schema` |
+| [PKG-019] | `license` is shown and stored. The host refuses an empty value or one over 128 characters. A registry publish may require a known SPDX expression. | `manifest.schema` |
+| [PKG-020] | An icon name that the client does not know is drawn as the default plugin icon. It is a warning in `check` and never an install error. | none (warning only) |
 | [PKG-021] | `categories` is required to publish to a registry. A value outside the list is refused at publish. | `manifest.schema`, `registry.category-unknown` |
-| [PKG-022] | `keywords` feed search only. | `manifest.schema` |
+| [PKG-022] | `keywords` feed search only. More than 8 items, or an item outside 1 to 24 characters, is refused. | `manifest.schema` |
 | [PKG-023] | `homepage` and `repository` are shown as text and as a link that the user opens on purpose. The host never fetches them. | `manifest.schema` |
 | [PKG-024] | A side that is declared MUST have its component in the package (PKG-125). | `manifest.file-missing` |
 | [PKG-025] | `capabilities` MAY have the keys `server`, `client` and `scene` only. A list for a side without a component is refused. Each list holds at most 256 distinct grants. | `manifest.grant-side`, `manifest.unknown-key` |
@@ -251,7 +253,7 @@ Risk marks: `normal` grants are checked by default in the review dialog. High-ri
 
 ## Release information the manifest does not carry
 
-The manifest has no key for a home page, a repository, a support address, a changelog, a deprecation notice or a replacement name in `ilium:plugin@0.1.0`. The keys that describe a plugin to a person are `name`, `publisher`, `description` (one paragraph, at most 280 characters according to `lint.description-missing`), `license` and `icon`. An author MUST put the support contact, the home page and the changelog in `README.md` and in the `description`, and MUST NOT add other metadata keys, because an unknown key is refused with `manifest.unknown-key`. [AUT-321] Deprecation and a successor are properties of a registry entry, not of the manifest. See [Publishing and support](/pages/guide-publishing-and-support/).
+The manifest has no key for a home page, a repository, a support address, a changelog, a deprecation notice or a replacement name in `ilium:plugin@0.1.0`. The keys that describe a plugin to a person are `name`, `publisher`, `description` (one paragraph; the hard limit is 500 characters, and `lint.description-missing` warns above 280 characters), `license` and `icon`. An author MUST put the support contact, the home page and the changelog in `README.md` and in the `description`, and MUST NOT add other metadata keys, because an unknown key is refused with `manifest.unknown-key`. [AUT-321] Deprecation and a successor are properties of a registry entry, not of the manifest. See [Publishing and support](/pages/guide-publishing-and-support/).
 
 ## Activation triggers
 
@@ -308,7 +310,7 @@ A lazy plugin that is not active receives no topic events. Use `startup` for a p
 | `http_routes` | `method`, `path` | Loopback routes |
 | `services` | `provides` | Service names offered |
 | `topics` | `publishes`, `subscribes` | Publish only under the plugin's own id prefix |
-| `jobs` | `kind`, `deadline_ms`, `memory_mib` | Override the job limits, within the ceilings |
+| `jobs` | `kind`, `deadline_ms`, `memory_mib` | Override the job limits, within the ceilings. `deadline_ms` is the CPU-time limit of the job (the `job-runner.run` CPU row of the scheduling table); the wall-time limit is not a manifest key |
 | `onboarding_steps` | `id`, `title`, `order` | Target `onboarding-step("<id>")` |
 | `extension_points` | `id`, `kind`, `mode`, `title`, `entry_schema`, `payload_schema`, `reply_schema`, `risk`, `deadline_ms`, `max_handlers`, `max_entries`, `dynamic`, `version` | Points other plugins fill. Cap 16. Needs `extensions.provide`. See [Extension points and replacement](#extension-points-and-replacement) |
 | `extensions` | `point`, `id`, `priority`, `entry`, `handler` | Entries or handlers added to a point. Cap 64. Needs `extensions.contribute` |
@@ -331,13 +333,13 @@ On a clash the user's remap wins, then kernel built-ins, then T1, then T2 and T3
 
 ### The when expression
 
-`when` joins comparisons with `&&`, `||`, `!` and parentheses. A comparison is `key == "text"` or `key != "text"`. The keys are `pane.primitive` (`basic`, `terminal`, `agent`, `editor`, `none`), `pane.kind` and `agent.activity`. A key with no pane in scope is false. `when` only hides entries. It never blocks `commands.invoke`.
+`when` joins comparisons with `&&`, `||`, `!` and parentheses. A comparison is `key == "text"` or `key != "text"`. The keys are `pane.primitive` (`basic`, `terminal`, `agent`, `editor`, `none`), `pane.kind`, `agent.activity`, `node.kind`, `node.file_extension`, `agent.signature`, `view.focused` and `display_mode`. All eight are valid in `commands`, `toolbar_buttons`, `context_menu`, `row_actions` and `tree_toolbar`; see [the `when` keys table](/pages/api-commands/). A key with no pane in scope is false. `when` only hides entries. It never blocks `commands.invoke`.
 
 ### Settings schema subset
 
 Command `arguments_schema` uses JSON Schema draft 2020-12, restricted to: `type` (`object`, `boolean`, `integer`, `number`, `string`), `properties`, `required`, `enum`, `title`, `description`, `default`, `minimum`, `maximum`, `pattern`, `maxLength`, and the Ilium keywords `help`, `step`, `unit`, `secret`, `multiline`, `enum_titles` and `picker` (`file` or `directory`, with `extensions`). Other keywords are refused with `manifest.schema-keyword`.
 
-Settings rows do not carry a schema of their own. Each value row (`toggle`, `choice`, `number`, `text`, `text-area`, `path`, `color`, `keybinding`, `list`) compiles to a property of the plugin's settings schema, which uses the same keywords and also `type: array` with `items` and `maxItems` (at most 64) for `list` rows. The row fields and their compiled form are in the [settings schema reference](/pages/reference-settings-schema/).
+Settings rows do not carry a schema of their own. Each value row (`toggle`, `choice`, `number`, `text`, `text-area`, `path`, `color`, `keybinding`, `list`, `location`, `map`, `multi-choice`) compiles to a property of the plugin's settings schema, which uses the same keywords and also `type: array` with `items` and `maxItems` (at most 64) for `list` rows. The row fields and their compiled form are in the [settings schema reference](/pages/reference-settings-schema/).
 
 ### Signature entries
 
@@ -423,7 +425,7 @@ This manifest fragment declares one of each of the commonly used chrome keys. It
 
 ### Filling a segment at run time
 
-The manifest reserves the place. The plugin fills it with an intent at run time. The Rust and TypeScript listings for `set-status-segment`, the `row-action` click and the other chrome intents are on [Chrome intents](/pages/api-intent-chrome/) and [Tree chrome](/pages/api-tree-chrome/). The filled segment is cleared when the plugin stops, and the host drops updates above 10 per second per segment.
+The manifest reserves the place. The plugin fills it with an intent at run time. The Rust and TypeScript listings for `set-status-segment`, the `row-action` click and the other chrome intents are on [Chrome intents](/pages/api-intent-chrome/) and [Tree chrome](/pages/api-tree-chrome/). The filled segment is cleared when the plugin stops, and the host drops updates above 10 per second per slot (the segment id is the slot).
 
 ### Services
 
@@ -437,7 +439,7 @@ A service is a typed function set that one plugin offers and others call. The ca
 | `version` | string | yes | SemVer of the service contract. Callers match it with the minimum version in `requires.services` under the compatibility rule of [Services](/pages/services/#names-versions-and-grants) |
 | `schema` | string | yes | Path of a JSON file in the package that maps each method to a `params` and a `result` schema, using the keywords of the [Data schema subset](/pages/reference-settings-schema/#data-schema-subset). At most 256 KiB |
 
-**Caller.** `requires.services` lists strings of the form `<name>@<version>` with a full `major.minor.patch` version, which means the minimum compatible version. Caret, tilde and ranges are refused with `manifest.service-version`. The grant is `services.use:<name>`; the provider's grant is `services.provide:<name>`. A grant never carries a version. A cycle of service requirements is refused with `manifest.service-cycle` [PKG-079].
+**Caller.** `requires.services` lists strings of the form `<name>@<version>` with a full `major.minor.patch` version, which means the minimum compatible version. Caret, tilde and ranges are refused with `manifest.service-version`. The grant is `services.use:<name>`; the provider's grant is `services.provide:<name>`. A grant never carries a version. A cycle of service requirements is refused with `manifest.service-cycle` [PKG-654].
 
 | Id | Rule | Code |
 |---|---|---|
@@ -458,7 +460,7 @@ An extension point is a slot that one plugin owns and others fill. The full cont
 | `entry_schema` | collect | [Data schema subset](/pages/reference-settings-schema/#data-schema-subset). An entry is at most 16 KiB |
 | `payload_schema`, `reply_schema` | hook | [Data schema subset](/pages/reference-settings-schema/#data-schema-subset). Each at most 64 KiB. `reply_schema` is required for `transform` and `first` and refused (`manifest.extension-point-invalid`) for `observe` and `veto`. On `transform` it lists the changeable fields only |
 | `risk` | both | `standard` (default) or `high`. `high` makes `extensions.contribute` for this point a high-risk grant |
-| `deadline_ms` | hook | 5 to 50, default 20 |
+| `deadline_ms` | hook | 5 to 50 for every tier, default 20 |
 | `max_handlers` | hook | 1 to 8, default 8 |
 | `max_entries` | collect | 1 to 256, default 64 |
 | `dynamic` | collect | `true` allows `register` and `unregister` at run time |
@@ -470,7 +472,7 @@ An extension point is a slot that one plugin owns and others fill. The full cont
 
 | Field | Rule |
 |---|---|
-| `point` | `<plugin-id>/<id>`, optionally `<plugin-id>/<id>@<minimum-version>`. Without `@version` the contribution matches any owner version. With it, the rule is: same major; minor at least the requested one; for major 0 the minor must be equal; patch ignored |
+| `point` | `<plugin-id>/<id>`, optionally `<plugin-id>/<id>@<minimum-version>`. Without `@version` the contribution matches any owner version. With it, the version is a bare version and so a caret range (PKG-317, PKG-318, PKG-328 in [Dependency resolution](/pages/reference-dependency-resolution/)): `@1.2.0` accepts `>=1.2.0 <2.0.0`, `@0.1.0` accepts `>=0.1.0 <0.2.0` |
 | `id` | Unique per contributor and point |
 | `priority` | 0 to 100, default 50. Lower runs first. Ties go by plugin id |
 | `entry` | Collect points. Validated against `entry_schema` at install (`manifest.extension-entry-invalid`) |
@@ -621,7 +623,7 @@ Limits are integers in the unit of their name: MiB, milliseconds or a count. The
 | [PKG-071] | A value above the ceiling of the tier is clamped to the ceiling and logged. It is never refused. A value of 0 means the default. | none |
 | [PKG-072] | A key outside the table is refused. | `manifest.unknown-key` |
 | [PKG-073] | The ceiling comes from the tier, which is known only after the signature check. The manifest cannot raise it. | none |
-| [PKG-074] | The user may set the same keys under `[plugins.limits]` or `[plugins."<id>".limits]`. The effective value is `min(ceiling, first set of [plugins."<id>".limits] value, [plugins.limits] value, manifest value, default)`; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it (LIF-143). | none |
+| [PKG-074] | The user may set the same keys under `[plugins.limits]` or `[plugins."<id>".limits]`. The effective value is `min(ceiling, v)`, where `v` is the first set of the `[plugins."<id>".limits]` value, the `[plugins.limits]` value, the manifest value and the default, in that order; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it (LIF-143). | none |
 
 The nine keys not in the base set are the extended requestable limits. What a breach does (a trap, a refused call or a dropped event) is in the [errors and limits reference](/pages/reference-errors-and-limits/). A manifest requests limits the same way in both SDKs, because `limits` is part of the JSON.
 
@@ -634,7 +636,7 @@ The installer validates a package in 11 stages and never runs plugin code before
 | Id | Rule |
 |---|---|
 | [PKG-075] | A stage that collects errors MUST report every error it finds in the order of the keys of the manifest, up to 100. A test with two defects in one stage expects both codes. A test with defects in two stages expects only the earlier one. |
-| [PKG-076] | Every error carries a `code`, a `message` from the template of the catalogue, and a JSON pointer to the value. |
+| [PKG-076] | Every error carries a `code`, a `message` from the template of the catalogue, and, when the error has a place in the document, a pointer (RFC 6901) or a path to it. |
 | [PKG-077] | `ilium plugin check` on a source manifest runs stages 2 to 4. It reports the same codes and pointers as the installer. |
 | [PKG-078] | The code of every error is in the [error catalogue](/pages/reference-manifest-schema/#error-catalogue). The older spellings are in the table of retired codes. |
 
@@ -743,7 +745,7 @@ If `com.example.notes` is not installed or is at `2.0.0`, the install fails at s
 | `"id": "demo"` (one segment) | `manifest.id-invalid` |
 | `"description"` has a line break | `manifest.display-name` |
 | `"limits": { "memory_mib": 4096 }` for a T2 package | Clamped to 128 MiB and logged; the install succeeds |
-| `exports` lists a name that the side does not have | `manifest.schema` at the list entry |
+| `exports` lists a name that the side does not have | `manifest.exports-mismatch` |
 | `exports` is empty but the component has `detector` | `manifest.exports-mismatch` |
 | `data_version` is `0` | `manifest.data-version` |
 | A command has `"side": "server"` and there is no `server` component | `manifest.contribution-target` |

@@ -403,7 +403,7 @@ variant widget {
 - [Capability: ui panels](/pages/capability-ui-panels/)
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/)
 - [Accessibility and theming](/pages/accessibility-and-theming/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.
 

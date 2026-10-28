@@ -549,7 +549,7 @@
 <tr>
 <td>Reserved names</td>
 <td>none</td>
-<td>The kernel names above are reserved. A manifest that uses one fails with <code>manifest.cli-name-reserved</code>.</td>
+<td>The names the kernel owns (<code>plugin</code>, <code>session</code>, <code>kill-session</code>, <code>help</code>, <code>version</code>) are reserved. A manifest that uses one fails with <code>manifest.cli-name-reserved</code>. A name owned by a bundled core plugin (<code>recap</code>, <code>progress</code>, <code>wait</code>, <code>chat</code>, <code>panes</code>, <code>broadcast</code>, <code>new-pane</code>, <code>voice</code>) may be declared only by that plugin; any other plugin fails with <code>manifest.cli-name-taken</code>.</td>
 </tr>
 <tr>
 <td>Startup meaning</td>

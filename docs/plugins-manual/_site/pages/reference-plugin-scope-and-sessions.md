@@ -8,7 +8,7 @@ Contract version: `ilium:plugin@0.1.0`.
 
 ### Install scope
 
-In 0.1.0 a plugin installs globally, for the user. There is no project-scope install. A package in a project folder could run code the moment a repository is opened, so the platform leaves it out until workspace trust exists. The shared package store, `installed.json`, grants and the global storage bucket serve every session of the user.
+In 0.1.0 a plugin installs globally, for the user. There is no project-scope install. A package in a project folder could run code the moment a repository is opened, so the platform leaves it out until project trust exists. The shared package store, `installed.json`, grants and the global storage bucket serve every session of the user.
 
 - [LIF-160] The host MUST accept installs only into the user scope in 0.1.0, and MUST refuse `--scope project` for install with `install.scope-unsupported`. Test: run the command.
 

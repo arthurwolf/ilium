@@ -400,7 +400,7 @@
 <li><strong>Package:</strong> a <code>scene</code> component (<code>scene.wasm</code>) with the world <code>ilium:anim/base@0.1.0</code>, and a <code>contributes.scenes</code> entry for each scene.</li>
 <li><strong>Language:</strong> Rust stable 1.90 or later with the <code>wasm32-wasip2</code> target, using <code>ilium-plugin-sdk</code>; or TypeScript with Bun 1.2 or later and <code>@ilium/plugin-sdk</code>. The SDK pins the binding generator versions, so <code>bun install</code> is the only install step.</li>
 <li><strong>Imports:</strong> <code>ilium:anim/base</code> allows <code>log</code>, <code>clock</code>, <code>storage</code>, <code>fs</code>, <code>codec</code>, <code>jobs</code>, <code>http</code>, <code>audio</code>, <code>media</code>, <code>location</code> and the surface. Nothing else is linked.</li>
-<li><strong>Exports:</strong> <code>lifecycle</code> and <code>renderer</code> are required. The optional <code>job-runner</code> export needs <code>jobs.run</code>.</li>
+<li><strong>Exports:</strong> <code>lifecycle</code> and <code>renderer</code> are required, and the manifest <code>exports</code> list never names a required export, so <code>"exports": []</code> is correct for a scene with only those two. The optional <code>job-runner</code> export needs <code>jobs.run</code>.</li>
 <li><strong>Grants:</strong> the scene side always has <code>log</code>, <code>clock</code>, <code>storage</code> (own buckets), <code>codec</code>, and the <code>fs</code> scopes <code>package</code>, <code>data</code> and <code>cache</code>. Every other grant goes in <code>capabilities.scene</code>, for example <code>jobs.run</code>, <code>http:api.example.com</code> or <code>media.video</code>. <code>audio.capture</code> and <code>location.observer</code> are high risk and need an explicit user grant.</li>
 </ul>
 <h3 id="manifest-contributions">Manifest contributions</h3>
@@ -617,7 +617,7 @@
 <h3 id="lifecycle-of-a-renderer">Lifecycle of a renderer</h3>
 <p>The host constructs the renderer when the scene is shown, and again after a restart. The spec is a JSON object with <code>scene</code> (the scene id), <code>settings</code>, <code>palette</code> and <code>mode</code> (<code>live</code> or <code>pre-rendered</code>). Rust receives it as <code>SceneSpec</code>. TypeScript receives it parsed, with <code>settings</code> typed <code>unknown</code>, so the scene checks it before use.</p>
 <p>The host reads <code>readiness</code> before each frame. <code>Preparing</code> frames are not presented, and <code>Failed</code> stops drawing. The frame rate is read once after construction and after each <code>reconfigure</code> that returns <code>true</code>, never per frame. A palette change calls <code>set_palette</code> before the next frame. A setting change is validated against <code>settings_schema</code> first, then sent to <code>reconfigure</code>.</p>
-<p>In <code>pre-rendered</code> mode the host calls <code>render</code> for <code>clip_seconds</code> of frames, stores the clip in host memory and loops it without calling <code>render</code> again. A change to the palette or the settings rebuilds the clip. A clip is limited to 64 MiB; a longer clip is shortened to fit, with a minimum of one second.</p>
+<p>In <code>pre-rendered</code> mode the host calls <code>render</code> for <code>clip_seconds</code> of frames, stores the clip in host memory and loops it without calling <code>render</code> again. A change to the palette or the settings rebuilds the clip. A single clip is limited to 64 MiB (the one clip size limit); the 256 MiB figure in <a href="/pages/reference-host-rendering/">host rendering</a> is the separate total clip memory the host holds across clips. A longer clip is shortened to fit, with a minimum of one second.</p>
 <figure>
 <svg viewBox="0 0 400 200" role="img" aria-label="Scene frame flow from host to scene and back to the panel" width="600" height="300">
   <defs>
@@ -645,10 +645,10 @@
 
 <h3 id="surface-rules">Surface rules</h3>
 <ul>
-<li>A row is <code>width</code> bytes in <code>gray8</code>, <code>3 x width</code> bytes in <code>rgb8</code>, and <code>4 x width</code> bytes in <code>rgba8</code>. <code>write_rows</code> writes whole rows only. A remainder is dropped and a warn line is written once per second.</li>
+<li>A row is <code>width</code> bytes in <code>gray8</code>, <code>3 x width</code> bytes in <code>rgb8</code>, and <code>4 x width</code> bytes in <code>rgba8</code>. <code>write_rows</code> writes whole rows only. When the data length is an exact multiple of the row size, every row is written. When it is not, the call writes the whole rows, drops the partial trailing row and writes a warn line at most once per second, and it does not return an error. <code>invalid-argument</code> is only for a format the scene did not declare, for empty data, or for <code>first-row</code> at or past <code>height</code>.</li>
 <li>Rows at or past <code>height</code> are ignored.</li>
 <li><code>write_cell_colors</code> takes one packed <code>0xRRGGBB</code> value per cell, row-major. It is ignored unless <code>uses-cell-colors</code> is <code>true</code>.</li>
-<li><code>occupancy()</code> returns one byte per pixel, row-major: 0 for free and 255 for covered by a panel or popup. It returns <code>none</code> unless <code>wants-occupancy</code> is <code>true</code>.</li>
+<li><code>occupancy()</code> returns an <code>occupancy-grid</code> of cells (<code>columns</code>, <code>rows</code>, and one <code>bool</code> per cell, row-major): <code>true</code> where pane text is drawn. It returns <code>none</code> unless <code>wants-occupancy</code> is <code>true</code>.</li>
 <li><code>pointer()</code> returns the column and row in cells, counted from the top left of the scene area. It returns <code>none</code> when the pointer is outside that area, or when <code>wants-pointer</code> is <code>false</code>.</li>
 <li>A <code>render</code> call that returns without <code>present</code> drops that frame, and a warn line is written once per second.</li>
 </ul>
@@ -819,7 +819,11 @@ export const { lifecycle, renderer } = defineScene(Rings);
 <td>The host restarts the renderer with the new spec. This is not a failure.</td>
 </tr>
 <tr>
-<td>A call to an import without its grant, or <code>http.fetch</code> outside the grant</td>
+<td>A call to an import whose grant the manifest never requested</td>
+<td>Trap, because that is a plugin bug.</td>
+</tr>
+<tr>
+<td>A call to an import whose grant the user declined or revoked, or <code>http.fetch</code> outside the grant</td>
 <td><code>not-permitted</code>, synchronously.</td>
 </tr>
 <tr>
@@ -905,7 +909,7 @@ export const { lifecycle, renderer } = defineScene(Rings);
 </tr>
 <tr>
 <td>A loop that costs no plugin calls</td>
-<td><code>prerender</code> (3,600 frames, 30 fps, 128 MiB)</td>
+<td><code>prerender</code> (up to 3,600 frames at 30 fps, within the 64 MiB clip limit)</td>
 </tr>
 </tbody>
 </table>
@@ -929,8 +933,8 @@ record frame-receipt { frame: u64, presented-at-millis: u64, dropped-before: u32
 resource frame-surface {
   /// Width and height in pixels.
   size: func() -&gt; tuple&lt;u32, u32&gt;;
-  /// Rows are top to bottom. first-row plus the rows written must be within the height.
-  /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+  /// Rows are top to bottom. Rows that fall at or past the height are ignored.
+  /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
   write-rows: func(first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
   /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
   write-cell-colors: func(first-row: u32, colors: list&lt;u32&gt;) -&gt; result&lt;_, plugin-error&gt;;
@@ -953,7 +957,7 @@ resource frame-surface {
 <li><a href="/pages/api-exports/">Plugin exports</a> for the <code>renderer</code> export and <code>job-runner</code>.</li>
 <li><a href="/pages/api-storage/">Storage</a>, <a href="/pages/api-fs/">File access</a> and <a href="/pages/api-codec/">Codec</a> for the scene's data and images.</li>
 <li><a href="/pages/api-jobs/">Background jobs</a>, <a href="/pages/api-http/">HTTP</a>, <a href="/pages/api-location/">Location</a>, <a href="/pages/api-audio/">Audio</a> and <a href="/pages/api-media/">Media</a> for the other imports.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error codes.</li>
 <li><a href="/pages/tutorial-07-ambient-scene/">Tutorial 7: ambient scene</a> for a step-by-step scene plugin.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-process-control/"><small>Previous</small>Process control</a><a class="next" href="/pages/api-services/"><small>Next</small>services</a></nav>

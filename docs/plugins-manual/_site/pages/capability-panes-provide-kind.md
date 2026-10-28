@@ -290,13 +290,13 @@ plugin". The grant is remembered once the user accepts it.
 | `set-title` with a title over 256 characters | `invalid-argument`. |
 | `set-status`, `request-focus` on a foreign node | `not-permitted`. |
 | `size` on a foreign node | `None`. The function has no result, so it has no error code. |
-| Grant revoked at run time | `revoked` on the next call. |
+| Grant revoked at run time | A call that is already running when the revoke lands returns `revoked`. A call that starts after the revoke returns `not-permitted`. |
 | Basic panes and restore | A basic pane has no process, so `pane-not-ready` never applies to it. Calls work at once after a restore. |
 | `views.render` over 10 ms | The plugin traps. Three failures in 10 minutes disable the plugin (see [lifecycle](/pages/lifecycle/)). |
 | `wants_keys` is `false` | No `key-pressed` or `key-released` events reach the pane. |
 
-Only the codes listed here are specific to the basic primitive. Every call can also return
-`revoked` and `internal`.
+Only the codes listed here are specific to the basic primitive. Every call that has a result can also return
+`revoked` and `internal`; `size` returns `None` instead and has no error code.
 
 ## First-party features that request it
 

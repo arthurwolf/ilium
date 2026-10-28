@@ -586,7 +586,7 @@ record dir-entry { name: string, metadata: fs-metadata }
 </tr>
 </tbody>
 </table>
-<p>See <a href="/pages/errors-and-limits/">errors and limits</a> for the full table.</p>
+<p>See <a href="/pages/reference-errors-and-limits/">errors and limits</a> for the full table.</p>
 <p>Glob grammar for <code>scan</code>: <code>*</code> matches any run of characters inside one segment. A whole <code>**</code> segment matches zero or more folders. <code>?</code> matches one character inside a segment. Braces, character classes and escapes are not supported. A leading <code>/</code>, a <code>..</code> segment or a backslash is <code>invalid-argument</code>.</p>
 <h2 id="worked-example-rust">Worked example: Rust</h2>
 <p>This server-side plugin reads the first kilobyte of one file, and lists the Rust sources of the project from a task.</p>
@@ -777,14 +777,14 @@ Plugin Session stats 0.1.0 asks for:
 </figure>
 
 <h2 id="declined-and-revoked-grants">Declined and revoked grants</h2>
-<p>When the user declines a scope, or the grant is revoked, the scope is removed from <code>roots()</code> and every call on it returns <code>not-permitted</code>. Each refused call writes one refusal line to the plugin log, which <code>ilium plugin logs</code> shows. The line names the scope and the function, and gives the reason: <code>declined</code>, or <code>not-requested</code> when the manifest never asked for that scope.</p>
+<p>When the user declines a scope, or the grant is revoked, the scope is removed from <code>roots()</code> and every call on it returns <code>not-permitted</code>. Each refused call writes one refusal line to the plugin log, which <code>ilium plugin logs</code> shows. The line names the scope and the function, and gives the reason: <code>declined</code> or <code>revoked</code>, <code>not-granted</code> when the argument is outside the grant (the manifest asked for <code>fs.read</code> but never for that scope), or <code>scope</code> when a path lies outside the granted scope. A call of <code>fs.read</code> itself without any <code>fs.read</code> request is not a refusal: it traps with <code>host.capability-not-requested</code>. See the <a href="/pages/reference-errors-and-limits/#refusal-reasons">refusal reasons</a>.</p>
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="/pages/capability-fs-write/">fs.write</a> for the matching write grant and its rules per scope.</li>
 <li><a href="/pages/capability-fs-watch/">fs.watch</a> for change events on the same scopes.</li>
 <li><a href="/pages/capability-fs-pick/">fs.pick</a> for how <code>picked/&lt;n&gt;</code> scopes are created.</li>
 <li><a href="/pages/capability-always-granted/">always-granted set</a> for the reads that need no grant.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for every size cap.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for every size cap.</li>
 <li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a> for a file explorer, which reads the project through this grant.</li>
 </ul>
 <p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>

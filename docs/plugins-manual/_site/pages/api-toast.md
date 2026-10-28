@@ -100,7 +100,7 @@ At most `toasts_pending` (3, the same for every tier) toasts are alive at once; 
 - **Rate.** 3 toasts per 10 seconds per plugin. The fourth within the window completes as `refused(rate-limited)`. Replacing by id counts as a toast.
 - **Length.** The title is cut by the plugin: over 60 characters is `invalid-argument`, not a silent cut. The body is rich text with at most 200 characters in total; over that is `invalid-argument`. Button labels are at most 24 characters.
 - **Buttons.** At most two. A button runs the named command with `origin: toast` and `context` set to the toast `id`. The toast closes when a button is pressed.
-- **Accessibility.** With reduced motion the gauge is drawn as a fixed text `5 s left` that updates once per second, not as a shrinking bar. A `danger` toast never closes by itself.
+- **Accessibility.** With reduced motion the gauge is drawn as a fixed text `5 s left` that updates once per second, not as a shrinking bar. A `danger` toast stays until dismissed while a client is attached.
 - **Not a log.** A toast is gone when it closes. Put the permanent record in the plugin [log](/pages/api-log/), or in a pane.
 
 ### Examples

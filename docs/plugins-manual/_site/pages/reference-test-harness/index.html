@@ -451,7 +451,7 @@
 <tr>
 <td><code>host.mode() -&gt; Mode</code></td>
 <td><code>host.mode(): 'native' \| 'component'</code></td>
-<td>The mode of this host. The default is native under <code>cargo test</code> and <code>bun test</code>, and component under <code>ilium plugin test --component</code>.</td>
+<td>The mode of this host. The default is native under <code>cargo test</code> and <code>bun test</code>, and component under <code>ilium plugin test</code> (<code>--component &lt;file&gt;</code> only picks the wasm file).</td>
 </tr>
 </tbody>
 </table>
@@ -460,7 +460,7 @@
 <li><strong>[DEV-401]</strong> In component mode the harness MUST enforce the deadlines and the memory ceiling of <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. In native mode it MUST NOT, and it MUST say so in <code>host.mode()</code>, which returns <code>Mode::Native</code> (TypeScript <code>'native'</code>) or <code>Mode::Component</code> (<code>'component'</code>).</li>
 <li><strong>[DEV-402]</strong> The project's own tests run in native mode with <code>cargo test</code> or <code>bun test</code>. <code>ilium plugin test</code> runs the fixtures with expectation files in component mode, as <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a> defines. A test written with <code>FakeHost</code> MAY be run in component mode by setting <code>ILIUM_PLUGIN_TEST_MODE=component</code>, which makes <code>FakeHost</code> load <code>dist/&lt;side&gt;.wasm</code> instead of the native type.</li>
 <li><strong>[DEV-403]</strong> In component mode a trap MUST be reported as a test failure with the trap code, unless the test calls <code>expect_trap</code>.</li>
-<li><strong>[DEV-404]</strong> <code>host.mode()</code> MUST return <code>native</code> under <code>cargo test</code> and <code>bun test</code>, and <code>component</code> under <code>ilium plugin test --component</code> or <code>ILIUM_PLUGIN_TEST_MODE=component</code>. <code>assert_within_budget</code> MUST be skipped with the reason <code>needs-component</code> when <code>host.mode()</code> is <code>native</code>.</li>
+<li><strong>[DEV-404]</strong> <code>host.mode()</code> MUST return <code>native</code> under <code>cargo test</code> and <code>bun test</code>, and <code>component</code> under <code>ilium plugin test</code> (<code>--component &lt;file&gt;</code> only picks the wasm file) or <code>ILIUM_PLUGIN_TEST_MODE=component</code>. <code>assert_within_budget</code> MUST be skipped with the reason <code>needs-component</code> when <code>host.mode()</code> is <code>native</code>.</li>
 </ul>
 <h2 id="setup-the-builder">Setup: the builder</h2>
 <p>A host is built in steps, then activated. Setup is complete at <code>activate</code>. Grants and tier cannot change the builder after that, except through the runtime calls below.</p>
@@ -568,7 +568,7 @@
 <li><strong>[DEV-415]</strong> <code>host.grant_now(name)</code> on an active plugin MUST call <code>deactivate(granted)</code>, then <code>activate</code> with <code>instance</code> plus 1 and the new <code>granted</code> list. <code>host.revoke(name)</code> MUST do the same with <code>deactivate(revoked)</code>. No event is delivered.</li>
 <li><strong>[DEV-564]</strong> <code>host.grants_changed(list)</code> MUST follow the revocation rule of <a href="/pages/reference-runtime-model/#13-link-time-grant-enforcement">Runtime model</a>: requests that need a removed grant complete as <code>failed(revoked)</code> before <code>deactivate(revoked)</code>, then <code>activate</code> runs with the new list. A list that only adds grants MUST use <code>deactivate(granted)</code>.</li>
 <li><strong>[DEV-565]</strong> <code>host.breach_deadline(export)</code> MUST apply the effect of the call class in the scheduling table, and a <code>deactivate</code> breach MUST NOT count as a failure.</li>
-<li><strong>[DEV-416]</strong> After <code>revoke</code>, or for a capability the test declined, intents that need the grant MUST complete as <code>refused(plugin-error{code: not-permitted})</code>, and host imports that need it MUST return <code>Err(not-permitted)</code>. A call to a function of a capability the manifest never requested MUST trap with <code>trap.import-not-requested</code>.</li>
+<li><strong>[DEV-416]</strong> After <code>revoke</code>, or for a capability the test declined, intents that need the grant MUST complete as <code>refused(plugin-error{code: not-permitted})</code>, and host imports that need it MUST return <code>Err(not-permitted)</code>. A call to a function of a capability the manifest never requested MUST trap with <code>host.capability-not-requested</code>.</li>
 <li><strong>[DEV-417]</strong> Runtime results MUST use the WIT <code>error-code</code> enum of <a href="/pages/reference-errors-and-limits/#the-plugin-error-record">Errors and limits</a> and no other value. Dotted codes such as <code>harness.setup-closed</code> or <code>trap.deadline</code> are harness, fixture, trap and command-line diagnostics only, and MUST NOT appear in <code>plugin-error.code</code>.</li>
 </ul>
 <p><strong>Error values.</strong> Runtime results always use the WIT error-code enum. Dotted codes are used only for harness, fixture, trap and CLI diagnostics, never inside <code>plugin-error.code</code>. The table maps the situations of this page to the values a test asserts.</p>
@@ -590,7 +590,7 @@
 </tr>
 <tr>
 <td>Function of a capability never requested</td>
-<td>trap <code>trap.import-not-requested</code></td>
+<td>trap <code>host.capability-not-requested</code></td>
 </tr>
 <tr>
 <td>Path out of the granted scope</td>
@@ -714,7 +714,7 @@
 <li><strong>[DEV-431]</strong> <code>deliver</code> MUST return the submissions the plugin returned from <code>on-events</code>, without applying them. It MUST also record them in <code>submitted()</code>.</li>
 <li><strong>[DEV-432]</strong> <code>deliver</code> MUST NOT deliver outcomes by itself. Outcomes are queued as <code>request-completed</code> events. <code>settle()</code> delivers them and also delivers the submissions that those events produce, until the queue is empty or 100 rounds pass. After 100 rounds <code>settle</code> MUST fail with <code>harness.settle-limit</code>.</li>
 <li><strong>[DEV-433]</strong> More than 256 submissions from one batch MUST fail the test with <code>trap.submission-batch</code> in both modes, because the real host traps the instance.</li>
-<li><strong>[DEV-434]</strong> The harness MUST apply the batch refusal rule of <a href="/pages/reference-events-and-intents/">Events and intents</a>: a refused submission completes as <code>refused(error)</code> and all others complete as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>.</li>
+<li><strong>[DEV-434]</strong> The harness MUST apply the batch refusal rule of <a href="/pages/reference-events-and-intents/">Events and intents</a>: a refused submission completes as <code>refused(not-permitted)</code> or <code>refused(invalid-argument)</code> and all others complete as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>.</li>
 <li><strong>[DEV-435]</strong> The harness MUST validate dedup keys: charset <code>[A-Za-z0-9._:/-]</code>, 1 to 128 characters, and a second submission with the same key inside 10 fake minutes MUST complete as <code>duplicate</code>. A bad key MUST complete as <code>refused(plugin-error{code: invalid-argument, message starting "dedup-key-invalid:"})</code>.</li>
 <li><strong>[DEV-436]</strong> <code>deliver</code> MUST NOT run timers. Time moves only through <code>advance_clock</code>.</li>
 </ul>
@@ -1621,7 +1621,7 @@ test('badge then outcome', async () =&gt; {
 </table>
 <ul>
 <li><strong>[DEV-515]</strong> In an expectation item, only the given fields are compared. Fields absent from the item are ignored.</li>
-<li><strong>[DEV-514]</strong> A fixture with <code>side</code> <code>scene</code> MUST accept only the keys <code>schema</code>, <code>side</code>, <code>settings</code>, <code>clock</code> and <code>frames</code>. Any other key MUST fail with <code>fixture.unknown-key</code>. <code>lifecycle</code> steps MUST run after the events. <code>expect_state</code> MUST fail the fixture with <code>fixture.state-mismatch</code> when the state differs.</li>
+<li><strong>[DEV-514]</strong> A fixture with <code>side</code> <code>scene</code> MUST accept only the keys <code>schema</code>, <code>side</code>, <code>settings</code>, <code>clock</code>, <code>lifecycle</code>, <code>expect_state</code> and <code>frames</code>. Any other key MUST fail with <code>fixture.unknown-key</code>. <code>lifecycle</code> steps MUST run after the events. <code>expect_state</code> MUST fail the fixture with <code>fixture.state-mismatch</code> when the state differs.</li>
 <li><strong>[DEV-516]</strong> <code>host.run_fixture(path)</code> MUST load the fixture, deliver the events, settle, and compare the expectation file when it exists. A missing expectation file means the run only asserts that nothing traps.</li>
 <li><strong>[DEV-517]</strong> <code>ilium plugin test</code> MUST run every <code>tests/fixtures/*.json</code> as a test case named <code>fixture:&lt;file&gt;</code> and MUST compare the expectation file when one exists.</li>
 </ul>
@@ -1705,7 +1705,7 @@ test('badge then outcome', async () =&gt; {
 <tbody>
 <tr>
 <td><code>test-case</code></td>
-<td><code>name</code>, <code>status</code> (<code>pass</code>, <code>fail</code>, <code>trap</code>), <code>duration_ms</code>, <code>reason</code> (not for a pass)</td>
+<td><code>name</code>, <code>status</code> (<code>pass</code>, <code>fail</code>, <code>trap</code>, <code>skipped</code>), <code>duration_ms</code>, <code>reason</code> (required when <code>status</code> is <code>skipped</code>, present for <code>fail</code> and <code>trap</code>, absent for <code>pass</code>)</td>
 </tr>
 <tr>
 <td><code>summary</code></td>
@@ -1929,8 +1929,8 @@ test('badge then outcome', async () =&gt; {
 <td>Warning: a fixture has no expectation file</td>
 </tr>
 <tr>
-<td><code>trap.deadline</code>, <code>trap.memory</code>, <code>trap.table</code>, <code>trap.submission-batch</code>, <code>trap.invalid-ui-tree</code>, <code>trap.import-not-requested</code>, <code>trap.abi</code>, <code>trap.panic</code></td>
-<td>Trap codes. The table in <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a> owns them.</td>
+<td><code>trap.deadline</code>, <code>trap.memory</code>, <code>trap.table</code>, <code>trap.submission-batch</code>, <code>trap.invalid-ui-tree</code>, <code>trap.abi</code>, <code>trap.panic</code></td>
+<td>Trap codes (a never-requested capability traps with <code>host.capability-not-requested</code>). The table in <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a> owns them.</td>
 </tr>
 </tbody>
 </table>

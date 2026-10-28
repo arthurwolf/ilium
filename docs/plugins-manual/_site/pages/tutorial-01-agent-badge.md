@@ -482,7 +482,7 @@ Other points that affect what the user sees:
 - Clearing a slot that has no decoration is accepted and changes nothing.
 - A badge longer than 12 cells is cut, and the cut text ends with an ellipsis. The labels in this step are shorter.
 - Decorations from `persist: false` are dropped when the server restarts. This step does not read agent state on start, so a row gets its badge back when its activity next changes.
-- After a crash restart, the plugin keeps its decorations, marked stale.
+- When only the plugin restarts after a crash (the server keeps running), the plugin keeps its decorations, marked stale. A server restart is the case of the previous item.
 - If `tree.decorate` is revoked, the plugin receives `deactivate(revoked)`, and its decorations are withdrawn.
 
 ### Test it

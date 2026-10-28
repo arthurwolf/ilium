@@ -808,7 +808,7 @@ export function startAnswer(request: HttpCalledEvent): void {
 </table>
 <p>Each open call takes exactly one <code>respond</code>. A second <code>respond</code> for the same call returns <code>not-found</code>. Two requests in the same event batch are two calls with two ids; answer each one.</p>
 <h3 id="used-by">Used by</h3>
-<p>The kernel's own loopback routes (feature 58) do not use this grant. They are served under <code>/api/</code> with the same token.</p>
+<p>The kernel's own loopback routes (see <a href="/pages/reference-kernel-and-boot/">Kernel and boot</a>) do not use this grant. They are served under <code>/api/</code> with the same token.</p>
 <h3 id="see-also">See also</h3>
 <ul>
 <li><a href="/pages/capability-http-api-route/">Capability: http-api.route</a> for the grant and its review text.</li>
@@ -816,7 +816,7 @@ export function startAnswer(request: HttpCalledEvent): void {
 <li><a href="/pages/api-cli/">cli</a> for the other server-side entry point that answers over a stream.</li>
 <li><a href="/pages/api-exports/">Plugin exports</a> for the <code>handler</code> export that receives <code>http-called</code>.</li>
 <li><a href="/pages/events-and-intents/">Events and intents</a> for the event batch that carries <code>http-called</code>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the shared error model.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the shared error model.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-http/"><small>Previous</small>http</a><a class="next" href="/pages/api-inference/"><small>Next</small>inference</a></nav>

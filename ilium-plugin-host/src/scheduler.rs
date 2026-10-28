@@ -806,14 +806,18 @@ impl Scheduler {
     /// The caller owns the drained events; queue policies have already been applied.
     pub fn take_events(&self, plugin: &PluginId, maximum: usize) -> Vec<Event> {
         let mut state = lock(&self.state);
-        let Some(side) = state.sides.get_mut(plugin) else { return Vec::new(); };
+        let Some(side) = state.sides.get_mut(plugin) else {
+            return Vec::new();
+        };
         let count = maximum.min(side.events.len());
         side.events.drain(..count).collect()
     }
 
     /// Observes pending delivery order without consuming events or changing policy state.
     pub fn snapshot_events(&self, plugin: &PluginId) -> Vec<Event> {
-        lock(&self.state).sides.get(plugin)
+        lock(&self.state)
+            .sides
+            .get(plugin)
             .map_or_else(Vec::new, |side| side.events.iter().cloned().collect())
     }
 
@@ -910,7 +914,11 @@ pub fn event_queue_policy(event: &Event) -> QueuePolicy {
             QueuePolicy::Coalesce
         }
         Event::EditorPointer(pointer)
-            if pointer.pointer.kind == ilium_plugin_api::generated::types::ui::PointerKind::Move => QueuePolicy::Coalesce,
+            if pointer.pointer.kind
+                == ilium_plugin_api::generated::types::ui::PointerKind::Move =>
+        {
+            QueuePolicy::Coalesce
+        }
         Event::UiAction(action)
             if matches!(
                 action.kind,

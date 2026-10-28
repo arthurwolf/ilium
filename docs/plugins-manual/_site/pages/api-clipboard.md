@@ -12,7 +12,7 @@ Two functions cover the whole import. `read-text` returns the clipboard text. `w
 |---|---|
 | Side | Client. The import belongs to the client world, `ilium:client/base`. |
 | Grant to write | `clipboard.write`, normal risk. |
-| Grant to read | `clipboard.read`, high risk. The user allows it once in the review dialog. |
+| Grant to read | `clipboard.read`, high risk. A T2 or T3 plugin asks in the install review dialog; a T1 bundled plugin asks at its first activation. |
 | Rust | Crate `ilium-plugin-sdk`, Rust stable 1.90 or later, target `wasm32-wasip2`. |
 | TypeScript | Package `@ilium/plugin-sdk`, Bun 1.2 or later. `bun install` adds the toolchain. |
 | Text format | UTF-8 plain text only. |
@@ -51,7 +51,7 @@ The names follow the binding rules (S5): kebab-case becomes snake_case in Rust a
 - **Route.** The client writes through the system clipboard when it runs on the user's desktop. When it runs in a terminal that supports OSC 52, it writes through an OSC 52 sequence. With neither route, `write-text` returns `unsupported` and `read-text` returns nothing.
 - **Logging.** Every successful read writes an info line to the plugin log that records only the length, never the text. The same line goes to the privacy log. The user is not asked before each read.
 - **Footer.** After each read, the client footer shows `clipboard read by <plugin name>` for 3 s.
-- **Prompts.** The review dialog lists `Read the clipboard` for `clipboard.read` and `Write to the clipboard` for `clipboard.write`. The high-risk grant is asked once, when the plugin first activates. There is no prompt per call.
+- **Prompts.** The review dialog lists `Read the clipboard` for `clipboard.read` and `Write to the clipboard` for `clipboard.write`. A T2 or T3 plugin asks for the high-risk grant in the install review dialog; a T1 plugin asks at its first activation. There is no prompt per call.
 
 <figure>
 <svg viewBox="0 0 400 200" role="img" aria-label="Copy flow from terminal selection to the clipboard">
@@ -114,7 +114,7 @@ The names follow the binding rules (S5): kebab-case becomes snake_case in Rust a
 | Grant held | Writes the text. | Returns the text, or nothing when the clipboard has no text. |
 | Grant declined by the user | `not-permitted`. | Returns nothing. A warn line is written to the plugin log. |
 | Grant revoked during the call | `revoked`. The plugin is re-activated. | Returns nothing, because `read-text` has no error result. |
-| Grant never requested in the manifest | Traps. The plugin fails and is restarted under the rules in [errors and limits](/pages/errors-and-limits/). | Traps, the same as an audio call without an audio grant. |
+| Grant never requested in the manifest | Traps. The plugin fails and is restarted under the rules in [errors and limits](/pages/reference-errors-and-limits/). | Traps, the same as an audio call without an audio grant. |
 
 ### Using the clipboard from the server side
 
@@ -309,7 +309,6 @@ The plugin log shows one line per call. The footer confirms each read.
 
 - Text selection and right-click menu (feature 16) writes the selection with `clipboard.write-text`.
 - Smart Copy light (feature 65) writes the selection on key release. It uses `clipboard.write-text` with a grab from the keys import.
-- Agent toolbar (feature 35) copies text with `clipboard.write`.
 
 ### See also
 
@@ -319,7 +318,7 @@ The plugin log shows one line per call. The footer confirms each read.
 - [clock and timers](/pages/api-clock-and-timers/) for `now-unix-millis`.
 - [client requests](/pages/api-client-requests/) for reading the clipboard from the server side.
 - [capability: clipboard](/pages/capability-clipboard/) for the grants, the logging and the review dialog.
-- [errors and limits](/pages/errors-and-limits/) for the trap and restart rules.
+- [errors and limits](/pages/reference-errors-and-limits/) for the trap and restart rules.
 
 Contract: `ilium:host/clipboard`. The server side reaches it through client requests.
 

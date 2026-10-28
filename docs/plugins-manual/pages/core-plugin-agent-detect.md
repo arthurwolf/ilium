@@ -21,7 +21,7 @@ Walking the process tree and scraping the vt100 screen are kernel-native. The ke
 
 ### See it
 
-<figure><img src="/assets/demos/01-agent-activity.gif" alt="Tree rows whose agent icons change between working, idle and waiting" loading="lazy"><figcaption>Agent icons follow the activity of each pane: working, idle, awaiting approval, done.</figcaption></figure>
+<figure><img src="/assets/demos/01-agent-activity.gif" alt="Current Ilium activity signals on local scripted agent fixtures" loading="lazy"><figcaption>Local scripted fixtures show working, unread completion and focus acknowledgement in current Ilium. The approval menu is a simulation; no provider session is running.</figcaption></figure>
 
 <figure><img src="/assets/demos/17-goal-indicators.gif" alt="A goal badge appears on a tree row while an agent pursues a goal" loading="lazy"><figcaption>The goal badge shows while an agent pursues a /goal and clears when the goal ends.</figcaption></figure>
 

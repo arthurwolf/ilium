@@ -51,7 +51,7 @@ close-video: func(video: u64);
 
 - **Frame rate.** The decoder does not pace the frames. The plugin decides how often it calls `next-frame`, usually from a timer ([timers](/pages/api-clock-and-timers/)).
 - **Frame size.** Each dimension must be at least 1, and `width` by `height` may not exceed 3,840 by 2,160. The frame size must match the pixel size of the surface that receives it. The host derives that pixel size from the surface's `min-columns` and `min-rows` and the sub-cell factor of the shared dither mode, so the plugin sets those widget props to give the size it asks for.
-- **Buffer.** The host decodes frames ahead, as many as fit in `video_buffer_mib` (64 MiB by default, 256 MiB at most) for each open video, and always at least one. A call that finds a buffered frame returns at once.
+- **Buffer.** The host decodes frames ahead, as many as fit in `video_buffer_mib` (64 MiB by default, 256 MiB at most for tier 1, 64 MiB for tiers 2 and 3) for each open video, and always at least one. A call that finds a buffered frame returns at once.
 - **Open videos.** A plugin may hold 2 open videos at once, and the ceiling is 8. A third `open-video` returns `quota-exceeded` until one is closed.
 - **Closing.** Call `close-video` as soon as the plugin no longer needs the video. Each open video holds its decoder and its frame buffer until then.
 
@@ -263,9 +263,9 @@ Every error is a `plugin-error` with one of these codes. Rust returns it as `Err
 | Code | When | Retry |
 |---|---|---|
 | `not-permitted` | No `media.video` grant, or no read grant for the path's scope. | No. Request the grant. |
-| `not-found` | `open-video`: the path does not exist. `next-frame` or `close-video`: the video id is unknown or already closed. | No. |
+| `not-found` | `open-video`: the path does not exist. `next-frame`: the video id is unknown or already closed. `close-video` has no error channel: closing an unknown or already closed id is a silent no-op. | No. |
 | `invalid-argument` | `next-frame` with a zero width or height, or a size over 3,840 by 2,160. | No. Fix the size. |
-| `unsupported` | No `ffmpeg` on `PATH` (the message names the program), or the file's extension or codec is not supported. | No. |
+| `unsupported` | No `ffmpeg` on `PATH` (the message names the program), or the file's extension, the `mime` type given to `open-video-bytes`, or the codec is not supported. Accepted mime types are `video/mp4`, `video/x-matroska`, `video/x-msvideo`, `video/quicktime`, `video/webm`, `video/mpeg`, `video/x-ms-wmv`, `video/x-flv` and `video/mp2t`. | No. |
 | `quota-exceeded` | The plugin already has 2 open videos (8 at most). | Yes, after a `close-video`. |
 | `io` | The operating system or the decoder failed to read the file. | Maybe. |
 | `revoked` | The authorization changed during the call. The plugin is activated again. | No. |
@@ -293,7 +293,7 @@ seek: func(video: u64, millis: u64) -> result<_, plugin-error>;
 
 | Call | Rust | TypeScript | Error |
 |---|---|---|---|
-| `open-video-bytes` | `media::open_video_bytes(&bytes, "video/mp4")` | `openVideoBytes(bytes, 'video/mp4')` | `invalid-argument` (format), `quota-exceeded` (16 MiB) |
+| `open-video-bytes` | `media::open_video_bytes(&bytes, "video/mp4")` | `openVideoBytes(bytes, 'video/mp4')` | `unsupported` (mime type or codec), `invalid-argument` (empty bytes, or more than 16 MiB) |
 | `open-video-range` | `media::open_video_range(path, start, end)` | `openVideoRange(path, start, end)` | `io`, `not-permitted` |
 | `seek` | `media::seek(video, millis)` | `seek(video, millis)` | `invalid-argument` |
 
@@ -323,4 +323,4 @@ See [glyph plane](/pages/api-surface-glyph-plane/) for fonts, package assets and
 - [codec](/pages/api-codec/) for decoding still images.
 - [fs](/pages/api-fs/) and [capability: fs.pick](/pages/capability-fs-pick/) for files the user chooses.
 - [timers](/pages/api-clock-and-timers/) for the frame rate.
-- [errors and limits](/pages/errors-and-limits/) for the general error model.
+- [errors and limits](/pages/reference-errors-and-limits/) for the general error model.
