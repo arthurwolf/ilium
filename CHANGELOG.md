@@ -52,6 +52,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium progress guard` is a Claude Code `PreToolUse` hook that Ilium installs into each chatroom project's `.claude/settings.local.json`. Inside an Ilium pane it refuses a foreground Bash call with a timeout over three minutes unless the call is an `ilium progress` or `ilium wait` command or runs in the background. Outside a pane, and for malformed hook input, it allows the call.
 
 ### Fixed
+- Saved-world landscapes render waterlogged polished deepslate stairs as source water, as the Java 1.19.3 stair block does; such saves no longer fail route qualification on that block.
+- Saved-world landscapes store each distinct block state once, so a saved route holds far less memory per cell; the one-GiB saved-scene account is still exceeded on some large routes.
 - Saved-world landscapes no longer fail route qualification because the native biome-tint registry was charged 2 MiB against the saved-scene memory account; it is now charged for its actual 28 KB manifest.
 - Saved-world landscape errors now name the block textures that the selected pack and Java jar lack, instead of only reporting "required native model textures missing".
 - Overworld landscapes using the installed Java 1.19.3 textures no longer fail the texture coverage check on blocks that version lacks (cactus flower, cherry wood, pink petals, torchflower, pitcher plant, leaf litter, dry grasses). Each such block shows a labelled 1.19.3 stand-in texture instead of stopping the frame.
