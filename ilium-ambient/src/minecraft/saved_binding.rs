@@ -11,7 +11,11 @@ use crate::voxel_landscape::{
     surface_generation::{Region, SourceOwner, SurfaceBlock, SurfaceWorld},
     surface_mesh::{BoundQuad, PreparedMesh},
 };
-use std::{collections::BTreeMap, mem::size_of, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::size_of,
+    sync::Arc,
+};
 const MAX_CELLS: usize = 1_000_000;
 const MAX_COPY_BYTES: usize = 512 << 20;
 const MAX_WORK: usize = 16_000_000;
@@ -201,6 +205,7 @@ fn prepare_internal(
         (size_of::<[i32; 3]>() + size_of::<SurfaceBlock>()) * 16 + PROPERTY_ROOT_BYTES,
         limits.owned_bytes,
     )?;
+    let mut distinct_states: BTreeSet<(&str, &BTreeMap<String, String>)> = BTreeSet::new();
     for position in &cells.positions {
         work.charge(1)?;
         let state = raw_state(cells, *position)?;
@@ -219,25 +224,36 @@ fn prepare_internal(
             size_of::<[i32; 3]>() + size_of::<SurfaceBlock>() + TREE_ENTRY_BYTES,
             limits.owned_bytes,
         )?;
-        add_bytes(
-            &mut storage_charge,
-            state.name.capacity(),
-            limits.owned_bytes,
-        )?;
-        add_bytes(&mut storage_charge, state.name.len(), limits.owned_bytes)?;
+        // Each cell holds a shared handle to its distinct state, so the state's
+        // strings and property entries are charged once, on first sight.
         work.charge(state.name.len())?;
-        if !state.properties.is_empty() {
-            add_bytes(&mut storage_charge, PROPERTY_ROOT_BYTES, limits.owned_bytes)?;
-        }
-        for (key, value) in &state.properties {
+        if distinct_states.insert((state.name.as_str(), &state.properties)) {
             add_bytes(
                 &mut storage_charge,
-                size_of::<(String, String)>() + TREE_ENTRY_BYTES,
+                size_of::<(&str, &BTreeMap<String, String>)>() + TREE_ENTRY_BYTES,
                 limits.owned_bytes,
             )?;
-            for bytes in [key.capacity(), value.capacity(), key.len()] {
-                add_bytes(&mut storage_charge, bytes, limits.owned_bytes)?;
+            add_bytes(
+                &mut storage_charge,
+                state.name.capacity(),
+                limits.owned_bytes,
+            )?;
+            add_bytes(&mut storage_charge, state.name.len(), limits.owned_bytes)?;
+            if !state.properties.is_empty() {
+                add_bytes(&mut storage_charge, PROPERTY_ROOT_BYTES, limits.owned_bytes)?;
             }
+            for (key, value) in &state.properties {
+                add_bytes(
+                    &mut storage_charge,
+                    size_of::<(String, String)>() + TREE_ENTRY_BYTES,
+                    limits.owned_bytes,
+                )?;
+                for bytes in [key.capacity(), value.capacity(), key.len()] {
+                    add_bytes(&mut storage_charge, bytes, limits.owned_bytes)?;
+                }
+            }
+        }
+        for (key, value) in &state.properties {
             work.charge(
                 key.len()
                     .checked_add(value.len())
@@ -249,6 +265,7 @@ fn prepare_internal(
         .map(|(budget, cancel)| budget.reserve(storage_charge as u64, cancel))
         .transpose()?;
     let mut blocks = BTreeMap::new();
+    let mut built_states: BTreeMap<(&str, &BTreeMap<String, String>), BlockState> = BTreeMap::new();
     let mut liquid_cells = BTreeMap::new();
     for position in &cells.positions {
         work.charge(1)?;
@@ -262,34 +279,42 @@ fn prepare_internal(
         if blocks.contains_key(&renderer_position) {
             return Err(Error::Invalid("duplicate saved position"));
         }
-        let id = ResourceId::parse(&raw.name)?;
-        if id.as_str() != raw.name {
-            return Err(Error::Invalid("native identifier changed saved name"));
-        }
-        let state = BlockState::new(
-            id,
-            raw.properties
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone())),
-        )?;
-        // Charge observable destination capacities if an implementation gives a
-        // clone more spare capacity than its source; never publish excess copy.
-        for (key, value) in state.properties() {
-            let source = raw
-                .properties
-                .get_key_value(key)
-                .ok_or(Error::Invalid("native property changed"))?;
-            add_bytes(
-                &mut storage_charge,
-                key.capacity().saturating_sub(source.0.capacity()),
-                limits.owned_bytes,
-            )?;
-            add_bytes(
-                &mut storage_charge,
-                value.capacity().saturating_sub(source.1.capacity()),
-                limits.owned_bytes,
-            )?;
-        }
+        let state = match built_states.get(&(raw.name.as_str(), &raw.properties)) {
+            Some(state) => state.clone(),
+            None => {
+                let id = ResourceId::parse(&raw.name)?;
+                if id.as_str() != raw.name {
+                    return Err(Error::Invalid("native identifier changed saved name"));
+                }
+                let state = BlockState::new(
+                    id,
+                    raw.properties
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                )?;
+                // Charge observable destination capacities if an implementation
+                // gives a clone more spare capacity than its source; never publish
+                // excess copy.
+                for (key, value) in state.properties() {
+                    let source = raw
+                        .properties
+                        .get_key_value(key)
+                        .ok_or(Error::Invalid("native property changed"))?;
+                    add_bytes(
+                        &mut storage_charge,
+                        key.capacity().saturating_sub(source.0.capacity()),
+                        limits.owned_bytes,
+                    )?;
+                    add_bytes(
+                        &mut storage_charge,
+                        value.capacity().saturating_sub(source.1.capacity()),
+                        limits.owned_bytes,
+                    )?;
+                }
+                built_states.insert((raw.name.as_str(), &raw.properties), state.clone());
+                state
+            }
+        };
         blocks.insert(
             renderer_position,
             SurfaceBlock {

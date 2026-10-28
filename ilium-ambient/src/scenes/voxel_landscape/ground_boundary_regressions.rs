@@ -160,7 +160,8 @@ fn prepare_fixture(
 }
 fn has_face(surface: &PreparedSurface, position: [i32; 3], normal: [f32; 3]) -> bool {
     surface.mesh.faces.iter().any(|face| {
-        face.position() == position && face.model.quads[usize::from(face.quad_index)].normal == normal
+        face.position() == position
+            && face.model.quads[usize::from(face.quad_index)].normal == normal
     })
 }
 fn model_at(surface: &PreparedSurface, position: [i32; 3]) -> &BoundModel {
