@@ -64,6 +64,11 @@ impl Request {
     pub fn scale(&self) -> f64 {
         self.scale
     }
+    /// Route endpoints in quarter blocks, the same units `RouteKey` uses, so a
+    /// receipt can name the corridor a frame was painted from.
+    pub fn route_endpoints_quarter_blocks(&self) -> [[i64; 2]; 2] {
+        [self.line.start, self.line.end].map(|point| point.map(|v| (v * 4.0).round() as i64))
+    }
     pub fn render_chunks(&self) -> &BTreeSet<[i32; 2]> {
         &self.render
     }

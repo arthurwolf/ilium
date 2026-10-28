@@ -2892,6 +2892,7 @@ fn paint(
         required_materials: coverage.required_count,
         required_materials_satisfied: coverage.required_satisfied,
         visible_pixels: covered.iter().filter(|visible| **visible).count(),
+        route_endpoints_quarter_blocks: Some(route.request.route_endpoints_quarter_blocks()),
     };
     composite_selected(&colors, &covered, frame, settings, palette);
     let mut owners = FrameOwners::new(Arc::clone(&route.map));

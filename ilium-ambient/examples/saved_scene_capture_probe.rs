@@ -540,6 +540,7 @@ mod tests {
             required_materials: 1,
             required_materials_satisfied: 1,
             visible_pixels: 1,
+            route_endpoints_quarter_blocks: None,
         };
 
         assert!(frame_evidence_matches(&evidence, native_digest, None,));
