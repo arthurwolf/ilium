@@ -4805,18 +4805,15 @@ impl App {
                 if !is_terminal {
                     return viewport;
                 }
-                // Reserve before interaction: metadata changes only redraw these slots.
                 let viewport = if self.ui_settings.agent_toolbar_enabled {
                     viewport.with_agent_toolbar_reserved(self.ui_settings.section_frames_enabled)
                 } else {
                     viewport
                 };
-                let viewport = if self.ui_settings.last_prompt_enabled
-                    && !self.last_prompt_banner_closed.contains(&viewport.pane_id)
-                {
+                let viewport = if self.shows_last_prompt_banner(viewport.pane_id) {
                     // In a physically clipped pane, leave room for the progress
                     // gauge and a detail row as well as the terminal itself.
-                    let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+                    let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
                         2.min(viewport.content_area.height.saturating_sub(2))
                     } else {
                         0
@@ -4844,7 +4841,7 @@ impl App {
                     viewport
                 };
                 let viewport = self.with_briefing_slot(viewport);
-                if self.ui_settings.progress_monitor_enabled {
+                if self.shows_progress_footer(viewport.pane_id) {
                     viewport.with_progress_reserved(
                         crate::progress_bar::reserved_height(
                             self.ui_settings.progress_max_lines.into(),
@@ -4871,7 +4868,7 @@ impl App {
     /// terminal's size and the box can never disagree. The box asks for what
     /// is left after the terminal's minimum height and the progress footer.
     fn with_briefing_slot(&self, viewport: PaneViewport) -> PaneViewport {
-        let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+        let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
             2.min(viewport.content_area.height.saturating_sub(2))
         } else {
             0
@@ -5057,10 +5054,12 @@ impl App {
     pub(crate) fn close_last_prompt_banner(&mut self, pane_id: NodeId) {
         self.last_prompt_banner_closed.insert(pane_id);
         self.hovered_last_prompt_button = None;
+        self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
     pub(crate) fn reopen_last_prompt_banner(&mut self, pane_id: NodeId) {
         self.last_prompt_banner_closed.remove(&pane_id);
+        self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
     /// Runs one banner-toolbar button for `pane_id`.
@@ -5097,8 +5096,7 @@ impl App {
         }
     }
 
-    /// Whether the fixed prompt slot displays recorded text. Hiding its text
-    /// never changes terminal dimensions.
+    /// Whether recorded prompt text needs a visible banner.
     pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
         self.ui_settings.last_prompt_enabled
             && !self.last_prompt_banner_closed.contains(&pane_id)
@@ -5107,7 +5105,7 @@ impl App {
                 .is_some_and(|text| !text.is_empty())
     }
 
-    /// Whether the already-reserved progress slot displays a report: the user
+    /// Whether the progress slot displays a report: the user
     /// hasn't turned the feature off and the server has an active report for
     /// this pane. Unlike the toolbar/last-prompt banner, this is not gated
     /// on "detected agent" -- a progress monitor can be running in any
@@ -5203,6 +5201,9 @@ impl App {
         let visibility_changed = previous
             .iter()
             .any(|(pane_id, was_visible)| *was_visible != self.shows_progress_footer(*pane_id));
+        if visibility_changed {
+            self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        }
         visibility_changed
             || (second_changed
                 && previous.iter().any(|(pane_id, _)| {
@@ -10490,8 +10491,8 @@ impl App {
     }
 
     /// Adjusts the fixed prompt slot by one row within the supported range.
-    /// This explicit setting changes terminal geometry even before a prompt
-    /// exists; subsequent text changes only wrap inside the reserved slot.
+    /// This setting changes terminal geometry while a prompt is visible;
+    /// subsequent text changes wrap inside the reserved slot.
     pub fn settings_adjust_last_prompt_max_lines(&mut self, delta: i32) {
         let current = self.ui_settings.last_prompt_max_lines;
         let lines = (i32::from(current) + delta).clamp(
@@ -22384,7 +22385,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_progress_expiry_hides_text_without_resizing_or_losing_result() {
+    fn completed_progress_expiry_reclaims_rows_without_losing_result() {
         use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = app();
@@ -22436,9 +22437,9 @@ mod tests {
 
         assert!(app.tick_completed_progress_display(61_000));
         let after = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(after, before);
+        assert!(after.content_area.height > before.content_area.height);
         assert!(!app.shows_progress_footer(pane_id));
-        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
         terminal
             .draw(|frame| crate::ui::draw(frame, &mut app))
             .unwrap();
@@ -22527,11 +22528,11 @@ mod tests {
             assert!(app.tick_completed_progress_display(61_000));
             let done_after = app.pane_viewport(done).unwrap();
             let busy_after = app.pane_viewport(busy).unwrap();
-            assert_eq!(done_after, done_before);
+            assert!(done_after.content_area.height > done_before.content_area.height);
             assert!(!app.shows_progress_footer(done));
             assert_eq!(busy_after, busy_before);
             assert!(!app.tree.pane_progress(done).is_empty());
-            assert!(app.take_outbound_requests().is_empty());
+            assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { pane_id, .. } if *pane_id == done)));
             app.ui_settings.completed_progress_hide_after_seconds = 0;
             app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
             assert!(app.pane_viewport(done).unwrap().progress_area.is_some());

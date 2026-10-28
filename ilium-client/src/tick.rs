@@ -31,7 +31,12 @@ pub fn on_tick(
     // spinners/pulses below share this same "still active as of the start
     // of this tick" contract.
     app.tick_layout_animation(now);
+    let before = app.pane_viewports();
     app.sync_last_prompt_histories();
+    let metadata_geometry_changed = before != app.pane_viewports();
+    if metadata_geometry_changed {
+        app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+    }
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
@@ -63,6 +68,7 @@ pub fn on_tick(
     let setup_prompt_changed =
         !setup_prompt_was_open && matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     was_animating
+        || metadata_geometry_changed
         || tree_transition_changed
         || terminal_activity_changed
         || (app.ui_settings.progress_monitor_enabled && !app.resources.waits.is_empty())
