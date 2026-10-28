@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Publishing and support | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details open><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/" aria-current="page">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Publishing and support</h1>
+
+<p>This guide covers the last mile of a plugin: preparing a release, signing it, giving it to users, writing a changelog, answering a bug report, and handling a lost key. It follows the order in which an author meets these tasks. The commands are the ones of the <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a>, and the signing rules are in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</p>
+<p>Requirement ids of this page are in the range <code>AUT-300</code> to <code>AUT-399</code>. The complete list is in <a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a>.</p>
+<h3 id="you-need">You need</h3>
+<ul>
+<li>A plugin that passes its tests. See <a href="/pages/testing/">Testing plugins</a>.</li>
+<li>A release build. A debug build is for development only.</li>
+<li>For a signed (T2) release, an Ed25519 publisher key made with <code>ilium plugin keygen</code>.</li>
+</ul>
+<h2 id="what-publishing-means-in-version-010">What publishing means in version 0.1.0</h2>
+<p>In <code>ilium:plugin@0.1.0</code> the supported way to publish is to hand over files. A release is three things:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;id&gt;-&lt;version&gt;.iliumpkg</code></td>
+<td>The package, a deterministic ZIP file</td>
+</tr>
+<tr>
+<td><code>publisher.pub</code></td>
+<td>The public key of the signer (signed releases only)</td>
+</tr>
+<tr>
+<td>The SHA-256 of the package</td>
+<td>Printed by <code>ilium plugin pack</code>, written in your release notes</td>
+</tr>
+</tbody>
+</table>
+<p>Users add the key once with <code>ilium plugin trust add publisher.pub</code> and install the package with <code>ilium plugin install</code>. A newer version of an installed id is an update.</p>
+<p>The manual also specifies an optional registry, a set of signed static files that a client can read (see <a href="/pages/reference-registry/">Registry reference</a>). It adds search, channels, yank and deprecate. The command <code>ilium plugin publish &lt;file&gt; --registry &lt;url&gt;</code> uploads a signed package to a registry (see <a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a>). The package file stays the base route that needs no registry, and an author MAY add a registry as a second route. [AUT-301]</p>
+<h2 id="before-you-release">Before you release</h2>
+<p>Run these in the project folder, in this order. Each is offline.</p>
+<pre><code class="language-bash">ilium plugin check
+ilium plugin lint --deny warnings
+ilium plugin test
+ilium plugin build --release
+ilium plugin pack
+ilium plugin verify dist/com.example.notes-1.4.0.iliumpkg
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Catches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>check</code></td>
+<td>Mistakes that would stop an install or trap at run time. It reports the same codes as the installer.</td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td>Weak spots such as an unused grant, a missing help topic or a debug build in a release</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td>Behaviour against your fixtures</td>
+</tr>
+<tr>
+<td><code>build --release</code></td>
+<td>A release build without debug information</td>
+</tr>
+<tr>
+<td><code>pack</code></td>
+<td>The deterministic archive with the <code>files</code> inventory</td>
+</tr>
+<tr>
+<td><code>verify</code></td>
+<td>Offline replay of the install stages 1 to 7 on the finished file</td>
+</tr>
+</tbody>
+</table>
+<p>A release MUST pass <code>check</code> without errors and SHOULD pass <code>lint --deny warnings</code>. [AUT-302]</p>
+<p>A release package MUST be built with <code>--release</code>, because a package that carries debug information or source maps is larger and fails <code>lint.debug-info-in-release</code>. [AUT-303]</p>
+<p>The release checklist of <a href="/pages/guide-quality-checklist/">Quality checklist</a> lists what each of these checks and what they cannot check.</p>
+<h3 id="what-goes-into-the-package">What goes into the package</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Include</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Components (<code>*.wasm</code>)</td>
+<td>Yes</td>
+<td>The plugin</td>
+</tr>
+<tr>
+<td><code>manifest.json</code>, <code>files</code> inventory</td>
+<td>Yes</td>
+<td>Written by <code>pack</code></td>
+</tr>
+<tr>
+<td>Help topics, icons, assets</td>
+<td>Yes</td>
+<td>Declared in the manifest</td>
+</tr>
+<tr>
+<td><code>README.md</code>, <code>LICENSE</code></td>
+<td>Yes</td>
+<td>The package page and the review dialog use them</td>
+</tr>
+<tr>
+<td><code>src/**</code></td>
+<td>Only with <code>--include-src</code></td>
+<td>Reviewers can read it. The host never loads it.</td>
+</tr>
+<tr>
+<td><code>.cwasm</code> precompiled files</td>
+<td>Never</td>
+<td>Refused with <code>package.precompiled-forbidden</code></td>
+</tr>
+<tr>
+<td>Test fixtures, build caches</td>
+<td>No</td>
+<td>They add size and no value</td>
+</tr>
+</tbody>
+</table>
+<p>A package MUST NOT contain a secret, a key or a token. The package is a file that anyone can open. [AUT-304]</p>
+<h2 id="names-ids-and-versions">Names, ids and versions</h2>
+<p>The <code>id</code> is permanent. It is <code>[a-z0-9-]+(\.[a-z0-9-]+)+</code>, usually a reverse domain name that you control, such as <code>com.example.notes</code>. The prefix <code>ilium.</code> belongs to first-party plugins and is refused for others with <code>manifest.id-reserved</code>.</p>
+<p>A signed package has one more rule: its id MUST start with the publisher id of the signing key and a dot, and an id that does not is refused with <code>manifest.id-publisher</code>. [AUT-305]</p>
+<p>Pick the id once. A rename is a different plugin, and users lose grants, settings and storage. See <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a>.</p>
+<h2 id="keys">Keys</h2>
+<p>A signed release needs a key pair. Make it once for each publisher.</p>
+<pre><code class="language-bash">ilium plugin keygen --publisher-id com.example --publisher &quot;Example Corp&quot; --out ~/keys/example
+ilium plugin sign dist/com.example.notes-1.4.0.iliumpkg --key ~/keys/example/publisher.key
+</code></pre>
+<p><code>keygen</code> writes <code>publisher.key</code> (the secret, mode 0600) and <code>publisher.pub</code> (the public part). It refuses to overwrite either file with <code>trust.key-exists</code>. <code>sign</code> refuses a key file that other users can read with <code>sign.key-permissions</code>, and refuses a manifest whose <code>publisher</code> differs from the key with <code>sign.publisher-mismatch</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Keep <code>publisher.key</code> outside the project and outside version control</td>
+<td>A key in a repository is a leaked key</td>
+</tr>
+<tr>
+<td>Keep an offline copy</td>
+<td>A lost key cannot be recovered</td>
+</tr>
+<tr>
+<td>Sign last</td>
+<td>A later <code>pack</code> writes a new archive without a signature</td>
+</tr>
+<tr>
+<td>Sign in a clean environment, or give CI the key through <code>ILIUM_PLUGIN_SIGNING_KEY</code> (path of a key file) or <code>ILIUM_PUBLISHER_KEY</code> (PEM text)</td>
+<td>The key never appears in a command line or a log</td>
+</tr>
+</tbody>
+</table>
+<p>The secret key MUST NOT be committed, packaged or printed. [AUT-306]</p>
+<p>A release MUST be signed after the last <code>pack</code>, and the signed file MUST be the file that users receive. Signing twice with the same key gives the same bytes. [AUT-307]</p>
+<h3 id="show-users-the-fingerprint">Show users the fingerprint</h3>
+<p>The key fingerprint is the SHA-256 of the raw public key. Users see its short form (the first 8 digits, for example <code>3f2a 91c0</code>) in the trust dialog. The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two. [AUT-308]</p>
+<h3 id="lost-leaked-or-changed-keys">Lost, leaked or changed keys</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+<th>What the author does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Key lost</td>
+<td>No new signed release for that publisher id</td>
+<td>Make a new key and a new publisher id, publish a new plugin id, and tell users</td>
+</tr>
+<tr>
+<td>Key leaked</td>
+<td>Anyone can sign as you</td>
+<td>Stop shipping, tell users to run <code>ilium plugin trust revoke &lt;key_id&gt; --reason compromised</code>, publish under a new key</td>
+</tr>
+<tr>
+<td>A known publisher id arrives with another key</td>
+<td>Refused with <code>package.publisher-key-changed</code></td>
+<td>Users must remove the old key and add the new one on purpose</td>
+</tr>
+<tr>
+<td>Registry in use</td>
+<td>A key can also be revoked in the registry metadata</td>
+<td>Publish the revocation there too</td>
+</tr>
+</tbody>
+</table>
+<p>A leaked key MUST be announced to users on the same channel as the releases, with the fingerprint of the key that replaces it. [AUT-309]</p>
+<h2 id="release-notes-and-changelog">Release notes and changelog</h2>
+<p>Keep a <code>CHANGELOG.md</code> in the project. Use one block per version, newest first, with the date in <code>YYYY-MM-DD</code> form and three kinds of entry.</p>
+<pre><code class="language-text">## 1.4.0 (2026-10-12)
+
+Added
+- Export to Markdown (command `export-notes`).
+
+Changed
+- The old command id `notes-export` still works and is hidden. It will go in 3.0.0.
+
+Fixed
+- A note with an empty title no longer traps the panel.
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Include</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>New or changed grants</td>
+<td>The update review dialog will show them</td>
+</tr>
+<tr>
+<td>Raised <code>data_version</code> and what the migration does</td>
+<td>Users with large data will wait</td>
+</tr>
+<tr>
+<td>Renamed or removed names</td>
+<td>See <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></td>
+</tr>
+<tr>
+<td>The SHA-256 of the package</td>
+<td>So that users can check the file</td>
+</tr>
+<tr>
+<td>The contract version (<code>api</code>)</td>
+<td>So that users know whether their Ilium supports it</td>
+</tr>
+</tbody>
+</table>
+<p>Release notes MUST name every new grant and every raised <code>data_version</code>. [AUT-310]</p>
+<p>A project SHOULD ship <code>README.md</code> and <code>CHANGELOG.md</code>, because <code>lint.readme-missing</code> and <code>lint.changelog-missing</code> report their absence. [AUT-311]</p>
+<p>The in-product help of the plugin is a separate matter and is covered in <a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a>.</p>
+<h2 id="distribution-channels">Distribution channels</h2>
+<table>
+<thead>
+<tr>
+<th>Channel</th>
+<th>Good for</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A project page with a download link, the fingerprint and the SHA-256</td>
+<td>Public plugins</td>
+<td>Keep old versions available so that users can roll back</td>
+</tr>
+<tr>
+<td>A shared folder or file host</td>
+<td>A team</td>
+<td>Send <code>publisher.pub</code> once, out of band</td>
+</tr>
+<tr>
+<td>E-mail</td>
+<td>One user</td>
+<td>Attach the package and send the fingerprint another way</td>
+</tr>
+<tr>
+<td>A registry, when the host supports it</td>
+<td>Search, channels, updates</td>
+<td>Adds <code>yank</code> and <code>deprecate</code></td>
+</tr>
+</tbody>
+</table>
+<p>Wherever the file goes, the author SHOULD name the file <code>&lt;id&gt;-&lt;version&gt;.iliumpkg</code> and SHOULD NOT rename it. [AUT-312]</p>
+<p>A user can check a file before installing it: <code>ilium plugin verify &lt;file&gt;</code> runs the install stages offline, and <code>ilium plugin inspect &lt;file&gt; --verify</code> recomputes the hashes.</p>
+<h2 id="platforms">Platforms</h2>
+<p>T2 and T3 packages run only on Linux in version 0.1.0 and are refused on Windows and macOS with <code>package.platform-unsupported</code>. A release page MUST state that signed and unsigned third-party packages need Linux. [AUT-313]</p>
+<h2 id="supporting-your-users">Supporting your users</h2>
+<p>A bug report is useful when it lets you see what the plugin did. The user has four tools, and you tell them which to use.</p>
+<table>
+<thead>
+<tr>
+<th>Ask the user for</th>
+<th>Command</th>
+<th>What it gives you</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The plugin log</td>
+<td><code>ilium plugin logs &lt;id&gt; --tail 200</code></td>
+<td>Traps, restarts, deadline breaches, refusals</td>
+</tr>
+<tr>
+<td>The state and failures</td>
+<td><code>ilium plugin status &lt;id&gt;</code></td>
+<td>Health and the failure window</td>
+</tr>
+<tr>
+<td>Resource use</td>
+<td><code>ilium plugin stats &lt;id&gt;</code></td>
+<td>Use against each limit</td>
+</tr>
+<tr>
+<td>A recorded trace</td>
+<td><code>ilium plugin trace &lt;id&gt; --last 100 --record trace.replay</code></td>
+<td>The events and calls, with payloads redacted</td>
+</tr>
+<tr>
+<td>An environment check</td>
+<td><code>ilium plugin doctor</code></td>
+<td>Host and sandbox facts</td>
+</tr>
+<tr>
+<td>The version and grants</td>
+<td><code>ilium plugin info &lt;id&gt;</code></td>
+<td>What is installed and what was granted</td>
+</tr>
+</tbody>
+</table>
+<p>Payloads in a normal trace are redacted and print as <code>&lt;redacted N bytes&gt;</code>. <code>--unredacted</code> works only for a plugin installed with <code>ilium plugin dev</code>, so an author MUST NOT ask a user for unredacted output from a normal install. [AUT-314]</p>
+<p>A plugin that logs MUST NOT write secrets, tokens, file contents or whole payloads to the plugin log. A log line is 16 KiB at most, so write a count or an id. [AUT-315]</p>
+<h3 id="a-template-for-bug-reports">A template for bug reports</h3>
+<p>Put this in your README, so that users send what you need:</p>
+<pre><code class="language-text">Plugin id and version:        (ilium plugin info &lt;id&gt;)
+Ilium version:                (ilium --version)
+Operating system:
+What you did:
+What you expected:
+What happened:
+Plugin log, last 100 lines:   (ilium plugin logs &lt;id&gt; --tail 100)
+Status:                       (ilium plugin status &lt;id&gt;)
+</code></pre>
+<h3 id="reproducing-a-report">Reproducing a report</h3>
+<p>With a replay file from <code>ilium plugin trace --record</code>, you can run <code>ilium plugin test --replay trace.replay</code> and see the same events. The fake host runs on a fake clock, so timing problems are reproduced with <code>advance_clock</code>. A report that cannot be reproduced SHOULD be turned into a fixture once you understand it, so that it never returns. [AUT-316]</p>
+<h3 id="triage">Triage</h3>
+<table>
+<thead>
+<tr>
+<th>Symptom in the report</th>
+<th>First place to look</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plugin disabled after three failures</td>
+<td>The first trap in the log. Later restarts repeat it.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code></td>
+<td>The user declined or revoked a grant. Your code must work without it.</td>
+</tr>
+<tr>
+<td>Install error with a <code>manifest.</code> or <code>package.</code> code</td>
+<td><a href="/pages/reference-errors-and-limits/">Errors and limits reference</a>, install code index</td>
+</tr>
+<tr>
+<td>Works on your machine only</td>
+<td>Sandbox paths, network allowlists, tier differences</td>
+</tr>
+<tr>
+<td>Slow or stuck</td>
+<td><code>ilium plugin stats</code> and <code>ilium plugin profile</code></td>
+</tr>
+</tbody>
+</table>
+<p><a href="/pages/guide-troubleshooting/">Troubleshooting</a> lists these by symptom for authors.</p>
+<h2 id="security-reports">Security reports</h2>
+<p>If someone reports a vulnerability, treat it as private until a fix is out. Publish a fixed version with a higher number, state in the release notes that it is a security fix, and tell users to update. If the vulnerability needs a grant to be exploited, say which grant. A plugin that cannot be fixed SHOULD be deprecated with a successor named, when a registry is in use. [AUT-317]</p>
+<p>An author MUST publish a way to reach them, in the README and in the package description, before the first release. [AUT-318]</p>
+<h2 id="withdrawing-a-release">Withdrawing a release</h2>
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A bad version must not be installed new</td>
+<td>Publish a higher fixed version. With a registry, <code>yank</code> the bad one. Installed copies keep working.</td>
+</tr>
+<tr>
+<td>The whole plugin is obsolete</td>
+<td>With a registry, <code>deprecate</code> with a message and a successor</td>
+</tr>
+<tr>
+<td>Users must stop using it at once</td>
+<td>Tell them to run <code>ilium plugin disable &lt;id&gt;</code> or <code>uninstall &lt;id&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>A version number, once published, MUST NOT be reused for different content. The host refuses it with <code>package.version-reused</code>. [AUT-319]</p>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Manifest <code>publisher</code> differs from the key</td>
+<td><code>sign.publisher-mismatch</code> at sign, <code>manifest.publisher-mismatch</code> at install</td>
+<td>Use the same publisher string and publisher id</td>
+</tr>
+<tr>
+<td>Package signed, then packed again</td>
+<td>The signature is gone</td>
+<td>Sign last</td>
+</tr>
+<tr>
+<td>Key file readable by others</td>
+<td><code>sign.key-permissions</code></td>
+<td><code>chmod 600</code></td>
+</tr>
+<tr>
+<td>Package renamed</td>
+<td>Still installs. The id comes from the manifest.</td>
+<td>Keep the standard name</td>
+</tr>
+<tr>
+<td>Package built with <code>--debug</code></td>
+<td><code>lint.debug-info-in-release</code></td>
+<td>Rebuild with <code>--release</code></td>
+</tr>
+<tr>
+<td>User on Windows or macOS</td>
+<td><code>package.platform-unsupported</code></td>
+<td>Say so on the release page</td>
+</tr>
+<tr>
+<td>Same version, new content</td>
+<td><code>package.version-reused</code></td>
+<td>Raise the version</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>Before install, the review dialog lists the publisher, the tier, the signature state, the key fingerprint and every grant, one row each. A key that is not trusted is offered with <code>Trust publisher</code>. After install the plugin appears in Settings &gt; Plugins with its version. See <a href="/pages/user-managing-plugins/">Managing plugins</a>.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/tutorial-09-package-and-share/">Package and share</a> for the first release step by step</li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust</a> for key and signature formats</li>
+<li><a href="/pages/reference-package-format/">Package format</a> for the archive</li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a> before each release</li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a> for version rules</li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a> for help topics and README</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/guide-porting-from-other-plugin-systems/"><small>Previous</small>Porting from other plugin systems</a><a class="next" href="/pages/guide-publishing/"><small>Next</small>Publishing guide</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#what-publishing-means-in-version-010">What publishing means in version 0.1.0</a></li><li class="l2"><a href="#before-you-release">Before you release</a></li><li class="l3"><a href="#what-goes-into-the-package">What goes into the package</a></li><li class="l2"><a href="#names-ids-and-versions">Names, ids and versions</a></li><li class="l2"><a href="#keys">Keys</a></li><li class="l3"><a href="#show-users-the-fingerprint">Show users the fingerprint</a></li><li class="l3"><a href="#lost-leaked-or-changed-keys">Lost, leaked or changed keys</a></li><li class="l2"><a href="#release-notes-and-changelog">Release notes and changelog</a></li><li class="l2"><a href="#distribution-channels">Distribution channels</a></li><li class="l2"><a href="#platforms">Platforms</a></li><li class="l2"><a href="#supporting-your-users">Supporting your users</a></li><li class="l3"><a href="#a-template-for-bug-reports">A template for bug reports</a></li><li class="l3"><a href="#reproducing-a-report">Reproducing a report</a></li><li class="l3"><a href="#triage">Triage</a></li><li class="l2"><a href="#security-reports">Security reports</a></li><li class="l2"><a href="#withdrawing-a-release">Withdrawing a release</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

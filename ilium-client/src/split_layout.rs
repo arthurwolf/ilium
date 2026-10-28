@@ -51,8 +51,21 @@ pub struct PaneViewport {
     pub toolbar_area: Option<Rect>,
     /// Fixed prompt slot below the toolbar, clipped only by physical space.
     pub last_prompt_area: Option<Rect>,
+    /// Briefing box slot directly below the prompt slot; present only while
+    /// an attention briefing is shown for the pane.
+    pub briefing_area: Option<Rect>,
     /// Fixed progress slot at the bottom, including hidden retained results.
     pub progress_area: Option<Rect>,
+    /// One-row frame rule below the agent toolbar, full outer width so its
+    /// ends land on the pane's side borders. It doubles as the top edge of
+    /// the prompt banner. Present only when frames are on and a row is spare.
+    pub toolbar_rule: Option<Rect>,
+    /// One-row frame rule below the prompt slot.
+    pub last_prompt_bottom_rule: Option<Rect>,
+    /// One-row frame rule below the briefing slot.
+    pub briefing_bottom_rule: Option<Rect>,
+    /// One-row frame rule above the progress slot.
+    pub progress_rule: Option<Rect>,
 }
 
 impl PaneViewport {
@@ -70,14 +83,25 @@ impl PaneViewport {
             slot_index,
             toolbar_area: None,
             last_prompt_area: None,
+            briefing_area: None,
             progress_area: None,
+            toolbar_rule: None,
+            last_prompt_bottom_rule: None,
+            briefing_bottom_rule: None,
+            progress_rule: None,
         }
+    }
+
+    /// A one-row, full-outer-width strip at row `y`, so a rule drawn there
+    /// reaches the pane's side borders and forms `├`/`┤` joints with them.
+    fn rule_row(&self, y: u16) -> Rect {
+        Rect::new(self.outer_area.x, y, self.outer_area.width, 1)
     }
 
     /// Reserves one row at the top of `content_area` for the agent toolbar,
     /// returning the adjusted viewport. A no-op on an already-empty content
     /// area so a sliver-sized split can't underflow into a huge `Rect`.
-    pub fn with_agent_toolbar_reserved(self) -> Self {
+    pub fn with_agent_toolbar_reserved(self, frames: bool) -> Self {
         if self.content_area.height <= 1 {
             return self;
         }
@@ -87,21 +111,29 @@ impl PaneViewport {
             self.content_area.width,
             1,
         );
+        // The rule needs a row beyond the toolbar and the terminal's one.
+        let has_rule = frames && self.content_area.height >= 3;
+        let used = 1 + u16::from(has_rule);
         let content_area = Rect::new(
             self.content_area.x,
-            self.content_area.y.saturating_add(1),
+            self.content_area.y.saturating_add(used),
             self.content_area.width,
-            self.content_area.height.saturating_sub(1),
+            self.content_area.height.saturating_sub(used),
         );
         Self {
             content_area,
             toolbar_area: Some(toolbar_area),
+            toolbar_rule: has_rule.then(|| self.rule_row(toolbar_area.y + 1)),
             ..self
         }
     }
 
     /// Reserves the configured prompt budget while retaining one terminal row.
-    pub fn with_last_prompt_reserved(self, rows: u16) -> Self {
+    /// The rule below the prompt is added only when `frames` is on and rows
+    /// remain beyond the prompt, the terminal row and `keep_free_rows` (rows
+    /// later reservations such as the progress footer still need), so a short
+    /// pane loses its rule before it loses prompt or terminal rows.
+    pub fn with_last_prompt_reserved(self, rows: u16, keep_free_rows: u16, frames: bool) -> Self {
         if self.content_area.height <= 1 || rows == 0 {
             return self;
         }
@@ -112,15 +144,53 @@ impl PaneViewport {
             self.content_area.width,
             rows,
         );
+        let remaining = self.content_area.height - rows;
+        let has_rule = frames && remaining >= 2u16.saturating_add(keep_free_rows);
+        let rule_rows = u16::from(has_rule);
         let content_area = Rect::new(
             self.content_area.x,
-            self.content_area.y.saturating_add(rows),
+            self.content_area.y + rows + rule_rows,
             self.content_area.width,
-            self.content_area.height.saturating_sub(rows),
+            remaining - rule_rows,
         );
         Self {
             content_area,
             last_prompt_area: Some(last_prompt_area),
+            last_prompt_bottom_rule: has_rule.then(|| self.rule_row(last_prompt_area.bottom())),
+            ..self
+        }
+    }
+
+    /// Reserves `rows` for the attention briefing box at the top of what is
+    /// left of `content_area` (below the toolbar and the prompt banner),
+    /// retaining one terminal row. Rules follow
+    /// [`Self::with_last_prompt_reserved`]: the rule below the box is added
+    /// only when `frames` is on and rows remain beyond the box, the terminal
+    /// row and `keep_free_rows`.
+    pub fn with_briefing_reserved(self, rows: u16, keep_free_rows: u16, frames: bool) -> Self {
+        if self.content_area.height <= 1 || rows == 0 {
+            return self;
+        }
+        let rows = rows.min(self.content_area.height - 1);
+        let briefing_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y,
+            self.content_area.width,
+            rows,
+        );
+        let remaining = self.content_area.height - rows;
+        let has_rule = frames && remaining >= 2u16.saturating_add(keep_free_rows);
+        let rule_rows = u16::from(has_rule);
+        let content_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y + rows + rule_rows,
+            self.content_area.width,
+            remaining - rule_rows,
+        );
+        Self {
+            content_area,
+            briefing_area: Some(briefing_area),
+            briefing_bottom_rule: has_rule.then(|| self.rule_row(briefing_area.bottom())),
             ..self
         }
     }
@@ -130,14 +200,19 @@ impl PaneViewport {
     /// the opposite end from [`Self::with_last_prompt_reserved`]. A no-op on
     /// an already-empty content area or a zero-row request, for the same
     /// underflow-safety reason as that method.
-    pub fn with_progress_reserved(self, rows: u16) -> Self {
+    pub fn with_progress_reserved(self, rows: u16, frames: bool) -> Self {
         if self.content_area.height <= 1 || rows == 0 {
             return self;
         }
         let rows = rows.min(self.content_area.height - 1);
+        // The rule above the footer needs one more row than the footer and the
+        // terminal's single retained row; otherwise it is simply omitted.
+        let has_rule = frames && self.content_area.height - rows >= 2;
+        let rule_rows = u16::from(has_rule);
+        let progress_y = self.content_area.y + self.content_area.height - rows;
         let progress_area = Rect::new(
             self.content_area.x,
-            self.content_area.y + self.content_area.height - rows,
+            progress_y,
             self.content_area.width,
             rows,
         );
@@ -145,11 +220,12 @@ impl PaneViewport {
             self.content_area.x,
             self.content_area.y,
             self.content_area.width,
-            self.content_area.height - rows,
+            self.content_area.height - rows - rule_rows,
         );
         Self {
             content_area,
             progress_area: Some(progress_area),
+            progress_rule: has_rule.then(|| self.rule_row(progress_y - 1)),
             ..self
         }
     }
@@ -294,13 +370,116 @@ mod tests {
     use super::*;
 
     #[test]
+    fn frames_reserve_a_rule_row_under_the_toolbar_only_when_enabled() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 20), SplitOrientation::Vertical, &ids(1))[0];
+        let plain = viewport.with_agent_toolbar_reserved(false);
+        let framed = viewport.with_agent_toolbar_reserved(true);
+        assert_eq!(plain.toolbar_rule, None);
+        let rule = framed.toolbar_rule.expect("framed toolbar has a rule");
+        assert_eq!(rule.y, framed.toolbar_area.unwrap().y + 1);
+        assert_eq!(rule.x, viewport.outer_area.x);
+        assert_eq!(rule.width, viewport.outer_area.width);
+        assert_eq!(framed.content_area.height + 1, plain.content_area.height);
+        assert_eq!(framed.content_area.y, rule.y + 1);
+    }
+
+    #[test]
+    fn frames_drop_the_toolbar_rule_before_the_terminal_row() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 4), SplitOrientation::Vertical, &ids(1))[0];
+        let tiny = PaneViewport {
+            content_area: Rect::new(
+                viewport.content_area.x,
+                viewport.content_area.y,
+                viewport.content_area.width,
+                2,
+            ),
+            ..viewport
+        };
+        let framed = tiny.with_agent_toolbar_reserved(true);
+        assert_eq!(framed.toolbar_rule, None);
+        assert_eq!(framed.content_area.height, 1);
+    }
+
+    #[test]
+    fn frames_reserve_prompt_and_progress_rules_below_their_sections() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 24), SplitOrientation::Vertical, &ids(1))[0];
+        let plain = viewport.with_last_prompt_reserved(3, 0, false);
+        let framed = viewport.with_last_prompt_reserved(3, 0, true);
+        assert_eq!(plain.last_prompt_bottom_rule, None);
+        assert!(framed.last_prompt_bottom_rule.is_some());
+        assert_eq!(framed.content_area.height + 1, plain.content_area.height);
+
+        let plain = viewport.with_progress_reserved(2, false);
+        let framed = viewport.with_progress_reserved(2, true);
+        assert_eq!(plain.progress_rule, None);
+        let rule = framed.progress_rule.expect("framed footer has a rule");
+        assert_eq!(framed.content_area.height + 1, plain.content_area.height);
+        assert!(rule.y >= framed.content_area.bottom());
+    }
+
+    #[test]
+    fn briefing_reservation_sits_below_the_prompt_and_keeps_a_terminal_row() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 24), SplitOrientation::Vertical, &ids(1))[0];
+        let with_prompt = viewport.with_last_prompt_reserved(3, 0, true);
+        let framed = with_prompt.with_briefing_reserved(4, 0, true);
+        let area = framed.briefing_area.expect("briefing slot");
+        assert_eq!(area.y, with_prompt.content_area.y);
+        assert_eq!(area.height, 4);
+        let rule = framed
+            .briefing_bottom_rule
+            .expect("framed briefing has a rule");
+        assert_eq!(rule.y, area.bottom());
+        assert_eq!(framed.content_area.y, rule.y + 1);
+        assert_eq!(
+            framed.content_area.height + 5,
+            with_prompt.content_area.height
+        );
+        // Prompt rule above and briefing rule below: two separate rules.
+        assert!(framed.last_prompt_bottom_rule.is_some());
+        assert_ne!(framed.last_prompt_bottom_rule, framed.briefing_bottom_rule);
+
+        let plain = with_prompt.with_briefing_reserved(4, 0, false);
+        assert_eq!(plain.briefing_bottom_rule, None);
+        assert_eq!(
+            plain.content_area.height + 4,
+            with_prompt.content_area.height
+        );
+
+        let without_prompt = viewport.with_briefing_reserved(4, 0, true);
+        assert_eq!(
+            without_prompt.briefing_area.unwrap().y,
+            viewport.content_area.y
+        );
+    }
+
+    #[test]
+    fn briefing_reservation_is_clamped_and_skips_empty_requests() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 6), SplitOrientation::Vertical, &ids(1))[0];
+        assert_eq!(viewport.with_briefing_reserved(0, 0, true), viewport);
+        let clamped = viewport.with_briefing_reserved(50, 0, true);
+        assert_eq!(clamped.content_area.height, 1);
+        assert_eq!(clamped.briefing_bottom_rule, None);
+        let empty = allocate_viewports(
+            Rect::new(u16::MAX, u16::MAX, 1, 1),
+            SplitOrientation::Horizontal,
+            &ids(1),
+        )[0];
+        assert_eq!(empty.with_briefing_reserved(3, 0, true).briefing_area, None);
+    }
+
+    #[test]
     fn agent_toolbar_reservation_shrinks_content_from_the_top() {
         let viewports =
             allocate_viewports(Rect::new(0, 0, 40, 20), SplitOrientation::Vertical, &ids(1));
         let viewport = viewports[0];
         assert_eq!(viewport.toolbar_area, None);
 
-        let reserved = viewport.with_agent_toolbar_reserved();
+        let reserved = viewport.with_agent_toolbar_reserved(false);
         assert_eq!(reserved.outer_area, viewport.outer_area);
         assert_eq!(
             reserved.toolbar_area,
@@ -329,7 +508,7 @@ mod tests {
             SplitOrientation::Horizontal,
             &ids(1),
         );
-        let reserved = viewports[0].with_agent_toolbar_reserved();
+        let reserved = viewports[0].with_agent_toolbar_reserved(false);
         assert_eq!(reserved.toolbar_area, None);
         assert_eq!(reserved.content_area.height, 0);
     }

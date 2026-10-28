@@ -1,0 +1,6 @@
+╭─ Close pane? ────────────────────────────────╮
+│ You said: close the pane called docs         │
+│ Pane docs and its terminal will close.       │
+│                                              │
+│    Esc Cancel                Enter Close pane│
+╰──────────────────────────────────────────────╯

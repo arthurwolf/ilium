@@ -103,6 +103,9 @@ async fn supervise_loop(state: std::sync::Arc<ServerState>) {
             Err(error) if error.is_cancelled() => return,
             Err(error) => {
                 tracing::error!("agent detection loop panicked and is restarting: {error}");
+                // A deterministic native failure must not respawn tasks in a
+                // tight loop and starve IPC/input on the same runtime.
+                tokio::time::sleep(TICK_FAILURE_BACKOFF_INITIAL).await;
             }
         }
     }
@@ -232,7 +235,7 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         tracing::error!("detection requires bootstrap-owned server execution");
         return;
     };
-    let execution = owner.client.clone();
+    let execution = owner.detection.clone();
     let retention = match execution.foundation.try_reserve(
         Lane::Io,
         JobCost {
@@ -258,16 +261,21 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         // Sleep to the exact nearest pane deadline. New panes and debounced
         // force-checks notify this loop, so an earlier deadline interrupts
         // the sleep immediately without a fixed polling granularity.
+        // Register before inspecting the schedule: a pane/focus update may
+        // notify while next_detection_delay is awaiting registry locks.
+        let schedule_changed = state.detection_schedule_changed.notified();
+        tokio::pin!(schedule_changed);
+        schedule_changed.as_mut().enable();
         match next_detection_delay(&state, Instant::now()).await {
             Some(delay) if !delay.is_zero() => {
                 tokio::select! {
                     () = tokio::time::sleep(delay) => {}
-                    () = state.detection_schedule_changed.notified() => continue,
+                    () = &mut schedule_changed => continue,
                 }
             }
             Some(_) => {}
             None => {
-                state.detection_schedule_changed.notified().await;
+                schedule_changed.await;
                 continue;
             }
         }
@@ -472,7 +480,7 @@ async fn system_refresh_required(
         return true;
     };
     match owner
-        .client
+        .detection
         .run(
             Lane::Io,
             JobCost {
@@ -799,9 +807,14 @@ async fn run_due_panes_with_hook(
         .execution
         .get()
         .ok_or_else(|| execution_error("server bank not started"))?
+        .detection
+        .clone();
+    let notification_execution = state
+        .execution
+        .get()
+        .ok_or_else(|| execution_error("server bank not started"))?
         .client
         .clone();
-    let notification_execution = execution.clone();
     // Reserve before cloning classification inputs or formatting screens.
     let reservation = execution
         .foundation
@@ -958,6 +971,10 @@ async fn run_due_panes_with_hook(
     }
 
     let evidence_deadline = tokio::time::Instant::now() + EVIDENCE_DEADLINE;
+    let attempted_panes: Vec<_> = due_panes
+        .iter()
+        .map(|pane| (pane.pane_id, pane.request_generation, pane.agent_generation))
+        .collect();
     let shell_observers: Vec<_> = due_panes
         .iter_mut()
         .filter_map(|pane| {
@@ -1008,6 +1025,7 @@ async fn run_due_panes_with_hook(
         status: PaneStatus,
         identity: Option<ilium_detect::AgentIdentity>,
         screen_generation: u64,
+        observed_at_unix_millis: u64,
         request_generation: u64,
         confirmed_goal_owner: Option<ConfirmedGoalOwner>,
         is_fresh_agent_screen: bool,
@@ -1152,6 +1170,8 @@ async fn run_due_panes_with_hook(
                         })
                         .collect();
 
+                    let observed_at_unix_millis = observation_unix_millis();
+                    let mut current_cached_screens = std::collections::HashSet::new();
                     let screen_snapshots: std::collections::HashMap<
                         NodeId,
                         ilium_pty::ScreenSnapshot,
@@ -1160,9 +1180,7 @@ async fn run_due_panes_with_hook(
                         let mut snapshots =
                             std::collections::HashMap::with_capacity(identified_panes.len());
                         for pane in &identified_panes {
-                            if pane.identity.is_none()
-                                || pane.cached_screen_classification.is_some()
-                            {
+                            if pane.identity.is_none() {
                                 continue;
                             }
                             let Some(PaneResource::Terminal(runtime)) =
@@ -1170,12 +1188,23 @@ async fn run_due_panes_with_hook(
                             else {
                                 continue;
                             };
-                            let Ok(snapshot) =
-                                runtime.session.screen_snapshot_with_limit(2 * 1024 * 1024)
+                            if let Some(cache) = &pane.cached_screen_classification {
+                                // The atomic generation can remain old while the parser
+                                // processes output. Only the parser lock proves this
+                                // unchanged frame was actually available to observe.
+                                if runtime.session.current_screen_generation()
+                                    == Some(cache.screen_generation)
+                                {
+                                    current_cached_screens.insert(pane.due.pane_id);
+                                }
+                                continue;
+                            }
+                            let Ok(Some(snapshot)) = runtime
+                                .session
+                                .current_screen_snapshot_with_limit(2 * 1024 * 1024)
                             else {
-                                return Err(std::io::Error::other(
-                                    "detection screen evidence admission limit reached",
-                                ));
+                                // A busy or oversized pane must not prevent checks of its peers.
+                                continue;
                             };
                             snapshots.insert(pane.due.pane_id, snapshot);
                         }
@@ -1184,9 +1213,15 @@ async fn run_due_panes_with_hook(
 
                     let classifications: Vec<ClassifiedPane> = identified_panes
                         .into_iter()
-                        .map(|identified| {
+                        .filter_map(|identified| {
                             let due_pane = identified.due;
                             let identity = identified.identity;
+                            if identity.is_some()
+                                && !current_cached_screens.contains(&due_pane.pane_id)
+                                && !screen_snapshots.contains_key(&due_pane.pane_id)
+                            {
+                                return None;
+                            }
                             let (
                                 screen_generation,
                                 classified_identity,
@@ -1259,7 +1294,7 @@ async fn run_due_panes_with_hook(
                                 });
                             let needs_session_discovery =
                                 identity.is_some() && !has_stable_session_owner;
-                            ClassifiedPane {
+                            Some(ClassifiedPane {
                                 pane_id: due_pane.pane_id,
                                 input: due_pane.input,
                                 agent_generation: due_pane.agent_generation,
@@ -1269,6 +1304,7 @@ async fn run_due_panes_with_hook(
                                 status: classified_identity.status,
                                 identity,
                                 screen_generation,
+                                observed_at_unix_millis,
                                 request_generation: due_pane.request_generation,
                                 confirmed_goal_owner: classified_identity.confirmed_goal_owner,
                                 is_fresh_agent_screen,
@@ -1296,7 +1332,7 @@ async fn run_due_panes_with_hook(
                                 goal_was_retained: classified_identity.goal_was_retained,
                                 interstitial_prompt_response,
                                 screen_classification_cache,
-                            }
+                            })
                         })
                         .collect();
 
@@ -2066,6 +2102,22 @@ async fn run_due_panes_with_hook(
                     .is_none_or(|owner| owner == pane_id)
         });
 
+        // An unavailable oldest batch must not monopolize the next batch.
+        // Retrying an observation changes scheduling only, never freshness.
+        for (pane_id, request_generation, agent_generation) in &attempted_panes {
+            if classifications.iter().any(|pane| pane.pane_id == *pane_id) {
+                continue;
+            }
+            if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(pane_id) {
+                if runtime.detection_schedule.request_generation == *request_generation
+                    && runtime.agent_generation == *agent_generation
+                {
+                    runtime.detection_schedule.next_due =
+                        unavailable_observation_retry(Instant::now());
+                }
+            }
+        }
+
         for classified_pane in classifications.iter().cloned() {
             let pane_id = classified_pane.pane_id;
             let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
@@ -2789,6 +2841,10 @@ async fn run_due_panes_with_hook(
             }
 
             let detection_evidence = pane_detection_evidence(DetectionEvidenceInputs {
+                observed_at_unix_millis: classified_pane.observed_at_unix_millis,
+                stale_after_millis: detection_stale_after_millis(
+                    runtime.detection_schedule.current_interval,
+                ),
                 identity: classified_pane.identity.as_ref(),
                 shell_pid: classified_pane.shell_pid,
                 raw_status: &raw_status,
@@ -2836,6 +2892,14 @@ async fn run_due_panes_with_hook(
                 // other pane's status update this tick.
                 tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
                 continue;
+            }
+            if previous_status
+                .as_ref()
+                .and_then(PaneStatus::agent_state)
+                .map(|agent| agent.turn)
+                != new_status.agent_state().map(|agent| agent.turn)
+            {
+                runtime.invalidate_detection_completion();
             }
             runtime.detection_evidence = Some(detection_evidence.clone());
             match tree.record_node_activity(pane_id) {
@@ -2950,10 +3014,26 @@ async fn run_due_panes_with_hook(
         });
     }
 
-    crate::ipc::handlers::reconcile_empty_agent_titles(state, &pending_empty_title_checks).await;
-
-    for pane_id in completed_pane_ids {
-        crate::prompt_queue::deliver_next_after_completion(state, pane_id).await;
+    // Slow general-bank title reads and durable prompt writes must never
+    // serialize the next background observation. Each pane owns one bounded,
+    // coalescing actor, cancelled with its agent/runtime ownership.
+    {
+        let mut panes = state.panes.write().await;
+        let effect_panes: std::collections::HashSet<_> = pending_empty_title_checks
+            .iter()
+            .chain(completed_pane_ids.iter())
+            .copied()
+            .collect();
+        for pane_id in effect_panes {
+            if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+                runtime.request_detection_effects(
+                    state,
+                    pane_id,
+                    pending_empty_title_checks.contains(&pane_id),
+                    completed_pane_ids.contains(&pane_id),
+                );
+            }
+        }
     }
 
     for pending in pending_notifications {
@@ -3027,6 +3107,8 @@ fn explain_identity_decision(
 }
 
 struct DetectionEvidenceInputs<'a> {
+    observed_at_unix_millis: u64,
+    stale_after_millis: u64,
     identity: Option<&'a ilium_detect::AgentIdentity>,
     shell_pid: Option<u32>,
     raw_status: &'a PaneStatus,
@@ -3114,6 +3196,8 @@ fn pane_detection_evidence(input: DetectionEvidenceInputs<'_>) -> PaneDetectionE
         _ => None,
     };
     PaneDetectionEvidence {
+        observed_at_unix_millis: input.observed_at_unix_millis,
+        stale_after_millis: input.stale_after_millis,
         applied_status: input.applied_status.clone(),
         identity,
         activity,
@@ -3714,9 +3798,33 @@ fn is_awaiting_launched_agent(
     launched_at: Instant,
     now: Instant,
 ) -> bool {
-    matches!(origin, crate::pane::TerminalOrigin::Command(_))
-        && matches!(status, PaneStatus::PlainShell)
+    matches!(
+        origin,
+        crate::pane::TerminalOrigin::Command(_)
+            | crate::pane::TerminalOrigin::CustomAgent { frozen: false, .. }
+    ) && matches!(status, PaneStatus::PlainShell)
         && now.saturating_duration_since(launched_at) < LAUNCH_FAST_POLL_WINDOW
+}
+
+fn unavailable_observation_retry(now: Instant) -> Instant {
+    now + FOCUSED_POLL_INTERVAL
+}
+
+fn observation_unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+/// Allow three scheduled checks, with a floor for a briefly busy server.
+fn detection_stale_after_millis(interval: Duration) -> u64 {
+    interval
+        .saturating_mul(3)
+        .max(Duration::from_secs(30))
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
 /// Takes `&DetectionConfig` rather than `&ServerState` -- this is a pure
@@ -3754,7 +3862,7 @@ mod tests {
     async fn shell_ownership_observation_uses_the_admitted_io_worker() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
         let result = execution
-            .client
+            .detection
             .run(
                 Lane::Io,
                 JobCost {
@@ -3849,7 +3957,7 @@ mod tests {
 
         let owner = state.execution.get().expect("owner");
         let retention = owner
-            .client
+            .detection
             .foundation
             .try_reserve(
                 Lane::Io,
@@ -3969,7 +4077,7 @@ mod tests {
             .insert(pane_id, PaneResource::Terminal(Box::new(spawn())));
         let owner = state.execution.get().expect("owner");
         let retention = owner
-            .client
+            .detection
             .foundation
             .try_reserve(
                 Lane::Io,
@@ -4101,7 +4209,7 @@ mod tests {
             .insert(pane_id, PaneResource::Terminal(Box::new(runtime)));
         let owner = state.execution.get().expect("owner");
         let retention = owner
-            .client
+            .detection
             .foundation
             .try_reserve(
                 Lane::Io,
@@ -4795,6 +4903,44 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_oldest_batch_yields_to_healthy_panes_without_freshness() {
+        let now = Instant::now();
+        let mut deadlines: Vec<_> = (0..MAX_DUE_PANES + 1)
+            .map(|index| {
+                (
+                    now - Duration::from_secs((MAX_DUE_PANES + 1 - index) as u64),
+                    NodeId(index as u64),
+                )
+            })
+            .collect();
+        let unavailable = select_due_pane_ids(deadlines.iter().copied(), now, MAX_DUE_PANES);
+        assert_eq!(unavailable.len(), MAX_DUE_PANES);
+        for (deadline, pane_id) in &mut deadlines {
+            if unavailable.contains(pane_id) {
+                *deadline = unavailable_observation_retry(now);
+            }
+        }
+        assert_eq!(
+            select_due_pane_ids(deadlines.into_iter(), now, MAX_DUE_PANES),
+            vec![NodeId(MAX_DUE_PANES as u64)]
+        );
+    }
+
+    #[test]
+    fn freshness_threshold_tracks_poll_interval_with_busy_server_floor() {
+        assert_eq!(detection_stale_after_millis(Duration::from_secs(1)), 30_000);
+        assert_eq!(
+            detection_stale_after_millis(Duration::from_secs(10)),
+            30_000
+        );
+        assert_eq!(
+            detection_stale_after_millis(Duration::from_secs(45)),
+            135_000
+        );
+        assert_eq!(detection_stale_after_millis(Duration::MAX), u64::MAX);
+    }
+
+    #[test]
     fn failed_ticks_back_off_exponentially_up_to_a_ceiling() {
         assert_eq!(tick_failure_backoff(1), TICK_FAILURE_BACKOFF_INITIAL);
         assert_eq!(tick_failure_backoff(2), TICK_FAILURE_BACKOFF_INITIAL * 2);
@@ -4804,13 +4950,13 @@ mod tests {
     }
 
     #[test]
-    fn discovery_and_evidence_reservations_fit_the_shared_result_budget() {
-        // Both are held at once during a tick; the rest of the server shares
-        // the same foundation budget, so they must leave real headroom.
+    fn discovery_and_evidence_reservations_fit_the_detection_result_budget() {
+        // Evidence, discovery and staged transcript reads overlap; leave
+        // sixteen MiB for staged results within the reserved detector bank.
         const {
             assert!(
                 EVIDENCE_RESULT_BYTES + DISCOVERY_RESULT_BYTES
-                    <= crate::execution::GENERAL_RESULT_BYTES * 3 / 4
+                    <= crate::execution::DETECTION_RESULT_BYTES - 16 * 1024 * 1024
             );
         }
     }

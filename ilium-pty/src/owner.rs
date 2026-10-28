@@ -95,6 +95,7 @@ impl PtyInput {
 /// chunk to the existing journal and broadcasts it; it must not block on I/O.
 /// No read pump receives this state or any of its parser/journal Arcs.
 pub(crate) struct TerminalState {
+    pub(crate) child_process_id: u32,
     pub(crate) screen_reader: crate::screen_reader::ScreenReader,
     pub(crate) parser: Arc<RwLock<Parser>>,
     pub(crate) generation: Arc<AtomicU64>,
@@ -127,8 +128,9 @@ impl Drop for CleanupOnFailure {
 }
 
 impl PtyOwner {
-    /// `setup_failure` kills/reaps ONLY the child just spawned by this session.
-    /// It runs before dropping native control on every ordinary setup error.
+    /// `setup_failure` requests shutdown of ONLY this session's child through
+    /// its already started, supervised reaper. It runs before dropping native
+    /// control on every ordinary setup error; native cleanup may remain pending.
     /// A successful owner never invokes it and never signals a user process.
     pub(crate) fn spawn(
         master: Box<dyn MasterPty + Send>,
@@ -170,9 +172,17 @@ impl PtyOwner {
         )?;
         let writer_tickets = writer.tickets();
         let output_queue = Arc::clone(&queue);
+        let child_process_id = terminal.child_process_id;
+        let mut first_output = true;
         let reader_worker = match reader.spawn_reserved(
             queue.stop.child(),
-            move |message, stop| output_queue.output(message, stop),
+            move |message, stop| {
+                if first_output && matches!(&message, ilium_platform::pty_io::ReadMessage::Data(bytes) if !bytes.is_empty()) {
+                    first_output = false;
+                    ilium_platform::startup_timing::record("first_pty_read", 0, 0, child_process_id, 0);
+                }
+                output_queue.output(message, stop)
+            },
             reservations.reader,
         ) {
             Ok(worker) => worker,
@@ -363,6 +373,9 @@ impl Engine {
     fn run(mut self, stop: &StopToken, guard: &OwnerExitGuard) {
         loop {
             if self.active.is_some() {
+                // Observe the wake counter before checking completion. A writer
+                // finishing between the check and wait must prevent sleeping.
+                let wake_generation = self.queue.wake_generation();
                 if let Some((reason, error)) = self.poll_active() {
                     guard.stop(reason, error);
                     break;
@@ -371,7 +384,6 @@ impl Engine {
                     // One partial input/reply owns the writer exclusively.
                     // Parse only output that precedes the next queued command;
                     // a resize ahead of output remains an absolute barrier.
-                    let wake_generation = self.queue.wake_generation();
                     if let Some(output) = self.queue.take_output_while_writing() {
                         if let Some((reason, error)) = self.execute(output) {
                             guard.stop(reason, error);
@@ -422,9 +434,10 @@ impl Engine {
         // poll observes either an exact completion or the bounded cancellation
         // grace's unconfirmed result. Keep the original terminal reason.
         while self.active.is_some() {
+            // Use the same check-before-wait ordering during retirement.
+            let wake_generation = self.queue.wake_generation();
             let _ = self.poll_active();
             if self.active.is_some() {
-                let wake_generation = self.queue.wake_generation();
                 self.queue.wait_during_write(
                     wake_generation,
                     self.writer.next_poll_delay().unwrap_or(Duration::ZERO),
@@ -611,22 +624,17 @@ impl Engine {
             };
             parser.process(&bytes);
             self.terminal.generation.fetch_add(1, Ordering::Release);
+            // Publish while the parser lock is held, so a snapshot taken under that
+            // lock always agrees with the journal sequence it is paired with.
+            (self.terminal.publish)(Arc::clone(&bytes));
             parser.callbacks_mut().take_pending_replies()
         };
-        // Preserve output, including the query that caused a terminal failure.
-        (self.terminal.publish)(bytes);
         let _ = self.terminal.changed.send(());
+        // Automatic capability-query replies are best effort. A child that floods
+        // queries while the writer is busy must not shut the pane's input down,
+        // so the excess replies are dropped instead.
         if pending.len() > MAX_PENDING_REPLY_BYTES.saturating_sub(self.pending_reply_bytes) {
-            return Some((
-                ShutdownReason::WriterFailed,
-                Some(DeliveryError::new(
-                    None,
-                    DeliveryFailure::TooLarge {
-                        requested: self.pending_reply_bytes + pending.len(),
-                        maximum: MAX_PENDING_REPLY_BYTES,
-                    },
-                )),
-            ));
+            return None;
         }
         if !pending.is_empty() {
             self.pending_reply_bytes += pending.len();

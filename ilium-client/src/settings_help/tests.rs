@@ -14,6 +14,10 @@ fn catalog_covers_every_settings_help_id_once_with_complete_content() {
         .map(|topic| topic.id.clone())
         .collect::<BTreeSet<_>>();
     let expected = expected_ids();
+    let grouping = catalog::by_id("AP-36").expect("resource grouping help exists");
+    assert!(grouping.explanation.contains("real pane parents"));
+    assert!(grouping.states.contains("Default On"));
+    assert!(grouping.specimen.contains("waiting badges"));
 
     assert_eq!(topics.len(), expected.len(), "catalog topic count");
     assert_eq!(ids.len(), topics.len(), "catalog IDs must be unique");
@@ -85,7 +89,7 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
     };
 
     app.push_modal_over(
-        Mode::Settings(settings),
+        Mode::Settings(Box::new(settings)),
         Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
             "VOICE-03",
             1,
@@ -109,10 +113,14 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
 fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     add_range(&mut ids, "AP", 1, 26);
+    ids.insert("AP-33".to_owned());
+    ids.insert("AP-36".to_owned());
+    ids.insert("AP-34".to_owned());
+    add_range(&mut ids, "COST", 24, 27);
     for id in crate::animation_rows::help_ids() {
         ids.insert(id);
     }
-    add_range(&mut ids, "AM", 1, 24);
+    add_range(&mut ids, "AM", 1, 25);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);
     add_range(&mut ids, "TERM", 1, 3);
@@ -120,9 +128,11 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "SES", 1, 2);
     add_range(&mut ids, "GIT", 1, 7);
     add_range(&mut ids, "KAN", 1, 2);
+    add_range(&mut ids, "PAD", 1, 3);
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
     add_range(&mut ids, "RESET", 1, 3);
+    add_range(&mut ids, "ATT", 1, 7);
     add_range(&mut ids, "COST", 1, 23);
     add_range(&mut ids, "RCOMP", 1, 17);
     add_range(&mut ids, "OPT", 1, 14);
@@ -132,6 +142,7 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "INF", 1, 15);
     add_range(&mut ids, "LLM", 1, 7);
     ids.insert("TITLE-01".to_owned());
+    ids.insert("TITLE-02".to_owned());
     add_range(&mut ids, "TRIGGER", 1, 8);
     ids.insert("TEXTTRIGGER-01".to_owned());
     ids
@@ -237,6 +248,8 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-81".to_owned()
         } else if kind == AnimationKind::AlmostTouching {
             "AN-82".to_owned()
+        } else if kind == AnimationKind::Growth {
+            "AN-84".to_owned()
         } else if kind == AnimationKind::HiddenWheel {
             "AN-83".to_owned()
         } else if kind == AnimationKind::Semantic {
@@ -370,10 +383,10 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
             .render(&app.animation_settings, width, height, Duration::ZERO);
         let before = app.animation_settings.clone();
         app.push_modal_over(
-            Mode::Settings(SettingsState {
+            Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 ..Default::default()
-            }),
+            })),
             Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
                 "AN-37",
                 1,

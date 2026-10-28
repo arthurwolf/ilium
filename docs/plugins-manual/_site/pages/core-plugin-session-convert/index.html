@@ -1,0 +1,1161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Session conversion | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/" aria-current="page">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Session conversion</h1>
+
+<p>Session conversion lets a conversation continue under the other agent. A Claude Code conversation becomes a Codex conversation, or a Codex conversation becomes a Claude Code one, without starting over. The plugin id is <code>ilium.core.session-convert</code> and it runs on both sides. The client side adds the context menu entries and draws the progress dialog. The server side checks the pane, freezes it, runs the conversion as a job, and then replaces the frozen pane with a new pane that resumes the converted session.</p>
+<p>The original transcript is read and never changed. Antigravity sessions cannot be converted. The conversion engine itself is the Rust crate <code>ilium-session-convert</code>, which reports steps, log lines and progress. The plugin turns those reports into the dialog.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li>The entries <strong>Convert to Codex</strong> (for a Claude Code pane) and <strong>Convert to Claude Code</strong> (for a Codex pane). The entry for the other agent is always listed in the menu of an agent pane. It is enabled only when the pane has a verified session, no other conversion is running, and the pane is not a worktree pane; otherwise it stays visible but disabled and shows the reason.</li>
+<li>The progress dialog with one row per step, a progress bar and a log.</li>
+<li>Claude Code to Codex: locate the transcript, inspect it, start a private <code>codex app-server</code>, import the session with Codex's own importer, verify the Codex rollout, stop the app-server.</li>
+<li>Codex to Claude Code: locate the rollout, parse it, convert it to Claude Code lines, write the Claude Code transcript, verify it, register it with Claude Code. User prompts, assistant text, and shell or tool calls with results are carried over. Reasoning and token events are dropped.</li>
+<li>Cancel with Esc, and the recovery choice after a failure: Enter resumes the original session, Esc closes the dialog.</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<figure><img src="/assets/demos/26-convert-session.gif" alt="A Claude Code session converts to Codex, which still remembers the secret word, then converts back to Claude" loading="lazy"><figcaption>A session is converted from Claude to Codex and back while keeping its context.</figcaption></figure>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure>
+<pre class="term">╭─ Pane ───────────────────────────────────────╮
+│ Rename                                       │
+│ Copy screen to pane…                         │
+│ <span class="t-hi">Convert to Codex</span>                             │
+│ <span class="t-dim">Convert to Claude Code  (Codex pane only)</span>    │
+│ Close                                        │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The right-click menu of a Claude Code pane. Only the entry that fits the agent is enabled, and a disabled entry shows its reason.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Convert Claude Code to Codex ───────────────╮
+│ <span class="t-ok"><span class="w2">✓</span></span> Locate the Claude Code transcript          │
+│ <span class="t-ok"><span class="w2">✓</span></span> Inspect the transcript                     │
+│ <span class="t-ok"><span class="w2">✓</span></span> Start a private codex app-server           │
+│ <span class="t-hi">▶ Import the session</span>                         │
+│ <span class="t-dim">○ Verify the Codex rollout</span>                   │
+│ <span class="t-dim">○ Stop the app-server</span>                        │
+│                                              │
+│ <span class="t-hi">████████████</span><span class="t-dim">░░░░░░░░░░░░</span> 51%                 │
+│ <span class="t-dim">imported 186 of 364 items</span>                    │
+│ <span class="t-dim">Esc cancels</span>                                  │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The progress dialog: a step list, a <code>progress-row</code> and a log line inside a <code>dialog</code>.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Convert Codex to Claude Code ───────────────╮
+│ <span class="t-err"><span class="w2">✕</span> Conversion failed</span>                          │
+│ <span class="t-dim">  The Claude Code transcript did not verify.</span> │
+│ <span class="t-dim">  The original session is untouched.</span>         │
+│                                              │
+│ Carried over ……………………………………………………… 212 items │
+│ Left out …………………………………………………………………… 57 items │
+│                                              │
+│ [ <span class="t-hi">Resume original</span> ]   [ Close ]              │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. After a failure that came after the agent was stopped, Enter resumes the original session and Esc closes the dialog.</figcaption>
+</figure>
+
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<p>The contract version is 0.1. The plugin is replaceable. A replacement must provide the command, the service and both points.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.session-convert&quot;,
+  &quot;name&quot;: &quot;Session conversion&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;limits_tier&quot;: &quot;first-party&quot;,
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:convert&quot;, &quot;points:formats&quot;, &quot;points:after-convert&quot;, &quot;commands:convert&quot;
+  ],
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;job-runner&quot;, &quot;service-provider&quot;]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;views&quot;, &quot;menu-provider&quot;]
+  },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;panes.read&quot;, &quot;panes.lifecycle&quot;, &quot;panes.create&quot;, &quot;tree.write&quot;, &quot;agent.read&quot;,
+      &quot;fs.read:agent-sessions:claude&quot;, &quot;fs.read:agent-sessions:codex&quot;,
+      &quot;fs.write:agent-config:claude&quot;,
+      &quot;process.run:codex&quot;, &quot;process.long-lived&quot;, &quot;jobs.run&quot;, &quot;notify.toast&quot;,
+      &quot;services.provide:ilium.core.session-convert/convert&quot;,
+      &quot;extensions.provide:ilium.core.session-convert/formats&quot;,
+      &quot;extensions.provide:ilium.core.session-convert/after-convert&quot;
+    ],
+    &quot;client&quot;: [&quot;agent.read&quot;, &quot;ui.panels&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [{ &quot;id&quot;: &quot;convert&quot;, &quot;title&quot;: &quot;Convert session&quot;, &quot;category&quot;: &quot;Agents&quot; }],
+    &quot;context_menu&quot;: [{ &quot;id&quot;: &quot;pane-convert&quot;, &quot;applies_to&quot;: [&quot;pane&quot;], &quot;dynamic&quot;: true, &quot;command&quot;: &quot;convert&quot; }],
+    &quot;panels&quot;: [{ &quot;id&quot;: &quot;progress&quot;, &quot;title&quot;: &quot;Convert session&quot;, &quot;modal&quot;: true }],
+    &quot;jobs&quot;: [{ &quot;kind&quot;: &quot;codex-to-claude&quot;, &quot;deadline_ms&quot;: 60000, &quot;memory_mib&quot;: 256 }],
+    &quot;services&quot;: {
+      &quot;ilium.core.session-convert/convert&quot;: {
+        &quot;start&quot;: {
+          &quot;params&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;pane&quot;, &quot;target&quot;],
+            &quot;properties&quot;: { &quot;pane&quot;: { &quot;type&quot;: &quot;integer&quot; },
+                            &quot;target&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;codex&quot;, &quot;claude&quot;] } } },
+          &quot;result&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;conversion&quot;: { &quot;type&quot;: &quot;string&quot; } },
+            &quot;required&quot;: [&quot;conversion&quot;] }
+        }
+      }
+    },
+    &quot;extension_points&quot;: [
+      { &quot;id&quot;: &quot;formats&quot;, &quot;kind&quot;: &quot;collect&quot;, &quot;title&quot;: &quot;Transcript formats&quot;,
+        &quot;entry_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;id&quot;, &quot;title&quot;, &quot;direction&quot;, &quot;service&quot;],
+          &quot;properties&quot;: { &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;title&quot;: { &quot;type&quot;: &quot;string&quot; },
+                          &quot;direction&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;read&quot;, &quot;write&quot;, &quot;both&quot;] },
+                          &quot;service&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+        &quot;max_entries&quot;: 8, &quot;dynamic&quot;: false, &quot;version&quot;: &quot;0.1.0&quot; },
+      { &quot;id&quot;: &quot;after-convert&quot;, &quot;kind&quot;: &quot;hook&quot;, &quot;mode&quot;: &quot;observe&quot;, &quot;title&quot;: &quot;After conversion&quot;,
+        &quot;payload_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {
+          &quot;from&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;to&quot;: { &quot;type&quot;: &quot;string&quot; },
+          &quot;messages&quot;: { &quot;type&quot;: &quot;integer&quot; }, &quot;path&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+        &quot;risk&quot;: &quot;standard&quot;, &quot;deadline_ms&quot;: 20, &quot;max_handlers&quot;: 8, &quot;version&quot;: &quot;0.1.0&quot; }
+    ]
+  }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050]</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.session-convert&quot;,
+  &quot;name&quot;: &quot;Session convert&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;Session conversion lets a conversation continue under the other agent.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;job-runner&quot;,
+      &quot;service-provider&quot;
+    ]
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;views&quot;,
+      &quot;menu-provider&quot;
+    ]
+  },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;panes.read&quot;,
+      &quot;panes.lifecycle&quot;,
+      &quot;panes.create&quot;,
+      &quot;tree.write&quot;,
+      &quot;agent.read&quot;,
+      &quot;fs.read:agent-sessions:claude&quot;,
+      &quot;fs.read:agent-sessions:codex&quot;,
+      &quot;fs.write:agent-config:claude&quot;,
+      &quot;process.run:codex&quot;,
+      &quot;process.long-lived&quot;,
+      &quot;jobs.run&quot;,
+      &quot;notify.toast&quot;,
+      &quot;services.provide:ilium.core.session-convert/convert&quot;,
+      &quot;extensions.provide:ilium.core.session-convert/formats&quot;,
+      &quot;extensions.provide:ilium.core.session-convert/after-convert&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;agent.read&quot;,
+      &quot;ui.panels&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;command:convert&quot;,
+    &quot;service:convert&quot;,
+    &quot;view:session-convert.progress&quot;
+  ],
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:convert&quot;,
+    &quot;points:formats&quot;,
+    &quot;points:after-convert&quot;,
+    &quot;commands:convert&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      {
+        &quot;id&quot;: &quot;convert&quot;,
+        &quot;title&quot;: &quot;Convert session&quot;,
+        &quot;category&quot;: &quot;Agents&quot;
+      }
+    ],
+    &quot;context_menu&quot;: [
+      {
+        &quot;id&quot;: &quot;pane-convert&quot;,
+        &quot;applies_to&quot;: [
+          &quot;pane&quot;
+        ],
+        &quot;dynamic&quot;: true,
+        &quot;command&quot;: &quot;convert&quot;
+      }
+    ],
+    &quot;panels&quot;: [
+      {
+        &quot;id&quot;: &quot;progress&quot;,
+        &quot;title&quot;: &quot;Convert session&quot;,
+        &quot;modal&quot;: true
+      }
+    ],
+    &quot;jobs&quot;: [
+      {
+        &quot;kind&quot;: &quot;codex-to-claude&quot;,
+        &quot;deadline_ms&quot;: 60000,
+        &quot;memory_mib&quot;: 256
+      }
+    ],
+    &quot;services&quot;: {
+      &quot;ilium.core.session-convert/convert&quot;: {
+        &quot;start&quot;: {
+          &quot;params&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;required&quot;: [
+              &quot;pane&quot;,
+              &quot;target&quot;
+            ],
+            &quot;properties&quot;: {
+              &quot;pane&quot;: {
+                &quot;type&quot;: &quot;integer&quot;
+              },
+              &quot;target&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;enum&quot;: [
+                  &quot;codex&quot;,
+                  &quot;claude&quot;
+                ]
+              }
+            }
+          },
+          &quot;result&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;properties&quot;: {
+              &quot;conversion&quot;: {
+                &quot;type&quot;: &quot;string&quot;
+              }
+            },
+            &quot;required&quot;: [
+              &quot;conversion&quot;
+            ]
+          }
+        }
+      }
+    },
+    &quot;extension_points&quot;: [
+      {
+        &quot;id&quot;: &quot;formats&quot;,
+        &quot;kind&quot;: &quot;collect&quot;,
+        &quot;title&quot;: &quot;Transcript formats&quot;,
+        &quot;entry_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [
+            &quot;id&quot;,
+            &quot;title&quot;,
+            &quot;direction&quot;,
+            &quot;service&quot;
+          ],
+          &quot;properties&quot;: {
+            &quot;id&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;title&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;direction&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;enum&quot;: [
+                &quot;read&quot;,
+                &quot;write&quot;,
+                &quot;both&quot;
+              ]
+            },
+            &quot;service&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          }
+        },
+        &quot;max_entries&quot;: 8,
+        &quot;dynamic&quot;: false,
+        &quot;version&quot;: &quot;0.1.0&quot;
+      },
+      {
+        &quot;id&quot;: &quot;after-convert&quot;,
+        &quot;kind&quot;: &quot;hook&quot;,
+        &quot;mode&quot;: &quot;observe&quot;,
+        &quot;title&quot;: &quot;After conversion&quot;,
+        &quot;payload_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;from&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;to&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;messages&quot;: {
+              &quot;type&quot;: &quot;integer&quot;
+            },
+            &quot;path&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          }
+        },
+        &quot;risk&quot;: &quot;standard&quot;,
+        &quot;deadline_ms&quot;: 20,
+        &quot;max_handlers&quot;: 8,
+        &quot;version&quot;: &quot;0.1.0&quot;
+      }
+    ]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="samples">Samples</h3>
+<h4 id="menu-entries-with-disabled-reasons">Menu entries with disabled reasons</h4>
+<p>The client side answers the dynamic menu with <code>menu-items</code>. It reads the agent session of the clicked pane and offers one entry. An entry that cannot run stays visible with a short reason. The click comes back as <code>command-invoked</code> with <code>{"item":"to-codex","node":42}</code> in <code>arguments_json</code>. See <a href="/pages/api-menus/">menus</a>, <a href="/pages/api-menu-provider/">the menu provider</a> and <a href="/pages/primitives-agent/">agent</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::MenuProvider;
+use ilium_plugin_sdk::primitives::agent;
+use ilium_plugin_sdk::exports::menu_provider::MenuContext;
+use ilium_plugin_sdk::types::ui::MenuEntry;
+
+impl MenuProvider for Convert {
+    fn menu_items(&amp;mut self, context: MenuContext) -&gt; Vec&lt;MenuEntry&gt; {
+        let Some(pane) = context.pane else { return Vec::new() };
+        let Some(signature) = self.signatures.get(&amp;pane) else { return Vec::new() };
+        let (id, label) = match signature.as_str() {
+            &quot;claude&quot; =&gt; (&quot;to-codex&quot;, &quot;Convert to Codex&quot;),
+            &quot;codex&quot; =&gt; (&quot;to-claude&quot;, &quot;Convert to Claude Code&quot;),
+            _ =&gt; return Vec::new(), // Antigravity and custom agents cannot be converted
+        };
+        let reason = if agent::session(pane).is_none() {
+            Some(&quot;no verified session&quot;)
+        } else if self.running.is_some() {
+            Some(&quot;another conversion runs&quot;)
+        } else if self.worktree_panes.contains(&amp;pane) {
+            Some(&quot;worktree pane&quot;)
+        } else {
+            None
+        };
+        vec![MenuEntry::new(id, label).icon(&quot;arrows-exchange&quot;).disabled_reason(reason)]
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { session } from '@ilium/plugin-sdk/primitives/agent';
+import type { MenuContext, MenuEntry } from '@ilium/plugin-sdk/types';
+
+export function menuItems(context: MenuContext): MenuEntry[] {
+  if (context.pane === undefined) return [];
+  const signature = signatures.get(context.pane);
+  const choice = signature === 'claude' ? { id: 'to-codex', label: 'Convert to Codex' }
+    : signature === 'codex' ? { id: 'to-claude', label: 'Convert to Claude Code' }
+    : undefined;
+  if (choice === undefined) return []; // Antigravity and custom agents cannot be converted
+  const disabledReason = session(context.pane) === undefined ? 'no verified session'
+    : running !== undefined ? 'another conversion runs'
+    : worktreePanes.has(context.pane) ? 'worktree pane'
+    : undefined;
+  return [{ ...choice, icon: 'arrows-exchange', disabledReason }];
+}
+</code></pre>
+<h4 id="freeze-the-pane-and-keep-a-journal">Freeze the pane and keep a journal</h4>
+<p>On the chosen entry the client side sends a message to the server side. The server checks that the source transcript exists, freezes the pane, writes the state to <code>storage</code> and adds a journal entry, so the plugin knows what it was doing after a crash. A durable timer is the safety net: if nothing finishes in ten minutes, the pane is unfrozen. See <a href="/pages/api-storage/">storage</a>, <a href="/pages/api-durable-timers/">durable timers and the journal</a> and <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle intents</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{clock, journal, storage, timers};
+use ilium_plugin_sdk::host::storage::Bucket;
+use ilium_plugin_sdk::types::intents::FreezePaneSpec;
+
+const WATCHDOG_MILLIS: u64 = 10 * 60 * 1000;
+
+fn begin(&amp;mut self, pane: NodeId, target: &amp;str) -&gt; Result&lt;Vec&lt;Submission&gt;, PluginError&gt; {
+    let state = format!(r#&quot;{{&quot;pane&quot;:{},&quot;target&quot;:&quot;{target}&quot;,&quot;phase&quot;:&quot;frozen&quot;}}&quot;#, pane.0);
+    storage::put(Bucket::Session, &amp;format!(&quot;convert/{}&quot;, pane.0), state.as_bytes())?;
+    journal::log_event(Some(pane), &quot;convert-started&quot;, &amp;format!(r#&quot;{{&quot;target&quot;:&quot;{target}&quot;}}&quot;#))?;
+    timers::at(clock::now_unix_millis() + WATCHDOG_MILLIS, &amp;format!(&quot;convert-watchdog/{}&quot;, pane.0))?;
+    Ok(vec![Submission::keyed(Intent::FreezePane(FreezePaneSpec { pane }), format!(&quot;freeze-{}&quot;, pane.0))])
+}
+
+// Event::DurableTimerFired(fired) if fired.name.starts_with(&quot;convert-watchdog/&quot;):
+//   read storage &quot;convert/&lt;pane&gt;&quot;, and when it is still there, submit UnfreezePane and remove the key.
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
+import * as journal from '@ilium/plugin-sdk/host/journal';
+import * as storage from '@ilium/plugin-sdk/host/storage';
+import * as timers from '@ilium/plugin-sdk/host/timers';
+import type { Submission } from '@ilium/plugin-sdk/types';
+
+const WATCHDOG_MILLIS = 10n * 60n * 1000n;
+
+export function begin(pane: bigint, target: string): Submission[] {
+  const state = JSON.stringify({ pane: Number(pane), target, phase: 'frozen' });
+  storage.put('session', `convert/${pane}`, new TextEncoder().encode(state));
+  journal.logEvent(pane, 'convert-started', JSON.stringify({ target }));
+  timers.at(nowUnixMillis() + WATCHDOG_MILLIS, `convert-watchdog/${pane}`);
+  return [{ intent: { tag: 'freeze-pane', val: { pane } }, correlation: 1n, dedupKey: `freeze-${pane}` }];
+}
+
+// case 'durable-timer-fired': when event.val.name starts with 'convert-watchdog/' and the storage key is
+// still set, submit an unfreeze-pane intent and remove the key.
+</code></pre>
+<h4 id="codex-to-claude-code-as-a-job">Codex to Claude Code as a job</h4>
+<p>Parsing a rollout and writing Claude Code lines can take longer than the event deadline, so it runs as a job. The job reads the rollout from the read-only Codex sessions scope, keeps user prompts, assistant text and tool calls with results, and drops reasoning and token events. It reports progress as it goes and stops when cancelled. See <a href="/pages/api-jobs/">jobs</a>, <a href="/pages/api-fs/">fs</a> and <a href="/pages/file-access/">file access</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{fs, jobs};
+use ilium_plugin_sdk::types::paths::FsPath;
+
+fn codex_to_claude(input: &amp;ConvertInput) -&gt; Result&lt;ConvertOutput, PluginError&gt; {
+    let rollout = FsPath { scope: &quot;agent-sessions:codex&quot;.into(), path: input.rollout.clone() };
+    // One read returns at most 1 MiB, so a larger rollout is read in a loop over offsets.
+    let mut bytes: Vec&lt;u8&gt; = Vec::new();
+    loop {
+        let chunk = fs::read(&amp;rollout, bytes.len() as u64, 1_048_576)?;
+        if chunk.is_empty() { break; }
+        bytes.extend_from_slice(&amp;chunk);
+    }
+    let text = String::from_utf8_lossy(&amp;bytes).to_string();
+    let lines: Vec&lt;&amp;str&gt; = text.lines().collect();
+    let (mut out, mut kept, mut dropped) = (Vec::new(), 0u32, 0u32);
+    for (index, line) in lines.iter().enumerate() {
+        if jobs::is_cancelled() { return Err(PluginError::cancelled()); }
+        match claude_line(line) {
+            Some(converted) =&gt; { out.push(converted); kept += 1; }
+            None =&gt; dropped += 1, // reasoning and token events
+        }
+        if index % 50 == 0 { jobs::report_progress(100.0 * index as f32 / lines.len() as f32); }
+    }
+    Ok(ConvertOutput { claude_jsonl: out.join(&quot;\n&quot;), kept, dropped })
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { read } from '@ilium/plugin-sdk/host/fs';
+import { isCancelled, reportProgress } from '@ilium/plugin-sdk/host/jobs';
+
+export function codexToClaude(input: { rollout: string }) {
+  // One read returns at most 1 MiB, so a larger rollout is read in a loop over offsets.
+  const chunks: Uint8Array[] = [];
+  let offset = 0n;
+  for (;;) {
+    const chunk = read({ scope: 'agent-sessions:codex', path: input.rollout }, offset, 1048576);
+    if (chunk.length === 0) break;
+    chunks.push(chunk);
+    offset += BigInt(chunk.length);
+  }
+  const bytes = new Uint8Array(chunks.reduce((total, part) =&gt; total + part.length, 0));
+  let at = 0;
+  for (const part of chunks) { bytes.set(part, at); at += part.length; }
+  const lines = new TextDecoder().decode(bytes).split('\n');
+  const out: string[] = [];
+  let dropped = 0;
+  lines.forEach((line, index) =&gt; {
+    if (isCancelled()) throw { code: 'cancelled', message: 'conversion cancelled' };
+    const converted = claudeLine(line);
+    if (converted === undefined) dropped += 1; // reasoning and token events
+    else out.push(converted);
+    if (index % 50 === 0) reportProgress((100 * index) / lines.length);
+  });
+  return { claudeJsonl: out.join('\n'), kept: out.length, dropped };
+}
+</code></pre>
+<h4 id="write-the-claude-code-transcript-and-verify-it">Write the Claude Code transcript and verify it</h4>
+<p>The new transcript is written with an atomic write whose expected revision is <code>none</code>, so an existing file is never replaced: a clash completes as <code>failed(conflict)</code>. After the write, the plugin reads the file back with its revision and checks the line count before it registers the session. See <a href="/pages/api-fs-atomic-and-tail/">atomic write and revisions</a> and <a href="/pages/capability-fs-write/">fs.write</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs;
+
+async fn write_and_verify(path: FsPath, jsonl: String, expected_lines: usize) -&gt; Result&lt;String, PluginError&gt; {
+    let revision = fs::write_atomic(&amp;path, jsonl.into_bytes(), None).await?; // None: the file must not exist
+    let back = fs::read_with_revision(&amp;path).await?;
+    if back.revision != revision {
+        return Err(PluginError::conflict(&quot;transcript changed after the write&quot;));
+    }
+    let lines = back.bytes.iter().filter(|byte| **byte == b'\n').count() + 1;
+    if lines != expected_lines {
+        return Err(PluginError::internal(&quot;line count differs after the write&quot;));
+    }
+    Ok(revision)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { readWithRevision, writeAtomic } from '@ilium/plugin-sdk/host/fs';
+import type { FsPath } from '@ilium/plugin-sdk/types';
+
+export async function writeAndVerify(path: FsPath, jsonl: string, expectedLines: number): Promise&lt;string&gt; {
+  const revision = await writeAtomic(path, new TextEncoder().encode(jsonl), undefined); // undefined: must not exist
+  const back = await readWithRevision(path);
+  if (back.revision !== revision) throw { code: 'conflict', message: 'transcript changed after the write' };
+  const lines = back.bytes.filter((byte) =&gt; byte === 0x0a).length + 1;
+  if (lines !== expectedLines) throw { code: 'internal', message: 'line count differs after the write' };
+  return revision;
+}
+</code></pre>
+<h4 id="claude-code-to-codex-with-a-private-app-server">Claude Code to Codex with a private app-server</h4>
+<p>Claude Code to Codex uses Codex's own importer, so the plugin starts a private <code>codex app-server</code> as a long-lived child and talks to it by lines. The child ends when the conversion ends, whatever the result. See <a href="/pages/api-process-control/">process control</a>, <a href="/pages/capability-process-run/">process.run</a> and <a href="/pages/capability-process-long-lived/">process.long-lived</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::process::{self, ProcessSpec, SpawnSpec};
+
+fn start_app_server(&amp;mut self, conversion: u64) -&gt; Result&lt;(), PluginError&gt; {
+    let child = process::spawn(&amp;SpawnSpec {
+        process: ProcessSpec {
+            program: &quot;codex&quot;.into(), arguments: vec![&quot;app-server&quot;.into()],
+            cwd: None, stdin: None, environment: Vec::new(), timeout_millis: 1_000,
+        },
+        stdin_open: true,
+        line_mode: true,
+    })?;
+    self.app_servers.insert(conversion, child);
+    Ok(())
+}
+
+fn stop_app_server(&amp;mut self, conversion: u64) {
+    if let Some(child) = self.app_servers.remove(&amp;conversion) {
+        let _ = child.signal(&quot;terminate&quot;); // dropping the handle also ends it
+    }
+}
+// Event::ChildOutput(output): one JSON line per message; match it to the import request of the conversion.
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { spawn, type Child } from '@ilium/plugin-sdk/host/process';
+
+const appServers = new Map&lt;bigint, Child&gt;();
+
+export function startAppServer(conversion: bigint): void {
+  const child = spawn({
+    process: { program: 'codex', arguments: ['app-server'], cwd: undefined, stdin: undefined,
+               environment: [], timeoutMillis: 1_000 },
+    stdinOpen: true,
+    lineMode: true,
+  });
+  appServers.set(conversion, child);
+}
+
+export function stopAppServer(conversion: bigint): void {
+  appServers.get(conversion)?.signal('terminate'); // dropping the handle also ends it
+  appServers.delete(conversion);
+}
+// case 'child-output': one JSON line per message; match it to the import request of the conversion.
+</code></pre>
+<h4 id="the-progress-dialog">The progress dialog</h4>
+<p>The server sends steps, log lines and progress to the client side as messages. The client side keeps them and draws a <code>dialog</code> with a step list and a <code>progress-row</code>. Esc is the cancel button. After a failure that came after the agent was stopped, the primary button resumes the original session. See <a href="/pages/widgets-layout-and-containers/">layout and containers</a>, <a href="/pages/widgets-data-display/">data display</a> and <a href="/pages/api-ui/">ui</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::types::ui::{DialogKind, ProgressState};
+
+fn render_dialog(&amp;self, tree: &amp;mut Tree) -&gt; NodeHandle {
+    let steps: Vec&lt;NodeHandle&gt; = self.steps.iter().map(|step| {
+        tree.paragraph(vec![vec![Span::plain(format!(&quot;{} {}&quot;, step.mark(), step.title))]])
+    }).collect();
+    let progress = tree
+        .progress_row(&amp;self.title)
+        .state(if self.failed { ProgressState::Error } else { ProgressState::Running })
+        .percent(self.percent)
+        .message(&amp;self.last_log)
+        .key(&quot;progress&quot;);
+    let body = tree.layout(Direction::Vertical)
+        .constraints(vec![Constraint::Fill(1), Constraint::Length(1)])
+        .child(tree.layout(Direction::Vertical).constraints(vec![Constraint::Length(1); steps.len()]).children(steps))
+        .child(progress);
+    tree.dialog(&quot;convert-progress&quot;, &amp;self.title)
+        .kind(DialogKind::Plain)
+        .width(Constraint::Length(48))
+        .height(Constraint::Length(14))
+        .child(body)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { dialog, layout, length, fill, paragraph, progressRow, span } from '@ilium/plugin-sdk/ui/build';
+
+export function renderDialog(state: ConvertState) {
+  const steps = state.steps.map((step) =&gt; paragraph([[span(`${step.mark} ${step.title}`)]]));
+  const progress = progressRow(state.title, {
+    key: 'progress',
+    state: state.failed ? 'error' : 'running',
+    percent: state.percent,
+    message: state.lastLog,
+  });
+  const body = layout({ direction: 'vertical', constraints: [fill(1), length(1)] }, [
+    layout({ direction: 'vertical', constraints: steps.map(() =&gt; length(1)) }, steps),
+    progress,
+  ]);
+  return dialog('convert-progress', {
+    title: state.title, kind: 'plain', width: length(48), height: length(14),
+    buttons: state.failed
+      ? [{ id: 'resume', label: 'Resume original', role: 'primary', isCancel: false },
+         { id: 'close', label: 'Close', role: 'secondary', isCancel: true }]
+      : [{ id: 'cancel', label: 'Cancel', role: 'secondary', isCancel: true }],
+  }, [body]);
+}
+</code></pre>
+<h4 id="replace-the-frozen-pane">Replace the frozen pane</h4>
+<p>On success the server creates a new pane that resumes the converted session in the other agent and closes the frozen one. On a failure after the agent was stopped, the user's choice decides: <strong>Resume original</strong> replaces the pane command with the original resume command and keeps the scrollback. See <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle intents</a>, <a href="/pages/api-intents/">intents</a> and <a href="/pages/capability-panes-create/">panes.create</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::types::intents::{CreatePaneSpec, ReplacePaneCommandSpec};
+
+fn finish_ok(pane: NodeId, target: &amp;str, new_session: &amp;str, cwd: FsPath) -&gt; Vec&lt;Submission&gt; {
+    let command = match target {
+        &quot;codex&quot; =&gt; vec![&quot;codex&quot;.to_string(), &quot;resume&quot;.into(), new_session.into()],
+        _ =&gt; vec![&quot;claude&quot;.to_string(), &quot;--resume&quot;.into(), new_session.into()],
+    };
+    vec![
+        Submission::new(Intent::CreatePane(CreatePaneSpec {
+            parent: None, title: format!(&quot;{target} (converted)&quot;), content_kind: &quot;ilium.terminal&quot;.into(),
+            cwd: Some(cwd), command: Some(command), initial_input: None,
+        })),
+        Submission::new(Intent::CloseNode(pane)),
+    ]
+}
+
+fn resume_original(pane: NodeId, original: Vec&lt;String&gt;) -&gt; Submission {
+    Submission::new(Intent::ReplacePaneCommand(ReplacePaneCommandSpec {
+        pane, command: original, cwd: None, keep_scrollback: true,
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { FsPath, Submission } from '@ilium/plugin-sdk/types';
+
+export function finishOk(pane: bigint, target: string, newSession: string, cwd: FsPath): Submission[] {
+  const command = target === 'codex' ? ['codex', 'resume', newSession] : ['claude', '--resume', newSession];
+  return [
+    { intent: { tag: 'create-pane', val: { parent: undefined, title: `${target} (converted)`,
+        contentKind: 'ilium.terminal', cwd, command, initialInput: undefined } },
+      correlation: 1n, dedupKey: undefined },
+    { intent: { tag: 'close-node', val: pane }, correlation: 2n, dedupKey: undefined },
+  ];
+}
+
+export const resumeOriginal = (pane: bigint, original: string[]): Submission =&gt; ({
+  intent: { tag: 'replace-pane-command', val: { pane, command: original, cwd: undefined, keepScrollback: true } },
+  correlation: 3n, dedupKey: undefined,
+});
+</code></pre>
+<h4 id="owner-side-formats-and-after-convert">Owner side: formats and <code>after-convert</code></h4>
+<p><code>formats</code> is a collect point. A contributor adds a transcript format with a direction and a service that reads or writes it. The plugin lists the entries to build its source and target choices, and lists again when the kernel publishes <code>ilium.extensions/changed</code>. <code>after-convert</code> is an observe hook: the plugin runs it once when a conversion finishes and ignores the replies. See <a href="/pages/api-events/">events</a>, <a href="/pages/requests-and-outcomes/">requests and outcomes</a> and <a href="/pages/api-messages-and-topics/">messages and topics</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+
+fn formats(&amp;self) -&gt; Vec&lt;Format&gt; {
+    extensions::list(&quot;ilium.core.session-convert/formats&quot;)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| serde_json::from_str::&lt;Format&gt;(&amp;entry.entry_json).ok())
+        .collect() // each Format has id, title, direction and service
+}
+
+fn announce(&amp;mut self, from: &amp;str, to: &amp;str, messages: u32, path: &amp;str) {
+    let payload = serde_json::json!({ &quot;from&quot;: from, &quot;to&quot;: to, &quot;messages&quot;: messages, &quot;path&quot;: path });
+    if let Ok(request) = extensions::run_hook_request(&quot;ilium.core.session-convert/after-convert&quot;, &amp;payload.to_string()) {
+        self.observers.insert(request);
+    }
+}
+
+// Event::RequestCompleted(done) if self.observers.remove(&amp;done.request): log the outcome, nothing else.
+// Event::TopicPublished(t) if t.topic == &quot;ilium.extensions/changed&quot;: call self.formats() again.
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as extensions from '@ilium/plugin-sdk/host/extensions';
+
+export const formats = () =&gt;
+  extensions.list('ilium.core.session-convert/formats')
+    .map((entry) =&gt; JSON.parse(entry.entryJson) as { id: string; title: string; direction: string; service: string });
+
+export function announce(from: string, to: string, messages: number, path: string): void {
+  const request = extensions.runHook('ilium.core.session-convert/after-convert',
+    JSON.stringify({ from, to, messages, path }));
+  observers.add(request);
+}
+
+// case 'request-completed': if (observers.delete(event.val.request)) log the outcome, nothing else.
+// case 'topic-published': if (event.val.topic === 'ilium.extensions/changed') formats() again.
+</code></pre>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.session-convert</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.session-convert/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.session-convert/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>formats</code></td>
+<td>collect</td>
+<td>Add a transcript format that conversion can read or write.</td>
+<td>entry: id, title, direction (read, write, both), service</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>after-convert</code></td>
+<td>hook (observe)</td>
+<td>Learn that a conversion finished.</td>
+<td>from, to, messages, path</td>
+<td>standard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.session-convert/convert</code>: start: convert a transcript between two formats</li>
+</ul>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.session-convert"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
+<h4 id="example-adds-a-third-transcript-format">Example: Adds a third transcript format</h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.session-convert/formats&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.session-convert/formats&quot;,
+        &quot;id&quot;: &quot;gemini&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;title&quot;: &quot;Gemini CLI&quot;,
+          &quot;direction&quot;: &quot;both&quot;,
+          &quot;service&quot;: &quot;example.gemini/convert&quot;
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/api-menus/">Menus</a> and <a href="/pages/api-menu-provider/">the menu provider</a></li>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">Pane lifecycle intents</a>, <a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a> and <a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/api-storage/">Storage</a>, <a href="/pages/api-durable-timers/">durable timers and the journal</a></li>
+<li><a href="/pages/api-jobs/">Jobs</a> and <a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/api-fs/">fs</a>, <a href="/pages/api-fs-atomic-and-tail/">atomic write and revisions</a> and <a href="/pages/file-access/">file access</a></li>
+<li><a href="/pages/api-process-control/">Process control</a> and <a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a> and <a href="/pages/widgets-data-display/">data display</a></li>
+<li><a href="/pages/api-intents/">Intents</a>, <a href="/pages/api-events/">events</a> and <a href="/pages/requests-and-outcomes/">requests and outcomes</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-recap/"><small>Previous</small>Recap</a><a class="next" href="/pages/core-plugin-agent-setup/"><small>Next</small>Agent setup</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#menu-entries-with-disabled-reasons">Menu entries with disabled reasons</a></li><li class="l3"><a href="#freeze-the-pane-and-keep-a-journal">Freeze the pane and keep a journal</a></li><li class="l3"><a href="#codex-to-claude-code-as-a-job">Codex to Claude Code as a job</a></li><li class="l3"><a href="#write-the-claude-code-transcript-and-verify-it">Write the Claude Code transcript and verify it</a></li><li class="l3"><a href="#claude-code-to-codex-with-a-private-app-server">Claude Code to Codex with a private app-server</a></li><li class="l3"><a href="#the-progress-dialog">The progress dialog</a></li><li class="l3"><a href="#replace-the-frozen-pane">Replace the frozen pane</a></li><li class="l3"><a href="#owner-side-formats-and-after-convert">Owner side: formats and after-convert</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-adds-a-third-transcript-format">Example: Adds a third transcript format</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

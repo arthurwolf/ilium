@@ -1,0 +1,1165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Patterns cookbook | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details open><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/" aria-current="page">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Patterns cookbook</h1>
+
+<p>This page collects twelve recipes that most plugins need sooner or later: debounce, throttle, cache with a time limit, windowed lists, retry with backoff, idempotent submissions, state that survives a restart, stale-result guards, batch handling, slow work in jobs, talking between the two sides, and migrating stored data. Each recipe states the problem, lists the limits that shape the answer, gives Rust and TypeScript code, shows a test, and lists the traps.</p>
+<p>The recipes use one idea over and over: keep the decision logic in a plain function or struct that takes the current time and the incoming event as arguments, and keep the host calls in a thin handler around it. The core is then testable with plain numbers. The fake host also has a fake clock (<code>advance_clock</code>, see <a href="/pages/reference-test-harness/">Test harness reference</a>), so the tests below call the core directly where the logic is pure and use the fake host to check the glue and the timers.</p>
+<p>Requirement ids of this page are in the range <code>AUT-001</code> to <code>AUT-099</code>. The complete list is in <a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a>.</p>
+<h3 id="you-need">You need</h3>
+<ul>
+<li>A plugin that builds and activates. Start with <a href="/pages/getting-started-first-plugin/">Your first plugin</a> if you have none.</li>
+<li>The grants named in each recipe. The clock, timers and storage need no grant.</li>
+<li>The limits below. Every number comes from <a href="/pages/reference-errors-and-limits/">Errors and limits</a> and <a href="/pages/performance/">Performance</a>. This page does not define them again.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+<th>Page</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Timer minimum, timers per plugin</td>
+<td>50 ms, 64</td>
+<td><a href="/pages/api-clock-and-timers/">Clock and timers</a></td>
+</tr>
+<tr>
+<td><code>on-events</code> deadline</td>
+<td>20 ms (50 ms for tier 1)</td>
+<td><a href="/pages/performance/">Performance</a></td>
+</tr>
+<tr>
+<td>Storage key, value, bucket</td>
+<td>256 bytes, 1 MiB, 16 MiB (<code>storage_bucket_mib</code>)</td>
+<td><a href="/pages/api-storage/">Storage</a></td>
+</tr>
+<tr>
+<td>Restore bytes from <code>deactivate</code></td>
+<td>1 MiB</td>
+<td><a href="/pages/lifecycle/">Lifecycle</a></td>
+</tr>
+<tr>
+<td>Dedup window</td>
+<td>10 minutes</td>
+<td><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></td>
+</tr>
+<tr>
+<td>Toast rate</td>
+<td>3 per 10 s</td>
+<td><a href="/pages/api-toast/">Toast</a></td>
+</tr>
+<tr>
+<td>Tree limits</td>
+<td>4,096 nodes, 1,024 KiB</td>
+<td><a href="/pages/ui-model/">UI model</a></td>
+</tr>
+<tr>
+<td>Topic payload</td>
+<td>64 KiB</td>
+<td><a href="/pages/api-messages-and-topics/">Messages and topics</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-shape-of-every-recipe">The shape of every recipe</h3>
+<p>Rust plugins keep a <code>Core</code> struct with pure methods. A method receives <code>now</code> in milliseconds and returns what the handler should do, as a small enum. The handler turns the enum into host calls.</p>
+<pre><code class="language-rust">/// What the handler must do after the core decides.
+pub enum Action {
+    Nothing,
+    ArmTimer { after_millis: u32 },
+    CancelTimer,
+    Run,
+}
+</code></pre>
+<p>The TypeScript version is the same, with a discriminated union.</p>
+<pre><code class="language-ts">export type Action =
+  | { tag: 'nothing' }
+  | { tag: 'arm-timer'; afterMillis: number }
+  | { tag: 'cancel-timer' }
+  | { tag: 'run' };
+</code></pre>
+<p>A core MUST NOT call the clock itself, and a handler SHOULD read the clock once per batch and pass the value in. [AUT-001]</p>
+<h2 id="recipe-1-debounce">Recipe 1: debounce</h2>
+<p><strong>Problem.</strong> The user types or resizes, and your plugin gets an event for every change. You want to act once, a short time after the last change.</p>
+<p><strong>Constraints.</strong> A timer needs at least 50 ms. A plugin holds at most 64 timers. Timer events coalesce while they wait, so a late handler sees one <code>timer-fired</code>. There is no "reset" call. You restart a debounce by cancelling the old timer and setting a new one.</p>
+<p><strong>Rule.</strong> A debounce MUST cancel the pending timer before it arms a new one. Otherwise each change leaves a timer behind, and a busy editor reaches the limit of 64 held timers. [AUT-002]</p>
+<p><strong>Rule.</strong> The handler MUST compare the id of each <code>timer-fired</code> event with the id it stored, and ignore every other id. [AUT-003]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::timers;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::ids::TimerId;
+
+pub const QUIET_MILLIS: u32 = 300;
+
+#[derive(Default)]
+pub struct Debounce {
+    pending: Option&lt;TimerId&gt;,
+}
+
+impl Debounce {
+    /// Call on every change. Restarts the quiet period.
+    pub fn touch(&amp;mut self) -&gt; Result&lt;(), PluginError&gt; {
+        if let Some(old) = self.pending.take() {
+            timers::cancel(old);
+        }
+        self.pending = Some(timers::set(QUIET_MILLIS, None)?);
+        Ok(())
+    }
+
+    /// Call for every timer-fired event. True when the quiet period ended.
+    pub fn fired(&amp;mut self, timer: TimerId) -&gt; bool {
+        if self.pending == Some(timer) {
+            self.pending = None;
+            return true;
+        }
+        false
+    }
+
+    /// Call from deactivate. Timers are lost on restart anyway; this keeps the count honest.
+    pub fn stop(&amp;mut self) {
+        if let Some(old) = self.pending.take() {
+            timers::cancel(old);
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as timers from '@ilium/plugin-sdk/host/timers';
+
+export const QUIET_MILLIS = 300;
+
+export class Debounce {
+  private pending: bigint | undefined;
+
+  touch(): void {
+    if (this.pending !== undefined) timers.cancel(this.pending);
+    this.pending = timers.set(QUIET_MILLIS, undefined);
+  }
+
+  fired(timer: bigint): boolean {
+    if (this.pending !== timer) return false;
+    this.pending = undefined;
+    return true;
+  }
+
+  stop(): void {
+    if (this.pending !== undefined) timers.cancel(this.pending);
+    this.pending = undefined;
+  }
+}
+</code></pre>
+<p><strong>Test.</strong> The fake host moves time only through <code>advance_clock</code>, and <code>deliver</code> never runs timers. The test below types three times, 200 ms apart, and expects one action after the quiet period.</p>
+<pre><code class="language-rust">#[test]
+fn three_changes_give_one_action() {
+    let mut host = FakeHost::new();
+    host.activate::&lt;Editor&gt;();
+    for _ in 0..3 {
+        host.deliver(vec![text_changed()]);
+        host.advance_clock(200);
+    }
+    assert!(host.submitted().is_empty());      // 200 ms after the last change
+    host.advance_clock(100);                   // 300 ms: the quiet period ends
+    assert_eq!(host.submitted().len(), 1);
+}
+
+#[test]
+fn unknown_timer_is_ignored() {
+    let mut host = FakeHost::new();
+    host.activate::&lt;Editor&gt;();
+    let submissions = host.deliver(vec![Event::TimerFired(TimerId(999))]);
+    assert!(submissions.is_empty());
+}
+</code></pre>
+<p><strong>Traps.</strong></p>
+<ul>
+<li>A debounce delay MUST be 50 ms or more, because a shorter delay is refused with <code>invalid-argument</code>. [AUT-004]</li>
+<li>Timers are lost on restart. A debounce that was pending when the plugin restarted does not fire. Treat the next change as the start of a new quiet period.</li>
+<li>Do not use a repeating timer and a "last change" stamp to simulate a debounce. It wakes the plugin every period for nothing.</li>
+</ul>
+<h2 id="recipe-2-throttle-and-rate-limits">Recipe 2: throttle and rate limits</h2>
+<p><strong>Problem.</strong> An event arrives many times per second, and your reaction is a host call with a rate limit: a toast, a status segment, a meter update.</p>
+<p><strong>Constraints.</strong> A toast is limited to 3 per 10 s. A status segment and a frame slot are limited to 10 per second per slot. A meter family is limited to 10 per second. Over the rate, the call fails with <code>rate-limited</code> and the error carries <code>retry-after-ms</code>.</p>
+<p><strong>Rule.</strong> A plugin SHOULD keep its own send rate under the host rate, and SHOULD NOT depend on <code>rate-limited</code> as flow control. [AUT-005]</p>
+<p><strong>Rule.</strong> After <code>rate-limited</code>, the plugin MUST wait at least <code>retry-after-ms</code> before it sends the same kind of call again. [AUT-006]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">/// Allows one action per `interval_millis`. The caller passes `now`.
+pub struct Throttle {
+    interval_millis: u64,
+    last: Option&lt;u64&gt;,
+}
+
+impl Throttle {
+    pub fn new(interval_millis: u64) -&gt; Self {
+        Self { interval_millis, last: None }
+    }
+
+    pub fn allow(&amp;mut self, now: u64) -&gt; bool {
+        match self.last {
+            Some(last) if now.saturating_sub(last) &lt; self.interval_millis =&gt; false,
+            _ =&gt; {
+                self.last = Some(now);
+                true
+            }
+        }
+    }
+
+    /// Call when the host answered rate-limited with a retry delay.
+    pub fn back_off(&amp;mut self, now: u64, retry_after_ms: u32) {
+        self.last = Some(now + u64::from(retry_after_ms).saturating_sub(self.interval_millis));
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export class Throttle {
+  private last: bigint | undefined;
+  constructor(private readonly intervalMillis: bigint) {}
+
+  allow(now: bigint): boolean {
+    if (this.last !== undefined &amp;&amp; now - this.last &lt; this.intervalMillis) return false;
+    this.last = now;
+    return true;
+  }
+
+  backOff(now: bigint, retryAfterMs: number): void {
+    const wait = BigInt(retryAfterMs);
+    this.last = now + (wait &gt; this.intervalMillis ? wait - this.intervalMillis : 0n);
+  }
+}
+</code></pre>
+<p><strong>Test.</strong> Both tests call the core with plain numbers, so no clock is needed.</p>
+<pre><code class="language-rust">#[test]
+fn throttle_allows_one_per_interval() {
+    let mut throttle = Throttle::new(100);
+    assert!(throttle.allow(1_000));
+    assert!(!throttle.allow(1_050));
+    assert!(throttle.allow(1_100));
+}
+
+#[test]
+fn back_off_delays_the_next_send() {
+    let mut throttle = Throttle::new(100);
+    assert!(throttle.allow(0));
+    throttle.back_off(0, 2_000);
+    assert!(!throttle.allow(1_500));
+    assert!(throttle.allow(2_000));
+}
+</code></pre>
+<p><strong>Traps.</strong> A throttle MUST take its time from <code>monotonic-millis</code>, because wall time can jump backwards and then <code>now - last</code> underflows in unsigned arithmetic. The code above uses <code>saturating_sub</code> for this reason. [AUT-007]</p>
+<h2 id="recipe-3-cache-with-a-time-limit">Recipe 3: cache with a time limit</h2>
+<p><strong>Problem.</strong> You fetch something slow, such as an HTTP answer or a scan, and you want to reuse it for a while.</p>
+<p><strong>Constraints.</strong> Buckets are <code>global</code>, <code>project</code>, <code>session</code> and <code>shared</code>. The first three are durable and count against <code>storage_bucket_mib</code> (16 MiB for tiers 2 and 3). The <code>shared</code> bucket is a cache: the host may clear it at any time, it is shared by all sessions of the user, and it counts against <code>shared_cache_mib</code>. A value is at most 1 MiB. The <code>lease</code> call lets exactly one caller per key refresh. A folder named <code>/cache</code> in the <code>fs</code> scope is a different thing: a file area, counted with <code>data</code> in <code>disk_mib</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Where</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Can be rebuilt, shared by sessions</td>
+<td><code>shared</code> bucket</td>
+<td>The host may clear it. Entries evict oldest first.</td>
+</tr>
+<tr>
+<td>Can be rebuilt, large, a file</td>
+<td><code>/cache</code> in <code>fs</code></td>
+<td>Files suit big data. The host may evict it.</td>
+</tr>
+<tr>
+<td>Cannot be rebuilt (user choices, counters)</td>
+<td><code>global</code>, <code>project</code> or <code>session</code></td>
+<td>Durable. Not cleared by the host.</td>
+</tr>
+<tr>
+<td>Rebuilt per run</td>
+<td>In memory</td>
+<td>Lost on restart. Cheapest.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule.</strong> Data that the plugin can rebuild MUST go to the <code>shared</code> bucket or to <code>/cache</code>, never to a durable bucket, so that it does not fill the 16 MiB bucket. [AUT-008]</p>
+<p><strong>Rule.</strong> A cached value MUST carry its fetch time as <code>now-unix-millis</code> inside the stored bytes, and the reader MUST compare it with the current time. The host does not expire entries by age. [AUT-009]</p>
+<p><strong>Rule.</strong> When several sessions can refresh the same entry, only the caller whose <code>lease</code> returned true MAY refresh it. [AUT-010]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::storage::{self, Bucket};
+
+const TTL_MILLIS: u64 = 10 * 60 * 1000;
+
+fn encode(fetched_at: u64, body: &amp;[u8]) -&gt; Vec&lt;u8&gt; {
+    let mut out = fetched_at.to_le_bytes().to_vec();
+    out.extend_from_slice(body);
+    out
+}
+
+fn decode(bytes: &amp;[u8]) -&gt; Option&lt;(u64, &amp;[u8])&gt; {
+    let (head, body) = bytes.split_at_checked(8)?;
+    Some((u64::from_le_bytes(head.try_into().ok()?), body))
+}
+
+/// Returns fresh bytes, stale bytes while another session refreshes, or None.
+pub fn read_cached(key: &amp;str, now: u64) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
+    let stored = storage::get(Bucket::Shared, key);
+    let fresh = stored
+        .as_deref()
+        .and_then(decode)
+        .filter(|(at, _)| now.saturating_sub(*at) &lt; TTL_MILLIS);
+    if let Some((_, body)) = fresh {
+        return Some(body.to_vec());
+    }
+    if storage::lease(key, 60_000) {
+        return None; // the caller fetches, then calls write_cached
+    }
+    stored.as_deref().and_then(decode).map(|(_, body)| body.to_vec())
+}
+
+pub fn write_cached(key: &amp;str, now: u64, body: &amp;[u8]) {
+    let _ = storage::put(Bucket::Shared, key, &amp;encode(now, body));
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as storage from '@ilium/plugin-sdk/host/storage';
+
+const TTL_MILLIS = 10n * 60n * 1000n;
+
+export function readCached(key: string, now: bigint): Uint8Array | undefined {
+  const stored = storage.get('shared', key);
+  const parsed = stored &amp;&amp; stored.length &gt;= 8 ? split(stored) : undefined;
+  if (parsed &amp;&amp; now - parsed.at &lt; TTL_MILLIS) return parsed.body;
+  if (storage.lease(key, 60_000)) return undefined;
+  return parsed?.body;
+}
+
+function split(bytes: Uint8Array): { at: bigint; body: Uint8Array } {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+  return { at: view.getBigUint64(0, true), body: bytes.subarray(8) };
+}
+</code></pre>
+<p><strong>Test.</strong> <code>encode</code> and <code>decode</code> are pure, so test them without the host. <code>read_cached</code> and <code>write_cached</code> take <code>now</code> as an argument (the handler reads the clock once per batch, [AUT-001]), so the TTL branch can be tested with fixed numbers.</p>
+<p><strong>Traps.</strong></p>
+<ul>
+<li>A <code>put</code> into <code>shared</code> of a value over 1 MiB fails with <code>invalid-argument</code>, not <code>quota-exceeded</code>.</li>
+<li>The lease is not a lock. It prevents duplicate work, not races. Two callers can still write. The last write wins. That is fine for a cache.</li>
+<li>Never keep the only copy of user data in <code>shared</code>. The host may clear it.</li>
+</ul>
+<h2 id="recipe-4-lists-larger-than-the-tree">Recipe 4: lists larger than the tree</h2>
+<p><strong>Problem.</strong> You have thousands of rows, such as search hits, log lines or files. A tree is limited to 4,096 nodes and 1,024 KiB, and a render must finish in 10 ms.</p>
+<p><strong>Constraints.</strong> The <code>%list</code> and <code>table</code> widgets keep <code>selected</code> and <code>offset</code> as host-owned state, which the plugin reads through <code>ui.widget-state</code>. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps <code>check-list</code> (256 items) and <code>list-editor</code> (64 items) are enforced at render time: a larger one traps with <code>ui.invalid-tree</code>.</p>
+<p><strong>Rule.</strong> A view MUST render only the rows in the visible window plus a small margin, and MUST NOT put all rows into the tree. The ceiling is 4,096 nodes and 1,024 KiB for the whole tree. [AUT-011]</p>
+<p><strong>Rule.</strong> A view that hides rows behind a window MUST show how many rows exist and where the window is, for example <code>41 to 60 of 3,212</code>, so that the user knows more exist. [AUT-012]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">pub struct Window {
+    pub first: usize,
+    pub len: usize,
+}
+
+/// Window for a list of `total` rows, a host offset and a visible height.
+pub fn window(total: usize, offset: usize, visible: usize) -&gt; Window {
+    let margin = 4;
+    let first = offset.saturating_sub(margin).min(total);
+    let end = (offset + visible + margin).min(total);
+    Window { first, len: end - first }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function window(total: number, offset: number, visible: number): { first: number; len: number } {
+  const margin = 4;
+  const first = Math.min(Math.max(offset - margin, 0), total);
+  const end = Math.min(offset + visible + margin, total);
+  return { first, len: end - first };
+}
+</code></pre>
+<p>A plugin that cannot hold all rows in memory pages them from its source. A catalogue provider returns pages with <code>limit</code> (1 to 256), a <code>next</code> cursor and <code>total</code>. A sidebar virtual-row provider returns rows with a cursor and the host adds the Load more row. See <a href="/pages/api-catalogs/">Catalogs</a> and <a href="/pages/api-virtual-rows-provider/">Virtual rows provider</a>.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Search hits ────────────────────────╮
+│ 41 to 60 of 3,212                          │
+│ src/lib.rs:41                              │
+│ src/lib.rs:57                              │
+│ src/app.rs:3                               │
+│ ...                                        │
+│ Load more                                  │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The count line tells the user that the window is part of a larger list.</figcaption>
+</figure>
+
+<p><strong>Test.</strong></p>
+<pre><code class="language-rust">#[test]
+fn window_is_clamped_to_the_list() {
+    let w = window(10, 8, 5);
+    assert_eq!(w.first, 4);
+    assert_eq!(w.first + w.len, 10);
+    assert_eq!(window(0, 0, 5).len, 0);
+}
+</code></pre>
+<p><strong>Traps.</strong> Do not size the tree by the number of rows. A width change or a resize calls <code>render</code> again, and a plugin that rebuilds 3,000 rows per render misses the 10 ms deadline.</p>
+<h2 id="recipe-5-retry-with-backoff">Recipe 5: retry with backoff</h2>
+<p><strong>Problem.</strong> A request fails, and some failures are worth another try.</p>
+<p><strong>Constraints.</strong> A request completes with an outcome. A failed one carries an error code. Of the fifteen codes, only some describe a passing problem.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Retry?</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timed-out</code>, <code>busy</code>, <code>network</code>, <code>rate-limited</code>, <code>io</code></td>
+<td>Yes, with backoff</td>
+<td>The cause can pass. For <code>rate-limited</code>, wait at least <code>retry-after-ms</code>.</td>
+</tr>
+<tr>
+<td><code>quota-exceeded</code></td>
+<td>After freeing space</td>
+<td>A retry fails the same way until something is removed.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code>, <code>revoked</code>, <code>unsupported</code></td>
+<td>No</td>
+<td>The user or the host decided. A retry cannot change it.</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code>, <code>not-found</code>, <code>conflict</code></td>
+<td>No</td>
+<td>The request is wrong. Change it.</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Only on the next trigger</td>
+<td>The plugin or the user stopped it.</td>
+</tr>
+<tr>
+<td><code>pane-not-ready</code></td>
+<td>Yes, after the next pane event</td>
+<td>The pane process has not started.</td>
+</tr>
+<tr>
+<td><code>internal</code></td>
+<td>Once, then report</td>
+<td>A host fault.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule.</strong> A plugin MUST NOT retry <code>not-permitted</code>, <code>revoked</code>, <code>invalid-argument</code> or <code>unsupported</code>. [AUT-013]</p>
+<p><strong>Rule.</strong> A retry loop MUST have a maximum attempt count and a growing delay. A suggested schedule is 1 s, 2 s, 4 s, up to 60 s, with at most 5 attempts. [AUT-014]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">pub fn is_transient(code: ErrorCode) -&gt; bool {
+    matches!(
+        code,
+        ErrorCode::TimedOut | ErrorCode::Busy | ErrorCode::Network | ErrorCode::RateLimited | ErrorCode::Io
+    )
+}
+
+/// Delay before attempt `attempt` (1-based), or None when to give up.
+pub fn backoff_millis(attempt: u32, retry_after_ms: Option&lt;u32&gt;) -&gt; Option&lt;u32&gt; {
+    const MAX_ATTEMPTS: u32 = 5;
+    if attempt &gt; MAX_ATTEMPTS {
+        return None;
+    }
+    let base = 1_000u32.saturating_mul(1 &lt;&lt; (attempt - 1)).min(60_000);
+    Some(base.max(retry_after_ms.unwrap_or(0)))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function backoffMillis(attempt: number, retryAfterMs?: number): number | undefined {
+  const MAX_ATTEMPTS = 5;
+  if (attempt &gt; MAX_ATTEMPTS) return undefined;
+  const base = Math.min(1000 * 2 ** (attempt - 1), 60_000);
+  return Math.max(base, retryAfterMs ?? 0);
+}
+</code></pre>
+<p>The retry itself is a timer: <code>timers.set(delay, None)</code>, and the <code>timer-fired</code> handler starts the request again. The attempt count lives in memory. A restart loses it, which is the right result, since the failure may be gone.</p>
+<p><strong>Test.</strong></p>
+<pre><code class="language-rust">#[test]
+fn backoff_doubles_and_gives_up() {
+    assert_eq!(backoff_millis(1, None), Some(1_000));
+    assert_eq!(backoff_millis(3, None), Some(4_000));
+    assert_eq!(backoff_millis(2, Some(9_000)), Some(9_000));
+    assert_eq!(backoff_millis(6, None), None);
+}
+
+#[test]
+fn failed_request_is_logged_not_trapped() {
+    let mut host = FakeHost::new().grant(&quot;http:api.example.com&quot;);
+    host.activate::&lt;Fetcher&gt;();
+    host.deliver(vec![command(&quot;com.example.fetch/run&quot;)]);
+    let request = host.pending_requests()[0];
+    host.complete(request, Outcome::Failed(ErrorCode::Network));
+    assert!(host.logs().iter().any(|line| line.message.contains(&quot;retry&quot;)));
+}
+</code></pre>
+<h2 id="recipe-6-idempotent-submissions">Recipe 6: idempotent submissions</h2>
+<p><strong>Problem.</strong> An event can repeat, and your reaction must not repeat with it: a notice, a decoration, a send-input.</p>
+<p><strong>Constraints.</strong> A submission may carry a <code>dedup-key</code> of 1 to 128 characters from <code>A-Z</code>, <code>a-z</code>, <code>0-9</code>, <code>.</code>, <code>_</code>, <code>:</code>, <code>/</code> and <code>-</code>. The key is scoped to the plugin id and stays reserved for 10 minutes. A second submission with the same key completes as <code>duplicate</code> with a reference to the first.</p>
+<p><strong>Rule.</strong> A submission whose repeat would harm the user (a notice, a sent line) MUST carry a <code>dedup-key</code> built from what makes the action unique, such as an id and a revision. [AUT-015]</p>
+<p><strong>Rule.</strong> A <code>dedup-key</code> MUST NOT be reused for different content within 10 minutes. The second submission is dropped as <code>duplicate</code> even though its content differs. [AUT-016]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">fn finished_notice(node: u64, revision: u64) -&gt; Submission {
+    let mut submission = Submission::new(Intent::Notify(notice_for(node)));
+    submission.dedup_key = Some(format!(&quot;finished:{node}:{revision}&quot;));
+    submission
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">function finishedNotice(node: bigint, revision: bigint): Submission {
+  return {
+    intent: { tag: 'notify', val: noticeFor(node) },
+    correlation: nextCorrelation++,
+    dedupKey: `finished:${node}:${revision}`,
+  };
+}
+</code></pre>
+<p><strong>Test.</strong> Complete the same key twice in the fake host and check that <code>outcomes()</code> shows <code>Outcome::Duplicate</code> for the second. Check that the key string matches <code>^[A-Za-z0-9._:/-]{1,128}$</code>.</p>
+<p><strong>Traps.</strong> The window is 10 minutes. After it, the same key is accepted again. If an action must be once for all time, record it in storage too.</p>
+<h2 id="recipe-7-state-that-survives-a-restart">Recipe 7: state that survives a restart</h2>
+<p><strong>Problem.</strong> The plugin stops and starts, and some state must come back.</p>
+<p><strong>Constraints.</strong> <code>deactivate</code> returns up to 1 MiB of restore bytes, with a deadline of 500 ms. The bytes come back as <code>restored</code> in the next <code>activate</code>. After a trap, the instance is dropped and <code>deactivate</code> is never called, so nothing is saved. The restore bytes are not a migration path, and the host drops them when <code>data_version</code> differs from the build that wrote them.</p>
+<p><strong>Rule.</strong> The first byte of restore bytes MUST be a format version, and <code>activate</code> MUST check the version and the length before it reads. A mismatch MUST fall back to defaults. [AUT-017]</p>
+<p><strong>Rule.</strong> State that must outlive a trap MUST be written to storage when it changes, not only in <code>deactivate</code>. [AUT-018]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">const FORMAT: u8 = 1;
+
+#[derive(Default)]
+pub struct Counter {
+    pub value: u32,
+}
+
+impl Counter {
+    pub fn save(&amp;self) -&gt; Vec&lt;u8&gt; {
+        let mut out = vec![FORMAT];
+        out.extend_from_slice(&amp;self.value.to_le_bytes());
+        out
+    }
+
+    pub fn load(bytes: &amp;[u8]) -&gt; Self {
+        match bytes {
+            [FORMAT, a, b, c, d] =&gt; Self { value: u32::from_le_bytes([*a, *b, *c, *d]) },
+            _ =&gt; Self::default(),
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const FORMAT = 1;
+
+export function save(value: number): Uint8Array {
+  const out = new Uint8Array(5);
+  out[0] = FORMAT;
+  new DataView(out.buffer).setUint32(1, value, true);
+  return out;
+}
+
+export function load(bytes: Uint8Array | undefined): number {
+  if (!bytes || bytes.length !== 5 || bytes[0] !== FORMAT) return 0;
+  return new DataView(bytes.buffer, bytes.byteOffset).getUint32(1, true);
+}
+</code></pre>
+<p><strong>Test.</strong> The core test needs no host. The host test uses the lifecycle methods of the fake host (<code>deactivate</code>, <code>restart_with</code>).</p>
+<pre><code class="language-rust">#[test]
+fn restore_round_trip() {
+    let mut host = FakeHost::new();
+    host.activate::&lt;Editor&gt;();
+    let bytes = host.deactivate(&quot;upgrade&quot;);
+    host.restart_with(bytes.clone());
+    assert_eq!(bytes[0], 1);                   // the format byte
+}
+
+#[test]
+fn bad_restore_bytes_fall_back_to_defaults() {
+    assert_eq!(Counter::load(&amp;[]).value, 0);
+    assert_eq!(Counter::load(&amp;[9, 1, 0, 0, 0]).value, 0);
+    let saved = Counter { value: 7 }.save();
+    assert_eq!(Counter::load(&amp;saved).value, 7);
+}
+</code></pre>
+<h2 id="recipe-8-ignore-stale-results">Recipe 8: ignore stale results</h2>
+<p><strong>Problem.</strong> The user changes the query while a request for the old one is running. The old answer must not overwrite the new one.</p>
+<p><strong>Rule.</strong> A plugin that starts work for a changing input MUST keep a generation number, store it with the request, and discard a completion whose generation is not the current one. [AUT-019]</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use std::collections::HashMap;
+
+#[derive(Default)]
+pub struct Latest {
+    generation: u64,
+    by_request: HashMap&lt;u64, u64&gt;,
+}
+
+impl Latest {
+    pub fn start(&amp;mut self, request: u64) {
+        self.generation += 1;
+        self.by_request.insert(request, self.generation);
+    }
+
+    /// True only for the newest request.
+    pub fn accept(&amp;mut self, request: u64) -&gt; bool {
+        self.by_request.remove(&amp;request) == Some(self.generation)
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export class Latest {
+  private generation = 0;
+  private byRequest = new Map&lt;bigint, number&gt;();
+  start(request: bigint): void {
+    this.generation += 1;
+    this.byRequest.set(request, this.generation);
+  }
+  accept(request: bigint): boolean {
+    const mine = this.byRequest.get(request);
+    this.byRequest.delete(request);
+    return mine === this.generation;
+  }
+}
+</code></pre>
+<p><strong>Test.</strong> Start two requests, accept the first (false), accept the second (true). Also check that an unknown id is rejected.</p>
+<p>A request can also be cancelled when it supports cancellation (jobs do, through <code>jobs.cancel</code>). Cancelling saves work but does not replace the guard, because a completion may already be in the queue.</p>
+<h2 id="recipe-9-handle-a-whole-batch">Recipe 9: handle a whole batch</h2>
+<p><strong>Problem.</strong> <code>on-events</code> receives a batch, not one event.</p>
+<p><strong>Rule.</strong> The handler MUST process every event of the batch in order, and MUST return before the event deadline (20 ms, 50 ms for tier 1). [AUT-020]</p>
+<p><strong>Rule.</strong> After an <code>events-dropped</code> entry, the handler MUST rebuild its picture from a read call instead of trusting its incremental state. [AUT-021]</p>
+<pre><code class="language-rust">fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+    let now = clock::monotonic_millis();
+    let mut submissions = Vec::new();
+    for event in batch {
+        match event {
+            Event::EventsDropped(_) =&gt; self.resync(),
+            Event::TimerFired(timer) =&gt; self.on_timer(timer, now, &amp;mut submissions),
+            other =&gt; self.core.apply(other, now, &amp;mut submissions),
+        }
+    }
+    submissions
+}
+</code></pre>
+<p>The batch gives you a free coalescing step. If three <code>agent-activity-changed</code> events for one node arrive together, apply them all and submit one decoration for the final state.</p>
+<h2 id="recipe-10-slow-work-belongs-in-a-job">Recipe 10: slow work belongs in a job</h2>
+<p><strong>Problem.</strong> A step takes more than a few milliseconds: parsing a large file, hashing, formatting.</p>
+<p><strong>Rule.</strong> Work that can take longer than 10 ms MUST run as a job or a request. A handler that spends its 20 ms deadline on work traps the instance. [AUT-022]</p>
+<p>A job runs under 2 s CPU, 20 s wall and 64 MiB, and reports progress. Start it from the handler, keep its request id, and read its output after <code>request-completed</code>. The full worked example, with cancellation and progress, is in <a href="/pages/performance/">Performance</a> and <a href="/pages/api-jobs/">Jobs</a>. Combine it with recipe 8 so a result for an old input is dropped.</p>
+<h2 id="recipe-11-choose-how-the-two-sides-talk">Recipe 11: choose how the two sides talk</h2>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Use</th>
+<th>Limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>News nobody answers</td>
+<td>Topic publish</td>
+<td>Payload 64 KiB, valid JSON, dropped and counted when the queue is full</td>
+</tr>
+<tr>
+<td>A direct note to a known plugin</td>
+<td>Message</td>
+<td>Never dropped. A full queue marks the receiver stuck.</td>
+</tr>
+<tr>
+<td>One answer from one client now</td>
+<td>Client request</td>
+<td>At most 16 kinds, timeout 1 to 30,000 ms</td>
+</tr>
+<tr>
+<td>Durable data that both sides need</td>
+<td>Each side keeps its own copy in storage; the other side asks with a client request</td>
+<td>Atomic <code>put</code> per key, no multi-key transaction. Do not use the <code>shared</code> bucket: the host may clear it.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule.</strong> A server side that needs data from the client MUST use a client request with an explicit timeout, and MUST handle <code>timed-out</code> and <code>not-found</code> (the client is gone). [AUT-023]</p>
+<p>See <a href="/pages/api-client-requests/">Client requests</a> and <a href="/pages/api-messages-and-topics/">Messages and topics</a>.</p>
+<h2 id="recipe-12-migrate-stored-data">Recipe 12: migrate stored data</h2>
+<p><strong>Problem.</strong> A new version stores data differently.</p>
+<p><strong>Constraints.</strong> The host owns the migration. The manifest key <code>data_version</code> (an unsigned 32-bit integer, default 1) names the layout. When a new version declares a higher number, the host takes a backup, calls the optional export <code>migrator.migrate(from, to)</code> once per side before <code>activate</code>, stamps the new number when it succeeds, and rolls back when it fails. The <code>shared</code> bucket is not migrated: the host clears it when <code>data_version</code> changes. The full rules, the backup, the downgrade case and the tests are in <a href="/pages/guide-data-migration/">Data migration</a>. <code>put</code> is atomic for one key only, so a migration that touches several keys must be safe to run again.</p>
+<p><strong>Rule.</strong> A plugin that changes how it stores data MUST raise <code>data_version</code> and MUST provide a <code>migrator</code> export that converts the old layout, instead of reading both layouts inside <code>activate</code>. [AUT-024]</p>
+<p><strong>Rule.</strong> A <code>migrate</code> function MUST be idempotent and MUST write the new value of a key before it removes the old one, so that an interrupted run can start again from the same arguments. [AUT-025]</p>
+<pre><code class="language-rust">fn migrate(from: u32, to: u32) -&gt; Result&lt;(), PluginError&gt; {
+    if from &lt; 2 &amp;&amp; to &gt;= 2 {
+        if let Some(old) = storage::get(Bucket::Global, &quot;notes&quot;) {
+            storage::put(Bucket::Global, &quot;notes.v2&quot;, &amp;upgrade_notes(&amp;old))?;
+            storage::remove(Bucket::Global, &quot;notes&quot;);
+        }
+    }
+    Ok(())
+}
+</code></pre>
+<p>If <code>notes</code> is already gone, the step does nothing, so a second run is harmless. Compare with the version rules in <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a>.</p>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+<th>Recipe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Timer id not tracked</td>
+<td>Ignore the event</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Wall clock jumps backwards</td>
+<td>Use monotonic time for intervals</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>shared</code> cleared by the host</td>
+<td>The reader sees no value and refetches</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Window offset beyond the list</td>
+<td>Clamp, show an empty window</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>rate-limited</code> with <code>retry-after-ms</code></td>
+<td>Wait at least that long</td>
+<td>2, 5</td>
+</tr>
+<tr>
+<td>Same <code>dedup-key</code>, different content</td>
+<td>Second submission is a duplicate</td>
+<td>6</td>
+</tr>
+<tr>
+<td>Restore bytes over 1 MiB</td>
+<td>Dropped with a warn line</td>
+<td>7</td>
+</tr>
+<tr>
+<td>Trap</td>
+<td>No <code>deactivate</code>, no restore bytes</td>
+<td>7</td>
+</tr>
+<tr>
+<td><code>events-dropped</code></td>
+<td>Resync from a read</td>
+<td>9</td>
+</tr>
+<tr>
+<td>Completion for an old input</td>
+<td>Discard by generation</td>
+<td>8</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>Nothing of these patterns directly. They see the effects: a panel that settles after typing, a notice that appears once, a list that says <code>41 to 60 of 3,212</code>, and a plugin that is not disabled after a restart. The failure cases show up in <code>ilium plugin logs &lt;id&gt;</code> (see <a href="/pages/debugging/">Debugging</a>).</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a> for a review list that covers these patterns</li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting</a> when a pattern misbehaves</li>
+<li><a href="/pages/performance/">Performance</a> for deadlines and budgets</li>
+<li><a href="/pages/testing/">Testing</a> for the fake host</li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for outcomes and error codes</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/guide-internationalisation/"><small>Previous</small>Internationalisation</a><a class="next" href="/pages/guide-plugin-administration/"><small>Next</small>Plugin administration</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#the-shape-of-every-recipe">The shape of every recipe</a></li><li class="l2"><a href="#recipe-1-debounce">Recipe 1: debounce</a></li><li class="l2"><a href="#recipe-2-throttle-and-rate-limits">Recipe 2: throttle and rate limits</a></li><li class="l2"><a href="#recipe-3-cache-with-a-time-limit">Recipe 3: cache with a time limit</a></li><li class="l2"><a href="#recipe-4-lists-larger-than-the-tree">Recipe 4: lists larger than the tree</a></li><li class="l2"><a href="#recipe-5-retry-with-backoff">Recipe 5: retry with backoff</a></li><li class="l2"><a href="#recipe-6-idempotent-submissions">Recipe 6: idempotent submissions</a></li><li class="l2"><a href="#recipe-7-state-that-survives-a-restart">Recipe 7: state that survives a restart</a></li><li class="l2"><a href="#recipe-8-ignore-stale-results">Recipe 8: ignore stale results</a></li><li class="l2"><a href="#recipe-9-handle-a-whole-batch">Recipe 9: handle a whole batch</a></li><li class="l2"><a href="#recipe-10-slow-work-belongs-in-a-job">Recipe 10: slow work belongs in a job</a></li><li class="l2"><a href="#recipe-11-choose-how-the-two-sides-talk">Recipe 11: choose how the two sides talk</a></li><li class="l2"><a href="#recipe-12-migrate-stored-data">Recipe 12: migrate stored data</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

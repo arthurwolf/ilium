@@ -9,6 +9,7 @@ target/
 /docs/*
 !/docs/
 /docs/*
+!/docs/plugins-manual/
 !/docs/tasks/
 /docs/tasks/*
 !/docs/tasks/01-overworld-texture-pack-shipping.md
@@ -18,3 +19,4 @@ target/
 
 # Task-owned hashed development inputs for remote UI qualification.
 /.ni-build-ui-sdk/
+/claude-api.sh

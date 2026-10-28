@@ -1,0 +1,6 @@
+package ilium:host@0.1.0;
+
+interface location {
+  /// Latitude and longitude, or none when unknown.
+  current: func() -> option<tuple<f64, f64>>;
+}

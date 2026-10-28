@@ -31,7 +31,7 @@ Detection combines two independent signals.
 Further rules:
 
 - One idle sample straight after an active turn is provisional. Ilium keeps the active state, schedules a quick recheck, and marks the turn as finished (unread) only after a second consecutive idle sample from the same process.
-- For Claude Code, the latest recognised completed-turn summary is a boundary: earlier working and background-wait lines belong to the previous turn.
+- For Claude Code, the latest recognised completed-turn summary is a boundary: earlier working and background-wait lines belong to the previous turn. Live activity requires the provider’s spinner, activity label and elapsed-time row; configurable footer text below the composer does not count as activity.
 - Goal state is read from the provider's own status row and is independent of current activity.
 - Unread completion clears when you open the pane, submit new terminal input, or the agent starts working again. Opening the pane clears the bell for every attached client.
 - Ilium can answer known one-time interstitial dialogs for you. Currently this is Claude Code's "resume full session" prompt, answered with one keystroke per agent process. It is on by default (`auto_answer_interstitial_prompts` under `[detection]`).
@@ -46,6 +46,12 @@ Detection is adaptive rather than fixed.
 | Idle, finished, or plain shell | 45 seconds | `idle_poll_seconds` |
 
 Both values are whole seconds, are applied to a running server within moments of saving, and are clamped to a minimum of 500 ms (a value of `0` means 500 ms). They are detection checks only. They do not change how fast an agent works and are unrelated to progress-monitor polling.
+
+### When an activity check is stale
+
+A yellow caution replaces the activity spinner or bell when Ilium has not successfully checked that agent state, or when the last check is older than three check intervals (at least 30 seconds). Hover the activity slot to see the check age and freshness limit. The last known activity, unread completion and goal remain recorded; a stale check does not mean the agent has finished. A successful check clears the warning. Reopening or reconnecting does not make old evidence fresh.
+
+Background checks include panes you have not opened. A busy terminal parser or oversized screen delays only that pane’s observation; its retained display frame is not treated as a new check.
 
 ### Custom agent signatures
 
@@ -88,6 +94,8 @@ Every pane row has three icon slots before its title.
 | Identity | Which agent runs here (or a plain terminal, editor or board) |
 | Objective | The agent's `/goal`, a monitored task, or a scheduled input |
 | Now | What the agent is doing this moment |
+
+With **Settings -> Agent Monitoring -> Model icons** on, the identity slot shows the session's selected model icon instead of the provider icon. The setting is off by default (`[ui].agent_tree_model_icons`), and models without an icon fall back to the provider icon.
 
 Identity renders as an icon by default. In **Settings -> User Interface** you can choose full name, one letter, the configured icon, or no identifier. Every glyph below is configurable in **Settings -> Icons** and under `[ui]` in `config.toml`.
 
@@ -267,7 +275,10 @@ Every row has an in-app help topic (open it from the row).
 
 Two optional per-pane displays sit above a detected agent's terminal.
 
+When **Section frames** (`[ui].section_frames_enabled`, default on) is on, rounded rules joined to the pane border separate the toolbar, the prompt banner (which sits behind a quote gutter with side padding) and the progress footer (an eighth-block gauge, right-aligned percentage and a dotted detail gutter). Each rule uses one extra row, shown only while its section has content. Turning frames off removes the rules and returns their rows to the terminal.
+
 - **Last prompt banner** (`[ui].last_prompt_enabled`, default on). Shows the last prompt Ilium could reconstruct exactly as submitted to the agent. If later input cannot be recognised, the banner keeps the last captured prompt rather than guessing. **Last prompt banner lines** (`[ui].last_prompt_max_lines`, 1 to 20, default 4) fixes how many rows are reserved; longer prompts wrap and keep their beginning and end.
+  A mini toolbar in the banner's bottom-right corner offers: ▲ / ▼ to step through the prompts submitted in this pane since the client attached (a button disappears, leaving a blank slot, at the oldest or newest prompt), a copy button, **+** to open a dialog with the full prompt text (it has its own Copy button; Esc closes it) and ✕ to hide the banner for this agent only. While hidden for an agent but still enabled in Settings, the agent toolbar shows a ❯ button that brings the banner back. The hidden state is not saved across client restarts.
 - **Agent toolbar** (`[ui].agent_toolbar_enabled`, default on). Action buttons above detected agents (for example compact, clear, model, effort, stop, copy screen, Smart Copy, copy last message; which appear depends on the agent). Hide or reopen it from the pane's icon or the right-click menu (**Hide agent toolbar** / **Show agent toolbar**). **Agent toolbar labels** adds text after the icons.
 
 ## Recover work after an agent stops

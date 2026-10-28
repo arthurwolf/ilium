@@ -797,7 +797,7 @@
       "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
       "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
     },
-    "sha256": "6219e768ee0e0ce13e413fa10944b4561288466acce0f16fff1d5c0f2d5fc1f3"
+    "sha256": "91c7f7d98cfde58dcd7e405f567d44c4067c32e4046726b12d26945c87497cfe"
   },
   {
     "name": "agent/progress-error",
@@ -808,7 +808,7 @@
       "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
       "v4": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
     },
-    "sha256": "b53531d2d2050c87740a3416a90b062283a13999b281c18165593f8ab6b155cb"
+    "sha256": "e7fc34daa6d73ce104619536c897865e50e056ed1388f2954d2b92db52027f40"
   },
   {
     "name": "agent/progress-unknown",
@@ -818,7 +818,7 @@
       "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
       "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
     },
-    "sha256": "a408ed2f8afb961f02cce9cd557576ac994d5ec30aeba6d57bd3743662b68e02"
+    "sha256": "bd9ba5368467ba2307937223ad3be94d315011f3dc6af2bbadd7ff2adb502842"
   },
   {
     "name": "agent/progress-monitor-failure",
@@ -828,7 +828,7 @@
       "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
       "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
     },
-    "sha256": "09c943b13fd3666a8d968a1cf45c56086fdbf14db49146be69d2ab5d264846ab"
+    "sha256": "4ae39eb7ee0a125e930709d4cb7fb3784e033cafc63cef075e46995f99605348"
   },
   {
     "name": "conversion/truncated-result",

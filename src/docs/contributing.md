@@ -24,7 +24,7 @@ Report problems in [issues](https://github.com/arthurwolf/ilium/issues).
 ## Setting up a workspace
 
 1. Follow [Building from source](building-from-source.md) to clone the repository and install the prerequisites. rustup reads `rust-toolchain.toml` and installs the pinned Rust version with `clippy` and `rustfmt`.
-2. Read [ARCHITECTURE.md](../../ARCHITECTURE.md) before touching code, and [AGENTS.md](../../AGENTS.md) for the contribution rules.
+2. Read [ARCHITECTURE.md](../../ARCHITECTURE.md) before touching code, and [CLAUDE.md](../../CLAUDE.md) for the contribution rules.
 3. Build with `cargo build --locked` or `make build`.
 
 ## Workspace checks
@@ -41,7 +41,7 @@ Treat new clippy warnings as things to fix, not to silence with `#[allow]`, unle
 
 ## Contribution rules
 
-The full text is in [AGENTS.md](../../AGENTS.md). The essentials:
+The full text is in [CLAUDE.md](../../CLAUDE.md). The essentials:
 
 - One crate per architectural layer. Do not collapse layers for convenience.
 - `ilium-core` has no I/O and no async. `ilium-detect` is a pure classification function. `ilium-pty` knows nothing about the tree or agents. `ilium-client` never touches the PTY, terminal-parser or process-list libraries; if it needs more from the server, extend the IPC protocol in `ilium-ipc`.
@@ -51,7 +51,7 @@ The full text is in [AGENTS.md](../../AGENTS.md). The essentials:
 - Use the `directories` crate for configuration and data paths; never hardcode `~`.
 - Do not replace normal UTF-8 icons with plain glyphs to fix a rendering problem; fix the width or rendering behaviour instead.
 - Background animations must use the shared look controls (colour, palette, dither, display) and add only scene-specific settings. A new animation is not done until it appears in the Settings list, round-trips its controls, has a help topic and is mentioned in the documentation.
-- Scope: preserve the existing JavaScript animation-package extension runtime; worker/service work does not add another user-extension runtime or loader. Remote or SSH sharing and an agent-driving SDK are also outside scope (see the non-goals in ARCHITECTURE.md). The project is new, so there are no compatibility shims or version-two files.
+- Scope: preserve the existing JavaScript animation-package extension runtime. The separately authorized WebAssembly plugin platform has its own contracts and loader; worker/service architecture does not absorb or replace either extension runtime. Remote or SSH sharing and an agent-driving SDK are also outside scope (see the non-goals in ARCHITECTURE.md). The project is new, so there are no compatibility shims or version-two files.
 - Process custody: never restart or kill a user's running Ilium server from a contribution workflow; build and verify the artefact and report that a running server still has the old executable.
 
 ## Testing policy

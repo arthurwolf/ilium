@@ -1,0 +1,72 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.scenes",
+  "name": "Scenes",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Scenes plugin (id ilium.core.scenes, side: scene) is the plugin form of the animated scenes themselves.",
+  "license": "MIT",
+  "scene": {
+    "entry": "scene.wasm",
+    "world": "ilium:anim/base@0.1.0",
+    "exports": []
+  },
+  "capabilities": {
+    "scene": [
+      "media.video",
+      "location.observer",
+      "gpu.kernels",
+      "http:services.swpc.noaa.gov"
+    ]
+  },
+  "activation": [
+    "scene:*"
+  ],
+  "contributes": {
+    "scenes": [
+      {
+        "id": "waves",
+        "title": "Waves",
+        "family": "procedural",
+        "modes": [
+          "live",
+          "pre-rendered"
+        ],
+        "frame_rate_cap": 24,
+        "clip_seconds": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "id": "clock",
+        "title": "Clock",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 2,
+        "glyph_plane": true,
+        "settings_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "id": "stars-overhead",
+        "title": "Stars overhead",
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 10,
+        "settings_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

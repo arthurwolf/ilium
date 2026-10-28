@@ -183,7 +183,16 @@ pub(crate) fn read_source(
     storage: BoardStorage,
     create_missing: bool,
 ) -> Result<BoardSource, String> {
-    let board = if storage.path().exists() {
+    // A dangling symlink is an existing user-owned entry. Loading it must
+    // fail rather than letting board creation replace the link atomically.
+    let exists = storage
+        .path()
+        .try_exists()
+        .map_err(|error| error.to_string())?;
+    if !exists && fs::symlink_metadata(storage.path()).is_ok() {
+        return Err("Board path is an existing entry whose target cannot be read".into());
+    }
+    let board = if exists {
         BoardPane::load(storage)?
     } else if create_missing {
         BoardPane::create(storage)?
@@ -1943,6 +1952,29 @@ mod tests {
 
         let source = fs::read_to_string(&path).unwrap();
         assert!(source.contains("- Task!\n  N\n"));
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn detail_editor_keeps_every_body_character_typed_after_a_title_save() {
+        let path = temporary_path("detail-edit-phrase").join("board.md");
+        let storage = BoardStorage::MarkdownFile { path: path.clone() };
+        let mut board = BoardPane::create(storage).unwrap();
+        board.add_card("Task".to_string()).unwrap();
+        board.open_card_details(0, 0);
+
+        board
+            .input_detail_editor(key_input(KeyCode::Char('!')))
+            .unwrap();
+        board.cycle_detail_editor_focus(false);
+        for character in "Live note".chars() {
+            board
+                .input_detail_editor(key_input(KeyCode::Char(character)))
+                .unwrap();
+        }
+
+        let source = fs::read_to_string(&path).unwrap();
+        assert!(source.contains("  Live note\n"), "{source:?}");
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 

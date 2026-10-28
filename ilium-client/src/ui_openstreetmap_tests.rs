@@ -31,8 +31,9 @@ fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
     let started = Instant::now();
     loop {
         app.animation_frame.settle_for_test();
+        let elapsed = started.elapsed();
         terminal
-            .draw(|frame| draw_at(frame, app, started.elapsed()))
+            .draw(|frame| draw_at(frame, app, elapsed))
             .expect("loaded map render");
         if app
             .animation_frame
@@ -44,9 +45,19 @@ fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
                 .iter()
                 .any(|bits| *bits != 0)
         {
-            assert!(whole_text(terminal.backend().buffer())
-                .chars()
-                .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph)));
+            // status()/packed_cells() may collect a completed surface after
+            // the draw above. Compose that exact loaded display before judging
+            // final terminal pixels; do not advance its simulation clock.
+            terminal
+                .draw(|frame| draw_at(frame, app, elapsed))
+                .expect("compose loaded map display");
+            assert!(
+                whole_text(terminal.backend().buffer())
+                    .chars()
+                    .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph)),
+                "loaded map pixels must appear in final composed cells: {}",
+                whole_text(terminal.backend().buffer())
+            );
             return;
         }
         assert!(
@@ -158,7 +169,7 @@ fn settings_and_fullscreen_osm_credit_have_separate_hint_and_voice_rows() {
             animation_fullscreen: fullscreen,
             ..Default::default()
         };
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend");
         draw_buffer(&mut terminal, &mut app);
         let buffer = terminal.backend().buffer();
@@ -173,7 +184,12 @@ fn settings_and_fullscreen_osm_credit_have_separate_hint_and_voice_rows() {
                 panic!("settings mode survives drawing");
             };
             let settings = crate::settings_ui::compute_layout_for_mode(buffer.area, &app, state);
-            assert_eq!(settings.content_area.bottom(), credit_area.top());
+            assert_eq!(settings.content_frame_area.bottom(), credit_area.top());
+            let bottom_padding = settings
+                .content_frame_area
+                .bottom()
+                .saturating_sub(settings.content_area.bottom());
+            assert!((1..=2).contains(&bottom_padding));
             let model = app.animation_row_model();
             assert!(crate::animation_settings_ui::hit(
                 settings.content_area,

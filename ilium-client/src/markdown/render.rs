@@ -334,17 +334,24 @@ fn safe_geometry(width: u16, cell: (u16, u16)) -> bool {
     width > 0 && width <= 512 && cell.0 > 0 && cell.0 <= 32 && cell.1 > 0 && cell.1 <= 64
 }
 
+/// Layout inputs that shape every block of one prepared document.
+pub(crate) struct PreparedRenderOptions {
+    pub(crate) width: u16,
+    pub(crate) heading: HeadingRendering,
+}
+
 /// No filesystem access here: encoding and rasterization are CPU work.
+#[allow(clippy::too_many_arguments)] // Layout, theme and raster limits vary independently.
 pub(crate) fn render_prepared(
     document: &Document,
     images: &std::collections::HashMap<std::path::PathBuf, Vec<u8>>,
     picker: &Picker,
     rasterizer: &mut HeaderRasterizer,
-    width: u16,
-    heading: HeadingRendering,
+    options: PreparedRenderOptions,
     cancelled: impl Fn() -> bool,
     text_reservation: RetirementReservation<TextArena>,
 ) -> Result<RenderedDocument, &'static str> {
+    let PreparedRenderOptions { width, heading } = options;
     let mut prepared_text = TextPreparation::new(text_reservation);
     let cell = super::raster::cell_pixel_size(picker);
     let mut blocks = Vec::with_capacity(document.blocks.len());

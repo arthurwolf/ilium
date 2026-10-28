@@ -27,7 +27,7 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 /// router's 1,000,000-token context window rejects that with HTTP 400
 /// (`context_length_exceeded`, observed 2026-09-26), which would make the
 /// default-on AI titling and restructuring fail on first boot.
-pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "stepfun/step-5-preview-free";
+pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "dots-studio/dots-3-note-preview:free";
 pub const DEFAULT_PROXY_DATABASE_URI: &str = "mongodb://127.0.0.1:27017";
 pub const DEFAULT_PROXY_DATABASE_NAME: &str = "money";
 pub const DEFAULT_PROXY_COLLECTION_NAME: &str = "paid_proxies";
@@ -119,6 +119,9 @@ fn deserialize_positive_token_limit<'de, D: serde::Deserializer<'de>>(
 pub struct InferenceSettings {
     pub selected_provider: InferenceProviderKind,
     pub title_style: TitleStyle,
+    /// When set, Codex panes take the official thread name Codex stores on disk
+    /// instead of asking the model. User-written titles still win.
+    pub codex_official_thread_names: bool,
     /// Rough input-token budget (four Unicode characters per token).
     #[serde(deserialize_with = "deserialize_positive_token_limit")]
     pub restructure_prompt_token_limit: u32,
@@ -135,6 +138,7 @@ impl Default for InferenceSettings {
         Self {
             selected_provider: InferenceProviderKind::KiloGateway,
             title_style: TitleStyle::default(),
+            codex_official_thread_names: false,
             restructure_prompt_token_limit: DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
             instructions: PromptInstructions::default(),
             kilo_gateway: KiloGatewaySettings::default(),

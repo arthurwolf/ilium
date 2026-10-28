@@ -36,6 +36,125 @@ fn slots_are_reserved_before_agent_detection_or_first_prompt() {
 }
 
 #[test]
+fn native_wait_shares_existing_footer_without_resizing_and_retains_saturated_monitor_hit_routes() {
+    for detail_lines in [1, 4] {
+        let (mut app, pane_id) = terminal_app();
+        app.ui_settings.progress_max_lines = detail_lines;
+        let before = app.pane_viewport(pane_id).unwrap();
+        let monitors = (1..=8)
+            .map(|monitor_id| {
+                PaneProgress::new(
+                    monitor_id,
+                    ProgressTaskReport {
+                        job_id: format!("ordinary-{monitor_id}"),
+                        status: ProgressTaskStatus::Running,
+                        percent: 50.0,
+                        message: "Synthetic saturated monitor".into(),
+                        details: String::new(),
+                        error: None,
+                        eta_seconds: None,
+                        indeterminate: false,
+                    },
+                    1000,
+                )
+                .unwrap()
+            })
+            .collect();
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::PaneProgressChanged {
+                pane_id,
+                progress_monitors: monitors,
+            },
+        );
+        app.take_outbound_requests();
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::ResourceWaitChanged {
+                pane_id,
+                reservation_id: Some(ilium_core::resource_queue::ReservationId::from(
+                    "synthetic-wait",
+                )),
+                wait_revision: 1,
+            },
+        );
+        assert_eq!(before, app.pane_viewport(pane_id).unwrap());
+        assert!(!app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        let area = before.progress_area.unwrap();
+        let native_rows = app.resource_wait_footer_rows(pane_id, area.height);
+        assert_eq!(native_rows, if detail_lines == 1 { 1 } else { 2 });
+        let ordinary = Rect::new(
+            area.x,
+            area.y + native_rows,
+            area.width,
+            area.height - native_rows,
+        );
+        assert!(ordinary.height >= 1);
+        assert!(app
+            .progress_monitor_at(
+                pane_id,
+                area,
+                ratatui::layout::Position::new(area.x, area.y)
+            )
+            .is_none());
+        assert_eq!(
+            app.progress_monitor_at(
+                pane_id,
+                area,
+                ratatui::layout::Position::new(ordinary.x, ordinary.y)
+            )
+            .unwrap()
+            .monitor_id,
+            1
+        );
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                app.resource_wait_footer(
+                    frame,
+                    Rect::new(area.x, area.y, area.width, native_rows),
+                    pane_id,
+                );
+                crate::progress_bar::render_monitors(
+                    frame,
+                    ordinary,
+                    &app.visible_progress_monitors(pane_id),
+                    detail_lines.into(),
+                    app.ui_settings.color_scheme,
+                    1000,
+                );
+            })
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Resource wait"));
+        assert!(rendered.contains(if detail_lines == 1 {
+            "+7 more"
+        } else {
+            "+6 more"
+        }));
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::ResourceWaitChanged {
+                pane_id,
+                reservation_id: None,
+                wait_revision: 2,
+            },
+        );
+        assert_eq!(before, app.pane_viewport(pane_id).unwrap());
+    }
+}
+
+#[test]
 fn prompt_and_progress_content_changes_do_not_resize_the_terminal() {
     let (mut app, pane_id) = terminal_app();
     let before = app.pane_viewport(pane_id).unwrap().content_area;
@@ -68,6 +187,8 @@ fn prompt_and_progress_content_changes_do_not_resize_the_terminal() {
                 message,
                 details: String::new(),
                 error: None,
+                eta_seconds: None,
+                indeterminate: false,
             },
             1000,
         )
@@ -135,6 +256,8 @@ fn hiding_a_completed_footer_preserves_its_slot_and_result() {
             message: "finished marker".into(),
             details: String::new(),
             error: None,
+            eta_seconds: None,
+            indeterminate: false,
         },
         1000,
     )
@@ -165,7 +288,10 @@ fn an_explicit_slot_setting_change_still_resizes_the_child() {
     let after = app.pane_viewport(pane_id).unwrap();
     assert_eq!(
         after.content_area.height,
-        before + u16::from(app.ui_settings.last_prompt_max_lines)
+        // The banner's bottom rule row is released together with the banner.
+        before
+            + u16::from(app.ui_settings.last_prompt_max_lines)
+            + u16::from(crate::theme::section_frames_enabled())
     );
     assert!(app.take_outbound_requests().iter().any(|r| matches!(r,
         ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == after.content_area.height
@@ -290,7 +416,11 @@ fn a_server_confirmed_feature_setting_changes_geometry_once() {
     let after = app.pane_viewport(pane_id).unwrap();
     assert_eq!(
         after.content_area.height,
-        before + 1 + u16::from(app.ui_settings.progress_max_lines)
+        // The footer's rule row is released with the footer.
+        before
+            + 1
+            + u16::from(app.ui_settings.progress_max_lines)
+            + u16::from(crate::theme::section_frames_enabled())
     );
     assert!(app.take_outbound_requests().iter().any(
         |request| matches!(request, ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id)
@@ -312,9 +442,9 @@ fn metadata_reservation_preserves_one_terminal_row_in_a_small_split() {
     for viewport in viewports {
         assert!(viewport.content_area.height > 0);
         let with_slots = viewport
-            .with_agent_toolbar_reserved()
-            .with_last_prompt_reserved(4)
-            .with_progress_reserved(5);
+            .with_agent_toolbar_reserved(false)
+            .with_last_prompt_reserved(4, 0, false)
+            .with_progress_reserved(5, false);
         assert!(with_slots.content_area.height >= 1);
         assert!(with_slots
             .outer_area
@@ -438,4 +568,23 @@ fn an_unrelated_server_error_does_not_cause_terminal_resize_churn() {
     assert_eq!(app.requested_pane_sizes[&pane_id], requested);
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     assert!(app.take_outbound_requests().is_empty());
+}
+
+#[test]
+fn padding_insets_only_the_terminal_content_not_the_metadata_bars() {
+    let (mut app, pane_id) = terminal_app();
+    let plain = app.pane_viewport(pane_id).unwrap();
+    app.padding_settings.mode = crate::padding::PaddingMode::Enabled;
+    let padded = app.pane_viewport(pane_id).unwrap();
+    // Every bar keeps its unpadded geometry, edge to edge.
+    assert_eq!(padded.toolbar_area, plain.toolbar_area);
+    assert_eq!(padded.last_prompt_area, plain.last_prompt_area);
+    assert_eq!(padded.progress_area, plain.progress_area);
+    assert_eq!(padded.toolbar_rule, plain.toolbar_rule);
+    assert_eq!(padded.progress_rule, plain.progress_rule);
+    // Only the terminal itself moves in by the default one cell per side.
+    assert_eq!(padded.content_area.x, plain.content_area.x + 1);
+    assert_eq!(padded.content_area.y, plain.content_area.y + 1);
+    assert_eq!(padded.content_area.width, plain.content_area.width - 2);
+    assert_eq!(padded.content_area.height, plain.content_area.height - 2);
 }

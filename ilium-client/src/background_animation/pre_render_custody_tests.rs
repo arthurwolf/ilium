@@ -88,6 +88,7 @@ fn prepared_live_source_sequence() -> (
         &mut instance,
         &fixture.request,
         &fixture.quota,
+        &fixture.cadence_owner,
         fixture.resources.clone(),
         Arc::clone(&fixture.state_root),
         None,
@@ -429,6 +430,7 @@ fn client_replay_sequence_cancellation_drains_source_and_discards_partial_record
 }
 
 #[test]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
 fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
     let script = "export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{},replay:{seed:3,duration_seconds:1,seamless:false}}} export async function create(host){for(let i=0;i<2;i++){const value=await host.tasks.yield();if(!value.ok)throw Error(value.error.code)}return {render(context,frame){frame.cells.set_cell(0,0,{mask:1});frame.present()},dispose(){}}}";
     let fixture = Fixture::new(script, AnimationMode::PreRendered);
@@ -443,6 +445,7 @@ fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
         &mut instance,
         &fixture.request,
         &fixture.quota,
+        &fixture.cadence_owner,
         fixture.resources.clone(),
         Arc::clone(&fixture.state_root),
         None,
@@ -497,6 +500,7 @@ fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
 }
 
 #[test]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
 fn live_replay_freeze_acknowledges_an_explicit_empty_source_set() {
     let fixture = Fixture::new(LIVE_EMPTY_REPLAY_FREEZE_SCRIPT, AnimationMode::Live);
     let (mut instance, review) = fixture
@@ -509,6 +513,7 @@ fn live_replay_freeze_acknowledges_an_explicit_empty_source_set() {
         &mut instance,
         &fixture.request,
         &fixture.quota,
+        &fixture.cadence_owner,
         fixture.resources.clone(),
         Arc::clone(&fixture.state_root),
         None,
@@ -630,6 +635,7 @@ struct Fixture {
     state_root: Arc<PinnedDirectory>,
     clip_root: Arc<PinnedDirectory>,
     quota: QuotaGroup,
+    cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
     execution: Execution,
     client: Client,
     resources: ilium_ambient::resources::AmbientResources,
@@ -657,6 +663,8 @@ impl Fixture {
         // Presentation's process-wide SourceCadence is bound to this exact
         // original quota root even when this fixture requests no sources.
         let quota = crate::execution::process_quota();
+        let cadence_owner = crate::execution::native_source_cadence_owner(&quota)
+            .expect("fixture captures its original source cadence identity");
         let lane = LaneConfig {
             threads: 1,
             queue_slots: 8,
@@ -715,6 +723,7 @@ impl Fixture {
             state_root,
             clip_root,
             quota,
+            cadence_owner,
             execution,
             client,
             resources,
@@ -749,8 +758,26 @@ impl Fixture {
         host_policy: Ceiling,
     ) -> VerifiedPreparation {
         let helper = std::env::var_os("ILIUM_ANIMATION_HELPER")
-            .expect("matching release helper must be supplied explicitly");
-        assert!(Path::new(&helper).is_absolute());
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                // Workspace tests build the matching helper beside the deps
+                // directory. Explicit paths still support release qualification.
+                std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join(format!(
+                        "ilium-animation-helper{}",
+                        std::env::consts::EXE_SUFFIX
+                    ))
+            });
+        assert!(
+            helper.is_absolute() && helper.is_file(),
+            "matching animation helper missing: {}",
+            helper.display()
+        );
         let verifier = TrustVerifier::from_release_inventory(Vec::new()).unwrap();
         let settings = json!({});
         let environment = json!({"cell_width":1,"cell_height":1,"dot_width":2,"dot_height":4});
@@ -821,6 +848,7 @@ impl Fixture {
             instance,
             &self.request,
             &self.quota,
+            &self.cadence_owner,
             self.resources.clone(),
             Arc::clone(&self.state_root),
             None, // These image/cache fixtures declare no audio demand.
@@ -993,6 +1021,7 @@ fn backend_with_accepted_workflow(fixture: &Fixture) -> PluginBackend {
     let retention = setup_retention(fixture);
     let mut backend = PluginBackend::new(
         fixture.quota.clone(),
+        Arc::clone(&fixture.cadence_owner),
         fixture.resources.clone(),
         Arc::clone(&fixture.review),
         Arc::new(|| {}),

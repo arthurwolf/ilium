@@ -12,11 +12,35 @@ const MIB: usize = 1024 * 1024;
 // currently visible terminal's bounded recovery frame, even when general
 // event and worker storage is saturated.
 const VISIBLE_RECOVERY_BYTES: usize = 64 * MIB;
-// Shared ceiling for event, replay, recovery, codec and CPU worker storage.
+// Shared ceiling for event, replay, recovery, codec and CPU worker storage,
+// including the decoder-owner metadata transferred into RESULT below.
 // PTY sessions are deliberately NOT charged here: a fixed pool shared with
 // unrelated consumers once admitted only 25 panes during a restore and
 // silently dropped every later one. See `pty_quota_limits`.
 const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
+// This is part of, not additional to, the process worker ceiling. Only an
+// active writer can own it; producer queues and the journal cannot spend it.
+// One maximum input/frame pair fits. Smaller frames release their surplus
+// before transport can block, retaining two-encoder capacity for small jobs.
+const OUTPUT_WORKER_BYTES: usize = 512 * MIB;
+// Ordinary socket backpressure cannot consume the current visible terminal's
+// output headroom. This also fits a full bounded snapshot, not only a prefix.
+const VISIBLE_OUTPUT_WORKER_BYTES: usize = 384 * MIB;
+// One share of an aggregate tenant allowance, not a per-event limit.
+pub(crate) const SERVER_CODEC_INPUT_BYTES: usize = 128 * MIB;
+const SERVER_ENCODER_JOBS: usize = 2;
+pub(crate) const SERVER_ENCODER_MAX_INPUT_BYTES: usize =
+    SERVER_ENCODER_JOBS * SERVER_CODEC_INPUT_BYTES;
+pub(crate) const SERVER_CODEC_RESULT_BYTES: usize = 192 * MIB;
+const SERVER_DECODER_JOBS: usize = 4;
+// Completed results add JobHold/Arc ownership after the allocation-policy
+// bound. Admit that owner up front, including requests at the 64 MiB ceiling.
+pub(crate) const SERVER_DECODER_RESULT_BYTES: usize =
+    SERVER_CODEC_RESULT_BYTES + ilium_execution::retained_result_storage_overhead_bytes();
+// Move exactly this allowance from worker storage to decoder RESULT; the
+// existing total declared process ceiling does not grow.
+const DECODER_RESULT_OWNER_BYTES: usize =
+    SERVER_DECODER_JOBS * ilium_execution::retained_result_storage_overhead_bytes();
 /// Many-agent design target: panes one server must admit.
 #[cfg(test)]
 const TARGET_PTY_SESSIONS: usize = 1024;
@@ -41,10 +65,105 @@ fn pty_quota_limits() -> QuotaLimits {
 // for backpressured PTY/direct replies. These are declared allocation limits,
 // not an RSS estimate. They are shared across connections, never per client.
 const ADMISSION_WAIT_REPORT: std::time::Duration = std::time::Duration::from_secs(2);
-const GENERAL_INPUT_BYTES: usize = 512 * MIB;
+const ADMISSION_WAIT_REPEAT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// One reporter belongs to one admission future. Completion wakes from other
+/// operations must not reset its diagnostic deadline or elapsed wait duration.
+struct AdmissionWaitReporter {
+    started_at: tokio::time::Instant,
+    next_report_at: tokio::time::Instant,
+    request: AdmissionWaitRequest,
+}
+
+#[derive(Clone, Copy)]
+enum AdmissionWaitRequest {
+    Storage { bytes: usize },
+    Retirement { bytes: usize },
+    Job { lane: Lane, cost: JobCost },
+}
+
+impl AdmissionWaitReporter {
+    fn new(request: AdmissionWaitRequest) -> Self {
+        Self::new_at(request, tokio::time::Instant::now())
+    }
+
+    fn new_at(request: AdmissionWaitRequest, now: tokio::time::Instant) -> Self {
+        Self {
+            started_at: now,
+            next_report_at: now + ADMISSION_WAIT_REPORT,
+            request,
+        }
+    }
+
+    /// Pure cadence advancement permits deterministic notification-flood tests.
+    /// A delayed report starts a fresh interval instead of producing a burst.
+    fn take_report(&mut self, now: tokio::time::Instant) -> bool {
+        if now < self.next_report_at {
+            return false;
+        }
+        self.next_report_at = now + ADMISSION_WAIT_REPEAT;
+        true
+    }
+
+    fn report_if_due(&mut self, client: &ExecutionClient, reason: ilium_execution::RejectReason) {
+        let now = tokio::time::Instant::now();
+        if !self.take_report(now) {
+            return;
+        }
+        let (operation, requested_bytes, lane, cost) = match self.request {
+            AdmissionWaitRequest::Storage { bytes } => ("event storage", Some(bytes), None, None),
+            AdmissionWaitRequest::Retirement { bytes } => {
+                ("retirement metadata", Some(bytes), None, None)
+            }
+            AdmissionWaitRequest::Job { lane, cost } => {
+                ("execution job", None, Some(lane), Some(cost))
+            }
+        };
+        let elapsed_ms = u64::try_from(now.saturating_duration_since(self.started_at).as_millis())
+            .unwrap_or(u64::MAX);
+        tracing::warn!(
+            operation,
+            ?reason,
+            ?requested_bytes,
+            ?lane,
+            ?cost,
+            elapsed_ms,
+            tenant_usage_and_limits = ?client.foundation.usage(),
+            root_usage_and_limits = ?client.quota.snapshot(),
+            "server admission still waiting for capacity; original payload custody retained"
+        );
+    }
+
+    async fn wait_for_release(
+        &mut self,
+        client: &ExecutionClient,
+        notified: impl std::future::Future<Output = ()>,
+        reason: ilium_execution::RejectReason,
+    ) {
+        self.report_if_due(client, reason);
+        // Keep the diagnostic deadline across unrelated releases. Preserve
+        // the existing two-second lost-wake retry independently of the slower
+        // log cadence, especially for the retirement-slot publication race.
+        let retry_at = tokio::time::Instant::now() + ADMISSION_WAIT_REPORT;
+        let deadline = self.next_report_at.min(retry_at);
+        let _ = tokio::time::timeout_at(deadline, notified).await;
+    }
+}
+
+// Library tests create many independent banks concurrently, but all native
+// joins use one process-wide supervisor. Keep the physical-completion proof
+// bounded without treating its cross-test retirement queue as a leaked worker.
+#[cfg(test)]
+pub(crate) const PHYSICAL_JOIN_TEST_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const DETECTION_INPUT_BYTES: usize = 576 * MIB;
+pub(crate) const DETECTION_RESULT_BYTES: usize = 96 * MIB;
+const DETECTION_WORKER_BYTES: usize = 64 * MIB;
+pub(crate) const GENERAL_INPUT_BYTES: usize = 512 * MIB;
 pub(crate) const GENERAL_RESULT_BYTES: usize = 128 * MIB;
 const PROCESS_INPUT_BYTES: usize = GENERAL_INPUT_BYTES + 4 * 128 * MIB + 2 * 128 * MIB;
-const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 192 * MIB;
+const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES
+    + SERVER_DECODER_JOBS * SERVER_DECODER_RESULT_BYTES
+    + SERVER_ENCODER_JOBS * SERVER_CODEC_RESULT_BYTES;
 
 /// The existing session root and its admission/completion notification, created
 /// before process logging and moved into the later execution bank. Construction
@@ -53,6 +172,9 @@ const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 1
 pub struct ServerResources {
     quota: QuotaGroup,
     visible_recovery_quota: QuotaGroup,
+    output_quota: QuotaGroup,
+    visible_output_quota: QuotaGroup,
+    output_metadata_quota: QuotaGroup,
     pty_quota: QuotaGroup,
     completed: Arc<Notify>,
 }
@@ -72,7 +194,12 @@ impl ServerResources {
                 // the two 32 MiB CPU workers and concurrent replay/output
                 // storage for any number of panes.
                 worker_threads: ilium_platform::owned_worker::MAX_OWNED_WORKERS,
-                worker_bytes: PROCESS_WORKER_BYTES - VISIBLE_RECOVERY_BYTES,
+                worker_bytes: PROCESS_WORKER_BYTES
+                    - VISIBLE_RECOVERY_BYTES
+                    - OUTPUT_WORKER_BYTES
+                    - VISIBLE_OUTPUT_WORKER_BYTES
+                    - crate::ipc::SERVER_EVENT_RETIREMENT_BYTES
+                    - DECODER_RESULT_OWNER_BYTES,
             },
             move || admission_wake.notify_waiters(),
         );
@@ -89,9 +216,27 @@ impl ServerResources {
             },
             move || recovery_wake.notify_waiters(),
         );
+        let storage_quota = |worker_bytes| {
+            let wake = Arc::clone(&completed);
+            QuotaGroup::new_with_admission_wake(
+                QuotaLimits {
+                    clients: 0,
+                    jobs: 0,
+                    service_jobs: 0,
+                    input_bytes: 0,
+                    result_bytes: 0,
+                    worker_threads: 0,
+                    worker_bytes,
+                },
+                move || wake.notify_waiters(),
+            )
+        };
         Self {
             quota,
             visible_recovery_quota,
+            output_quota: storage_quota(OUTPUT_WORKER_BYTES),
+            visible_output_quota: storage_quota(VISIBLE_OUTPUT_WORKER_BYTES),
+            output_metadata_quota: storage_quota(crate::ipc::SERVER_EVENT_RETIREMENT_BYTES),
             pty_quota: QuotaGroup::new(pty_quota_limits()),
             completed,
         }
@@ -132,10 +277,14 @@ pub(crate) struct ServerExecution {
     // This owner is retained until the State drops. Its destructor signals
     // cancellation without synchronously joining blocked native callbacks.
     _owner: Execution,
+    detection_owner: Execution,
+    pub(crate) detection: ExecutionClient,
     pub(crate) client: ExecutionClient,
     pub(crate) visible_recovery: ExecutionClient,
     pub(crate) decoder: ExecutionClient,
     pub(crate) encoder: ExecutionClient,
+    pub(crate) output: ServerOutput,
+    pub(crate) visible_output: ServerOutput,
     /// PTY session admission, separate from the shared byte ceiling.
     pty_quota: QuotaGroup,
 }
@@ -145,6 +294,25 @@ pub(crate) struct ExecutionClient {
     quota: QuotaGroup,
     completed: Arc<Notify>,
 }
+/// Storage admission for an active output, never a producer queue. A fair
+/// cancellation-safe turn prevents small repeated writes starving a window.
+/// Holders never acquire this turn a second time before their physical drop.
+#[derive(Clone)]
+pub(crate) struct ServerOutput {
+    pub(crate) storage: ExecutionClient,
+    pub(crate) metadata: ExecutionClient,
+    admission_turn: Arc<tokio::sync::Mutex<()>>,
+}
+impl ServerOutput {
+    pub(crate) async fn reserve_storage(
+        &self,
+        bytes: usize,
+    ) -> Result<ilium_execution::StorageAdmission, ilium_execution::RejectReason> {
+        let _turn = self.admission_turn.lock().await;
+        self.storage.reserve_owned_storage(bytes).await
+    }
+}
+
 pub(crate) enum ExecutionError<E> {
     Rejected(ilium_execution::RejectReason),
     Failed(Retained<E>),
@@ -201,6 +369,9 @@ impl ServerExecution {
         let ServerResources {
             quota,
             visible_recovery_quota,
+            output_quota,
+            visible_output_quota,
+            output_metadata_quota,
             pty_quota,
             completed,
         } = resources;
@@ -209,6 +380,48 @@ impl ServerExecution {
             queue_slots: if threads == 0 { 0 } else { 80 },
             priority: Some(ilium_execution::WorkerPriority::BelowNormal),
             resident_bytes_per_thread,
+        };
+        // Reserve before general workloads can retain any storage. This does
+        // not raise process limits or reduce codec/PTY capacity gates.
+        let detection_quota = quota
+            .reserved_partition(QuotaLimits {
+                clients: 2,
+                jobs: 12,
+                service_jobs: 0,
+                input_bytes: DETECTION_INPUT_BYTES,
+                result_bytes: DETECTION_RESULT_BYTES,
+                worker_threads: 2,
+                worker_bytes: DETECTION_WORKER_BYTES,
+            })
+            .map_err(|error| io::Error::other(format!("detection capacity: {error:?}")))?;
+        let detection_owner = Execution::start(
+            detection_quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    queue_slots: 12,
+                    ..lane(1, 32 * MIB)
+                },
+                io: LaneConfig {
+                    queue_slots: 12,
+                    ..lane(1, 0)
+                },
+                service: lane(0, 0),
+            },
+        )
+        .map_err(|error| io::Error::other(format!("detection bank: {error:?}")))?;
+        let wake = Arc::clone(&completed);
+        let detection = ExecutionClient {
+            foundation: detection_owner
+                .client(ClientLimits {
+                    jobs: 12,
+                    service_jobs: 0,
+                    input_bytes: DETECTION_INPUT_BYTES,
+                    result_bytes: DETECTION_RESULT_BYTES,
+                })
+                .map_err(|error| io::Error::other(format!("detection client: {error:?}")))?
+                .with_completion_wake(move || wake.notify_waiters()),
+            quota: detection_quota,
+            completed: Arc::clone(&completed),
         };
         let owner = Execution::start(
             quota.clone(),
@@ -234,14 +447,14 @@ impl ServerExecution {
             })
             .map_err(|error| io::Error::other(format!("server execution client: {error:?}")))?
             .with_completion_wake(move || wake.notify_waiters());
-        let codec = |jobs| -> io::Result<ExecutionClient> {
+        let codec = |jobs, result_bytes| -> io::Result<ExecutionClient> {
             let wake = Arc::clone(&completed);
             let foundation = owner
                 .client(ClientLimits {
                     jobs,
                     service_jobs: 0,
-                    input_bytes: jobs * 128 * MIB,
-                    result_bytes: jobs * 192 * MIB,
+                    input_bytes: jobs * SERVER_CODEC_INPUT_BYTES,
+                    result_bytes: jobs * result_bytes,
                 })
                 .map_err(|error| io::Error::other(format!("codec tenant: {error:?}")))?
                 .with_completion_wake(move || wake.notify_waiters());
@@ -251,8 +464,23 @@ impl ServerExecution {
                 completed: Arc::clone(&completed),
             })
         };
-        let decoder = codec(4)?;
-        let encoder = codec(2)?;
+        let decoder = codec(SERVER_DECODER_JOBS, SERVER_DECODER_RESULT_BYTES)?;
+        let encoder = codec(SERVER_ENCODER_JOBS, SERVER_CODEC_RESULT_BYTES)?;
+        let output_client = |storage_quota| ServerOutput {
+            storage: ExecutionClient {
+                foundation: encoder.foundation.clone(),
+                quota: storage_quota,
+                completed: Arc::clone(&completed),
+            },
+            metadata: ExecutionClient {
+                foundation: encoder.foundation.clone(),
+                quota: output_metadata_quota.clone(),
+                completed: Arc::clone(&completed),
+            },
+            admission_turn: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        let output = output_client(output_quota);
+        let visible_output = output_client(visible_output_quota);
         let visible_recovery = ExecutionClient {
             foundation: foundation.clone(),
             quota: visible_recovery_quota,
@@ -260,6 +488,8 @@ impl ServerExecution {
         };
         Ok(Self {
             _owner: owner,
+            detection_owner,
+            detection,
             client: ExecutionClient {
                 foundation,
                 quota,
@@ -268,6 +498,8 @@ impl ServerExecution {
             visible_recovery,
             decoder,
             encoder,
+            output,
+            visible_output,
             pty_quota,
         })
     }
@@ -281,10 +513,16 @@ impl ServerExecution {
         &mut self,
         deadline: std::time::Instant,
     ) -> Result<ilium_execution::JoinReport, ilium_execution::JoinUseError> {
-        self._owner.join_until_background(deadline)
+        let detection = self.detection_owner.join_until_background(deadline)?;
+        let mut general = self._owner.join_until_background(deadline)?;
+        general.remaining_workers += detection.remaining_workers;
+        general.shutdown_complete &= detection.shutdown_complete;
+        general.observations.extend(detection.observations);
+        Ok(general)
     }
 
     pub(crate) fn request_shutdown(&self) {
+        self.detection_owner.request_shutdown(ShutdownMode::Cancel);
         self._owner.request_shutdown(ShutdownMode::Cancel);
         self.client.completed.notify_waiters();
     }
@@ -308,36 +546,55 @@ impl ExecutionClient {
         &self,
         bytes: usize,
     ) -> Result<Arc<ilium_execution::StorageAdmission>, ilium_execution::RejectReason> {
+        self.try_reserve_owned_storage(bytes).map(Arc::new)
+    }
+
+    fn try_reserve_owned_storage(
+        &self,
+        bytes: usize,
+    ) -> Result<ilium_execution::StorageAdmission, ilium_execution::RejectReason> {
         if bytes == 0 || bytes > self.quota.snapshot().limits.worker_bytes {
             return Err(ilium_execution::RejectReason::InvalidCost);
         }
         if !self.foundation.is_open() {
             return Err(ilium_execution::RejectReason::Closed);
         }
-        self.quota.reserve_external_storage(bytes).map(Arc::new)
+        self.quota.reserve_external_storage(bytes)
     }
 
     pub(crate) async fn reserve_storage(
         &self,
         bytes: usize,
     ) -> Result<Arc<ilium_execution::StorageAdmission>, ilium_execution::RejectReason> {
+        self.reserve_owned_storage(bytes).await.map(Arc::new)
+    }
+
+    async fn reserve_owned_storage(
+        &self,
+        bytes: usize,
+    ) -> Result<ilium_execution::StorageAdmission, ilium_execution::RejectReason> {
         if bytes == 0 || bytes > self.quota.snapshot().limits.worker_bytes {
             return Err(ilium_execution::RejectReason::InvalidCost);
         }
+        let mut wait = AdmissionWaitReporter::new(AdmissionWaitRequest::Storage { bytes });
         loop {
             let notified = self.completed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            match self.try_reserve_storage(bytes) {
+            match self.try_reserve_owned_storage(bytes) {
                 Ok(reservation) => return Ok(reservation),
-                Err(ilium_execution::RejectReason::Busy) => {
+                Err(reason @ ilium_execution::RejectReason::Busy) => {
+                    wait.report_if_due(self, reason);
                     tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 }
-                Err(ilium_execution::RejectReason::WorkerBytes) => notified.await,
+                Err(reason @ ilium_execution::RejectReason::WorkerBytes) => {
+                    wait.wait_for_release(self, notified, reason).await;
+                }
                 Err(error) => return Err(error),
             }
         }
     }
+
     /// Reserve only bounded retirement metadata here. The payload's backing
     /// bytes must independently retain their codec/storage guard after attach.
     pub(crate) async fn reserve_retirement<T: Send + 'static>(
@@ -345,23 +602,29 @@ impl ExecutionClient {
         declared_bytes: usize,
     ) -> Result<ilium_execution::RetirementReservation<T>, ilium_execution::RejectReason> {
         let retirement = self.foundation.retirement();
+        let mut wait = AdmissionWaitReporter::new(AdmissionWaitRequest::Retirement {
+            bytes: declared_bytes,
+        });
         loop {
             let notified = self.completed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            match retirement.try_reserve::<T>(declared_bytes) {
+            match retirement.try_reserve_with_storage_quota::<T>(&self.quota, declared_bytes) {
                 Ok(reservation) => return Ok(reservation),
-                Err(ilium_execution::RejectReason::Busy) => {
+                Err(reason @ ilium_execution::RejectReason::Busy) => {
+                    wait.report_if_due(self, reason);
                     tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 }
-                Err(ilium_execution::RejectReason::WorkerBytes) => notified.await,
-                Err(ilium_execution::RejectReason::QueueFull) => {
+                Err(reason @ ilium_execution::RejectReason::WorkerBytes) => {
+                    wait.wait_for_release(self, notified, reason).await;
+                }
+                Err(reason @ ilium_execution::RejectReason::QueueFull) => {
                     // Foundation releases storage (and its wake) BEFORE the
                     // retirement slot. A waiter can wake in that tiny interval
                     // and observe the old slot count; no later slot wake exists.
                     // Reuse the existing admission deadline to close that race.
                     // This is an admission retry, never a second disposal queue.
-                    let _ = tokio::time::timeout(ADMISSION_WAIT_REPORT, notified).await;
+                    wait.wait_for_release(self, notified, reason).await;
                 }
                 Err(reason) => return Err(reason),
             }
@@ -375,13 +638,42 @@ impl ExecutionClient {
         lane: Lane,
         cost: JobCost,
     ) -> Result<ilium_execution::Reservation, ilium_execution::RejectReason> {
+        let mut wait = AdmissionWaitReporter::new(AdmissionWaitRequest::Job { lane, cost });
         loop {
             let notified = self.completed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
+            // A finite job above an immutable group/tenant ceiling will
+            // never become admissible. I/O has the same byte/job ledgers as
+            // CPU: waiting for release cannot make an oversized job fit.
+            // Service uses a separate service-job ledger and remains governed
+            // by its checked reservation below.
+            if matches!(lane, Lane::Cpu | Lane::Io) {
+                let maximum = if matches!(lane, Lane::Cpu) {
+                    self.foundation.maximum_cpu_job_cost()
+                } else {
+                    self.foundation.maximum_external_job_cost()
+                };
+                match maximum {
+                    Ok(maximum) if cost.input_bytes > maximum.input_bytes => {
+                        return Err(ilium_execution::RejectReason::InputBytes)
+                    }
+                    Ok(maximum) if cost.result_bytes > maximum.result_bytes => {
+                        return Err(ilium_execution::RejectReason::ResultBytes)
+                    }
+                    Ok(_) => {}
+                    Err(reason @ ilium_execution::RejectReason::Busy) => {
+                        wait.report_if_due(self, reason);
+                        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                        continue;
+                    }
+                    Err(reason) => return Err(reason),
+                }
+            }
             match self.foundation.try_reserve(lane, cost) {
                 Ok(reservation) => return Ok(reservation),
-                Err(ilium_execution::RejectReason::Busy) => {
+                Err(reason @ ilium_execution::RejectReason::Busy) => {
+                    wait.report_if_due(self, reason);
                     tokio::time::sleep(std::time::Duration::from_millis(1)).await
                 }
                 Err(
@@ -390,17 +682,7 @@ impl ExecutionClient {
                     | ilium_execution::RejectReason::InputBytes
                     | ilium_execution::RejectReason::ResultBytes),
                 ) => {
-                    // A stalled admission is otherwise invisible: report it
-                    // with the process-wide ledger, then keep waiting.
-                    if tokio::time::timeout(ADMISSION_WAIT_REPORT, notified)
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!(
-                            ?lane, ?cost, ?reason, ledger = ?self.quota.snapshot(),
-                            "execution admission has been waiting for capacity"
-                        );
-                    }
+                    wait.wait_for_release(self, notified, reason).await;
                 }
                 Err(error) => return Err(error),
             }
@@ -505,6 +787,11 @@ pub(crate) fn test_general_client() -> ExecutionClient {
 }
 
 #[cfg(test)]
+pub(crate) fn test_output_client() -> ServerOutput {
+    test_owner().output.clone()
+}
+
+#[cfg(test)]
 pub(crate) fn test_codec_client(is_decoder: bool) -> ExecutionClient {
     let owner = test_owner();
     if is_decoder {
@@ -520,6 +807,97 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn unrelated_admission_wakes_cannot_postpone_the_report_deadline() {
+        let started = tokio::time::Instant::now();
+        let mut wait =
+            AdmissionWaitReporter::new_at(AdmissionWaitRequest::Storage { bytes: 123 }, started);
+        let initial_deadline = wait.next_report_at;
+        for wake in 0..10_000 {
+            let now = started + Duration::from_micros(wake * 200);
+            assert!(!wait.take_report(now));
+            assert_eq!(wait.next_report_at, initial_deadline);
+        }
+        assert!(wait.take_report(started + Duration::from_secs(2)));
+        assert_eq!(wait.next_report_at, started + Duration::from_secs(12));
+        for wake in 0..10_000 {
+            let now = started + Duration::from_secs(2) + Duration::from_micros(wake * 999);
+            assert!(!wait.take_report(now));
+        }
+        assert!(wait.take_report(started + Duration::from_secs(12)));
+    }
+
+    #[test]
+    fn delayed_admission_report_does_not_emit_a_catch_up_burst() {
+        let started = tokio::time::Instant::now();
+        let mut wait =
+            AdmissionWaitReporter::new_at(AdmissionWaitRequest::Retirement { bytes: 456 }, started);
+        let delayed = started + Duration::from_secs(120);
+        assert!(wait.take_report(delayed));
+        for _ in 0..10_000 {
+            assert!(!wait.take_report(delayed));
+        }
+        assert_eq!(wait.next_report_at, delayed + ADMISSION_WAIT_REPEAT);
+        assert_eq!(wait.started_at, started);
+    }
+
+    #[tokio::test]
+    async fn output_admission_keeps_fifo_turn_when_a_later_smaller_window_fits() {
+        let owner = ServerExecution::start().unwrap();
+        let quota = owner.output.storage.quota_group();
+        let limit = quota.snapshot().limits.worker_bytes;
+        let pressure = quota.reserve_external_storage(limit - 1).unwrap();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let mut head = Box::pin(owner.output.reserve_storage(2));
+        let mut later = Box::pin(owner.output.reserve_storage(1));
+        assert!(std::future::Future::poll(head.as_mut(), &mut context).is_pending());
+        assert!(
+            std::future::Future::poll(later.as_mut(), &mut context).is_pending(),
+            "a fitting small request cannot overtake the head turn"
+        );
+        drop(pressure);
+        assert!(std::future::Future::poll(later.as_mut(), &mut context).is_pending());
+        let head = tokio::time::timeout(Duration::from_secs(2), head)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(head.resident_bytes(), 2);
+        let later = tokio::time::timeout(Duration::from_secs(2), later)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(later.resident_bytes(), 1);
+        drop(head);
+        drop(later);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        owner.request_shutdown();
+    }
+
+    #[tokio::test]
+    async fn cancelled_output_admission_head_does_not_strand_the_next_writer() {
+        let owner = ServerExecution::start().unwrap();
+        let quota = owner.output.storage.quota_group();
+        let pressure = quota
+            .reserve_external_storage(quota.snapshot().limits.worker_bytes)
+            .unwrap();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let mut cancelled = Box::pin(owner.output.reserve_storage(2));
+        let mut survivor = Box::pin(owner.output.reserve_storage(1));
+        assert!(std::future::Future::poll(cancelled.as_mut(), &mut context).is_pending());
+        assert!(std::future::Future::poll(survivor.as_mut(), &mut context).is_pending());
+        drop(cancelled);
+        assert!(std::future::Future::poll(survivor.as_mut(), &mut context).is_pending());
+        drop(pressure);
+        let admitted = tokio::time::timeout(Duration::from_secs(2), survivor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(admitted.resident_bytes(), 1);
+        drop(admitted);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        owner.request_shutdown();
+    }
+
+    #[test]
     fn process_worker_budget_keeps_the_visible_recovery_share_inside_the_ceiling() {
         let resources = ServerResources::new();
         assert_eq!(
@@ -528,9 +906,44 @@ mod tests {
                     .visible_recovery_quota
                     .snapshot()
                     .limits
+                    .worker_bytes
+                + resources.output_quota.snapshot().limits.worker_bytes
+                + resources
+                    .visible_output_quota
+                    .snapshot()
+                    .limits
+                    .worker_bytes
+                + resources
+                    .output_metadata_quota
+                    .snapshot()
+                    .limits
                     .worker_bytes,
-            PROCESS_WORKER_BYTES,
-            "the reserved visible-recovery share stays inside the process ceiling"
+            PROCESS_WORKER_BYTES - DECODER_RESULT_OWNER_BYTES,
+            "worker shares make room for the exact decoder owner RESULT transfer"
+        );
+        let shared = resources.quota_group().snapshot().limits;
+        let partition_bytes = resources
+            .visible_recovery_quota
+            .snapshot()
+            .limits
+            .worker_bytes
+            + resources.output_quota.snapshot().limits.worker_bytes
+            + resources
+                .visible_output_quota
+                .snapshot()
+                .limits
+                .worker_bytes
+            + resources
+                .output_metadata_quota
+                .snapshot()
+                .limits
+                .worker_bytes;
+        // Hand-derived original ceilings: input1280 + result1280 + worker4096 MiB.
+        // Detection is a subaccount already carved from shared worker bytes.
+        assert_eq!(
+            shared.input_bytes + shared.result_bytes + shared.worker_bytes + partition_bytes,
+            6656 * MIB,
+            "decoder owner metadata must not increase the full declared byte ceiling"
         );
     }
 
@@ -677,7 +1090,15 @@ mod tests {
                 },
             )
             .expect("general envelope");
-        let cost = JobCost {
+        let decoder_cost = JobCost {
+            input_bytes: 128 * MIB,
+            result_bytes:
+                ilium_execution::retained_result_storage_bytes::<ilium_ipc::ClientRequest>(
+                    192 * MIB,
+                )
+                .unwrap(),
+        };
+        let encoder_cost = JobCost {
             input_bytes: 128 * MIB,
             result_bytes: 192 * MIB,
         };
@@ -686,12 +1107,15 @@ mod tests {
                 owner
                     .decoder
                     .foundation
-                    .try_reserve(Lane::Cpu, cost)
+                    .try_reserve(Lane::Cpu, decoder_cost)
                     .expect("decoded request envelope")
             })
             .collect();
         assert!(matches!(
-            owner.decoder.foundation.try_reserve(Lane::Cpu, cost),
+            owner
+                .decoder
+                .foundation
+                .try_reserve(Lane::Cpu, decoder_cost),
             Err(ilium_execution::RejectReason::JobLimit)
         ));
         let writers: Vec<_> = (0..2)
@@ -699,17 +1123,58 @@ mod tests {
                 owner
                     .encoder
                     .foundation
-                    .try_reserve(Lane::Cpu, cost)
+                    .try_reserve(Lane::Cpu, encoder_cost)
                     .expect("output headroom must survive waiting handlers")
             })
             .collect();
         assert!(matches!(
-            owner.encoder.foundation.try_reserve(Lane::Cpu, cost),
+            owner
+                .encoder
+                .foundation
+                .try_reserve(Lane::Cpu, encoder_cost),
             // The process envelope is now exactly full; root byte checks
             // precede this tenant's third-job limit.
             Err(ilium_execution::RejectReason::InputBytes)
         ));
+        let root_usage = owner.client.quota_group().snapshot();
+        assert_eq!(root_usage.result_bytes, root_usage.limits.result_bytes);
         drop((general, readers, writers));
+    }
+
+    #[tokio::test]
+    async fn impossible_io_reservations_fail_without_waiting_for_release() {
+        let owner = ServerExecution::start().expect("execution");
+        let maximum = owner.client.foundation.maximum_external_job_cost().unwrap();
+        for (cost, expected) in [
+            (
+                JobCost {
+                    input_bytes: maximum.input_bytes + 1,
+                    result_bytes: 1,
+                },
+                ilium_execution::RejectReason::InputBytes,
+            ),
+            (
+                JobCost {
+                    input_bytes: 1,
+                    result_bytes: maximum.result_bytes + 1,
+                },
+                ilium_execution::RejectReason::ResultBytes,
+            ),
+        ] {
+            let before = owner.client.foundation.usage();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                owner.client.reserve(Lane::Io, cost),
+            )
+            .await
+            .expect("impossible admission must not await a capacity release");
+            assert_eq!(result.err(), Some(expected));
+            let after = owner.client.foundation.usage();
+            assert_eq!(
+                (after.jobs, after.input_bytes, after.result_bytes),
+                (before.jobs, before.input_bytes, before.result_bytes)
+            );
+        }
     }
 
     /// Callers often count only the heap data a job carries. A cost smaller
@@ -847,3 +1312,6 @@ mod tests {
         owner.request_shutdown();
     }
 }
+
+#[cfg(test)]
+mod freshness_tests;

@@ -3,7 +3,7 @@
 //! A slot lives through its acknowledgement, bounding queued AND retained frames.
 use std::collections::VecDeque;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -19,10 +19,11 @@ use ratatui::layout::Position;
 use tokio::sync::{mpsc, oneshot};
 
 const FRAME_SLOTS: usize = 2;
+const BUFFER_SLOTS: usize = FRAME_SLOTS + 1;
 pub const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
-// Two admitted frames (including ACKs), last emitted diff base, and1MiB
+// Two admitted frames (including ACKs), last emitted diff base, and 1 MiB
 // owner/channel/error metadata which may outlive actual output-thread join.
-const FRAME_STORAGE_BYTES: usize = (FRAME_SLOTS + 1) * MAX_FRAME_BYTES + 1024 * 1024;
+const FRAME_STORAGE_BYTES: usize = BUFFER_SLOTS * MAX_FRAME_BYTES + 1024 * 1024;
 // Encoder retained capacity64MiB, one resize blank32MiB, and the emitted-cell
 // mask (one byte per cell). Diff streams directly; no whole-frame diff Vec.
 // These are cooperative declarations, not allocator/native RSS guarantees.
@@ -30,17 +31,106 @@ const MAX_DIFF_MASK_BYTES: usize = MAX_FRAME_BYTES / std::mem::size_of::<Cell>()
 const OUTPUT_STACK_BYTES: usize = 2 * 1024 * 1024;
 const OUTPUT_WORKER_BYTES: usize = MAX_FRAME_BYTES * 3 + MAX_DIFF_MASK_BYTES + OUTPUT_STACK_BYTES;
 
+/// Only numeric progress leaves the terminal owner; no output bytes are retained.
+#[derive(Debug)]
+pub(crate) struct PresentationHealth {
+    started: Instant,
+    phase: AtomicUsize,
+    frame: AtomicU64,
+    phase_since_ms: AtomicU64,
+    last_ack_ms: AtomicU64,
+    acknowledged_frame: AtomicU64,
+    queued_frames: AtomicUsize,
+    queued_since_ms: AtomicU64,
+    requested_bytes: AtomicU64,
+    written_bytes: AtomicU64,
+}
+impl PresentationHealth {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            started: Instant::now(),
+            phase: AtomicUsize::new(0),
+            frame: AtomicU64::new(0),
+            phase_since_ms: AtomicU64::new(0),
+            last_ack_ms: AtomicU64::new(0),
+            acknowledged_frame: AtomicU64::new(0),
+            queued_frames: AtomicUsize::new(0),
+            queued_since_ms: AtomicU64::new(0),
+            requested_bytes: AtomicU64::new(0),
+            written_bytes: AtomicU64::new(0),
+        })
+    }
+    fn now_ms(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+    fn phase(&self, phase: usize) {
+        self.phase_since_ms.store(self.now_ms(), Ordering::Relaxed);
+        self.phase.store(phase, Ordering::Release);
+    }
+    pub(crate) fn acknowledge(&self, frame_id: u64) {
+        self.last_ack_ms.store(self.now_ms(), Ordering::Relaxed);
+        self.acknowledged_frame
+            .fetch_max(frame_id, Ordering::Release);
+    }
+    fn phase_name(&self) -> &'static str {
+        match self.phase.load(Ordering::Acquire) {
+            0 => {
+                if self.queued_frames.load(Ordering::Acquire) == 0 {
+                    "idle"
+                } else {
+                    "queued"
+                }
+            }
+            1 => "queued",
+            2 => "encoding",
+            3 => "writing",
+            4 => "flushing",
+            5 if self.acknowledged_frame.load(Ordering::Acquire)
+                >= self.frame.load(Ordering::Acquire) =>
+            {
+                if self.queued_frames.load(Ordering::Acquire) == 0 {
+                    "idle"
+                } else {
+                    "queued"
+                }
+            }
+            5 => "awaiting UI acknowledgement",
+            _ => "unknown",
+        }
+    }
+    fn progress_age_ms(&self) -> u64 {
+        let since = if self.phase_name() == "queued" {
+            self.queued_since_ms.load(Ordering::Acquire)
+        } else {
+            self.phase_since_ms.load(Ordering::Relaxed)
+        };
+        self.now_ms().saturating_sub(since)
+    }
+    pub(crate) fn report(&self) -> String {
+        let phase = self.phase_name();
+        format!("phase={phase}, owner_frame={}, phase_age_ms={}, last_ack_age_ms={}, requested_bytes={}, confirmed_written_bytes={} (counts are samples; partial writes may precede an error)", self.frame.load(Ordering::Relaxed), self.progress_age_ms(), self.now_ms().saturating_sub(self.last_ack_ms.load(Ordering::Relaxed)), self.requested_bytes.load(Ordering::Relaxed), self.written_bytes.load(Ordering::Relaxed))
+    }
+    pub(crate) fn stalled(&self) -> bool {
+        self.phase_name() != "idle" && self.progress_age_ms() >= 5000
+    }
+}
+
 /// Whole-frame buffering with no implicit Drop flush. A failed explicit flush
 /// consumes the attempted buffer; an uncertain output prefix is never retried.
 pub struct TerminalOutput<W: Write> {
     writer: W,
     bytes: Vec<u8>,
+    health: Arc<PresentationHealth>,
 }
 impl<W: Write> TerminalOutput<W> {
     pub fn new(writer: W) -> Self {
+        Self::with_health(writer, PresentationHealth::new())
+    }
+    pub(crate) fn with_health(writer: W, health: Arc<PresentationHealth>) -> Self {
         Self {
             writer,
             bytes: Vec::new(),
+            health,
         }
     }
 }
@@ -65,16 +155,69 @@ impl<W: Write> Write for TerminalOutput<W> {
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        let written = self.writer.write_all(&self.bytes);
+        self.health
+            .requested_bytes
+            .store(self.bytes.len() as u64, Ordering::Relaxed);
+        self.health.written_bytes.store(0, Ordering::Relaxed);
+        self.health.phase(3);
+        let mut written = 0;
+        let result = (|| {
+            while written < self.bytes.len() {
+                match self.writer.write(&self.bytes[written..]) {
+                    Ok(0) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::WriteZero,
+                            "terminal output made no progress",
+                        ))
+                    }
+                    Ok(count) => {
+                        written += count;
+                        self.health
+                            .written_bytes
+                            .store(written as u64, Ordering::Relaxed);
+                        self.health
+                            .phase_since_ms
+                            .store(self.health.now_ms(), Ordering::Relaxed);
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            self.health.phase(4);
+            self.writer.flush()
+        })();
         self.bytes.clear();
-        written?;
-        self.writer.flush()
+        result
     }
 }
 
 struct FrameSlots {
     used: AtomicUsize,
+    buffers_used: AtomicUsize,
     allocation: Arc<StorageAdmission>,
+}
+impl FrameSlots {
+    fn try_reserve(self: &Arc<Self>) -> Option<FrameReservation> {
+        self.used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |slots| {
+                (slots < FRAME_SLOTS).then_some(slots + 1)
+            })
+            .ok()?;
+        if self
+            .buffers_used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |slots| {
+                (slots < BUFFER_SLOTS).then_some(slots + 1)
+            })
+            .is_err()
+        {
+            self.used.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        Some(FrameReservation {
+            slots: self.clone(),
+            buffer_slot: Some(BufferSlot(self.clone())),
+        })
+    }
 }
 // Both terminal failure receipts share the original error allocation. The last
 // receipt owns its storage declaration independently of actual worker retirement.
@@ -103,13 +246,26 @@ fn guarded_failure(error: io::Error, allocation: Arc<StorageAdmission>) -> io::E
         }),
     )
 }
-pub struct FrameReservation(Arc<FrameSlots>);
+pub struct FrameReservation {
+    slots: Arc<FrameSlots>,
+    buffer_slot: Option<BufferSlot>,
+}
+
+// The buffer slot transfers from pre-composition reservation to the final
+// Arc<GuardedBuffer>, so retained ACKs and diff bases stay inside the budget.
+struct BufferSlot(Arc<FrameSlots>);
+impl Drop for BufferSlot {
+    fn drop(&mut self) {
+        self.0.buffers_used.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// A buffer clone carries its original allocation even after the output owner
 /// has joined. Public Arc clones cannot accidentally detach bytes from custody.
 pub struct GuardedBuffer {
     buffer: Buffer,
     _allocation: Arc<StorageAdmission>,
+    _buffer_slot: BufferSlot,
 }
 impl std::ops::Deref for GuardedBuffer {
     type Target = Buffer;
@@ -119,7 +275,7 @@ impl std::ops::Deref for GuardedBuffer {
 }
 impl Drop for FrameReservation {
     fn drop(&mut self) {
-        self.0.used.fetch_sub(1, Ordering::AcqRel);
+        self.slots.used.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -143,6 +299,8 @@ pub struct PreparedFrame {
     pub frame_id: u64,
     pub layout_revision: u64,
     pub prepared_at: Instant,
+    /// Frozen content identities, captured during composition, never at acknowledgement.
+    pub terminal_sequences: [Option<(u64, u64)>; 4],
     animation: Option<ComposedPresentation>,
     _reservation: FrameReservation,
 }
@@ -156,7 +314,7 @@ impl PreparedFrame {
     }
 
     pub fn new(
-        reservation: FrameReservation,
+        mut reservation: FrameReservation,
         buffer: Buffer,
         cursor: Option<Position>,
         frame_id: u64,
@@ -180,18 +338,29 @@ impl PreparedFrame {
                     io::ErrorKind::InvalidData,
                     "terminal frame exceeds presentation byte limit",
                 ),
-                reservation.0.allocation.clone(),
+                reservation.slots.allocation.clone(),
             ));
         }
+        let buffer_slot = reservation.buffer_slot.take().ok_or_else(|| {
+            guarded_failure(
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "frame reservation has no buffer admission",
+                ),
+                reservation.slots.allocation.clone(),
+            )
+        })?;
         Ok(Self {
             buffer: Arc::new(GuardedBuffer {
                 buffer,
-                _allocation: reservation.0.allocation.clone(),
+                _allocation: reservation.slots.allocation.clone(),
+                _buffer_slot: buffer_slot,
             }),
             cursor,
             frame_id,
             layout_revision,
             prepared_at: Instant::now(),
+            terminal_sequences: [None; 4],
             animation: None,
             _reservation: reservation,
         })
@@ -233,6 +402,7 @@ pub struct Presenter {
     physical_exit: Arc<tokio::sync::Notify>,
     observed_exit: Option<WorkerExit>,
     _worker: OwnedWorker,
+    health: Arc<PresentationHealth>,
 }
 impl Presenter {
     pub fn start<B: Backend<Error = io::Error> + Send + 'static>(
@@ -247,6 +417,14 @@ impl Presenter {
     pub fn start_with_cleanup<B: Backend<Error = io::Error> + Send + 'static>(
         backend: B,
         quota: &QuotaGroup,
+        cleanup: impl FnOnce() + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::start_with_health_cleanup(backend, quota, PresentationHealth::new(), cleanup)
+    }
+    pub(crate) fn start_with_health_cleanup<B: Backend<Error = io::Error> + Send + 'static>(
+        backend: B,
+        quota: &QuotaGroup,
+        health: Arc<PresentationHealth>,
         cleanup: impl FnOnce() + Send + 'static,
     ) -> io::Result<Self> {
         // Admit before allocating owner/channel state or creating an OS thread.
@@ -278,6 +456,7 @@ impl Presenter {
         });
         let slots = Arc::new(FrameSlots {
             used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation,
         });
         // The extra error slot ensures a backend error cannot wait behind both
@@ -290,6 +469,7 @@ impl Presenter {
         let owned = shared.clone();
         let failure_allocation = slots.allocation.clone();
         let wake_allocation = slots.allocation.clone();
+        let owner_health = Arc::clone(&health);
         let worker = reserve_owned_worker(Some(OUTPUT_STACK_BYTES), worker_admission)?
             .spawn_with_completion(
                 "ilium-presentation",
@@ -309,7 +489,7 @@ impl Presenter {
                         drop(queue);
                         cleanup();
                     }));
-                    let result = match emit_frames(backend, &owned, &stop, &acks) {
+                    let result = match emit_frames(backend, &owned, &stop, &acks, &owner_health) {
                         Ok(()) => Ok(()),
                         Err(error) => {
                             let kind = error.kind();
@@ -336,6 +516,7 @@ impl Presenter {
             physical_exit,
             observed_exit: None,
             _worker: worker,
+            health,
         })
     }
     /// Never wait for terminal throughput on the UI thread.
@@ -343,26 +524,21 @@ impl Presenter {
         if self.shared.queue.try_lock().ok()?.closing {
             return None;
         }
-        self.slots
-            .used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |slots| {
-                (slots < FRAME_SLOTS).then_some(slots + 1)
-            })
-            .ok()?;
-        Some(FrameReservation(self.slots.clone()))
+        self.slots.try_reserve()
     }
     pub fn outstanding_frames(&self) -> usize {
         self.slots.used.load(Ordering::Acquire)
     }
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub fn submit(&self, frame: PreparedFrame) -> Result<(), SubmissionError> {
-        if !Arc::ptr_eq(&frame._reservation.0, &self.slots) {
+        if !Arc::ptr_eq(&frame._reservation.slots, &self.slots) {
             return Err(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "frame reservation belongs to another presenter",
                     ),
-                    frame._reservation.0.allocation.clone(),
+                    frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
             });
@@ -375,10 +551,16 @@ impl Presenter {
                         io::ErrorKind::BrokenPipe,
                         "presentation owner closed or capacity violated",
                     ),
-                    frame._reservation.0.allocation.clone(),
+                    frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
             });
+        }
+        // Queue admission never overwrites an active emitter identity.
+        if self.health.queued_frames.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.health
+                .queued_since_ms
+                .store(self.health.now_ms(), Ordering::Release);
         }
         queue.frames.push_back(frame);
         drop(queue);
@@ -530,6 +712,7 @@ fn emit_frames<B: Backend<Error = io::Error>>(
     shared: &Shared,
     stop: &StopToken,
     acknowledgements: &mpsc::Sender<io::Result<PresentedFrame>>,
+    health: &PresentationHealth,
 ) -> io::Result<()> {
     let mut emitted: Option<Arc<GuardedBuffer>> = None;
     loop {
@@ -552,6 +735,11 @@ fn emit_frames<B: Backend<Error = io::Error>>(
                 None => return backend.flush(),
             }
         };
+        health.queued_frames.fetch_sub(1, Ordering::AcqRel);
+        health.frame.store(frame.frame_id, Ordering::Release);
+        health.requested_bytes.store(0, Ordering::Relaxed);
+        health.written_bytes.store(0, Ordering::Relaxed);
+        health.phase(2);
         let started = Instant::now();
         let committed = match frame.animation.as_mut() {
             Some(animation) => {
@@ -643,6 +831,7 @@ fn emit_frames<B: Backend<Error = io::Error>>(
                 return Err(io::Error::new(error.kind(), reason));
             }
         };
+        health.phase(5);
         // Only a complete successful backend flush establishes the next diff base.
         emitted = Some(frame.buffer.clone());
         let acknowledgement = PresentedFrame {
@@ -862,9 +1051,9 @@ mod tests {
             Some(ilium_platform::owned_worker::WorkerExit::Joined)
         );
         presenter.shutdown().await.unwrap();
-        // Joined proves physical exit. The original ticket and presenter
-        // still retain their wake's admission until their last owner drops.
-        assert_eq!(quota.snapshot().worker_threads, 1);
+        // Joined proves physical exit and supervisor custody release. The
+        // observer and presenter remain usable without keeping a worker charge.
+        assert_eq!(quota.snapshot().worker_threads, 0);
         drop(ticket);
         drop(presenter);
         assert_eq!(quota.snapshot().worker_threads, 0);
@@ -1247,7 +1436,8 @@ mod tests {
     #[test]
     fn diff_cursor_and_resize_follow_the_actual_emitted_base() {
         let slots = Arc::new(FrameSlots {
-            used: AtomicUsize::new(1),
+            used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation: Arc::new(
                 test_quota()
                     .reserve_external_storage(FRAME_STORAGE_BYTES)
@@ -1257,7 +1447,7 @@ mod tests {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 4, 2));
         buffer[(0, 0)].set_symbol("A");
         let first = PreparedFrame::new(
-            FrameReservation(slots.clone()),
+            slots.try_reserve().unwrap(),
             buffer,
             Some(Position::new(2, 1)),
             1,
@@ -1290,11 +1480,10 @@ mod tests {
             "unchanged cells are not emitted"
         );
         bytes.lock().unwrap().clear();
-        slots.used.fetch_add(1, Ordering::Relaxed);
         let mut resized_buffer = Buffer::empty(Rect::new(0, 0, 6, 3));
         resized_buffer[(0, 0)].set_symbol("A");
         let resized =
-            PreparedFrame::new(FrameReservation(slots), resized_buffer, None, 2, 1).unwrap();
+            PreparedFrame::new(slots.try_reserve().unwrap(), resized_buffer, None, 2, 1).unwrap();
         emit_one(&mut backend, Some(&first.buffer), &resized).unwrap();
         let resized_bytes = String::from_utf8_lossy(&bytes.lock().unwrap()).into_owned();
         assert!(
@@ -1434,7 +1623,8 @@ mod tests {
     #[test]
     fn prepared_frame_retains_existing_cell_vector_capacity() {
         let slots = Arc::new(FrameSlots {
-            used: AtomicUsize::new(1),
+            used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation: Arc::new(
                 test_quota()
                     .reserve_external_storage(FRAME_STORAGE_BYTES)
@@ -1446,7 +1636,7 @@ mod tests {
         let capacity = buffer.content.capacity();
         assert!(capacity > buffer.content.len());
 
-        let frame = PreparedFrame::new(FrameReservation(slots), buffer, None, 1, 1).unwrap();
+        let frame = PreparedFrame::new(slots.try_reserve().unwrap(), buffer, None, 1, 1).unwrap();
 
         assert_eq!(frame.buffer.content.capacity(), capacity);
     }
@@ -1454,7 +1644,8 @@ mod tests {
     #[test]
     fn oversized_graphics_symbol_releases_reserved_capacity() {
         let slots = Arc::new(FrameSlots {
-            used: AtomicUsize::new(1),
+            used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation: Arc::new(
                 test_quota()
                     .reserve_external_storage(FRAME_STORAGE_BYTES)
@@ -1463,8 +1654,69 @@ mod tests {
         });
         let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
         buffer[(0, 0)].set_symbol(&"x".repeat(MAX_FRAME_BYTES / 2 + 1));
-        let result = PreparedFrame::new(FrameReservation(slots.clone()), buffer, None, 1, 1);
+        let result = PreparedFrame::new(slots.try_reserve().unwrap(), buffer, None, 1, 1);
         assert!(result.is_err());
         assert_eq!(slots.used.load(Ordering::Acquire), 0);
+        assert_eq!(slots.buffers_used.load(Ordering::Acquire), 0);
+    }
+}
+
+#[cfg(test)]
+mod presentation_health_tests {
+    use super::*;
+    struct PrefixThenFailure {
+        calls: usize,
+    }
+    impl Write for PrefixThenFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.calls += 1;
+            match self.calls {
+                1 => Err(io::ErrorKind::Interrupted.into()),
+                2 => Ok(bytes.len().min(2)),
+                _ => Err(io::Error::other("synthetic terminal stall error")),
+            }
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            panic!("failed writes must not flush")
+        }
+    }
+    #[test]
+    fn partial_terminal_failure_reports_only_confirmed_prefix_and_never_retries_it() {
+        let health = PresentationHealth::new();
+        let mut output =
+            TerminalOutput::with_health(PrefixThenFailure { calls: 0 }, health.clone());
+        output.write_all(b"abcde").unwrap();
+        assert!(output.flush().is_err());
+        assert_eq!(health.requested_bytes.load(Ordering::Relaxed), 5);
+        assert_eq!(health.written_bytes.load(Ordering::Relaxed), 2);
+        assert_eq!(health.phase.load(Ordering::Acquire), 3);
+        assert!(
+            output.bytes.is_empty(),
+            "uncertain attempted frame must never replay"
+        );
+        assert_eq!(output.writer.calls, 3);
+    }
+    #[test]
+    fn independent_presenters_do_not_share_health_or_acknowledgements() {
+        let first = PresentationHealth::new();
+        let second = PresentationHealth::new();
+        first.frame.store(99, Ordering::Relaxed);
+        first.phase(3);
+        second.acknowledge(0);
+        assert_eq!(first.phase.load(Ordering::Acquire), 3);
+        assert_eq!(second.phase.load(Ordering::Acquire), 0);
+        assert!(first.report().contains("owner_frame=99"));
+        assert!(second.report().contains("owner_frame=0"));
+        first.phase(5);
+        first.acknowledge(98);
+        assert_eq!(first.phase_name(), "awaiting UI acknowledgement");
+        first.acknowledge(99);
+        assert_eq!(first.phase_name(), "idle");
+        first.queued_frames.store(1, Ordering::Release);
+        assert_eq!(first.phase_name(), "queued");
+        first.frame.store(100, Ordering::Release);
+        first.phase(3);
+        first.acknowledge(99);
+        assert_eq!(first.phase_name(), "writing");
     }
 }

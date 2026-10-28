@@ -30,6 +30,10 @@ The screen has a **left panel** (the project tree) and a **right panel** (the pa
 
 You can size the left panel in **Settings → Appearance**. The default policy is **Width-dependent**: the panel is 44 columns wide (its focused width) when the terminal is at least 120 columns wide or when the tree itself has focus, and 24 columns wide otherwise. The other policies are **Fixed** (default 32 columns, whatever has focus) and **Focus-dependent** (44 columns with focus in the tree, 24 otherwise). Widths are limited to 16 through 80 columns, and the width threshold can be set between 40 and 500 columns.
 
+### Reading a complete error
+
+Press **F9** to expand the current diagnostic. **Ctrl+F9** opens local runtime diagnostics even when no error is showing, including connection stages, progress counters and queue admission. It does not query the server; a long idle stage alone does not prove a hang. The viewer preserves the open dialog and its draft. Use **Up/Down**, the mouse wheel, **PageUp/PageDown**, or **Home/End** to read long errors; **Esc** or **F9** closes the viewer. Compact status rows and error tooltips show an F9 hint. Agent-creation errors also wrap and expand the footer popup when space permits.
+
 ## The tree
 
 The tree is the authoritative description of your workspace and is stored on the server, so every attached client sees the same tree.

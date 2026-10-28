@@ -1,0 +1,1083 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Extending Settings | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/" aria-current="page">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Extending Settings</h1>
+
+<p>A plugin can put its own settings into Ilium's Settings screen. It can do that in two ways:</p>
+<ul>
+<li><strong>A. A new tab.</strong> The plugin adds one or two tabs of its own to the rail, next to the built-in tabs. The plugin decides what the tab holds.</li>
+<li><strong>B. Sections in an existing tab.</strong> The plugin adds a group of rows to a built-in tab, such as Terminal, Editor or Sound. The rows sit under a divider that names the plugin, so the user always sees where they came from.</li>
+</ul>
+<p>Most plugins need only A. Use B when a setting belongs beside related built-in settings. Both ways use the same 18 row types, save rules and storage. Step-by-step guides are <a href="/pages/tutorial-10-settings-new-tab/">tutorial 10, a new tab</a> and <a href="/pages/tutorial-11-settings-extend-tab/">tutorial 11, a section in an existing tab</a>. Exact field tables and error codes are in the <a href="/pages/reference-settings-schema/">settings schema reference</a>, the calls a plugin uses to read and write values are in <a href="/pages/api-settings/">settings API</a>, and the screen itself is described in <a href="/pages/settings-screens/">building settings screens</a>.</p>
+<h3 id="the-model">The model</h3>
+<p>Every settings tab has a stable id. Built-in tabs use kebab-case ids such as <code>terminal</code>, <code>editor</code> or <code>user-interface</code>. These ids never change, even when the label on screen changes. A plugin's own tab has a global id made of the plugin id and its local id, for example <code>example.clipboard-history/main</code>.</p>
+<p>A plugin declares its settings in <code>contributes.settings</code>. Each entry has a <code>kind</code>:</p>
+<ul>
+<li><code>kind: "tab"</code> creates a new tab in the rail.</li>
+<li><code>kind: "section"</code> adds a group of rows. Its <code>tab</code> field names either a built-in tab id (for example <code>terminal</code>) or one of the plugin's own tabs, written <code>self:&lt;tab-id&gt;</code>.</li>
+</ul>
+<p>A section is placed at an <strong>anchor</strong>. An anchor is a named point in a tab:</p>
+<ul>
+<li><code>end</code> (the default) puts the section after the last built-in row.</li>
+<li><code>before:&lt;section&gt;</code> puts it directly before a named section.</li>
+<li><code>after:&lt;section&gt;</code> puts it directly after a named section.</li>
+</ul>
+<p>Most built-in tabs have one unnamed section called <code>main</code>, so <code>before:main</code> is refused with <code>manifest.settings-anchor</code>. Tabs with headings, such as Remote compaction, expose named anchors: <code>behaviour</code>, <code>technique-per-agent</code>, <code>custom-prompt</code>, <code>input-shaping</code> and <code>model</code>. Kernel anchors are never renamed or removed.</p>
+<p>A new tab is placed in the rail with <code>after</code>, which names the tab it follows. The default is <code>text-triggers</code>. The tail of the rail (<code>debug</code>, <code>api</code>, <code>about</code>, <code>setup</code>) is pinned, so a plugin tab never appears after <code>debug</code>.</p>
+<h3 id="ordering">Ordering</h3>
+<p>The order of plugin content inside one tab is fixed by three keys, applied in turn:</p>
+<ol>
+<li>The anchor. Built-in rows come first. A <code>before:</code> block sits directly before its named section, an <code>after:</code> block sits directly after it, and <code>end</code> blocks follow the last built-in row.</li>
+<li>The <code>order</code> number, from 0 to 1000 (default 500). Lower numbers come first.</li>
+<li>The plugin id, compared as bytes, then the order of declaration inside the plugin.</li>
+</ol>
+<p>All sections of one plugin at one anchor sit together under one divider. The installation order and the enable order never change the result, so two machines with the same plugins show the same page.</p>
+<figure>
+<svg viewBox="0 0 400 220" role="img" aria-label="Order of plugin blocks in a tab with named anchors" width="600" height="330">
+  <defs>
+    <marker id="se-order-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="8" width="200" height="20" rx="4" fill="none" stroke="currentColor"/>
+  <text x="16" y="22" font-size="11" fill="currentColor">behaviour</text>
+  <text x="256" y="22" font-size="10" fill="currentColor">kernel section</text>
+  <rect x="8" y="34" width="200" height="20" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="16" y="48" font-size="11" fill="currentColor">Plugin A block</text>
+  <text x="256" y="48" font-size="10" fill="currentColor">plugin A, after:behaviour</text>
+  <rect x="8" y="60" width="200" height="20" rx="4" fill="none" stroke="currentColor"/>
+  <text x="16" y="74" font-size="11" fill="currentColor">technique-per-agent</text>
+  <text x="256" y="74" font-size="10" fill="currentColor">kernel section</text>
+  <rect x="8" y="86" width="200" height="20" rx="4" fill="none" stroke="currentColor"/>
+  <text x="16" y="100" font-size="11" fill="currentColor">custom-prompt</text>
+  <text x="256" y="100" font-size="10" fill="currentColor">kernel section</text>
+  <rect x="8" y="112" width="200" height="20" rx="4" fill="none" stroke="currentColor"/>
+  <text x="16" y="126" font-size="11" fill="currentColor">input-shaping</text>
+  <text x="256" y="126" font-size="10" fill="currentColor">kernel section</text>
+  <rect x="8" y="138" width="200" height="20" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="16" y="152" font-size="11" fill="currentColor">Plugin B block</text>
+  <text x="256" y="152" font-size="10" fill="currentColor">plugin B, after:input-shaping</text>
+  <rect x="8" y="164" width="200" height="20" rx="4" fill="none" stroke="currentColor"/>
+  <text x="16" y="178" font-size="11" fill="currentColor">model</text>
+  <text x="256" y="178" font-size="10" fill="currentColor">kernel section</text>
+  <rect x="8" y="190" width="200" height="20" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="16" y="204" font-size="11" fill="currentColor">Plugin A block, end</text>
+  <text x="256" y="204" font-size="10" fill="currentColor">plugin A, end</text>
+</svg>
+<figcaption>Remote compaction tab: plugin blocks are placed by anchor. Kernel sections keep their order.</figcaption>
+</figure>
+
+<h3 id="grants">Grants</h3>
+<p>A plugin needs no grant for its own tab or for sections in its own tab. The always-granted <code>settings</code> access covers the plugin's own values.</p>
+<p>To add sections to a built-in tab, the plugin needs one grant per tab: <code>settings.contribute:&lt;tab-id&gt;</code>, for example <code>settings.contribute:terminal</code>. The grant takes one tab id with no wildcard. It gives permission to draw sections in that tab and nothing else. The review dialog shows it as "Adds settings to the Terminal tab". The grant is normal risk and gives no read or write access to built-in values.</p>
+<p><code>settings.read-all</code> and <code>settings.write-all</code> are a different grant and stay high risk. Neither grant implies <code>settings.contribute</code>, and the reverse is also true. See <a href="/pages/capability-settings-all/">capability: settings.read-all and settings.write-all</a>.</p>
+<h3 id="row-types">Row types</h3>
+<p>A row is one setting line group: a label, a control and a description. Rows are declared inline in the manifest. The table lists the 18 types. Every type, in every state, is on the <a href="/pages/reference-settings-rows/">row gallery</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Stores</th>
+<th>What the user gets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toggle</code></td>
+<td>boolean</td>
+<td><code>‹ On ›</code> or <code>‹ Off ›</code>, or <code>[x]</code> and <code>[ ]</code> with <code>style: "checkbox"</code></td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td>string or integer</td>
+<td>A short list of <code>options</code>, stepped with Left and Right, or a filterable dialog</td>
+</tr>
+<tr>
+<td><code>number</code></td>
+<td>integer or decimal</td>
+<td>A stepper <code>- 42 + *</code>, or a slider with a <code>●</code> thumb</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>string</td>
+<td>A single line, optionally masked with <code>secret</code> as <code>••••</code></td>
+</tr>
+<tr>
+<td><code>text-area</code></td>
+<td>string</td>
+<td>A multi-line editor opened with Enter</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>string</td>
+<td>A file or folder picker; stores the path as text only</td>
+</tr>
+<tr>
+<td><code>color</code></td>
+<td><code>#rrggbb</code></td>
+<td>A swatch picker with hex entry</td>
+</tr>
+<tr>
+<td><code>keybinding</code></td>
+<td>key chord</td>
+<td>A capture of a chord for one of the plugin's own commands</td>
+</tr>
+<tr>
+<td><code>button</code></td>
+<td>nothing</td>
+<td>A button that runs one of the plugin's commands</td>
+</tr>
+<tr>
+<td><code>info</code></td>
+<td>nothing</td>
+<td>Read-only text; can be updated at runtime if <code>live</code> is set</td>
+</tr>
+<tr>
+<td><code>group</code></td>
+<td>nothing</td>
+<td>A folding heading that holds up to 12 child rows</td>
+</tr>
+<tr>
+<td><code>list</code></td>
+<td>array</td>
+<td>A list editor for strings or small objects of up to 8 fields</td>
+</tr>
+<tr>
+<td><code>location</code></td>
+<td><code>{ lat, lon, label? }</code></td>
+<td>The world-map picker with an address search</td>
+</tr>
+<tr>
+<td><code>preview</code></td>
+<td>nothing</td>
+<td>A live area drawn by the plugin; own tabs only</td>
+</tr>
+<tr>
+<td><code>notice</code></td>
+<td>nothing</td>
+<td>A banner with a tone; can be dismissed</td>
+</tr>
+<tr>
+<td><code>map</code></td>
+<td>object</td>
+<td>An editor for string keys and their values</td>
+</tr>
+<tr>
+<td><code>multi-choice</code></td>
+<td>array</td>
+<td>A checklist, or a dialog with check marks</td>
+</tr>
+<tr>
+<td><code>meter</code></td>
+<td>nothing</td>
+<td>A segmented bar, updated by the plugin</td>
+</tr>
+</tbody>
+</table>
+<p>Every value row has a <code>key</code>, a <code>title</code> and a <code>default</code>. The kernel turns each value row into one property of a JSON schema, so the same validation and merge rules apply to plugin rows and built-in rows. A row whose default does not match its own schema refuses the package at install time.</p>
+<p>Three fields of every value row change how a row behaves:</p>
+<ul>
+<li><code>depends_on</code> makes the row read-only when its condition is false. The row stays visible and focusable and says <code>Unavailable: &lt;title&gt; is &lt;value&gt;.</code></li>
+<li><code>visible_when</code> hides the row when its condition is false. A hidden row keeps its value and search skips it.</li>
+<li><code>scope: "project"</code> stores the value in the project's <code>.ilium/</code> settings under <code>[plugins."&lt;plugin-id&gt;"]</code>. The project value wins while that project is open.</li>
+<li><code>applies: "restart"</code> draws the marker <code>↻</code> after the value and the note <code>Applies after restart.</code></li>
+</ul>
+<p>Use <code>depends_on</code> when the user should see where a setting lives. Hiding a row moves the rows under the cursor.</p>
+<h3 id="safety-rules">Safety rules</h3>
+<p>Plugins can add to Settings. They cannot change what is already there.</p>
+<ul>
+<li>A plugin cannot hide, disable, reorder, relabel or restyle a built-in row, and it cannot change the rows of a built-in section.</li>
+<li>Plugin keys are stored only in <code>[plugins."&lt;plugin-id&gt;"]</code>. A section in the Terminal tab never writes the <code>[terminal]</code> table.</li>
+<li>The kernel handles Up, Down, Tab, Esc, <code>q</code>, <code>?</code>, <code>/</code> and <code>r</code> before any plugin row sees input. Plugin rows receive values, never raw key events.</li>
+<li>Plugin text (titles, descriptions, info text) is plain text. The kernel strips control characters and bidirectional overrides and draws the text in its own styles. A plugin cannot draw a fake built-in divider or a fake close button.</li>
+</ul>
+<p>The user always sees who added a section. A plugin tab shows its name and version in the first line of the page, and its frame title ends with <code>· plugin</code>. A plugin block inside a built-in tab starts with a divider line of the form <code>▏ &lt;glyph&gt; &lt;PLUGIN NAME&gt; ──── plugin ─</code>. Every line of plugin content carries a dim <code>▏</code> gutter in column 0, so the label stays visible after the user scrolls past the divider.</p>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tabs per plugin</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Sections per plugin tab</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Sections per plugin, per built-in tab</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Plugin sections in one built-in tab, all plugins</td>
+<td>6</td>
+</tr>
+<tr>
+<td>Rows per section (a group counts its children)</td>
+<td>24</td>
+</tr>
+<tr>
+<td>Value keys per plugin</td>
+<td>128</td>
+</tr>
+<tr>
+<td>Segments in a meter, entries in a map</td>
+<td>8 and 64</td>
+</tr>
+<tr>
+<td>Choice options</td>
+<td>64</td>
+</tr>
+<tr>
+<td>List items, and fields per item object</td>
+<td>64, and 8</td>
+</tr>
+<tr>
+<td>Text value</td>
+<td>4,096 characters (text area: 65,536)</td>
+</tr>
+<tr>
+<td>All values of one plugin, serialized</td>
+<td>256 KiB</td>
+</tr>
+<tr>
+<td>Manifest titles, section titles, descriptions, info text, button labels</td>
+<td>48, 40, 200, 120 and 20 characters</td>
+</tr>
+</tbody>
+</table>
+<p>The caps above are the standard tier. A bundled T1 plugin whose id starts with <code>ilium.</code> and that sets <code>limits_tier: "first-party"</code> gets these higher caps instead (any other package is refused with <code>manifest.limits-tier</code>; see <a href="/pages/design-decisions/">design decisions</a>):</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Standard</th>
+<th>First-party</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tabs per plugin</td>
+<td>2</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Value keys per plugin</td>
+<td>128</td>
+<td>2,048</td>
+</tr>
+<tr>
+<td>Rows per section</td>
+<td>24</td>
+<td>64</td>
+</tr>
+<tr>
+<td>List items</td>
+<td>64</td>
+<td>1,024</td>
+</tr>
+<tr>
+<td>Choice options</td>
+<td>64</td>
+<td>512</td>
+</tr>
+</tbody>
+</table>
+<p>When the limit for plugin sections in one built-in tab is reached, the extra sections are not drawn. They are listed on the recovery page with the warning <code>settings.section-dropped</code>. Install-time errors name the item, its path in the manifest and the limit.</p>
+<h3 id="values-and-saving">Values and saving</h3>
+<p>Values for a plugin's settings are stored in its own table in <code>config.toml</code>:</p>
+<pre><code class="language-toml">[plugins.&quot;example.clipboard-history&quot;]
+enabled = true
+max_entries = 500
+ignore_patterns = [&quot;^sk-[A-Za-z0-9]{20,}$&quot;, &quot;^ghp_&quot;]
+record_panes = true
+</code></pre>
+<p>A row's key follows its section's <code>scope</code>. A row with <code>scope: "project"</code> is written to the project's <code>.ilium/</code> settings instead of <code>config.toml</code>; the project value wins while that project is open. The <code>side</code> field of a <code>settings-changed</code> event names the receiving side. Client-scope keys are read on the client. Server-scope keys are checked by the client against the same schema, written to the same table and passed to the server through the normal configuration refresh. A section has a single scope, so a plugin that needs both sides declares two sections.</p>
+<p>Changes are saved as the user makes them. There is no Save button.</p>
+<table>
+<thead>
+<tr>
+<th>Interaction</th>
+<th>Saved</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Toggle, choice step, choice picked from a list</td>
+<td>At once</td>
+</tr>
+<tr>
+<td>Number steps</td>
+<td>600 ms after the last step; steps within the window become one write</td>
+</tr>
+<tr>
+<td>Typed number or text</td>
+<td>600 ms after the last keystroke, or at once on Enter or when leaving the row</td>
+</tr>
+<tr>
+<td>Text area</td>
+<td>1 s after the last keystroke, and at once when the editor closes</td>
+</tr>
+<tr>
+<td>Path, colour, keybinding, list item</td>
+<td>At once, when the dialog is confirmed</td>
+</tr>
+<tr>
+<td>Plugin call <code>set-json</code></td>
+<td>At once, without a delay</td>
+</tr>
+</tbody>
+</table>
+<p>While a write is pending, the row shows a dim <code>◌</code> after the value. A row whose value differs from its default shows a dim <code>•</code> after the label, and the <code>r</code> key resets the focused row to its default.</p>
+<p>A save runs three checks in order: the schema, then the plugin's optional <code>settings-validate</code> export, then the write. The export has a deadline of 100 ms. A failed check keeps the previous value and puts the message in place of the row's description. Closing Settings writes every pending change at once.</p>
+<h3 id="live-content">Live content</h3>
+<p>Eight calls let a plugin update its own rows while it runs. They need no grant and are limited to 10 per second per plugin. A plugin tab can also draw its whole page with a view. A built-in tab never runs plugin code while it paints.</p>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set-info</code>, <code>set-info-rich</code></td>
+<td>the text of a live <code>info</code> row</td>
+</tr>
+<tr>
+<td><code>set-choices</code>, <code>set-choice-items</code></td>
+<td>the options of a dynamic <code>choice</code> or <code>multi-choice</code> row</td>
+</tr>
+<tr>
+<td><code>set-row-note</code></td>
+<td>a dim note under the description</td>
+</tr>
+<tr>
+<td><code>set-row-state</code></td>
+<td><code>idle</code>, <code>loading</code>, <code>pending</code> or <code>error</code> on a row, with a message of at most 80 characters</td>
+</tr>
+<tr>
+<td><code>set-item-states</code></td>
+<td>the state of single list items</td>
+</tr>
+<tr>
+<td><code>set-meter</code></td>
+<td>the segments of a <code>meter</code> row</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::settings;
+use ilium_plugin_sdk::types::{RowState, RowStateKind};
+
+fn mark_loading() -&gt; Result&lt;(), PluginError&gt; {
+    settings::set_row_state(&quot;stars&quot;, &amp;RowState {
+        kind: RowStateKind::Loading,
+        message: Some(&quot;asking the server&quot;.into()),
+    })
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { setRowState } from '@ilium/plugin-sdk/host/settings';
+
+export function markLoading(): void {
+  setRowState('stars', { kind: 'loading', message: 'asking the server' });
+}
+</code></pre>
+<p>A plugin that needs a built-in value can read it. The grant <code>settings.read-kernel:&lt;tab-id&gt;</code> and the import <code>kernel-settings</code> return the values of that tab as read-only JSON, with secrets replaced by <code>&lt;redacted&gt;</code>. No plugin writes a built-in value; a link with <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code> opens Settings at that row.</p>
+<h3 id="search">Search</h3>
+<p>Settings has a filter. Press <code>/</code> or <code>Ctrl+F</code> to open it, and type part of a name. The field replaces the <code>Esc or q to close</code> hint on the second header line. The filter matches tab titles, row titles, descriptions, section titles, keywords and keys, and for plugin rows the plugin name and id. A row hidden by <code>visible_when</code> is skipped. The rail then shows only the tabs with matches, each with a count, and the content shows only the matching rows, each with its section title and, for plugin rows, the plugin divider. Esc clears the filter, and a second Esc closes Settings.</p>
+<figure>
+<pre class="term"><span class="w2">⚙</span> Settings                                                               <span class="w2">✕</span> Close
+<span class="t-dim">/ max                                                           [ Guided setup ]</span>
+╭  ≡ ● · Navigation╮ ╭  ≡ ● · Clipboard history · plugin───────────────────────╮
+│ <span class="w2">❯</span>  Terminal 1    │ │                                                         │
+<span class="t-hi">│ ⎘  Clipboard 1   │</span> │<span class="t-hi">  CAPTURE                                                </span>│
+│                  │ │  Maximum entries ………………………………………………………… -   500    + *  │
+│                  │ │<span class="t-dim">    Oldest entries are removed first.                    </span>│
+│                  │ │                                                         │
+│                  │ │                                                         │
+│                  │ │                                                         │
+│                  │ │                                                         │
+╰──────────────────╯ ╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>The filter with the query <code>max</code>. The rail keeps the two tabs with a match and a count. The content shows the matching row under its section title. A match in a built-in tab shows the plugin divider when the row comes from a plugin.</figcaption>
+</figure>
+
+<p>Plugins need no search code. To make a row easier to find, give it <code>keywords</code>, at most 4 per row.</p>
+<h3 id="reset-to-default">Reset to default</h3>
+<p>The <code>r</code> key on a focused value row sends the patch <code>{ "&lt;key&gt;": null }</code> and needs no confirmation. The section title of a plugin tab, and the divider of a plugin block, carry a <code>[ Reset ]</code> control. It sets every key of the section that has <code>reset: true</code> to <code>null</code>, after the question <code>Reset &lt;n&gt; settings of &lt;plugin name&gt;?</code>. A section reset has the origin <code>reset</code> in <code>settings-changed</code>. Built-in rows have no reset key.</p>
+<h3 id="declaring-and-reading-in-both-languages">Declaring and reading, in both languages</h3>
+<p>A tab and a section differ only in the entry. The values are read the same way in both cases.</p>
+<pre><code class="language-json">{ &quot;contributes&quot;: { &quot;settings&quot;: [
+  { &quot;kind&quot;: &quot;section&quot;, &quot;id&quot;: &quot;terminal-capture&quot;, &quot;tab&quot;: &quot;terminal&quot;,
+    &quot;placement&quot;: &quot;end&quot;, &quot;title&quot;: &quot;Terminal capture&quot;, &quot;scope&quot;: &quot;client&quot;,
+    &quot;rows&quot;: [ { &quot;type&quot;: &quot;toggle&quot;, &quot;key&quot;: &quot;record_panes&quot;, &quot;title&quot;: &quot;Record pane copies&quot;,
+                &quot;default&quot;: true } ] }
+] } }
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::settings;
+
+fn record_panes() -&gt; bool {
+    let values: serde_json::Value =
+        serde_json::from_str(&amp;settings::get_json()).unwrap_or_default();
+    values[&quot;record_panes&quot;].as_bool().unwrap_or(true)
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { getJson } from '@ilium/plugin-sdk/host/settings';
+
+export function recordPanes(): boolean {
+  const values = JSON.parse(getJson()) as { record_panes?: boolean };
+  return values.record_panes ?? true;
+}
+</code></pre>
+<p>The section needs the grant <code>settings.contribute:terminal</code> in the manifest. The full build is <a href="/pages/tutorial-11-settings-extend-tab/">tutorial 11</a>.</p>
+<h3 id="lifecycle">Lifecycle</h3>
+<p>Settings outlive the plugin. The table shows each state.</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Plugin tab</th>
+<th>Section in a built-in tab</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Running</td>
+<td>Normal</td>
+<td>Normal</td>
+<td>Editable</td>
+</tr>
+<tr>
+<td>Restarting after a failure</td>
+<td>Notice with the attempt number and wait time</td>
+<td>Divider shows <code>plugin · restarting</code></td>
+<td>Editable, unless the plugin has <code>settings-validate</code>; then read-only</td>
+</tr>
+<tr>
+<td>Turned off by the user</td>
+<td>Rail entry dimmed, with a link to the Plugins page</td>
+<td>Divider shows <code>plugin · off</code>; rows dimmed</td>
+<td>Kept, read-only</td>
+</tr>
+<tr>
+<td>Disabled after repeated failures</td>
+<td>The stop notice and a link to the Plugins page</td>
+<td>Divider shows <code>plugin · disabled</code>; rows dimmed</td>
+<td>Kept, read-only</td>
+</tr>
+<tr>
+<td>Refused at load (API or schema mismatch)</td>
+<td>Dimmed, with the required API version</td>
+<td>As disabled</td>
+<td>Kept, untouched</td>
+</tr>
+<tr>
+<td>Uninstalled</td>
+<td>Gone from the rail</td>
+<td>Gone</td>
+<td>Kept until the user purges them</td>
+</tr>
+</tbody>
+</table>
+<p>A plugin that fails three times within 10 minutes is disabled. Disabling, crashes, upgrades and uninstalls never delete values. An upgrade can narrow a range, so a stored value may stop matching its row. The kernel then ignores it, uses the default and lists it on the recovery page as <code>settings.value-ignored</code>. The stored text stays in the file. Only <code>ilium plugin uninstall --purge</code> or "Forget settings" on the recovery page deletes values. A reinstall reads them again.</p>
+<div class="warn">
+
+A plugin that declares `settings-validate` has its rows read-only while it restarts, because the kernel cannot check a new value without the plugin. Plugins without that export keep their rows editable during a restart.
+
+</div>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The renders are 80 columns wide, with the geometry of the Settings screen at 80 by 32: a navigation frame of 20 columns, a gap of 1 and a content frame of 59. They are built from the layout code of the client. <code>◂</code> marks the selected rail entry, which the real rail shows with the selected style (lavender, near-black text), not with a glyph. The scrollbar is a <code>│</code> track with a <code>┃</code> thumb. The microphone glyph of Voice control is one cell in the width tables of the client, so a browser that draws it two cells wide shifts that one line. The same holds for the lightning glyph of the Inference tab in the rails below.</p>
+<p>The plugin tab <code>Clipboard history</code> uses its <code>short_title</code> <code>Clipboard</code>, because 17 cells do not fit the 14 cells the rail leaves for a label at this width. It sits after <code>Text Triggers</code> and before the pinned tail.</p>
+<figure>
+<pre class="term"><span class="w2">⚙</span> Settings                                                               <span class="w2">✕</span> Close
+Esc or q to close                                               [ Guided setup ]
+╭  ≡ ● · Navigation╮ ╭  ≡ ● · Clipboard history · plugin───────────────────────╮
+│                  │ │                                                     ┃   │
+│ ◐  User Interface│ │  ⎘ Added by example.clipboard-history 1.2.0         ┃   │
+│ ▦  Icons         │ │                                                     ┃   │
+│ ◉  Agents        │ │  CAPTURE                                            ┃   │
+│ ¤  Agent Cost    │ │  Keep history …………………………………………………………… ‹ On ›        ┃   │
+│ ↗  Optimization  │ │    Record text copied in panes and the editor.      ┃   │
+│ ⇥  Remote        │ │  ──────────────────────                             ┃   │
+│ ⌨  Keyboard      │ │  Maximum entries …………………………………………………… -   500    + *┃ ? │
+│ <span class="w2">❯</span>  Terminal      │ │    Oldest entries are removed first.                ┃   │
+│ <span class="w2">✎</span>  Editor        │ │  ──────────────────────                             ┃   │
+│ ▣  Session       │ │  Store ……………………………………………………………………………… ‹ Text only › ┃   │
+│ ⑂  Git           │ │    Which clipboard content is kept.                 ┃   │
+│ ▥  Kanban Board  │ │  ──────────────────────                             ┃   │
+│ ▷  Animations    │ │                                                     ┃   │
+│ <span class="w2">♪</span>  Sound         │ │  PRIVACY                                            │   │
+│ <span class="w2">🎙</span>  Voice control │ │  Ignore patterns …………………………………………………… ‹ 2 items ›   │ ?│
+│ ↻  Reset planning│ │    Copies that match are never stored.              │   │
+│ <span class="w2">⚡</span> Inference     │ │  ──────────────────────                             │   │
+│ ≡  LLM text      │ │                                                     │   │
+│ ≔  Titles        │ │                                                     │   │
+│ <span class="w2">⚑</span>  Triggers      │ │                                                     │   │
+│ ¶  Text Triggers │ │                                                     │   │
+│ ⎘  <span class="t-hi">Clipboard    ◂</span>│ │                                                     │   │
+│ ⌕  Debug         │ │                                                     │   │
+│ ⇄  API           │ │                                                     │   │
+│ ⓘ  About         │ │                                                     │   │
+│ <span class="w2">⚙</span>  Setup         │ │                                                     │   │
+╰──────────────────╯ ╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>The rail with a plugin tab, and the first part of the tab. The first line names the plugin and its version. Section titles are upper case.</figcaption>
+</figure>
+
+<p>Inside a built-in tab, a plugin block follows the built-in rows, at the anchor. The block starts with a divider that names the plugin, and a dim <code>▏</code> gutter marks every plugin line, so the label stays visible after the user scrolls past the divider.</p>
+<figure>
+<pre class="term"><span class="w2">⚙</span> Settings                                                               <span class="w2">✕</span> Close
+Esc or q to close                                               [ Guided setup ]
+╭  ≡ ● · Navigation╮ ╭  ≡ ● · Terminal─────────────────────────────────────────╮
+│                  │ │                                                         │
+│ ◐  User Interface│ │  Scrollback budget ……………………………………………… -  8 MiB   + *  ? │
+│ ▦  Icons         │ │    Maximum retained terminal output per pane; takes     │
+│ ◉  Agents        │ │  ──────────────────────                                 │
+│ ¤  Agent Cost    │ │  New pane directory …………………………………………………… ‹ Project r  ? │
+│ ↗  Optimization  │ │    Choose the initial directory for a terminal pane.    │
+│ ⇥  Remote        │ │  ──────────────────────                                 │
+│ ⌨  Keyboard      │ │  Smart Copy light ………………………………………………………… ‹ On ›         │
+│ <span class="w2">❯</span>  Terminal     ◂│ │    Hold the key below over a terminal and click regi    │
+│ <span class="w2">✎</span>  Editor        │ │  ──────────────────────                                 │
+│ ▣  Session       │ │  Smart Copy light key …………………………………… ← Control   + →    │
+│ ⑂  Git           │ │    The modifier key that starts Smart Copy light whi    │
+│ ▥  Kanban Board  │ │  ──────────────────────                                 │
+│ ▷  Animations    │ │  Parser pool ……………………………………………………………… -  0 MiB   + *  ? │
+│ <span class="w2">♪</span>  Sound         │ │    No aggregate parser memory cap: initialized panes    │
+│ <span class="w2">🎙</span>  Voice control│ │  ──────────────────────                                 │
+│ ↻  Reset planning│ │<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ────────────────────── plugin ─</span>    │
+│ <span class="w2">⚡</span> Inference     │ │▏ Terminal capture                                       │
+│ ≡  LLM text      │ │▏ Record pane copies …………………………………………… ‹ On ›          ? │
+│ ≔  Titles        │ │▏   Also store text copied from terminal panes.          │
+│ <span class="w2">⚑</span>  Triggers      │ │▏ ──────────────────────                                 │
+│ ¶  Text Triggers │ │▏ Ignore copies under ……………………………………… -  3 chars  + *    │
+│ ⎘  Clipboard     │ │▏   Short copies such as a single word are skipped.      │
+│ ⌕  Debug         │ │▏ ──────────────────────                                 │
+│ ⇄  API           │ │▏ Skip secret-looking text …………………………… ‹ On ›            │
+│ ⓘ  About         │ │▏   Tokens and keys are never stored.                    │
+│ <span class="w2">⚙</span>  Setup         │ │▏ ──────────────────────                                 │
+╰──────────────────╯ ╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>The Terminal tab with a plugin section at the anchor <code>end</code>. The built-in rows are unchanged.</figcaption>
+</figure>
+
+<p>When the plugin is disabled after failures, its block stays visible, dimmed and read-only, with the reason above it:</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal─────────────────────────────────────────╮
+│  Parser pool ……………………………………………………………… -  0 MiB   + *│ ? │
+│    No aggregate parser memory cap: initialized panes│   │
+│  ──────────────────────                             │   │
+│▏ ⎘ CLIPBOARD HISTORY ─────────── plugin · disabled ─│   │
+│▏ <span class="t-warn">! Plugin Clipboard history stopped after 3</span>         │   │
+│▏   failures in 10 minutes: handler trap.            │   │
+│▏   Values are kept.  [ Open Plugins page ]          │   │
+│▏ Terminal capture                                   │   │
+│▏ Record pane copies …………………………………………… ‹ On ›        ┃ ? │
+│▏   Read-only while the plugin is disabled.          ┃   │
+│▏ ──────────────────────                             ┃   │
+│▏ Ignore copies under ……………………………………… -  3 chars  + *┃   │
+│▏   Read-only while the plugin is disabled.          ┃   │
+│▏ ──────────────────────                             ┃   │
+╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>A plugin section after the plugin was disabled. Values are kept.</figcaption>
+</figure>
+
+<p>While the plugin restarts after a failure, a plugin tab shows a notice. A plugin that exports <code>settings-validate</code> has its rows read-only until the new instance runs:</p>
+<figure>
+<pre class="term">╭  ≡ ● · Clipboard history · plugin───────────────────────╮
+│                                                         │
+│  ⎘ Added by example.clipboard-history 1.2.0             │
+│  ◌ Restarting after a failure (attempt 2, in 5 s).      │
+│    Rows are read-only until it is back, because         │
+│    this plugin checks values itself.                    │
+│                                                         │
+│  CAPTURE                                                │
+│  Keep history …………………………………………………………… ‹ On ›            │
+│    Record text copied in panes and the editor.          │
+│  ──────────────────────                                 │
+│  Maximum entries …………………………………………………… -   500    + *  ? │
+│    Oldest entries are removed first.                    │
+│  ──────────────────────                                 │
+╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>The plugin tab while the plugin restarts.</figcaption>
+</figure>
+
+<p>Rows of a plugin tab can be of any of the 18 types. The tab, scrolled down, shows several of them:</p>
+<figure>
+<pre class="term">╭  ≡ ● · Clipboard history · plugin───────────────────────╮
+│  Ignore patterns …………………………………………………… ‹ 2 items ›   │ ? │
+│    Copies that match are never stored.              │   │
+│  ──────────────────────                             │   │
+│  Clear history ………………………………………………………… [ Clear now ] │   │
+│    Deletes every stored entry at once.              │   │
+│  ──────────────────────                             │   │
+│  Stored entries ……………………………………………………… 312 entries   │   │
+│    Updated by the plugin while it runs.             │   │
+│  ──────────────────────                             │   │
+│                                                     │   │
+│  STORAGE                                            │   │
+│  History file …………………………………………………………… ‹ ~/clips.db ›│   │
+│    File picker; other folders need fs access.       │   │
+│  ──────────────────────                             │   │
+│  Highlight colour ………………………………………………… ‹ ██ #4a9eff ›│   │
+│    Colour of the newest entry in the picker.        │   │
+│  ──────────────────────                             │   │
+│  Picker key ………………………………………………………………… ‹ Ctrl+Alt+V ›│   │
+│    Opens the history picker.                        │   │
+│  ──────────────────────                             │   │
+│  Label ……………………………………………………………………………… ‹ work ›      │   │
+│    Shown in the picker title; 40 characters.        │   │
+│  ──────────────────────                             ┃   │
+│  Paste template ……………………………………………………… ‹ 3 lines ›   ┃   │
+│    Enter opens the editor; saved after 1 s.         ┃   │
+│  ──────────────────────                             ┃   │
+│  ▾ Advanced                                         ┃   │
+│    Sync between panes ……………………………………… ‹ Off ›       ┃   │
+│      Needs Keep history.                            ┃   │
+│    ──────────────────────                           ┃   │
+│    Sync interval …………………………………………………… -   5 s    + *┃   │
+│      Unavailable: Sync between panes is Off.        ┃   │
+│    ──────────────────────                           ┃   │
+╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>More row types: a list, a button, a live info row, a path, a colour, a key, a text, a text area and a group. The group holds a toggle and a dependent number that is read-only because its <code>depends_on</code> is false.</figcaption>
+</figure>
+
+<h3 id="how-the-pieces-fit">How the pieces fit</h3>
+<p>The kernel keeps one settings registry. It is built when the client starts and rebuilt when a plugin is installed, enabled, disabled or upgraded. It holds the tabs in rail order, the anchors of each built-in tab and the plugin blocks for each anchor. Keys, mouse, help and search all read the same row list, so plugin rows behave like built-in rows.</p>
+<figure>
+<svg viewBox="0 0 410 160" role="img" aria-label="Plugin manifest flows into the settings registry, then the screen and one row model" width="615" height="240">
+  <defs>
+    <marker id="se-flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="36" width="118" height="52" rx="6" fill="none" stroke="currentColor"/>
+  <text x="65" y="58" font-size="11" text-anchor="middle" fill="currentColor">Plugin manifest</text>
+  <text x="65" y="74" font-size="10" text-anchor="middle" fill="currentColor">contributes.settings</text>
+  <rect x="146" y="36" width="118" height="52" rx="6" fill="none" stroke="currentColor"/>
+  <text x="205" y="58" font-size="11" text-anchor="middle" fill="currentColor">Settings registry</text>
+  <text x="205" y="74" font-size="10" text-anchor="middle" fill="currentColor">kernel, checked</text>
+  <rect x="286" y="36" width="118" height="52" rx="6" fill="none" stroke="currentColor"/>
+  <text x="345" y="58" font-size="11" text-anchor="middle" fill="currentColor">Settings screen</text>
+  <text x="345" y="74" font-size="10" text-anchor="middle" fill="currentColor">rail and content</text>
+  <line x1="124" y1="62" x2="143" y2="62" stroke="currentColor" marker-end="url(#se-flow-arrow)"/>
+  <line x1="264" y1="62" x2="283" y2="62" stroke="currentColor" marker-end="url(#se-flow-arrow)"/>
+  <rect x="6" y="116" width="398" height="30" rx="6" fill="none" stroke="currentColor"/>
+  <text x="205" y="135" font-size="11" text-anchor="middle" fill="currentColor">One row model: paint, keys, mouse, help, search</text>
+  <line x1="345" y1="88" x2="345" y2="114" stroke="currentColor" marker-end="url(#se-flow-arrow)"/>
+</svg>
+<figcaption>The manifest is read once into the registry. The screen draws built-in and plugin rows through one row model.</figcaption>
+</figure>
+
+<p>Built-in tabs keep their own row code. A plugin block can never change a built-in row index.</p>
+<h3 id="security">Security</h3>
+<p>Project-scope values are ignored until the user trusts the project ([SEC-310], [SEC-311]). See <a href="/pages/reference-extension-security/">Extension security</a>.</p>
+<p>Requirements for this page: <a href="/pages/reference-requirements-settings/">Settings requirements</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/worlds-and-sides/"><small>Previous</small>Worlds and sides</a><a class="next" href="/pages/api-audio/"><small>Next</small>audio</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#the-model">The model</a></li><li class="l2"><a href="#ordering">Ordering</a></li><li class="l2"><a href="#grants">Grants</a></li><li class="l2"><a href="#row-types">Row types</a></li><li class="l2"><a href="#safety-rules">Safety rules</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#values-and-saving">Values and saving</a></li><li class="l2"><a href="#live-content">Live content</a></li><li class="l2"><a href="#search">Search</a></li><li class="l2"><a href="#reset-to-default">Reset to default</a></li><li class="l2"><a href="#declaring-and-reading-in-both-languages">Declaring and reading, in both languages</a></li><li class="l2"><a href="#lifecycle">Lifecycle</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#how-the-pieces-fit">How the pieces fit</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

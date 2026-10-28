@@ -1,0 +1,962 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Editor primitive | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details open><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/" aria-current="page">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Pane primitives</b></p>
+<h1>Editor primitive</h1>
+
+<p>The editor primitive gives a client plugin access to the Ilium editor. A plugin can list the open buffers, read lines and selections, draw decorations and gutter marks, create and load buffers, save them, and change their text. It can also export an <code>annotator</code> that highlights text in the visible lines of a buffer. Only client-side plugins can use the primitive.</p>
+<p>The native editor provides this interface. The editor is a built-in pane kind, and no grant lets a plugin replace it in 0.1.0. A later version may let an editor plugin provide it under the <code>editor.provide</code> grant. That provider is post-v1 and high risk, and a package that names <code>editor.provide</code> fails with <code>manifest.grant-unknown</code>. See <a href="/pages/capability-editor-provide/">Editor provider</a>.</p>
+<h3 id="what-you-need">What you need</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>What it allows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>editor.read</code></td>
+<td>List buffers, read lines and selections, set decorations and gutter marks, receive editor events, and export an <code>annotator</code>.</td>
+</tr>
+<tr>
+<td><code>editor.edit</code></td>
+<td>Create, load, save and close buffers, apply edits, and open files in the editor. It also reads buffers, so most edit plugins hold both grants.</td>
+</tr>
+<tr>
+<td><code>fs.read</code></td>
+<td>Load a file with <code>load-file</code>, or open a path with <code>editor-open</code>. The grant applies to the file's scope.</td>
+</tr>
+<tr>
+<td><code>fs.write</code></td>
+<td>Save a buffer with <code>save-buffer</code>. The grant applies to the file's scope.</td>
+</tr>
+</tbody>
+</table>
+<p>The grants take no argument. <code>editor.read</code> and <code>editor.edit</code> are valid, and <code>editor.read:project</code> is invalid. Files are reached through their scope, for example <code>project</code>. See <a href="/pages/file-access/">File access</a>.</p>
+<p>The SDK for your language exposes the functions under <code>primitives/editor</code>. Rust uses <code>ilium-plugin-sdk</code> and TypeScript uses <code>@ilium/plugin-sdk</code>. Both need the manifest to list the grants above. The annotator also needs an entry in the manifest <code>exports</code> list. See <a href="/pages/api-exports/">Plugin exports</a>.</p>
+<h3 id="interface">Interface</h3>
+<pre><code class="language-wit">record buffer-ref {
+    buffer: buffer-id, pane: option&lt;node-id&gt;, path: option&lt;fs-path&gt;,
+    language: option&lt;string&gt;, revision: u64, line-count: u32, dirty: bool,
+}
+record text-position { line: u32, column: u32 }
+record text-range { start: text-position, end: text-position }
+buffers: func() -&gt; list&lt;buffer-ref&gt;;
+buffer-for-pane: func(pane: node-id) -&gt; option&lt;buffer-ref&gt;;
+read-lines: func(buffer: buffer-id, first-line: u32, count: u32)
+    -&gt; result&lt;list&lt;string&gt;, plugin-error&gt;;
+selections: func(buffer: buffer-id) -&gt; list&lt;text-range&gt;;
+record range-decoration { range: text-range, style: style, hover: option&lt;string&gt; }
+set-decorations: func(buffer: buffer-id, layer: string, items: list&lt;range-decoration&gt;)
+    -&gt; result&lt;_, plugin-error&gt;;
+record gutter-mark {
+    line: u32, icon: string, tooltip: option&lt;string&gt;, command: option&lt;string&gt;,
+}
+set-gutter: func(buffer: buffer-id, layer: string, marks: list&lt;gutter-mark&gt;)
+    -&gt; result&lt;_, plugin-error&gt;;
+create-buffer: func(initial: string, language: option&lt;string&gt;)
+    -&gt; result&lt;buffer-id, plugin-error&gt;;
+load-file: func(path: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+take-buffer: func(request: request-id) -&gt; option&lt;buffer-id&gt;;
+save-buffer: func(buffer: buffer-id, path: option&lt;fs-path&gt;)
+    -&gt; result&lt;request-id, plugin-error&gt;;
+close-buffer: func(buffer: buffer-id);
+record line-annotation {
+    line: u32, first-column: u32, last-column: u32, style: style,
+}
+annotate: func(buffer: buffer-id, revision: u64, first-line: u32, lines: list&lt;string&gt;)
+    -&gt; list&lt;line-annotation&gt;;
+</code></pre>
+<p>Lines count from zero, and columns count Unicode scalar values, not bytes. A <code>text-range</code> is half open: its end is not part of the range. The <code>style</code> record is the shared one from the text model, and its colour roles are listed in <a href="/pages/accessibility-and-theming/">Accessibility and theming</a>.</p>
+<h3 id="functions">Functions</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Rust (<code>primitives::editor</code>)</th>
+<th>TypeScript (<code>primitives/editor</code>)</th>
+<th>Grant</th>
+<th>Sync or async</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>buffers</code></td>
+<td><code>buffers()</code></td>
+<td><code>buffers()</code></td>
+<td><code>editor.read</code></td>
+<td>sync</td>
+<td>Lists the open buffers with their revisions and line counts.</td>
+</tr>
+<tr>
+<td><code>buffer-for-pane</code></td>
+<td><code>buffer_for_pane(pane)</code></td>
+<td><code>bufferForPane(pane)</code></td>
+<td><code>editor.read</code></td>
+<td>sync</td>
+<td>Returns the buffer shown in one pane, or none.</td>
+</tr>
+<tr>
+<td><code>read-lines</code></td>
+<td><code>read_lines(buffer, first_line, count)</code></td>
+<td><code>readLines(buffer, firstLine, count)</code></td>
+<td><code>editor.read</code></td>
+<td>sync</td>
+<td>Returns up to <code>count</code> lines from <code>first_line</code>.</td>
+</tr>
+<tr>
+<td><code>selections</code></td>
+<td><code>selections(buffer)</code></td>
+<td><code>selections(buffer)</code></td>
+<td><code>editor.read</code></td>
+<td>sync</td>
+<td>Returns the selections as text ranges.</td>
+</tr>
+<tr>
+<td><code>set-decorations</code></td>
+<td><code>set_decorations(buffer, layer, &amp;[..])</code></td>
+<td><code>setDecorations(buffer, layer, [..])</code></td>
+<td><code>editor.read</code></td>
+<td>sync</td>
+<td>Replaces every decoration of one layer on a buffer.</td>
+</tr>
+<tr>
+<td><code>set-gutter</code></td>
+<td><code>set_gutter(buffer, layer, &amp;[..])</code></td>
+<td><code>setGutter(buffer, layer, [..])</code></td>
+<td><code>editor.read</code></td>
+<td>sync</td>
+<td>Replaces every gutter mark of one layer on a buffer.</td>
+</tr>
+<tr>
+<td><code>create-buffer</code></td>
+<td><code>create_buffer(initial, language)</code></td>
+<td><code>createBuffer(initial, language?)</code></td>
+<td><code>editor.edit</code></td>
+<td>sync</td>
+<td>Creates a buffer with initial text and returns its id.</td>
+</tr>
+<tr>
+<td><code>load-file</code></td>
+<td><code>load_file(path).await</code></td>
+<td><code>loadFile(path)</code></td>
+<td><code>editor.edit</code>, <code>fs.read</code></td>
+<td>async</td>
+<td>Loads a file. The completion carries the buffer id.</td>
+</tr>
+<tr>
+<td><code>take-buffer</code></td>
+<td><code>take_buffer(request)</code></td>
+<td><code>takeBuffer(request)</code></td>
+<td>none</td>
+<td>sync</td>
+<td>Reads the buffer id of a finished <code>load-file</code>.</td>
+</tr>
+<tr>
+<td><code>save-buffer</code></td>
+<td><code>save_buffer(buffer, path).await</code></td>
+<td><code>saveBuffer(buffer, path?)</code></td>
+<td><code>editor.edit</code>, <code>fs.write</code></td>
+<td>async</td>
+<td>Writes a buffer to its path, or to a new path.</td>
+</tr>
+<tr>
+<td><code>close-buffer</code></td>
+<td><code>close_buffer(buffer)</code></td>
+<td><code>closeBuffer(buffer)</code></td>
+<td><code>editor.edit</code></td>
+<td>sync</td>
+<td>Closes a buffer and frees its slot in the quota.</td>
+</tr>
+</tbody>
+</table>
+<p>Fallible sync functions return <code>Result&lt;T, PluginError&gt;</code> in Rust. In TypeScript they return the value or throw a <code>PluginError</code>. The infallible editor reads <code>buffers()</code>, <code>buffer-for-pane()</code> and <code>selections()</code> have no result: they return the list or option directly, and with <code>editor.read</code> declined or revoked they return an empty list or none (see the edge cases). The async functions return a request in the raw form, and the wrappers take the buffer at once.</p>
+<p>Decorations and gutter marks belong to the plugin. Each layer is named by the plugin, and a call on one layer never touches another layer or another plugin's marks. The host clears every layer of a plugin when the plugin stops.</p>
+<h3 id="events-and-intents">Events and intents</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Payload</th>
+<th>Grant</th>
+<th>Delivery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>editor-opened</code>, <code>editor-closed</code></td>
+<td><code>buffer-ref</code></td>
+<td><code>editor.read</code></td>
+<td>Never dropped.</td>
+</tr>
+<tr>
+<td><code>editor-changed</code></td>
+<td><code>buffer</code>, <code>revision</code>, <code>first-line</code>, <code>last-line</code></td>
+<td><code>editor.read</code></td>
+<td>Coalesced per buffer, debounced 100 ms.</td>
+</tr>
+<tr>
+<td><code>editor-saved</code></td>
+<td><code>buffer</code>, <code>path</code></td>
+<td><code>editor.read</code></td>
+<td>Never dropped.</td>
+</tr>
+<tr>
+<td><code>editor-apply-edits</code> intent</td>
+<td><code>buffer</code>, <code>base-revision</code>, <code>edits</code> (<code>range</code>, <code>replacement</code>)</td>
+<td><code>editor.edit</code></td>
+<td>Outcome <code>ok</code>, or <code>refused(conflict)</code> when the revision is stale.</td>
+</tr>
+<tr>
+<td><code>editor-open</code> intent</td>
+<td><code>path</code>, <code>line</code>, <code>placement</code> (<code>new-pane</code>, <code>split</code>, <code>replace</code>)</td>
+<td><code>editor.edit</code>, <code>fs.read</code></td>
+<td>Outcome <code>ok-node</code>, the pane that opened.</td>
+</tr>
+</tbody>
+</table>
+<p>An edit names the revision that the plugin read. The kernel applies all edits of one submission as one change, and the revision rises by one. Edits in one submission must not overlap. Read the buffer again after a <code>conflict</code>, decide whether the change is still needed, and submit again. See <a href="/pages/capability-editor-edit/">Editor edit</a> for the full rules.</p>
+<h3 id="annotator-export">Annotator export</h3>
+<p>The annotator is an optional export of the client side. It has one method, <code>annotate</code>, which the kernel calls for the visible lines of a buffer. It runs at most once every 100 ms per buffer, and a late result for an old revision is dropped. It needs <code>editor.read</code>. A call that breaches its time budget is dropped, and three breaches in a row trap the plugin. See <a href="/pages/api-exports/">Plugin exports</a>.</p>
+<h3 id="worked-example-in-rust">Worked example in Rust</h3>
+<p>This client plugin highlights every <code>TODO</code> word in the visible lines through its annotator. It also puts a gutter mark on each line that contains <code>TODO</code>. The mark runs <code>example.todo/open</code> when clicked. The plugin needs the grant <code>editor.read</code> and the manifest entries <code>exports = ["annotator"]</code> and a command with the id <code>example.todo/open</code>.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::primitives::editor::{self, GutterMark, LineAnnotation};
+use ilium_plugin_sdk::types::ids::BufferId;
+use ilium_plugin_sdk::types::text::ColorRole;
+
+const TODO_LAYER: &amp;str = &quot;todo-marks&quot;;
+const OPEN_COMMAND: &amp;str = &quot;example.todo/open&quot;;
+const MAX_LINES: u32 = 10_000;
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;annotator&quot;])]
+#[derive(Default)]
+struct TodoMarks;
+
+impl Lifecycle for TodoMarks {}
+
+impl Handler for TodoMarks {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::EditorChanged(change) = event else { continue };
+            let Some(buffer) = editor::buffers()
+                .into_iter()
+                .find(|candidate| candidate.buffer == change.buffer)
+            else {
+                continue;
+            };
+            // set-gutter replaces the whole layer, so every mark of the buffer is sent.
+            let count = buffer.line_count.min(MAX_LINES);
+            let Ok(lines) = editor::read_lines(change.buffer, 0, count) else { continue };
+            let marks = todo_marks(&amp;lines);
+            let _ = editor::set_gutter(change.buffer, TODO_LAYER, &amp;marks);
+        }
+        Vec::new()
+    }
+}
+
+fn todo_marks(lines: &amp;[String]) -&gt; Vec&lt;GutterMark&gt; {
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, text)| text.contains(&quot;TODO&quot;))
+        .map(|(index, _)| GutterMark {
+            line: index as u32,
+            icon: &quot;list-check&quot;.into(),
+            tooltip: Some(&quot;Open the TODO issue&quot;.into()),
+            command: Some(OPEN_COMMAND.into()),
+        })
+        .collect()
+}
+
+impl Annotator for TodoMarks {
+    fn annotate(
+        &amp;mut self,
+        _buffer: BufferId,
+        _revision: u64,
+        first_line: u32,
+        lines: Vec&lt;String&gt;,
+    ) -&gt; Vec&lt;LineAnnotation&gt; {
+        lines
+            .iter()
+            .enumerate()
+            .filter_map(|(index, text)| {
+                let byte_index = text.find(&quot;TODO&quot;)?;
+                let column = text[..byte_index].chars().count() as u32;
+                Some(LineAnnotation {
+                    line: first_line + index as u32,
+                    first_column: column,
+                    last_column: column + &quot;TODO&quot;.chars().count() as u32,
+                    style: Style::role(ColorRole::Accent),
+                })
+            })
+            .collect()
+    }
+}
+</code></pre>
+<h3 id="worked-example-in-typescript">Worked example in TypeScript</h3>
+<p>This client plugin handles a command that summarises the selections of the buffer where it ran. It writes the summary into a new buffer and highlights the selected ranges in the source buffer. The plugin needs <code>editor.read</code> and <code>editor.edit</code>, and the command <code>example.selections/summarise</code> in its manifest.</p>
+<pre><code class="language-ts">import { definePlugin, PluginError } from '@ilium/plugin-sdk';
+import {
+  createBuffer, readLines, selections, setDecorations, type RangeDecoration,
+} from '@ilium/plugin-sdk/primitives/editor';
+import { role, type Event, type Submission } from '@ilium/plugin-sdk/types';
+
+const SUMMARY_COMMAND = 'example.selections/summarise';
+const SELECTION_LAYER = 'selection-summary';
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate() {},
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag !== 'command-invoked' || event.val.command !== SUMMARY_COMMAND) continue;
+      const buffer = event.val.context.buffer;
+      if (buffer !== undefined) summarise(buffer);
+    }
+    return [];
+  },
+});
+
+function summarise(buffer: bigint): void {
+  const ranges = selections(buffer);
+  if (ranges.length === 0) return;
+  try {
+    const summaryLines = ranges.map((range) =&gt; {
+      const [text = ''] = readLines(buffer, range.start.line, 1);
+      return `line ${range.start.line + 1}: ${text.trim()}`;
+    });
+    createBuffer(`${summaryLines.join('\n')}\n`);
+    const decorations: RangeDecoration[] = ranges.map((range) =&gt; ({
+      range,
+      style: { fg: role('accent') },
+      hover: 'Included in the selection summary',
+    }));
+    setDecorations(buffer, SELECTION_LAYER, decorations);
+  } catch (error) {
+    // not-found means the buffer closed during the call. Other errors are not handled here.
+    if (!(error instanceof PluginError &amp;&amp; error.code === 'not-found')) throw error;
+  }
+}
+</code></pre>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The annotator colours the matched words in the editor, and the gutter marks sit beside the matched lines. Both are drawn in the editor pane, not in the plugin's own view.</p>
+<figure>
+<pre class="term">
+<span class="t-dim"> 41 </span>  fn load(path: &amp;Path) -&gt; Notes {
+<span class="t-hi"> 42 </span>● <span class="t-warn">// TODO</span> handle
+<span class="t-dim"> 43 </span>      let text = fs::read(path)?;
+<span class="t-dim"> 44 </span>      parse(&amp;text)
+<span class="t-dim"> 45 </span>  }
+</pre>
+<figcaption>Illustrative, not generated. An editor pane with a TODO highlight and a gutter mark
+on line 42, in the dark theme. The mark on line 42 opens the issue when clicked.</figcaption>
+</figure>
+
+<p>The summary command in the TypeScript example leaves a new buffer that the user can save or close:</p>
+<figure>
+<pre class="term">
+<span class="t-hi">line 42:</span> <span class="t-warn">// TODO</span> handle
+<span class="t-hi">line 44:</span> parse(&amp;text)
+</pre>
+<figcaption>Illustrative, not generated. The buffer created by the summary command. The
+selected ranges in the source buffer carry the accent colour and a hover text.</figcaption>
+</figure>
+
+<h3 id="diagrams">Diagrams</h3>
+<figure>
+<svg viewBox="0 0 400 140" role="img" aria-label="Annotator and gutter paths for one buffer" width="600" height="210">
+  <defs>
+    <marker id="arrow-annotate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="10" width="110" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="65" y="32" font-size="12" text-anchor="middle" fill="currentColor">Buffer lines</text>
+  <line x1="120" y1="27" x2="158" y2="27" stroke="currentColor" marker-end="url(#arrow-annotate)"/>
+  <rect x="160" y="10" width="110" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="215" y="32" font-size="12" text-anchor="middle" fill="currentColor">annotate()</text>
+  <line x1="270" y1="27" x2="288" y2="27" stroke="currentColor" marker-end="url(#arrow-annotate)"/>
+  <rect x="290" y="10" width="110" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="345" y="32" font-size="12" text-anchor="middle" fill="currentColor">Highlight drawn</text>
+  <rect x="10" y="70" width="120" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="70" y="92" font-size="12" text-anchor="middle" fill="currentColor">editor-changed</text>
+  <line x1="130" y1="87" x2="158" y2="87" stroke="currentColor" marker-end="url(#arrow-annotate)"/>
+  <rect x="160" y="70" width="110" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="215" y="92" font-size="12" text-anchor="middle" fill="currentColor">set-gutter()</text>
+  <line x1="270" y1="87" x2="288" y2="87" stroke="currentColor" marker-end="url(#arrow-annotate)"/>
+  <rect x="290" y="70" width="110" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="345" y="92" font-size="12" text-anchor="middle" fill="currentColor">Gutter icon</text>
+  <text x="10" y="130" font-size="11" fill="currentColor">Top: annotator. Bottom: the handler marks the gutter.</text>
+</svg>
+<figcaption>The annotator runs on the visible lines, and the handler sets the gutter after each
+change to the buffer.</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 340 130" role="img" aria-label="Edit path with base revision check" width="510" height="195">
+  <defs>
+    <marker id="arrow-edit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="8" width="130" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="73" y="30" font-size="12" text-anchor="middle" fill="currentColor">Plugin submits</text>
+  <line x1="138" y1="26" x2="180" y2="26" stroke="currentColor" marker-end="url(#arrow-edit)"/>
+  <rect x="182" y="8" width="150" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="257" y="30" font-size="12" text-anchor="middle" fill="currentColor">Compare revision</text>
+  <line x1="257" y1="44" x2="257" y2="70" stroke="currentColor" marker-end="url(#arrow-edit)"/>
+  <text x="263" y="62" font-size="10" fill="currentColor">stale</text>
+  <rect x="182" y="72" width="150" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="257" y="94" font-size="12" text-anchor="middle" fill="currentColor">Refused: conflict</text>
+  <text x="8" y="124" font-size="11" fill="currentColor">A matching revision applies the edits and returns ok.</text>
+</svg>
+<figcaption>A plugin never edits a buffer it has not just read.</figcaption>
+</figure>
+
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A sync call without its grant</td>
+<td><code>not-permitted</code> at once.</td>
+</tr>
+<tr>
+<td><code>buffers()</code>, <code>buffer-for-pane()</code> or <code>selections()</code> with <code>editor.read</code> declined or revoked</td>
+<td>An empty list or none, and one refusal line in the plugin log. These calls have no result.</td>
+</tr>
+<tr>
+<td><code>read-lines</code>, <code>set-decorations</code> or <code>set-gutter</code> with the grant declined or revoked</td>
+<td><code>not-permitted</code>.</td>
+</tr>
+<tr>
+<td><code>read-lines</code> with a first line past the end of the buffer</td>
+<td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td><code>read-lines</code> with a count past the last line</td>
+<td>The lines that exist, with no error.</td>
+</tr>
+<tr>
+<td><code>read-lines</code> with a count over 10,000</td>
+<td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td><code>set-decorations</code> or <code>set-gutter</code> with over 10,000 items in one layer</td>
+<td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>A buffer id that does not exist or has closed</td>
+<td><code>not-found</code>.</td>
+</tr>
+<tr>
+<td><code>create-buffer</code> with more than 16 MiB of text</td>
+<td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>The 65th buffer held by one plugin</td>
+<td><code>quota-exceeded</code>. Closing a buffer frees its slot.</td>
+</tr>
+<tr>
+<td><code>load-file</code> with a binary file or a file over 16 MiB</td>
+<td><code>failed(invalid-argument)</code> in the completion.</td>
+</tr>
+<tr>
+<td><code>load-file</code> with a missing file</td>
+<td><code>failed(not-found)</code> in the completion.</td>
+</tr>
+<tr>
+<td><code>save-buffer</code> with <code>path: none</code> on a buffer without a path</td>
+<td><code>invalid-argument</code> at once.</td>
+</tr>
+<tr>
+<td><code>save-buffer</code> when the file changed on disk after loading</td>
+<td><code>failed(conflict)</code> in the completion.</td>
+</tr>
+<tr>
+<td><code>editor-apply-edits</code> with a stale base revision</td>
+<td><code>refused(conflict)</code>. No edit is applied.</td>
+</tr>
+<tr>
+<td><code>editor-apply-edits</code> with overlapping or out-of-range edits</td>
+<td><code>refused(invalid-argument)</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>load-file</code> completes once the buffer is open. If the plugin does not call <code>take-buffer</code> within 30 seconds, the buffer stays open and the plugin finds it again with <code>buffers()</code>. Buffers stay open when a plugin stops, is disabled or is restarted. The editor keeps their text.</p>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+<th>Error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lines per <code>read-lines</code> call</td>
+<td>10,000</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Decorations or gutter marks per layer</td>
+<td>10,000</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Buffers created or held per plugin</td>
+<td>64</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Text in <code>create-buffer</code></td>
+<td>16 MiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Edits in one <code>editor-apply-edits</code></td>
+<td>10,000</td>
+<td><code>refused(invalid-argument)</code></td>
+</tr>
+<tr>
+<td>Annotator calls per buffer</td>
+<td>once per 100 ms</td>
+<td>Extra calls are not made.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="viewport-pointer-and-tokens">Viewport, pointer and tokens</h3>
+<p>The viewport, the <code>editor-pointer</code> and <code>editor-viewport-changed</code> events, minimap marks and the <code>token-provider</code> export are described in <a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a>. They need only <code>editor.read</code>.</p>
+<pre class="term">╭──≡ ● · main.rs───────────────────────────────────────╮
+│fn main() {                                       <span class="t-dim">·</span>   │
+│    <span class="t-err">oops();</span>                                     <span class="t-err">≡</span>     │
+│}                                                 <span class="t-dim">·</span>   │
+╰──────────────────────────────────────────────────────╯
+</pre>
+
+<p>Requirement ids for this page: [PRI-020], [PRI-021], [PRI-022], [PRI-023], [PRI-024]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li>
+<p><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a> for the viewport, pointer events, minimap marks and token provider.</p>
+</li>
+<li>
+<p><a href="/pages/api-exports/">Plugin exports</a> for the <code>annotator</code> export and its call budget.</p>
+</li>
+<li><a href="/pages/capability-editor-read/">Editor read</a> for the grant, events and limits in full.</li>
+<li><a href="/pages/capability-editor-edit/">Editor edit</a> for buffers, saving and the edit intent.</li>
+<li><a href="/pages/api-commands/">Commands</a> for the command that a gutter mark runs.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes used here.</li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the import paths.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/primitives-basic/"><small>Previous</small>Basic primitive</a><a class="next" href="/pages/primitives-terminal/"><small>Next</small>Terminal primitive</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#interface">Interface</a></li><li class="l2"><a href="#functions">Functions</a></li><li class="l2"><a href="#events-and-intents">Events and intents</a></li><li class="l2"><a href="#annotator-export">Annotator export</a></li><li class="l2"><a href="#worked-example-in-rust">Worked example in Rust</a></li><li class="l2"><a href="#worked-example-in-typescript">Worked example in TypeScript</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#diagrams">Diagrams</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#viewport-pointer-and-tokens">Viewport, pointer and tokens</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

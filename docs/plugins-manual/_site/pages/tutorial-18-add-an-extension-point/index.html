@@ -1,0 +1,1155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>18. Offer an extension point: a link preview plugin | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/" aria-current="page">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>18. Offer an extension point: a link preview plugin</h1>
+
+<p>This step makes your plugin the owner of an extension point. The plugin is <code>example.linkpreview</code>. When the user runs a command on a URL, the plugin builds a short preview. It does not know every site. It owns a <strong>collect</strong> point, <code>renderers</code>, where other packages list a URL pattern and the service that can render it. It also owns a <strong>transform hook</strong>, <code>before-preview</code>, where other packages can adjust the finished preview. A second package, <code>example.linkpreview-github</code>, fills the point for GitHub URLs. The step shows the dormant state of that package before the owner is installed.</p>
+<p>You start a fresh plugin. You need tutorials 1 to 9, and you should have read <a href="/pages/services/">Services</a> and <a href="/pages/architecture/">Architecture</a>. The full mechanism is in <a href="/pages/api-extension-points/">Extension points</a>. The points of the core plugins are in <a href="/pages/reference-core-extension-points/">Reference: core extension points</a>, and <a href="/pages/extending-core-plugins/">Extending core plugins</a> compares the five ways to work with a core feature. This page does not repeat those tables.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code>, <code>serde_json</code> and <code>regex-lite</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>. <code>RegExp</code> is built in.</li>
+<li>Grants for the owner: <code>extensions.provide:example.linkpreview/renderers</code>, <code>extensions.provide:example.linkpreview/before-preview</code>, <code>services.use:example.linkpreview-github/render</code>, <code>topics.subscribe:ilium.extensions/changed</code> and <code>notify.toast</code>. Nothing else.</li>
+<li>Grants for the contributor: <code>extensions.contribute:example.linkpreview/renderers</code> and <code>services.provide:example.linkpreview-github/render</code>.</li>
+<li>Both manifests set <code>"unstable": ["plugin-services"]</code> (dev mode, T2 and T3), because the renderer is a plugin-defined service.</li>
+</ul>
+<h3 id="the-surface-this-step-uses">The surface this step uses</h3>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Manifest</td>
+<td><code>contributes.extension_points[]</code></td>
+<td>Declares <code>renderers</code> (collect, dynamic) and <code>before-preview</code> (hook, transform). The global ids are <code>example.linkpreview/renderers</code> and <code>example.linkpreview/before-preview</code>.</td>
+</tr>
+<tr>
+<td>Manifest</td>
+<td><code>contributes.extensions[]</code></td>
+<td>The contributor writes <code>point</code>, <code>id</code>, <code>priority</code> and <code>entry</code>.</td>
+</tr>
+<tr>
+<td>Grant</td>
+<td><code>extensions.provide:&lt;point&gt;</code></td>
+<td>Owner of one point. It may only own points that start with its own plugin id.</td>
+</tr>
+<tr>
+<td>Grant</td>
+<td><code>extensions.contribute:&lt;point&gt;</code></td>
+<td>Contributor to one point. No wildcard.</td>
+</tr>
+<tr>
+<td>Host</td>
+<td><code>extensions::list(point)</code> / <code>list(point)</code></td>
+<td>The active entries, in run order.</td>
+</tr>
+<tr>
+<td>Host</td>
+<td><code>extensions::run_hook(point, payload).await</code> / <code>runHook(point, payload)</code></td>
+<td>Runs the chain and resolves with the final payload.</td>
+</tr>
+<tr>
+<td>Host</td>
+<td><code>extensions::register</code> and <code>unregister</code></td>
+<td>Add or remove an entry of a <code>dynamic</code> point at run time.</td>
+</tr>
+<tr>
+<td>Topic</td>
+<td><code>ilium.extensions/changed</code></td>
+<td>Tells the owner, and nobody else, that the list of a point changed. Payload <code>{ "point": "&lt;id&gt;" }</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-flow">The flow</h3>
+<figure>
+<svg viewBox="0 0 480 330" role="img" aria-label="Sequence of a link preview with one contributed renderer" width="720" height="495">
+  <title>Link preview sequence</title>
+  <desc>The user runs the preview command. The owner lists the renderers in the registry, matches the URL, calls the renderer service of the contributor, runs the before-preview hook and shows the result.</desc>
+  <defs>
+    <marker id="t18-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="8" width="80" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="50" y="25" font-size="11" text-anchor="middle" fill="currentColor">User</text>
+  <rect x="140" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="185" y="25" font-size="11" text-anchor="middle" fill="currentColor">Owner</text>
+  <rect x="270" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="315" y="25" font-size="11" text-anchor="middle" fill="currentColor">Registry</text>
+  <rect x="390" y="8" width="84" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="432" y="25" font-size="11" text-anchor="middle" fill="currentColor">GitHub pkg</text>
+  <line x1="50" y1="34" x2="50" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="185" y1="34" x2="185" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="315" y1="34" x2="315" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="432" y1="34" x2="432" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="50" y1="58" x2="185" y2="58" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="118" y="52" font-size="10" text-anchor="middle" fill="currentColor">preview command</text>
+  <line x1="185" y1="88" x2="315" y2="88" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="250" y="82" font-size="10" text-anchor="middle" fill="currentColor">list(renderers)</text>
+  <line x1="315" y1="112" x2="185" y2="112" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="250" y="106" font-size="10" text-anchor="middle" fill="currentColor">entries in run order</text>
+  <line x1="185" y1="146" x2="432" y2="146" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="308" y="140" font-size="10" text-anchor="middle" fill="currentColor">call render (service, 30 s cap)</text>
+  <line x1="432" y1="172" x2="185" y2="172" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="308" y="166" font-size="10" text-anchor="middle" fill="currentColor">title and summary</text>
+  <line x1="185" y1="206" x2="315" y2="206" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="250" y="200" font-size="10" text-anchor="middle" fill="currentColor">run-hook(before-preview)</text>
+  <line x1="315" y1="230" x2="185" y2="230" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="250" y="224" font-size="10" text-anchor="middle" fill="currentColor">final payload</text>
+  <line x1="185" y1="268" x2="50" y2="268" stroke="currentColor" marker-end="url(#t18-arrow)"/>
+  <text x="118" y="262" font-size="10" text-anchor="middle" fill="currentColor">toast with the preview</text>
+  <line x1="315" y1="304" x2="185" y2="304" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#t18-arrow)"/>
+  <text x="250" y="298" font-size="10" text-anchor="middle" fill="currentColor">changed (when a list changes)</text>
+</svg>
+<figcaption>One preview. The dashed arrow is the kernel topic <code>ilium.extensions/changed</code>, sent to the owner only. The owner then calls <code>list</code> again.</figcaption>
+</figure>
+
+<h3 id="step-1-the-owner-manifest">Step 1: the owner manifest</h3>
+<p>The owner declares both points. <code>renderers</code> is a collect point, so it has an <code>entry_schema</code>. It is <code>dynamic</code>, so a contributor may also add entries at run time. <code>before-preview</code> is a hook with the mode <code>transform</code>, so a handler may replace the payload.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.linkpreview&quot;,
+  &quot;name&quot;: &quot;Link preview&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;icon&quot;: &quot;link&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;extensions.provide:example.linkpreview/renderers&quot;,
+      &quot;extensions.provide:example.linkpreview/before-preview&quot;,
+      &quot;services.use:example.linkpreview-github/render&quot;,
+      &quot;topics.subscribe:ilium.extensions/changed&quot;,
+      &quot;notify.toast&quot;
+    ]
+  },
+  &quot;activation&quot;: [&quot;command:example.linkpreview/preview&quot;],
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      { &quot;id&quot;: &quot;preview&quot;, &quot;title&quot;: &quot;Link preview: show preview of a URL&quot; }
+    ],
+    &quot;topics&quot;: { &quot;subscribes&quot;: [&quot;ilium.extensions/changed&quot;] },
+    &quot;extension_points&quot;: [
+      {
+        &quot;id&quot;: &quot;renderers&quot;,
+        &quot;kind&quot;: &quot;collect&quot;,
+        &quot;title&quot;: &quot;Link renderers&quot;,
+        &quot;version&quot;: &quot;1.0.0&quot;,
+        &quot;dynamic&quot;: true,
+        &quot;max_entries&quot;: 32,
+        &quot;entry_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [&quot;id&quot;, &quot;regex&quot;, &quot;service&quot;],
+          &quot;properties&quot;: {
+            &quot;id&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 64 },
+            &quot;regex&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 256 },
+            &quot;service&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 128 }
+          }
+        }
+      },
+      {
+        &quot;id&quot;: &quot;before-preview&quot;,
+        &quot;kind&quot;: &quot;hook&quot;,
+        &quot;mode&quot;: &quot;transform&quot;,
+        &quot;title&quot;: &quot;Before a preview is shown&quot;,
+        &quot;version&quot;: &quot;1.0.0&quot;,
+        &quot;risk&quot;: &quot;standard&quot;,
+        &quot;deadline_ms&quot;: 20,
+        &quot;max_handlers&quot;: 4,
+        &quot;payload_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [&quot;url&quot;, &quot;title&quot;, &quot;summary&quot;],
+          &quot;properties&quot;: {
+            &quot;url&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 2048 },
+            &quot;title&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 200 },
+            &quot;summary&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 600 }
+          }
+        },
+        &quot;reply_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [&quot;title&quot;, &quot;summary&quot;],
+          &quot;properties&quot;: {
+            &quot;title&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 200 },
+            &quot;summary&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 600 }
+          }
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li>The global ids are the plugin id, a slash and the point id: <code>example.linkpreview/renderers</code>. Each <code>extensions.provide</code> grant names one of them. A grant for a point that starts with another plugin's id is refused at install with <code>manifest.grant-missing-extension</code>, and a point without a grant fails the same way.</li>
+<li>The owner does not list <code>hook-handler</code> in <code>exports</code>. It runs hooks and does not handle them.</li>
+<li><code>version</code> is the version of the point's schema. Bump the minor number when you add an optional field. Bump the major number when you remove a field or make a field required. Contributors can ask for a minimum, as step 3 shows.</li>
+<li><code>max_entries</code> caps the whole list at 32. A 33rd entry is refused with <code>extension.cap-exceeded</code>. The default is 64 and the limit is 256.</li>
+<li>The owner grants itself <code>services.use</code> for exactly one renderer service. An entry that names another service is listed, but the call fails with <code>not-permitted</code>. Step 2 turns that into a plain preview.</li>
+</ul>
+<h3 id="step-2-the-owner-code">Step 2: the owner code</h3>
+<p>The owner has four jobs. It reads the list on start. It reads the list again when <code>ilium.extensions/changed</code> arrives for <code>renderers</code>. On the command it finds the first entry whose pattern matches, calls that entry's service, and runs the hook. If there is no match, no renderer or a failing renderer, it falls back to a plain preview from the URL. The preview never fails because a contributor is bad.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs
+use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::services;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::task;
+use regex_lite::Regex;
+use serde_json::{json, Value};
+
+const RENDERERS: &amp;str = &quot;example.linkpreview/renderers&quot;;
+const BEFORE_PREVIEW: &amp;str = &quot;example.linkpreview/before-preview&quot;;
+
+#[derive(Clone)]
+struct Renderer {
+    extension: String,
+    regex: Regex,
+    service: String,
+}
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct LinkPreview {
+    renderers: Vec&lt;Renderer&gt;,
+}
+
+impl LinkPreview {
+    fn reload(&amp;mut self) {
+        let entries = match extensions::list(RENDERERS) {
+            Ok(entries) =&gt; entries,
+            Err(error) =&gt; {
+                log::log(Level::Warn, &amp;format!(&quot;list failed: {error:?}&quot;));
+                return;
+            }
+        };
+        self.renderers = entries
+            .into_iter()
+            .filter_map(|entry| {
+                let value: Value = serde_json::from_str(&amp;entry.entry_json).ok()?;
+                // A bad pattern drops this entry only. The others stay usable.
+                let regex = Regex::new(value[&quot;regex&quot;].as_str()?).ok()?;
+                Some(Renderer {
+                    extension: entry.extension,
+                    regex,
+                    service: value[&quot;service&quot;].as_str()?.to_string(),
+                })
+            })
+            .collect();
+        log::log(Level::Info, &amp;format!(&quot;{} renderers loaded&quot;, self.renderers.len()));
+    }
+}
+
+impl Lifecycle for LinkPreview {
+    fn activate(&amp;mut self) {
+        self.reload();
+    }
+}
+
+impl Handler for LinkPreview {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::TopicPublished(published) if published.topic == &quot;ilium.extensions/changed&quot; =&gt; {
+                    let changed: Value = serde_json::from_str(&amp;published.payload_json).unwrap_or(Value::Null);
+                    if changed[&quot;point&quot;] == RENDERERS {
+                        self.reload();
+                    }
+                }
+                Event::CommandInvoked(invoked) if invoked.command == &quot;example.linkpreview/preview&quot; =&gt; {
+                    let arguments: Value = serde_json::from_str(&amp;invoked.arguments_json).unwrap_or(Value::Null);
+                    let url = arguments[&quot;url&quot;].as_str().unwrap_or(&quot;&quot;).to_string();
+                    task::spawn(build_preview(url, self.renderers.clone()));
+                }
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+
+async fn build_preview(url: String, renderers: Vec&lt;Renderer&gt;) {
+    let mut preview = plain_preview(&amp;url);
+    if let Some(renderer) = renderers.iter().find(|renderer| renderer.regex.is_match(&amp;url)) {
+        match services::call(&amp;renderer.service, &quot;render&quot;, &amp;json!({ &quot;url&quot;: url }).to_string()).await {
+            Ok(reply) =&gt; match parse_preview(&amp;reply) {
+                Some(rendered) =&gt; preview = rendered,
+                None =&gt; log::log(Level::Warn, &amp;format!(&quot;{} sent a bad reply&quot;, renderer.extension)),
+            },
+            Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;{} failed: {}&quot;, renderer.extension, error.code)),
+        }
+    }
+    let payload = json!({ &quot;url&quot;: url, &quot;title&quot;: preview.0, &quot;summary&quot;: preview.1 }).to_string();
+    match extensions::run_hook(BEFORE_PREVIEW, &amp;payload).await {
+        Ok(Some(changed)) =&gt; {
+            if let Some(adjusted) = parse_preview(&amp;changed) {
+                preview = adjusted;
+            }
+        }
+        Ok(None) =&gt; {}
+        Err(error) =&gt; log::log(Level::Warn, &amp;format!(&quot;hook failed: {}&quot;, error.code)),
+    }
+    log::log(Level::Info, &amp;format!(&quot;preview ready: {}&quot;, preview.0));
+    // The toast submission is returned by the next batch in a full plugin.
+}
+
+fn parse_preview(json_text: &amp;str) -&gt; Option&lt;(String, String)&gt; {
+    let value: Value = serde_json::from_str(json_text).ok()?;
+    Some((value[&quot;title&quot;].as_str()?.to_string(), value[&quot;summary&quot;].as_str()?.to_string()))
+}
+
+fn plain_preview(url: &amp;str) -&gt; (String, String) {
+    let host = url.split('/').nth(2).unwrap_or(url);
+    (host.to_string(), format!(&quot;No renderer for {host}.&quot;))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts
+import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { list, runHook } from '@ilium/plugin-sdk/host/extensions';
+import { call } from '@ilium/plugin-sdk/host/services';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const RENDERERS = 'example.linkpreview/renderers';
+const BEFORE_PREVIEW = 'example.linkpreview/before-preview';
+
+interface Renderer { extension: string; regex: RegExp; service: string }
+type Preview = { title: string; summary: string };
+
+let renderers: Renderer[] = [];
+
+function reload(): void {
+  try {
+    renderers = list(RENDERERS).flatMap((entry) =&gt; {
+      try {
+        const value = JSON.parse(entry.entryJson) as { regex: string; service: string };
+        // A bad pattern drops this entry only. The others stay usable.
+        return [{ extension: entry.extension, regex: new RegExp(value.regex), service: value.service }];
+      } catch {
+        return [];
+      }
+    });
+    log('info', `${renderers.length} renderers loaded`);
+  } catch (error) {
+    log('warn', `list failed: ${String(error)}`);
+  }
+}
+
+function plainPreview(url: string): Preview {
+  const host = url.split('/')[2] ?? url;
+  return { title: host, summary: `No renderer for ${host}.` };
+}
+
+function parsePreview(text: string): Preview | undefined {
+  try {
+    const value = JSON.parse(text) as Partial&lt;Preview&gt;;
+    if (typeof value.title !== 'string' || typeof value.summary !== 'string') return undefined;
+    return { title: value.title, summary: value.summary };
+  } catch {
+    return undefined;
+  }
+}
+
+async function buildPreview(url: string, active: Renderer[]): Promise&lt;void&gt; {
+  let preview = plainPreview(url);
+  const renderer = active.find((candidate) =&gt; candidate.regex.test(url));
+  if (renderer) {
+    try {
+      const reply = await call(renderer.service, 'render', JSON.stringify({ url }));
+      const rendered = parsePreview(reply);
+      if (rendered) preview = rendered;
+      else log('warn', `${renderer.extension} sent a bad reply`);
+    } catch (error) {
+      log('warn', `${renderer.extension} failed: ${String((error as { code?: string }).code)}`);
+    }
+  }
+  try {
+    const changed = await runHook(BEFORE_PREVIEW, JSON.stringify({ url, ...preview }));
+    const adjusted = changed === undefined ? undefined : parsePreview(changed);
+    if (adjusted) preview = adjusted;
+  } catch (error) {
+    log('warn', `hook failed: ${String((error as { code?: string }).code)}`);
+  }
+  log('info', `preview ready: ${preview.title}`);
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate() {
+    reload();
+  },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'topic-published' &amp;&amp; event.val.topic === 'ilium.extensions/changed') {
+        const changed = JSON.parse(event.val.payloadJson) as { point?: string };
+        if (changed.point === RENDERERS) reload();
+      }
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'example.linkpreview/preview') {
+        const args = JSON.parse(event.val.argumentsJson) as { url?: string };
+        void buildPreview(args.url ?? '', renderers);
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li><code>list</code> returns entries already sorted by the user's order, then priority, then plugin id. Take the first match.</li>
+<li>The owner keeps the compiled list and reloads on the topic. The topic carries only the point id, so the owner reloads the whole list.</li>
+<li>A contributor is untrusted input. The kernel checks <code>reply_schema</code> for the hook, but the owner parses the service reply itself.</li>
+<li>With no handler, <code>run_hook</code> returns nothing and the owner keeps its own preview. A full plugin returns an <code>Intent::Toast</code> from the next batch (<a href="/pages/tutorial-04-finished-notice/">tutorial 4</a>).</li>
+</ul>
+<h3 id="step-3-the-contributor-package">Step 3: the contributor package</h3>
+<p>The second package knows GitHub. It fills the point from its manifest, so it needs no code to register. Its service answers the <code>render</code> calls. It can also ask for a minimum version of the point: <code>example.linkpreview/renderers@1.0.0</code> is a caret range: it accepts <code>&gt;=1.0.0 &lt;2.0.0</code>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.linkpreview-github&quot;,
+  &quot;name&quot;: &quot;Link preview: GitHub&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;icon&quot;: &quot;brand-github&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;service-provider&quot;]
+  },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;extensions.contribute:example.linkpreview/renderers&quot;,
+      &quot;services.provide:example.linkpreview-github/render&quot;
+    ]
+  },
+  &quot;contributes&quot;: {
+    &quot;services&quot;: {
+      &quot;provides&quot;: [
+        {
+          &quot;name&quot;: &quot;example.linkpreview-github/render&quot;,
+          &quot;version&quot;: &quot;1.0.0&quot;,
+          &quot;schema&quot;: &quot;schemas/render.json&quot;
+        }
+      ]
+    },
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;example.linkpreview/renderers@1.0.0&quot;,
+        &quot;id&quot;: &quot;github&quot;,
+        &quot;priority&quot;: 40,
+        &quot;entry&quot;: {
+          &quot;id&quot;: &quot;github&quot;,
+          &quot;regex&quot;: &quot;^https://github\\.com/[^/]+/[^/]+&quot;,
+          &quot;service&quot;: &quot;example.linkpreview-github/render&quot;
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<p><code>schemas/render.json</code> (params <code>{ "url": string }</code>, result <code>{ "title": string, "summary": string }</code>, each field with a <code>maxLength</code>):</p>
+<pre><code class="language-json">{ &quot;methods&quot;: { &quot;render&quot;: {
+  &quot;params&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;url&quot;], &quot;properties&quot;: { &quot;url&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 2048 } } },
+  &quot;result&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;title&quot;, &quot;summary&quot;], &quot;properties&quot;: {
+    &quot;title&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 200 }, &quot;summary&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 600 } } }
+} } }
+</code></pre>
+<p>The provider code reads the owner and the repository from the path. It does no network call, so it needs no <code>http</code> grant. A real renderer would add <code>http:api.github.com</code>, which is a separate grant that the user would see in the review dialog.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs
+use ilium_plugin_sdk::exports::{ServiceCall, ServiceProvider, ServiceReply};
+use ilium_plugin_sdk::prelude::*;
+use serde_json::{json, Value};
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;service-provider&quot;])]
+#[derive(Default)]
+struct GithubRenderer;
+
+impl Lifecycle for GithubRenderer {}
+
+impl Handler for GithubRenderer {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+
+impl ServiceProvider for GithubRenderer {
+    fn handle(&amp;mut self, call: ServiceCall) -&gt; ServiceReply {
+        if call.method != &quot;render&quot; {
+            return ServiceReply::Done(json!({ &quot;title&quot;: &quot;&quot;, &quot;summary&quot;: &quot;&quot; }).to_string());
+        }
+        let params: Value = serde_json::from_str(&amp;call.payload_json).unwrap_or(Value::Null);
+        let url = params[&quot;url&quot;].as_str().unwrap_or(&quot;&quot;);
+        let mut parts = url.trim_start_matches(&quot;https://github.com/&quot;).split('/');
+        let owner = parts.next().unwrap_or(&quot;&quot;);
+        let repository = parts.next().unwrap_or(&quot;&quot;);
+        ServiceReply::Done(
+            json!({
+                &quot;title&quot;: format!(&quot;{owner}/{repository}&quot;),
+                &quot;summary&quot;: format!(&quot;GitHub repository {repository} owned by {owner}.&quot;),
+            })
+            .to_string(),
+        )
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts
+import { definePlugin } from '@ilium/plugin-sdk';
+import type { ServiceCall, ServiceReply } from '@ilium/plugin-sdk';
+
+export const { lifecycle, handler, serviceProvider } = definePlugin({
+  side: 'server',
+  onEvents() {
+    return [];
+  },
+  handle(call: ServiceCall): ServiceReply {
+    if (call.method !== 'render') {
+      return { tag: 'done', val: JSON.stringify({ title: '', summary: '' }) };
+    }
+    const params = JSON.parse(call.payloadJson) as { url?: string };
+    const [owner = '', repository = ''] = (params.url ?? '')
+      .replace('https://github.com/', '')
+      .split('/');
+    return {
+      tag: 'done',
+      val: JSON.stringify({
+        title: `${owner}/${repository}`,
+        summary: `GitHub repository ${repository} owned by ${owner}.`,
+      }),
+    };
+  },
+});
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li>The manifest is the whole contribution. The entry is checked against the owner's <code>entry_schema</code> when the package is installed. A missing <code>service</code> field fails with <code>manifest.extension-entry-invalid</code>, and a missing grant with <code>manifest.grant-missing-extension</code>.</li>
+<li><code>priority</code> 40 puts GitHub before the default 50. Lower runs first, and the user can still move it on the owner's Extensions tab.</li>
+<li>A missing <code>service</code> field fails the install with <code>manifest.extension-entry-invalid</code>.</li>
+</ul>
+<h3 id="step-4-dormant-until-the-owner-is-installed">Step 4: dormant until the owner is installed</h3>
+<p>Install the contributor first, with the owner missing. The install does not fail. The entry stays in the package and counts for nothing. The Plugins screen shows <code>waiting for example.linkpreview</code>. Install the owner second, and the entry becomes active. The kernel sends <code>ilium.extensions/changed</code> with <code>{ "point": "example.linkpreview/renderers" }</code> to the owner. The owner reloads and shows <code>1 renderers loaded</code> in its log.</p>
+<p>The same happens when the owner is disabled: the entries go dormant at once and a preview falls back to plain text. An entry that asks for <code>renderers@1.2.0</code> from an owner at <code>1.0.0</code> is dormant too, and the Plugins screen names the version the owner must reach.</p>
+<h3 id="step-5-dynamic-entries-with-register-and-unregister">Step 5: dynamic entries with register and unregister</h3>
+<p>Because <code>renderers</code> is <code>dynamic</code>, a contributor may add and remove entries while it runs. This is how a plugin offers a renderer for something it only learns at run time, such as the host name of a company wiki read from its settings. The contributor needs the same <code>extensions.contribute</code> grant. The entry is validated again against the schema.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+
+fn add_wiki(host: &amp;str) -&gt; Result&lt;(), String&gt; {
+    let regex = host.replace('.', &quot;\\.&quot;);
+    let entry = format!(
+        r#&quot;{{&quot;id&quot;:&quot;wiki&quot;,&quot;regex&quot;:&quot;^https://{regex}/&quot;,&quot;service&quot;:&quot;example.linkpreview-github/render&quot;}}&quot;#
+    );
+    extensions::register(&quot;example.linkpreview/renderers&quot;, &quot;wiki&quot;, 60, &amp;entry)
+        .map_err(|error| format!(&quot;{error:?}&quot;))
+}
+
+// Remove it later: extensions::unregister(&quot;example.linkpreview/renderers&quot;, &quot;wiki&quot;)
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { register } from '@ilium/plugin-sdk/host/extensions';
+
+export function addWiki(host: string): void {
+  const regex = host.replace(/\./g, '\\.');
+  const entry = JSON.stringify({
+    id: 'wiki',
+    regex: `^https://${regex}/`,
+    service: 'example.linkpreview-github/render',
+  });
+  register('example.linkpreview/renderers', 'wiki', 60, entry);
+}
+
+// Remove it later: unregister('example.linkpreview/renderers', 'wiki')
+</code></pre>
+<p>Registering an id the plugin already used replaces that entry. A plugin can only remove entries it registered, and a call on a point that is not <code>dynamic</code> fails with <code>extension.not-dynamic</code> (the WIT case <code>not-dynamic</code>). A registered entry does not survive a restart of the contributor, so register again in <code>activate</code>. A dynamic entry has the same cap, the same priority rules and the same toggles as a manifest entry.</p>
+<h3 id="step-6-change-the-schema-without-breaking-contributors">Step 6: change the schema without breaking contributors</h3>
+<p>Point versions let you grow the schema. Suppose you want to add an optional <code>icon</code> field to renderer entries.</p>
+<ol>
+<li>Add <code>icon</code> to <code>properties</code>, not to <code>required</code>, and set <code>"version": "1.1.0"</code>. Contributors that wrote <code>renderers@1.0.0</code> stay active and the owner uses a default icon.</li>
+<li>Contributors that need the field write <code>renderers@1.1.0</code>. On an owner still at <code>1.0.0</code> they are dormant, which is correct.</li>
+<li>To remove a field or require one, bump to <code>2.0.0</code>. Every contributor that asked for <code>@1.0.0</code> goes dormant.</li>
+</ol>
+<p>A contributor that does not write a version always matches. Tell contributors to write one.</p>
+<h3 id="security-and-consent">Security and consent</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Who</th>
+<th>Risk</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extensions.provide:example.linkpreview/renderers</code></td>
+<td>Owner</td>
+<td>normal</td>
+<td>The plugin owns the point.</td>
+</tr>
+<tr>
+<td><code>extensions.provide:example.linkpreview/before-preview</code></td>
+<td>Owner</td>
+<td>normal</td>
+<td>The plugin owns the hook. The point has <code>risk: "standard"</code>.</td>
+</tr>
+<tr>
+<td><code>extensions.contribute:example.linkpreview/renderers</code></td>
+<td>GitHub package</td>
+<td>normal</td>
+<td>The package adds one entry.</td>
+</tr>
+<tr>
+<td><code>services.use:example.linkpreview-github/render</code></td>
+<td>Owner</td>
+<td>normal</td>
+<td>The owner calls one named service.</td>
+</tr>
+<tr>
+<td><code>services.provide:example.linkpreview-github/render</code></td>
+<td>GitHub package</td>
+<td>normal</td>
+<td>The package answers that service.</td>
+</tr>
+<tr>
+<td><code>topics.subscribe:ilium.extensions/changed</code></td>
+<td>Owner</td>
+<td>normal</td>
+<td>The owner hears about list changes.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A contributor is untrusted input. It can name any service in its entry. The owner can call only services it holds a <code>services.use</code> grant for, so an entry with a different service fails with <code>not-permitted</code> and the owner falls back.</li>
+<li>A contributor cannot see the owner's state. A handler sees the payload and nothing else.</li>
+<li>Mark a hook <code>high</code> only when a handler could do harm. A preview carries no secret, so <code>before-preview</code> stays standard.</li>
+</ul>
+<h3 id="test-it">Test it</h3>
+<p>Test the manifests first. Remove <code>"service"</code> from the GitHub entry and run <code>ilium plugin build</code>. It reports <code>manifest.extension-entry-invalid</code>. Restore it, then remove the <code>extensions.contribute</code> grant to see <code>manifest.grant-missing-extension</code>.</p>
+<p>Then run the unit tests. The <a href="/pages/testing/">Testing</a> page documents the fake host. It delivers events and records the calls. Use <code>FakeSession</code> to run the owner and a stub contributor together, so the test covers the real <code>list</code> and <code>run-hook</code> path. Use a fixture for host data. Test the pure parts directly, as plain functions. See <a href="/pages/reference-test-harness/">Test harness reference</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_preview_names_the_host() {
+        let preview = plain_preview(&quot;https://example.org/a/b&quot;);
+        assert_eq!(preview.0, &quot;example.org&quot;);
+    }
+
+    #[test]
+    fn bad_service_reply_is_ignored() {
+        assert!(parse_preview(&quot;not json&quot;).is_none());
+        assert!(parse_preview(r#&quot;{&quot;title&quot;:&quot;a&quot;,&quot;summary&quot;:&quot;b&quot;}&quot;#).is_some());
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { expect, test } from 'bun:test';
+import { parsePreview, plainPreview } from './index';
+
+test('plain preview names the host', () =&gt; {
+  expect(plainPreview('https://example.org/a/b').title).toBe('example.org');
+});
+
+test('bad service reply is ignored', () =&gt; {
+  expect(parsePreview('not json')).toBeUndefined();
+  expect(parsePreview('{&quot;title&quot;:&quot;a&quot;,&quot;summary&quot;:&quot;b&quot;}')).toBeDefined();
+});
+</code></pre>
+<p>Export <code>parsePreview</code> and <code>plainPreview</code> for the test. Then test the whole flow in the app, using the steps from <a href="/pages/debugging/">Debugging</a>:</p>
+<ol>
+<li>Pack and install the contributor first. Open Settings &gt; Plugins and check that it says <code>waiting for example.linkpreview</code>.</li>
+<li>Install the owner. Run <code>ilium plugin logs example.linkpreview --tail 5</code>. It must show <code>1 renderers loaded</code>.</li>
+<li>Run the command with a GitHub URL, then with another URL. The log must show <code>preview ready:</code> with the repository, then with the host name.</li>
+<li>Disable the GitHub package. The owner log must show <code>0 renderers loaded</code>.</li>
+</ol>
+<h3 id="what-you-see">What you see</h3>
+<p>The review dialog of the contributor groups its contribution under <strong>Adds to other plugins</strong>. The owner is named, even though it is not installed yet.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Review: example.linkpreview-github 0.1.0     │
+│                                              │
+│ Adds to other plugins                        │
+│   Link preview > Link renderers              │
+│     adds a link pattern and its renderer     │
+│                                              │
+│ Grants                                       │
+│   [x] extensions.contribute: link renderers  │
+│   [x] services.provide: render               │
+│                                              │
+│   [allow]  [decline]                         │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The dialog for the contributor. Both grants are normal risk, so both are checked.</figcaption>
+</figure>
+
+<p>On the Plugins screen the entry shows <code>waiting for example.linkpreview</code> until the owner is installed.</p>
+<h3 id="what-can-go-wrong">What can go wrong</h3>
+<table>
+<thead>
+<tr>
+<th>Code or symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.extension-point-invalid</code>, <code>manifest.extension-point-duplicate</code></td>
+<td>A bad id, kind, mode or schema keyword, or two points with one id.</td>
+<td>Fix the point entry.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-missing-extension</code>, <code>manifest.grant-wildcard</code></td>
+<td>A point or extension has no matching grant, or the grant ends in <code>*</code>.</td>
+<td>Add the exact grant.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-entry-invalid</code></td>
+<td>The entry fails the owner's <code>entry_schema</code>.</td>
+<td>Match the schema.</td>
+</tr>
+<tr>
+<td><code>extension.schema-mismatch</code> on <code>run-hook</code></td>
+<td>The payload fails <code>payload_schema</code>.</td>
+<td>Trim title and summary.</td>
+</tr>
+<tr>
+<td><code>extension.cap-exceeded</code>, <code>extension.not-dynamic</code></td>
+<td>Over <code>max_entries</code>, or <code>register</code> on a static point.</td>
+<td>Raise the cap, or set <code>dynamic</code>.</td>
+</tr>
+<tr>
+<td>The renderer never runs</td>
+<td>The entry is dormant, disabled, or sorted below another match.</td>
+<td>Check the Extensions tab.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code> from the service</td>
+<td>The owner has no <code>services.use</code> for the entry's service.</td>
+<td>Add the grant, or ignore that renderer.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-extension-points/">Extension points</a> for the full mechanism, the functions and the error codes.</li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</li>
+<li><a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the points the core plugins own.</li>
+<li><a href="/pages/services/">Services</a> and <a href="/pages/api-services/">services API</a> for the renderer service.</li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">Tutorial 19: stop core actions with hooks</a> for the handler side of a hook.</li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">Tutorial 22: a versioned service with fallbacks</a> for service versions.</li>
+<li><a href="/pages/testing/">Testing</a>, <a href="/pages/debugging/">Debugging</a> and <a href="/pages/reference-manifest/">Manifest reference</a>.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-17-help-and-sound/"><small>Previous</small>17. A help topic and a custom sound</a><a class="next" href="/pages/tutorial-19-stop-core-actions-with-hooks/"><small>Next</small>19. Stop core actions with hooks: quiet hours</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-surface-this-step-uses">The surface this step uses</a></li><li class="l2"><a href="#the-flow">The flow</a></li><li class="l2"><a href="#step-1-the-owner-manifest">Step 1: the owner manifest</a></li><li class="l2"><a href="#step-2-the-owner-code">Step 2: the owner code</a></li><li class="l2"><a href="#step-3-the-contributor-package">Step 3: the contributor package</a></li><li class="l2"><a href="#step-4-dormant-until-the-owner-is-installed">Step 4: dormant until the owner is installed</a></li><li class="l2"><a href="#step-5-dynamic-entries-with-register-and-unregister">Step 5: dynamic entries with register and unregister</a></li><li class="l2"><a href="#step-6-change-the-schema-without-breaking-contributors">Step 6: change the schema without breaking contributors</a></li><li class="l2"><a href="#security-and-consent">Security and consent</a></li><li class="l2"><a href="#test-it">Test it</a></li><li class="l2"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#what-can-go-wrong">What can go wrong</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -250,6 +250,7 @@ impl IsolatedHttpServer {
             &mut stream,
             &ClientRequest::Attach {
                 session: "workspace-http".into(),
+                hello: Default::default(),
             },
         )
         .await

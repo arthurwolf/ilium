@@ -1,0 +1,1273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Reference, plugin lifecycle states | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/" aria-current="page">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Reference, plugin lifecycle states</h1>
+
+<p>This page is the closed state model of a plugin. It lists every state a plugin package and a plugin instance can be in, every transition between states, the guard that allows it, what the host does in order, and what the user and other plugins see. A host that implements these tables has no state that this page does not name. A test author can derive one test per row.</p>
+<p>Contract version: <code>ilium:plugin@0.1.0</code>. Requirement ids have the form <code>[LIF-nnn]</code>. They are collected in <a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a>. Failure counting and restart delays are defined once, in <a href="/pages/lifecycle/">Lifecycle</a>. This page refers to them and does not repeat the numbers.</p>
+<h3 id="two-state-machines">Two state machines</h3>
+<p>A plugin has two layers of state.</p>
+<ul>
+<li>The package state is stored on disk. It says whether the plugin is installed, whether it may run, and why not. It survives a server restart and a reboot.</li>
+<li>The instance state is held in memory, once per side and per world. It says whether code is running now. A side is <code>server</code>, <code>client</code> or <code>scene</code>. The server side has one instance per session server. The client and scene sides have one instance per attached client.</li>
+</ul>
+<p>A package state decides which instance states are allowed. An instance can be <code>active</code> only while its side is allowed to run.</p>
+<h3 id="package-states">Package states</h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Stored where</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not-installed</code></td>
+<td>no record</td>
+<td>The id has no entry in the installed registry.</td>
+</tr>
+<tr>
+<td><code>installed-enabled</code></td>
+<td><code>installed.json</code>, <code>state</code></td>
+<td>The package is installed and the user allows it to run.</td>
+</tr>
+<tr>
+<td><code>installed-disabled-by-user</code></td>
+<td><code>installed.json</code>, <code>state</code></td>
+<td>The user, the CLI or <code>plugins.set-enabled</code> turned it off.</td>
+</tr>
+<tr>
+<td><code>disabled-untrusted</code></td>
+<td><code>installed.json</code>, <code>state</code></td>
+<td>The signing key was removed from the trust store with <code>trust remove --force</code>. The files, grants and settings stay. It leaves this state when the key is trusted again, or with <code>enable &lt;id&gt; --accept-risk</code>.</td>
+</tr>
+<tr>
+<td><code>disabled-blocked</code></td>
+<td><code>installed.json</code>, <code>state</code></td>
+<td>The signing key was revoked as <code>compromised</code>, or a registry takedown named this version. It leaves this state only with <code>enable &lt;id&gt; --accept-risk</code>, or with an update signed by another trusted key of the same publisher.</td>
+</tr>
+<tr>
+<td><code>disabled-by-policy</code></td>
+<td>policy file, or the start flags</td>
+<td>An administrator rule or safe mode forbids it for this run. Not written to <code>installed.json</code>.</td>
+</tr>
+<tr>
+<td><code>refused-at-load</code></td>
+<td>recomputed at every load</td>
+<td>The host checked the package and refused to run it. The reason is a code, for example <code>package.api-unsupported</code>, <code>trust.key-revoked</code>, <code>policy.tier-denied</code>, <code>package.corrupt</code> or <code>policy.blocked</code>.</td>
+</tr>
+<tr>
+<td><code>update-staged</code></td>
+<td><code>plugins/store/&lt;id&gt;/&lt;version&gt;/</code></td>
+<td>A newer version is unpacked and verified, and the swap has not happened.</td>
+</tr>
+<tr>
+<td><code>uninstall-pending</code></td>
+<td><code>installed.json</code>, <code>state</code></td>
+<td>The user asked for removal and an instance is still stopping.</td>
+</tr>
+</tbody>
+</table>
+<p>Rules for package states:</p>
+<ul>
+<li>[LIF-001] The host MUST give every installed plugin exactly one package state at any time. Test: list a plugin through every transition below and assert one state in <code>ilium plugin list --json</code>.</li>
+<li>[LIF-002] A stop by failure belongs to one side, not to the package. It is the instance state <code>stopped-by-failure</code> of that side, and the package state stays <code>installed-enabled</code>. A stop of the client side MUST NOT stop the server side. Test: trap the client side three times and assert the server side stays <code>active</code>.</li>
+<li>[LIF-003] A package with state <code>refused-at-load</code> MUST NOT be instantiated, and the refusal code MUST be shown in <code>disabled-reason</code>. Test: install a package whose api window the host does not support and read the list output.</li>
+<li>[LIF-004] <code>disabled-by-policy</code> and safe mode MUST NOT be written to <code>installed.json</code>. Test: start in safe mode, stop, start normally and assert the plugin is <code>installed-enabled</code> again.</li>
+</ul>
+<h3 id="instance-states">Instance states</h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inactive</code></td>
+<td>The side is allowed to run and has no instance. It waits for a trigger, or for host capacity.</td>
+</tr>
+<tr>
+<td><code>activating</code></td>
+<td>The instance exists and <code>activate</code> is running. The activate deadline applies.</td>
+</tr>
+<tr>
+<td><code>waiting-dependency</code></td>
+<td>The side is allowed to run, but a required plugin or the provider of a required service is not <code>active</code>. It leaves to <code>activating</code> when every requirement is <code>active</code>, or to <code>inactive</code> with the refusal <code>dependency.unresolved</code> shown in the row after <code>wait_ms</code> (<a href="/pages/reference-dependency-resolution/">PKG-326</a>). A wait is not a failure.</td>
+</tr>
+<tr>
+<td><code>active</code></td>
+<td><code>activate</code> returned <code>ok</code>. The host calls the other exports.</td>
+</tr>
+<tr>
+<td><code>deactivating</code></td>
+<td><code>deactivate(reason)</code> is running. The deactivate deadline applies.</td>
+</tr>
+<tr>
+<td><code>failed</code></td>
+<td>A counted failure just dropped the instance. The state lasts only until the host picks <code>restart-scheduled</code> or <code>stopped</code>. It is visible in events and logs, not in lists.</td>
+</tr>
+<tr>
+<td><code>restart-scheduled</code></td>
+<td>The instance was dropped after a failure and a timer will activate it again. The record carries the due time <code>restart-at</code>.</td>
+</tr>
+<tr>
+<td><code>stopped-by-failure</code></td>
+<td>The third counted failure in a window stopped this side. No restart is scheduled. The server side is stored in <code>installed.json</code> as <code>failure_stopped: ["server"]</code>. A client or scene side is held only in memory and is dropped when its client detaches. See <a href="/pages/lifecycle/#failure-counting-and-restart">Lifecycle</a>.</td>
+</tr>
+<tr>
+<td><code>stopped</code></td>
+<td>The side may not run now. The package state says why.</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<svg viewBox="0 0 440 250" role="img" aria-label="Instance states and their transitions" width="660" height="375">
+  <title>Instance states</title>
+  <desc>An inactive instance becomes activating on a trigger, then active. A failure moves activating or active to failed, then to restart-scheduled or stopped. A restart timer returns restart-scheduled to activating. Active moves to deactivating, then to inactive or stopped.</desc>
+  <defs>
+    <marker id="pls-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="100" width="80" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="48" y="121" font-size="11" text-anchor="middle" fill="currentColor">inactive</text>
+  <rect x="130" y="100" width="84" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="172" y="121" font-size="11" text-anchor="middle" fill="currentColor">activating</text>
+  <rect x="256" y="100" width="70" height="34" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="291" y="121" font-size="11" text-anchor="middle" fill="currentColor">active</text>
+  <rect x="350" y="100" width="82" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="391" y="121" font-size="11" text-anchor="middle" fill="currentColor">deactivating</text>
+  <rect x="190" y="12" width="70" height="30" rx="6" fill="none" stroke="currentColor"/>
+  <text x="225" y="31" font-size="11" text-anchor="middle" fill="currentColor">failed</text>
+  <rect x="60" y="12" width="100" height="30" rx="6" fill="none" stroke="currentColor"/>
+  <text x="110" y="31" font-size="11" text-anchor="middle" fill="currentColor">restart-scheduled</text>
+  <rect x="300" y="12" width="70" height="30" rx="6" fill="none" stroke="currentColor"/>
+  <text x="335" y="31" font-size="11" text-anchor="middle" fill="currentColor">stopped</text>
+  <line x1="88" y1="117" x2="130" y2="117" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="214" y1="117" x2="256" y2="117" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="326" y1="117" x2="350" y2="117" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="180" y1="100" x2="215" y2="42" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="280" y1="100" x2="245" y2="42" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="190" y1="27" x2="160" y2="27" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="260" y1="27" x2="300" y2="27" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <line x1="100" y1="42" x2="150" y2="100" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#pls-arrow)"/>
+  <path d="M391 134 V190 H48 V134" fill="none" stroke="currentColor" marker-end="url(#pls-arrow)"/>
+  <text x="220" y="204" font-size="10" text-anchor="middle" fill="currentColor">disable, update, revoke, grant, detach: back to inactive or stopped</text>
+  <text x="300" y="70" font-size="10" fill="currentColor">3rd failure</text>
+  <text x="40" y="86" font-size="10" fill="currentColor">timer</text>
+  <text x="110" y="232" font-size="10" fill="currentColor">Dashed arrow: automatic. The package state decides stopped.</text>
+</svg>
+<figcaption>Instance states of one side. A failure always passes through failed, which lasts only until the host chooses a restart or a stop.</figcaption>
+</figure>
+
+<ul>
+<li>[LIF-005] An instance MUST be in exactly one instance state, and only the transitions in the tables below MAY occur. Test: a state-machine fuzz test drives random triggers and asserts every observed transition is in the table.</li>
+<li>[LIF-006] The host MUST NOT call <code>handler</code>, <code>views</code>, <code>renderer</code> or provider exports on an instance that is not <code>active</code>. Test: send an event to an instance in <code>activating</code> and assert it is queued, and an event to <code>stopped</code> is dropped.</li>
+</ul>
+<h3 id="package-state-transitions">Package-state transitions</h3>
+<p>The trigger column names who or what causes the change. The effect column is what a user sees. Event names are defined in the section after the tables.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>From</th>
+<th>Trigger</th>
+<th>Guard</th>
+<th>Host actions, in order</th>
+<th>Events and log</th>
+<th>User-visible effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td><code>not-installed</code></td>
+<td><code>ilium plugin install</code></td>
+<td>all install checks pass</td>
+<td>Run the install pipeline. Write the registry entry. Set state.</td>
+<td><code>plugin-state-changed</code>, log <code>install.ok</code></td>
+<td>Plugin appears in Settings &gt; Plugins</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><code>installed-enabled</code></td>
+<td>disable</td>
+<td>none</td>
+<td>Record the desired state. For every side: run I9.</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch off, contributions withdrawn</td>
+</tr>
+<tr>
+<td>P3</td>
+<td><code>installed-disabled-by-user</code></td>
+<td>enable</td>
+<td>not refused, not blocked by policy</td>
+<td>Record the desired state. Clear the failure windows. Activate per trigger rules.</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch on</td>
+</tr>
+<tr>
+<td>P4</td>
+<td><code>installed-enabled</code></td>
+<td>third counted failure</td>
+<td>side-specific</td>
+<td>Drop the instance. Do not schedule a restart. Set the side <code>stopped-by-failure</code>. The package state does not change.</td>
+<td><code>plugin-state-changed</code> reason <code>failure</code>, log <code>failure.disabled</code></td>
+<td>Footer notice, red mark in the list</td>
+</tr>
+<tr>
+<td>P5</td>
+<td><code>installed-enabled</code></td>
+<td>enable, reset-failures or update</td>
+<td>a side is <code>stopped-by-failure</code></td>
+<td>Clear the failure window. Set the side <code>inactive</code>.</td>
+<td><code>plugin-state-changed</code> reason <code>user</code> or <code>update</code></td>
+<td>Notice cleared</td>
+</tr>
+<tr>
+<td>P6</td>
+<td><code>installed-enabled</code></td>
+<td>policy file lists the id or version</td>
+<td>policy loaded</td>
+<td>Stop all sides. Set the overlay.</td>
+<td><code>plugin-state-changed</code> reason <code>policy</code>, log <code>policy.blocked</code></td>
+<td>Row shows <code>Blocked by policy</code></td>
+</tr>
+<tr>
+<td>P7</td>
+<td>any installed state</td>
+<td>package check fails at load</td>
+<td>API window, tier, signature, hash, trust, policy</td>
+<td>Refuse. Keep the files.</td>
+<td>log <code>load.refused</code> with the code</td>
+<td>Row shows the code and the fix</td>
+</tr>
+<tr>
+<td>P8</td>
+<td><code>installed-enabled</code></td>
+<td>update downloaded and verified</td>
+<td>install pipeline step 6 committed</td>
+<td>Keep the candidate in <code>store/&lt;id&gt;/&lt;version&gt;/</code> beside the active version, with <code>update.state: staged</code></td>
+<td><code>plugin-state-changed</code> reason <code>update</code></td>
+<td>none until the swap</td>
+</tr>
+<tr>
+<td>P9</td>
+<td><code>update-staged</code></td>
+<td>swap</td>
+<td>the first <code>activate</code> of the candidate returns <code>ok</code> on the server side</td>
+<td>Run data migration. Activate. Set <code>active_version</code> to the candidate.</td>
+<td>log <code>update.ok</code></td>
+<td>New version shown</td>
+</tr>
+<tr>
+<td>P10</td>
+<td><code>update-staged</code></td>
+<td>swap</td>
+<td>the first <code>activate</code> fails, traps or misses its deadline</td>
+<td>Roll back at once to the previous version and its pre-update data snapshot. Mark the candidate <code>skip</code>. Do not count the failure.</td>
+<td>log <code>update.rolled-back</code></td>
+<td>Toast: <code>Update failed, rolled back</code></td>
+</tr>
+<tr>
+<td>P11</td>
+<td>any installed state</td>
+<td>uninstall</td>
+<td>no uninstall already pending</td>
+<td>Set <code>uninstall-pending</code>. Stop all sides. Remove files.</td>
+<td>log <code>uninstall.ok</code></td>
+<td>Plugin disappears</td>
+</tr>
+<tr>
+<td>P12</td>
+<td><code>uninstall-pending</code></td>
+<td>server start after a crash</td>
+<td>files still present</td>
+<td>Finish the uninstall</td>
+<td>log <code>uninstall.recovered</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>P13</td>
+<td><code>installed-enabled</code></td>
+<td><code>trust remove &lt;key_id&gt; --force</code></td>
+<td>the key signed this plugin</td>
+<td>Stop all sides. Record <code>state</code>.</td>
+<td><code>plugin-state-changed</code> reason <code>policy</code>, log <code>trust.removed</code></td>
+<td>Row shows <code>Untrusted</code>, with a badge</td>
+</tr>
+<tr>
+<td>P14</td>
+<td><code>disabled-untrusted</code></td>
+<td>the key is trusted again, or <code>enable --accept-risk</code></td>
+<td>none</td>
+<td>Record <code>installed-enabled</code>. Clear the failure windows. Activate per trigger rules.</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch on</td>
+</tr>
+<tr>
+<td>P15</td>
+<td>any installed state</td>
+<td>key revoked as <code>compromised</code>, or registry takedown of this version</td>
+<td>none</td>
+<td>Stop all sides. Record <code>disabled-blocked</code> and the reason.</td>
+<td><code>plugin-state-changed</code> reason <code>policy</code>, log <code>trust.key-revoked</code> or <code>registry.takedown</code></td>
+<td>Row shows <code>Blocked</code>, with the reason</td>
+</tr>
+<tr>
+<td>P16</td>
+<td><code>disabled-blocked</code></td>
+<td><code>enable --accept-risk</code>, or an update signed by another trusted key of the same publisher</td>
+<td>none</td>
+<td>Record <code>installed-enabled</code>. Clear the failure windows.</td>
+<td><code>plugin-state-changed</code> reason <code>user</code> or <code>update</code></td>
+<td>Switch on</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-007] Enabling a plugin that is <code>refused-at-load</code> or <code>disabled-by-policy</code> MUST return <code>not-permitted</code> with the refusal code in the message, and MUST NOT change any state. Test: call <code>set-enabled(id, true)</code> on a policy-blocked plugin.</li>
+<li>[LIF-008] A failure that moves the server side to <code>stopped-by-failure</code> MUST be written to <code>failure_stopped</code> in <code>installed.json</code>, so it survives a server restart. A client or scene side is not stored. Test: cause three failures, restart the server and read the list output.</li>
+<li>[LIF-009] Enabling, resetting failures or installing an update MUST clear the failure window of the sides it affects. Test: two failures, then enable, then one failure restarts after the first-failure delay.</li>
+<li>[LIF-010] A candidate whose first <code>activate</code> fails MUST roll back to the previous version, as P10 says, and MUST NOT leave the plugin in <code>update-staged</code>. A failure after a successful first activation MUST NOT roll back. Test: stage a version whose <code>activate</code> always errors and assert the old version is active.</li>
+<li>[LIF-283] The package states <code>disabled-untrusted</code> and <code>disabled-blocked</code> MUST follow rows P13 to P16, MUST be stored in <code>installed.json</code> and MUST survive a restart. A plugin in either state MUST NOT run, and MUST keep its grants, settings and data. Test: remove the signing key with <code>--force</code>, restart the server and assert <code>disabled-untrusted</code>; revoke a key as <code>compromised</code> and assert <code>disabled-blocked</code>; leave each state by the stated way.</li>
+</ul>
+<h3 id="instance-state-transitions">Instance-state transitions</h3>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>From</th>
+<th>Trigger</th>
+<th>Guard</th>
+<th>Host actions, in order</th>
+<th>Deactivate reason</th>
+<th>Events and log</th>
+<th>User-visible effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I1</td>
+<td><code>inactive</code></td>
+<td>activation trigger fires</td>
+<td>pool memory available, concurrency cap not reached</td>
+<td>Create the instance. Call <code>activate</code>.</td>
+<td>none</td>
+<td>log <code>activate.begin</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I2</td>
+<td><code>inactive</code></td>
+<td>activation trigger fires</td>
+<td>pool memory full</td>
+<td>Stay <code>inactive</code> with reason <code>host-capacity</code>. Retry on release, and after 1 s, 5 s and 30 s, then every 60 s without end while the plugin is enabled (<a href="/pages/lifecycle/">LIF-034</a>).</td>
+<td>none</td>
+<td>log <code>activate.deferred</code></td>
+<td>Row shows <code>waiting for memory</code></td>
+</tr>
+<tr>
+<td>I3</td>
+<td><code>activating</code></td>
+<td><code>activate</code> returns <code>ok</code></td>
+<td>within deadline</td>
+<td>Mark <code>active</code>. Flush queued events.</td>
+<td>none</td>
+<td><code>plugin-state-changed</code>, log <code>activate.ok</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I4</td>
+<td><code>activating</code></td>
+<td><code>activate</code> errors, traps or misses its deadline</td>
+<td>none</td>
+<td>Drop the instance. Count one failure. Run I6 or I7.</td>
+<td>none</td>
+<td>log <code>failure.counted</code></td>
+<td>none, or notice on the third</td>
+</tr>
+<tr>
+<td>I5</td>
+<td><code>active</code></td>
+<td>trap, deadline breach, queue overflow or memory limit</td>
+<td>none</td>
+<td>Drop the instance. Withdraw dynamic contributions. Keep decorations, marked stale. Cancel pending requests. Count one failure.</td>
+<td>none</td>
+<td>log <code>failure.counted</code></td>
+<td>Decorations shown stale</td>
+</tr>
+<tr>
+<td>I6</td>
+<td><code>failed</code></td>
+<td>counted failure number 1 or 2</td>
+<td>not stopping</td>
+<td>Schedule the restart timer.</td>
+<td>none</td>
+<td>log <code>restart.scheduled</code> with the delay</td>
+<td>Row shows <code>restarting</code></td>
+</tr>
+<tr>
+<td>I7</td>
+<td><code>failed</code></td>
+<td>counted failure number 3 in the window</td>
+<td>none</td>
+<td>Set the side <code>stopped-by-failure</code>. Run P4.</td>
+<td>none</td>
+<td>log <code>failure.disabled</code></td>
+<td>Footer notice</td>
+</tr>
+<tr>
+<td>I8</td>
+<td><code>restart-scheduled</code></td>
+<td>timer fires</td>
+<td>side still allowed, server not stopping</td>
+<td>Run I1.</td>
+<td>none</td>
+<td>log <code>restart.begin</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I9</td>
+<td><code>active</code></td>
+<td>disable</td>
+<td>none</td>
+<td>Stop accepting calls. Call <code>deactivate(disabled)</code>. Withdraw contributions. Release locks. Cancel requests.</td>
+<td><code>disabled</code></td>
+<td>log <code>deactivate.ok</code></td>
+<td>Row dim</td>
+</tr>
+<tr>
+<td>I10</td>
+<td><code>active</code></td>
+<td>server stop begins</td>
+<td>none</td>
+<td>Call <code>deactivate(shutdown)</code> in reverse start order. Store the bytes.</td>
+<td><code>shutdown</code></td>
+<td>log <code>deactivate.ok</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I11</td>
+<td><code>active</code></td>
+<td>client detaches</td>
+<td>side is <code>client</code> or <code>scene</code></td>
+<td>Call <code>deactivate(shutdown)</code>. Send the bytes to the server if the link is up.</td>
+<td><code>shutdown</code></td>
+<td>log <code>deactivate.ok</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I12</td>
+<td><code>active</code></td>
+<td>update swap or dev reload</td>
+<td>none</td>
+<td>Call <code>deactivate(upgrade)</code>. Then run I1 for the new build.</td>
+<td><code>upgrade</code></td>
+<td>log <code>deactivate.ok</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I13</td>
+<td><code>active</code></td>
+<td>grant revoked or granted</td>
+<td>none</td>
+<td>Bump the authorization epoch. Call <code>deactivate(revoked)</code> or <code>deactivate(granted)</code>. Run I1 with the new <code>granted</code> list.</td>
+<td><code>revoked</code> or <code>granted</code></td>
+<td><code>plugin-state-changed</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I14</td>
+<td><code>restart-scheduled</code></td>
+<td>disable, update or uninstall</td>
+<td>none</td>
+<td>Cancel the timer. No <code>deactivate</code> call, there is no instance.</td>
+<td>none</td>
+<td>log <code>restart.cancelled</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I15</td>
+<td>any</td>
+<td><code>deactivate</code> misses its deadline</td>
+<td>none</td>
+<td>Drop the instance. Discard the bytes.</td>
+<td>as sent</td>
+<td>log <code>deactivate.deadline</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I16</td>
+<td><code>inactive</code></td>
+<td>activation trigger fires</td>
+<td>a required plugin, or the provider of a required service, is not <code>active</code></td>
+<td>Set <code>waiting-dependency</code>. Start the wait of <code>wait_ms</code> per provider. Activate the missing requirement if it is lazy.</td>
+<td>none</td>
+<td>log <code>activate.waiting</code></td>
+<td>Row shows <code>waiting for &lt;name&gt;</code></td>
+</tr>
+<tr>
+<td>I17</td>
+<td><code>waiting-dependency</code></td>
+<td>every requirement is <code>active</code></td>
+<td>none</td>
+<td>Run I1.</td>
+<td>none</td>
+<td>log <code>activate.begin</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>I18</td>
+<td><code>waiting-dependency</code></td>
+<td><code>wait_ms</code> runs out</td>
+<td>none</td>
+<td>Set <code>inactive</code> with the reason <code>dependency.unresolved</code>. Retry when a requirement becomes <code>active</code>, and after 1 s, 5 s and 30 s, then every 60 s without end while the plugin is enabled.</td>
+<td>none</td>
+<td>log <code>activate.wait-expired</code></td>
+<td>Row keeps <code>waiting for &lt;name&gt;</code></td>
+</tr>
+<tr>
+<td>I19</td>
+<td><code>inactive</code></td>
+<td>disable</td>
+<td>none</td>
+<td>Record the desired state. Cancel pending retries. No <code>deactivate</code> call, there is no instance.</td>
+<td>none</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch off, contributions withdrawn</td>
+</tr>
+<tr>
+<td>I20</td>
+<td><code>waiting-dependency</code></td>
+<td>disable</td>
+<td>none</td>
+<td>Record the desired state. Cancel the wait. No <code>deactivate</code> call, there is no instance.</td>
+<td>none</td>
+<td><code>plugin-state-changed</code> reason <code>user</code></td>
+<td>Switch off, <code>waiting for &lt;name&gt;</code> cleared</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-011] The host MUST apply row I2 when the session memory pool cannot admit the instance, and MUST NOT count that refusal as a failure. Test: fill the pool with other plugins, trigger activation and assert the failure window of the refused plugin is empty.</li>
+<li>[LIF-012] A trap, an error from <code>activate</code> or a deadline breach in <code>activating</code> or <code>active</code> MUST follow rows I4 or I5 and MUST drop the instance without calling <code>deactivate</code>. Test: trap in <code>on-events</code> and assert no <code>deactivate</code> call is logged.</li>
+<li>[LIF-013] The host MUST apply row I14 when a plugin is disabled, updated or uninstalled while a restart is scheduled. Test: schedule a restart, disable the plugin and assert the timer never fires.</li>
+<li>[LIF-014] Rows I9 to I13 MUST send exactly one <code>deactivate</code> call per live instance, with the reason in the table. Test: for each row, count <code>deactivate</code> calls and read the reason.</li>
+<li>[LIF-015] A client or scene instance MUST receive <code>deactivate(shutdown)</code> when its client disconnects cleanly, and MUST receive no other reason. After a crash or a kill of the client process no call is possible: the server uses the last restore bytes it stored. Test: kill the client process and read the server log for the stored restore bytes.</li>
+<li>[LIF-284] A side whose required plugin or service provider is not <code>active</code> MUST be in the instance state <code>waiting-dependency</code>, MUST NOT count a failure, and MUST follow rows I16 to I18. Test: activate a consumer while its provider is disabled, assert <code>waiting-dependency</code>, enable the provider and assert <code>activating</code>; repeat with a provider that stays off for longer than <code>wait_ms</code> and assert <code>inactive</code> with <code>dependency.unresolved</code>.</li>
+</ul>
+<h3 id="events-and-counters">Events and counters</h3>
+<p>Two events report state changes. Both are delivered only to plugins that hold <code>plugins.manage</code> (<a href="/pages/capability-plugins-manage/">capability</a>). The kernel also publishes the first one on the topic <code>ilium.plugins/state</code> for the settings screens.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Fields</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin-state-changed</code></td>
+<td><code>plugin</code>, <code>side</code>, <code>scope</code>, <code>from</code>, <code>to</code>, <code>reason</code>, <code>at-unix-ms</code></td>
+<td>Every row of both tables that changes a package or instance state</td>
+</tr>
+<tr>
+<td><code>ilium.extensions/changed</code></td>
+<td><code>point</code>, <code>owner</code></td>
+<td>A contributor to an extension point appears, changes or disappears. See <a href="/pages/api-extension-points/">extension points</a></td>
+</tr>
+</tbody>
+</table>
+<p>The <code>reason</code> is one of <code>user</code>, <code>failure</code>, <code>policy</code>, <code>update</code>, <code>uninstall</code>, <code>trigger</code>, <code>capacity</code>, <code>server-start</code>, <code>server-stop</code>, <code>detach</code>, <code>grant</code> and <code>dev</code>.</p>
+<ul>
+<li>[LIF-016] The host MUST emit <code>plugin-state-changed</code> once per state change, in the order the changes happened, to every subscriber with <code>plugins.manage</code>. Test: record events through a full disable, enable and failure sequence.</li>
+</ul>
+<h3 id="the-plugin-info-record">The <code>plugin-info</code> record</h3>
+<p>The record of <a href="/pages/api-help-and-plugins/">help and plugins</a> has 19 fields, numbered in the table below. <code>enabled</code> and <code>failed</code> stay as derived fields, so a plugin that reads only them keeps working.</p>
+<pre><code class="language-wit">enum package-state { not-installed, installed-enabled, installed-disabled-by-user,
+                     disabled-untrusted, disabled-blocked, disabled-by-policy,
+                     refused-at-load, update-staged, uninstall-pending }
+enum instance-state { inactive, activating, waiting-dependency, active, deactivating,
+                      restart-scheduled, stopped-by-failure, stopped }
+enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }
+
+record side-state {
+  side: string,                       // &quot;server&quot;, &quot;client&quot; or &quot;scene&quot;
+  scope: string,                      // &quot;server&quot;, or the attached client id
+  state: instance-state,
+  failures-in-window: u32,
+  last-error-code: option&lt;string&gt;,    // for example &quot;trap.deadline&quot;
+  restart-at-unix-ms: option&lt;u64&gt;,
+}
+
+record plugin-info {
+  id: plugin-id, name: string, version: string, tier: string,
+  enabled: bool, failed: bool,
+  state: package-state,
+  side-states: list&lt;side-state&gt;,
+  scope: string,                      // &quot;global&quot; in 0.1.0
+  disabled-reason: option&lt;string&gt;,    // a code such as &quot;user&quot;, &quot;untrusted&quot;, &quot;blocked&quot;, &quot;policy.blocked&quot;
+  health: health-state,
+  publisher: string,                  // display name from the manifest
+  publisher-key: option&lt;string&gt;,      // key id; none for T3
+  source: string,                     // &quot;file&quot;, &quot;url&quot; or &quot;registry&quot;
+  channel: string,                    // &quot;stable&quot; or &quot;beta&quot;
+  pinned: bool,
+  update-available: option&lt;string&gt;,   // newest allowed version, from cached registry data
+  deprecated: bool,
+  yanked: bool,
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>id</code></td>
+<td><code>plugin-id</code></td>
+<td>The plugin id.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>name</code></td>
+<td>string</td>
+<td>Display name from the manifest.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>version</code></td>
+<td>string</td>
+<td>Version of the active package.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>tier</code></td>
+<td>string</td>
+<td><code>T1</code>, <code>T2</code> or <code>T3</code>.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td>Derived, see the rules below.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>failed</code></td>
+<td>bool</td>
+<td>Derived, see the rules below.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>state</code></td>
+<td><code>package-state</code></td>
+<td>The package state.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>side-states</code></td>
+<td>list of <code>side-state</code></td>
+<td>One record per side and scope.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>scope</code></td>
+<td>string</td>
+<td><code>global</code> in 0.1.0.</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>disabled-reason</code></td>
+<td>option of string</td>
+<td>Why the plugin is off.</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>health</code></td>
+<td><code>health-state</code></td>
+<td>The health value.</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>publisher</code></td>
+<td>string</td>
+<td>Display name from the manifest.</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>publisher-key</code></td>
+<td>option of string</td>
+<td>Key id; none for T3.</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>source</code></td>
+<td>string</td>
+<td><code>file</code>, <code>url</code> or <code>registry</code>.</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>channel</code></td>
+<td>string</td>
+<td><code>stable</code> or <code>beta</code>.</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>pinned</code></td>
+<td>bool</td>
+<td>The user pinned the version.</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>update-available</code></td>
+<td>option of string</td>
+<td>Newest allowed version, from cached registry data.</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>deprecated</code></td>
+<td>bool</td>
+<td>The registry marks the plugin deprecated.</td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>yanked</code></td>
+<td>bool</td>
+<td>The registry marks the active version yanked.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Derived field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td><code>true</code> when <code>state</code> is <code>installed-enabled</code> or <code>update-staged</code></td>
+</tr>
+<tr>
+<td><code>failed</code></td>
+<td><code>true</code> when any side has the instance state <code>stopped-by-failure</code></td>
+</tr>
+<tr>
+<td><code>disabled-reason</code></td>
+<td><code>none</code> when enabled, otherwise <code>user</code>, <code>untrusted</code>, <code>blocked</code>, <code>policy.blocked</code>, <code>safe-mode</code> or a refusal code</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[LIF-017] <code>plugins.list</code> MUST return one record per installed plugin with every field of the <code>plugin-info</code> table, in table order. Test: install two plugins, disable one and compare the records with the table.</li>
+<li>[LIF-018] <code>enabled</code> MUST equal the rule above in every state. Test: parametrised over the nine package states.</li>
+</ul>
+<p>The CLI shows the same data. <code>ilium plugin list --json</code> prints one JSON line per plugin, with the type <code>plugin</code>:</p>
+<pre><code class="language-text">{&quot;type&quot;:&quot;plugin&quot;,&quot;id&quot;:&quot;com.example.notes&quot;,&quot;version&quot;:&quot;0.3.1&quot;,&quot;tier&quot;:&quot;T2&quot;,&quot;state&quot;:&quot;installed-enabled&quot;,&quot;scope&quot;:&quot;global&quot;,&quot;health&quot;:&quot;healthy&quot;,&quot;enabled&quot;:true,&quot;failed&quot;:false,&quot;disabled_reason&quot;:null,&quot;side_states&quot;:[{&quot;side&quot;:&quot;server&quot;,&quot;scope&quot;:&quot;server&quot;,&quot;state&quot;:&quot;active&quot;,&quot;failures_in_window&quot;:0,&quot;last_error_code&quot;:null,&quot;restart_at_unix_ms&quot;:null}]}
+</code></pre>
+<p>The JSON uses snake_case keys, as all JSONL output of the CLI does. A final <code>summary</code> line gives <code>plugins</code> and <code>problems</code>.</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin list
+<span class="t-dim">ID                    VER    STATE      HEALTH</span>
+ilium.core.tree       0.1.0  <span class="t-ok">enabled</span>    healthy
+com.example.notes     0.3.1  <span class="t-ok">enabled</span>    healthy
+com.example.cursor    0.2.0  <span class="t-err">failed</span>     failed
+com.example.old       1.0.0  <span class="t-dim">off(user)</span>  disabled
+vendor.ext            0.1.0  <span class="t-warn">refused</span>    refused
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The default list prints one row per plugin. Add <code>--json</code> for the full record.</figcaption>
+</figure>
+
+<h3 id="idempotency-and-concurrency">Idempotency and concurrency</h3>
+<ul>
+<li>[LIF-019] <code>set-enabled(id, true)</code> on an enabled plugin and <code>set-enabled(id, false)</code> on a disabled plugin MUST return <code>ok</code> and change nothing, and no event MUST be emitted. Test: call twice and count events.</li>
+<li>[LIF-020] The host MUST serialise all transitions of one plugin id. Transitions of different plugin ids MAY run in parallel. Test: issue disable and uninstall at the same time and assert one runs after the other.</li>
+</ul>
+<p>How a request behaves while another transition of the same plugin is in flight:</p>
+<table>
+<thead>
+<tr>
+<th>In flight</th>
+<th>A new <code>set-enabled</code></th>
+<th>A new install, update or uninstall</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activating</code></td>
+<td>recorded at once, returns <code>ok</code>, applied when activation ends</td>
+<td>queued behind the transition</td>
+</tr>
+<tr>
+<td><code>deactivating</code></td>
+<td>recorded at once, returns <code>ok</code>, applied when the deactivate ends</td>
+<td>queued behind the transition</td>
+</tr>
+<tr>
+<td>update swap</td>
+<td>refused with <code>conflict</code></td>
+<td>refused with <code>conflict</code> and the message <code>update in progress</code></td>
+</tr>
+<tr>
+<td><code>uninstall-pending</code></td>
+<td>refused with <code>conflict</code></td>
+<td>refused with <code>conflict</code></td>
+</tr>
+</tbody>
+</table>
+<p>The last recorded desired state wins. A queued request never waits longer than the sum of the deadlines of the transition in flight. The call returns when the change is recorded, never when the transition ends.</p>
+<h3 id="edge-cases">Edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Disable during <code>activating</code></td>
+<td>The desired state is recorded. When <code>activate</code> returns, the host calls <code>deactivate(disabled)</code>. If <code>activate</code> never returns, the activate deadline drops the instance.</td>
+</tr>
+<tr>
+<td>Enable a plugin with a scheduled restart</td>
+<td>The plugin is already enabled, so the call returns <code>ok</code>. The timer is not changed.</td>
+</tr>
+<tr>
+<td>Two clients attached, one fails three times</td>
+<td>Only that client's side becomes <code>stopped-by-failure</code>. The other client keeps the plugin.</td>
+</tr>
+<tr>
+<td>Server stops while a restart is scheduled</td>
+<td>The timer is cancelled. See <a href="/pages/lifecycle/#failure-counting-and-restart">Lifecycle</a>.</td>
+</tr>
+<tr>
+<td>The registry file cannot be written</td>
+<td>The transition is refused with <code>io</code> and the state stays as it was. See <a href="/pages/reference-offline-and-low-disk/">offline and low disk</a>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/lifecycle/">Lifecycle</a> for activation order, failure counting and restart delays</li>
+<li><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Health and watchdog</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Plugin scope and sessions</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Persistence and restart</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and troubleshooting</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-plugin-files/"><small>Previous</small>Plugin files on disk</a><a class="next" href="/pages/reference-plugin-policy/"><small>Next</small>Plugin policy</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#two-state-machines">Two state machines</a></li><li class="l2"><a href="#package-states">Package states</a></li><li class="l2"><a href="#instance-states">Instance states</a></li><li class="l2"><a href="#package-state-transitions">Package-state transitions</a></li><li class="l2"><a href="#instance-state-transitions">Instance-state transitions</a></li><li class="l2"><a href="#events-and-counters">Events and counters</a></li><li class="l2"><a href="#the-plugin-info-record">The plugin-info record</a></li><li class="l2"><a href="#idempotency-and-concurrency">Idempotency and concurrency</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -124,8 +124,13 @@ def main():
             fail("copied binary does not match its artifact hash", binary=binary)
         previous = None
         if destination.is_file():
+            # Copy to a temporary name and rename it into place: the old `.prev`
+            # may still be running (an agent matching an older live server),
+            # and writing into a running executable fails with ETXTBSY.
             previous = bin_dir / f"{binary}.prev"
-            shutil.copy2(destination, previous)
+            previous_temporary = bin_dir / f".{binary}.prev.installing"
+            shutil.copy2(destination, previous_temporary)
+            os.replace(previous_temporary, previous)
         os.replace(temporary, destination)
         record = {
             "binary": binary,

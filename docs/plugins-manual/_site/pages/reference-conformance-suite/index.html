@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Conformance suite | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/" aria-current="page">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Conformance suite</h1>
+
+<p>The conformance suite is a fixed list of cases that check one claim each about the contract <code>ilium:plugin@0.1.0</code>. It has two uses. A plugin author runs it to learn that a built plugin follows the contract. A maintainer of Ilium or of an SDK runs it to learn that a host or an SDK still follows the contract after a change.</p>
+<p>Terms:</p>
+<ul>
+<li><strong>Case</strong>: one check with an id, a setup, a stimulus and an expected result.</li>
+<li><strong>Subject</strong>: the thing under test. It is a plugin component, an SDK, or the host.</li>
+<li><strong>Verdict</strong>: <code>pass</code>, <code>fail</code> or <code>skip</code> for one case.</li>
+</ul>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>A built component in <code>dist/</code> for plugin subjects. See <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a>.</li>
+<li>The harness from <a href="/pages/reference-test-harness/">Test harness reference</a>. The suite runs on <code>FakeHost</code> in component mode.</li>
+</ul>
+<h2 id="running-the-suite">Running the suite</h2>
+<p><code>ilium plugin test --conformance [--subject &lt;plugin|sdk|host&gt;] [--case &lt;id&gt;]</code></p>
+<table>
+<thead>
+<tr>
+<th>Subject</th>
+<th>Needs</th>
+<th>What it checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin</code> (default)</td>
+<td><code>dist/*.wasm</code></td>
+<td>That the component behaves within the contract limits</td>
+</tr>
+<tr>
+<td><code>sdk</code></td>
+<td>The SDK source tree</td>
+<td>That the SDK maps every contract rule to its API</td>
+</tr>
+<tr>
+<td><code>host</code></td>
+<td>A running session</td>
+<td>That the host enforces every contract rule</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-600]</strong> <code>--subject plugin</code> MUST run only the cases marked <code>plugin</code> in the catalogue below. It MUST skip cases that need a grant the plugin does not request, with the reason <code>grant-not-requested</code>.</li>
+<li><strong>[DEV-601]</strong> <code>--subject sdk</code> and <code>--subject host</code> MUST be refused with exit 2 and <code>usage.subject-unavailable</code> in a normal install. They are available only in the Ilium source tree, where the maintainer enables them with <code>ILIUM_CONFORMANCE_MAINTAINER=1</code>.</li>
+<li><strong>[DEV-602]</strong> The suite MUST print one <code>conformance</code> record per case, then a <code>summary</code> record. A <code>fail</code> verdict makes the exit code 3. A suite with only <code>pass</code> and <code>skip</code> exits 0.</li>
+<li><strong>[DEV-603]</strong> <code>--case &lt;id&gt;</code> MUST run one case. An unknown id MUST fail with exit 2 and <code>usage.invalid-value</code>.</li>
+<li><strong>[DEV-604]</strong> The case ids MUST be stable. A case MUST NOT change meaning. A changed rule gets a new case id, and the old id is retired in the retired list at the end of this page.</li>
+<li><strong>[DEV-605]</strong> Every case MUST be deterministic. It MUST use the fake clock and the default seed.</li>
+<li><strong>[DEV-606]</strong> One case MUST finish within 10,000 ms of wall time. A longer case is a <code>fail</code> with the message <code>case exceeded 10000 ms</code>.</li>
+<li><strong>[DEV-607]</strong> Durations in case expectations are fake-clock milliseconds, except the call time measured in epoch-based wall-clock milliseconds (fuel is off and never enforces or measures deadlines, per HST-058 and LIF-127). A case that needs a deadline breach MUST use the built-in probe plugin <code>conformance-probe.wasm</code> with its busy-wait import, never the plugin under test.</li>
+</ul>
+<p>A record:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;conformance&quot;,&quot;case&quot;:&quot;CONF-LIFE-02&quot;,&quot;title&quot;:&quot;activate stays under its deadline&quot;,&quot;subject&quot;:&quot;plugin&quot;,&quot;verdict&quot;:&quot;pass&quot;,&quot;duration_ms&quot;:41}
+{&quot;type&quot;:&quot;summary&quot;,&quot;passed&quot;:31,&quot;failed&quot;:0,&quot;skipped&quot;:5,&quot;duration_ms&quot;:18420}
+</code></pre>
+<h2 id="case-catalogue">Case catalogue</h2>
+<p>Case ids have the form <code>CONF-&lt;AREA&gt;-&lt;nn&gt;</code>. The tables list the id, the claim, the stimulus and the expected result. The subject column says who can run the case: <code>P</code> plugin, <code>S</code> SDK, <code>H</code> host.</p>
+<h3 id="lifecycle">Lifecycle</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-LIFE-01</td>
+<td><code>activate</code> runs once before any event</td>
+<td>Activate, then deliver one event</td>
+<td><code>activate</code> call precedes <code>on-events</code></td>
+<td>P S H</td>
+</tr>
+<tr>
+<td>CONF-LIFE-02</td>
+<td><code>activate</code> stays under its deadline</td>
+<td>Subject P: activate the subject plugin and measure the call time. Subject H: the probe plugin busy-waits for 2,100 ms in <code>activate</code>.</td>
+<td>P: call time under the effective deadline. H: <code>trap.deadline</code>.</td>
+<td>P H</td>
+</tr>
+<tr>
+<td>CONF-LIFE-03</td>
+<td><code>deactivate</code> over 500 ms is cut</td>
+<td>The probe plugin busy-waits for 600 ms in <code>deactivate</code></td>
+<td>Instance dropped, restore bytes discarded, not counted as a failure (<code>failures()</code> unchanged)</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-LIFE-04</td>
+<td>An error from <code>activate</code> fails the start</td>
+<td><code>activate</code> returns an error</td>
+<td>Plugin not active, error code logged</td>
+<td>P S H</td>
+</tr>
+<tr>
+<td>CONF-LIFE-05</td>
+<td>Deactivate reason is one of the five delivered reasons</td>
+<td>Deactivate with each of <code>shutdown</code>, <code>disabled</code>, <code>upgrade</code>, <code>revoked</code> and <code>granted</code></td>
+<td>The plugin sees that reason. <code>crash-restart</code> is reserved and never delivered.</td>
+<td>S H</td>
+</tr>
+</tbody>
+</table>
+<h3 id="events-and-submissions">Events and submissions</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-EVT-01</td>
+<td>A batch holds at most 256 events</td>
+<td>Queue 600 events</td>
+<td>Batches of at most 256</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-EVT-02</td>
+<td>A batch of events stays under its deadline</td>
+<td>Subject P: deliver <code>sample_batch(256)</code> and measure the call time. Subject H: the probe plugin busy-waits for 25 ms in <code>on-events</code>.</td>
+<td>P: call time under 20 ms. H: <code>trap.deadline</code>.</td>
+<td>P H</td>
+</tr>
+<tr>
+<td>CONF-EVT-03</td>
+<td>Coalesced events keep the newest state</td>
+<td>Send three renames for one node</td>
+<td>One event with the last name</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-EVT-04</td>
+<td><code>events-dropped</code> follows a full queue</td>
+<td>Fill the queue past 1,024</td>
+<td>Next batch starts with <code>events-dropped</code></td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-EVT-05</td>
+<td>Ungranted events are not delivered</td>
+<td>Remove the grant, send the event</td>
+<td>No delivery</td>
+<td>P H</td>
+</tr>
+<tr>
+<td>CONF-EVT-06</td>
+<td>More than 256 submissions trap</td>
+<td>Return 256 submissions (passes), then 257 submissions</td>
+<td>256: no trap; 257: <code>trap.submission-batch</code></td>
+<td>P S H</td>
+</tr>
+<tr>
+<td>CONF-EVT-07</td>
+<td>Batch refusal cancels the rest</td>
+<td>Third submission is invalid</td>
+<td>Others <code>refused(cancelled)</code> with <code>batch refused: submission 2</code></td>
+<td>S H</td>
+</tr>
+<tr>
+<td>CONF-EVT-08</td>
+<td>Dedup key repeats are duplicates</td>
+<td>Same key twice in 10 minutes</td>
+<td>Second is <code>duplicate</code></td>
+<td>S H</td>
+</tr>
+<tr>
+<td>CONF-EVT-09</td>
+<td>A dedup key outside the charset is refused</td>
+<td>Key with a space</td>
+<td><code>refused(plugin-error{code: invalid-argument, message starting "dedup-key-invalid:"})</code></td>
+<td>S H</td>
+</tr>
+<tr>
+<td>CONF-EVT-10</td>
+<td>Outcomes arrive as <code>request-completed</code></td>
+<td>Submit one intent</td>
+<td>One event with the same correlation</td>
+<td>P S H</td>
+</tr>
+</tbody>
+</table>
+<h3 id="grants">Grants</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-GRANT-01</td>
+<td>An import whose grant the user declined is refused</td>
+<td>The manifest requests <code>fs.read:project</code>, the test declines it, the plugin calls <code>fs.read</code></td>
+<td><code>Err(not-permitted)</code></td>
+<td>P S H</td>
+</tr>
+<tr>
+<td>CONF-GRANT-02</td>
+<td>Revocation takes effect at once</td>
+<td>Revoke, then call</td>
+<td><code>Err(revoked)</code> for an import (HST-075), <code>refused(plugin-error{code: not-permitted})</code> for an intent</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-GRANT-03</td>
+<td>Grant arguments are matched exactly</td>
+<td>Grant <code>fs.read:project</code>, read <code>FsPath{scope: "data"}</code></td>
+<td><code>Err(not-permitted)</code></td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-GRANT-04</td>
+<td>A grant absent from the manifest cannot be gained</td>
+<td><code>host.grant_now</code> of a grant not in the manifest</td>
+<td><code>harness.grant-not-declared</code></td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-GRANT-05</td>
+<td>A function of a capability never requested traps</td>
+<td>Call a function of a capability the manifest never requested</td>
+<td><code>host.capability-not-requested</code></td>
+<td>H</td>
+</tr>
+</tbody>
+</table>
+<h3 id="views">Views</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-VIEW-01</td>
+<td>A render stays under its deadline</td>
+<td>Subject P: render each declared view at 80x24 and measure the call time. Subject H: the probe plugin busy-waits for 15 ms in <code>render</code>.</td>
+<td>P: call time under 10 ms. H: last good render stays, <code>trap.deadline</code> counted.</td>
+<td>P H</td>
+</tr>
+<tr>
+<td>CONF-VIEW-02</td>
+<td>A view is pure</td>
+<td>Render twice</td>
+<td>Equal screens</td>
+<td>P S</td>
+</tr>
+<tr>
+<td>CONF-VIEW-03</td>
+<td>Node limits are enforced</td>
+<td>Return a tree of 4,097 nodes, then one of 4,096</td>
+<td><code>trap.invalid-ui-tree</code> at 4,097 nodes; 4,096 renders</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-VIEW-04</td>
+<td>An action with an unknown key is dropped</td>
+<td>Click an action key the view never set</td>
+<td>Not delivered</td>
+<td>H</td>
+</tr>
+</tbody>
+</table>
+<h3 id="storage-memory-and-state">Storage, memory and state</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-STORE-01</td>
+<td>Storage survives a restart</td>
+<td>Put, trap, restart, get</td>
+<td>Value present</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-STORE-02</td>
+<td>A value over 1 MiB is refused</td>
+<td>Put a value of 1,048,576 bytes (passes), then 1,048,577 bytes</td>
+<td>1,048,576: <code>ok</code>; 1,048,577: <code>Err(quota-exceeded)</code></td>
+<td>S H</td>
+</tr>
+<tr>
+<td>CONF-STORE-03</td>
+<td>A bucket over 16 MiB is refused</td>
+<td>Fill a bucket to exactly 16 MiB (passes), then add 1 byte</td>
+<td>16 MiB: <code>ok</code>; one more byte: <code>Err(quota-exceeded)</code></td>
+<td>S H</td>
+</tr>
+<tr>
+<td>CONF-MEM-01</td>
+<td>Memory over <code>memory_mib</code> traps</td>
+<td>The probe plugin stays just under the default 32 MiB (passes), then allocates 40 MiB</td>
+<td>under: no trap; 40 MiB: <code>trap.memory</code> (see the trap code table of <a href="/pages/reference-errors-and-limits/#trap-codes">Errors and limits</a>)</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-MEM-02</td>
+<td>The ceiling is 128 MiB for T2 and T3</td>
+<td>Request 256 in the manifest</td>
+<td>Install succeeds; the value is clamped to 128 MiB and the clamp is logged</td>
+<td>H</td>
+</tr>
+</tbody>
+</table>
+<h3 id="restart-rule">Restart rule</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-RESTART-01</td>
+<td>First failure restarts after 1 s</td>
+<td>Trap once</td>
+<td>Restart at 1 s</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-RESTART-02</td>
+<td>Second failure restarts after 5 s</td>
+<td>Trap twice in 10 minutes</td>
+<td>Restart at 5 s</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-RESTART-03</td>
+<td>Third failure in 10 minutes disables</td>
+<td>Trap three times</td>
+<td>Plugin disabled</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-RESTART-04</td>
+<td>Old failures expire</td>
+<td>Traps at 0, 6 and 11 minutes of fake time</td>
+<td>Restarts after 1 s, 5 s and 5 s; never disabled</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-RESTART-05</td>
+<td>A lone old failure does not count</td>
+<td>Traps at 0 and 11 minutes of fake time</td>
+<td>Both restart after 1 s</td>
+<td>H</td>
+</tr>
+</tbody>
+</table>
+<h3 id="package-and-manifest">Package and manifest</h3>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Claim</th>
+<th>Stimulus</th>
+<th>Expected</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONF-PKG-01</td>
+<td>A package is deterministic</td>
+<td>Pack twice from one build</td>
+<td>Equal bytes</td>
+<td>P</td>
+</tr>
+<tr>
+<td>CONF-PKG-02</td>
+<td>The api-version section matches the manifest</td>
+<td>Read the custom section</td>
+<td><code>0.1.0</code> as three u16 big-endian</td>
+<td>P</td>
+</tr>
+<tr>
+<td>CONF-PKG-03</td>
+<td>A hash mismatch is refused at install</td>
+<td>Change one byte of a file</td>
+<td><code>manifest.file-hash</code></td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-PKG-04</td>
+<td>An unsigned package installs only as T3</td>
+<td>Install without a signature</td>
+<td>Tier T3 with the dev badge</td>
+<td>H</td>
+</tr>
+<tr>
+<td>CONF-PKG-05</td>
+<td>A manifest with an unknown key is refused</td>
+<td>Add <code>colour</code> at top level</td>
+<td><code>manifest.unknown-key</code></td>
+<td>H</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-610]</strong> The catalogue above MUST be the minimum. A release of the suite MAY add cases and MUST NOT remove a case without a retirement note.</li>
+<li><strong>[DEV-611]</strong> Cases for the restart rule MUST use fake time. No case waits for real seconds.</li>
+<li><strong>[DEV-612]</strong> A case for a limit MUST test the value just under the limit (pass) and the value just over (fail), unless the table says otherwise.</li>
+<li><strong>[DEV-613]</strong> A <code>skip</code> MUST carry a reason: <code>grant-not-requested</code>, <code>side-not-built</code>, <code>subject-mismatch</code>, <code>needs-session</code> or <code>needs-component</code>.</li>
+</ul>
+<h2 id="writing-a-plugin-specific-conformance-case">Writing a plugin-specific conformance case</h2>
+<p>A plugin author can add cases to the project. A case is a test function that uses <code>conformance::case</code>.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::testing::{conformance, FakeHost};
+
+#[test]
+fn event_budget_holds() {
+    conformance::case(&quot;PROJ-EVT-01&quot;, &quot;handler stays under 20 ms&quot;, |host: &amp;mut FakeHost| {
+        host.activate::&lt;Plugin&gt;();
+        host.deliver(conformance::sample_batch(256));
+        conformance::assert_within_budget(host, &quot;event&quot;, 20);
+    });
+}
+</code></pre>
+<pre><code class="language-ts">import { test } from 'bun:test';
+import { conformance, type FakeHost } from '@ilium/plugin-sdk/testing';
+
+test('event budget holds', async () =&gt; {
+  await conformance.case('PROJ-EVT-01', 'handler stays under 20 ms', async (host: FakeHost) =&gt; {
+    await host.activateModule('../src/server');
+    host.deliver(conformance.sampleBatch(256));
+    conformance.assertWithinBudget(host, 'event', 20);
+  });
+});
+</code></pre>
+<p><code>conformance::case(id: &amp;str, title: &amp;str, body: impl FnOnce(&amp;mut FakeHost))</code> in Rust and <code>conformance.case(id, title, async (host: FakeHost) =&gt; ...)</code> in TypeScript build the host the same way: <code>FakeHost::for_manifest("manifest.json")</code> in component mode with the default seed. The case receives the host as its argument and never builds one.</p>
+<ul>
+<li><strong>[DEV-624]</strong> <code>conformance::case</code> and <code>conformance.case</code> MUST pass a <code>FakeHost</code> for <code>manifest.json</code> in component mode with the default seed to the body. The body MUST NOT build its own host.</li>
+<li><strong>[DEV-620]</strong> A project case id MUST start with <code>PROJ-</code> so it can never clash with a suite case id.</li>
+<li><strong>[DEV-621]</strong> <code>sample_batch(n)</code> MUST return <code>n</code> valid events for the grants of the host, using the fuzz generator with the host seed.</li>
+<li><strong>[DEV-622]</strong> <code>assert_within_budget(host, kind, millis)</code> MUST compare the recorded time of the last call of that kind with <code>millis</code>. <code>kind</code> is one of <code>'event'</code>, <code>'render'</code>, <code>'activate'</code> and <code>'deactivate'</code>, and <code>millis</code> is an integer in milliseconds (Rust <code>u32</code>, TypeScript <code>number</code>). It MUST be skipped in native mode with the reason <code>needs-component</code>.</li>
+</ul>
+<h2 id="record-fields">Record fields</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td>string</td>
+<td>Always <code>conformance</code> for a case record</td>
+</tr>
+<tr>
+<td><code>case</code></td>
+<td>string</td>
+<td>Case id</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>The claim, as in the catalogue</td>
+</tr>
+<tr>
+<td><code>subject</code></td>
+<td>string</td>
+<td><code>plugin</code>, <code>sdk</code> or <code>host</code></td>
+</tr>
+<tr>
+<td><code>verdict</code></td>
+<td>string</td>
+<td><code>pass</code>, <code>fail</code> or <code>skip</code></td>
+</tr>
+<tr>
+<td><code>reason</code></td>
+<td>string</td>
+<td>For <code>skip</code>, one of the reasons in DEV-613. For <code>fail</code>, the message.</td>
+</tr>
+<tr>
+<td><code>duration_ms</code></td>
+<td>integer</td>
+<td>Time the case took</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-640]</strong> A <code>fail</code> record MUST carry <code>expected</code> and <code>actual</code> fields that describe the difference, as strings of at most 200 characters.</li>
+<li><strong>[DEV-641]</strong> The <code>summary</code> record MUST list <code>passed</code>, <code>failed</code>, <code>skipped</code> and <code>duration_ms</code>. <code>passed</code> plus <code>failed</code> plus <code>skipped</code> MUST equal the number of case records.</li>
+<li><strong>[DEV-642]</strong> Case order in the output MUST be the order of the catalogue on this page, area by area.</li>
+</ul>
+<h2 id="worked-example-one-case-end-to-end">Worked example: one case end to end</h2>
+<p>Case <code>CONF-EVT-06</code> checks that 257 submissions trap. The suite builds a probe batch of 257 submissions, delivers it to the component and expects <code>trap.submission-batch</code>.</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;conformance&quot;,&quot;case&quot;:&quot;CONF-EVT-06&quot;,&quot;title&quot;:&quot;more than 256 submissions trap&quot;,&quot;subject&quot;:&quot;plugin&quot;,&quot;verdict&quot;:&quot;pass&quot;,&quot;duration_ms&quot;:41}
+</code></pre>
+<p>For a plugin that returns at most 10 submissions per batch, the case drives the probe plugin, because the plugin itself never returns 257. The case therefore checks the host guard, and a plugin result <code>skip</code> with the reason <code>subject-mismatch</code> applies when the plugin world has no way to run the probe.</p>
+<ul>
+<li><strong>[DEV-643]</strong> A case that cannot drive the plugin to the claimed state MUST be a <code>skip</code> with the reason <code>subject-mismatch</code>, never a <code>pass</code>.</li>
+</ul>
+<h2 id="the-edge-of-the-suite">The edge of the suite</h2>
+<p>The suite checks the contract. It does not check:</p>
+<ul>
+<li>the look of a view on a real terminal;</li>
+<li>the speed on a given machine, except through the budgets above;</li>
+<li>the behaviour of a core plugin, which has its own tests.</li>
+</ul>
+<h2 id="using-the-suite-in-ci">Using the suite in CI</h2>
+<p>Add <code>ilium plugin test --conformance --json</code> to the pipeline. A fail verdict exits 3. See <a href="/pages/guide-ci-recipes/">CI recipes</a>.</p>
+<h2 id="retired-case-ids">Retired case ids</h2>
+<p>None. The first release of the suite is ids as listed.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li>A plugin with only a scene side skips all event and grant cases that need a server or client side, with <code>side-not-built</code>.</li>
+<li>A debug build runs slower than a release build and can fail a budget case. Use the release build for conformance. <code>--conformance</code> MUST refuse a debug build with exit 2 and <code>usage.release-build-required</code>, unless <code>--allow-debug</code> is given.</li>
+<li><strong>[DEV-630]</strong> <code>--conformance</code> MUST run in component mode only. It MUST NOT run in native mode, because the limits are not enforced there.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-config-and-data-migration/"><small>Previous</small>Config and data migration</a><a class="next" href="/pages/reference-debugging-tools/"><small>Next</small>Debugging tools</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#running-the-suite">Running the suite</a></li><li class="l2"><a href="#case-catalogue">Case catalogue</a></li><li class="l3"><a href="#lifecycle">Lifecycle</a></li><li class="l3"><a href="#events-and-submissions">Events and submissions</a></li><li class="l3"><a href="#grants">Grants</a></li><li class="l3"><a href="#views">Views</a></li><li class="l3"><a href="#storage-memory-and-state">Storage, memory and state</a></li><li class="l3"><a href="#restart-rule">Restart rule</a></li><li class="l3"><a href="#package-and-manifest">Package and manifest</a></li><li class="l2"><a href="#writing-a-plugin-specific-conformance-case">Writing a plugin-specific conformance case</a></li><li class="l2"><a href="#record-fields">Record fields</a></li><li class="l2"><a href="#worked-example-one-case-end-to-end">Worked example: one case end to end</a></li><li class="l2"><a href="#the-edge-of-the-suite">The edge of the suite</a></li><li class="l2"><a href="#using-the-suite-in-ci">Using the suite in CI</a></li><li class="l2"><a href="#retired-case-ids">Retired case ids</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

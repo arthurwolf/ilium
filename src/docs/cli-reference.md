@@ -93,6 +93,8 @@ ilium --reset-session new-session review
 | `ilium voice say <sentence>...` | Type sentences into the live voice session. | JSONL |
 | `ilium panes [selection]` | List panes across every running session. | JSONL |
 | `ilium broadcast [selection] <message>...` | Send a message to every selected agent. | JSONL |
+| `ilium close-pane [--worktree keep\|remove\|remove-and-branch]` | Close this pane, optionally removing its Ilium-created worktree. | JSONL |
+| `ilium ctl <command>` | Full remote control: read the tree, create, move, rename, close and drive panes. | JSON, YAML, Markdown or JSONL |
 | `ilium recap [selection]` | Short and long factual recaps of selected agent and shell panes. | JSONL or Markdown |
 
 ## ilium (attach)
@@ -280,7 +282,7 @@ ilium progress set    --command '<probe>' [--interval-seconds <n>] [--wait [--ti
 ilium progress wait   [<monitor_id>] [--timeout-seconds <n>]
 ilium wait            [<monitor_id>] [--timeout-seconds <n>]
 ilium progress status
-ilium progress clear  [--monitor-id <id> | --all]
+ilium progress clear  [--monitor-id <id> [--running] | --all]
 ```
 
 Requirements:
@@ -300,6 +302,7 @@ The probe is a shell command line (at most 16 KiB). It must print exactly one JS
 | `percent` | yes | A finite number from 0 to 100. `done` is shown as exactly 100; any other value for `done` is rejected. |
 | `message` | recommended | One line, at most 2048 bytes, always visible in the pane footer. It should make sense to someone who has not read the agent's session. |
 | `details` | optional | Multi-line text, at most 8192 bytes, shown when the user hovers the footer. |
+| `eta_seconds` | optional | Whole seconds the task still needs (at most 315360000). Replaces the pace-based ETA in the footer when present. |
 | `error` | required when `status` is `error`, forbidden otherwise | Text, at most 4096 bytes. |
 
 Limits: the probe may run for at most 30 seconds, produce at most 64 KiB on stdout and 16 KiB on stderr, and must exit successfully. A task that reports `error` is a task failure; a probe that cannot be run or read is a monitor failure, and the two are reported separately. After repeated consecutive observation failures (up to three) the monitor is marked failed rather than the task.
@@ -331,7 +334,7 @@ Validates the probe, then atomically adds a monitor to this pane, and waits for 
 | `--command <probe>` | required | The probe command line. |
 | `--interval-seconds <n>` | 1 | How often the probe re-runs, from 1 to 86400 (24 hours). |
 | `--wait` | off | After the acknowledgement line, block like `ilium progress wait <monitor_id>` and print its `progress_wait` line. |
-| `--timeout-seconds <n>` | none | With `--wait`: stop waiting after this many seconds (exit 6). Use a value below your shell tool's command time limit. |
+| `--timeout-seconds <n>` | none | With `--wait`: stop waiting after this many seconds (exit 6). Agents should leave it out and give the command their tool's longest wait instead. |
 | `--replace` | off | Clear every monitor of this pane first. Use only on purpose. |
 
 ```sh
@@ -384,7 +387,8 @@ Stops monitors and clears their retained results.
 
 | Option | Meaning |
 | --- | --- |
-| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. |
+| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. If its task is still running, the request is refused with `monitor-running` (exit 2), because on a pane shared by several agents the ID may belong to another agent's task. |
+| `--running` | With `--monitor-id`: also clear the monitor when its task is still running. |
 | `--all` | Clear every monitor of the pane. |
 | (neither) | Clears the only monitor; refused with `monitor-ambiguous` when the pane has several. |
 
@@ -414,12 +418,11 @@ probe='cat /tmp/tests.status.json'
 
 # 3. Validate, then register and block until the task settles.
 ilium progress check --command "$probe"
-ilium progress set   --command "$probe" --interval-seconds 5 --wait --timeout-seconds 590
+# Run it with the longest wait your tool allows (in Claude Code, as a background
+# command); no --timeout-seconds, so it returns only when the task ends.
+ilium progress set   --command "$probe" --interval-seconds 5 --wait
 
-# 4. If it printed exit 6 (still running), keep waiting on the monitor ID it printed:
-ilium progress wait 3 --timeout-seconds 590
-
-# 5. After handling the result:
+# 4. After handling the result:
 ilium progress clear --monitor-id 3
 ```
 
@@ -549,6 +552,43 @@ Output is JSONL: a `progress` record, a `warning` per session that could not be 
 
 Exit status: 0 when at least one agent was reached (or planned) and nothing failed; 1 when nothing was selected, any delivery failed, or any running session could not be read; 2 for an invalid selection or an empty message.
 
+## ilium close-pane
+
+```sh
+ilium close-pane [--pane <id>] [--worktree keep|remove|remove-and-branch] [--timeout-seconds <n>]
+ilium close-pane --worktree remove
+```
+
+Closes a pane of the running session. With no `--pane`, it closes the pane the command runs in, from the `ILIUM_PANE_ID` variable Ilium sets in every pane. This is how a worktree agent wraps up: commit, merge into the base branch, then run `ilium close-pane --worktree remove` as the last step.
+
+| Argument or option | Default | Meaning |
+| --- | --- | --- |
+| `--pane <id>` | this pane | Close another pane of the same session instead. |
+| `--worktree keep` | keep | Close the pane and leave its worktree on disk. |
+| `--worktree remove` | | Close the pane, then remove its worktree when it is clean, merged into its recorded base branch, has no running process, and was created by Ilium. The branch is kept. |
+| `--worktree remove-and-branch` | | As `remove`, and also delete the creation branch when that is safe. |
+| `--timeout-seconds <n>` | 120 | How long to wait for the server's answer. |
+
+The server runs the same checks as **Safe remove** in the worktree manager (see [Worktrees](worktrees.md#clean-up-worktrees)). The server stops the pane's processes, checks for running processes and custody tickets, removes the worktree, and closes the pane. The worktree is removed only when every check passes. A refusal keeps the worktree and reports the reasons. A refusal that comes after the pane's processes have stopped also closes the pane; a refusal before that point (for example uncommitted or untracked files) leaves the pane open. Ilium never removes a worktree it did not create; such a request is blocked.
+
+Closing a pane stops every process in it, including this command. The server still completes the request, but the lines printed after the pane stops may not reach the calling agent. Confirm the result with `git worktree list` and `git branch --list <branch>` in the main checkout.
+
+Output is JSONL: a `progress` record, then exactly one answer:
+
+```text
+{"type":"progress","command":"close-pane","request_id":1783428455846,"pane_id":12,"worktree":"remove","stage":"requesting-close"}
+{"type":"result","command":"close-pane","request_id":1783428455846,"pane_id":12,"worktree":"remove","outcome":"removed","reasons":[]}
+```
+
+| Record | Meaning |
+| --- | --- |
+| `result` with `outcome` `closed` | The pane closed; the worktree was kept (`keep`). |
+| `result` with `outcome` `removed` | The pane closed and its worktree was removed. |
+| `blocked` | The server refused. `reasons` says why (uncommitted changes, not merged, running process, foreign worktree, and so on). Nothing was removed. |
+| `uncertain` | The server did not confirm in time, or a removal reported a failure partway. Inspect the worktree before retrying; do not assume it is gone or intact. |
+| `error` | The request never ran. `code` is `not-inside-ilium-pane`, `pane-not-found`, `session-unreachable`, `connection-closed` or `server-error`. |
+
+Exit status: 0 for `result`; 1 for `blocked` or `uncertain`; 2 for `error`.
 ## ilium recap
 
 ```sh
@@ -609,6 +649,34 @@ JSONL, one object per line:
 `pane_id` is a string here. A `long` value is `null` when `--length short` was given. Markdown output prints one section per pane with the same facts.
 
 Exit status is `0` when the run finished, including with failed or stale panes; read the `summary` and `warning` records for per-pane outcomes. Exit `2` means an invalid selection, and exit `1` means the configuration could not be read.
+
+## ilium ctl
+
+`ilium ctl` is the full remote-control surface for agents and scripts. It reads the live tree and changes it: anything the interface does to panes, projects and groups has a command. Start with `ilium ctl guide`, which prints the essentials as example commands; `ilium ctl guide topics` lists deeper topics (reading, creating, controlling, arranging, http) and `ilium ctl ops` prints one JSON example of every operation.
+
+Global options: `--session NAME` (session of the `--cwd` project), `--socket PATH` (one live session, see `ilium ctl sessions`), `--format json|jsonl|yaml|markdown` for reads. Inside an Ilium pane the pane's own session is the default. Nodes are addressed by numeric id; projects also by absolute path, directory name or display name when unambiguous.
+
+| Command | What it does |
+| --- | --- |
+| `ctl tree [--depth N] [--project P] [--no-details]` | The whole session. |
+| `ctl project P` / `ctl node ID` | One project or node and its subtree. |
+| `ctl pane ID [--screen] [--lines N]` | Everything known about one pane, optionally with its screen text. |
+| `ctl find [--agent A] [--state S] [--kind K] [--project P] [--name-contains T]` | Flat list of matching panes. |
+| `ctl screen ID [--lines N]` | Current screen text of a terminal pane. |
+| `ctl wait ID [--state idle,done] [--timeout S]` | Block until an agent reaches a state or the pane closes. |
+| `ctl whoami`, `ctl sessions` | The calling pane; live sessions. |
+| `ctl new-pane [--project P \| --parent ID] [--workdir DIR] [--agent claude\|codex\|agy [--prompt T]] [--worktree --branch B [--base REF]] [--editor FILE] [--keep-open] [-- CMD]` | Create a shell, command, editor or agent pane; a worktree pane creates the Git worktree first. |
+| `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `new-split-view NAME ID ID...`, `change-folder P DIR` | Create and re-point containers and split views. |
+| `ctl replace-command ID COMMAND` | Replace the process of a pane with a shell command line. |
+| `ctl new-board NAME PATH [--markdown]`, `freeze ID RESUME`, `unfreeze ID` | Open a kanban board pane; park a pane as a frozen placeholder and restart it. |
+| `ctl rename ID TITLE`, `close ID [--worktree keep\|remove\|remove-and-branch]`, `move ID (--up \| --down \| --to PARENT [--index N])` | Rename, close and arrange. |
+| `ctl send ID TEXT [--no-enter]`, `keys ID KEY...`, `schedule ID --in S TEXT`, `queue ID TEXT [--times N \| --forever]`, `queue-clear ID`, `terminate ID` | Drive a pane. |
+| `ctl bookmark ID [--off]`, `expand ID`, `collapse ID`, `lock-closed ID [--off]` | Sidebar state. |
+| `ctl restructure PLAN.json [--project P]`, `ctl revert-restructure [--project P]` | Apply or undo a restructure plan (planning stays in the interface). |
+| `ctl kill-session` | End the session. |
+| `ctl op JSON` (or `-` for standard input) | Any operation as JSON, same body as `POST /v1/ops`. |
+
+Reads print one document in the chosen format. Mutations print one JSONL record: `{"type":"result","ok":true,"op":...}` with the ids involved, or `{"type":"error","code":...,"message":...}`. A mutation succeeds only after the server's tree shows the change. Exit status: 0 success, 2 bad arguments or selector, 3 rejected or not confirmed, 4 no reachable session. Reads never start a server; `new-pane` starts the project's session when none runs.
 
 ## Environment variables
 
@@ -728,3 +796,27 @@ ilium --reset-session new-session scratch
 | `new-pane` prints `no confirmation received from the server` | The server is busy or the session is not the one you meant. Check `ilium ls` and `--session-name`. |
 | `chat send` says the project does not have a chatroom | Run `ilium chat init` first. |
 | After installing a new build the old behaviour persists | A running server keeps its old executable. Use `ilium --restart-server` (panes are relaunched from the snapshot) when you are ready. |
+
+## Shared resource queues
+
+`ilium resource` (alias `ilium ressource`) coordinates exclusive access across linked projects on this machine. Commands connect to an existing project server; they never start or restart one. Use `--project PATH` and optionally `--session NAME` to select it. Agent operations infer the current pane or accept `--agent PANE` / `--agent SESSION/PANE`.
+
+| Command | Result |
+|---|---|
+| `resource list [--all]` / `resource show SLUG` | Project bindings or the user-wide catalog, including queue and gate state |
+| `resource create --name NAME --slug SLUG [--kind KIND] [--device-identity ID] [--description TEXT] [--rules TEXT]` | Create one shared resource and bind this project |
+| `resource link RESOURCE_ID --slug SLUG` | Bind an existing shared resource |
+| `resource edit SLUG [--name NAME] [--description TEXT] [--rules TEXT] [--kind KIND] [--device-identity ID \| --clear-device-identity]` | Edit the shared definition |
+| `resource unlink SLUG` / `resource archive SLUG` | Remove this binding, or archive an unused shared resource |
+| `resource repair SLUG` | Retry managed instruction/settings projection and read back its synchronization state |
+| `resource rebind PROJECT_ID PROJECT_PATH --expected-revision N` | Rebind a moved project using its stable identity and current catalog revision |
+| `resource reserve [AGENT] SLUG DURATION` | Return a reservation ID, ownership generation or FIFO position and estimate |
+| `resource wait RESERVATION` | Block until acquisition or explicit error; show native queue progress |
+| `resource status [RESERVATION]` | Read authoritative status; authenticated acquisition readback acknowledges delivery |
+| `resource release RESERVATION` | Release the current generation after actual hardware use stops |
+| `resource cancel RESERVATION` | Cancel the agent's queued claim |
+| `resource estimate RESERVATION DURATION` | Update the estimate without extending or expiring ownership |
+| `resource gate SLUG open\|paused\|unavailable [--reason TEXT]` | Change availability without clearing occupancy |
+| `resource recover SLUG --expected-revision N --reason TEXT` | Interactive, revision-bound revocation or subsequent clearance confirmation |
+
+Mutations return a timestamped request key. Reuse it with `--request-id KEY` when retrying an uncertain response; changing the payload under the same key is rejected. Durations use explicit units, for example `20m` or `1h30m`, from one second through seven days. Interrupted waits retain reservations. Estimates never expire ownership or prove that hardware is safe. User cancellation additionally requires `--reason TEXT --expected-revision N` and fresh interactive confirmation. See [Resource queues](resource-queues.md) for recovery and GPU/USB-board workflows.

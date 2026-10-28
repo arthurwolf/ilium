@@ -1,0 +1,36 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.titles",
+  "name": "Titles",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Titles and organisation is the plugin form of Ilium's AI naming and tree tidying.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "inference",
+      "agent.read-prompts",
+      "tree.read",
+      "tree.write",
+      "tree.decorate",
+      "tree.restructure"
+    ],
+    "client": [
+      "ui.panels",
+      "settings.write-kernel:titles",
+      "settings.write-kernel:triggers"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "limits_tier": "first-party"
+}

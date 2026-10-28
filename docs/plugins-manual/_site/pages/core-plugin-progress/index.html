@@ -1,0 +1,949 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Progress | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details open><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/" aria-current="page">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Core plugins</b></p>
+<h1>Progress</h1>
+
+<p>Progress monitors let a long task show how far it is. An agent or a script registers a probe command with <code>ilium progress set</code>, the server runs the probe on an interval, and the tree and status bar show the result. <code>ilium progress set --wait</code> and <code>ilium wait</code> block until the task ends. The plugin id is <code>ilium.core.progress</code> and it runs on both sides: the server side owns the CLI, the probes and the watchers, and the client side draws the footer and the status bar segment.</p>
+<h3 id="what-it-covers">What it covers</h3>
+<ul>
+<li>Progress monitor: a probe that prints one JSON object with a status, a percent and a message, described in the Progress monitor section of the automation guide.</li>
+<li>The <code>ilium progress</code> command and <code>ilium wait</code>, described in the CLI reference.</li>
+<li>Long-lived watchers that stream progress lines instead of being polled (new in the plugin build, not parity).</li>
+<li>The progress footer in the tree and the count in the status bar, described in the agent monitoring guide.</li>
+</ul>
+<h3 id="see-it">See it</h3>
+<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A local Codex-shaped fixture runs a monitored five-card census task and receives its completed result" loading="lazy"><figcaption>A local script acts as the Codex-shaped fixture. Ilium registers its monitor, shows progress, and posts the result; no provider request is made.</figcaption></figure>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<figure>
+<pre class="term">╭─ Progress ─────────────────────────────────────╮
+│ <span class="t-hi">▶ RUNNING  42%</span> <span class="t-hi">████████</span><span class="t-dim">░░░░░░░░░░░░</span>            │
+│ <span class="t-dim">  Running the unit tests, crate 9 of 22</span>        │
+│ <span class="t-ok"><span class="w2">✓</span> DONE  100%</span> <span class="t-ok">████████████████████</span>              │
+│ <span class="t-dim">  Export of 412 sessions finished</span>              │
+╰────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Two <code>progress-row</code> widgets with percent and message. Illustrative: the bar glyphs depend on the icon set.</figcaption>
+</figure>
+
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium progress set --command '/opt/probe.sh' --wait
+{"type":"progress_set","request_id":31,"pane_id":12,"monitor_id":4,
+ "progress":{"monitor_id":4,"report":{"job_id":"export-412",
+ "status":"running","percent":0,"message":"Exporting 412 sessions",
+ "details":"","error":null},"monitor_health":{"state":"healthy"},
+ "last_observed_unix_millis":1791800000000}}
+{"type":"progress_wait","pane_id":12,"monitor_id":4,"outcome":"done",
+ "exit_code":0,"waited_seconds":412,"composer_notice":"suppressed",
+ "next":"The task finished. ...","progress":{"monitor_id":4,...}}
+<span class="t-prompt">$</span> echo $?
+<span class="t-ok">0</span>
+</pre>
+<figcaption>Rendered at 80 columns or fewer. Illustrative. Each record is one line on a real terminal; it is wrapped here, and the text of <code>next</code> and the nested <code>progress</code> object are cut. The registration record comes first. The final <code>progress_wait</code> record ends the wait and the exit status is 0 for done.</figcaption>
+</figure>
+
+<h3 id="behaviour-contract">Behaviour contract</h3>
+<p>Field order and names equal the baseline; extra fields are not allowed. The records are:</p>
+<ul>
+<li><code>progress_set</code>: <code>{"type":"progress_set","request_id":&lt;n&gt;,"pane_id":&lt;n&gt;,"monitor_id":&lt;n&gt;,"progress":{"monitor_id":&lt;n&gt;,"report":{...},"monitor_health":{"state":"..."},"last_observed_unix_millis":&lt;n&gt;}}</code></li>
+<li><code>progress_wait</code>: <code>{"type":"progress_wait","pane_id":&lt;n&gt;,"monitor_id":&lt;n&gt;,"outcome":"done|error|monitor-failed|cleared|no-monitor|still-running","exit_code":&lt;n&gt;,"waited_seconds":&lt;n&gt;,"composer_notice":"suppressed|may-also-arrive|none","next":"...","progress":{...}}</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+<th>Exact value or text</th>
+<th>Baseline source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>progress-B01</td>
+<td>Exit status of <code>progress set --wait</code> and <code>progress wait</code></td>
+<td>0 done, 2 usage or rejected (for example <code>monitor-ambiguous</code>), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 <code>--timeout-seconds</code> elapsed while the task is still running (<code>outcome</code> <code>still-running</code>)</td>
+<td><code>src/docs/cli-reference.md#progress-wait</code></td>
+</tr>
+<tr>
+<td>progress-B02</td>
+<td><code>outcome</code> for each exit</td>
+<td>0 <code>done</code>, 3 <code>error</code>, 4 <code>monitor-failed</code>, 5 <code>cleared</code> or <code>no-monitor</code>, 6 <code>still-running</code></td>
+<td><code>src/docs/cli-reference.md#progress-wait</code></td>
+</tr>
+<tr>
+<td>progress-B03</td>
+<td>Text of <code>next</code></td>
+<td><code>done</code>: "The task finished. Verify its output, then continue." <code>error</code>: "The task reported failure. Inspect its log or error, fix, and retry." <code>monitor-failed</code>: "The probe stopped working, so the task outcome is unknown. Check the task directly; do not assume success." <code>cleared</code>: "The monitor was cleared, or is not registered on this pane. Check <code>ilium progress status</code>." <code>no-monitor</code>: "This pane has no progress monitor. Register one with <code>ilium progress set</code>." <code>still-running</code>: "The task is still running. Run the same wait command again to keep waiting." A settled outcome adds " When you have handled it, remove this monitor with <code>ilium progress clear --monitor-id &lt;id&gt;</code>."</td>
+<td><code>ilium/src/progress_wait.rs</code></td>
+</tr>
+<tr>
+<td>progress-B04</td>
+<td><code>composer_notice</code></td>
+<td><code>suppressed</code> while a wait takes the outcome, <code>may-also-arrive</code> for a settled outcome without a wait, <code>none</code> otherwise</td>
+<td><code>src/docs/cli-reference.md#progress-wait</code></td>
+</tr>
+<tr>
+<td>progress-B05</td>
+<td>Monitors per pane</td>
+<td>At most 8. The 9th live monitor is rejected with code <code>too-many-monitors</code>. A settled monitor whose outcome was delivered makes room</td>
+<td><code>src/docs/cli-reference.md#progress-set</code></td>
+</tr>
+<tr>
+<td>progress-B06</td>
+<td><code>--interval-seconds</code></td>
+<td>Default 1, range 1 to 86400</td>
+<td><code>src/docs/cli-reference.md#progress-set</code></td>
+</tr>
+<tr>
+<td>progress-B07</td>
+<td>Probe size limits</td>
+<td>Command line 16 KiB, stdout 64 KiB, stderr 16 KiB, <code>job_id</code> 256 bytes, <code>message</code> 2048 bytes, <code>details</code> 8192 bytes, <code>error</code> 4096 bytes</td>
+<td><code>src/docs/cli-reference.md#the-probe-contract</code></td>
+</tr>
+<tr>
+<td>progress-B08</td>
+<td>Probe run</td>
+<td>One shell command line, run by the server with the session project root as working directory, at most 30 s (<code>timeout_millis: 30_000</code>)</td>
+<td><code>src/docs/cli-reference.md#the-probe-contract</code></td>
+</tr>
+<tr>
+<td>progress-B09</td>
+<td>Probe failure counting</td>
+<td>After 3 consecutive probe failures the monitor becomes <code>failed</code> (monitor health), not the task</td>
+<td><code>src/docs/cli-reference.md#the-probe-contract</code></td>
+</tr>
+<tr>
+<td>progress-B10</td>
+<td>CLI reply wait</td>
+<td>The CLI waits up to 45 s for the server reply</td>
+<td><code>src/docs/cli-reference.md#progress-status</code></td>
+</tr>
+<tr>
+<td>progress-B11</td>
+<td>Same probe twice</td>
+<td>Registering the same probe command again in the same pane while its monitor runs returns the existing monitor id</td>
+<td><code>src/docs/automation.md#progress-monitor</code></td>
+</tr>
+<tr>
+<td>progress-B12</td>
+<td>Restore after restart</td>
+<td>A monitor is re-established only after one preflight probe returns the same <code>job_id</code>, and it gets a fresh monitor id</td>
+<td><code>ilium-server/src/persistence.rs</code></td>
+</tr>
+<tr>
+<td>progress-B13</td>
+<td>Delivery states</td>
+<td><code>not-queued</code>, <code>queued</code>, <code>attempted</code>, <code>delivered-to-pty</code>, <code>uncertain</code>, <code>not-deliverable</code>, <code>collected-by-waiter</code>. Only <code>queued</code> is retried after a restart. A settled outcome whose delivery is <code>not-deliverable</code>, or <code>uncertain</code> after a server restart, is re-sent by the 20 s reconciler, at most 5 times per monitor generation; it then stops. A re-sent notice carries a possible-duplicate prefix instead of a dedup key, so the agent may see it twice and ignores it if already handled</td>
+<td><code>ilium-server/src/agent_delivery.rs</code></td>
+</tr>
+<tr>
+<td>progress-B14</td>
+<td>Terminal result</td>
+<td>Typed into the agent composer once (<code>composer_notice</code>); not typed when a running wait collected it</td>
+<td><code>src/docs/automation.md#progress-monitor</code></td>
+</tr>
+<tr>
+<td>progress-B15</td>
+<td>Rejection codes</td>
+<td><code>disabled</code>, <code>invalid-request</code>, <code>invalid-probe-report</code>, <code>probe-spawn-failed</code>, <code>probe-timed-out</code>, <code>probe-exited-non-zero</code>, <code>probe-output-too-large</code>, <code>probe-io-failed</code>, <code>pane-not-found</code>, <code>stale-monitor</code>, <code>too-many-monitors</code>, <code>monitor-ambiguous</code></td>
+<td><code>src/docs/cli-reference.md#progress-status</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="settings-it-reads">Settings it reads</h3>
+<p>The plugin owns no tab. It reads four keys of the User Interface table that the Agent Monitoring tab writes, through <code>settings.read-kernel:agent-monitoring</code>. Values and defaults are those of the baseline.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Range or values</th>
+<th>Baseline source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[ui] progress_monitor_enabled</code></td>
+<td>true</td>
+<td>true or false. Off stops observation and rejects new registrations with <code>disabled</code></td>
+<td><code>src/docs/automation.md#progress-monitor</code></td>
+</tr>
+<tr>
+<td><code>[ui] progress_max_lines</code></td>
+<td>4</td>
+<td>Footer lines, 1 to 20</td>
+<td><code>src/docs/automation.md#progress-monitor</code></td>
+</tr>
+<tr>
+<td><code>[ui] completed_progress_hide_after_seconds</code></td>
+<td>60</td>
+<td>Steps of 30; 0 means never hide</td>
+<td><code>src/docs/automation.md#progress-monitor</code></td>
+</tr>
+<tr>
+<td><code>[ui] task_progress_frames</code></td>
+<td>the built-in preset 0 of the Agent Monitoring tab frame picker (the client default; the other presets are bars, moon phases and quarter circles)</td>
+<td>2 to 13 printable frames, all one cell wide or all two cells wide</td>
+<td><code>src/docs/automation.md#progress-monitor</code></td>
+</tr>
+</tbody>
+</table>
+<p>All four are written by the Agent Monitoring tab (<a href="/pages/reference-config-and-data-migration/">config and data migration</a>); this plugin never writes them.</p>
+<h3 id="manifest">Manifest</h3>
+<p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
+<p>The contract version is 0.1. The plugin declares one subcommand, <code>progress</code>, with <code>check</code>, <code>set</code>, <code>wait</code>, <code>status</code> and <code>clear</code> as its arguments. The alias <code>wait</code> makes <code>ilium wait</code> work as <code>ilium progress wait</code>.</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;ilium.core.progress&quot;,
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [&quot;cli.contribute&quot;, &quot;process.run:sh&quot;, &quot;process.long-lived&quot;, &quot;http-api.route:/progress.json&quot;, &quot;settings.read-kernel:agent-monitoring&quot;],
+    &quot;client&quot;: [&quot;ui.chrome&quot;, &quot;settings.read-kernel:agent-monitoring&quot;]
+  },
+  &quot;contributes&quot;: { &quot;cli&quot;: [{ &quot;name&quot;: &quot;progress&quot;, &quot;summary&quot;: &quot;Progress monitors&quot;, &quot;output&quot;: &quot;jsonl&quot;, &quot;requires_server&quot;: true, &quot;aliases&quot;: [&quot;wait&quot;] }] }
+}
+</code></pre>
+<h3 id="complete-manifest">Complete manifest</h3>
+<p>This is the whole manifest of the plugin at <code>ilium:plugin@0.1.0</code>. The Manifest section above shows the contributions in detail; here the required keys, the sides, the <code>capabilities</code> per side and the <code>activation</code> triggers are all present. Activation follows <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. [COR-050] Every <code>cli</code> key in the fragment above appears with the same value in this manifest.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;ilium.core.progress&quot;,
+  &quot;name&quot;: &quot;Progress&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;description&quot;: &quot;Progress monitors let a long task show how far it is.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;
+  },
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;cli.contribute&quot;,
+      &quot;process.run:sh&quot;,
+      &quot;process.long-lived&quot;,
+      &quot;http-api.route:/progress.json&quot;,
+      &quot;settings.read-kernel:agent-monitoring&quot;
+    ],
+    &quot;client&quot;: [
+      &quot;ui.chrome&quot;,
+      &quot;settings.read-kernel:agent-monitoring&quot;
+    ]
+  },
+  &quot;activation&quot;: [
+    &quot;startup&quot;
+  ],
+  &quot;contributes&quot;: {
+    &quot;cli&quot;: [{
+      &quot;name&quot;: &quot;progress&quot;,
+      &quot;summary&quot;: &quot;Progress monitors&quot;,
+      &quot;output&quot;: &quot;jsonl&quot;,
+      &quot;requires_server&quot;: true,
+      &quot;aliases&quot;: [&quot;wait&quot;]
+    }]
+  },
+  &quot;limits_tier&quot;: &quot;first-party&quot;
+}
+</code></pre>
+<h3 id="samples">Samples</h3>
+<h4 id="ilium-progress-set-and-wait">ilium progress set and wait</h4>
+<p><code>ilium progress set --wait</code> keeps its invocation open. The plugin writes the registration line, remembers the open invocation and finishes it when the monitor settles. When the user presses Ctrl+C the host sends <code>cli-cancelled</code>, and the plugin stops the probe. See <a href="/pages/api-cli/">the CLI API</a>, <a href="/pages/capability-cli-contribute/">cli.contribute</a> and <a href="/pages/api-events/">events</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::cli;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::CliInvokedEvent;
+
+impl Handler for Progress {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::CliInvoked(CliInvokedEvent { invocation, name, argv, .. })
+                    if name == &quot;progress&quot; =&gt;
+                {
+                    let (monitor, progress) = self.register(&amp;argv);
+                    // Field order and names equal the baseline record.
+                    let line = format!(
+                        r#&quot;{{&quot;type&quot;:&quot;progress_set&quot;,&quot;request_id&quot;:{},&quot;pane_id&quot;:{},&quot;monitor_id&quot;:{monitor},&quot;progress&quot;:{progress}}}&quot;#,
+                        self.request_id, self.pane_id,
+                    );
+                    let _ = cli::write_line(invocation, &amp;line);
+                    if argv.iter().any(|a| a == &quot;--wait&quot;) {
+                        self.waiting.insert(monitor, invocation);
+                    } else {
+                        cli::finish(invocation, 0);
+                    }
+                }
+                Event::CliCancelled(invocation) =&gt; self.stop_waiting(invocation),
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import * as cli from '@ilium/plugin-sdk/host/cli';
+
+export const { handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'cli-invoked' &amp;&amp; event.val.name === 'progress') {
+        const { monitor, progress } = register(event.val.argv);
+        // Field order and names equal the baseline record.
+        cli.writeLine(event.val.invocation, JSON.stringify({
+          type: 'progress_set', request_id: requestId, pane_id: paneId,
+          monitor_id: monitor, progress,
+        }));
+        if (event.val.argv.includes('--wait')) waiting.set(monitor, event.val.invocation);
+        else cli.finish(event.val.invocation, 0);
+      } else if (event.tag === 'cli-cancelled') {
+        stopWaiting(event.val);
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<h4 id="run-the-probe">Run the probe</h4>
+<p>A repeating timer fires on the probe interval. The plugin runs the probe command, parses the JSON object it prints and stores the status and percent. A non-zero exit is not a plugin error and updates no status or percent. It counts as one probe failure toward the three-failure rule (progress-B09), and the probe is reported with the rejection code <code>probe-exited-non-zero</code> when a registration or a <code>progress check</code> run exits non-zero. The third consecutive failure sets the monitor health to <code>failed</code>. See <a href="/pages/api-process-control/">process control</a>, <a href="/pages/capability-process-run/">process.run</a> and <a href="/pages/api-events/">events</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::process::{self, ProcessSpec};
+
+async fn run_probe(command: String, project_root: FsPath) -&gt; Result&lt;ProbeReport, PluginError&gt; {
+    let spec = ProcessSpec {
+        // The probe is one shell command line, at most 16 KiB.
+        program: &quot;sh&quot;.to_string(),
+        arguments: vec![&quot;-c&quot;.to_string(), command],
+        cwd: Some(project_root), // the session project root, as in the baseline
+        stdin: None,
+        environment: Vec::new(),
+        timeout_millis: 30_000,
+    };
+    let exit = process::run(spec).await?;
+    let report: ProbeReport = serde_json::from_slice(&amp;exit.stdout)
+        .map_err(|_| PluginError::invalid_argument(&quot;probe printed no JSON object&quot;))?;
+    Ok(report)
+}
+
+// In on_events: Event::TimerFired(timer) =&gt; spawn run_probe for the monitor of that timer.
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { run } from '@ilium/plugin-sdk/host/process';
+import { PluginError } from '@ilium/plugin-sdk';
+
+export async function runProbe(command: string, projectRoot: string): Promise&lt;ProbeReport&gt; {
+  // One shell command line, run in the session project root, at most 30 s.
+  const exit = await run({
+    program: 'sh', arguments: ['-c', command], cwd: projectRoot,
+    stdin: undefined, environment: [], timeoutMillis: 30_000,
+  });
+  try {
+    return JSON.parse(new TextDecoder().decode(exit.stdout)) as ProbeReport;
+  } catch {
+    throw new PluginError('invalid-argument', 'probe printed no JSON object');
+  }
+}
+
+// In onEvents: case 'timer-fired': run the probe of the monitor that owns event.val.
+</code></pre>
+<h4 id="long-lived-watcher">Long-lived watcher</h4>
+<p>New in the plugin build, not covered by COR-041. A watcher is a child process that stays alive and prints one JSON line per progress step. Its program is always <code>sh</code>, the only program the plugin holds a <code>process.run:&lt;program&gt;</code> grant for; <code>process.long-lived</code> alone is not enough, and any other program makes <code>spawn</code> fail with <code>not-permitted</code> (see <a href="/pages/capability-process-long-lived/">process.long-lived</a>). Each line is a probe-format JSON object (<code>job_id</code>, <code>status</code>, <code>percent</code>, <code>message</code>, <code>details</code>, <code>error</code>), at most 64 KiB long, and at most 10 lines per second are applied; extra lines are coalesced to the latest. An invalid line counts as one probe failure. The plugin parses each <code>child-output</code> line and settles the monitor on <code>child-exited</code>. See <a href="/pages/capability-process-long-lived/">process.long-lived</a>, <a href="/pages/api-process-control/">process control</a> and <a href="/pages/api-events/">events</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::process::{self, ProcessSpec, SpawnSpec};
+use ilium_plugin_sdk::types::events::OutputStream;
+
+fn start_watcher(&amp;mut self, monitor: u64, program: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
+    let child = process::spawn(&amp;SpawnSpec {
+        process: ProcessSpec {
+            program: program.to_string(), arguments: Vec::new(), cwd: None,
+            stdin: None, environment: Vec::new(), timeout_millis: 1_000,
+        },
+        stdin_open: false,
+        line_mode: true,
+    })?;
+    self.children.insert(monitor, child);
+    Ok(())
+}
+
+// In on_events:
+//   Event::ChildOutput(out) if out.stream == OutputStream::Stdout =&gt; self.apply_line(&amp;out.bytes),
+//   Event::ChildExited(exit) =&gt; self.settle(exit.child, exit.status),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as process from '@ilium/plugin-sdk/host/process';
+import type { Child } from '@ilium/plugin-sdk/host/process';
+
+const children = new Map&lt;bigint, Child&gt;();
+
+export function startWatcher(monitor: bigint, program: string): void {
+  children.set(monitor, process.spawn({
+    process: { program, arguments: [], cwd: undefined, stdin: undefined,
+      environment: [], timeoutMillis: 1_000 },
+    stdinOpen: false,
+    lineMode: true,
+  }));
+}
+
+// In onEvents:
+//   case 'child-output': if (event.val.stream === 'stdout') applyLine(event.val.bytes); break;
+//   case 'child-exited': settle(event.val.child, event.val.status); break;
+</code></pre>
+<h4 id="progress-footer-and-status-bar">Progress footer and status bar</h4>
+<p>The client side renders one <code>progress-row</code> per monitor and sets a status segment with the number of running monitors. When none remain it clears the segment. See <a href="/pages/api-intent-chrome/">chrome intents</a>, <a href="/pages/widgets-status-and-feedback/">status and feedback widgets</a>, <a href="/pages/capability-ui-chrome/">ui.chrome</a> and <a href="/pages/widgets-data-display/">data display widgets</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::types::intents::SetStatusSegmentSpec;
+use ilium_plugin_sdk::types::ui::ProgressState;
+
+fn footer_row(tree: &amp;mut Tree, m: &amp;Monitor) -&gt; NodeHandle {
+    tree.progress_row(&amp;m.title)
+        .state(ProgressState::Running)
+        .percent(m.percent)
+        .message(&amp;m.message)
+        .key(&amp;format!(&quot;monitor-{}&quot;, m.id))
+}
+
+fn status_segment(running: usize) -&gt; Submission {
+    if running == 0 {
+        return Submission::new(Intent::ClearStatusSegment(&quot;progress&quot;.into()));
+    }
+    Submission::new(Intent::SetStatusSegment(SetStatusSegmentSpec {
+        segment: &quot;progress&quot;.into(),
+        content: RichText::plain(format!(&quot;{running} running&quot;)),
+        tooltip: None,
+        tone: None,
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { progressRow } from '@ilium/plugin-sdk/ui/build';
+import type { Submission } from '@ilium/plugin-sdk/types';
+
+export const footerRow = (m: Monitor) =&gt;
+  progressRow(m.title, { key: `monitor-${m.id}`, state: 'running', percent: m.percent, message: m.message });
+
+export function statusSegment(running: number): Submission {
+  const intent = running === 0
+    ? ({ tag: 'clear-status-segment', val: 'progress' } as const)
+    : ({ tag: 'set-status-segment', val: {
+        segment: 'progress', content: richText(`${running} running`),
+        tooltip: undefined, tone: undefined } } as const);
+  return { intent, correlation: 1n, dedupKey: undefined };
+}
+</code></pre>
+<h4 id="status-route-on-the-loopback-listener">Status route on the loopback listener</h4>
+<p>New in the plugin build, not covered by COR-041. The plugin holds the grant <code>http-api.route:/progress.json</code> and answers <code>GET /progress.json</code> on the loopback HTTP listener. A request for any other path never reaches the plugin and gets <code>404 Not Found</code> from the kernel; another method on <code>/progress.json</code> gets <code>405 Method Not Allowed</code> from the plugin. Each <code>http-called</code> event is one request, and <code>respond</code> answers exactly that request, so a script can read progress without the terminal. The body is <code>{"monitors":[&lt;progress object&gt;]}</code>, where each element has the same shape as the <code>progress</code> field of a <code>progress status</code> record.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::http_api;
+
+impl Handler for StatusRoute {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::HttpCalled(call) = event else { continue };
+            if call.path != &quot;/progress.json&quot; { continue; }
+            if call.method != &quot;GET&quot; {
+                let _ = http_api::respond(call.call, 405, &amp;[(&quot;allow&quot;.into(), &quot;GET&quot;.into())], &amp;[]);
+                continue;
+            }
+            let body = serde_json::to_vec(&amp;self.snapshot()).unwrap_or_default();
+            let _ = http_api::respond(call.call, 200, &amp;[(&quot;content-type&quot;.into(), &quot;application/json&quot;.into())], &amp;body);
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { respond } from '@ilium/plugin-sdk/host/http-api';
+
+export function onEvents(events: Event[]): Submission[] {
+  for (const event of events) {
+    if (event.tag !== 'http-called') continue;
+    const { call, method, path } = event.val;
+    if (path !== '/progress.json') continue;
+    if (method !== 'GET') {
+      respond(call, 405, [['allow', 'GET']], new Uint8Array());
+      continue;
+    }
+    respond(call, 200, [['content-type', 'application/json']], encode(snapshot()));
+  }
+  return [];
+}
+</code></pre>
+<h3 id="extension-points">Extension points</h3>
+<p>Other plugins change what <code>ilium.core.progress</code> does through the points below. The plugin owns each point (grant <code>extensions.provide:ilium.core.progress/&lt;point&gt;</code>). Contributors need <code>extensions.contribute:ilium.core.progress/&lt;point&gt;</code>. See <a href="/pages/api-extension-points/">Extension points</a> for the mechanism and <a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways to work with a core feature.</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Kind</th>
+<th>What it does</th>
+<th>Payload</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>footer-segments</code></td>
+<td>collect</td>
+<td>Add a segment to the progress footer.</td>
+<td>entry: id, priority, max_width</td>
+<td>standard</td>
+</tr>
+<tr>
+<td><code>probe-kinds</code></td>
+<td>collect</td>
+<td>Add a ready-made probe, such as a CI run or a build.</td>
+<td>entry: id, title, command_template, interval_seconds</td>
+<td>standard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
+<ul>
+<li><code>ilium.core.progress/report</code>: start, update, finish: report progress of a task the plugin runs</li>
+</ul>
+<p><strong>Topics</strong> (list under <code>contributes.topics.subscribes</code>):</p>
+<ul>
+<li><code>ilium.core.progress/changed</code>: { monitor, status, percent }</li>
+</ul>
+<p>A job that ends is announced on the separate kernel topic <code>ilium.progress/finished</code>, which belongs to the reserved kernel namespace <code>ilium.progress</code> (see <a href="/pages/api-messages-and-topics/#topic-names-and-patterns">Messages and topics</a>). This plugin does not publish it, so its own topics all start with <code>ilium.core.progress/</code>.</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.progress"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
+<h4 id="example-adds-a-probe-template-for-a-ci-run">Example: Adds a probe template for a CI run</h4>
+<p>A package adds this entry in its manifest. It needs no code.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.progress/probe-kinds&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      {
+        &quot;point&quot;: &quot;ilium.core.progress/probe-kinds&quot;,
+        &quot;id&quot;: &quot;ci-run&quot;,
+        &quot;priority&quot;: 50,
+        &quot;entry&quot;: {
+          &quot;title&quot;: &quot;CI run&quot;,
+          &quot;command_template&quot;: &quot;/usr/local/bin/ci-probe {run}&quot;,
+          &quot;interval_seconds&quot;: 30
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="abi-used">ABI used</h3>
+<ul>
+<li><a href="/pages/api-cli/">CLI API</a> and <a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-process-control/">Process control</a>, <a href="/pages/capability-process-run/">process.run</a> and <a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/api-intent-chrome/">Chrome intents</a> and <a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback widgets</a> and <a href="/pages/widgets-data-display/">data display widgets</a></li>
+<li><a href="/pages/capability-http-api-route/">HTTP API route</a>, <a href="/pages/api-http-api/">HTTP API</a></li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a>, which agents use beside progress monitors</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/core-plugin-text-triggers/"><small>Previous</small>Text triggers</a><a class="next" href="/pages/core-plugin-chatroom/"><small>Next</small>Chatroom</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-it-covers">What it covers</a></li><li class="l2"><a href="#see-it">See it</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#behaviour-contract">Behaviour contract</a></li><li class="l2"><a href="#settings-it-reads">Settings it reads</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#complete-manifest">Complete manifest</a></li><li class="l2"><a href="#samples">Samples</a></li><li class="l3"><a href="#ilium-progress-set-and-wait">ilium progress set and wait</a></li><li class="l3"><a href="#run-the-probe">Run the probe</a></li><li class="l3"><a href="#long-lived-watcher">Long-lived watcher</a></li><li class="l3"><a href="#progress-footer-and-status-bar">Progress footer and status bar</a></li><li class="l3"><a href="#status-route-on-the-loopback-listener">Status route on the loopback listener</a></li><li class="l2"><a href="#extension-points">Extension points</a></li><li class="l3"><a href="#example-adds-a-probe-template-for-a-ci-run">Example: Adds a probe template for a CI run</a></li><li class="l2"><a href="#abi-used">ABI used</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

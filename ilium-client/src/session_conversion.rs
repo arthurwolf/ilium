@@ -28,7 +28,7 @@ use ratatui::Frame;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, UNFREEZING_AGENT_STATUS};
 use crate::modal;
 use crate::theme;
 
@@ -37,8 +37,20 @@ use crate::theme;
 const MAX_LOG_LINES: usize = 500;
 pub(crate) const CONVERSION_WORKING_BYTES: usize = 512 * 1024 * 1024;
 pub(crate) const CONVERSION_RESULT_BYTES: usize = 2 * 1024 * 1024;
+const CONVERSION_FIXED_WORKING_BYTES: u64 = 16 * 1024 * 1024;
+const CONVERSION_TRANSCRIPT_WORKING_MULTIPLIER: u64 = 4;
 const MAX_PROGRESS_TEXT_BYTES: usize = 4 * 1024;
 const UI_EVENT_CAPACITY: usize = 64;
+
+/// Charges transcript-sized conversion work, including copies and fixed
+/// bookkeeping, while retaining the existing ceiling for 128 MiB inputs.
+fn conversion_working_bytes(source_transcript_bytes: u64) -> usize {
+    let estimated_bytes = source_transcript_bytes
+        .saturating_mul(CONVERSION_TRANSCRIPT_WORKING_MULTIPLIER)
+        .saturating_add(CONVERSION_FIXED_WORKING_BYTES)
+        .min(CONVERSION_WORKING_BYTES as u64);
+    usize::try_from(estimated_bytes).unwrap_or(CONVERSION_WORKING_BYTES)
+}
 
 /// Where the conversion currently is. `Failed` keeps the agent-stopped fact so
 /// the dialog knows whether "resume the original session" is offered.
@@ -57,6 +69,7 @@ pub struct ConversionDialogState {
     pub source: BuiltinAgentProvider,
     pub target: BuiltinAgentProvider,
     pub source_session_id: String,
+    pub source_transcript_path: PathBuf,
     pub project_cwd: PathBuf,
     pub phase: ConversionPhase,
     /// True once the server confirmed the source agent process is gone.
@@ -76,6 +89,7 @@ impl ConversionDialogState {
         source: BuiltinAgentProvider,
         target: BuiltinAgentProvider,
         source_session_id: String,
+        source_transcript_path: PathBuf,
         project_cwd: PathBuf,
     ) -> Self {
         let mut state = Self {
@@ -83,6 +97,7 @@ impl ConversionDialogState {
             source,
             target,
             source_session_id,
+            source_transcript_path,
             project_cwd,
             phase: ConversionPhase::StoppingAgent,
             is_agent_stopped: false,
@@ -157,6 +172,7 @@ pub struct ReplacementFocus {
 pub struct ConversionJob {
     pub pane_id: NodeId,
     pub request: ConversionRequest,
+    pub source_transcript_path: PathBuf,
 }
 
 /// Messages a running worker sends back to the event loop.
@@ -180,6 +196,7 @@ struct ActiveWorker {
 
 struct ConversionTask {
     job: ConversionJob,
+    source_transcript_bytes_at_admission: u64,
     events: mpsc::Sender<ConversionWorkerEvent>,
     cancel: Arc<AtomicBool>,
     notification: Arc<Notify>,
@@ -216,8 +233,19 @@ impl Job for ConversionTask {
             }
         };
         let is_cancelled = || self.cancel.load(Ordering::Acquire) || stop.is_stopped();
-        let result = convert_session_with_cancel(&request, &is_cancelled, &mut sink)
-            .map_err(|error| bounded_conversion_error(error.to_string()));
+        let result = match std::fs::metadata(&self.job.source_transcript_path) {
+            Ok(metadata) if metadata.len() <= self.source_transcript_bytes_at_admission => {
+                convert_session_with_cancel(&request, &is_cancelled, &mut sink)
+                    .map_err(|error| bounded_conversion_error(error.to_string()))
+            }
+            Ok(_) => Err(
+                "Source transcript grew after conversion admission; retry the conversion"
+                    .to_string(),
+            ),
+            Err(error) => Err(bounded_conversion_error(format!(
+                "Cannot inspect source transcript after admission: {error}"
+            ))),
+        };
         Ok(ConversionWorkerEvent::Finished { pane_id, result })
     }
 }
@@ -251,10 +279,20 @@ impl ConversionWorkers {
                 "A previous session conversion is still stopping",
             ));
         }
+        let source_transcript_bytes_at_admission = std::fs::metadata(&job.source_transcript_path)
+            .map_err(|error| {
+                conversion_failure(
+                    &job,
+                    &format!("Cannot inspect source transcript before admission: {error}"),
+                )
+            })?
+            .len();
+        let input_bytes = conversion_working_bytes(source_transcript_bytes_at_admission);
         let pane_id = job.pane_id;
         let cancel = Arc::new(AtomicBool::new(false));
         let task = ConversionTask {
             job,
+            source_transcript_bytes_at_admission,
             events: self.events.clone(),
             cancel: Arc::clone(&cancel),
             notification: Arc::clone(&self.notification),
@@ -264,7 +302,7 @@ impl ConversionWorkers {
             .try_submit(
                 Lane::Io,
                 JobCost {
-                    input_bytes: CONVERSION_WORKING_BYTES,
+                    input_bytes,
                     result_bytes: CONVERSION_RESULT_BYTES,
                 },
                 task,
@@ -571,24 +609,23 @@ impl App {
             self.status_message = Some("Cannot convert: home directory unavailable".to_string());
             return;
         };
-        if crate::agent_history_path::verified_jsonl_history_path(
+        let Some(source_transcript_path) = crate::agent_history_path::verified_jsonl_history_path(
             &home_dir,
             &project_cwd,
             &class,
             &session_id,
-        )
-        .is_none()
-        {
+        ) else {
             self.status_message =
                 Some("Cannot convert: this session has no verified transcript yet".to_string());
             return;
-        }
+        };
         self.frozen_panes.insert(pane_id);
         self.conversion = Some(Box::new(ConversionDialogState::new(
             pane_id,
             source,
             target,
             session_id,
+            source_transcript_path,
             project_cwd,
         )));
         self.mode = Mode::ConvertSession;
@@ -629,6 +666,7 @@ impl App {
                         codex_home: None,
                         codex_executable: None,
                     },
+                    source_transcript_path: state.source_transcript_path.clone(),
                 });
             }
             Err(message) => state.fail(message),
@@ -705,6 +743,9 @@ impl App {
             return;
         }
         self.pending_replacement_focus = None;
+        if self.status_message.as_deref() == Some(UNFREEZING_AGENT_STATUS) {
+            self.status_message = None;
+        }
         if !pending.was_focused {
             return;
         }
@@ -767,6 +808,17 @@ impl App {
 mod tests {
     use super::*;
 
+    #[test]
+    fn conversion_working_set_scales_to_transcript_size_and_respects_the_cap() {
+        let mebibyte = 1024 * 1024;
+        assert_eq!(conversion_working_bytes(0), 16 * mebibyte);
+        assert_eq!(conversion_working_bytes(1024), 16 * mebibyte + 4 * 1024);
+        assert_eq!(
+            conversion_working_bytes(128 * 1024 * 1024),
+            CONVERSION_WORKING_BYTES
+        );
+    }
+
     #[tokio::test]
     async fn conversion_worker_completes_through_the_bounded_io_receipt() {
         use ilium_execution::{
@@ -774,14 +826,17 @@ mod tests {
         };
         use std::time::{Duration, Instant};
 
+        const TEST_INPUT_BUDGET: usize = 32 * 1024 * 1024;
         let quota = QuotaGroup::new(QuotaLimits {
             clients: 1,
             jobs: 1,
             service_jobs: 0,
-            input_bytes: CONVERSION_WORKING_BYTES,
+            input_bytes: TEST_INPUT_BUDGET,
             result_bytes: CONVERSION_RESULT_BYTES,
             worker_threads: 1,
-            worker_bytes: 4 * 1024 * 1024,
+            // Four MiB worker plus retained bank bookkeeping. The smaller
+            // shared input ceiling reproduces admission under background use.
+            worker_bytes: 5 * 1024 * 1024,
         });
         let disabled = LaneConfig {
             threads: 0,
@@ -809,24 +864,51 @@ mod tests {
             .client(ilium_execution::ClientLimits {
                 jobs: 1,
                 service_jobs: 0,
-                input_bytes: CONVERSION_WORKING_BYTES,
+                input_bytes: TEST_INPUT_BUDGET,
                 result_bytes: CONVERSION_RESULT_BYTES,
             })
             .unwrap()
             .with_completion_wake(move || wake.notify_one());
         let mut workers = ConversionWorkers::new(client, Arc::clone(&notification));
         let temporary = tempfile::tempdir().unwrap();
+        let home_dir = temporary.path().join("home");
+        let project_cwd = temporary.path().join("project");
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        let source_session_id = "11111111-1111-4111-8111-111111111111";
+        let project_slug: String = project_cwd
+            .to_string_lossy()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let transcript_dir = home_dir.join(".claude/projects").join(project_slug);
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        std::fs::write(
+            transcript_dir.join(format!("{source_session_id}.jsonl")),
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({"type":"user","sessionId":source_session_id,"cwd":project_cwd,"message":{"content":"hello"}}),
+                serde_json::json!({"type":"assistant","sessionId":source_session_id,"cwd":project_cwd,"message":{"content":"noted"}})
+            ),
+        )
+        .unwrap();
         let job = ConversionJob {
             pane_id: NodeId(7),
             request: ConversionRequest {
-                home_dir: temporary.path().to_path_buf(),
-                project_cwd: temporary.path().to_path_buf(),
+                home_dir,
+                project_cwd,
                 source: BuiltinAgentProvider::Claude,
                 target: BuiltinAgentProvider::Codex,
-                source_session_id: "11111111-1111-4111-8111-111111111111".to_string(),
+                source_session_id: source_session_id.to_string(),
                 codex_home: None,
-                codex_executable: None,
+                codex_executable: Some(PathBuf::from("/nonexistent/codex")),
             },
+            source_transcript_path: transcript_dir.join(format!("{source_session_id}.jsonl")),
         };
         workers.spawn(job).unwrap();
         let mut events = Vec::new();
@@ -845,7 +927,8 @@ mod tests {
             events.last(),
             Some(ConversionWorkerEvent::Finished {
                 result: Err(message), ..
-            }) if message.contains("no Claude Code transcript")
+            }) if !message.contains("no Claude Code transcript")
+                && !message.contains("admission refused")
         ));
         drop(workers);
         execution.request_shutdown(ShutdownMode::Cancel);
@@ -861,6 +944,7 @@ mod tests {
             BuiltinAgentProvider::Claude,
             BuiltinAgentProvider::Codex,
             "11111111-1111-4111-8111-111111111111".to_string(),
+            PathBuf::from("/tmp/project/.claude/transcript.jsonl"),
             PathBuf::from("/tmp/project"),
         )
     }
@@ -962,6 +1046,7 @@ mod tests {
                 source,
                 target,
                 SESSION_ID.to_string(),
+                PathBuf::from("/tmp/project/.claude/transcript.jsonl"),
                 std::env::temp_dir(),
             )));
             app.mode = Mode::ConvertSession;
@@ -1155,6 +1240,31 @@ mod tests {
             app.apply_pending_replacement_focus();
             assert!(app.pending_replacement_focus.is_none());
             assert_eq!(app.active_pane_id(), Some(replacement));
+        }
+
+        #[test]
+        fn the_unfreezing_status_clears_once_the_replacement_lands() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            let parent = app.tree.parent_of(pane).unwrap();
+            app.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
+            app.pending_replacement_focus = Some(ReplacementFocus {
+                old_pane_id: pane,
+                parent,
+                index: 0,
+                was_focused: false,
+            });
+            app.apply_pending_replacement_focus();
+            assert_eq!(
+                app.status_message.as_deref(),
+                Some(UNFREEZING_AGENT_STATUS),
+                "the old pane still exists, so the status must stay"
+            );
+            app.tree
+                .add_pane(parent, "new", PaneContentKind::Terminal)
+                .unwrap();
+            app.tree.remove_node(pane).unwrap();
+            app.apply_pending_replacement_focus();
+            assert!(app.status_message.is_none());
         }
     }
 }

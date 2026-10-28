@@ -1,0 +1,7 @@
+package ilium:host@0.1.0;
+
+interface kernel-settings {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// A JSON object of that tab's values. Secrets are "<redacted>".
+  read: func(tab: string) -> result<string, plugin-error>;
+}

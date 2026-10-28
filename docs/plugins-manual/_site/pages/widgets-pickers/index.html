@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Pickers | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/" aria-current="page">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Pickers</h1>
+
+<p>A picker is an input that opens a dialog drawn by the host. The plugin shows a closed field and hears only the result. This page documents three widgets, <code>color-picker</code>, <code>path-field</code> and <code>location-picker</code>, and three uses of <code>choice</code> that the Settings screen shows as pickers: the palette picker, the dither picker and the icon picker. Their dialogs are kernel code, so the look, the keys and the network rules are the same as in the Settings screen, and a plugin cannot change them.</p>
+<table>
+<thead>
+<tr>
+<th>Picker</th>
+<th>Widget</th>
+<th>Dialog</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Colour</td>
+<td><code>color-picker</code></td>
+<td>hue strip, shade strip, swatches, hex field</td>
+<td><code>text(#rrggbb)</code></td>
+</tr>
+<tr>
+<td>Path</td>
+<td><code>path-field</code></td>
+<td>the kernel file picker</td>
+<td><code>text(display path)</code></td>
+</tr>
+<tr>
+<td>World map</td>
+<td><code>location-picker</code></td>
+<td>Braille map, address search, coordinates</td>
+<td><code>geo(geo-point)</code></td>
+</tr>
+<tr>
+<td>Palette</td>
+<td><code>choice</code> over <code>ilium.palettes</code></td>
+<td>choice dialog with swatches</td>
+<td><code>text(palette id)</code></td>
+</tr>
+<tr>
+<td>Dither</td>
+<td><code>choice</code> over <code>ilium.dithers</code></td>
+<td>choice dialog with patterns</td>
+<td><code>text(dither id)</code></td>
+</tr>
+<tr>
+<td>Icon</td>
+<td><code>choice</code> over <code>ilium.icons</code></td>
+<td>choice dialog with a List and Grid switch</td>
+<td><code>text(icon id)</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>The <code>ui.panels</code> grant for a view that holds the picker. See <a href="/pages/capability-ui-panels/">ui.panels</a>.</li>
+<li><code>fs.pick</code> for the file picker of a <code>path-field</code>. See <a href="/pages/capability-fs-pick/">fs.pick</a>.</li>
+<li><code>location.geocode</code> for the address search of a <code>location-picker</code>, and <code>location.observer</code> for its <code>Use current location</code> button. See <a href="/pages/capability-location-geocode/">location.geocode</a> and <a href="/pages/capability-location-observer/">location.observer</a>.</li>
+<li>Catalogue ids for the choice pickers. The host publishes <code>ilium.palettes</code>, <code>ilium.dithers</code> and <code>ilium.icons</code>. A plugin can add its own catalogue, see <a href="/pages/api-catalogs/">Catalogues</a>.</li>
+</ul>
+<h3 id="settings-pages">Settings pages</h3>
+<p>A settings page accepts <code>location-picker</code>, and no other picker. Its value is written only through the <code>bind</code> prop to an own <code>location</code> key, and the host validates and saves it as it does for a row. For the other pickers use the matching settings row: <code>color</code>, <code>path</code>, <code>choice</code> with a catalogue source. See <a href="/pages/settings-screens/">Settings screens</a>.</p>
+<h4 id="color-picker">color-picker</h4>
+<p><strong>Purpose.</strong> Edits a colour as <code>#rrggbb</code>. The closed field shows a swatch <code>██</code> and the hex text. Enter opens the host colour dialog with a hue strip, a shade strip, a row of swatches and a hex field. The dialog is true colour, so the capture shows only its glyphs. The Ilium client has no colour dialog of its own yet, so the render follows the specification on this page.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The colour as <code>#rrggbb</code>.</td>
+</tr>
+<tr>
+<td><code>palette</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>A catalogue id of preset swatches.</td>
+</tr>
+<tr>
+<td><code>allow-theme-roles</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Adds the theme roles (<code>accent</code>, <code>border</code>) to the swatches.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(#rrggbb)</code></td>
+<td>The user applies a colour in the dialog.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enter</td>
+<td>Opens the dialog.</td>
+</tr>
+<tr>
+<td>Tab</td>
+<td>Cycles the dialog fields: hue, shade, swatches, hex.</td>
+</tr>
+<tr>
+<td>Left, Right, Up, Down</td>
+<td>Move the hue, shade or swatch.</td>
+</tr>
+<tr>
+<td>Typing in the hex field</td>
+<td>Sets the colour. A value that is not <code>#rrggbb</code> is refused.</td>
+</tr>
+<tr>
+<td>Enter in the dialog</td>
+<td>Applies.</td>
+</tr>
+<tr>
+<td>Escape</td>
+<td>Cancels.</td>
+</tr>
+<tr>
+<td>Click on a swatch, drag in a strip</td>
+<td>Pick.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: the picked colour for the swatch, <code>border</code> for the dialog frame, <code>danger</code> for an invalid value.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Colour rows───────────────────────────────────────────────────────╮
+│ <span class="t-hi">Accent</span> <span class="t-dim">……………………………………………………………………………………………………………………………………</span> <span class="t-hi">[ ██ #7aa2f7 ]</span> │
+│ Border <span class="t-dim">……………………………………………………………………………………………………………………………………</span> [ ██ #4a4a4a ] │
+│ Marker <span class="t-dim">……………………………………………………………………………………………………………………………………</span> <span class="t-err">[ ██ #zzzzzz ]</span> │
+│ <span class="t-dim">Background</span> <span class="t-dim">…………………………………………………………………………………………………………………………</span> <span class="t-dim">[ ██ #1a1b26 ]</span> │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The closed colour-picker field. The swatch ██ shows the colour and the hex value follows. Enter opens the colour dialog. An invalid value uses the error colour.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭  ≡ ● · Colour────────────────────────────────────────────────────╮
+│ Hue    <span class="t-err">▀▀▀▀▀▀</span><span class="t-warn">▀▀▀▀▀▀</span><span class="t-ok">▀▀▀▀▀▀</span><span class="t-hi">▀▀▀▀▀▀▀▀▀▀▀▀</span><span class="t-err">▀▀▀▀▀▀</span>                      │
+│ Shade  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                  │
+│ Swatches  ██ ██ ██ ██ ██ ██ ██ ██ ██ ██                          │
+│ Hex <span class="t-dim">……………………………………</span> [ #7aa2f7 ]   ██                              │
+│ <span class="t-dim">Tab cycles fields · arrows move · Enter applies · Esc cancels</span>    │
+╰──────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The host colour dialog. The hue strip and the shade strip are drawn with half blocks in true colour; the capture shows only the glyphs. Swatches come from the optional palette catalogue. The layout is the contract of this page; the Ilium client has no colour dialog of its own yet, so this render follows the specification, not a client capture.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let accent = tree.color_picker(&quot;#7aa2f7&quot;).key(&quot;accent&quot;).palette(&quot;ilium.palettes&quot;).allow_theme_roles(true);
+// (&quot;accent&quot;, ActionKind::Changed, ActionValue::Text(hex)) =&gt; self.accent = hex,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const accent = colorPicker('#7aa2f7', { key: 'accent', palette: 'ilium.palettes', allowThemeRoles: true });
+// if (key === 'accent' &amp;&amp; value.tag === 'text') state.accent = value.val;
+</code></pre>
+<h4 id="path-field">path-field</h4>
+<p><strong>Purpose.</strong> Chooses a file or a folder. The field shows a display text and a <code>…</code> button. The text is only a label: the plugin never sees the raw path, only a picked scope that <code>fs.pick</code> created. This keeps a plugin from reading outside the paths the user chose.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td><code>path-kind</code></td>
+<td>required</td>
+<td><code>open-file</code>, <code>open-directory</code> or <code>save-file</code>.</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td><code>option&lt;fs-path&gt;</code></td>
+<td>none</td>
+<td>The picked scope.</td>
+</tr>
+<tr>
+<td><code>display</code></td>
+<td><code>string</code></td>
+<td>empty</td>
+<td>The text shown.</td>
+</tr>
+<tr>
+<td><code>extensions</code></td>
+<td><code>list&lt;string&gt;</code></td>
+<td>empty</td>
+<td>File extensions the picker offers.</td>
+</tr>
+<tr>
+<td><code>editable</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Lets the user type a path. The host resolves it.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(display path)</code></td>
+<td>The user picks a path.</td>
+</tr>
+<tr>
+<td><code>submitted</code></td>
+<td><code>text(display path)</code></td>
+<td>Enter in an editable field.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enter on the button</td>
+<td>Opens the host file picker.</td>
+</tr>
+<tr>
+<td>Typing</td>
+<td>Edits the text when <code>editable</code>.</td>
+</tr>
+<tr>
+<td>Click on <code>…</code></td>
+<td>Opens the file picker.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>foreground</code> for the text, <code>danger</code> for a path the plugin reports as missing.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Path rows─────────────────────────────────────────────────────────╮
+│ <span class="t-hi">Project folder</span> <span class="t-dim">……………………………………………………………………………………………</span> <span class="t-hi">[ ~/dev/ilium ] [ … ]</span> │
+│ Export file <span class="t-dim">……………………………………………………………………………………………………</span> [ report.html ] [ … ] │
+│ Backup folder <span class="t-dim">………………………………………………………………………………</span> <span class="t-err">[ /data/old-backups ] [ … ]</span> │
+│ <span class="t-dim">Cache folder</span> <span class="t-dim">……………………………………………………………………………………………</span> <span class="t-dim">[ ~/.cache/demo ] [ … ]</span> │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The path-field widget. The text is the display string and the … button opens the host file picker. The error row names a path the plugin has reported missing. The plugin never sees the raw path: the picked scope is what it receives.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let export = tree.path_field(PathKind::SaveFile).key(&quot;export&quot;).display(&amp;self.export_name).extensions(vec![&quot;html&quot;]);
+// (&quot;export&quot;, ActionKind::Changed, ActionValue::Text(name)) =&gt; self.export_name = name,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const exportField = pathField('save-file', { key: 'export', display: state.exportName, extensions: ['html'] });
+// if (key === 'export' &amp;&amp; value.tag === 'text') state.exportName = value.val;
+</code></pre>
+<h4 id="location-picker">location-picker</h4>
+<p><strong>Purpose.</strong> Picks a point on the world. The host draws the real Ilium world map in Braille dots, a crosshair <code>┼</code>, an address search and a coordinates mode. The plugin receives only the point. Geocoding runs in the host with Photon and falls back to Nominatim. The user agrees once to send place names to that provider.</p>
+<p><strong>The map.</strong> The land is a Braille mask of 360 by 180 samples, one per degree, taken from the same data as the ambient world map scene. Each Braille cell holds 2 by 4 dots, and a dot is set when land covers at least half of its area. The equator and the prime meridian are drawn as <code>─</code> and <code>│</code> lines. The crosshair <code>┼</code> is drawn in the accent colour at the selected point. Land is <code>muted</code> and the sea is the background. The Selected row names the place and shows the point.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code></td>
+<td><code>option&lt;geo-point&gt;</code></td>
+<td>none</td>
+<td>The point: <code>latitude</code> and <code>longitude</code> in degrees.</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>The place name shown in the Selected row.</td>
+</tr>
+<tr>
+<td><code>search</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Shows the Address search. Needs <code>location.geocode</code>.</td>
+</tr>
+<tr>
+<td><code>allow-current</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Adds <code>Use current location</code>. Needs <code>location.observer</code>.</td>
+</tr>
+<tr>
+<td><code>zoom</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Lets the wheel zoom the map.</td>
+</tr>
+<tr>
+<td><code>bind</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>An own <code>location</code> key. Used in settings pages only.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>geo(geo-point)</code></td>
+<td>The crosshair moves to a new point.</td>
+</tr>
+<tr>
+<td><code>submitted</code></td>
+<td><code>geo(geo-point)</code></td>
+<td>The user presses <code>Use location</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arrows</td>
+<td>Move the crosshair by one Braille dot. Shift moves by 10 dots.</td>
+</tr>
+<tr>
+<td>Tab</td>
+<td>Switches between Address and Coordinates.</td>
+</tr>
+<tr>
+<td>Typing in Address</td>
+<td>Searches after 300 ms and lists up to 5 results.</td>
+</tr>
+<tr>
+<td>Up, Down in the results</td>
+<td>Choose a result.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Uses the highlighted result, or confirms the point (<code>Use location</code>).</td>
+</tr>
+<tr>
+<td>Escape</td>
+<td>Cancels.</td>
+</tr>
+<tr>
+<td>Left click on the map</td>
+<td>Sets the point.</td>
+</tr>
+<tr>
+<td>Mouse wheel</td>
+<td>Zooms, when <code>zoom</code> is true.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>muted</code> for land, <code>background</code> for the sea, <code>accent</code> for the crosshair, <code>danger</code> for an error message.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Location──────────────────────────────────────────────────────╮
+│ Entry <span class="t-dim">…………………………………………………………………………………………………………</span> ← Address → +         │
+│ ╭  ≡ ● ·───────────────────────────────────────────────────────╮     │
+│ │ Paris_                                                       │     │
+│ ╰──────────────────────────────────────────────────────────────╯     │
+│ <span class="t-hi">Paris, France (48.8534, 2.3488)</span>                                      │
+│ Paris, Texas, United States (33.6609, -95.5555)                      │
+│ Paris, Ile-de-France, France (48.8566, 2.3522)                       │
+│           ⢀⢀⡀ ⢀⢠⢤⣤⠤⠄⠠⠤⢤⣤⣤⣴⣶⣶⣤⠄   │ ⠠⠄⠄          ⢀⣀⣀⣀⣀⣀    ⢀⡀         │
+│    ⠽⠿⠿⠿⠷⢾⣿⣿⣾⣿⣿⣶⣿⣛⠛⢩⣽⣓⣀ ⠙⠻⠋⠉⠉⠁   ⡀│⢤⣶⠚⣿⣿⣶⣶⣶⣶⣶⣷⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠿⠿⢟⡿⠷⠞⠓   │
+│ ─────────⠈⢹⣿⣿⣿⣿⣿⣿⣿⣾⠿⠛⠉⠁────────⢠⣼<span class="t-err">┼</span>⠛⠟⠿⡿⣛⣛⣻⣿⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⡿⠛⢋───────   │
+│            ⠉⠛⢿⣿⡋⢉⠙⠁           ⣤⣾⣿⣿⣿⣶⣶⣶⣶⣞⢿⣿⣟⡿⠛⠿⢿⣿⣿⠿⣿⣿⡿⠿⠿⠂ ⠁           │
+│                 ⠉⠃⢀⣤⣤⣤⣄⡀      ⠛⠿⠿⠿⢿⣿⣿⣿⣿⣿⣷⡭⠁   ⠈⠋   ⣉⠛⣀⡀⠁             │
+│                   ⠙⢿⣿⣿⣿⣿⣿⣶⠂      │ ⣹⣿⣿⣿⣿⡅⢀         ⠈⠁⠉⠁ ⣀⣀⠑⡒         │
+│                     ⣿⣿⣿⠿⠋⠁       │ ⠘⢿⣿⠿⠃ ⠋            ⢶⡿⠿⠿⣿⣿⡶        │
+│                    ⢼⡟⠉⠁          │                         ⠉     ⠁   │
+│                     ⢀⡀           │    ⢀⣀⣀⣀⣀⣀⣀⡀ ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀       │
+│ ⣀⣀⣀⣀⣀⣴⣶⣶⣿⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿⣭⣭⣥⣤⣤⣦⣤⣤⣴⣶⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣥⣀⣀   │
+│ <span class="t-hi">Selected: Paris, France (48.8534, 2.3488)</span>                            │
+│ <span class="t-dim">Map: Natural Earth (public domain)</span>                                   │
+│ <span class="t-dim">Search: Photon (komoot)</span>                                              │
+│ <span class="t-dim">© OpenStreetMap contributors (ODbL)</span>                                  │
+│          <span class="t-dim"> Esc Cancel </span>                 <span class="t-hi"> Enter Use location </span>           │
+│ <span class="t-dim">Enter uses this place; arrows fine-tune it</span>                           │
+╰──────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The location-picker dialog in Address mode with a result list. The map is the real Braille land mask (360 by 180 samples resampled to 66 by 10 cells); the red ┼ is the crosshair at Paris, and the dim ─ and │ are the guide lines through it. The first result row is highlighted.</figcaption>
+</figure>
+
+<p>The Coordinates mode replaces the address box with two number rows. Each row opens a number entry with the message <code>Enter latitude</code> or <code>Enter longitude</code>. Editing a coordinate replaces the place name with the coordinates.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Location──────────────────────────────────────────────────────╮
+│ Entry <span class="t-dim">…………………………………………………………………………………………………………</span> ← Coordinates → +     │
+│ Latitude <span class="t-dim">………………………………………………………………………………………………………………………</span> 48.8534       │
+│ Longitude <span class="t-dim">……………………………………………………………………………………………………………………</span> 2.3488        │
+│           ⢀⢀⡀ ⢀⢠⢤⣤⠤⠄⠠⠤⢤⣤⣤⣴⣶⣶⣤⠄   │ ⠠⠄⠄          ⢀⣀⣀⣀⣀⣀    ⢀⡀         │
+│    ⠽⠿⠿⠿⠷⢾⣿⣿⣾⣿⣿⣶⣿⣛⠛⢩⣽⣓⣀ ⠙⠻⠋⠉⠉⠁   ⡀│⢤⣶⠚⣿⣿⣶⣶⣶⣶⣶⣷⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠿⠿⢟⡿⠷⠞⠓   │
+│ ─────────⠈⢹⣿⣿⣿⣿⣿⣿⣿⣾⠿⠛⠉⠁────────⢠⣼<span class="t-err">┼</span>⠛⠟⠿⡿⣛⣛⣻⣿⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⡿⠛⢋───────   │
+│            ⠉⠛⢿⣿⡋⢉⠙⠁           ⣤⣾⣿⣿⣿⣶⣶⣶⣶⣞⢿⣿⣟⡿⠛⠿⢿⣿⣿⠿⣿⣿⡿⠿⠿⠂ ⠁           │
+│                 ⠉⠃⢀⣤⣤⣤⣄⡀      ⠛⠿⠿⠿⢿⣿⣿⣿⣿⣿⣷⡭⠁   ⠈⠋   ⣉⠛⣀⡀⠁             │
+│                   ⠙⢿⣿⣿⣿⣿⣿⣶⠂      │ ⣹⣿⣿⣿⣿⡅⢀         ⠈⠁⠉⠁ ⣀⣀⠑⡒         │
+│                     ⣿⣿⣿⠿⠋⠁       │ ⠘⢿⣿⠿⠃ ⠋            ⢶⡿⠿⠿⣿⣿⡶        │
+│                    ⢼⡟⠉⠁          │                         ⠉     ⠁   │
+│                     ⢀⡀           │    ⢀⣀⣀⣀⣀⣀⣀⡀ ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀       │
+│ ⣀⣀⣀⣀⣀⣴⣶⣶⣿⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿⣭⣭⣥⣤⣤⣦⣤⣤⣴⣶⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣥⣀⣀   │
+│ Selected: Paris, France (48.8534, 2.3488)                            │
+│          <span class="t-dim"> Esc Cancel </span>                 <span class="t-hi"> Enter Use location </span>           │
+│ <span class="t-dim">Coordinates updated</span>                                                  │
+╰──────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Coordinates mode. The two coordinate rows replace the address box, each row opens a number entry with the message Enter latitude or Enter longitude. Editing a coordinate replaces the label with the coordinates.</figcaption>
+</figure>
+
+<p>Inside a settings page the picker is smaller and writes through <code>bind</code>, so the plugin receives <code>settings-changed</code> and reads the point from its own <code>location</code> key.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Observer location─────────────────────╮
+│ Nairobi (-1.2900, 36.8200)                   │
+│   ⣀⣀⣀⣀⣠⣤⣀⣄⣶⢒⡒⠲⣶⣶⡶⠖   ⢀⣀⣀│⣀⣀⣀⣀⣤⣤⣤⣤⣀⣀⣠⣀⣀⣀⣀     │
+│   ⠉⠉⠉⠙⣿⣿⣿⣷⣦⣼⠷⠂⠈    ⣰⡬⠿⣾⢿⣿⡿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠏⠉⠙⠉      │
+│       ⠈⠙⠿⢋⡙⠁      ⣴⣿⣿⣶⣶⣶⣻⣿⠟⠻⣿⠿⢿⣿⠿⠃           │
+│ ───────────⢼⣿⣶⣦⣄──⠈⠉⠉⢿⣿⣿<span class="t-err">┼</span>⠁──⠈──⠂⠰──⠠────     │
+│             ⣿⣿⠟⠃     ⠘⠿⠟⠁⠃      ⠠⠶⠿⢿⡦        │
+│            ⠐⠋           │                    │
+│ ⣀⣀⣀⣤⣤⣴⣦⣤⣴⣶⣶⣶⣚⣀⣠⣀⣤⣤⣶⣶⣶⣶⣶⣶⣶⣾⣷⣶⣶⣿⣿⣿⣿⣿⣿⣿⣶⣶⣂⣀     │
+│ <span class="t-dim">Click the map · arrows fine-tune</span>             │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>The location-picker embedded in a settings view next to other content. Here it is drawn at 40 by 7 cells with the point at Nairobi; the value is saved through the bind prop without any plugin code running.</figcaption>
+</figure>
+
+<p>Geocoding limits: 1 request per second per plugin, a 24 hour cache by query text, a 10 s timeout. Without consent the search returns <code>not-permitted</code>. Errors appear in the status line under the buttons: <code>network</code>, <code>rate-limited</code> with the wait time, <code>timed-out</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let place = tree.location_picker().key(&quot;place&quot;).value(self.point).label(&quot;Paris, France&quot;)
+    .search(true).allow_current(true).zoom(true);
+// (&quot;place&quot;, ActionKind::Changed, ActionValue::Geo(point)) =&gt; self.point = Some(point),
+// (&quot;place&quot;, ActionKind::Submitted, ActionValue::Geo(point)) =&gt; self.apply(point),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const place = locationPicker({
+  key: 'place', value: state.point, label: 'Paris, France', search: true, allowCurrent: true, zoom: true,
+});
+// if (value.tag === 'geo') { if (kind === 'changed') state.point = value.val; else apply(value.val); }
+</code></pre>
+<p>For a settings page the same widget binds to a key:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let place = tree.location_picker().key(&quot;place&quot;).bind(&quot;home_location&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const place = locationPicker({ key: 'place', bind: 'home_location' });
+</code></pre>
+<h3 id="choice-pickers">Choice pickers</h3>
+<p>The palette, dither and icon pickers are not separate widgets. They are a <code>choice</code> with <code>style: "dialog"</code>, a catalogue <code>source</code> and a <code>preview</code> on each item, see <a href="/pages/widgets-input/">Input</a> for the full prop list. The host reads the items in pages as the user scrolls. The dialog filters with the <code>Search:</code> line, marks the current item with <code>●</code>, and shows the status line <code>N of M options · Current: X</code>.</p>
+<h4 id="palette-picker">Palette picker</h4>
+<p>The palette catalogue <code>ilium.palettes</code> holds 38 presets. Each item has a <code>swatch</code> preview of 1 to 16 colours, drawn as a strip of half blocks coloured with the stops of the palette. A scene or widget that uses colour reads the chosen palette and recolours itself. The first item keeps the scene colours.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Palette───────────────────────────────────────────╮
+│ Search: _                                                │
+│ <span class="t-hi">● Scene colors</span>                                           │
+│   Rainbow          ▀▀▀▀▀▀▀▀▀▀▀▀                          │
+│   Pastel rainbow   ▀▀▀▀▀▀▀▀▀▀▀▀                          │
+│   Cotton candy     ▀▀▀▀▀▀▀▀▀▀▀▀                          │
+│   Sea glass        ▀▀▀▀▀▀▀▀▀▀▀▀                          │
+│   Sunset           ▀▀▀▀▀▀▀▀▀▀▀▀                          │
+│ 38 of 38 options · Current: Scene colors                 │
+│ Enter applies · Esc cancels                              │
+╰──────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A choice over the ilium.palettes catalogue with swatch previews. The names are the first entries of the real list; each swatch is a strip of half blocks coloured with the stops of the palette (1 to 16 colours). The first entry keeps the scene colours and has no swatch.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let palette = tree.choice(&quot;Palette&quot;, Vec::&lt;String&gt;::new(), 0).key(&quot;palette&quot;)
+    .source(&quot;ilium.palettes&quot;).style(ChoiceStyle::Dialog).filter(true).selected_id(&amp;self.palette);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const palette = choice('Palette', [], 0, {
+  key: 'palette', source: 'ilium.palettes', style: 'dialog', filter: true, selectedId: state.palette,
+});
+</code></pre>
+<h4 id="dither-picker">Dither picker</h4>
+<p>The dither catalogue <code>ilium.dithers</code> lists every matrix and error-diffusion mode. Each item has a <code>pattern</code> preview of 1 to 4 lines of at most 8 cells, drawn by the host from the algorithm. Dithering is global in Ilium, so a plugin never implements it. It only offers the choice.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Dither────────────────────────────────────────────────────╮
+│ Search: _                                                        │
+│ <span class="t-hi">● Ordered (Bayer 8x8)</span>     ⡪⢕⡪⢕⡪⢕                                 │
+│   Stippled                  ⠐⠀⠂⠀⠐⠀                               │
+│   Coarse (Bayer 2x2)        ⡇⢸⡇⢸⡇⢸                               │
+│   Halftone dots             ⠶⠶⠶⠶⠶⠶                               │
+│   Scan lines                ⠉⠉⠉⠉⠉⠉                               │
+│   Floyd-Steinberg                                                │
+│   <span class="t-dim">Error diffusion can shimmer on moving scenes</span>                   │
+│ 15 of 15 options · Current: Ordered (Bayer 8x8)                  │
+│ Enter applies · Esc cancels                                      │
+╰──────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A choice over the ilium.dithers catalogue with pattern previews. Each preview is one to four lines of at most 8 cells that the host draws in the muted colour; the Braille patterns here are examples of what the host supplies. The labels are the real DitherMode names.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let dither = tree.choice(&quot;Dither&quot;, Vec::&lt;String&gt;::new(), 0).key(&quot;dither&quot;)
+    .source(&quot;ilium.dithers&quot;).style(ChoiceStyle::Dialog).filter(true).selected_id(&amp;self.dither);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const dither = choice('Dither', [], 0, {
+  key: 'dither', source: 'ilium.dithers', style: 'dialog', filter: true, selectedId: state.dither,
+});
+</code></pre>
+<h4 id="icon-picker">Icon picker</h4>
+<p>The icon catalogue <code>ilium.icons</code> holds about 12,000 glyphs. Each item has a <code>glyph</code> preview. With <code>view-modes</code> the dialog gets the <code>View</code> row <code>← List → +</code> that switches between a list and a grid. The glyphs are normal UTF-8 icons. The stable alternative appears only when the user has chosen it.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Icon──────────────────────────────────────────────╮
+│ View <span class="t-dim">…………………………………………</span> ← List → +                         │
+│ Search: rocket_                                          │
+│ <span class="t-hi">● <span class="w2">🚀</span>  Rocket</span>                                             │
+│   <span class="w2">🛰️</span>  Satellite                                          │
+│   <span class="w2">📡</span>  Antenna                                            │
+│ 3 of 12041 options · Current: Rocket                     │
+│ Enter applies · Esc cancels                              │
+╰──────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The icon picker as a choice over the ilium.icons catalogue with glyph previews and a View switch between List and Grid. The glyphs are normal UTF-8 icons; the stable alternative is used only when the user has opted in.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let icon = tree.choice(&quot;Icon&quot;, Vec::&lt;String&gt;::new(), 0).key(&quot;icon&quot;)
+    .source(&quot;ilium.icons&quot;).style(ChoiceStyle::Dialog).filter(true)
+    .view_modes(vec![ViewMode::List, ViewMode::Grid]).selected_id(&amp;self.icon);
+// (&quot;icon&quot;, ActionKind::Changed, ActionValue::Text(id)) =&gt; self.icon = id,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const iconChoice = choice('Icon', [], 0, {
+  key: 'icon', source: 'ilium.icons', style: 'dialog', filter: true,
+  viewModes: ['list', 'grid'], selectedId: state.icon,
+});
+</code></pre>
+<h3 id="worked-example-a-home-location-row">Worked example: a home location row</h3>
+<p>The plugin keeps one point and shows its place name. The user picks a place on the map, and the plugin converts the point to text.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">impl Views for Home {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let place = tree.location_picker().key(&quot;place&quot;).value(self.point).search(true).zoom(true);
+        let accent = tree.color_picker(&amp;self.accent).key(&quot;accent&quot;);
+        let rows = tree.layout(Direction::Vertical)
+            .constraints(vec![Constraint::Min(12), Constraint::Length(1)])
+            .child(place).child(accent);
+        tree.finish(rows)
+    }
+}
+impl Handler for Home {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            match (action.key.as_str(), action.kind, action.value) {
+                (&quot;place&quot;, ActionKind::Changed, ActionValue::Geo(point)) =&gt; self.point = Some(point),
+                (&quot;accent&quot;, ActionKind::Changed, ActionValue::Text(hex)) =&gt; self.accent = hex,
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">render() {
+  return tree(layout(
+    { direction: 'vertical', constraints: [{ tag: 'min', val: 12 }, { tag: 'length', val: 1 }] },
+    [
+      locationPicker({ key: 'place', value: state.point, search: true, zoom: true }),
+      colorPicker(state.accent, { key: 'accent' }),
+    ],
+  ));
+},
+onEvents(batch) {
+  for (const event of batch) {
+    if (event.tag !== 'ui-action') continue;
+    const { key, kind, value } = event.val;
+    if (key === 'place' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'geo') state.point = value.val;
+    if (key === 'accent' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'text') state.accent = value.val;
+  }
+  return [];
+},
+</code></pre>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A <code>color-picker</code> value that is not <code>#rrggbb</code></td>
+<td>The field is drawn in the error colour. The dialog starts from the last valid colour.</td>
+</tr>
+<tr>
+<td>A <code>path-field</code> without the <code>fs.pick</code> grant</td>
+<td>The button is disabled and the reason is its tooltip.</td>
+</tr>
+<tr>
+<td>A <code>location-picker</code> with <code>search</code> and no <code>location.geocode</code></td>
+<td>The Address box is hidden. Coordinates mode still works.</td>
+</tr>
+<tr>
+<td>The user declines the geocoding consent</td>
+<td>The search returns <code>not-permitted</code> and the status line says so.</td>
+</tr>
+<tr>
+<td>A latitude outside -90 to 90, or a longitude outside -180 to 180</td>
+<td>The number entry shows its error and nothing is sent.</td>
+</tr>
+<tr>
+<td>A <code>bind</code> key that is not an own <code>location</code> key</td>
+<td>The tree is invalid: the render traps with <code>ui.invalid-tree</code>. <code>render</code> has no result type.</td>
+</tr>
+<tr>
+<td>A catalogue source that does not exist</td>
+<td>The dialog shows an empty list and the status line <code>0 of 0 options</code>.</td>
+</tr>
+<tr>
+<td>A stale item id on commit</td>
+<td>The host refuses it and keeps the old value.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/api-catalogs/">Catalogues</a></li>
+<li><a href="/pages/api-geocode/">Geocoding</a></li>
+<li><a href="/pages/api-location/">Location</a></li>
+<li><a href="/pages/settings-screens/">Settings screens</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-status-and-feedback/"><small>Previous</small>Status and feedback</a><a class="next" href="/pages/capability-agent-control/"><small>Next</small>agent.control</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#settings-pages">Settings pages</a></li><li class="l3"><a href="#color-picker">color-picker</a></li><li class="l3"><a href="#path-field">path-field</a></li><li class="l3"><a href="#location-picker">location-picker</a></li><li class="l2"><a href="#choice-pickers">Choice pickers</a></li><li class="l3"><a href="#palette-picker">Palette picker</a></li><li class="l3"><a href="#dither-picker">Dither picker</a></li><li class="l3"><a href="#icon-picker">Icon picker</a></li><li class="l2"><a href="#worked-example-a-home-location-row">Worked example: a home location row</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>
