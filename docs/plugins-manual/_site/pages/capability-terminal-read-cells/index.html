@@ -520,7 +520,7 @@ impl Handler for CellView {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != &quot;com.example.cellview/snapshot&quot; { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             match terminal::freeze_snapshot(pane) {
                 Ok(snapshot) =&gt; {
                     if let Some(rows) = terminal::read_snapshot_cells(snapshot, 0, 40) {
@@ -546,9 +546,9 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.cellview/snapshot' || event.val.pane === undefined) continue;
+      if (event.val.command !== 'com.example.cellview/snapshot' || event.val.context.pane === undefined) continue;
       try {
-        const snapshot = freezeSnapshot(event.val.pane);
+        const snapshot = freezeSnapshot(event.val.context.pane);
         const rows = readSnapshotCells(snapshot, 0, 40);
         if (rows) log('info', `${rows.rows.length} rows, revision ${rows.revision}`);
         dropSnapshot(snapshot);
@@ -560,7 +560,7 @@ export const { lifecycle, handler } = definePlugin({
   },
 });
 </code></pre>
-<p>The snapshot is released in every path. A plugin that forgets <code>drop-snapshot</code> keeps the copy until deactivation, and the host counts snapshots against the plugin memory quota.</p>
+<p>The snapshot is released in every path. A plugin that forgets <code>drop-snapshot</code> keeps the copy until deactivation, and the host counts snapshots against the plugin memory quota. A <code>freeze-snapshot</code> that would take the plugin over that quota returns <code>quota-exceeded</code> and creates no snapshot.</p>
 <h3 id="errors-and-edge-cases">Errors and edge cases</h3>
 <table>
 <thead>
@@ -590,6 +590,11 @@ export const { lifecycle, handler } = definePlugin({
 <td>Pane has no screen yet</td>
 <td><code>pane-not-ready</code></td>
 <td>Wait for the next <code>screen-changed</code> event.</td>
+</tr>
+<tr>
+<td><code>freeze-snapshot</code> over the memory quota</td>
+<td><code>quota-exceeded</code></td>
+<td>Drop older snapshots, then retry.</td>
 </tr>
 <tr>
 <td>Snapshot id already dropped</td>

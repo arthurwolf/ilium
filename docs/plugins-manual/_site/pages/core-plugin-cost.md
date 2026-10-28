@@ -16,7 +16,7 @@ Reading an agent's own session files is done by the kernel and exposed as typed 
 
 ### See it
 
-<figure><img src="/assets/demos/06-cost-and-stats.gif" alt="The statistics panel shows spend over time, a bar per model and a table of sessions" loading="lazy"><figcaption>The session statistics panel and the spend indicators in the tree.</figcaption></figure>
+<figure><img src="/assets/demos/06-cost-and-stats.gif" alt="Historical Costs and Stats capture from an older Ilium build; current-build live-resume acceptance remains unverified." loading="lazy"><figcaption>Historical capture; a current-build replacement has not passed its real-idle check.</figcaption></figure>
 
 ### What the user sees
 
@@ -56,7 +56,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "id": "ilium.core.cost",
   "server": { "entry": "server.wasm", "world": "ilium:server/base@0.1.0",
               "exports": ["service-provider"] },
-  "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0" },
+  "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0",
+              "exports": ["views"] },
   "contributes": {
     "decoration_slots": [ { "id": "cost", "placement": "badge", "priority": 40, "trailing": true } ],
     "tree_orderings": [ { "id": "by-cost", "title": "Cost, highest first", "slot": "cost" } ],
@@ -116,7 +117,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
   },
   "capabilities": {
     "server": [
@@ -633,7 +637,7 @@ Other plugins change what `ilium.core.cost` does through the points below. The p
 
 - `ilium.core.cost/usage-changed`: { pane, total } when the total of a pane changes
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.cost"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.cost"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Prices a local model at zero
 

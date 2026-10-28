@@ -22,7 +22,7 @@ All paths are relative to the plugin root, `<data dir>/plugins/`, where `<data d
 <data dir>/plugins/
   installed.json            registry, versioned format
   installed.lock            exclusive OS advisory lock; holder pid and boot id for messages
-  store/<id>/<version>/     immutable package: manifest.json, manifest.sha256, components, files
+  store/<id>/<version>/     immutable package: package.iliumpkg, manifest.json, manifest.sha256, components, files
   staging/<uuid>/           uncommitted unpack of one operation
   locks/<id>.migrate.lock   cross-process lock of one data migration
   backups/<id>/<version>-<utc timestamp>/   pre-migration copy of data and buckets
@@ -180,13 +180,13 @@ The JSON Schema of the file:
 - [LIF-071] Validation MUST run in the stage order of PKG-149, so that the cheapest checks refuse first and no prompt appears for a package that would be refused later. Test: a package with an invalid manifest (stage 3) and an invalid signature (stage 7) reports `manifest.schema` and no signature code.
 - [LIF-072] Installing the same id and version with the same manifest SHA-256 MUST be a no-op that exits 0 and prints `install.already-installed` as a `warning` line; with `--reinstall` it rewrites `store/<id>/<version>/` from the package. A different manifest SHA-256 for the same id and version MUST be refused at stage 9 with `package.version-reused` (exit 1). The host compares the manifest hash and not the package hash, because the signature document changes the package bytes. Test: install a package twice, then a modified copy with the same version, then the same manifest signed again.
 
-Grant review in a non-interactive run (no TTY): normal grants are accepted only with `--yes`; a high-risk grant is accepted only when named with `--grant <name>`. Without them the install ends with `install.needs-input` and exit code 1 (PKG-430).
+Grant review in a non-interactive run (no TTY): normal grants are accepted only with `--yes`; a high-risk grant is accepted only when named with `--grant <name>`. Without them the install ends with `install.review-required` and exit code 1 (PKG-430).
 
 ### Update
 
 A higher version of an installed id is an update. It is the same pipeline, committed beside the old version, followed by a swap. The candidate lives in `store/<id>/<version>/` from step 5 on, so the waiting period never depends on `staging/`.
 
-1. Steps 1 to 5 run as for an install. The dialog shows only the new capabilities. The package state is `update-staged`.
+1. Steps 1 to 5 run as for an install. The dialog shows only the new capabilities. The package state is `update-staged` only when the new version asks for grants beyond those the user accepted, and stays so until the review is answered (LIF-078); otherwise the update goes on to step 2.
 2. Step 6 writes `previous_version` and `update: { candidate, state: "staged", attempts: 0, started_at }`, and leaves `active_version` unchanged.
 3. Each running server receives the change. At the next safe point ([Install and update](/pages/reference-install-and-update/), PKG-278) each live instance receives `deactivate(upgrade)` and returns its restore bytes ([LIF-044](/pages/lifecycle/)).
 4. Before the host calls `migrate`, it writes `update.state: "migrating"` to `installed.json` with fsync. The data migration runs ([Data migration](/pages/guide-data-migration/)). If the host stops while the state is `migrating`, the next start restores the backup, increments `attempts` and runs the migration again; when `attempts` reaches 2 the host rolls back with `migration.interrupted` and marks the candidate `skip`.
@@ -223,11 +223,11 @@ If activation of the new version is deferred (a lazy plugin has no trigger yet),
 |---|---|---|---|
 | Store entries (all versions) | deleted | deleted | deleted |
 | Data directory | kept | deleted | kept |
-| Cache directory and compile cache | deleted | deleted | deleted |
+| Cache directory and compile cache | kept | deleted | kept |
 | Global bucket | kept with the data directory | deleted | kept |
 | Project bucket | kept | deleted for this project, tombstone for others | kept |
 | Session bucket | kept until its session is deleted | deleted for this session, tombstone for others | kept |
-| Shared bucket | deleted | deleted | deleted |
+| Shared bucket | kept | deleted | kept |
 | Settings values | kept | deleted | kept |
 | Grants and first-use answers | deleted | deleted | deleted |
 | Node metadata in snapshots | kept, inert | deleted for the live session, tombstone for others | kept, inert |
@@ -244,6 +244,10 @@ If activation of the new version is deferred (a lazy plugin has no trigger yet),
 - [LIF-082] An uninstall without `--purge` MUST keep the data directory, the buckets, the settings values and `backups/<id>/`, with or without a TTY, and MUST NOT ask a question. It prints the kept paths as `warning` lines. `--keep-data` is accepted and means the same as the default. Test: run it with standard input closed and again on a TTY, and assert no prompt and the warning lines.
 - [LIF-083] The host MUST delete grants (its entry in `grants.json`), first-use answers, durable timers, failure counters and persistent decorations on every uninstall, with or without `--purge`. Data, storage and settings are kept unless `--purge` is given. A reinstall MUST ask for grants again. Test: install, grant, uninstall, install and assert the review dialog appears.
 - [LIF-084] Node metadata and session data of an uninstalled plugin MUST stay inert: the host never passes them to another plugin, and keeps them in the snapshot. A reinstall of the same id MAY read them again. With `--purge` the host MUST delete them in the live session and add a tombstone, so that other projects delete theirs when they next open. Test: purge, reopen another project and assert the keys are gone.
+- [LIF-290] The host MUST provide `ilium plugin export <id> --out <file>`, which writes one archive holding the plugin's data directory, buckets and settings values for the current project scope. The archive MUST NOT contain grants, first-use answers, trusted keys, logs or the package itself. It MUST work while the plugin is enabled or disabled and MUST NOT change any plugin data. Test: export an installed plugin, list the archive and assert the data, bucket and settings entries and none of grants, keys, logs or package files; compare the plugin data before and after and assert no change.
+- [LIF-291] `ilium plugin export` MUST write a consistent snapshot: no bucket batch (a `storage.batch` call) appears half applied. It MUST create the file owner-only, MUST refuse an existing file with `export.exists` unless `--force` is given, and MUST fail with `export.unknown-plugin` for an id that is not installed, leaving no partial file. Test: export during a running batch and assert all or none of its keys; export twice to one path and assert `export.exists`, then again with `--force`; export an unknown id and assert the error and no file; assert the file mode is 0600.
+- [LIF-292] `ilium plugin import <id> --from <file>` MUST restore an archive made by `ilium plugin export` into the installed plugin with the same id, replacing its data, buckets and settings values. It MUST refuse an archive for another id with `import.id-mismatch` and an archive of an unknown format version with `import.format-unsupported`, and then MUST leave the existing data untouched. Test: export on one root, install the same id on a second root, import and read the keys back; import an archive of another id and one with a bumped format and assert the error codes and unchanged data.
+- [LIF-293] A `ilium plugin uninstall <id> --purge` on a TTY MUST print one line before it deletes, naming `ilium plugin export <id>` as the way to keep a copy. Without a TTY it MUST print no such prompt and MUST NOT ask a question (LIF-082). The line MUST NOT delay or block the purge. Test: run the purge on a TTY and assert the hint line and the purge; run it with standard input closed and assert no prompt and the purge.
 - [LIF-085] Uninstall MUST first set `uninstall-pending`, then stop all instances, then delete files. After a crash, the next start MUST finish it. Test: kill the host after the state is written.
 - [LIF-086] Uninstall MUST NOT delete data of other plugins, and MUST NOT remove a publisher key. Test: compare the other plugins' directories before and after.
 
@@ -253,7 +257,7 @@ All commands print JSON lines when output is not a terminal, or when `--json` is
 
 | Command | Purpose |
 |---|---|
-| `ilium plugin install <file> [--allow-unsigned] [--allow-downgrade] [--yes] [--grant <name>]...` | Install or update from a package file. |
+| `ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable\|beta\|dev] [--yes] [--grant <name>]... [--locked] [--unskip]` | Install or update from a package file, URL or registry id. `--unskip` clears the `skip` mark that a rollback set on that version. Full flag list: [Distribution commands](/pages/reference-plugin-distribution-cli/#install). |
 | `ilium plugin update <file>` | Same as install, but fails with `install.not-installed` when the id is not installed. |
 | `ilium plugin uninstall <id> [--purge] [--keep-data]` | Remove a plugin. The two flags exclude each other. |
 | `ilium plugin enable <id> [--scope <scope>] [--session <name>]` | Turn a plugin on. |

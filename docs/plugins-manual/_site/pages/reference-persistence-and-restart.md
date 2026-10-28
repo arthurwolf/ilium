@@ -13,7 +13,7 @@ Y means the state is kept. N means it is lost. R means the plugin gets it back o
 | State | Plugin restart (after a failure) | Disable then enable | Update | Server restart | Client reconnect | Session delete | Uninstall (no flags) | Uninstall with `--delete-data` |
 |---|---|---|---|---|---|---|---|---|
 | Linear memory and variables | N | N | N | N | N | N | N | N |
-| Restore bytes (server) | N | N | Y | N | n/a | N | N | N |
+| Restore bytes (server) | N | Y | Y | N | n/a | N | N | N |
 | Restore bytes (client, disconnect) | n/a | n/a | Y | n/a | Y | N | N | N |
 | Global storage bucket | Y | Y | Y (migrated) | Y | Y | Y | Y | N |
 | Project storage bucket | Y | Y | Y (migrated) | Y | Y | Y | Y | N |

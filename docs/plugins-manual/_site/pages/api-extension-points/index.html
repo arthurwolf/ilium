@@ -521,8 +521,8 @@ interface extensions {
 
 // export fragment `with-hook-handler`, listed as &quot;hook-handler&quot; in `exports`
 variant hook-reply { pass, replace(string), refuse(string), answer(string) }
-record hook-call { point: string, extension: string, call: u64, payload-json: string }
-handle-hook: func(call: hook-call) -&gt; hook-reply;
+record hook-call { call: u64, point: string, payload-json: string }
+handle-hook: func(call: hook-call) -&gt; result&lt;hook-reply, plugin-error&gt;;
 </code></pre>
 <h3 id="functions">Functions</h3>
 <table>
@@ -706,7 +706,7 @@ handle-hook: func(call: hook-call) -&gt; hook-reply;
 <ul>
 <li><strong>Payloads.</strong> A payload, a reply and a hook chain result are each capped at 64 KiB. An entry is capped at 16 KiB. The host checks the payload against <code>payload_schema</code> before the first handler runs. A failing payload returns <code>schema-mismatch</code> from <code>run-hook</code> and no handler runs.</li>
 <li><strong>What a contributor sees.</strong> A handler gets the payload of the owner's <code>payload_schema</code> and nothing else. It does not see the owner's state, the other handlers or the other contributors.</li>
-<li><strong>Deadlines.</strong> Each handler gets <code>deadline_ms</code>, between 5 and 50 milliseconds, 20 by default. The whole chain gets 100 milliseconds. Handlers that have not started when the chain reaches 100 ms are skipped and logged (see Chain cap).</li>
+<li><strong>Deadlines.</strong> Each handler gets <code>deadline_ms</code>, 20 milliseconds by default. The range is 5 to 50 milliseconds for every tier: the T1 ceiling and the T2 and T3 ceiling are both 50 milliseconds. This is separate from the plugin's own <code>event_deadline_ms</code>, whose ceiling is 50 milliseconds at T1 and 20 milliseconds at T2 and T3. The whole chain gets 100 milliseconds. Handlers that have not started when the chain reaches 100 ms are skipped and logged (see Chain cap).</li>
 <li><strong>Order.</strong> The user order is a stored list of (plugin id, extension id) per point. Items in it run first, in that order. Items not in it follow, sorted by tier band (T1 before T2 and T3), then priority (lower first), then plugin id, then extension id (byte-wise ASCII comparison). A contributor installed after the user reordered therefore lands after the stored items. An update keeps the stored position, and an uninstall removes it. The same order applies to <code>list</code> on collect points. Declared priorities are kept: <code>ExtensionEntry.priority</code> returns the declared value. [EXT-007] [EXT-008]</li>
 <li><strong>Fail open.</strong> A handler that times out, traps or errors counts as <code>pass</code>. A timeout never vetoes. A <strong>breach</strong> is a timeout, a trap, an error return, a reply over 64 KiB, a <code>replace</code> or <code>answer</code> that fails its schema, a CPU budget overrun, or a skip because the contributor's instance was busy. <code>reply-not-allowed</code> and a chain-cap skip are not breaches. The counter is per contributor, point and extension id. Any call that returns an accepted reply within its deadline resets it to 0. The third consecutive breach stops the extension. The stop ends when the contributor's instance restarts or the user presses Reset, and it is not persisted. The user sees a notice and a Reset button. [EXT-021]</li>
 <li><strong>Re-entry.</strong> A <code>run-hook</code> on any point that is already on the current chain stack, directly or indirectly (A runs B, and B's handler runs A), fails with <code>extension.reentrant</code>.</li>
@@ -1247,7 +1247,7 @@ export function addProjectKey(keyPrefix: string): void {
 <li><strong>Contributor removed while a chain runs.</strong> The chain skips its handler and logs <code>extension.disabled</code>.</li>
 <li><strong>Equal priority.</strong> Two extensions on one point with the same priority run in plugin id order, then in extension id order [EXT-007].</li>
 <li><strong>Two contributors, same id.</strong> The id is unique per contributor and point, so both stay. The user sees them as two rows.</li>
-<li><strong>Version mismatch.</strong> A contribution asks for <code>point@X.Y.Z</code>. The rule is the one for services: same major; minor at least the requested one; for major 0 the minor must be equal; patch is ignored. Otherwise it stays dormant and the Plugins screen says why. A contribution without <code>@version</code> matches any owner version. Examples with an owner at <code>1.2.0</code>: <code>@1.0.0</code> accepted, <code>@1.2.0</code> accepted, <code>@1.3.0</code> dormant, <code>@2.0.0</code> dormant. With an owner at <code>0.1.2</code>: <code>@0.1.0</code> and <code>@0.1.9</code> accepted, <code>@0.2.0</code> dormant [EXT-006].</li>
+<li><strong>Version mismatch.</strong> A contribution asks for <code>point@X.Y.Z</code>. The version is a caret range (PKG-317, PKG-318, PKG-328 in <a href="/pages/reference-dependency-resolution/">Dependency resolution</a>): the owner must satisfy <code>&gt;=X.Y.Z</code> within the same left-most non-zero part. Otherwise it stays dormant and the Plugins screen says why. A contribution without <code>@version</code> matches any owner version. Examples with an owner at <code>1.2.0</code>: <code>@1.0.0</code> accepted, <code>@1.2.0</code> accepted, <code>@1.3.0</code> dormant, <code>@2.0.0</code> dormant. With an owner at <code>0.1.2</code>: <code>@0.1.0</code> and <code>@0.1.9</code> accepted, <code>@0.2.0</code> dormant [EXT-006].</li>
 <li><strong>Hook with no handlers.</strong> <code>run-hook</code> resolves at once with outcome <code>ok</code> and no reply. The owner continues with its original data.</li>
 <li><strong>Slow owner path.</strong> The owner pays for the chain. The action waits for a <code>veto</code>, <code>transform</code> or <code>first</code> chain, at most the 100 ms cap plus one deadline. A handler that is skipped at the cap counts as <code>pass</code>, so a <code>veto</code> chain that never reached a refusal lets the action go on.</li>
 <li><strong>No retry by the kernel.</strong> The kernel never re-runs a failed chain. The owner decides.</li>
@@ -1270,7 +1270,7 @@ export function addProjectKey(keyPrefix: string): void {
 <li><a href="/pages/api-services/">services</a>, <a href="/pages/api-messages-and-topics/">messages and topics</a> and <a href="/pages/api-menu-provider/">menu provider</a> for the other ways plugins work together.</li>
 <li><a href="/pages/api-exports/">exports</a> for <code>hook-handler</code> and its <code>with-hook-handler</code> fragment.</li>
 <li><a href="/pages/requests-and-outcomes/">requests and outcomes</a> for <code>request-completed</code> and <code>refused</code>.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> and <a href="/pages/reference-errors-and-limits/">reference: errors and limits</a> for the full code table.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> and <a href="/pages/reference-errors-and-limits/">reference: errors and limits</a> for the full code table.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the module layout of each language.</li>
 <li><a href="/pages/reference-manifest/">reference: manifest</a> for the manifest keys, and <a href="/pages/versioning/">versioning</a> for point versions.</li>
 </ul>

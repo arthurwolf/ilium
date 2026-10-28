@@ -99,7 +99,7 @@ Manifest:
   "capabilities": { "server": ["sessions.cross", "cli.contribute"] },
   "contributes": {
     "commands": [{ "id": "pane-count", "title": "Count panes" }],
-    "cli": { "name": "count-everywhere", "summary": "Count panes in every session" }
+    "cli": [{ "name": "count-everywhere", "summary": "Count panes in every session" }]
   }
 }
 ```
@@ -310,6 +310,6 @@ The user runs the plugin's own CLI command. The plugin writes one JSON line per 
 - [Requests and outcomes](/pages/requests-and-outcomes/) for `request-completed` and the `take-*` pattern.
 - [commands](/pages/api-commands/) for declaring the command that the target runs.
 - [Capabilities](/pages/capabilities/) for risk levels and the grant dialog.
-- [Errors and limits](/pages/errors-and-limits/) for the common error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the common error codes.
 
 Interface version: `ilium:host/sessions`, version 0.1.

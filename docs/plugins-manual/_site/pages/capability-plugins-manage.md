@@ -14,7 +14,7 @@ The `plugins.manage` grant lets a client-side plugin list every installed plugin
   <rect x="20" y="10" width="360" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
   <text x="200" y="35" text-anchor="middle" fill="currentColor" font-size="12">Setup plugin (client, T1, plugins.manage)</text>
   <line x1="200" y1="50" x2="200" y2="82" stroke="currentColor" marker-end="url(#arr-plugins-disable)"/>
-  <text x="212" y="70" fill="currentColor" font-size="11">set-enabled(id, false)</text>
+  <text x="212" y="70" fill="currentColor" font-size="11">set-enabled(id, false, scope)</text>
   <rect x="20" y="82" width="360" height="40" rx="6" fill="none" stroke="currentColor"/>
   <text x="200" y="107" text-anchor="middle" fill="currentColor" font-size="12">Plugin registry</text>
   <line x1="200" y1="122" x2="200" y2="154" stroke="currentColor" marker-end="url(#arr-plugins-disable)"/>
@@ -57,7 +57,7 @@ Rust paths start at `ilium_plugin_sdk::host`. TypeScript paths start at `@ilium/
 | Function | Rust | TypeScript | Returns | Meaning |
 |---|---|---|---|---|
 | `%list` (`plugins.list`) | `plugins::list() -> Vec<PluginInfo>` | `list()` returns `PluginInfo[]` | `list<plugin-info>` | Every installed plugin, including disabled and failed ones. |
-| `set-enabled` | `plugins::set_enabled(plugin: &str, enabled: bool) -> Result<(), PluginError>` | `setEnabled(plugin, enabled)` returns `void` and throws `PluginError` | `result<_, plugin-error>` | Turns the plugin on or off. Returns once the change is recorded. |
+| `set-enabled` | `plugins::set_enabled(plugin: &str, enabled: bool, scope: &str) -> Result<(), PluginError>` | `setEnabled(plugin, enabled, scope)` returns `void` and throws `PluginError` | `result<_, plugin-error>` | Turns the plugin on or off. Returns once the change is recorded. |
 
 The WIT form, as the SDK receives it:
 
@@ -215,7 +215,7 @@ fn disable_target() {
         log::log(Level::Warn, "the notes plugin is not installed");
         return;
     }
-    match plugins::set_enabled(TARGET_PLUGIN, false) {
+    match plugins::set_enabled(TARGET_PLUGIN, false, "global") {
         Ok(()) => log::log(Level::Info, "the notes plugin is turned off"),
         Err(error) => log::log(
             Level::Error,
@@ -248,7 +248,7 @@ function disableTarget(): void {
     return;
   }
   try {
-    setEnabled(TARGET_PLUGIN, false);
+    setEnabled(TARGET_PLUGIN, false, 'global');
     log('info', 'the notes plugin is turned off');
   } catch (error) {
     if (!(error instanceof PluginError)) {

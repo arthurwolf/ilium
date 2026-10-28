@@ -53,7 +53,7 @@ The manifest is JSON with snake_case keys. Unknown keys fail the install with `m
 | `unstable` | list of strings | no | Opt-in names. Four exist in 0.1.0: `ui-calendar`, `plugin-services`, `gpu-kernels` and `websocket`. |
 | `files` | list | packed only | `{ "path", "length", "sha256" }` for each entry. |
 
-The `exports` list names only the optional exports: `views`, `detector`, `job-runner`, `service-provider`, `inference-provider` and `annotator`. Required exports (`lifecycle`, `handler`, `renderer`) are never listed. A component whose real exports differ from required plus listed fails with `manifest.exports-mismatch`.
+The `exports` list names only the optional exports: `detector`, `views`, `annotator`, `job-runner`, `service-provider`, `inference-provider`, `settings-validate`, `catalog-provider`, `menu-provider`, `virtual-rows-provider`, `token-provider`, `hook-handler` and `migrator`, each only on the sides that accept it (see [Worlds and sides](/pages/worlds-and-sides/)). Required exports (`lifecycle`, `handler`, `renderer`) are never listed. A component whose real exports differ from required plus listed fails with `manifest.exports-mismatch`.
 
 ## Contributions
 
@@ -63,8 +63,7 @@ The `exports` list names only the optional exports: `views`, `detector`, `job-ru
 |---|---|
 | `commands` | `{ id, title, arguments_schema?, voice?, palette?, icon?, when? }`. `palette` defaults to `true`. `voice` is 1 to 8 phrases. |
 | `keybindings` | `{ command, chord, mode }`. Mode is `prefix`, `global` or `pane:<kind>`. |
-| `settings` | `{ page, section?, scope, schema }`. Scope is `server` or `client`. |
-| `settings` | `kind` `tab` (with `"render": "view"` for a custom page) or `section`. See [Plugin settings extension](/pages/settings-extension/). |
+| `settings` | `{ kind, ... }`. `kind` is `tab` (with `"render": "view"` for a custom page) or `section` (with `tab`, `anchor?`, `scope` of `server`, `client` or `project`, and rows). See [Plugin settings extension](/pages/settings-extension/). |
 | `help` | `{ id, file, title }`. The file is Markdown under `help/`. |
 | `decoration_slots` | `{ id, placement, priority }`. Placement is `badge`, `icon`, `subtitle` or `footer`. |
 | `virtual_rows` | `{ id, title, icon, parent }`. Parent is `project` or `session`. |
@@ -230,12 +229,12 @@ The install runs the checks in the diagram order. Each failure prints one `error
 | `manifest.limits-tier` | `limits_tier: "first-party"` on a package that is not a bundled T1 `ilium.*` plugin. |
 | `manifest.when-key` | An unknown `when` context key. |
 | `manifest.client-request-unknown` | A client-request export is inconsistent with the other side's manifest. |
-| `manifest.asset-size` | Package assets over 64 MiB, or a font asset over 4 MiB. |
+| `manifest.asset-size` | Package assets over the `package_assets_mib` limit: 64 MiB, or up to 256 MiB for a T1 plugin that raises it (T2 and T3: 64 MiB, see [Performance](/pages/performance/)). Also a font asset over 4 MiB. |
 | `manifest.visible-when` | `visible_when` names another plugin's key, an unknown key, or forms a cycle with `depends_on`. |
 | `manifest.menu-depth` | Menu items nested deeper than 2. |
 | `manifest.settings-source` | A `choice` row `source` with both `options` and `source`, or neither. |
 | `manifest.cli-field` | An invalid `output`, `stdin` or `argument_groups` value on a `cli` entry. |
-| `manifest.scene-prerender` | `prerender` out of range, or on a scene that declares `wants-pointer`. |
+| `manifest.scene-prerender` | `prerender` out of range. |
 
 This table lists the common codes. The complete list of `manifest.` and `package.` codes, with the page that defines each, is the install code index in [Errors and limits reference](/pages/reference-errors-and-limits/).
 
@@ -245,7 +244,7 @@ This table lists the common codes. The complete list of `manifest.` and `package
 |---|---|---|
 | T1 | Bundled first-party plugins | Grants up to the manifest ceiling. High-risk grants are asked once at first activation. |
 | T2 | Signed by a publisher key the user trusts | The review dialog shows every grant. High-risk grants start unchecked. |
-| T3 | Unsigned local packages | Needs `--allow-unsigned` or `ilium plugin dev`. Shows a `dev` badge and T2 ceilings. |
+| T3 | Unsigned local packages | Needs `--allow-unsigned` or `ilium plugin dev`. Shows a `dev` badge and runs under the T2 sandbox and ceilings. |
 
 A package signed by an unknown key is offered for trust, with the key fingerprint. Declining refuses the install. A T2 or T3 install shows the review dialog. The plugin installs with the grants that stay checked:
 
@@ -272,9 +271,9 @@ A package that fills other plugins' extension points shows them in a separate gr
 
 The rules for a person who installs packages are in [Install and manage plugins](/pages/user-install-and-manage/). The rules that a package and its publisher must meet are these. Key formats, the trust store and registry updates are defined in [Signing and trust](/pages/reference-signing-and-trust/) and [Install and update](/pages/reference-install-and-update/).
 
-- [USR-126] An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the user trusts after seeing both fingerprints. Test: offer an update signed by a second key and assert the prompt shows the old and the new fingerprint.
+- [USR-126] An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the old key endorsed with a rotation statement (SEC-142). Any other key MUST be refused with `package.publisher-key-changed`. Test: offer an update signed by an unendorsed second key and assert it is refused with `package.publisher-key-changed`.
 - [USR-127] Trust MUST be per key, MUST be stored in the user's trust list, and MUST NOT be created by installing a package without a prompt. Test: install with a new key in a script without `--yes` and assert the install is refused.
-- [USR-128] A T2 package whose key was removed from the trust list MUST keep running and MUST show `untrusted` in `ilium plugin list`. A later update MUST ask for trust again. Test: remove the key, list, and offer an update.
+- [USR-128] A T2 package whose key was removed from the trust list MUST stop loading at the next activation and show `Publisher no longer trusted` (SEC-144); it is not uninstalled and its data stays. Trusting the key again reactivates it. A later update MUST ask for trust again. Test: remove the key, list, and offer an update.
 - [USR-129] A publisher MUST keep the private key offline and MUST NOT put it in a package. A lost key means new packages need a new key and a new trust prompt. Test: review `ilium plugin keygen` output for the path of the private key and its mode `0600`.
 
 ## Edge cases

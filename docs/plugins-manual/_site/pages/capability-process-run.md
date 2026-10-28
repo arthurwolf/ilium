@@ -62,7 +62,7 @@ The records:
 | `process-spec.arguments` | `Vec<String>` | `string[]` | Arguments after the program. At most 1,024. |
 | `process-spec.cwd` | `Option<FsPath>` | `FsPath \| undefined` | Working folder. It must lie in a scope the plugin can read. |
 | `process-spec.stdin` | `Option<Vec<u8>>` | `Uint8Array \| undefined` | Standard input. At most 4 MiB. |
-| `process-spec.environment` | `Vec<(String, String)>` | `[string, string][]` | Each pair replaces the inherited variable of the same name. At most 64 pairs. |
+| `process-spec.environment` | `Vec<(String, String)>` | `[string, string][]` | Each pair replaces the inherited variable of the same name, except `PATH`, `LD_PRELOAD` and `LD_LIBRARY_PATH`, which cannot be set (`invalid-argument`, [SEC-033]). At most 64 pairs. |
 | `process-spec.timeout_millis` | `u32` | `number` | Required. From 1 to 600,000 ms. |
 | `process-exit.status` | `Option<i32>` | `number \| undefined` | Exit code. `None` when a signal ended the process. |
 | `process-exit.signal` | `Option<String>` | `string \| undefined` | POSIX name such as `SIGKILL`. Set only when a signal ended the process. |
@@ -101,9 +101,9 @@ The records:
 
 When the plugin calls `run`:
 
-1. **Grant check.** A program that matches no grant, including a grant the user declined, returns `invalid-argument` at once. A `cwd` outside a readable scope returns `not-permitted`. A value over a fixed cap returns `invalid-argument`. Nothing starts.
+1. **Grant check.** A program that matches no grant, including a grant the user declined, returns `not-permitted` at once. A `cwd` outside a readable scope returns `not-permitted`. A value over a fixed cap returns `invalid-argument`. Nothing starts.
 2. **Program lookup.** A bare name is resolved through `PATH`. An absolute path runs exactly that file.
-3. **Environment.** The helper starts with `PATH`, `HOME` and `LANG` only. Each `environment` pair then replaces or adds one variable.
+3. **Environment.** The helper starts with `PATH` (fixed to `/usr/bin:/bin`, [SEC-027]), `HOME` and `LANG` only. Each `environment` pair then replaces or adds one variable, except `PATH`, `LD_PRELOAD` and `LD_LIBRARY_PATH`, which cannot be set (`invalid-argument`, [SEC-033]).
 4. **Priority and quota.** The helper runs at low priority, and its CPU time is charged to the plugin's CPU quota.
 5. **Confinement.** On T2 and T3 packages the helper runs in a bubblewrap mount namespace with a seccomp filter. It sees only the plugin's granted scopes (read-only for read grants), plus read-only `/usr`, `/bin`, `/lib*` and `/etc`, and it has no network. On T1 bundled plugins the helper runs unconfined, at low priority.
 6. **Timeout.** The helper is killed when `timeout_millis` passes, and the completion is `failed(timed-out)`.
@@ -157,7 +157,8 @@ The review dialog lists the program name from each grant. It does not show argum
 
 | Where | Code | When it happens |
 |---|---|---|
-| `run`, sync | `invalid-argument` | The program matches no grant, or a declined grant leaves none. `timeout_millis` is 0 or over 600,000. Stdin is over 4 MiB. There are more than 1,024 arguments or 64 pairs. |
+| `run`, sync | `not-permitted` | The program matches no grant, or a declined grant leaves none. |
+| `run`, sync | `invalid-argument` | `timeout_millis` is 0 or over 600,000. Stdin is over 4 MiB. There are more than 1,024 arguments or 64 pairs. |
 | `run`, sync | `not-permitted` | `cwd` lies outside a scope the plugin can read. |
 | `run`, sync | `busy` | The session runs 16 children, or the plugin's pending requests are full. |
 | Completion | `failed(not-found)` | The program is not on `PATH`, or `cwd` does not exist. |
@@ -270,7 +271,7 @@ The `run` call rejects with `PluginError` only when the run fails. A grep that f
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md`:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 59 Progress monitor: `process.run:sh`, to run arbitrary probe commands. Only a T1 bundled plugin can hold this grant.
 - 67, 68, 69 and 70 Git worktree features: `process.run:git`.
@@ -285,11 +286,11 @@ Requirement ids for this page: [CAP-009]. See the [requirements index](/pages/re
 - [Capability: fs.read](/pages/capability-fs-read/) for the scope that holds a working folder.
 - [Capability: workspace.manage](/pages/capability-workspace-manage/), which creates worktrees through the kernel and uses this grant for Git commands.
 - [Capability: jobs.run](/pages/capability-jobs-run/) for work that does not need an external program.
-- [Errors and limits](/pages/errors-and-limits/) for the full error table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error table.
 - [Security](/pages/security/) for the risk tiers behind high-risk grants.
 
 Targets `ilium:plugin@0.1.0`.
 
 ### Security
 
-Children get a rebuilt environment: `LD_PRELOAD`, `LD_LIBRARY_PATH` and `PATH` cannot be set (`invalid-argument`, [SEC-033]), `PATH` is fixed, the data folder is mounted `noexec`, the child has no network, and secrets are redacted from captured output ([SEC-243]). A refused program returns `not-permitted`. See [Sandbox reference](/pages/reference-sandbox/).
+Children get a rebuilt environment: `LD_PRELOAD`, `LD_LIBRARY_PATH` and `PATH` cannot be set (`invalid-argument`, [SEC-033]), `PATH` is fixed to `/usr/bin:/bin` ([SEC-027]), the data folder is mounted `noexec`, the child has no network on T2 and T3 (T1 bundled plugins run unconfined), and secrets are redacted from captured output ([SEC-243]). A refused program returns `not-permitted`. See [Sandbox reference](/pages/reference-sandbox/).

@@ -172,7 +172,7 @@ When a T2 or T3 package is installed, the review dialog lists the grant in the S
 <figcaption>The review dialog for a package that requests location.observer, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
 </figure>
 
-A bundled T1 plugin is not shown the review dialog. It is activated first without the grant. On its first activation the host asks once:
+A bundled T1 plugin is not shown the review dialog. It is activated first without the grant. On its first activation the host shows a prompt. `Not now` asks again at the next server start, at most three prompts in total, and then the user grants it in Settings > Plugins:
 
 <figure>
 
@@ -180,7 +180,7 @@ A bundled T1 plugin is not shown the review dialog. It is activated first withou
   <span class="t-err">HIGH</span> [ ] Know your configured location  location.observer
 <span class="t-dim">[Allow selected]  [Not now]</span></pre>
 
-<figcaption>Illustrative, not generated. The first-activation prompt for a bundled plugin. Choosing Not now asks again at the next server start, up to three times in total.</figcaption>
+<figcaption>Illustrative, not generated. The first-activation prompt for a bundled plugin. Choosing Not now asks again at the next server start, at most three prompts in total.</figcaption>
 </figure>
 
 The user can change a grant at any time in Settings > Plugins > <plugin> > Capabilities, or with `ilium plugin grants <id> --revoke location.observer`.
@@ -190,7 +190,7 @@ When the host refuses a call, it writes a refusal line to the plugin log. Run `i
 ```json
 {
   "type": "refusal",
-  "capability": "location.observer",
+  "grant": "location.observer",
   "function": "location.current",
   "reason": "declined"
 }
@@ -199,7 +199,7 @@ When the host refuses a call, it writes a refusal line to the plugin log. Run `i
 ### Risk and tier rules
 
 - `location.observer` is high risk (H). It always needs an explicit grant, even for a T1 bundled plugin.
-- **T1 bundled plugins** show one prompt per plugin at first activation: `Plugin <name> asks for: <list>`, with the buttons `Allow selected` and `Not now`.
+- **T1 bundled plugins** show a prompt per plugin at first activation (repeated at the next start after Not now, at most three prompts in total): `Plugin <name> asks for: <list>`, with the buttons `Allow selected` and `Not now`.
 - **T2 and T3 packages** show the grant in the review dialog. The user checks each high risk row.
 - **Client and scene worlds only.** The grant is available on the client side (`C`) and the animation world (`A`). It is not available on the server side.
 - **Per side and per plugin.** The grant is recorded per plugin, per side and per user configuration, not per project.

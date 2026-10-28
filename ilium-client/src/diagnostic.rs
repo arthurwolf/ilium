@@ -1,7 +1,7 @@
 //! A full-text escape hatch for diagnostics in compact UI surfaces. This
 //! overlay retains the underlying mode and drafts and never truncates text.
 use crate::app::{App, Mode};
-use crossterm::event::{Event, KeyCode, KeyEventKind, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use ratatui::{
     layout::Rect,
     widgets::{Clear, Paragraph},
@@ -22,6 +22,19 @@ pub(crate) fn current_text(app: &App) -> Option<String> {
     contextual_text(app)
         .or_else(|| app.presentation_warning.clone())
         .map(|text| with_runtime_context(app, text))
+}
+
+/// Explicit local escape hatch, independent of a contextual server error.
+pub(crate) fn requests_runtime_report(key: &crossterm::event::KeyEvent) -> bool {
+    key.code == KeyCode::F(9) && key.modifiers == KeyModifiers::CONTROL
+}
+
+fn requested_text(app: &App, key: &crossterm::event::KeyEvent) -> Option<String> {
+    current_text(app).or_else(|| {
+        requests_runtime_report(key).then(|| {
+            with_runtime_context(app, "Local runtime diagnostics requested with Ctrl+F9. Phase ages may reflect normal idle time; no server query was made.".to_owned())
+        })
+    })
 }
 
 /// All observations are local and nonblocking. In particular, opening F9 must
@@ -75,6 +88,9 @@ fn with_runtime_context(app: &App, text: String) -> String {
         app.emitted_layout_revision(),
         app.pending_terminal_events.len(),
     );
+    if let Some(health) = &app.connection_health {
+        report.push_str(&format!("Connection {}\n", health.report()));
+    }
     if let Some(health) = &app.presentation_health {
         report.push_str(&format!("Terminal presenter: {}\n", health.report()));
     }
@@ -294,7 +310,7 @@ pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
         if key.code == KeyCode::F(9) {
             if app.diagnostic_view.is_some() {
                 app.diagnostic_view = None;
-            } else if let Some(text) = current_text(app) {
+            } else if let Some(text) = requested_text(app, key) {
                 app.diagnostic_view = Some(DiagnosticView {
                     text,
                     scroll: 0,
@@ -441,6 +457,26 @@ mod tests {
         let bounded = metadata_value(&"界".repeat(2000));
         assert!(bounded.ends_with("… [metadata truncated]"));
         assert!(bounded.chars().count() < 1100);
+    }
+
+    #[test]
+    fn explicit_runtime_shortcut_opens_without_context_and_preserves_draft() {
+        let mut app = App::new("test".into(), std::env::temp_dir());
+        app.mode = Mode::Rename(crate::text_prompt::TextPromptState::new("private draft"));
+        let event = Event::Key(KeyEvent::new(KeyCode::F(9), KeyModifiers::CONTROL));
+        assert_eq!(
+            crate::keys::editor_loan_event_target(&app, &event),
+            Some(None)
+        );
+        assert!(intercept_event(&mut app, &event));
+        let text = &app.diagnostic_view.as_ref().expect("local report").text;
+        assert!(text.contains("Ilium diagnostic context"));
+        assert!(text.contains("no server query was made"));
+        assert!(!text.contains("private draft"));
+        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert!(intercept_event(&mut app, &event));
+        assert!(app.diagnostic_view.is_none());
+        assert!(matches!(app.mode, Mode::Rename(_)));
     }
 
     #[test]

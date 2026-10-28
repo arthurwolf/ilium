@@ -795,7 +795,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>open-popup-with</code> takes an anchor and options. The anchors are <code>centered((width, height))</code>, <code>at-cell((column, row))</code>, <code>below-key("key")</code>, <code>at-key("key")</code>, <code>at-tree-node(node)</code> and <code>at-pointer</code>. The options are <code>modal</code>, <code>pinnable</code>, <code>dismiss-on-leave</code> and <code>close-on-escape</code>. <a href="/pages/ui-model/">The UI model</a> explains each anchor.</p>
+<p><code>open-popup-with</code> takes an anchor and options. The anchors are <code>centered((width, height))</code>, <code>at-cell((column, row))</code>, <code>below-key("key")</code>, <code>at-key({ key, side })</code>, <code>at-tree-node(node)</code> and <code>at-pointer</code>. The options are <code>modal</code>, <code>pinnable</code>, <code>dismiss-on-leave</code> and <code>close-on-escape</code>. <a href="/pages/ui-model/">The UI model</a> explains each anchor.</p>
 <p>Actions: <code>closed</code> with <code>none</code> when the host closes the popup, for example after Escape. Escape follows the order in <a href="/pages/ui-model/#escape">Escape</a>, and a modal popup cannot refuse the close. A click outside closes a non-modal popup. <code>close-popup</code> sends nothing. Roles: <code>border</code>, and <code>accent</code> for the title.</p>
 <h3 id="popup-size-and-placement">Popup size and placement</h3>
 <ul>
@@ -1404,7 +1404,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><a href="/pages/widgets-collections/">Collections</a></li>
 <li><a href="/pages/api-ui/">Views and the ui import</a></li>
 <li><a href="/pages/ui-model/">The UI model</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/tutorial-03-panel/">Tutorial: a panel with a table and a layout</a></li>
 </ul>
 <p>API version: <code>ilium:plugin@0.1.0</code>.</p>

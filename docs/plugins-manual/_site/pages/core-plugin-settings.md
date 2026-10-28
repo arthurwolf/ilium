@@ -78,6 +78,7 @@ The Plugins tab, `ilium plugin list`, the recovery page and every user page use 
 | Off | Turned off by the user, the CLI or safe mode | `installed-disabled-by-user`, `disabled` | Turn on |
 | Waiting for <owner> | Needs a plugin that is off or missing | `dormant` | Turn on or install the owner |
 | Blocked by policy | An administrator rule forbids it | `disabled-by-policy`, `disabled` | Nothing; ask the administrator |
+| Blocked | Its publisher key was revoked as `compromised`, or a registry takedown names its version | `blocked`, `disabled` | `ilium plugin enable <id> --accept-risk`, or install an update signed by another trusted key |
 | Refused: <reason> | The host refused to run it, for example `no sandbox` | `refused-at-load`, `refused` | Remove, or reinstall a fixed package |
 
 In safe mode, a third-party row reads `Off, safe mode`. A dimmed row of a plugin that is off keeps its settings rows read-only, with the link to this tab.
@@ -281,7 +282,7 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 #### 1. A tab from the manifest
 
-Rows that the manifest declares become part of the User Interface tab. The plugin reads its own values with `settings.get_json` and redraws when `settings-changed` names a key it cares about. See the [settings API](/pages/api-settings/), the [settings.contribute grant](/pages/capability-settings-contribute/), [extending settings](/pages/settings-extension/), the [settings screens](/pages/settings-screens/) and the [event catalogue](/pages/api-events/). `emptyTree` is the plugin's own helper.
+Rows that the manifest declares become part of the User Interface tab. The plugin reads its own values with `settings.get_json` and redraws when `settings-changed` names a key it cares about. See the [settings API](/pages/api-settings/), the [settings.contribute grant](/pages/capability-settings-contribute/), [extending settings](/pages/settings-extension/), the [settings screens](/pages/settings-screens/) and the [event catalogue](/pages/api-events/). `emptyTree` is a helper defined in the sample itself (it returns a tree with one empty root node); the SDK has no such function, and [the panel tutorial](/pages/tutorial-03-panel/) shows a full version.
 
 **Rust**
 

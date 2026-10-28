@@ -1004,7 +1004,7 @@
 
 <h4 id="list">list</h4>
 <p>Keys: <code>item</code> (one primitive type, or an object of at most eight primitive fields), <code>max_items</code> (at most 64), <code>default</code> (array). Enter opens the list editor.</p>
-<p>Further keys: <code>item_format</code> for string items (<code>glob</code>, <code>url</code>, <code>host</code>, <code>path</code>, <code>regex</code> or <code>chord</code>; checked on commit, and an invalid item is shown with <code>✗</code> and the reason and is not written), <code>style</code> (<code>"rows"</code>, the <code>list-editor</code> widget, or <code>"inline"</code>, one text field), <code>separator</code> (inline style, default <code>;</code>), <code>reorderable</code> (default true), <code>remote</code> (each committed item shows as pending until the plugin confirms it with <code>set-item-states</code>), <code>item_status</code> (reserves a status cell per item). Object items have four fields.</p>
+<p>Further keys: <code>item_format</code> for string items (<code>glob</code>, <code>url</code>, <code>host</code>, <code>path</code>, <code>regex</code> or <code>chord</code>; checked on commit, and an invalid item is shown with <code>✗</code> and the reason and is not written), <code>style</code> (<code>"rows"</code>, the <code>list-editor</code> widget, or <code>"inline"</code>, one text field), <code>separator</code> (inline style, default <code>;</code>), <code>reorderable</code> (default true), <code>remote</code> (each committed item shows as pending until the plugin confirms it with <code>set-item-states</code>), <code>item_status</code> (reserves a status cell per item). Object items have at most eight fields.</p>
 <pre><code class="language-json">{ &quot;type&quot;: &quot;list&quot;, &quot;key&quot;: &quot;ignore_patterns&quot;, &quot;title&quot;: &quot;Ignore patterns&quot;, &quot;item&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;max_length&quot;: 200 }, &quot;max_items&quot;: 32, &quot;default&quot;: [] }
 </code></pre>
 <figure>
@@ -1179,7 +1179,7 @@
 <tr>
 <td>Text-area</td>
 <td>as typed</td>
-<td>1 s after the last keystroke</td>
+<td>1 s after the last keystroke, or <code>debounce_ms</code></td>
 </tr>
 <tr>
 <td><code>set-json</code> from the plugin</td>
@@ -1250,6 +1250,8 @@ record settings-change { keys: list&lt;string&gt;, origin: settings-origin, side
 settings-validate: func(patch: string, merged: string) -&gt; result&lt;_, list&lt;field-error&gt;&gt;;
 </code></pre>
 <p>It runs only for <code>user</code> and <code>reset</code> origins, after the schema check. Its deadline is 100 ms. A timeout, trap or stopped plugin refuses the save with <code>Could not check this value: &lt;plugin name&gt; did not answer.</code></p>
+<h3 id="data-schema-subset">Data schema subset</h3>
+<p>Every data schema in a manifest (row schemas, extension-point payload, entry and reply schemas, method schemas) may use only the keywords in the keyword table of <a href="/pages/api-settings/">Plugin settings, row schemas</a>: <code>type</code>, <code>enum</code>, <code>enum_titles</code>, <code>items</code>, <code>maxItems</code>, <code>title</code>, <code>help</code>, <code>description</code>, <code>default</code>, <code>minimum</code>, <code>maximum</code>, <code>step</code>, <code>unit</code> and the other rows of that table. Any other keyword fails the install with <code>manifest.schema-keyword</code>. The per-use size caps are on the page that uses the schema.</p>
 <h3 id="limits">Limits</h3>
 <p>An excess is refused with <code>manifest.settings-limit</code> unless the row says otherwise.</p>
 <table>
@@ -1430,7 +1432,7 @@ settings-validate: func(patch: string, merged: string) -&gt; result&lt;_, list&l
 </tr>
 <tr>
 <td><code>manifest.settings-source</code></td>
-<td><code>source</code> together with <code>options</code></td>
+<td>A <code>choice</code> row has both or neither of <code>options</code> and <code>source</code> (it needs exactly one)</td>
 </tr>
 <tr>
 <td><code>manifest.schema-keyword</code></td>
@@ -1462,6 +1464,14 @@ settings-validate: func(patch: string, merged: string) -&gt; result&lt;_, list&l
 <tr>
 <td><code>rate-limited</code></td>
 <td>More than 10 row-update calls per second per plugin, all kinds together</td>
+</tr>
+<tr>
+<td><code>settings.section-dropped</code></td>
+<td>A built-in tab already shows six plugin sections; the section is not drawn (warning)</td>
+</tr>
+<tr>
+<td><code>settings.tab-dropped</code></td>
+<td>16 plugin tabs are already shown; the tab is not drawn (warning)</td>
 </tr>
 <tr>
 <td><code>settings.value-ignored</code></td>
@@ -1503,7 +1513,7 @@ setJson(JSON.stringify({ max_entries: 800, label: null }));
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#tab-and-section-entries">Tab and section entries</a></li><li class="l3"><a href="#tab-entries-kind-tab">Tab entries (kind &quot;tab&quot;)</a></li><li class="l3"><a href="#section-entries-kind-section">Section entries (kind &quot;section&quot;)</a></li><li class="l2"><a href="#built-in-tab-ids">Built-in tab ids</a></li><li class="l2"><a href="#row-types">Row types</a></li><li class="l3"><a href="#toggle">toggle</a></li><li class="l3"><a href="#choice">choice</a></li><li class="l3"><a href="#number">number</a></li><li class="l3"><a href="#text">text</a></li><li class="l3"><a href="#text-area">text-area</a></li><li class="l3"><a href="#path">path</a></li><li class="l3"><a href="#color">color</a></li><li class="l3"><a href="#keybinding">keybinding</a></li><li class="l3"><a href="#button">button</a></li><li class="l3"><a href="#info">info</a></li><li class="l3"><a href="#group">group</a></li><li class="l3"><a href="#list">list</a></li><li class="l3"><a href="#location">location</a></li><li class="l3"><a href="#preview">preview</a></li><li class="l3"><a href="#notice">notice</a></li><li class="l3"><a href="#map">map</a></li><li class="l3"><a href="#multi-choice">multi-choice</a></li><li class="l3"><a href="#meter">meter</a></li><li class="l2"><a href="#common-row-keys">Common row keys</a></li><li class="l2"><a href="#validation-and-saving">Validation and saving</a></li><li class="l2"><a href="#keys-on-a-plugin-row">Keys on a plugin row</a></li><li class="l2"><a href="#events-and-callbacks">Events and callbacks</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#error-codes">Error codes</a></li><li class="l2"><a href="#reading-the-values-in-both-languages">Reading the values in both languages</a></li><li class="l2"><a href="#versioning">Versioning</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#tab-and-section-entries">Tab and section entries</a></li><li class="l3"><a href="#tab-entries-kind-tab">Tab entries (kind &quot;tab&quot;)</a></li><li class="l3"><a href="#section-entries-kind-section">Section entries (kind &quot;section&quot;)</a></li><li class="l2"><a href="#built-in-tab-ids">Built-in tab ids</a></li><li class="l2"><a href="#row-types">Row types</a></li><li class="l3"><a href="#toggle">toggle</a></li><li class="l3"><a href="#choice">choice</a></li><li class="l3"><a href="#number">number</a></li><li class="l3"><a href="#text">text</a></li><li class="l3"><a href="#text-area">text-area</a></li><li class="l3"><a href="#path">path</a></li><li class="l3"><a href="#color">color</a></li><li class="l3"><a href="#keybinding">keybinding</a></li><li class="l3"><a href="#button">button</a></li><li class="l3"><a href="#info">info</a></li><li class="l3"><a href="#group">group</a></li><li class="l3"><a href="#list">list</a></li><li class="l3"><a href="#location">location</a></li><li class="l3"><a href="#preview">preview</a></li><li class="l3"><a href="#notice">notice</a></li><li class="l3"><a href="#map">map</a></li><li class="l3"><a href="#multi-choice">multi-choice</a></li><li class="l3"><a href="#meter">meter</a></li><li class="l2"><a href="#common-row-keys">Common row keys</a></li><li class="l2"><a href="#validation-and-saving">Validation and saving</a></li><li class="l2"><a href="#keys-on-a-plugin-row">Keys on a plugin row</a></li><li class="l2"><a href="#events-and-callbacks">Events and callbacks</a></li><li class="l2"><a href="#data-schema-subset">Data schema subset</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#error-codes">Error codes</a></li><li class="l2"><a href="#reading-the-values-in-both-languages">Reading the values in both languages</a></li><li class="l2"><a href="#versioning">Versioning</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

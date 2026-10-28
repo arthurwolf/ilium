@@ -440,11 +440,11 @@
 <li><strong>Imports:</strong> <code>ilium_plugin_sdk::host::cli</code> in Rust, <code>@ilium/plugin-sdk/host/cli</code> in TypeScript.</li>
 </ul>
 <h3 id="manifest">Manifest</h3>
-<p>The <code>cli</code> key under <code>contributes</code> declares the subcommands. It holds one object, or a list of at most 8 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see <a href="/pages/reference-cli-compatibility/">CLI compatibility</a>) is refused with <code>manifest.cli-name-reserved</code>. Each entry has these fields; five are optional.</p>
+<p>The <code>cli</code> key under <code>contributes</code> declares the subcommands. It holds one object, or a list of at most 8 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see <a href="/pages/reference-cli-compatibility/">CLI compatibility</a>) is refused with <code>manifest.cli-name-reserved</code>. Each entry has these fields; six are optional.</p>
 <pre><code class="language-json">{
   &quot;capabilities&quot;: { &quot;server&quot;: [&quot;cli.contribute&quot;] },
   &quot;contributes&quot;: {
-    &quot;cli&quot;: {
+    &quot;cli&quot;: [{
       &quot;name&quot;: &quot;tally&quot;,
       &quot;summary&quot;: &quot;Count lines of text read from standard input&quot;,
       &quot;arguments_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;label&quot;: { &quot;type&quot;: &quot;string&quot; } } },
@@ -452,7 +452,7 @@
       &quot;stdin&quot;: &quot;optional&quot;,
       &quot;requires_server&quot;: false,
       &quot;argument_groups&quot;: [&quot;pane-selector&quot;]
-    }
+    }]
   }
 }
 </code></pre>
@@ -1023,7 +1023,7 @@ export function reportPanes(invocation: bigint): void {
 </tr>
 <tr>
 <td>Handler traps</td>
-<td>The plugin restarts under the rule in <a href="/pages/errors-and-limits/">errors and limits</a>, and the open invocation ends as above.</td>
+<td>The plugin restarts under the rule in <a href="/pages/reference-errors-and-limits/">errors and limits</a>, and the open invocation ends as above.</td>
 </tr>
 <tr>
 <td>Output form mismatch</td>

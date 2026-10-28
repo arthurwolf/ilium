@@ -97,7 +97,7 @@ Illustrative, not generated. A host log that shows which plugins load, which one
 
 ### The sandbox helper
 
-T2 and T3 components run in a separate helper process. The helper confines itself with a seccomp filter and a bubblewrap mount namespace. The namespace holds only the scopes that the plugin was granted, mounted read-only for read grants, plus read-only `/usr`, `/bin`, `/lib*` and `/etc`. A component that imports `wasi:sockets` or `wasi:http` is refused at load, so network access goes through the `http` import, which the kernel performs for the plugin.
+T2 and T3 components run in a separate helper process. The helper confines itself with a seccomp filter and a bubblewrap mount namespace. The namespace holds only the scopes that the plugin was granted, mounted read-only for read grants, plus read-only `/usr`, `/bin`, `/lib*` and `/etc`. A component that imports `wasi:sockets` or `wasi:http` is refused at install, so network access goes through the `http` import, which the kernel performs for the plugin.
 
 Child processes that a plugin starts with `process.run` inherit the same confinement. T1 children run without confinement, at low priority.
 
@@ -165,7 +165,7 @@ A client connects with a handshake that carries the plugin protocol number, the 
 
 ### Limits
 
-The manifest may request a limit. The host clamps the request to the ceiling for the tier and logs the clamp; it never refuses the package. The user sets the same keys under `[plugins.limits]` in `config.toml`, for every plugin or for the whole session. The main keys are below. The full list is in [Errors and limits](/pages/errors-and-limits/).
+The manifest may request a limit. The host clamps the request to the ceiling for the tier and logs the clamp; it never refuses the package. The user sets the same keys under `[plugins.limits]` in `config.toml`, for every plugin or for the whole session. The main keys are below. The full list is in [Errors and limits](/pages/reference-errors-and-limits/).
 
 | Key | Default | T1 ceiling | T2 and T3 ceiling | Effect on breach |
 |---|---|---|---|---|
@@ -182,7 +182,7 @@ The session keys cap the sum over all plugins in one process. For example, `sess
 
 ## Hook chains
 
-An owner can run a hook chain through the `extensions` host interface. The host looks up the extensions of that point, sorts them by priority (lower first, ties by plugin id) and calls each handler through the contributor's `hook-handler` export, one after the other. The reply of each handler is checked against the point's mode and `reply_schema` before the next handler runs. Hooks fail open. A handler that times out, traps or errors counts as a pass, three breaches in a row stop that extension until its plugin restarts, and the whole chain is capped at 100 ms. Handlers after the cap are skipped and logged. `run-hook` is asynchronous: it returns a request id at once and the chain runs without blocking the owner's call. Handlers run strictly one after another, the 100 ms cap is measured from the start of the first handler, and a hook never crosses a process: a client-owned point runs only the handlers in that client. T1 handlers run in the process that hosts the owner's side. T2 and T3 handlers cost one helper round trip, which counts inside the handler deadline. See [extension points](/pages/api-extension-points/) and [Host scheduling](/pages/reference-host-scheduling/).
+An owner can run a hook chain through the `extensions` host interface. The host looks up the extensions of that point, sorts them by priority (lower first, ties by plugin id) and calls each handler through the contributor's `hook-handler` export, one after the other. The reply of each handler is checked against the point's mode and `reply_schema` before the next handler runs. Hooks fail open. A handler that times out, traps or errors counts as a pass, three breaches in a row stop that extension until its plugin restarts or the user presses Reset (the stop is not saved across a server restart; the full rule is under Fail open on the [extending core plugins](/pages/extending-core-plugins/) page), and the whole chain is capped at 100 ms. Handlers after the cap are skipped and logged. `run-hook` is asynchronous: it returns a request id at once and the chain runs without blocking the owner's call. Handlers run strictly one after another, the 100 ms cap is measured from the start of the first handler, and a hook never crosses a process: a client-owned point runs only the handlers in that client. T1 handlers run in the process that hosts the owner's side. T2 and T3 handlers cost one helper round trip, which counts inside the handler deadline. See [extension points](/pages/api-extension-points/) and [Host scheduling](/pages/reference-host-scheduling/).
 
 ## Failures and restarts
 
@@ -190,7 +190,7 @@ A trap or a deadline breach drops the instance, cancels its pending requests and
 
 - The first failure restarts after 1 second.
 - The second failure restarts after 5 seconds.
-- The third failure within the 10-minute window stops that side; there is no 30-second step.
+- The third failure within the 10-minute window stops that side. The schedule is 1 s, 5 s, stop.
 - A third failure inside a sliding 10-minute window disables the plugin on that side. On the client, each client counts separately.
 
 A revocation, a disable, an upgrade or a shutdown never counts as a failure. When the host disables a plugin, the tree footer shows a notice in this form:
@@ -244,6 +244,7 @@ impl Handler for Hello {
                 icon: None,
                 sort_key: None,
                 persist: false,
+                ..SetDecorationSpec::default()
             })));
         }
         submissions
@@ -256,7 +257,7 @@ The path through the boundary is as follows:
 1. The dispatcher delivers `agent-activity-changed` into the plugin's queue. Delivery requires `agent.read`.
 2. `log::log` is an always-granted import. Its line goes to the plugin log.
 3. The returned `Submission` is checked when the batch is accepted. The kernel verifies `tree.decorate`, the node and the slot `hello`, which the manifest declares.
-4. If the user declined `tree.decorate`, the kernel answers `refused(not-permitted)` for that submission. The batch is refused as a whole only for a malformed submission or a missing grant.
+4. If the user declined `tree.decorate`, the kernel answers `refused(not-permitted)` for that submission and refuses the whole batch: every other submission completes as `refused(cancelled)` with `batch refused: submission <index>`. A malformed submission refuses the batch the same way. Optional fields such as `spans`, `tooltip`, `frames`, `tone` take their defaults from `SetDecorationSpec::default()`.
 
 ## Worked example 2: a TypeScript client plugin
 
@@ -343,7 +344,7 @@ The tree footer shows disable notices. Settings > Plugins lists each plugin with
 - [Primitives](/pages/primitives/)
 - [Services](/pages/services/)
 - [Security](/pages/security/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Rust SDK](/pages/rust-sdk/)
 - [TypeScript SDK](/pages/typescript-sdk/)
 

@@ -32,14 +32,14 @@ The grant has no functions. It opens four intents, each returned as a submission
 ```wit
 record submission { intent: intent, correlation: u64, dedup-key: option<string> }
 enum placement { before, after, inside-first, inside-last }
-record rename-node-spec { node: node-id, title: string }
+record rename-node-spec { node: node-id, title: string, source: title-source, expected-revision: option<u64> }
 record move-node-spec { node: node-id, target: node-id, placement: placement }
 record set-node-locked-spec { node: node-id, locked: bool }
 ```
 
 | Intent | Payload | Meaning | Outcomes beyond `ok` |
 |---|---|---|---|
-| `rename-node` | `rename-node-spec`: `node`, `title` (string) | Sets the title of a node. The title is 1 to 256 characters. | `refused(not-found)`; `refused(conflict)` when the user named the node by hand; `refused(invalid-argument)` for a title of the wrong length |
+| `rename-node` | `rename-node-spec`: `node`, `title` (string), `source` (`plugin` or `inferred`), `expected-revision` (optional) | Sets the title of a node. The title is 1 to 256 characters. | `refused(not-found)`; `refused(conflict)` when the user named the node by hand; `refused(invalid-argument)` for a title of the wrong length |
 | `move-node` | `move-node-spec`: `node`, `target` (node-id), `placement` | Moves a node before or after `target`, or into `target` as first or last child. | `refused(not-found)`; `refused(invalid-argument)` when `target` is the node itself or lies inside it |
 | `close-node` | `node` (node-id) | Closes the node, as the user does in the tree. | `refused(not-found)`; `refused(conflict)` when the node is locked |
 | `set-node-locked` | `set-node-locked-spec`: `node`, `locked` (bool) | Sets or clears the lock flag. | `refused(not-found)` |
@@ -74,7 +74,7 @@ When the user types a title for a node, the kernel marks the node as named by ha
 The plugin cannot read the mark, because `node-view` has no field for it. It learns of the mark only from the outcome:
 
 ```text
-rename-node { node: 42, title: "Build server" }
+rename-node { node: 42, title: "Build server", source: plugin }
 -> refused(plugin-error { code: conflict,
                           message: "node 42 was named manually",
                           retry-after-ms: none })
@@ -143,7 +143,7 @@ export const { lifecycle, handler } = definePlugin({
     for (const event of batch) {
       if (event.tag === 'pane-created' && event.val.contentKind === 'ilium.terminal') {
         submissions.push({
-          intent: { tag: 'rename-node', val: { node: event.val.node, title: 'Shell' } },
+          intent: { tag: 'rename-node', val: { node: event.val.node, title: 'Shell', source: 'plugin' } },
           correlation: event.val.node,
           dedupKey: `shell-title:${event.val.node}`,
         });
@@ -238,6 +238,6 @@ Illustrative, not generated. The node named by hand keeps its title, and the loc
 - [api-tree](/pages/api-tree/) for the `node-view` fields.
 - [api-intents](/pages/api-intents/) for the full intent catalogue and the dedup rules.
 - [api-events](/pages/api-events/) for `request-completed`, `tree-changed` and `pane-created`.
-- [errors and limits](/pages/errors-and-limits/) for the error codes.
+- [errors and limits](/pages/reference-errors-and-limits/) for the error codes.
 
 Checked against the API version `ilium:plugin@0.1.0`.

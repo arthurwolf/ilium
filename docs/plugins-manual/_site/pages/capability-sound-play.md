@@ -54,7 +54,7 @@ The grant takes no argument.
 | Name | Kind | Rust | TypeScript | Meaning |
 |---|---|---|---|---|
 | `play-sound` | intent, grant `sound.play` | `Intent::PlaySound(String)` | `{ tag: 'play-sound', val: 'done' }` | Asks the client to play the sound with that id. The outcome is in the request result. |
-| `catalog` | host function, always granted | `ilium_plugin_sdk::host::sounds::catalog() -> Vec<String>` | `catalog(): string[]` from `@ilium/plugin-sdk/host/sound` | Returns the sound ids this plugin may play. It is synchronous and has no error code. |
+| `catalog` | host function, always granted | `ilium_plugin_sdk::host::sounds::catalog() -> Vec<String>` | `catalog(): string[]` from `@ilium/plugin-sdk/host/sounds` | Returns the sound ids this plugin may play. It is synchronous and has no error code. |
 | `contributes.sounds` | manifest key | not applicable | not applicable | A list of `{ "id", "file" }` entries. Each file lives in the `sounds/` folder of the package. |
 | `dedup-key` | submission field | `Submission::keyed(intent, key)` | `dedupKey`, an optional string | An optional key that stops a repeat within 10 minutes. |
 
@@ -66,7 +66,7 @@ The Rust prelude brings in `Intent` and `Submission`. Import `sound` from `ilium
 - **Contributed ids.** Each `contributes.sounds` entry adds one id. The id is the plain string you write, such as `done`.
 - **Catalogue scope.** `catalog()` and `play-sound` see the bundled ids and the plugin's own ids. A plugin cannot play another plugin's sounds. Such an id is refused with `not-found`.
 - **Id rules.** An id must be unique within the manifest, and it must not be `chirping`. A repeated id or a clash with `chirping` fails the package check at install with `manifest.sound-id-taken`.
-- **File format.** A sound file must be WAV with PCM samples, or OGG Vorbis. A file that is missing or in another format fails the package check at install, and the plugin is not installed.
+- **File format.** A sound file must be WAV with PCM samples, or OGG Vorbis. A file that is missing or in another format fails the package check at install with `manifest.sound-format`, and the plugin is not installed.
 
 The manifest for both examples below:
 
@@ -211,13 +211,21 @@ Each refusal with `not-permitted` is written to the plugin log at level `warn`. 
 <figcaption>Illustrative, not generated. A refused <code>play-sound</code> in the plugin log.</figcaption>
 </figure>
 
+### Sound is never the only signal
+
+A sound cannot be heard by every user, on every terminal or in every room. A plugin that plays a sound MUST also show the same event as text.
+
+| ID | Rule | Exact value | Source |
+|---|---|---|---|
+| CAP-880 | Visible pair for every sound | Every `play-sound` for an event MUST be accompanied, in the same batch, by a visible text signal for that event (panel row, status line or toast). A batch with a `play-sound` and no visible signal for the event is rejected by the plugin check with `a11y.sound-only` | `src/docs/notifications.md` |
+| CAP-881 | Failed sound keeps the visible signal | `failed(io)`, `refused(rate-limited)` and a muted sound setting MUST NOT suppress or delay the paired visible signal | `src/docs/notifications.md` |
+
 ### Who requests it
 
 First-party plugins from the feature mapping:
 
 - 47 Sound alerts, which play a sound when an agent finishes or needs approval.
-- 56 Text triggers, which play a sound when terminal output matches a filter.
-- 59 Progress monitor, which plays a sound when a monitored task finishes.
+The Text triggers and Progress monitor plugins do not hold `sound.play` and play no sounds.
 
 ### WIT
 
@@ -234,6 +242,6 @@ catalog: func() -> list<string>;
 - [notify.desktop](/pages/capability-notify-desktop/) shows a desktop notification. Its `sound` field plays a sound with the notice and needs only `notify.desktop`.
 - [fs.read](/pages/capability-fs-read/) reads the sound files that a plugin reads for itself.
 - [Events and intents](/pages/events-and-intents/) describes the intent batch and the outcome model.
-- [Errors and limits](/pages/errors-and-limits/) lists the error codes and the rate budgets.
+- [Errors and limits](/pages/reference-errors-and-limits/) lists the error codes and the rate budgets.
 
 Contract: `ilium:plugin@0.1.0`.

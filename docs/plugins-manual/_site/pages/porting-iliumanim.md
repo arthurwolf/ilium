@@ -115,7 +115,7 @@ The contract adds two optional fields to a `contributes.scenes` entry:
 
 | Field | Value | Meaning |
 |---|---|---|
-| `prerender` | `{ "frames": 1 to 3600, "fps": 1 to 30, "cache_mib": 1 to 128 }` | The host calls `render` for that many frames once, caches them and loops them with no further plugin calls. A change of settings or palette discards the cache. Refused with `manifest.scene-prerender` when a value is out of range or when the scene declares `wants-pointer`. |
+| `prerender` | `{ "frames": 1 to 3600, "fps": 1 to 30, "cache_mib": 1 to 128 }` | The host calls `render` for that many frames once, caches them and loops them with no further plugin calls. A change of settings or palette discards the cache. Refused with `manifest.scene-prerender` when a value is out of range. A scene that answers `true` from `wants_pointer` is played from the cache with no pointer: `pointer` returns `none` and the host logs a warning. |
 | `glyph_plane` | `true` or `false` | Lets the scene write text cells over its pixels with `write-glyphs`, at most 131,072 cells per frame. The glyph colours still pass through the shared look. |
 
 The old `clip_seconds` value converts to frames as `clip_seconds` times the frame rate. For a 12-second clip at 24 fps that is `{ "frames": 288, "fps": 24, "cache_mib": 64 }`.
@@ -177,7 +177,7 @@ The old right names are not grant strings. Each one maps as follows.
 
 ## Limits
 
-The table lists the scene-relevant keys with their defaults and the ceilings for tier T2 and T3 packages. A request above a ceiling is clamped and logged, never refused. The user can lower any value under `[plugins.limits]` in `config.toml`.
+The table lists the scene-relevant keys with their defaults and the ceilings for tier T2 and T3 packages. A runtime scene limit above its ceiling is clamped and logged. The two install-time limits, package assets and the `prerender` cache, are refused at install instead. The user can lower any value under `[plugins.limits]` in `config.toml`.
 
 | Key | Default | Ceiling (T2 and T3) | Effect when exceeded |
 |---|---|---|---|
@@ -446,17 +446,18 @@ In Rust these are the methods `write_glyphs`, `clear_glyphs`, `set_owner_ids` an
 | Situation | Result |
 |---|---|
 | An `.iliumanim` file passed to the new loader | Refused with `package.old-format`. Logged as `old format, not loaded`. |
-| A manifest key with no counterpart, including `wants-pointer` in a manifest or a key in `limits` | Refused at install with `manifest.unknown-key` |
+| A manifest key with no counterpart, including a `wants-pointer` key in a manifest or a key in `limits` | Refused at install with `manifest.unknown-key` |
 | A file missing, extra or different from its inventory entry | Refused with `manifest.file-unlisted`, `manifest.file-missing`, `manifest.file-length` or `manifest.file-hash`, depending on the difference. No code from the package runs. |
 | An `api` value or `ilium:api-version` section that differs from `ilium:plugin@0.1.0` | Refused with `manifest.api-version` when the section differs from the manifest `api`, and with `package.api-unsupported` when the version is outside the window the host loads |
 | Old right names, or `device.gpu`, in `capabilities.scene` | Refused with `manifest.grant-unknown` |
-| A `frame_rate_cap` above 60, or a limit above its ceiling | Clamped to the ceiling and logged. Not refused. |
+| A `frame_rate_cap` above 60, or a runtime scene limit above its ceiling | Clamped to the ceiling and logged. Not refused. `package_assets_mib` and the `prerender` cache above their ceilings are refused at install |
 | `settings` that fail `settings_schema` | Never reach the scene. The previous values stay in force. |
 | `readiness` stays `Preparing` for more than 10 s | Counts as one failure. A `Failed` readiness stops `render` until the renderer restarts. |
 | A `render` call that returns without `present` | The frame is dropped. A warn line appears at most once per second. |
-| `prerender` values out of range, or `prerender` together with `wants-pointer` | Refused at install with `manifest.scene-prerender` |
+| `prerender` values out of range | Refused at install with `manifest.scene-prerender` |
+| `prerender` together with a scene that answers `true` from `wants_pointer` | Not refused. Played from the cache, `pointer` returns `none`, a warning is logged |
 | Package assets over 64 MiB (256 MiB for T1), or a font over 4 MiB | Refused at install with `manifest.asset-size` |
-| A glyph plane write without `glyph_plane: true` | The spec says the call needs `glyph_plane: true`. The error code is not specified. |
+| A glyph plane write without `glyph_plane: true` | The call returns `unsupported` ([glyph plane errors](/pages/api-surface-glyph-plane/)) |
 
 Failures and clamps are written to the plugin log. Read them with `ilium plugin logs <id>`.
 

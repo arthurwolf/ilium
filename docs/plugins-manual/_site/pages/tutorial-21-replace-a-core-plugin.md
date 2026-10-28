@@ -11,7 +11,7 @@ You start a fresh plugin. You have finished tutorials 1 to 9 and read [Extension
 ### You will need
 
 - Rust: stable 1.90 or later with the `wasm32-wasip2` target, and the crates `ilium-plugin-sdk` and `serde_json`. TypeScript: Bun 1.2 or later and `@ilium/plugin-sdk`.
-- Grants, with the reason for each in the table of step 5: `inference`, `agent.read-prompts`, `tree.read`, `tree.write`, `services.provide:ilium.core.titles/suggest`, `extensions.provide:ilium.core.titles/before-apply-title` and `extensions.provide:ilium.core.titles/title-styles`.
+- Grants, with the reason for each in the table of step 5: `inference`, `agent.read-prompts`, `tree.read`, `tree.write`, `services.provide:ilium.core.titles/suggest`, `extensions.provide:ilium.core.titles/before-apply-title`, `extensions.provide:ilium.core.titles/title-styles` and `topics.subscribe:ilium.extensions/changed`.
 - `"unstable": ["plugin-services"]`, because `suggest` is a plugin-defined service (dev mode, T2 and T3).
 - An AI provider that the user has set up. The titles come from [Inference providers](/pages/core-plugin-inference/).
 - A scratch folder for package inspection: `/media/arthur/tmp/titles-lite/` with a `.scratch-reaper` file in it.
@@ -200,6 +200,7 @@ use ilium_plugin_sdk::host::services;
 use ilium_plugin_sdk::host::topics;
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::TitleSource;
 use serde_json::{json, Value};
 
 const BEFORE_APPLY: &str = "ilium.core.titles/before-apply-title";
@@ -333,7 +334,7 @@ impl TitlesLite {
 fn apply(node: NodeId, title: &str, submissions: &mut Vec<Submission>) {
     let key = dedup::key_for(&["title", &node.to_string(), title]);
     submissions.push(Submission::keyed(
-        Intent::RenameNode(RenameNodeSpec { node, title: title.to_string(), expected_revision: None }),
+        Intent::RenameNode(RenameNodeSpec { node, title: title.to_string(), source: TitleSource::Inferred, expected_revision: None }),
         key,
     ));
     let payload = json!({ "node": node, "title": title }).to_string();
@@ -523,7 +524,7 @@ When the user turns Titles Lite on, the built-in plugin is turned off. Only one 
 1. The review dialog at install says what the replacement does. The user confirms.
 2. The kernel turns `ilium.core.titles` off and turns `example.titles-lite` on.
 3. The registry keeps every contribution that was made to `ilium.core.titles/title-styles` and `before-apply-title`. They apply to the replacement, because it provides the points of the same names.
-4. The settings tab, the commands and the pane kinds of the built-in plugin disappear. The Titles settings tab is not in the rail while the replacement is on. The command `ilium.core.titles/tidy` and the preview panel are gone too.
+4. The settings tab, the commands and the pane kinds of the built-in plugin disappear. The Titles settings tab is not in the rail while the replacement is on. Every command that `ilium.core.titles` contributes, for example its tree-tidying action, and the preview panel are gone too, unless the replacement contributes a command with the same id.
 5. Stored data stays on disk. The replacement does not read it. It cannot see the titles history, the style choice or the prompt text of the built-in plugin.
 
 Turning Titles Lite off, or uninstalling it, turns the built-in plugin back on. It finds its data as it left it. Titles that the replacement applied to panes stay on the panes. A title is a property of the pane, not of the plugin.

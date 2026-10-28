@@ -458,8 +458,8 @@
 <tr>
 <td><code>outcome</code></td>
 <td>variant</td>
-<td><code>ok</code>, <code>ok-node</code>, <code>duplicate(request-ref)</code>, <code>refused(plugin-error)</code>, <code>failed(plugin-error)</code>, <code>cancelled</code></td>
-<td>The result of one submission.</td>
+<td><code>ok</code>, <code>ok-node</code>, <code>duplicate(request-ref)</code>, <code>refused(plugin-error)</code>, <code>failed(plugin-error)</code>, <code>cancelled</code>, <code>ok-epoch(u64)</code></td>
+<td>The result of one submission. <code>ok-epoch</code> is returned only by <code>send-input</code> on an agent pane; this step never sees it. A submission whose grant was revoked before it applied completes as <code>refused(revoked)</code>.</td>
 </tr>
 <tr>
 <td><code>dedup-key</code></td>
@@ -533,6 +533,7 @@
       &quot;tree.read&quot;,
       &quot;tree.decorate&quot;,
       &quot;notify.desktop&quot;,
+      &quot;notify.toast&quot;,
       &quot;sound.play&quot;
     ],
     &quot;client&quot;: [&quot;agent.read&quot;, &quot;tree.read&quot;, &quot;ui.panels&quot;]
@@ -661,7 +662,7 @@ pub fn compact_agent(pane: u64, now_unix_millis: u64) -&gt; Submission {
 </code></pre>
 <h3 id="the-handler-arms">The handler arms</h3>
 <p><strong>Rust</strong></p>
-<p>The three new arms go into the <code>on_events</code> of <code>lib.rs</code>. The helpers from steps 1 to 3 (<code>decorate</code>, <code>to_kind</code>, <code>toggle_badges</code>, <code>refresh_all</code>, <code>load_settings</code>) stay as they are. Add these imports to <code>lib.rs</code>: <code>use ilium_plugin_sdk::host::{clock, log::{self, Level}, tree};</code>.</p>
+<p>The three new arms go into the <code>on_events</code> of <code>lib.rs</code>. The helpers from steps 1 to 3 (<code>to_kind</code>, <code>refresh_all</code>, <code>load_settings</code>) stay as they are, with two signature changes: <code>decorate</code> takes the activity revision as a third argument (<code>decorate(node, kind, revision, settings)</code>), and <code>toggle_badges</code> takes the loaded settings (<code>toggle_badges(settings)</code>). Update their definitions and the step 2 call sites to match. Add these imports to <code>lib.rs</code>: <code>use ilium_plugin_sdk::host::{clock, log::{self, Level}, tree};</code>.</p>
 <pre><code class="language-rust">// server/src/lib.rs, the handler body. Replaces the step 2 version.
 impl handler::Guest for AgentTools {
     fn on_events(batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
@@ -813,7 +814,7 @@ export function onEvents(batch: Event[]): Submission[] {
 }
 </code></pre>
 <h3 id="in-app-toast">In-app toast</h3>
-<p>A desktop notice leaves the terminal. A <code>toast</code> (grant <code>notify.toast</code>) stays inside the Ilium client and draws in its footer. Use it for a short message that needs no operating-system notice. The step 4 plugin sends one when a compact press is refused because the agent is working.</p>
+<p>A desktop notice leaves the terminal. A <code>toast</code> (grant <code>notify.toast</code>) stays inside the Ilium client and draws in its footer. Use it for a short message that needs no operating-system notice. The step 4 plugin defines this toast but does not send it: a compact press that is refused because the agent is working sends nothing, as the edge-case table below shows. Call <code>compact_busy_toast</code> from the refusal path if you want the message.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::types::intents::ToastSpec;
 use ilium_plugin_sdk::types::text::Tone;
@@ -841,7 +842,7 @@ export function compactBusyToast(pane: bigint): Submission {
   };
 }
 </code></pre>
-<p>Add <code>notify.toast</code> to <code>capabilities.server</code> to use it. The toast shows in the footer as a notice line.</p>
+<p>The manifest of this tutorial already lists <code>notify.toast</code> in <code>capabilities.server</code>. The toast shows in the footer as a notice line.</p>
 <h3 id="points-to-notice">Points to notice</h3>
 <ul>
 <li>Each Compact press gets a key built from the current time, so every press is a new request. The guard against a double compact is the activity check: while the agent is <code>working</code>, the second press is refused with <code>refused(conflict)</code>.</li>
@@ -859,12 +860,12 @@ export function compactBusyToast(pane: bigint): Submission {
 <tbody>
 <tr>
 <td><code>notify</code> or <code>play-sound</code> without its grant</td>
-<td><code>refused(not-permitted)</code>. The rest of the batch completes as <code>refused(cancelled)</code> (A29).</td>
+<td><code>refused(not-permitted)</code>. The rest of the batch completes as <code>refused(cancelled)</code>.</td>
 <td>A warn line. The finish raises no notice.</td>
 </tr>
 <tr>
 <td>Sound id not in <code>contributes.sounds</code></td>
-<td><code>refused(not-found)</code> for that submission only (A30).</td>
+<td><code>refused(not-found)</code> for that submission only.</td>
 <td>A warn line. Other submissions in the batch apply.</td>
 </tr>
 <tr>
@@ -879,7 +880,7 @@ export function compactBusyToast(pane: bigint): Submission {
 </tr>
 <tr>
 <td>Compact while the agent is <code>working</code></td>
-<td><code>refused(conflict)</code>, message <code>agent is working</code> (C1).</td>
+<td><code>refused(conflict)</code>, message <code>agent is working</code>.</td>
 <td>A warn line. Nothing is sent.</td>
 </tr>
 <tr>
@@ -901,7 +902,7 @@ export function compactBusyToast(pane: bigint): Submission {
 </table>
 <p>Limits: <code>notify</code> 6 per minute, <code>play-sound</code> 4 per second, <code>agent-action</code> 20 per second per pane. A refused submission does not reserve its key.</p>
 <h3 id="test-it">Test it</h3>
-<p>Run the plugin, start an agent, and let it finish. The notice and the sound appear, and <code>ilium plugin logs</code> shows the outcome. When an attached client reports terminal focus on the pane, the notice goes to the client footer instead of the desktop (C51).</p>
+<p>Run the plugin, start an agent, and let it finish. The notice and the sound appear, and <code>ilium plugin logs</code> shows the outcome. When an attached client reports terminal focus on the pane, the notice goes to the client footer instead of the desktop.</p>
 <p>To test the duplicate case, write a JSON fixture that lists the same finish twice. <code>ilium plugin test</code> prints each submission and its outcome as JSONL, and the second notice shows <code>duplicate</code>.</p>
 <pre><code class="language-bash">ilium plugin dev
 ilium plugin test . --fixture fixtures/finish-twice.json

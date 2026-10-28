@@ -596,7 +596,7 @@
 <tr>
 <td>4</td>
 <td>Plugin host</td>
-<td>Activate every client side with the <code>startup</code> trigger, in dependency order. The core plugins in this group are Tree, Settings, Ambient look, Agent toolbar, Terminal and Keys and help</td>
+<td>Activate every client side with the <code>startup</code> trigger, in dependency order. The core plugins in this group are Tree, Settings, Ambient look, Agent toolbar, Terminal and Progress</td>
 </tr>
 <tr>
 <td>5</td>
@@ -658,6 +658,7 @@
 </ul>
 <p>The commands that work this way are <code>ilium panes</code>, <code>ilium broadcast</code>, <code>ilium recap</code> and <code>ilium voice say</code> (the last one only for its argument check). <code>ilium chat</code>, <code>ilium progress</code> and <code>ilium wait</code> need the session of the pane they run in and use the socket from <code>ILIUM_SESSION_SOCKET</code>. They set <code>requires_server: true</code>.</p>
 <h3 id="startup-and-lazy-activation-of-the-30-core-plugins">Startup and lazy activation of the 30 core plugins</h3>
+<p>In the tables below, a <code>view:</code> trigger is written <code>view:&lt;plugin short name&gt;.&lt;view id&gt;</code>: the short name is the plugin id without its <code>ilium:</code> prefix, and the view id is the <code>id</code> declared in the plugin's <code>panels</code>, <code>views</code> or <code>overlays</code>. For Agent detect, <code>view:agent-detect.panel</code> is the view declared with the id <code>panel</code>.</p>
 <p>A plugin that starts at boot costs time in every session. A plugin that starts on first use costs time at the first use. The rule used here: a plugin starts at boot only when it must see events from the first moment, must be present on the first frame, or must restore state that outlives the process. Everything else is lazy. The Plugins screen shows the column <strong>Starts</strong> with <code>at boot</code> or <code>on use</code>.</p>
 <table>
 <thead>
@@ -683,7 +684,7 @@
 </tr>
 <tr>
 <td>Agent toolbar</td>
-<td><code>event:agent-state-changed</code></td>
+<td><code>event:agent-activity-changed</code></td>
 <td><code>startup</code></td>
 <td>Buttons are on the first frame</td>
 </tr>
@@ -701,7 +702,7 @@
 </tr>
 <tr>
 <td>Compaction</td>
-<td><code>event:agent-context-low</code>, <code>service:compact</code></td>
+<td><code>event:agent-activity-changed</code>, <code>service:compact</code></td>
 <td><code>view:compaction.optimizer</code></td>
 <td>Runs when an agent needs it</td>
 </tr>
@@ -738,7 +739,7 @@
 <tr>
 <td>Kanban</td>
 <td>none</td>
-<td><code>pane-kind:kanban</code></td>
+<td><code>pane-kind:board</code></td>
 <td>Native in v1. In plugin form it starts with a board pane</td>
 </tr>
 <tr>
@@ -809,13 +810,13 @@
 </tr>
 <tr>
 <td>Smart copy</td>
-<td><code>service:copy</code></td>
+<td>none</td>
 <td><code>command:smart-copy</code></td>
 <td>Starts on the copy gesture</td>
 </tr>
 <tr>
 <td>Terminal</td>
-<td><code>event:terminal-screen-changed</code></td>
+<td><code>event:screen-changed</code></td>
 <td><code>startup</code></td>
 <td>Links and the context menu need the first frame</td>
 </tr>
@@ -1078,8 +1079,8 @@
 <h3 id="replaceable-and-disableable">Replaceable and disableable</h3>
 <p>Two properties are different.</p>
 <ul>
-<li><strong>Disableable.</strong> The user can turn the plugin off in the Plugins screen. Every core plugin is disableable, including Sessions, Settings and Tree, because the kernel has a fallback for them.</li>
-<li><strong>Replaceable.</strong> Another package may list the plugin id in <code>replaces</code> and provide its whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>). The manifest says <code>replaceable: true</code> and carries a <code>surface</code>.</li>
+<li><strong>Disableable.</strong> The user can turn the plugin off in the Plugins screen. Every core plugin is disableable, including Sessions, Settings and Tree, because the kernel has a fallback for them. The one exception is Editor: it is native in v1 and cannot be turned off (see the table above).</li>
+<li><strong>Replaceable.</strong> Another package may list the plugin id in <code>replaces</code> and provide its whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>). The manifest says <code>replaceable: true</code> and carries a <code>surface</code>.</li>
 </ul>
 <p>Replaceable is stricter than disableable, because a replacement takes over stored data and a surface that other plugins call. Sessions and Settings are not replaceable (<code>replaceable: false</code>) because they own the stored sections and the settings screen that every other plugin depends on. The rest are replaceable. The rule for thin plugins that mostly drive a kernel part (Terminal, Tree, Layout) is: they are replaceable only if the replacement provides every service and point in their <code>surface</code>. A replacement that omits one is refused with <code>manifest.replaces-surface-incomplete</code>.</p>
 <table>
@@ -1342,7 +1343,7 @@
 <tr>
 <td><code>config.toml</code> fails to parse at boot</td>
 <td>Moved aside, defaults used, recovery page opens</td>
-<td><code>config.parse-failed</code></td>
+<td><code>config.parse-error</code></td>
 </tr>
 <tr>
 <td>A startup plugin takes longer than <code>HOST-START</code></td>

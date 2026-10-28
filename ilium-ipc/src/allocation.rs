@@ -587,6 +587,9 @@ impl HeapBytes for ServerEvent {
             // Result delegates through Box so the reply allocation and its nested capacities count.
             Self::ResourceResult { result, .. } => result.heap_bytes(),
             Self::ResourceWaitChanged { reservation_id, .. } => reservation_id.heap_bytes(),
+            Self::PaneCustomAgentIdentity { identity, .. } => identity
+                .as_ref()
+                .map_or(0, |value| value.profile_id.capacity()),
             Self::TreeSnapshot(value0) => 0usize.saturating_add(value0.heap_bytes()),
             Self::ScreenUpdate {
                 pane_id,

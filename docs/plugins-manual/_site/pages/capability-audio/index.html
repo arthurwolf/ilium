@@ -398,7 +398,7 @@
 <p><strong>You will need:</strong></p>
 <ul>
 <li>One grant per direction, declared in the manifest under the side that uses it. Client plugins use <code>capabilities.client</code>, and animation scenes use <code>capabilities.scene</code>.</li>
-<li>The client world (<code>ilium:client</code>) or the animation world (<code>ilium:anim</code>). Both accept the three grants (<code>C A</code> in section 3 of the API).</li>
+<li>The client world (<code>ilium:client/base</code>) or the animation world (<code>ilium:anim/base</code>). Both accept the three grants (<code>C A</code> in section 3 of the API).</li>
 <li>A manifest with <code>"api": "ilium:plugin@0.1.0"</code>.</li>
 <li>The SDK import for the audio functions: <code>ilium_plugin_sdk::host::audio</code> in Rust, <code>@ilium/plugin-sdk/host/audio</code> in TypeScript. The <a href="/pages/api-audio/">audio API page</a> lists the full import surface.</li>
 </ul>
@@ -490,7 +490,7 @@
 <td><code>await audio.play(...)</code></td>
 <td><code>audio.playback</code></td>
 <td><code>Result&lt;(), PluginError&gt;</code></td>
-<td>Plays samples. Completes when playback ends.</td>
+<td>Plays samples. The WIT function returns <code>result&lt;request-id, plugin-error&gt;</code>: a request id at once, and the host delivers <code>request-completed</code> with that id when playback ends. The SDK <code>await</code> resolves at that completion with this result type.</td>
 </tr>
 <tr>
 <td><code>Event::AudioFrames(AudioFramesEvent)</code></td>
@@ -853,7 +853,7 @@ export const { lifecycle, handler } = definePlugin({
 
 <p>Illustrative, not generated. The log of a voice plugin that reopens its microphone after the device is removed. The plugin writes the reopen lines, and the device name is a placeholder.</p>
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code>:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a>:</p>
 <ul>
 <li>50 Voice session: <code>audio.capture</code>.</li>
 <li>53 Voice onboarding demo: <code>audio.capture</code> and <code>audio.playback</code>.</li>
@@ -864,9 +864,9 @@ export const { lifecycle, handler } = definePlugin({
 <ul>
 <li><a href="/pages/api-audio/">audio</a> for the SDK import, the sample format and the level meter example.</li>
 <li><a href="/pages/capability-media-video/">media.video</a> for the other media decoder.</li>
-<li><a href="/pages/capability-messages-peer/">messages.peer</a> for the voice plugin's messages to its own client side.</li>
+<li><a href="/pages/api-messages-and-topics/">messages and topics</a> for the voice plugin's messages to its own client side, which need no grant.</li>
 <li><a href="/pages/capabilities/">capabilities</a> for the grant model, the H rule and the review dialog.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the error codes that every import uses.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the error codes that every import uses.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-always-granted/"><small>Previous</small>Always-granted capabilities</a><a class="next" href="/pages/capability-cli-contribute/"><small>Next</small>Capability: cli.contribute</a></nav>

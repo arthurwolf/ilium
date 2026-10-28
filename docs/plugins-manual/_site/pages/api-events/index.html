@@ -539,7 +539,7 @@
 </tr>
 <tr>
 <td><code>pointer</code></td>
-<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, drag, wheel, move), <code>button</code>, plus <code>sub-x</code>, <code>sub-y</code>, <code>modifiers</code></td>
+<td><code>node</code>, <code>row</code>, <code>column</code>, <code>kind</code> (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), <code>button</code>, plus <code>sub-x</code>, <code>sub-y</code>, <code>modifiers</code></td>
 <td><code>terminal.pointer</code> while claimed</td>
 <td>coalesced (drag)</td>
 </tr>
@@ -630,7 +630,7 @@
 <tr>
 <td><code>audio-frames</code></td>
 <td><code>capture</code>, <code>samples: list&lt;s16&gt;</code></td>
-<td>audio grant</td>
+<td><code>audio.capture</code> for input frames, <code>audio.loopback</code> for loopback frames</td>
 <td>drop oldest, counted</td>
 </tr>
 <tr>
@@ -939,7 +939,8 @@ variant action-value {
 </tbody>
 </table>
 <p>The never-dropped rule is as follows: a full queue marks the plugin as stuck and restarts it. <code>http-stream-data</code> and <code>child-output</code> add back-pressure first, so a fast network peer or a chatty child slows down before that point. <code>events-dropped</code> still counts the drop-oldest events only.</p>
-<p>Extended payloads of existing events (shape changes):</p>
+<h3 id="extended-payloads-of-existing-events">Extended payloads of existing events</h3>
+<p>Shape changes:</p>
 <ul>
 <li><code>pointer</code> gains <code>sub-x</code>, <code>sub-y</code>, <code>modifiers</code> and the kind <code>move</code>. A <code>move</code> is reported only while the plugin claims the pointer and the pointer is over the pane. A claim may ask for a modifier gesture, so plain clicks keep going to the program.</li>
 <li><code>command-invoked</code> <code>origin</code> gains <code>toast</code>, <code>row-action</code>, <code>status-segment</code>, <code>tree-toolbar</code>, <code>frame-slot</code>, <code>virtual-row-drop</code> and <code>text</code> (a clickable span). Its <code>context</code> gains <code>virtual-row: option&lt;string&gt;</code> and <code>menu-item: option&lt;string&gt;</code>.</li>
@@ -1095,8 +1096,8 @@ impl Handler for Notices {
                 Event::TimerFired(timer_id) =&gt; {
                     log::log(Level::Debug, &amp;format!(&quot;timer {timer_id} fired&quot;));
                 }
-                Event::SettingsChanged(keys) =&gt; {
-                    if keys.iter().any(|key| key == &quot;sound-enabled&quot;) {
+                Event::SettingsChanged(change) =&gt; {
+                    if change.keys.iter().any(|key| key == &quot;sound-enabled&quot;) {
                         self.sound_muted = !read_sound_enabled(); // see api-settings
                     }
                 }
@@ -1292,7 +1293,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/api-exports/">Plugin exports</a> for <code>handler</code> and the lifecycle that delivers the batches.</li>
 <li><a href="/pages/api-clock-and-timers/">Clock and timers</a> for <code>timer-fired</code>.</li>
 <li><a href="/pages/api-tree/">Tree</a> for the <code>tree.read</code> grant behind <code>tree-changed</code>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full limit table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full limit table.</li>
 <li><a href="/pages/lifecycle/">Lifecycle</a> for activation, deactivation and restarts.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
@@ -1300,7 +1301,7 @@ export const { lifecycle, handler } = definePlugin({
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#handler-surface">Handler surface</a></li><li class="l2"><a href="#batch-and-delivery-rules">Batch and delivery rules</a></li><li class="l2"><a href="#event-catalogue">Event catalogue</a></li><li class="l2"><a href="#request-results">Request results</a></li><li class="l3"><a href="#ui-action-kinds-and-values">ui-action kinds and values</a></li><li class="l2"><a href="#further-events">Further events</a></li><li class="l3"><a href="#pane-and-attention-events">Pane and attention events</a></li><li class="l2"><a href="#diagram-one-batch">Diagram: one batch</a></li><li class="l2"><a href="#diagram-delivery-policy-per-event">Diagram: delivery policy per event</a></li><li class="l2"><a href="#example-1-sound-on-pane-exit-with-a-settings-check">Example 1: sound on pane exit, with a settings check</a></li><li class="l2"><a href="#example-2-track-changed-nodes-and-count-dropped-events">Example 2: track changed nodes and count dropped events</a></li><li class="l2"><a href="#errors-and-limits">Errors and limits</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#handler-surface">Handler surface</a></li><li class="l2"><a href="#batch-and-delivery-rules">Batch and delivery rules</a></li><li class="l2"><a href="#event-catalogue">Event catalogue</a></li><li class="l2"><a href="#request-results">Request results</a></li><li class="l3"><a href="#ui-action-kinds-and-values">ui-action kinds and values</a></li><li class="l2"><a href="#further-events">Further events</a></li><li class="l2"><a href="#extended-payloads-of-existing-events">Extended payloads of existing events</a></li><li class="l3"><a href="#pane-and-attention-events">Pane and attention events</a></li><li class="l2"><a href="#diagram-one-batch">Diagram: one batch</a></li><li class="l2"><a href="#diagram-delivery-policy-per-event">Diagram: delivery policy per event</a></li><li class="l2"><a href="#example-1-sound-on-pane-exit-with-a-settings-check">Example 1: sound on pane exit, with a settings check</a></li><li class="l2"><a href="#example-2-track-changed-nodes-and-count-dropped-events">Example 2: track changed nodes and count dropped events</a></li><li class="l2"><a href="#errors-and-limits">Errors and limits</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

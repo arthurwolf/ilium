@@ -49,7 +49,7 @@ The keys are defined in the [schema of the Admin policy reference](/pages/refere
 
 A plugin that the policy blocks is in the package state `disabled-by-policy` and has the disabled reason `policy.blocked` (see [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)). The state is not written to `installed.json`, so removing the key lets the plugin run again after the next start.
 
-A grant that matches `grants.deny` never fails an install and never disables the plugin ([SEC-198]). The review dialog shows the row locked off with the text "Blocked by your administrator", and a call returns `not-permitted` with the reason `policy`.
+The two labels have different scopes: a grant row in the review dialog keeps "Blocked by your administrator" ([SEC-185]), and a plugin row in the plugin list keeps "Blocked by policy" ([LIF-193]). A grant that matches `grants.deny` never fails an install and never disables the plugin ([SEC-198]). The review dialog shows the row locked off with the text "Blocked by your administrator", and a call returns `not-permitted` with the reason `policy`.
 
 - [USR-214] A grant that matches `grants.deny` MUST NOT be granted, MUST be shown as locked in the review dialog and in the Capabilities tab with the text "Blocked by your administrator", and MUST make calls return `not-permitted`. Test: deny `clipboard.read`, install a plugin that requests it, and assert the row is locked and a call returns `not-permitted` with the message starting `policy: ` and the log line `refused clipboard.read by <function> (policy)`.
 - [USR-215] A plugin whose manifest requests a denied grant MUST still install and run, with that grant refused. Test: install such a plugin and assert state `enabled` and the refusal log line.

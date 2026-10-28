@@ -129,7 +129,7 @@ names the field path, for example `process_names[2]: empty name`.
     "process_names": ["example-agent"],
     "aliases": ["ea"],
     "icon": "robot",
-    "actions": { "compact": { "keys": "/compact\r", "allowed_when": ["idle", "done"] } },
+    "actions": [{ "id": "compact", "keys": "/compact\r", "allowed_when": ["idle", "done"] }],
     "resume": ["example-agent", "--resume", "{session}"],
     "session_scope": "agent-sessions:claude"
   }],
@@ -319,7 +319,7 @@ key, so a retry with the same key after fixing the cause is valid.
 | Pane exists and is an agent pane | `refused(not-found)` |
 | Pane restored and process started | `refused(pane-not-ready)` |
 | Action id in the signature | `refused(unsupported)` |
-| Activity allowed by `allowed_when` | `refused(conflict)` with the message `agent is working` |
+| Activity allowed by `allowed_when` | `refused(conflict)` with a message named after the current activity, for example `agent is working` |
 | Rate: 20 per second per pane per plugin | `refused(rate-limited)` with `retry-after-ms` |
 | Write | `failed(code)`; the key stays reserved, so a retry needs a new key |
 
@@ -387,8 +387,8 @@ Requirement ids for this page: [PRI-010], [PRI-011], [PRI-012], [PRI-013], [PRI-
 - [Agent read](/pages/capability-agent-read/), [agent read prompts](/pages/capability-agent-read-prompts/),
   [agent control](/pages/capability-agent-control/) and [agent signatures](/pages/capability-agent-signatures/)
   for the grants.
-- [Errors and limits](/pages/errors-and-limits/) for the codes and the restart rule.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the codes and the restart rule.
 
 ### Security
 
-**[SEC-042]** Signature registration needs the high-risk `agent.signatures` grant. See [Sandbox reference](/pages/reference-sandbox/).
+**[SEC-042]** Signature registration needs the normal-risk `agent.signatures` grant. See [Sandbox reference](/pages/reference-sandbox/).

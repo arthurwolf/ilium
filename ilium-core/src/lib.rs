@@ -15,6 +15,7 @@ pub mod resource_queue;
 pub use allocation::AllocationSize;
 pub mod agent_recovery;
 pub mod animation_recommendation;
+pub mod custom_agent;
 pub mod option_compatible_list;
 pub mod progress_timing;
 pub use progress_timing::{

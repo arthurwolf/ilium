@@ -212,7 +212,7 @@ An intent leaves a plugin in a submission. The numbers are the case positions in
 | 34 | `mark-attention` | tree.attention | ok |
 | 35 | `ack-attention` | tree.attention | ok |
 | 36 | `open-external` | open-external | not-permitted when declined; http, https, mailto only |
-| 37 | `set-status-segment` | ui.chrome | 10 per second per segment |
+| 37 | `set-status-segment` | ui.chrome | 10 per second per slot (the segment id is the slot) |
 | 38 | `clear-status-segment` | ui.chrome | ok |
 | 39 | `set-frame-slot` | ui.chrome | invalid-argument when applies_to does not match |
 | 40 | `clear-frame-slot` | ui.chrome | ok |
@@ -293,11 +293,11 @@ A plugin sends widgets inside a `ui-tree`. The numbers are the case positions in
 **Rust test sketch**
 
 ```rust
-use ilium_plugin_sdk::testing::{FakeHost, Grants};
+use ilium_plugin_sdk::testing::{FakeHost, Side};
 
 #[test]
 fn clipboard_write_needs_its_grant() {
-    let mut host = FakeHost::client(Grants::none());
+    let mut host = FakeHost::new().side(Side::Client);
     let result = host.call_clipboard_write("hello");
     assert_eq!(result.unwrap_err().code, ErrorCode::NotPermitted);
 }
@@ -306,10 +306,10 @@ fn clipboard_write_needs_its_grant() {
 **TypeScript test sketch**
 
 ```ts
-import { FakeHost, grants } from '@ilium/plugin-sdk/testing';
+import { createFakeHost } from '@ilium/plugin-sdk/testing';
 
 test('clipboard write needs its grant', () => {
-  const host = new FakeHost('client', grants());
+  const host = createFakeHost().side('client');
   expect(() => host.clipboard.writeText('hello')).toThrow(expect.objectContaining({ code: 'not-permitted' }));
 });
 ```

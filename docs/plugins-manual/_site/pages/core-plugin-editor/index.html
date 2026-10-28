@@ -524,7 +524,7 @@ use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::host::fs;
 use ilium_plugin_sdk::primitives::editor;
 
-#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;, &quot;service-provider&quot;])]
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;, &quot;service-provider&quot;, &quot;token-provider&quot;])]
 #[derive(Default)]
 struct Editor {
     ropes: HashMap&lt;BufferId, ropey::Rope&gt;,
@@ -849,7 +849,7 @@ impl Handler for LintRange {
 <li><code>ilium.core.editor/saved</code>: { buffer, path } after a save</li>
 </ul>
 <p><code>languages</code> entries and the <code>token-provider</code> export colour the buffers this plugin shows.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.editor"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.editor"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-removes-trailing-spaces-on-every-line-when-a-markdown-buffer-is-saved">Example: Removes trailing spaces on every line when a Markdown buffer is saved</h4>
 <p>A package adds a <code>transform</code> handler. Each handler gets the previous output and may replace it.</p>
 <pre><code class="language-json">{
@@ -878,10 +878,12 @@ impl HookHandler for Plugin {
         match call.extension.as_str() {
             &quot;trim_trailing&quot; =&gt; {
                 // call.payload_json holds: buffer, path, language, text
-                let _payload: serde_json::Value = match serde_json::from_str(&amp;call.payload_json) {
+                let mut payload: serde_json::Value = match serde_json::from_str(&amp;call.payload_json) {
                     Ok(value) =&gt; value,
                     Err(_) =&gt; return HookReply::Pass,
                 };
+                // Change the fields the hook owns, for example payload[&quot;text&quot;].
+                let new_payload_json = payload.to_string();
                 HookReply::Replace(new_payload_json)
             }
             _ =&gt; HookReply::Pass,
@@ -895,7 +897,8 @@ impl HookHandler for Plugin {
     if (call.extension !== 'trim_trailing') return { tag: 'pass' };
     // call.payloadJson holds: buffer, path, language, text
     const payload = JSON.parse(call.payloadJson);
-    void payload;
+    // Change the fields the hook owns, for example payload.text.
+    const newPayloadJson = JSON.stringify(payload);
     return { tag: 'replace', val: newPayloadJson };
   },
 });

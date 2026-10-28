@@ -32,7 +32,7 @@ Terms:
 - **[DEV-604]** The case ids MUST be stable. A case MUST NOT change meaning. A changed rule gets a new case id, and the old id is retired in the retired list at the end of this page.
 - **[DEV-605]** Every case MUST be deterministic. It MUST use the fake clock and the default seed.
 - **[DEV-606]** One case MUST finish within 10,000 ms of wall time. A longer case is a `fail` with the message `case exceeded 10000 ms`.
-- **[DEV-607]** Durations in case expectations are fake-clock milliseconds, except the call time measured in fuel. A case that needs a deadline breach MUST use the built-in probe plugin `conformance-probe.wasm` with its fuel-burn import, never the plugin under test.
+- **[DEV-607]** Durations in case expectations are fake-clock milliseconds, except the call time measured in epoch-based wall-clock milliseconds (fuel is off and never enforces or measures deadlines, per HST-058 and LIF-127). A case that needs a deadline breach MUST use the built-in probe plugin `conformance-probe.wasm` with its busy-wait import, never the plugin under test.
 
 A record:
 
@@ -50,8 +50,8 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
 | CONF-LIFE-01 | `activate` runs once before any event | Activate, then deliver one event | `activate` call precedes `on-events` | P S H |
-| CONF-LIFE-02 | `activate` stays under its deadline | Subject P: activate the subject plugin and measure the fuel time. Subject H: the probe plugin burns fuel for 2,100 ms in `activate`. | P: fuel time under the effective deadline. H: `trap.deadline`. | P H |
-| CONF-LIFE-03 | `deactivate` over 500 ms is cut | The probe plugin burns fuel for 600 ms in `deactivate` | Instance dropped, restore bytes discarded, not counted as a failure (`failures()` unchanged) | H |
+| CONF-LIFE-02 | `activate` stays under its deadline | Subject P: activate the subject plugin and measure the call time. Subject H: the probe plugin busy-waits for 2,100 ms in `activate`. | P: call time under the effective deadline. H: `trap.deadline`. | P H |
+| CONF-LIFE-03 | `deactivate` over 500 ms is cut | The probe plugin busy-waits for 600 ms in `deactivate` | Instance dropped, restore bytes discarded, not counted as a failure (`failures()` unchanged) | H |
 | CONF-LIFE-04 | An error from `activate` fails the start | `activate` returns an error | Plugin not active, error code logged | P S H |
 | CONF-LIFE-05 | Deactivate reason is one of the five delivered reasons | Deactivate with each of `shutdown`, `disabled`, `upgrade`, `revoked` and `granted` | The plugin sees that reason. `crash-restart` is reserved and never delivered. | S H |
 
@@ -60,11 +60,11 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
 | CONF-EVT-01 | A batch holds at most 256 events | Queue 600 events | Batches of at most 256 | H |
-| CONF-EVT-02 | A batch of events stays under its deadline | Subject P: deliver `sample_batch(256)` and measure the fuel time. Subject H: the probe plugin burns fuel for 25 ms in `on-events`. | P: fuel time under 20 ms. H: `trap.deadline`. | P H |
+| CONF-EVT-02 | A batch of events stays under its deadline | Subject P: deliver `sample_batch(256)` and measure the call time. Subject H: the probe plugin busy-waits for 25 ms in `on-events`. | P: call time under 20 ms. H: `trap.deadline`. | P H |
 | CONF-EVT-03 | Coalesced events keep the newest state | Send three renames for one node | One event with the last name | H |
 | CONF-EVT-04 | `events-dropped` follows a full queue | Fill the queue past 1,024 | Next batch starts with `events-dropped` | H |
 | CONF-EVT-05 | Ungranted events are not delivered | Remove the grant, send the event | No delivery | P H |
-| CONF-EVT-06 | More than 256 submissions trap | Return 257 submissions | `trap.submission-batch` | P S H |
+| CONF-EVT-06 | More than 256 submissions trap | Return 256 submissions (passes), then 257 submissions | 256: no trap; 257: `trap.submission-batch` | P S H |
 | CONF-EVT-07 | Batch refusal cancels the rest | Third submission is invalid | Others `refused(cancelled)` with `batch refused: submission 2` | S H |
 | CONF-EVT-08 | Dedup key repeats are duplicates | Same key twice in 10 minutes | Second is `duplicate` | S H |
 | CONF-EVT-09 | A dedup key outside the charset is refused | Key with a space | `refused(plugin-error{code: invalid-argument, message starting "dedup-key-invalid:"})` | S H |
@@ -75,16 +75,16 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
 | CONF-GRANT-01 | An import whose grant the user declined is refused | The manifest requests `fs.read:project`, the test declines it, the plugin calls `fs.read` | `Err(not-permitted)` | P S H |
-| CONF-GRANT-02 | Revocation takes effect at once | Revoke, then call | `Err(not-permitted)` for an import, `refused(plugin-error{code: not-permitted})` for an intent | H |
+| CONF-GRANT-02 | Revocation takes effect at once | Revoke, then call | `Err(revoked)` for an import (HST-075), `refused(plugin-error{code: not-permitted})` for an intent | H |
 | CONF-GRANT-03 | Grant arguments are matched exactly | Grant `fs.read:project`, read `FsPath{scope: "data"}` | `Err(not-permitted)` | H |
 | CONF-GRANT-04 | A grant absent from the manifest cannot be gained | `host.grant_now` of a grant not in the manifest | `harness.grant-not-declared` | H |
-| CONF-GRANT-05 | A function of a capability never requested traps | Call a function of a capability the manifest never requested | `trap.import-not-requested` | H |
+| CONF-GRANT-05 | A function of a capability never requested traps | Call a function of a capability the manifest never requested | `host.capability-not-requested` | H |
 
 ### Views
 
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
-| CONF-VIEW-01 | A render stays under its deadline | Subject P: render each declared view at 80x24 and measure the fuel time. Subject H: the probe plugin burns fuel for 15 ms in `render`. | P: fuel time under 10 ms. H: last good render stays, `trap.deadline` counted. | P H |
+| CONF-VIEW-01 | A render stays under its deadline | Subject P: render each declared view at 80x24 and measure the call time. Subject H: the probe plugin busy-waits for 15 ms in `render`. | P: call time under 10 ms. H: last good render stays, `trap.deadline` counted. | P H |
 | CONF-VIEW-02 | A view is pure | Render twice | Equal screens | P S |
 | CONF-VIEW-03 | Node limits are enforced | Return a tree of 4,097 nodes, then one of 4,096 | `trap.invalid-ui-tree` at 4,097 nodes; 4,096 renders | H |
 | CONF-VIEW-04 | An action with an unknown key is dropped | Click an action key the view never set | Not delivered | H |
@@ -94,9 +94,9 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 | Id | Claim | Stimulus | Expected | Subject |
 |---|---|---|---|---|
 | CONF-STORE-01 | Storage survives a restart | Put, trap, restart, get | Value present | H |
-| CONF-STORE-02 | A value over 1 MiB is refused | Put a value of 1,048,577 bytes | `Err(quota-exceeded)` | S H |
-| CONF-STORE-03 | A bucket over 16 MiB is refused | Fill a bucket to 16 MiB plus 1 byte | `Err(quota-exceeded)` | S H |
-| CONF-MEM-01 | Memory over `memory_mib` traps | The probe plugin allocates 40 MiB with the default 32 | `trap.memory` (see the trap code table of [Errors and limits](/pages/reference-errors-and-limits/#trap-codes)) | H |
+| CONF-STORE-02 | A value over 1 MiB is refused | Put a value of 1,048,576 bytes (passes), then 1,048,577 bytes | 1,048,576: `ok`; 1,048,577: `Err(quota-exceeded)` | S H |
+| CONF-STORE-03 | A bucket over 16 MiB is refused | Fill a bucket to exactly 16 MiB (passes), then add 1 byte | 16 MiB: `ok`; one more byte: `Err(quota-exceeded)` | S H |
+| CONF-MEM-01 | Memory over `memory_mib` traps | The probe plugin stays just under the default 32 MiB (passes), then allocates 40 MiB | under: no trap; 40 MiB: `trap.memory` (see the trap code table of [Errors and limits](/pages/reference-errors-and-limits/#trap-codes)) | H |
 | CONF-MEM-02 | The ceiling is 128 MiB for T2 and T3 | Request 256 in the manifest | Install succeeds; the value is clamped to 128 MiB and the clamp is logged | H |
 
 ### Restart rule
@@ -122,7 +122,7 @@ Case ids have the form `CONF-<AREA>-<nn>`. The tables list the id, the claim, th
 - **[DEV-610]** The catalogue above MUST be the minimum. A release of the suite MAY add cases and MUST NOT remove a case without a retirement note.
 - **[DEV-611]** Cases for the restart rule MUST use fake time. No case waits for real seconds.
 - **[DEV-612]** A case for a limit MUST test the value just under the limit (pass) and the value just over (fail), unless the table says otherwise.
-- **[DEV-613]** A `skip` MUST carry a reason: `grant-not-requested`, `side-not-built`, `subject-mismatch` or `needs-session`.
+- **[DEV-613]** A `skip` MUST carry a reason: `grant-not-requested`, `side-not-built`, `subject-mismatch`, `needs-session` or `needs-component`.
 
 ## Writing a plugin-specific conformance case
 

@@ -393,8 +393,8 @@
 <p class="crumbs"><b>Project</b></p>
 <h1>Design decisions</h1>
 
-<p>The user made seven decisions on 2026-10-11 about the plugin platform, D1 to D7. On the same day the user overrode one earlier rule so that plugins can add tabs and sections to Settings, recorded as SE1 to SE20. On 2026-10-12 the user asked that the API and the widget catalogue express everything Ilium has. That work added 42 additions (AX1 to AX42) and raised fourteen open questions, D8 to D25. This page records each decision: the question it answered, the decision, the reason and the effect on plugin authors.</p>
-<p>D1 to D25 and SE1 to SE20 are decided. Each entry states the choice and the alternative that was not taken. Where a decision differs from the original recommendation, the page says so.</p>
+<p>The user made seven decisions on 2026-10-11 about the plugin platform, D1 to D7. On the same day the user overrode one earlier rule so that plugins can add tabs and sections to Settings, recorded as SE1 to SE20. On 2026-10-12 the user asked that the API and the widget catalogue express everything Ilium has. That work added 42 additions (AX1 to AX42) and raised eighteen open questions, D8 to D25. This page records each decision: the question it answered, the decision, the reason and the effect on plugin authors.</p>
+<p>D1 to D27 and SE1 to SE20 are decided (D3 is superseded in part by D27, D9 is replaced by D13). Most entries state the choice and the alternative that was not taken. Where a decision differs from the original recommendation, the page says so.</p>
 <p>In plain terms, a plugin is a WebAssembly component. Rust and TypeScript both compile to that form and run under one contract, one set of limits and one set of capability grants. Third-party code runs in a separate helper process. First-party code runs inside the Ilium process. The decisions set these boundaries, and the other pages apply them.</p>
 <h3 id="you-will-need">You will need</h3>
 <p>Nothing to install or grant. This page explains design choices and asks nothing of you. Read it when a rule in another page looks strict, for example when a T2 package is refused on Windows, when a timer refuses an interval under 50 ms, or when a high-risk grant is off by default even for a bundled plugin. The <a href="/pages/glossary/">Glossary</a> defines the terms tier, side and grant that this page uses.</p>
@@ -449,7 +449,7 @@
 <td>D7</td>
 <td>One <code>.iliumpkg</code> format replaces <code>.iliumanim</code></td>
 <td>Decided</td>
-<td>Rebuild old packages; the <code>limits</code> object gains four fields</td>
+<td>Rebuild old packages; the <code>limits</code> object gains five fields</td>
 </tr>
 <tr>
 <td>SE1 to SE20</td>
@@ -671,7 +671,7 @@
 <p><strong>Effect on authors.</strong> Use <code>activation</code> in the manifest to choose the trigger. The triggers are <code>startup</code>, <code>event:&lt;event-name&gt;</code>, <code>command:&lt;id&gt;</code>, <code>view:&lt;id&gt;</code>, <code>pane-kind:&lt;id&gt;</code>, <code>scene:&lt;id&gt;</code>, <code>cli:&lt;name&gt;</code>, <code>http:&lt;path&gt;</code>, <code>service:&lt;interface&gt;</code>, <code>topic:&lt;topic&gt;</code> and <code>settings:&lt;tab-id&gt;</code>. A plugin that must run at launch declares <code>startup</code>. Start order is in the <a href="/pages/lifecycle/">lifecycle</a> page, and the manifest keys are in the <a href="/pages/reference-manifest/">manifest reference</a>.</p>
 <h2 id="d7-one-package-format">D7: One package format</h2>
 <p><strong>Question.</strong> Should the animation package format stay alongside the plugin format?</p>
-<p><strong>Decision.</strong> One <code>.iliumpkg</code> format replaces <code>.iliumanim</code>, with no compatibility layer. The package is a deterministic ZIP32 archive with stored entries, sorted paths and fixed timestamps. The <code>limits</code> object gains memory, table, event-deadline and render-deadline fields. The loader does not accept the old format.</p>
+<p><strong>Decision.</strong> One <code>.iliumpkg</code> format replaces <code>.iliumanim</code>, with no compatibility layer. The package is a deterministic ZIP32 archive with stored entries, sorted paths and fixed timestamps. The <code>limits</code> object gains memory, table, event-deadline, render-deadline and command-deadline fields. The loader does not accept the old format.</p>
 <p><strong>Reason.</strong> Keeping both formats would mean two loaders to maintain. The project has no users yet, so a one-time rebuild costs little.</p>
 <p><strong>Effect on authors.</strong> An <code>.iliumanim</code> package must be rebuilt as a <code>.iliumpkg</code>. The <a href="/pages/porting-iliumanim/">Porting from .iliumanim</a> page lists the changes. The <code>limits</code> keys and their ceilings are below. A request above the ceiling is clamped and logged. It is never refused.</p>
 <table>
@@ -799,7 +799,7 @@
 </tr>
 <tr>
 <td>SE16, SE17</td>
-<td><code>settings-changed</code> carries <code>keys</code>, <code>origin</code> and <code>scope</code>. The optional export <code>settings-validate</code> has a 100 ms deadline</td>
+<td><code>settings-changed</code> carries <code>keys</code>, <code>origin</code> and <code>side</code>. The optional export <code>settings-validate</code> has a 100 ms deadline</td>
 </tr>
 <tr>
 <td>SE18 to SE20</td>
@@ -828,6 +828,12 @@
 <td>The plugin could open the picked path without a broad grant, at the cost of a persistent file scope created from Settings</td>
 </tr>
 <tr>
+<td>D9</td>
+<td>Reading built-in values</td>
+<td>Replaced by <a href="#d13-kernel-settings-are-readable-and-the-tab-owner-may-write">D13</a>: kernel settings are readable and the tab owner may write</td>
+<td>See D13</td>
+</tr>
+<tr>
 <td>D10</td>
 <td>May the user reorder plugin sections inside a built-in tab?</td>
 <td>No. The order is anchor, then <code>order</code>, then plugin id</td>
@@ -836,7 +842,7 @@
 <tr>
 <td>D11</td>
 <td>Do kernel rows adopt the <code>r</code> reset, the <code>•</code> modified mark and the 600 ms debounce of plugin rows?</td>
-<td>Optional follow-up, outside the settings extension</td>
+<td>No. Kernel rows keep their own reset and debounce behaviour. Only plugin rows have the <code>r</code> reset and the <code>•</code> modified mark</td>
 <td>Kernel and plugin rows would behave the same everywhere</td>
 </tr>
 </tbody>
@@ -989,9 +995,9 @@ function statusSubmissions(): Submission[] {
 <p><strong>Question.</strong> How do plugins add to each other, and how does a third party change a core plugin, without a private API?</p>
 <p><strong>Decision.</strong> One mechanism serves every plugin, core or not. An owner declares a point under <code>contributes.extension_points</code>. A point is either <code>collect</code> (the owner reads data entries) or <code>hook</code> (handlers run inside the owner's flow, in one of four modes: <code>observe</code>, <code>transform</code>, <code>veto</code>, <code>first</code>). A contributor fills it under <code>contributes.extensions</code>. Two grants guard it: <code>extensions.provide:&lt;plugin-id&gt;/&lt;point&gt;</code> and <code>extensions.contribute:&lt;plugin-id&gt;/&lt;point&gt;</code>. A core plugin that can be replaced declares <code>replaceable</code> and a <code>surface</code>, and a package with <code>replaces</code> that provides the whole surface may take its place after the user confirms.</p>
 <p><strong>Why one uniform mechanism.</strong> Core plugins use only the public contract, so everything they can do a third-party plugin can do with the same grants. Services have one provider and topics have no reply. The manual needed a third shape, many contributors to one owner, and building it once keeps one set of limits, one review dialog group and one error table. The existing mechanisms stay.</p>
-<p><strong>Why hooks fail open.</strong> A handler is someone else's code inside the owner's flow. If a timeout, a trap or an error stopped the owner, one slow or broken plugin could freeze text triggers, titles or fleet actions. A failing handler counts as a pass, three breaches in a row stop that extension, and the whole chain is capped at 100 ms. Only a <code>veto</code> handler that answers on purpose can stop an action.</p>
+<p><strong>Why hooks fail open.</strong> A handler is someone else's code inside the owner's flow. If a timeout, a trap or an error stopped the owner, one slow or broken plugin could freeze text triggers, titles or fleet actions. A failing handler counts as a pass at every point except the high veto points, which fail closed with <code>on_failure: refuse</code> ([SEC-287]), three breaches in a row stop that extension, and the whole chain is capped at 100 ms. Only a <code>veto</code> handler that answers on purpose can stop an action.</p>
 <p><strong>Why replacement needs a surface.</strong> A replacement that provides only part of a core plugin would leave dangling services, commands, pane kinds and topics for other plugins. The <code>surface</code> list is the checklist, and <code>manifest.replaces-surface-incomplete</code> names what is missing. Replacement needs the user's confirmation, not a grant, because the user decides which built-in behaviour to give up. <code>ilium.core.sessions</code> and <code>ilium.core.settings</code> are not replaceable, because they protect saved data and the Plugins screen itself.</p>
-<p><strong>Why no wildcard grants.</strong> A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show <code>Text triggers &gt; Before fire: can stop a trigger from sending text (high risk)</code>. The grant <code>extensions.contribute-any</code> does not exist.</p>
+<p><strong>Why no wildcard grants.</strong> A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show <code>Text triggers &gt; Before fire: can stop a trigger from sending text (high risk)</code>. The name <code>extensions.contribute-any</code> is not a grant and does not exist.</p>
 <p><strong>Alternative.</strong> Per-plugin special hooks, which give core plugins a private API, or a single global event bus with veto rights, which cannot show the user what a package may stop.</p>
 <p><strong>Effect on authors.</strong> To let others extend your plugin, declare a point and read it with <code>list</code> or <code>run-hook</code>. To extend another plugin, ask for the grant for that exact point and list <code>hook-handler</code> in <code>exports</code> if you add handlers. See <a href="/pages/api-extension-points/">Extension points</a> and <a href="/pages/extending-core-plugins/">Extending core plugins</a>.</p>
 <h2 id="the-api-additions-and-their-decisions">The API additions and their decisions</h2>
@@ -1034,7 +1040,7 @@ function statusSubmissions(): Submission[] {
 </tr>
 <tr>
 <td>AX8</td>
-<td><code>open-external</code> intent through the host allowlist</td>
+<td><code>open-external</code> intent through the kernel checks: the scheme list and the per-origin consent (no separate target allowlist)</td>
 </tr>
 <tr>
 <td>AX9</td>
@@ -1179,14 +1185,14 @@ function statusSubmissions(): Submission[] {
 <li><strong>Kernel keeps the engine, plugins own the choice.</strong> Every addition names the part that stays in the kernel: dithering and the shared look, the vt100 emulation, the tree layout solver, the toast stack, the command palette, the syntax engine and every GPU shader. The plugin supplies content and intent. The kernel draws and decides.</li>
 <li><strong>Intents, not mutations.</strong> Pane lifecycle, tree restructure, attention, status segments, frame slots, toasts and <code>open-external</code> are intents. The kernel checks them against the grant and the current state, and a submission completes with one outcome. A new outcome case, <code>ok-epoch</code>, carries the new prompt epoch for <code>send-input</code> on an agent pane.</li>
 <li><strong>Read paths are typed and redacted.</strong> Terminal cells, scrollback, transcripts, kernel settings and the keymap are read paths, each behind its own grant, and all of them are read only.</li>
-<li><strong>High risk is explicit even for T1.</strong> The nine high-risk grants always need an explicit grant, and the dialog shows them in the warning style.</li>
+<li><strong>High risk is explicit even for T1.</strong> The ten high-risk grants of the extended set always need an explicit grant, and the dialog shows them in the warning style.</li>
 <li><strong>Streaming, not polling.</strong> HTTP streams, spawned children and screen changes arrive as events whose delivery policy is stated per event: coalesced, or never dropped with back-pressure.</li>
 </ul>
 <h2 id="what-the-user-sees">What the user sees</h2>
 <ul>
 <li>The review dialog lists every capability a plugin requests, before the first run. The user grants or declines each one. High-risk rows start unchecked.</li>
 <li>A T2 package is shown with its publisher and signature status. A T3 package carries a dev badge for as long as it is installed.</li>
-<li>A bundled plugin with high-risk grants asks once at its first start. The first open of a site, a new host from a setting, and the first place lookup each ask once.</li>
+<li>A bundled plugin with high-risk grants is asked at its first start, and again at each later start after Not now, at most three prompts in total. The first open of a site, a new host from a setting, and the first place lookup each ask once.</li>
 <li>A plugin that is disabled after three failures shows a notice in the tree footer. The user re-enables it in settings or on the kernel recovery page.</li>
 <li>A refused install shows the three-line message from D5 and leaves the other plugins running.</li>
 <li>Plugin rows in a built-in Settings tab sit under a divider that names the plugin, with a <code>▏</code> gutter.</li>
@@ -1274,7 +1280,7 @@ function statusSubmissions(): Submission[] {
 <li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
 <li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
 </ul>
-<p>Checked against the API version <code>ilium:plugin@0.1.0</code>. D1 to D25 and SE1 to SE20 are decided.</p>
+<p>Checked against the API version <code>ilium:plugin@0.1.0</code>. D1 to D27 and SE1 to SE20 are decided.</p>
 <h3 id="security">Security</h3>
 <p><strong>SD1 No unconfined fallback.</strong> If the sandbox cannot be built, the package does not load ([SEC-055]). <strong>SD2 Fail closed for high veto points.</strong> <code>on_failure: refuse</code> is the default ([SEC-287]). <strong>SD3 Project values untrusted by default.</strong> ([SEC-310]). <strong>SD4 Key pinning.</strong> ([SEC-142]).</p>
 <h2 id="d27-an-optional-registry-protocol">D27: an optional registry protocol</h2>

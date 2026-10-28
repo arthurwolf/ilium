@@ -503,6 +503,12 @@
 <td>Nothing; ask the administrator</td>
 </tr>
 <tr>
+<td>Blocked</td>
+<td>Its publisher key was revoked as <code>compromised</code>, or a registry takedown names its version</td>
+<td><code>blocked</code>, <code>disabled</code></td>
+<td><code>ilium plugin enable &lt;id&gt; --accept-risk</code>, or install an update signed by another trusted key</td>
+</tr>
+<tr>
 <td>Refused: <reason></td>
 <td>The host refused to run it, for example <code>no sandbox</code></td>
 <td><code>refused-at-load</code>, <code>refused</code></td>
@@ -855,7 +861,7 @@
 <p>If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Settings is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in <a href="/pages/reference-config-and-data-migration/">config and data migration</a>). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>. [COR-022]</p>
 <h3 id="samples">Samples</h3>
 <h4 id="1-a-tab-from-the-manifest">1. A tab from the manifest</h4>
-<p>Rows that the manifest declares become part of the User Interface tab. The plugin reads its own values with <code>settings.get_json</code> and redraws when <code>settings-changed</code> names a key it cares about. See the <a href="/pages/api-settings/">settings API</a>, the <a href="/pages/capability-settings-contribute/">settings.contribute grant</a>, <a href="/pages/settings-extension/">extending settings</a>, the <a href="/pages/settings-screens/">settings screens</a> and the <a href="/pages/api-events/">event catalogue</a>. <code>emptyTree</code> is the plugin's own helper.</p>
+<p>Rows that the manifest declares become part of the User Interface tab. The plugin reads its own values with <code>settings.get_json</code> and redraws when <code>settings-changed</code> names a key it cares about. See the <a href="/pages/api-settings/">settings API</a>, the <a href="/pages/capability-settings-contribute/">settings.contribute grant</a>, <a href="/pages/settings-extension/">extending settings</a>, the <a href="/pages/settings-screens/">settings screens</a> and the <a href="/pages/api-events/">event catalogue</a>. <code>emptyTree</code> is a helper defined in the sample itself (it returns a tree with one empty root node); the SDK has no such function, and <a href="/pages/tutorial-03-panel/">the panel tutorial</a> shows a full version.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::settings;
 use ilium_plugin_sdk::host::ui;

@@ -544,12 +544,12 @@
 </tr>
 <tr>
 <td>Allocate beyond <code>memory.max</code></td>
-<td>Helper killed; trap <code>limit-exceeded(memory)</code></td>
+<td>Helper killed; <code>trap.memory</code></td>
 <td>[SEC-029]</td>
 </tr>
 <tr>
 <td>Call each denied system call of [SEC-067]</td>
-<td><code>EPERM</code> or kill</td>
+<td><code>EPERM</code></td>
 <td>[SEC-024]</td>
 </tr>
 <tr>
@@ -650,7 +650,7 @@
 <td>[SEC-116]</td>
 <td>e2e</td>
 <td><code>ilium plugin install --yes</code> from a pane with no client</td>
-<td><code>approval.no-client</code></td>
+<td><code>install.review-required</code></td>
 </tr>
 <tr>
 <td>[SEC-120]</td>
@@ -740,12 +740,12 @@
 <td>[SEC-287]</td>
 <td>integration</td>
 <td>A veto handler that sleeps</td>
-<td>Plugin-initiated send refused with <code>guard-failed</code>; user prompt for a paste</td>
+<td>Plugin-initiated send refused with <code>extension.vetoed</code> (reason <code>guard-failed</code>); user prompt for a paste</td>
 </tr>
 <tr>
-<td>[SEC-285]</td>
+<td>HST-472</td>
 <td>integration</td>
-<td>Withdrawn (see HST-472): a handler that starts before 100 ms and burns its deadline</td>
+<td>A handler that starts before 100 ms and burns its deadline</td>
 <td>Handlers not started at 100 ms are skipped as pass and logged <code>extension.chain-cap</code></td>
 </tr>
 <tr>

@@ -123,8 +123,8 @@ The deadline of a call is carried in `CallExport`. The helper sets its own epoch
 | Event | Result |
 |---|---|
 | The call returns inside the deadline | `CallResult` is delivered normally |
-| The helper epoch deadline fires | The helper traps the instance and sends `CallResult` with `host.deadline` |
-| No `CallResult` arrives within 500 ms after the deadline | The host sends SIGKILL (SIGTERM first is not used) and treats it as `helper.hung`. One failure is counted |
+| The helper epoch deadline fires | The helper traps the instance and sends `CallResult` with `trap.deadline` |
+| No `CallResult` arrives within 500 ms after the deadline | The host terminates the helper (SIGTERM, then SIGKILL after 2 s, as in HST-171) and treats it as `helper.hung`. One failure is counted |
 | Three heartbeats in a row are missed | Same as above |
 
 The time spent in the host serving `HostCall` messages counts inside the call's deadline, because the guest is waiting. The time that the host spends before it sends `CallExport` (queue time) does not.
@@ -145,9 +145,9 @@ The memory of the helper is charged to the session. The charge for one helper is
 
 When the charge for an activation would pass `session_memory_mib`, the activation is refused with `session.memory-exceeded`. This refusal does not count as a failure, because the plugin did nothing wrong. The side stays `inactive` with the reason `host-capacity` and activation is retried, as in [Errors and limits](/pages/reference-errors-and-limits/).
 
-With cgroup v2 delegated, the kernel enforces `memory.max`. Without it, the helper uses `RLIMIT_AS` and the host samples RSS once a second. An out-of-memory kill is reported as a trap `limit-exceeded(memory)` and counts as a failure.
+With cgroup v2 delegated, the kernel enforces `memory.max`. Without it, the helper uses `RLIMIT_AS` and the host samples RSS once a second. An out-of-memory kill is reported as a `trap.memory` and counts as a failure.
 
-- **[HST-164]** The host MUST charge `memory_mib + 32` MiB per helper to `session_memory_mib` at spawn and release it at exit.
+- **[HST-164]** The host MUST charge the sum of the hosted instances' `memory_mib` plus 32 MiB per helper to `session_memory_mib` at spawn and release it at exit.
 - **[HST-165]** An activation that would exceed `session_memory_mib` MUST be refused with `session.memory-exceeded`, MUST NOT count as a failure, and MUST leave the side `inactive` with the reason `host-capacity`.
 
 ## Helper count

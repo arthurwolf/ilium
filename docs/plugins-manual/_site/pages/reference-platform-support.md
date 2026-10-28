@@ -29,7 +29,7 @@ The plugin host runs the same Wasmtime configuration on every platform that Iliu
 
 ## Precompiled artifacts
 
-A `.cwasm` file is machine code for one target triple and one Wasmtime fingerprint. The release embeds, for every T1 plugin, the `.wasm` component and one `.cwasm` per shipped target triple. The host picks the `.cwasm` that matches the running triple and fingerprint. If none matches, it compiles the `.wasm` with `Component::new` and the compile cache, and logs `cwasm.fallback`.
+A `.cwasm` file is machine code for one target triple and one Wasmtime fingerprint. The release embeds, for every T1 plugin, the `.wasm` component and one `.cwasm` per shipped target triple. The host picks the `.cwasm` that matches the running triple and fingerprint. If none matches, it compiles the `.wasm` with `Component::new` and the compile cache, and logs `host.cwasm-incompatible`.
 
 | Target triple | `.cwasm` embedded |
 |---|---|
@@ -76,7 +76,7 @@ The results of the conformance suite MUST be identical on every shipped platform
 | Id | When | Effect |
 |---|---|---|
 | `sandbox.unavailable` | Platform or prerequisite missing for T2 or T3 | The plugin shows `Cannot start: sandbox unavailable` with the platform |
-| `cwasm.fallback` | No `.cwasm` for the triple or fingerprint | Compiled at load; start is slower |
+| `host.cwasm-incompatible` | No `.cwasm` for the triple or fingerprint | Compiled at load; start is slower |
 
 ## Edge cases
 

@@ -26,6 +26,12 @@ pub(crate) async fn repository_lease(
     common_dir: &Path,
 ) -> Result<AdmittedRepositoryLease, String> {
     const MAX_PATH_BYTES: usize = 4096;
+    // The platform result owns only a File; the callback's PathBuf is destroyed
+    // before completion. Include the returned wrapper and its Arc-owned debit.
+    let storage_bytes = ilium_execution::retained_result_storage_bytes::<
+        Option<ilium_platform::process_control::WorkspaceRepositoryLease>,
+    >(std::mem::size_of::<AdmittedRepositoryLease>())
+    .map_err(|error| format!("repository lease storage sizing failed: {error:?}"))?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let common_dir = common_dir.to_path_buf();
@@ -35,19 +41,40 @@ pub(crate) async fn repository_lease(
         }
         let cost = ilium_execution::JobCost {
             input_bytes: path_bytes.max(1),
-            result_bytes: 4096,
+            result_bytes: 4096.max(storage_bytes),
         };
         let reservation =
             tokio::time::timeout_at(deadline, client.reserve(ilium_execution::Lane::Io, cost))
                 .await
                 .map_err(|_| "repository lease admission timed out".to_string())?
                 .map_err(|error| format!("repository lease admission failed: {error:?}"))?;
-        let retained = client
+        let mut retained = client
             .run_reserved(reservation, move |_| {
                 ilium_platform::process_control::try_workspace_repository_lease(&common_dir)
             })
             .await
             .map_err(|error| format!("repository lease worker failed: {error}"))?;
+        if retained.view().is_some() {
+            // A live repository lock needs owned storage, not a General job
+            // while its transaction awaits further I/O or the spawn fence.
+            tokio::time::timeout_at(deadline, async {
+                loop {
+                    match retained.try_reduce_to_result_storage(storage_bytes) {
+                        Ok(()) => return Ok(()),
+                        Err(ilium_execution::RejectReason::Busy) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                        }
+                        Err(error) => {
+                            return Err(format!(
+                                "repository lease storage transfer failed: {error:?}"
+                            ));
+                        }
+                    }
+                }
+            })
+            .await
+            .map_err(|_| "repository lease completion transfer timed out".to_string())??;
+        }
         let (lease, retention) = retained.into_parts();
         if let Some(lease) = lease {
             return Ok(AdmittedRepositoryLease {
@@ -72,6 +99,22 @@ pub(crate) struct SpawnRepositoryAdmission {
     execution_client: ExecutionClient,
 }
 impl SpawnRepositoryAdmission {
+    /// Heap captures move with native-spawn custody and need their own debit.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.owned_marker.as_ref().map_or(0, |marker| {
+            [
+                marker.workspace_id.capacity(),
+                marker.repo_common_dir.capacity(),
+                marker.worktree_root.capacity(),
+                marker.branch.capacity(),
+                marker.base_ref.capacity(),
+                marker.base_commit.capacity(),
+            ]
+            .into_iter()
+            .fold(0, usize::saturating_add)
+        })
+    }
+
     pub(crate) async fn begin_custody(
         &self,
     ) -> Result<Option<crate::workspace_custody::CustodyTicket>, String> {
@@ -83,6 +126,197 @@ impl SpawnRepositoryAdmission {
         }
     }
 }
+// Canonicalization and no-follow directory probes may block on the filesystem.
+// They share the existing General I/O bank; no new pool or worker is created.
+const SPAWN_PROBE_NATIVE_WORKING_BYTES: usize = 1024 * 1024;
+const SPAWN_PROBE_RESULT_BYTES: usize = 4096;
+const SPAWN_PROBE_ADMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+type SpawnDirectoryGeneration = Option<(u64, u64)>;
+
+fn spawn_probe_cost(path_bytes: usize) -> Result<ilium_execution::JobCost, String> {
+    // Own one input path; reserve simultaneous canonicalization/conversion and
+    // ancestor-join buffers as working storage, including native adapter scratch.
+    // The result is a bool/generation or an OS error, never a directory listing.
+    let input_bytes = path_bytes
+        .checked_mul(8)
+        .and_then(|bytes| bytes.checked_add(SPAWN_PROBE_NATIVE_WORKING_BYTES))
+        .ok_or_else(|| "launch directory probe storage size overflow".to_string())?;
+    Ok(ilium_execution::JobCost {
+        input_bytes,
+        result_bytes: SPAWN_PROBE_RESULT_BYTES,
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SpawnRepositoryPreflightError {
+    #[error("launch directory cannot be resolved: {0}")]
+    Resolve(std::io::Error),
+    #[error("launch directory is not canonical")]
+    NotCanonical,
+    #[error("cannot inspect launch repository boundary: {0}")]
+    Inspect(std::io::Error),
+}
+
+fn inspect_spawn_repository_boundary(cwd: &Path) -> Result<bool, SpawnRepositoryPreflightError> {
+    let canonical_cwd = paths::canonicalize(cwd).map_err(SpawnRepositoryPreflightError::Resolve)?;
+    if canonical_cwd != cwd {
+        return Err(SpawnRepositoryPreflightError::NotCanonical);
+    }
+    // Presence is only a hint: Git may ignore empty metadata or stop discovery
+    // before the candidate. Plain directories do not require an installed Git.
+    for ancestor in canonical_cwd.ancestors() {
+        match std::fs::symlink_metadata(ancestor.join(".git")) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(SpawnRepositoryPreflightError::Inspect(error)),
+        }
+    }
+    Ok(false)
+}
+
+async fn spawn_repository_boundary_present(
+    client: &ExecutionClient,
+    cwd: &Path,
+) -> Result<bool, String> {
+    let deadline = tokio::time::Instant::now() + SPAWN_PROBE_ADMISSION_TIMEOUT;
+    let reservation = tokio::time::timeout_at(
+        deadline,
+        client.reserve(
+            ilium_execution::Lane::Io,
+            spawn_probe_cost(cwd.as_os_str().len())?,
+        ),
+    )
+    .await
+    .map_err(|_| "launch repository preflight admission timed out".to_string())?
+    .map_err(|error| format!("launch repository preflight admission failed: {error:?}"))?;
+    // Copy only after admission. Physical cancellation custody is provided by
+    // run_reserved: dropping the future cancels the receipt, not a running OS call.
+    let cwd = cwd.to_path_buf();
+    match client
+        .run_reserved(reservation, move |_| {
+            inspect_spawn_repository_boundary(&cwd)
+        })
+        .await
+    {
+        Ok(retained) => {
+            let present = *retained.view();
+            // No General credit crosses a Git await or repository-lock wait.
+            drop(retained);
+            Ok(present)
+        }
+        Err(crate::execution::ExecutionError::Failed(error)) => Err(error.view().to_string()),
+        Err(error) => Err(format!(
+            "launch repository preflight worker failed: {error}"
+        )),
+    }
+}
+
+struct SpawnDirectoryProbeJob {
+    cwd: PathBuf,
+}
+
+impl ilium_execution::Job for SpawnDirectoryProbeJob {
+    type Output = SpawnDirectoryGeneration;
+    type Error = std::io::Error;
+
+    fn run(self, _context: ilium_execution::JobContext) -> Result<Self::Output, Self::Error> {
+        ilium_platform::secure_fs::spawn_directory_generation(&self.cwd)
+    }
+}
+
+struct PreparedSpawnDirectoryProbe {
+    client: ExecutionClient,
+    reservation: ilium_execution::Reservation,
+    cwd: PathBuf,
+}
+
+impl PreparedSpawnDirectoryProbe {
+    async fn prepare(
+        client: &ExecutionClient,
+        cwd: &Path,
+        deadline: tokio::time::Instant,
+    ) -> Result<Self, String> {
+        let reservation = tokio::time::timeout_at(
+            deadline,
+            client.reserve(
+                ilium_execution::Lane::Io,
+                spawn_probe_cost(cwd.as_os_str().len())?,
+            ),
+        )
+        .await
+        .map_err(|_| "launch directory identity admission timed out".to_string())?
+        .map_err(|error| format!("launch directory identity admission failed: {error:?}"))?;
+        // Prove run_reserved cannot drop/re-admit this job under the spawn
+        // fence: validation uses this exact named callback and result type.
+        reservation
+            .validate_job_type::<SpawnDirectoryProbeJob>()
+            .map_err(|error| format!("launch directory identity cost is invalid: {error:?}"))?;
+        Ok(Self {
+            client: client.clone(),
+            reservation,
+            cwd: cwd.to_path_buf(),
+        })
+    }
+
+    async fn inspect(self) -> Result<SpawnDirectoryGeneration, String> {
+        let Self {
+            client,
+            reservation,
+            cwd,
+        } = self;
+        let retained = client
+            .run_reserved(reservation, SpawnDirectoryProbeJob { cwd })
+            .await
+            .map_err(|error| format!("launch directory identity worker failed: {error}"))?;
+        let generation = *retained.view();
+        drop(retained);
+        Ok(generation)
+    }
+}
+
+pub(crate) async fn spawn_directory_generation(
+    state: &ServerState,
+    cwd: &Path,
+) -> Result<SpawnDirectoryGeneration, String> {
+    let deadline = tokio::time::Instant::now() + SPAWN_PROBE_ADMISSION_TIMEOUT;
+    PreparedSpawnDirectoryProbe::prepare(execution_client(state)?, cwd, deadline)
+        .await?
+        .inspect()
+        .await
+}
+
+/// Preserve the final generation observation under the existing spawn fence.
+/// No I/O admission is awaited under that fence, and no reserved General job
+/// waits for the fence: otherwise spawn waiters could starve a pruning holder.
+pub(crate) async fn fenced_spawn_directory_generation(
+    state: &ServerState,
+    cwd: &Path,
+) -> Result<(tokio::sync::OwnedMutexGuard<()>, SpawnDirectoryGeneration), String> {
+    let deadline = tokio::time::Instant::now() + SPAWN_PROBE_ADMISSION_TIMEOUT;
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("launch directory identity admission timed out".to_string());
+        }
+        let probe =
+            PreparedSpawnDirectoryProbe::prepare(execution_client(state)?, cwd, deadline).await?;
+        if let Ok(guard) = Arc::clone(&state.workspace_spawn_lock).try_lock_owned() {
+            // This is the same identity fence held by the former synchronous
+            // probe. Its read-only admitted callback must finish before spawn.
+            let generation = probe.inspect().await?;
+            return Ok((guard, generation));
+        }
+        drop(probe);
+        // Wait for a fair turn without retaining any General job. Re-admit
+        // outside the guard using the original deadline, then try both again.
+        // Errors need no spawn guard: the handler removes only an unregistered
+        // node while holding tree/panes guards, and must never launch on error.
+        let turn = tokio::time::timeout_at(deadline, state.workspace_spawn_lock.lock())
+            .await
+            .map_err(|_| "launch directory identity spawn-fence wait timed out".to_string())?;
+        drop(turn);
+    }
+}
+
 /// Non-Git plain panes remain unchanged. A present but unreadable Git root fails closed.
 pub(crate) async fn spawn_repository_admission(
     state: &ServerState,
@@ -93,33 +327,10 @@ pub(crate) async fn spawn_repository_admission(
         .execution
         .get()
         .ok_or_else(|| "workspace execution service is unavailable".to_string())?;
-    let canonical_cwd = ilium_platform::paths::canonicalize(cwd)
-        .map_err(|error| format!("launch directory cannot be resolved: {error}"))?;
-    if canonical_cwd != cwd {
-        return Err("launch directory is not canonical".into());
-    }
-    // Keep plain directories usable without a Git installation. Entry
-    // presence is only a hint: Git may ignore empty metadata or stop discovery
-    // before the candidate, so it must not itself demand a repository.
-    let mut git_boundary_present = false;
-    for ancestor in canonical_cwd.ancestors() {
-        match std::fs::symlink_metadata(ancestor.join(".git")) {
-            Ok(_) => {
-                git_boundary_present = true;
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "cannot inspect launch repository boundary: {error}"
-                ))
-            }
-        }
-    }
-    if !git_boundary_present {
+    if !spawn_repository_boundary_present(&execution.client, cwd).await? {
         return Ok(None);
     }
-    let repository = ilium_git::discover_optional(&canonical_cwd)
+    let repository = ilium_git::discover_optional(cwd)
         .await
         .map_err(|error| format!("launch repository cannot be verified: {error}"))?;
     let Some(repository) = repository else {
@@ -131,7 +342,7 @@ pub(crate) async fn spawn_repository_admission(
         .lock_owned()
         .await;
     let repository_lease = repository_lease(&execution.client, &repository.common_dir).await?;
-    let current = ilium_git::discover(&canonical_cwd)
+    let current = ilium_git::discover(cwd)
         .await
         .map_err(|error| format!("launch repository changed while waiting: {error}"))?;
     if current.common_dir != repository.common_dir
@@ -140,7 +351,7 @@ pub(crate) async fn spawn_repository_admission(
         return Err("launch repository identity changed during admission".into());
     }
     let owned_marker = if is_terminal {
-        let listed = ilium_git::list_worktrees(&canonical_cwd)
+        let listed = ilium_git::list_worktrees(cwd)
             .await
             .map_err(|error| format!("launch worktrees cannot be listed: {error}"))?;
         if listed
@@ -1190,6 +1401,117 @@ pub(crate) async fn can_offer_close(state: &Arc<ServerState>, pane_id: NodeId) -
 mod tests {
     use super::*;
 
+    #[cfg(any(unix, windows))]
+    #[tokio::test]
+    async fn completed_repository_leases_leave_general_io_live_at_connection_capacity() {
+        use ilium_execution::{JobCost, Lane};
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().expect("isolated repository directories");
+        let owner = crate::execution::ServerExecution::start().expect("independent finite bank");
+        let client = &owner.client;
+        let mut paths = Vec::new();
+        for index in 0..64 {
+            let path = directory.path().join(format!("repository-{index}"));
+            std::fs::create_dir(&path).expect("fixture repository directory");
+            paths.push(path);
+        }
+        let mut leases = Vec::new();
+        // Sixty completed lease results exhaust the old General job ledger.
+        for path in paths.iter().take(60) {
+            leases.push(
+                repository_lease(client, path)
+                    .await
+                    .expect("real exclusive lease"),
+            );
+        }
+        let scan_root = directory.path().to_path_buf();
+        let follow_up = tokio::time::timeout(Duration::from_secs(2), async {
+            let reservation = client
+                .reserve(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: scan_root.as_os_str().len().max(128),
+                        result_bytes: 4096,
+                    },
+                )
+                .await
+                .map_err(|error| format!("follow-up admission: {error:?}"))?;
+            let mut result = client
+                .run_reserved(reservation, move |_| {
+                    std::fs::read_dir(scan_root).map(|rows| rows.count())
+                })
+                .await
+                .map_err(|error| format!("follow-up worker: {error:?}"))?;
+            let storage_bytes = ilium_execution::retained_result_storage_bytes::<usize>(
+                std::mem::size_of::<usize>(),
+            )
+            .map_err(|error| format!("follow-up storage sizing: {error:?}"))?;
+            loop {
+                match result.try_reduce_to_result_storage(storage_bytes) {
+                    Ok(()) => break,
+                    Err(ilium_execution::RejectReason::Busy) => {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                    Err(error) => return Err(format!("follow-up storage transfer: {error:?}")),
+                }
+            }
+            Ok(*result.view())
+        })
+        .await;
+        if follow_up.is_ok() {
+            // Keep the actual 64-connection target; this is not a 60-lease gate.
+            for path in paths.iter().skip(60) {
+                leases.push(
+                    repository_lease(client, path)
+                        .await
+                        .expect("remaining real lease"),
+                );
+            }
+        }
+        let lease_count = leases.len();
+        let usage = client.foundation.usage();
+        let still_exclusive =
+            ilium_platform::process_control::try_workspace_repository_lease(&paths[0])
+                .expect("independent exclusive-lock probe")
+                .is_none();
+        drop(leases);
+        // Parallel process/PTY tests can fork while a native lease is live.
+        // A forked descriptor shares flock until close/exec, so an immediate
+        // single try can still report Busy after our original File is closed.
+        // Use the production bounded reacquisition contract; a leaked original
+        // lock still cannot pass it, and the live-owner probe above stays strict.
+        let reopened = repository_lease(client, &paths[0]).await.map(drop);
+        let released = client.foundation.usage();
+        owner.request_shutdown();
+
+        assert_eq!(
+            follow_up
+                .expect("completed leases cannot exhaust General jobs")
+                .expect("real follow-up I/O"),
+            64
+        );
+        assert_eq!(lease_count, 64);
+        assert!(
+            still_exclusive,
+            "storage conversion must keep the actual repository lock"
+        );
+        reopened.expect("dropping the original owner allows bounded lock reacquisition");
+        assert_eq!(
+            usage.jobs, 0,
+            "completed native leases are not pending jobs"
+        );
+        assert_eq!(
+            usage.input_bytes, 0,
+            "completed path captures have been destroyed"
+        );
+        assert!(usage.result_bytes >= 64 * std::mem::size_of::<AdmittedRepositoryLease>());
+        assert_eq!(
+            released.result_bytes, 0,
+            "owned lease storage remains charged until drop"
+        );
+    }
+
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn directory_users_runs_through_bounded_io_and_retains_process_evidence() {
@@ -1244,5 +1566,73 @@ mod tests {
         assert_eq!(result.path_present, None);
         assert_eq!(result.registration_present, None);
         assert_eq!(result.metadata_present, None);
+    }
+}
+
+#[cfg(test)]
+mod launch_preflight_tests {
+    use super::*;
+
+    #[test]
+    fn launch_probe_declarations_reject_overflow() {
+        assert!(spawn_probe_cost(usize::MAX).is_err());
+        let cost = spawn_probe_cost(4096).expect("bounded supported path");
+        assert!(cost.input_bytes >= 4096 * 8);
+        assert_eq!(cost.result_bytes, SPAWN_PROBE_RESULT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn admitted_boundary_probe_preserves_plain_git_missing_and_noncanonical_cases() {
+        let directory = tempfile::tempdir().expect("isolated launch root");
+        let root = paths::canonicalize(directory.path()).expect("canonical root");
+        let child = root.join("child");
+        std::fs::create_dir(&child).expect("child directory");
+        let owner = crate::execution::ServerExecution::start().expect("isolated finite bank");
+        assert!(!spawn_repository_boundary_present(&owner.client, &child)
+            .await
+            .expect("plain cwd"));
+        std::fs::create_dir(root.join(".git")).expect("Git boundary hint");
+        assert!(spawn_repository_boundary_present(&owner.client, &child)
+            .await
+            .expect("ancestor boundary"));
+        let missing = spawn_repository_boundary_present(&owner.client, &root.join("missing"))
+            .await
+            .expect_err("missing cwd refused");
+        assert!(missing.contains("launch directory cannot be resolved"));
+        let noncanonical = spawn_repository_boundary_present(&owner.client, &child.join(".."))
+            .await
+            .expect_err("noncanonical cwd refused");
+        assert!(noncanonical.contains("launch directory is not canonical"));
+        owner.request_shutdown();
+    }
+
+    #[tokio::test]
+    async fn admitted_identity_probe_preserves_platform_identity_without_general_credit() {
+        let directory = tempfile::tempdir().expect("isolated launch root");
+        let root = paths::canonicalize(directory.path()).expect("canonical root");
+        let owner = crate::execution::ServerExecution::start().expect("isolated finite bank");
+        let expected = ilium_platform::secure_fs::spawn_directory_generation(&root)
+            .expect("platform observation");
+        let actual = PreparedSpawnDirectoryProbe::prepare(
+            &owner.client,
+            &root,
+            tokio::time::Instant::now() + SPAWN_PROBE_ADMISSION_TIMEOUT,
+        )
+        .await
+        .expect("admission")
+        .inspect()
+        .await
+        .expect("worker observation");
+        assert_eq!(actual, expected);
+        // Worker completion may briefly retain its receipt hold. Bound the
+        // observation without weakening the eventual zero-credit contract.
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while owner.client.foundation.usage().jobs != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("scalar result must release General credit");
+        owner.request_shutdown();
     }
 }

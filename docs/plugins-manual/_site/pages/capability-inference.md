@@ -234,7 +234,7 @@ The install dialog shows one row for the grant, in the server or client group. T
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md`:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 41 Automatic pane titles.
 - 42 Session naming.
@@ -255,4 +255,4 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 
 ### Security
 
-Every request is recorded in the privacy log; see [User security and privacy](/pages/user-plugin-security-and-privacy/) ([SEC-264]).
+Every request is recorded in the privacy log; see [User security and privacy](/pages/user-plugin-security-and-privacy/) ([SEC-265]).

@@ -222,6 +222,19 @@ pub(crate) async fn begin(
 }
 
 impl CustodyTicket {
+    /// Owned input accounting for the finite native-spawn completion envelope.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        [
+            self.metadata_directory.capacity(),
+            self.worktree_root.capacity(),
+            self.file_name.capacity(),
+            self.workspace_id.capacity(),
+            self.ticket_id.capacity(),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
+    }
+
     pub(crate) fn worktree_root(&self) -> &Path {
         &self.worktree_root
     }

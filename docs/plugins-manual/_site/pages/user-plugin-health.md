@@ -64,7 +64,7 @@ The reasons you can see are:
 - **Busy queue.** Many messages wait for the plugin. This passes when the plugin catches up.
 - **Held by its quota.** The plugin used its share of time or data and Ilium made it wait. It continues on its own.
 - **Waiting for memory.** Ilium has too many plugins running at once. Turn off one you do not use.
-- **Restarted.** The plugin failed once and started again. If it happens again, the word changes to failed.
+- **Restarted.** The plugin failed once and started again. The word changes to failed only after three failures within ten minutes.
 
 ## What happens to what the plugin showed
 

@@ -513,7 +513,7 @@
 <tr>
 <td>Storage</td>
 <td>Key up to 256 bytes. Value up to 1 MiB. Bucket 16 MiB by default.</td>
-<td><a href="/pages/reference-errors-and-limits/#resource-limits-in-the-manifest">Resource limits</a> and L3</td>
+<td><a href="/pages/reference-errors-and-limits/#resource-limits-in-the-manifest">Resource limits</a></td>
 </tr>
 <tr>
 <td>Log line</td>
@@ -742,7 +742,7 @@ export function delayBeforeRetry(error: unknown): number | undefined {
 </code></pre>
 <p>A <code>PluginError</code> carries <code>code</code>, <code>message</code> and <code>retryAfterMs</code>. The function returns <code>undefined</code> for every other code, so the caller rethrows it.</p>
 <h2 id="where-the-extended-items-are-listed">Where the extended items are listed</h2>
-<p>The four reference pages list the extended items in their own sections: <a href="/pages/reference-manifest/#chrome-and-contribution-keys">manifest keys</a>, <a href="/pages/reference-events-and-intents/">events and intents</a>, <a href="/pages/reference-errors-and-limits/#requestable-limits">errors and limits</a> and <a href="/pages/reference-capabilities/">capabilities</a>. Twenty-three grants are listed there, and ten of them are high risk. The settings row table lives in the <a href="/pages/reference-settings-schema/">settings schema reference</a>.</p>
+<p>The four reference pages list the extended items in their own sections: <a href="/pages/reference-manifest/#chrome-and-contribution-keys">manifest keys</a>, <a href="/pages/reference-events-and-intents/">events and intents</a>, <a href="/pages/reference-errors-and-limits/#requestable-limits">errors and limits</a> and <a href="/pages/reference-capabilities/">capabilities</a>. Twenty-three grants are listed there, and eleven of them are high risk. The settings row table lives in the <a href="/pages/reference-settings-schema/">settings schema reference</a>.</p>
 <p>The render shows the lookup the CLI offers for a key. Illustrative, not generated.</p>
 <pre class="term">╭  ≡ ● · Plugin limits──────────────────────────╮
 │ status_segments …… 2   row_actions …… 4       │
@@ -765,7 +765,7 @@ export function delayBeforeRetry(error: unknown): number | undefined {
 <ul>
 <li>The install dialog lists the grants by risk tier. A <code>high</code> grant is listed and unchecked; the user must check it.</li>
 <li>Refusals and traps are logged with the plugin id, the interface and the function. <code>ilium plugin logs</code> shows them (see <a href="/pages/debugging/">Debugging</a>).</li>
-<li>A keybinding conflict makes the losing binding inactive and lists it in Settings &gt; Keys (N25).</li>
+<li>A keybinding conflict makes the losing binding inactive and lists it in Settings &gt; Keys.</li>
 <li>A plugin disabled by the third failure stays disabled until the user enables it again. A manual enable resets the failure count.</li>
 </ul>
 <h2 id="check-output">Check output</h2>
@@ -789,7 +789,7 @@ export function delayBeforeRetry(error: unknown): number | undefined {
 <li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
 <li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
 <li><a href="/pages/capabilities/">Capability model</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits concept</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits concept</a></li>
 <li><a href="/pages/events-and-intents/">Events and intents concept</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a></li>

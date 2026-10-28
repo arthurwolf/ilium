@@ -474,7 +474,7 @@
 </table>
 <p>It does not allow anything on other plugins' points. It does not allow reading a contributor's code or state. A contributor sees only the payload of the owner's <code>payload_schema</code>.</p>
 <h3 id="risk">Risk</h3>
-<p>The grant is normal risk (S). It is checked by default in the review dialog. Owning a point gives a plugin no power over the user's machine. It gives other plugins a way to run code at a place in the owner's flow, so the owner is responsible for what it puts in the payload. The owner sets <code>risk: "high"</code> on a point whose handlers can see or change sensitive data, such as text that goes to a terminal. A high-risk point makes the contributor's grant a high-risk (H) grant.</p>
+<p>The grant is normal risk (not high risk). It is checked by default in the review dialog. Owning a point gives a plugin no power over the user's machine. It gives other plugins a way to run code at a place in the owner's flow, so the owner is responsible for what it puts in the payload. The owner sets <code>risk: "high"</code> on a point whose handlers can see or change sensitive data, such as text that goes to a terminal. A high-risk point makes the contributor's grant a high-risk (H) grant.</p>
 <h3 id="manifest">Manifest</h3>
 <pre><code class="language-json">{
   &quot;id&quot;: &quot;com.example.notes&quot;,
@@ -571,7 +571,7 @@ export async function exportNote(text: string): Promise&lt;void&gt; {
 <li><strong>No contributors.</strong> <code>list</code> returns an empty list. <code>run-hook</code> resolves with outcome <code>ok</code> and no reply. The owner carries on with its original data.</li>
 <li><strong>Grant declined.</strong> Every call returns <code>extension.not-granted</code>. Contributions to the point go dormant because the point has no active owner.</li>
 <li><strong>Owner disabled.</strong> Its contributions go dormant at once. When the user enables the owner again, they become active and the owner receives <code>ilium.extensions/changed</code>.</li>
-<li><strong>Replaced owner.</strong> A plugin that replaces a core plugin takes over its points. The replacement must declare them all. See <a href="/pages/extending-core-plugins/#replace">extending core plugins</a>.</li>
+<li><strong>Replaced owner.</strong> A plugin that replaces a core plugin takes over its points. The replacement must declare them all. See <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">extending core plugins</a>.</li>
 <li><strong>Limits.</strong> 16 points per plugin, up to 256 entries per collect point, up to 8 handlers per hook point, a chain of 100 ms.</li>
 </ul>
 <h3 id="review-dialog">Review dialog</h3>

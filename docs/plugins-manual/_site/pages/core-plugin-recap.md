@@ -11,7 +11,7 @@ The recap text comes from the AI provider the user configured under Inference an
 - The `ilium recap [selection]` command, with the same selection options as `ilium panes` and `ilium broadcast`, described in the CLI reference.
 - Evidence for agent panes from the transcript of the pane's own verified session, never from the screen.
 - Evidence for shell panes from the current screen, capped at 64 KiB.
-- The six states of a record: `summarized`, `idle`, `denied`, `unavailable`, `stale` and `failed`.
+- The six states of a record: `summarized`, `idle`, `denied`, `unavailable`, `stale` and `failed`. `stale` means the pane has produced new output since the last stored recap, so the stored text is shown but marked out of date.
 - Goal lines read from the transcript, not written by the model.
 - Redaction of secrets before any text leaves Ilium, and the rule that a pointer survives only when its path appears in the evidence, lies under the pane's project or folder, exists now and is not denied.
 
@@ -43,12 +43,12 @@ There is no recording of this feature yet. The renders below are illustrative.
 │                                              │
 │<span class="t-hi">before-recap</span> (transform)                      │
 │  [x] Redact customer names                   │
-│  stopped after 3 timeouts       [Reset]      │
+│  stopped after 3 failures       [Reset]      │
 │  [x] Add ticket id                           │
 │  <span class="t-dim">Run order: lower priority number first.</span>     │
 ╰──────────────────────────────────────────────╯
 </pre>
-<figcaption>Rendered at 48 columns. Illustrative. The Extensions tab of the Recap plugin lists the contributors of each point in run order, each with a toggle. A contributor that breached its deadline three times in a row shows the one stopped label, `stopped after 3 timeouts [Reset]`, as defined in <a href="/pages/api-extension-points/">Extension points</a>.</figcaption>
+<figcaption>Rendered at 48 columns. Illustrative. The Extensions tab of the Recap plugin lists the contributors of each point in run order, each with a toggle. A contributor that breached its deadline three times in a row shows the one stopped label, `stopped after 3 failures [Reset]`, as defined in <a href="/pages/api-extension-points/">Extension points</a>.</figcaption>
 </figure>
 
 <figure>
@@ -103,14 +103,14 @@ The contract version is 0.1. The plugin declares two extension points, provides 
     "client": ["help.read"]
   },
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "recap",
       "summary": "Print short and long recaps of the selected panes",
       "output": "jsonl",
       "stdin": "none",
       "requires_server": true,
       "argument_groups": ["pane-selector"]
-    },
+    }],
     "jobs": [{ "kind": "recap-pane", "deadline_ms": 5000, "memory_mib": 64 }],
     "client_requests": [{ "kind": "onboarding-state" }],
     "help": [{ "id": "recap-privacy", "file": "help/recap-privacy.md", "title": "What a recap sends" }],
@@ -198,7 +198,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "cli:recap"
   ],
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "recap",
       "summary": "Print short and long recaps of the selected panes",
       "output": "jsonl",
@@ -207,7 +207,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "argument_groups": [
         "pane-selector"
       ]
-    },
+    }],
     "jobs": [
       {
         "kind": "recap-pane",
@@ -528,7 +528,7 @@ export function shellEvidence(pane: bigint) {
 
 #### One job per pane
 
-The model call can take seconds, far over the 20 ms event deadline, so each pane is one job of kind `recap-pane`. The job asks for both lengths in one call, reports its progress and stops when the run is cancelled (Ctrl-C or the timeout). The run limit `--max-concurrency` maps to the plugin's `concurrent_jobs`; extra jobs wait in the queue. See [jobs](/pages/api-jobs/), [jobs.run](/pages/capability-jobs-run/) and [inference](/pages/api-inference/).
+The model call can take seconds, far over the 20 ms event deadline, so each pane is one job of kind `recap-pane`. The job asks for both lengths in one call, reports its progress and stops when the run is cancelled (Ctrl-C or the timeout). The job waits at most 4,000 ms for the model, inside the 5,000 ms wall-clock deadline that the manifest declares for the `recap-pane` job kind ([jobs](/pages/api-jobs/)); a longer call fails the pane with `timed-out`. `MAX_PANES` is a constant of the sample, 32 panes per run; panes beyond it are skipped and reported in the summary. The sample's `--max-concurrency` flag, passed in `argv`, sets how many pane jobs run at once, up to the plugin's `concurrent_jobs` limit; extra jobs wait in the queue. See [jobs](/pages/api-jobs/), [jobs.run](/pages/capability-jobs-run/) and [inference](/pages/api-inference/).
 
 **Rust**
 
@@ -550,7 +550,7 @@ impl JobRunner for Recap {
             json_schema: Some(RECAP_SCHEMA.into()),
             purpose: "recap".into(),
         })?;
-        jobs::wait_request(request, 55_000)?;
+        jobs::wait_request(request, 4_000)?;
         if jobs::is_cancelled() { return Err(PluginError::cancelled()); }
         let completion = inference::take_completion(request).ok_or_else(PluginError::internal)?;
         jobs::report_progress(100.0);
@@ -577,7 +577,7 @@ export function run(kind: string, input: Uint8Array): Uint8Array {
     jsonSchema: RECAP_SCHEMA,
     purpose: 'recap',
   });
-  waitRequest(request, 55_000);
+  waitRequest(request, 4_000);
   if (isCancelled()) throw { code: 'cancelled', message: 'run cancelled' };
   const completion = takeCompletion(request);
   if (completion === undefined) throw { code: 'internal', message: 'no completion' };
@@ -661,7 +661,7 @@ const BEFORE_RECAP: &str = "ilium.core.recap/before-recap";
 
 fn start_hook(&mut self, pane: NodeId, kind: &str, text: &str) {
     let payload = serde_json::json!({ "pane": pane.0, "kind": kind, "text": text }).to_string();
-    match extensions::run_hook(BEFORE_RECAP, &payload) {
+    match extensions::run_hook_request(BEFORE_RECAP, &payload) {
         Ok(request) => { self.hooks.insert(request, (pane, kind.to_string(), text.to_string())); }
         Err(_) => self.finish_text(pane, kind, text.to_string()),
     }
@@ -763,7 +763,7 @@ Other plugins change what `ilium.core.recap` does through the points below. The 
 
 - `ilium.core.recap/recap`: get: short or long recap of panes
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.recap"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.recap"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds the ticket of the pane branch to every long recap
 

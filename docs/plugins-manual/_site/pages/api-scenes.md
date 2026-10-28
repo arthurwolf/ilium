@@ -11,7 +11,7 @@ Use a scene for an animated background the user can choose and tune. Use a clien
 - **Package:** a `scene` component (`scene.wasm`) with the world `ilium:anim/base@0.1.0`, and a `contributes.scenes` entry for each scene.
 - **Language:** Rust stable 1.90 or later with the `wasm32-wasip2` target, using `ilium-plugin-sdk`; or TypeScript with Bun 1.2 or later and `@ilium/plugin-sdk`. The SDK pins the binding generator versions, so `bun install` is the only install step.
 - **Imports:** `ilium:anim/base` allows `log`, `clock`, `storage`, `fs`, `codec`, `jobs`, `http`, `audio`, `media`, `location` and the surface. Nothing else is linked.
-- **Exports:** `lifecycle` and `renderer` are required. The optional `job-runner` export needs `jobs.run`.
+- **Exports:** `lifecycle` and `renderer` are required, and the manifest `exports` list never names a required export, so `"exports": []` is correct for a scene with only those two. The optional `job-runner` export needs `jobs.run`.
 - **Grants:** the scene side always has `log`, `clock`, `storage` (own buckets), `codec`, and the `fs` scopes `package`, `data` and `cache`. Every other grant goes in `capabilities.scene`, for example `jobs.run`, `http:api.example.com` or `media.video`. `audio.capture` and `location.observer` are high risk and need an explicit user grant.
 
 ### Manifest contributions
@@ -69,7 +69,7 @@ The host constructs the renderer when the scene is shown, and again after a rest
 
 The host reads `readiness` before each frame. `Preparing` frames are not presented, and `Failed` stops drawing. The frame rate is read once after construction and after each `reconfigure` that returns `true`, never per frame. A palette change calls `set_palette` before the next frame. A setting change is validated against `settings_schema` first, then sent to `reconfigure`.
 
-In `pre-rendered` mode the host calls `render` for `clip_seconds` of frames, stores the clip in host memory and loops it without calling `render` again. A change to the palette or the settings rebuilds the clip. A clip is limited to 64 MiB; a longer clip is shortened to fit, with a minimum of one second.
+In `pre-rendered` mode the host calls `render` for `clip_seconds` of frames, stores the clip in host memory and loops it without calling `render` again. A change to the palette or the settings rebuilds the clip. A single clip is limited to 64 MiB (the one clip size limit); the 256 MiB figure in [host rendering](/pages/reference-host-rendering/) is the separate total clip memory the host holds across clips. A longer clip is shortened to fit, with a minimum of one second.
 
 <figure>
 <svg viewBox="0 0 400 200" role="img" aria-label="Scene frame flow from host to scene and back to the panel">
@@ -98,10 +98,10 @@ In `pre-rendered` mode the host calls `render` for `clip_seconds` of frames, sto
 
 ### Surface rules
 
-- A row is `width` bytes in `gray8`, `3 x width` bytes in `rgb8`, and `4 x width` bytes in `rgba8`. `write_rows` writes whole rows only. A remainder is dropped and a warn line is written once per second.
+- A row is `width` bytes in `gray8`, `3 x width` bytes in `rgb8`, and `4 x width` bytes in `rgba8`. `write_rows` writes whole rows only. When the data length is an exact multiple of the row size, every row is written. When it is not, the call writes the whole rows, drops the partial trailing row and writes a warn line at most once per second, and it does not return an error. `invalid-argument` is only for a format the scene did not declare, for empty data, or for `first-row` at or past `height`.
 - Rows at or past `height` are ignored.
 - `write_cell_colors` takes one packed `0xRRGGBB` value per cell, row-major. It is ignored unless `uses-cell-colors` is `true`.
-- `occupancy()` returns one byte per pixel, row-major: 0 for free and 255 for covered by a panel or popup. It returns `none` unless `wants-occupancy` is `true`.
+- `occupancy()` returns an `occupancy-grid` of cells (`columns`, `rows`, and one `bool` per cell, row-major): `true` where pane text is drawn. It returns `none` unless `wants-occupancy` is `true`.
 - `pointer()` returns the column and row in cells, counted from the top left of the scene area. It returns `none` when the pointer is outside that area, or when `wants-pointer` is `false`.
 - A `render` call that returns without `present` drops that frame, and a warn line is written once per second.
 
@@ -268,7 +268,8 @@ Illustrative, not generated. The rings scene traps once, restarts after one seco
 | `readiness` returns `Failed`, or stays `Preparing` for more than 10 s | Counts as one failure. The host stops calling `render` until the restart. |
 | Settings fail `settings_schema` | The host refuses the change before the scene sees it. The previous values stay. |
 | `reconfigure` returns `false` | The host restarts the renderer with the new spec. This is not a failure. |
-| A call to an import without its grant, or `http.fetch` outside the grant | `not-permitted`, synchronously. |
+| A call to an import whose grant the manifest never requested | Trap, because that is a plugin bug. |
+| A call to an import whose grant the user declined or revoked, or `http.fetch` outside the grant | `not-permitted`, synchronously. |
 | `location.current` with no position set or a declined grant | `none`, not an error. |
 | `codec.decode-image` with an unsupported format | `unsupported`. |
 | `jobs.start` with the job queue full | `busy`. Retry later. |
@@ -293,7 +294,7 @@ Scenes can now use a glyph plane for text, owner ids and frame receipts for hit 
 | Labels over the picture | `write-glyphs` (131,072 cells per frame) |
 | Which object is under the pointer | `set-owner-ids` and `last-receipt().pointer-owner` |
 | Text as pixels | `Font::rasterize` into `mask8` |
-| A loop that costs no plugin calls | `prerender` (3,600 frames, 30 fps, 128 MiB) |
+| A loop that costs no plugin calls | `prerender` (up to 3,600 frames at 30 fps, within the 64 MiB clip limit) |
 
 **Rust**
 
@@ -326,8 +327,8 @@ record frame-receipt { frame: u64, presented-at-millis: u64, dropped-before: u32
 resource frame-surface {
   /// Width and height in pixels.
   size: func() -> tuple<u32, u32>;
-  /// Rows are top to bottom. first-row plus the rows written must be within the height.
-  /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+  /// Rows are top to bottom. Rows that fall at or past the height are ignored.
+  /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
   write-rows: func(first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
   /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
   write-cell-colors: func(first-row: u32, colors: list<u32>) -> result<_, plugin-error>;
@@ -351,5 +352,5 @@ resource frame-surface {
 - [Plugin exports](/pages/api-exports/) for the `renderer` export and `job-runner`.
 - [Storage](/pages/api-storage/), [File access](/pages/api-fs/) and [Codec](/pages/api-codec/) for the scene's data and images.
 - [Background jobs](/pages/api-jobs/), [HTTP](/pages/api-http/), [Location](/pages/api-location/), [Audio](/pages/api-audio/) and [Media](/pages/api-media/) for the other imports.
-- [Errors and limits](/pages/errors-and-limits/) for the full error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error codes.
 - [Tutorial 7: ambient scene](/pages/tutorial-07-ambient-scene/) for a step-by-step scene plugin.

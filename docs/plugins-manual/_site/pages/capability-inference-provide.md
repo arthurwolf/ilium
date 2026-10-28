@@ -10,8 +10,8 @@ A provider receives every prompt that the user's features send to it. Say where 
 
 - **The grant `inference.provide`.** It takes no argument and has normal risk, so the install dialog checks it by default.
 - **One grant `http:<provider-host>` per host** the provider calls, for example `http:api.provider.example`. Requests to those hosts also pass the AI admission gate.
-- **The export `inference-provider`** in the manifest `exports` list, for the side that implements it (`server` or `client`). The component also exports `lifecycle` and `handler`. Those two are required and are never listed (N9).
-- **A toolchain.** Rust stable 1.90 or later with the `wasm32-wasip2` target, plus `ilium-plugin-sdk` and `serde_json` (the Rust example uses it). Or Bun 1.2 or later with `@ilium/plugin-sdk` (S14).
+- **The export `inference-provider`** in the manifest `exports` list, for the side that implements it (`server` or `client`). The component also exports `lifecycle` and `handler`. Those two are required and are never listed.
+- **A toolchain.** Rust stable 1.90 or later with the `wasm32-wasip2` target, plus `ilium-plugin-sdk` and `serde_json` (the Rust example uses it). Or Bun 1.2 or later with `@ilium/plugin-sdk`.
 - **A settings field for the API key**, declared with `"secret": true` in the settings schema. Settings masks the value, the host redacts it from logs, and only the owning plugin can read it (P3).
 
 ### Grant syntax
@@ -77,7 +77,7 @@ TypeScript passes a WIT `result` as a tagged object: `{ tag: 'ok', val: completi
 <figcaption>The provider answers asynchronously. The call number ties the reply to the request that the kernel sent.</figcaption>
 </figure>
 
-The `complete` export must return at once. Work that needs the network runs in a task (`task::spawn` in Rust, a promise in TypeScript), and the task answers through `provider_reply`. The kernel drops a reply whose call number is unknown, answered or expired.
+The `complete` export must return at once. Work that needs the network runs in a task (`task::spawn` in Rust, a promise in TypeScript), and the task answers through `provider_reply`. A reply whose call number is unknown, already answered or expired makes `provider-reply` return `not-found` to the provider; the kernel changes nothing else.
 
 ### Worked example 1: a Rust provider
 
@@ -276,9 +276,10 @@ export const { lifecycle, handler, inferenceProvider } = definePlugin({
 | Reply text over 4 MiB | `provider-reply` returns `invalid-argument`. |
 | Reply sent without the grant | The reply is dropped and the host writes a refusal line to the plugin log. The caller times out. |
 | Gate refuses the purpose or provider | The caller gets `not-permitted`. The same gate applies to the provider's own HTTP calls to its host. |
-| Gate throttles the call | The caller gets `rate-limited` with `retry-after-ms` (A16, A17). |
+| Gate throttles the call | The caller gets `rate-limited` with `retry-after-ms`, the wait the gate asks for before a retry. |
 | HTTP to a host without a grant | `http.fetch` returns `not-permitted` and the plugin log records the refusal. |
 | Trap or deadline breach in `complete` | A failure under the restart rule. It follows the [restart and disable rule](/pages/reference-errors-and-limits/#restart-and-disable-rule): restart after 1 s, then 5 s, and disable at the third failure inside 10 minutes. |
+| Trap or deadline breach in `models` | The same failure under the restart rule as for `complete`. The caller's `inference.models` lists no models for this provider on that call (an empty list, not an error); other providers still list theirs. |
 | Empty `messages` or input over 4 MiB | The caller's `inference.complete` returns `invalid-argument` before the provider sees it. |
 
 Codes a provider can return from `complete` are the plugin's own: use `invalid-argument` when the request breaks a rule the provider checks (for example, no messages), and `unsupported` when the provider does not offer the requested model.
@@ -310,7 +311,7 @@ Codes a provider can return from `complete` are the plugin's own: use `invalid-a
 <figcaption>The review dialog for a package that requests inference.provide, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
 </figure>
 
-- **Install review.** The dialog shows one row per grant, and the rows use the wording of G9. Both grants are checked by default because they have normal risk.
+- **Install review.** The dialog shows one row per grant, and the rows use the wording of the [capability table](/pages/reference-capabilities/). Both grants are checked by default because they have normal risk.
 - **Settings.** Settings > Plugins lists the provider with its capability list. Settings > Plugins > (provider) shows it as unavailable if the grant was declined. Requests go to the provider that the user selected in Settings, and the plugin cannot choose another one.
 - **Secret field.** The API key appears masked. The host never stores it in the snapshot (P3).
 - **Privacy log.** Each request that the gate admits adds one line to the privacy log: the consumer's plugin id, the `purpose`, the provider, the model and the token counts. Settings > Privacy shows that log (api-inference).
@@ -329,4 +330,4 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 
 ### Security
 
-`inference.provide` is high risk: the provider sees every prompt other plugins send. See [Threat model](/pages/reference-threat-model/) ([SEC-007]) and [User security and privacy](/pages/user-plugin-security-and-privacy/).
+`inference.provide` has normal risk in the capability table, but the provider sees every prompt other plugins send, so the install dialog states that in the grant's review wording. See [Threat model](/pages/reference-threat-model/) ([SEC-007]) and [User security and privacy](/pages/user-plugin-security-and-privacy/).

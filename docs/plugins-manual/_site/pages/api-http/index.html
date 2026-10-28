@@ -562,7 +562,7 @@
 </tbody>
 </table>
 <p>Install refuses a bare <code>*</code>. A redirect follows the same rule for each hop.</p>
-<p><code>http:setting:&lt;key&gt;</code> names one of the plugin's own setting keys (otherwise the manifest fails with <code>manifest.grant-argument</code>). The setting is a <code>text</code> row with <code>item_format</code> <code>url</code> or <code>host</code>, or a <code>list</code> of them. The host is checked at <code>fetch</code> and <code>open-stream</code> time. When the stored value changes to a host the user has not confirmed, the user is asked once before the first request (D23), and until then calls to it return <code>not-permitted</code>. Wildcards in the stored value are refused. The full flow, with the confirmation dialog, is on <a href="/pages/api-http-streams/">http streams</a>.</p>
+<p><code>http:setting:&lt;key&gt;</code> names one of the plugin's own setting keys (otherwise the manifest fails with <code>manifest.grant-argument</code>). The setting is a <code>text</code> row with <code>item_format</code> <code>url</code> or <code>host</code>, or a <code>list</code> of them. The host is checked at <code>fetch</code> and <code>open-stream</code> time. When the stored value changes to a host the user has not confirmed, the user is asked once before the first request (SEC-074), and until then calls to it return <code>not-permitted</code>. Wildcards in the stored value are refused. The full flow, with the confirmation dialog, is on <a href="/pages/api-http-streams/">http streams</a>.</p>
 <h3 id="politeness">Politeness</h3>
 <p>The host keeps requests polite on behalf of every plugin, so a plugin does not implement its own back-off tables.</p>
 <table>
@@ -575,7 +575,7 @@
 <tbody>
 <tr>
 <td>Per-host rate limiter</td>
-<td>A request over the allowance for one host fails with <code>rate-limited</code>.</td>
+<td>The request is not failed at once. Its Completion outcome is <code>rate-limited</code> with <code>retry-after-ms</code> set.</td>
 </tr>
 <tr>
 <td><code>Retry-After</code></td>
@@ -626,7 +626,7 @@
 </tr>
 <tr>
 <td>Pending requests per plugin</td>
-<td>256 by default</td>
+<td>64 by default (<code>pending_requests</code>; ceiling 256 at tier 1)</td>
 <td><code>busy</code></td>
 </tr>
 <tr>
@@ -742,7 +742,7 @@ let response = http::take_response(id);   // Option&lt;HttpResponse&gt;; None af
 </ul>
 <pre><code class="language-json">{
   &quot;type&quot;: &quot;refusal&quot;,
-  &quot;capability&quot;: &quot;http:evil.example&quot;,
+  &quot;grant&quot;: &quot;http:evil.example&quot;,
   &quot;function&quot;: &quot;http.fetch&quot;,
   &quot;reason&quot;: &quot;not-granted&quot;
 }
@@ -887,7 +887,7 @@ let response = http::take_response(id);   // Option&lt;HttpResponse&gt;; None af
 record http-request { method: string, url: string, headers: list&lt;header&gt;, body: option&lt;list&lt;u8&gt;&gt;, timeout-millis: u32 }
 record http-response { status: u16, headers: list&lt;header&gt;, body: list&lt;u8&gt; }
 enum stream-framing { raw, lines, server-sent-events, ndjson }
-/// max-chunk-bytes at most 1 MiB.
+/// max-chunk-bytes at most 64 KiB.
 record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
 /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
 fetch: func(request: http-request) -&gt; result&lt;request-id, plugin-error&gt;;

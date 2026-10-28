@@ -65,6 +65,7 @@ pub mod compaction_ui;
 pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
+mod connection_health;
 mod context_menu_layout;
 pub mod control;
 pub mod cost_app;
@@ -74,6 +75,8 @@ pub mod cost_overlay;
 pub mod cost_settings;
 pub mod cost_settings_ui;
 pub mod cost_tracker;
+pub mod custom_agent_editor;
+mod custom_agent_settings;
 pub mod debug_logging;
 pub mod document_preparation;
 mod editor_capture_budget;
@@ -1076,6 +1079,7 @@ async fn run_inner(
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
 
+    app.custom_agents = config.custom_agents;
     app.apply_ui_settings(config.ui);
     app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
@@ -1168,6 +1172,7 @@ async fn run_inner(
     // Wait registry revisions are scoped to this server transport incarnation.
     app.resources.wait_revision=None;
     app.resources.waits.clear();
+    app.connection_health = Some(std::sync::Arc::clone(&connection.health));
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
     // Tells the server this connection hosts the voice session, so
     // `ilium voice say` can offer typed sentences to it. One-shot CLI

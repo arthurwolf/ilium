@@ -9,7 +9,7 @@ Commands connect the parts of a plugin that the user touches with the parts that
 **You will need:**
 
 - No grant to contribute a command, handle its `command-invoked` events, or change its state with `set-state`.
-- `commands.invoke:<pattern>` to invoke any command, including your own. The pattern is an exact global id such as `ilium.git/status`, a plugin prefix such as `ilium.git/*`, or a bare `*` for every command. The bare `*` is high risk: the review dialog leaves it unchecked by default. See [Capability: commands.invoke](/pages/capability-commands-invoke/).
+- `commands.invoke:<pattern>` to invoke a command of another plugin. Invoking your own command needs no grant. The pattern is an exact global id such as `ilium.git/status`, a plugin prefix such as `ilium.git/*`, or a bare `*` for every command. The bare `*` is high risk: the review dialog leaves it unchecked by default. See [Capability: commands.invoke](/pages/capability-commands-invoke/).
 - `ui.chrome` for the contributions that put a button, a row action, a status segment or a frame slot in the kernel's chrome (`tree_toolbar`, `row_actions`, `status_segments`, `pane_frame_slots`). Menus and toolbar buttons of the agent primitive need no grant.
 - The client side for `set-state` and for handling events. A server instance can call `invoke` but not `set-state`.
 - The command's provider installed and enabled. An invocation of a command that no installed plugin contributes fails with `not-found`.
@@ -44,7 +44,7 @@ A command is declared in the `contributes` section of the manifest. Its local id
 | `category` | string, at most 32 characters | none | The group the palette lists the command under |
 | `keywords` | list of at most 8 strings of at most 24 characters | none | Extra search terms that the palette matches besides the title |
 
-The command palette is a kernel surface: it ranks, groups and draws the commands, and a plugin only supplies the entries. A plugin cannot open the palette, add a mode to it, or read what the user typed. `category` and `keywords` are the whole contract. A `category` or `keywords` value above its limit is refused at install.
+The command palette is a kernel surface: it ranks, groups and draws the commands, and a plugin only supplies the entries. A plugin cannot open the palette, add a mode to it, or read what the user typed. `category` and `keywords` are the whole contract. A `category` or `keywords` value above its limit is refused at install with `manifest.contribution-limit`.
 
 Keybindings name a command and a chord. The `mode` key is `global`, `prefix` (the chord is the key after the prefix) or `pane:<kind>` (active only in one pane kind). Chords use the grammar of [keys](/pages/api-keys/). When two plugins bind the same chord, the user's remap wins, then built-in bindings, then the earlier installed plugin (the rule of [reference-manifest](/pages/reference-manifest/)). A plugin can read the user's current bindings with [keymap.bindings](/pages/api-kernel-settings-and-keymap/).
 
@@ -281,7 +281,7 @@ menu-items: func(context: menu-context) -> list<menu-entry>;      // <= 64 entri
 | `tooltip` | `Option<Tooltip>` | `Tooltip \| undefined` | Hover help, at most 200 characters |
 | `danger` | `bool` | `boolean` | Draws the entry in the warning style |
 
-The host calls `menu-items` with the deadline of 20 ms. On a timeout the menu opens with the static entries only, and the breach counts toward the plugin's deadline record. The export is activated by the trigger `menu:<id>`; until the instance answers, the host shows the static entries. A click arrives as `command-invoked` with `command` set to the menu's command and `arguments-json` `{"item": "<id>", ...context}`, and `context.menu-item` carries the entry id. At most 64 entries are shown; further ones are cut with a `… N more` row.
+The host calls `menu-items` with the deadline of 20 ms. On a timeout the menu opens with the static entries only, and the breach counts as a deadline breach in the plugin's health record (the breach count that can turn the plugin off, see [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)). The export is activated by the trigger `menu:<id>`; until the instance answers, the host shows the static entries. A click arrives as `command-invoked` with `command` set to the menu's command and `arguments-json` `{"item": "<id>", ...context}`, and `context.menu-item` carries the entry id. At most 64 entries are shown; further ones are cut with a `… N more` row.
 
 **Rust**
 
@@ -384,7 +384,7 @@ The client's own context menus show how such a menu looks: a rounded block with 
 
 ### Palette, keywords and categories
 
-The palette lists a command under its `category` and finds it by title, id and `keywords`. The host does the matching, case-insensitively and ranked by prefix first, the same way as for catalogues. A command with `palette: false` is not listed, but it still runs from keybindings, menus and `invoke`.
+The palette lists a command under its `category` and finds it by title, id, `category` and `keywords`. The host does the matching, case-insensitively and ranked by prefix first, the same way as for catalogues. A command with `palette: false` is not listed, but it still runs from keybindings, menus and `invoke`.
 
 <figure>
 <pre class="term">╭  ≡ ● · Commands───────────────────────────────────╮
@@ -430,8 +430,9 @@ Manifest errors (the install is refused with the key path):
 | `manifest.when-syntax` | A `when` value with bad syntax or an unknown value |
 | `manifest.when-key` | An unknown `when` key |
 | `manifest.menu-depth` | Static `context_menu` or `toolbar_buttons.submenu` items nested deeper than 2 |
-| `manifest.contribution-limit` | More `row_actions`, `tree_toolbar` entries and so on than the cap of 4 |
+| `manifest.contribution-limit` | More `row_actions`, `tree_toolbar` entries and so on than the cap of 4, or a `category` or `keywords` value above its limit |
 | `manifest.contribution-target` | `row_actions.applies_to` names an unknown target |
+| `manifest.grant-wildcard` | A `commands.invoke` grant uses a wildcard where the pattern grammar does not allow one, such as `*/status` or `ilium.git/prefix*` |
 
 ### Limits
 
@@ -455,7 +456,7 @@ Manifest errors (the install is refused with the key path):
 - Own commands need no grant, both for `set-state` and for `invoke`. A plugin can invoke its own command without holding any `commands.invoke` grant.
 - `when` is not checked by `invoke`. A plugin can run a command that is hidden from the palette.
 - A command returns no data. The completion carries an outcome only. To send data back, use [services](/pages/api-services/) or a [topic](/pages/api-messages-and-topics/).
-- The `*` pattern never crosses a slash. `*/status` and `ilium.git/prefix*` are rejected at install.
+- The `*` pattern never crosses a slash. `*/status` and `ilium.git/prefix*` are refused at install with `manifest.grant-wildcard`.
 - `set-state` changes the state until the next call or until the plugin restarts. A restart resets every command to its manifest state.
 - A dynamic menu whose provider is slow shows the static entries for that opening only; the next opening asks again.
 

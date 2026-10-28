@@ -3450,6 +3450,70 @@ mod completed_request_storage_tests {
         owner.request_shutdown();
     }
 
+    /// Catches a completed storage declaration whose owner metadata lies just
+    /// above the original 192 MiB reservation, although bounded decode accepts
+    /// the request at the unchanged 64 MiB allocation-policy ceiling.
+    #[tokio::test]
+    async fn allocation_ceiling_request_keeps_owner_metadata_without_refusing_conversion() {
+        const MIB: usize = 1024 * 1024;
+        let empty = ClientRequest::RenameNode {
+            node_id: ilium_core::NodeId(2),
+            title: String::new(),
+            short_title: None,
+            inferred_icon: None,
+        };
+        let empty_frame = ilium_ipc::encode_frame(&empty).unwrap();
+        let (_, empty_bytes) =
+            ilium_ipc::decode_bounded_frame_with_storage::<ClientRequest>(&empty_frame).unwrap();
+        assert_eq!(empty_bytes % 3, 0);
+        // The audited string visitor charges two bytes per string byte.
+        // Fixed request/field handoffs are observed through the real decoder;
+        // at most one allocation-policy byte remains below its literal limit.
+        let title_len = (64 * MIB - empty_bytes / 3) / 2;
+        let frame = ilium_ipc::encode_frame(&ClientRequest::RenameNode {
+            node_id: ilium_core::NodeId(2),
+            title: "x".repeat(title_len),
+            short_title: None,
+            inferred_icon: None,
+        })
+        .unwrap();
+        let (preflight, declared_bytes) =
+            ilium_ipc::decode_bounded_frame_with_storage::<ClientRequest>(&frame).unwrap();
+        assert!(declared_bytes >= 192 * MIB - 3);
+        assert!(declared_bytes <= 192 * MIB);
+        drop(preflight);
+        let covered =
+            ilium_execution::retained_result_storage_bytes::<ClientRequest>(declared_bytes)
+                .unwrap();
+        assert!(
+            covered > 192 * MIB,
+            "the fixture must exercise the old metadata overflow"
+        );
+
+        let owner = crate::execution::ServerExecution::start().unwrap();
+        let (sender, receiver) = tokio::io::duplex(4096);
+        let mut writer = FrameWriter::new(sender);
+        let mut reader = FrameReader::new(receiver);
+        let (sent, decoded) = tokio::join!(
+            writer.write_encoded(&frame),
+            decode_client_request(&mut reader, &owner.decoder, 1),
+        );
+        sent.unwrap();
+        let decoded =
+            decoded.expect("a valid maximum-allocation request must keep its original capacity");
+        match decoded.view() {
+            ClientRequest::RenameNode { title, .. } => assert_eq!(title.len(), title_len),
+            _ => panic!("decoded the wrong request"),
+        }
+        let usage = owner.decoder.foundation.usage();
+        assert_eq!(usage.jobs, 0);
+        assert_eq!(usage.input_bytes, 0);
+        assert_eq!(usage.result_bytes, covered);
+        drop(decoded);
+        assert_eq!(owner.decoder.foundation.usage().result_bytes, 0);
+        owner.request_shutdown();
+    }
+
     #[tokio::test]
     async fn result_storage_conversion_refuses_shared_retention_and_growth_without_losing_charge() {
         let owner = crate::execution::ServerExecution::start().unwrap();

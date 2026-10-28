@@ -561,6 +561,7 @@ pub enum SettingsTab {
     Titles,
     Triggers,
     TextTriggers,
+    CustomAgents,
     Icons,
     Appearance,
     /// Panel padding modes and fine-tuning.
@@ -747,7 +748,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 27] = [
+    pub const ALL: [SettingsTab; 28] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
@@ -771,6 +772,7 @@ impl SettingsTab {
         Self::Titles,
         Self::Triggers,
         Self::TextTriggers,
+        Self::CustomAgents,
         Self::Debug,
         Self::Api,
         Self::About,
@@ -785,6 +787,7 @@ impl SettingsTab {
             Self::Titles => "Titles",
             Self::Triggers => "Triggers",
             Self::TextTriggers => "Text Triggers",
+            Self::CustomAgents => "Custom Agents",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
             Self::Padding => "Padding",
@@ -1220,6 +1223,11 @@ pub struct SettingsState {
     /// Selected row within the active tab's list. Appearance currently has
     /// three rows and Keyboard one; About has none.
     pub selected_row: usize,
+    pub custom_agent_editor: Option<crate::custom_agent_editor::CustomAgentEditor>,
+    pub custom_agent_editing: bool,
+    pub custom_agent_edit_original: Option<String>,
+    pub custom_agent_delete_confirm: bool,
+    pub custom_agent_save_pending: bool,
     /// Vertical scroll offset into the active tab's content -- for a
     /// terminal too short to show every row at once. See
     /// `crate::settings_ui::content_scroll_bounds`.
@@ -1369,6 +1377,11 @@ impl SettingsState {
         Self {
             tab: SettingsTab::Appearance,
             selected_row: 0,
+            custom_agent_editor: None,
+            custom_agent_editing: false,
+            custom_agent_edit_original: None,
+            custom_agent_delete_confirm: false,
+            custom_agent_save_pending: false,
             scroll: 0,
             scene_scroll: 0,
             global_scroll: 0,
@@ -1632,12 +1645,14 @@ impl ContextMenuAction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmenuItemAction {
     SetTreeOrder(TreeOrder),
     AgentHere(BuiltinAgentProvider),
     AgentInNewWorktree(BuiltinAgentProvider),
     AgentInExistingWorktree(BuiltinAgentProvider),
+    CustomAgentHere(String),
+    CustomAgentInWorktree(String, bool),
     CopyWorktreeBranch,
     CopyWorktreePath,
     NewTerminalInWorktree,
@@ -1646,7 +1661,7 @@ pub enum SubmenuItemAction {
 }
 
 impl SubmenuItemAction {
-    pub(crate) const fn menu_group(self) -> u8 {
+    pub(crate) const fn menu_group(&self) -> u8 {
         match self {
             Self::SetTreeOrder(TreeOrder::AgeAscending | TreeOrder::AgeDescending) => 1,
             Self::SetTreeOrder(TreeOrder::NameAscending | TreeOrder::NameDescending) => 2,
@@ -2410,6 +2425,8 @@ pub struct App {
     /// case settings changes still apply live but can't be persisted (see
     /// `apply_and_persist_ui_settings`).
     pub config_dir: Option<PathBuf>,
+    /// User-managed profiles, including private values held only in memory.
+    pub custom_agents: crate::config::CustomAgentSettings,
     /// Home directory captured by the real client bootstrap for automatic
     /// provider-global instruction targets. `App::new` stays host-I/O-free;
     /// tests opt in with an isolated path instead of touching the user's
@@ -2444,6 +2461,8 @@ pub struct App {
     pub(crate) session_models: crate::session_models::SessionModelCache,
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
+    pub custom_toolbar_selected: Option<String>,
+    pub custom_toolbar_hovered: Option<String>,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// Toolbar buttons whose click was accepted but whose server-side work
     /// (spawning a pane, creating a worktree) has not been confirmed yet.
@@ -2473,7 +2492,7 @@ pub struct App {
     /// when. A hover within `POPOVER_REPO_OK_TTL` reuses it instead of queuing
     /// another slow Git snapshot; creating a worktree still revalidates.
     popover_repo_ok: Option<(NodeId, Instant)>,
-    active_workspace_create_request_id: Option<u64>,
+    pub(crate) active_workspace_create_request_id: Option<u64>,
     /// Panes ever observed with a detected agent status. Once a pane's
     /// toolbar row is reserved it stays reserved for that pane's lifetime,
     /// even if detection later reverts to `PlainShell` -- otherwise a live
@@ -2508,6 +2527,8 @@ pub struct App {
     /// The "Preview" dialog shown for a second after a light selection is copied.
     pub(crate) diagnostic_view: Option<crate::diagnostic::DiagnosticView>,
     pub(crate) presentation_health: Option<std::sync::Arc<crate::presentation::PresentationHealth>>,
+    pub(crate) connection_health:
+        Option<std::sync::Arc<crate::connection_health::ConnectionHealth>>,
     pub(crate) presentation_warning: Option<String>,
     pub(crate) projection_admission_details: Option<String>,
     pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
@@ -2679,6 +2700,8 @@ pub struct App {
     /// retry (`crate::title_inference`'s `PaneBecameDone` trigger) doesn't
     /// need the server to resend it.
     pub agent_session_ids: HashMap<NodeId, String>,
+    /// Non-secret profile identity for custom-agent panes.
+    pub custom_agent_panes: HashMap<NodeId, ilium_core::custom_agent::CustomAgentIdentity>,
     /// Recap fence, in-flight dedupe and the recaps the server last reported.
     pub recap: crate::recap_state::RecapState,
     pub(crate) pending_recap_requests: Vec<crate::recap_worker::RecapWorkerRequest>,
@@ -3081,6 +3104,7 @@ impl App {
             pending_naming_retries: Vec::new(),
             inference_test_settings: None,
             config_dir: None,
+            custom_agents: crate::config::CustomAgentSettings::default(),
             agent_setup_home_dir: None,
             pointer_position: None,
             is_terminal_focused: true,
@@ -3097,6 +3121,8 @@ impl App {
             session_models: crate::session_models::SessionModelCache::default(),
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
+            custom_toolbar_selected: None,
+            custom_toolbar_hovered: None,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
             pending_pane_creations: HashMap::new(),
@@ -3126,6 +3152,7 @@ impl App {
             smart_copy_light: None,
             diagnostic_view: None,
             presentation_health: None,
+            connection_health: None,
             presentation_warning: None,
             projection_admission_details: None,
             smart_copy_preview: None,
@@ -3312,6 +3339,7 @@ impl App {
             terminal_activity: TerminalActivityTracker::default(),
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
+            custom_agent_panes: HashMap::new(),
             recap: crate::recap_state::RecapState::default(),
             pending_recap_requests: Vec::new(),
             recap_progress: HashMap::new(),
@@ -10651,17 +10679,27 @@ impl App {
             self.status_message = Some("Smart Copy generation exhausted".into());
             return;
         };
+        // Capture path roots now; completion must not consult a newer tree/cwd.
+        let path_context = crate::smart_copy_tokens::PathContext::new(
+            self.tree.pane_cwd(pane_id),
+            &self.session_cwd,
+            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
+        );
         let mut capture_result = self
             .terminal_context_preparation
             .as_mut()
-            .map(|preparation| preparation.request_capture(pane_id, generation, &source));
+            .map(|preparation| {
+                preparation.request_capture(pane_id, generation, &source, path_context.clone())
+            });
         if capture_result.as_ref().is_some_and(Result::is_err)
             && self.release_foreign_selection_pin(pane_id)
         {
             capture_result = self
                 .terminal_context_preparation
                 .as_mut()
-                .map(|preparation| preparation.request_capture(pane_id, generation, &source));
+                .map(|preparation| {
+                    preparation.request_capture(pane_id, generation, &source, path_context.clone())
+                });
         }
         if let Some(result) = capture_result {
             match result {
@@ -10717,21 +10755,12 @@ impl App {
         match completion.result {
             Ok(result) => {
                 let (prepared, job_hold) = result.into_parts();
+                // Transfer the producer-installed debit and retirement permit
+                // before moving any result allocation into the live session.
+                let prepared = prepared.into_payload();
                 self.smart_copy_source = Some(prepared.source);
-                self.install_smart_copy_capture(
-                    completion.pane_id,
-                    completion.generation,
-                    prepared.snapshot,
-                    prepared.prompt,
-                    prepared.charge,
-                );
-                if let Some(session) = self
-                    .smart_copy_session
-                    .as_mut()
-                    .filter(|session| session.generation == completion.generation)
-                {
-                    session.output_retention = Some(job_hold);
-                }
+                self.install_smart_copy_capture(prepared.session, prepared.prompt, prepared.charge);
+                drop(job_hold); // Same original debit is now held by the session.
             }
             Err(error) => {
                 self.mode = Mode::Normal;
@@ -10754,7 +10783,16 @@ impl App {
                 return;
             }
         };
-        self.install_smart_copy_capture(pane_id, generation, snapshot, user_prompt, None);
+        // Legacy synchronous mouse fixtures only; production uses the I/O job.
+        let paths = crate::smart_copy_tokens::PathContext::new(
+            self.tree.pane_cwd(pane_id),
+            &self.session_cwd,
+            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
+        );
+        let session = crate::smart_copy::SmartCopySession::with_path_context(
+            generation, pane_id, snapshot, &paths,
+        );
+        self.install_smart_copy_capture(session, user_prompt, None);
         #[cfg(test)]
         {
             // Explicitly synthetic capture provenance for pre-existing mouse
@@ -10780,25 +10818,13 @@ impl App {
     }
     fn install_smart_copy_capture(
         &mut self,
-        pane_id: NodeId,
-        generation: u64,
-        snapshot: crate::smart_copy::SmartCopySnapshot,
+        session: crate::smart_copy::SmartCopySession,
         user_prompt: String,
         source_hold: Option<std::sync::Arc<crate::terminal_parsing::SnapshotCharge>>,
     ) {
-        // Relative paths on screen are checked against the pane's working
-        // directory, each of its ancestors and the project root.
-        let path_context = crate::smart_copy_tokens::PathContext::new(
-            self.tree.pane_cwd(pane_id),
-            &self.session_cwd,
-            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
-        );
-        self.smart_copy_session = Some(crate::smart_copy::SmartCopySession::with_path_context(
-            generation,
-            pane_id,
-            snapshot,
-            &path_context,
-        ));
+        let pane_id = session.pane_id;
+        let generation = session.generation;
+        self.smart_copy_session = Some(session);
         if self.smart_copy_light.is_some() {
             // Smart Copy light never calls a model: the detected regions are
             // the whole offer, so the session is complete from the start.
@@ -13583,7 +13609,7 @@ impl App {
         let creation_mask = self
             .pending_pane_creations
             .values()
-            .filter(|pending| !pending.uncertainty_reported)
+            .filter(|pending| !pending.uncertainty_reported && pending.custom_profile_id.is_none())
             .fold(restructure_bit, |mask, pending| {
                 mask | pending.action.pending_bit()
             });
@@ -14763,19 +14789,38 @@ impl App {
             other => other,
         };
         let request_id = self.next_workspace_request_id();
-        if !self.queue_request(ClientRequest::CreateAgentInWorkspace {
-            request_id,
-            parent_group: state.parent_group,
-            provider,
-            spec,
-            initial_input,
-        }) {
+        let request = match state.custom_agent.clone() {
+            Some(identity) if identity.base_provider == provider => {
+                ClientRequest::CreateCustomAgentInWorkspace {
+                    request_id,
+                    parent_group: state.parent_group,
+                    identity,
+                    spec,
+                    initial_input,
+                }
+            }
+            Some(_) => {
+                state.set_create_error("The selected profile uses a different provider; reopen the dialog to choose a compatible agent");
+                self.mode = Mode::CreateAgentWorkspace(state);
+                return;
+            }
+            None => ClientRequest::CreateAgentInWorkspace {
+                request_id,
+                parent_group: state.parent_group,
+                provider,
+                spec,
+                initial_input,
+            },
+        };
+        if !self.queue_request(request) {
             state.set_create_error("Request queue is full; retry when pending work completes");
             self.mode = Mode::CreateAgentWorkspace(state);
             return;
         }
         self.active_workspace_create_request_id = Some(request_id);
-        self.begin_pending_toolbar_action(TreeToolbarAction::Agent(provider));
+        if state.custom_agent.is_none() {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Agent(provider));
+        }
         state.set_stage(ilium_ipc::WorkspaceCreateStage::CreatingWorktree);
         self.mode = Mode::CreateAgentWorkspace(state);
     }
@@ -14967,7 +15012,10 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
-        self.clear_pending_workspace_toolbar_actions();
+        if !matches!(&self.mode, Mode::CreateAgentWorkspace(state) if state.custom_agent.is_some())
+        {
+            self.clear_pending_workspace_toolbar_actions();
+        }
         self.mode = Mode::Normal;
         self.status_message = Some(format!("Agent started in worktree (pane {})", pane_id.0));
         if self.tree.get(pane_id).is_some() {
@@ -14980,7 +15028,10 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
-        self.clear_pending_workspace_toolbar_actions();
+        if !matches!(&self.mode, Mode::CreateAgentWorkspace(state) if state.custom_agent.is_some())
+        {
+            self.clear_pending_workspace_toolbar_actions();
+        }
         if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
             state.set_create_error(error);
             state.status_retention = self.processing_event_retention.clone();
@@ -16150,8 +16201,8 @@ impl App {
                     .position(|tree_order| *tree_order == self.ui_settings.tree_order)
                     .unwrap_or(0),
             ),
-            ContextMenuAction::NewAgent(provider) => (
-                vec![
+            ContextMenuAction::NewAgent(provider) => {
+                let mut items = vec![
                     SubmenuItem {
                         action: SubmenuItemAction::AgentHere(provider),
                         label: "Here".to_string(),
@@ -16170,13 +16221,44 @@ impl App {
                         disabled_reason: None,
                         disabled_reason_retention: None,
                     },
-                ],
-                match self.git_settings.default_where {
-                    crate::config::GitDefaultWhere::Here => 0,
-                    crate::config::GitDefaultWhere::NewWorktree => 1,
-                    crate::config::GitDefaultWhere::ExistingWorktree => 2,
-                },
-            ),
+                ];
+                for profile in self
+                    .custom_agents
+                    .profiles
+                    .iter()
+                    .filter(|profile| profile.base_provider == provider)
+                {
+                    for (action, location) in [
+                        (
+                            SubmenuItemAction::CustomAgentHere(profile.id.clone()),
+                            "here",
+                        ),
+                        (
+                            SubmenuItemAction::CustomAgentInWorktree(profile.id.clone(), false),
+                            "in new worktree…",
+                        ),
+                        (
+                            SubmenuItemAction::CustomAgentInWorktree(profile.id.clone(), true),
+                            "in existing worktree…",
+                        ),
+                    ] {
+                        items.push(SubmenuItem {
+                            action,
+                            label: format!("{} {}: {location}", profile.icon, profile.name),
+                            disabled_reason: None,
+                            disabled_reason_retention: None,
+                        });
+                    }
+                }
+                (
+                    items,
+                    match self.git_settings.default_where {
+                        crate::config::GitDefaultWhere::Here => 0,
+                        crate::config::GitDefaultWhere::NewWorktree => 1,
+                        crate::config::GitDefaultWhere::ExistingWorktree => 2,
+                    },
+                )
+            }
             ContextMenuAction::Worktree => {
                 let workspace = self.tree.pane_workspace(menu.target);
                 let removal_reason = match workspace {
@@ -16228,7 +16310,7 @@ impl App {
         };
         let mut items = items;
         if parent == ContextMenuAction::Worktree {
-            items.sort_by_key(|item| match item.action {
+            items.sort_by_key(|item| match &item.action {
                 SubmenuItemAction::OpenWorktreeFolder => 0,
                 SubmenuItemAction::NewTerminalInWorktree => 1,
                 SubmenuItemAction::CopyWorktreeBranch => 2,
@@ -16299,7 +16381,7 @@ impl App {
             return;
         }
         self.select_node(target);
-        match item.action {
+        match item.action.clone() {
             SubmenuItemAction::SetTreeOrder(tree_order) => self.settings_set_tree_order(tree_order),
             SubmenuItemAction::AgentHere(provider) => {
                 self.action_new_command_pane(provider.command_line());
@@ -16309,6 +16391,32 @@ impl App {
             }
             SubmenuItemAction::AgentInExistingWorktree(provider) => {
                 self.open_create_agent_workspace_dialog(provider, target, true)
+            }
+            SubmenuItemAction::CustomAgentHere(profile_id) => {
+                self.action_new_custom_agent(&profile_id);
+            }
+            SubmenuItemAction::CustomAgentInWorktree(profile_id, existing) => {
+                let identity = self
+                    .custom_agents
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+                    .map(|profile| ilium_core::custom_agent::CustomAgentIdentity {
+                        profile_id: profile.id.clone(),
+                        base_provider: profile.base_provider,
+                    });
+                if let Some(identity) = identity {
+                    self.open_create_agent_workspace_dialog(
+                        identity.base_provider,
+                        target,
+                        existing,
+                    );
+                    if let Mode::CreateAgentWorkspace(dialog) = &mut self.mode {
+                        dialog.custom_agent = Some(identity);
+                    }
+                } else {
+                    self.status_message = Some("The custom agent profile no longer exists".into());
+                }
             }
             SubmenuItemAction::CopyWorktreeBranch => {
                 if let Some(workspace) = self.tree.pane_workspace(target) {
@@ -16622,6 +16730,7 @@ impl App {
         self.pending_pane_creations.insert(
             request_id,
             crate::blocking_errors::PendingPaneCreation {
+                custom_profile_id: None,
                 parent_group: state.parent_group,
                 action: Self::toolbar_action_for_command(command),
                 started: Instant::now(),
@@ -17401,6 +17510,70 @@ impl App {
         self.request_new_command_pane(parent, command_line)
     }
 
+    /// Start a saved profile without embedding its environment in the request.
+    pub fn action_new_custom_agent(&mut self, profile_id: &str) -> bool {
+        let Some(profile) = self
+            .custom_agents
+            .profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+        else {
+            self.status_message = Some("The custom agent profile no longer exists".into());
+            return false;
+        };
+        let identity = ilium_core::custom_agent::CustomAgentIdentity {
+            profile_id: profile.id.clone(),
+            base_provider: profile.base_provider,
+        };
+        let target = self.selected_node_id().or_else(|| self.active_pane_id());
+        if let Some(target) =
+            target.filter(|target| self.tree.worktree_container_for_node(*target).is_some())
+        {
+            self.open_create_agent_workspace_dialog(identity.base_provider, target, true);
+            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+                state.custom_agent = Some(identity);
+            }
+            return true;
+        }
+        let parent_group = self.group_for_new_node();
+        let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
+            parent_group,
+            kind: ilium_ipc::NewPaneKind::CustomAgent {
+                identity: identity.clone(),
+                initial_input: None,
+            },
+            working_directory: self.new_pane_working_directory(),
+        });
+        if admitted {
+            self.record_pending_pane_focus(
+                parent_group,
+                PaneContentKind::Terminal,
+                identity.profile_id,
+            );
+        }
+        admitted
+    }
+
+    pub(crate) fn step_custom_toolbar(&mut self, direction: i32) {
+        let profiles = &self.custom_agents.profiles;
+        if profiles.is_empty() {
+            return;
+        }
+        let current = self
+            .custom_toolbar_selected
+            .as_deref()
+            .and_then(|id| profiles.iter().position(|profile| profile.id == id))
+            .unwrap_or(0);
+        let next = if direction < 0 {
+            current.saturating_sub(1)
+        } else {
+            (current + 1).min(profiles.len() - 1)
+        };
+        self.custom_toolbar_selected = Some(profiles[next].id.clone());
+        self.status_message = Some(format!("Custom agent: {}", profiles[next].name));
+    }
+
     /// Opens the file-picker overlay rooted at the session's cwd; the
     /// picked file (if any) becomes a `NewPane` request under the
     /// currently targeted group -- see `Mode::Explorer`'s doc comment for
@@ -17972,7 +18145,28 @@ impl App {
 
     /// Ordinary (non-leader) key handling while the tree panel has focus.
     pub fn handle_tree_key(&mut self, key: crossterm::event::KeyEvent) {
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyModifiers};
+        if key.modifiers.contains(KeyModifiers::ALT) && !self.custom_agents.profiles.is_empty() {
+            match key.code {
+                KeyCode::Left => {
+                    self.step_custom_toolbar(-1);
+                    return;
+                }
+                KeyCode::Right => {
+                    self.step_custom_toolbar(1);
+                    return;
+                }
+                KeyCode::Enter => {
+                    let id = self
+                        .custom_toolbar_selected
+                        .clone()
+                        .unwrap_or_else(|| self.custom_agents.profiles[0].id.clone());
+                    self.action_new_custom_agent(&id);
+                    return;
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Home => {
                 self.tree_state.select_first();
@@ -20565,6 +20759,37 @@ mod tests {
 
     fn app() -> App {
         App::new("test-session".to_string(), std::env::temp_dir())
+    }
+
+    #[test]
+    fn custom_toolbar_keyboard_launches_selected_identity_without_environment_payload() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use ilium_core::custom_agent::{CustomAgentProfile, EnvironmentEntry};
+        let mut app = app();
+        app.custom_agents.profiles = ["first", "second"]
+            .into_iter()
+            .map(|id| CustomAgentProfile {
+                id: id.into(),
+                name: id.into(),
+                icon: "✦".into(),
+                base_provider: BuiltinAgentProvider::Claude,
+                environment: vec![EnvironmentEntry {
+                    key: "TOKEN".into(),
+                    value: "private-sentinel".into(),
+                }],
+            })
+            .collect();
+        app.handle_tree_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT));
+        app.handle_tree_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+        let requests = app.take_outbound_requests();
+        assert!(
+            matches!(requests.as_slice(), [ClientRequest::NewPane { kind: ilium_ipc::NewPaneKind::CustomAgent { identity, .. }, .. }] if identity.profile_id == "second")
+        );
+        assert!(!format!("{requests:?}").contains("private-sentinel"));
+        assert!(app
+            .pending_pane_creations
+            .values()
+            .any(|pending| pending.custom_profile_id.as_deref() == Some("second")));
     }
 
     #[test]
@@ -23885,6 +24110,39 @@ mod tests {
         assert!(submenu.items[1..]
             .iter()
             .all(|item| item.disabled_reason.is_none()));
+    }
+
+    #[test]
+    fn custom_agent_menu_keeps_stable_identity_for_worktree_choices() {
+        let mut app = app();
+        let mut profile = crate::custom_agent_editor::CustomAgentEditor::new().draft;
+        profile.name = "Work profile".into();
+        let profile_id = profile.id.clone();
+        app.custom_agents.profiles.push(profile);
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("context menu should open")
+        };
+        app.open_context_submenu(
+            &mut menu,
+            ContextMenuAction::NewAgent(BuiltinAgentProvider::Claude),
+        );
+        let items = &menu.submenu.as_ref().unwrap().items;
+        assert!(items.iter().any(|item| item.action
+            == SubmenuItemAction::CustomAgentHere(profile_id.clone())
+            && item.label.contains("Work profile")));
+        let item = items
+            .iter()
+            .find(|item| {
+                item.action == SubmenuItemAction::CustomAgentInWorktree(profile_id.clone(), true)
+            })
+            .unwrap();
+        app.execute_context_submenu_item(item, ROOT_ID);
+        let Mode::CreateAgentWorkspace(dialog) = &app.mode else {
+            panic!("worktree dialog should open")
+        };
+        assert_eq!(dialog.custom_agent.as_ref().unwrap().profile_id, profile_id);
     }
 
     #[test]
@@ -29086,7 +29344,8 @@ mod tests {
         assert_eq!(SettingsTab::LlmInstructions.next(), SettingsTab::Titles);
         assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
         assert_eq!(SettingsTab::Triggers.next(), SettingsTab::TextTriggers);
-        assert_eq!(SettingsTab::TextTriggers.next(), SettingsTab::Debug);
+        assert_eq!(SettingsTab::TextTriggers.next(), SettingsTab::CustomAgents);
+        assert_eq!(SettingsTab::CustomAgents.next(), SettingsTab::Debug);
         assert_eq!(SettingsTab::Debug.next(), SettingsTab::Api);
         assert_eq!(SettingsTab::Api.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Setup);
@@ -30601,7 +30860,19 @@ impl App {
             }
         };
         // Admission precedes actual composition, matching production ownership.
-        let reservation = presenter.try_reserve().unwrap();
+        // The output worker can briefly own its queue lock immediately after
+        // startup; exercise real admission without assuming the first try wins.
+        let frame_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let reservation = loop {
+            if let Some(reservation) = presenter.try_reserve() {
+                break reservation;
+            }
+            assert!(
+                std::time::Instant::now() < frame_deadline,
+                "real fixture frame admission stayed busy"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
         let screen = self.layout.screen_area;
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
             screen.width,
@@ -31387,5 +31658,56 @@ mod popover_repo_reuse_tests {
             1,
             "stale check asks again"
         );
+    }
+}
+
+#[cfg(test)]
+mod smart_copy_capture_retention_contract_tests {
+    use super::*;
+
+    #[test]
+    fn model_event_replacement_preserves_independent_capture_debit() {
+        let capture_client = crate::execution::test_document_client();
+        let model_client = crate::execution::test_document_client();
+        let mut app = App::new("capture-retention-contract".into(), std::env::temp_dir());
+        let capture = capture_client
+            .try_reserve_external(ilium_execution::JobCost {
+                input_bytes: 8192,
+                result_bytes: 8192,
+            })
+            .expect("capture reservation")
+            .retain(())
+            .expect("capture owner");
+        let (_, capture_hold) = capture.into_parts();
+        let model = model_client
+            .try_reserve_external(ilium_execution::JobCost {
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .expect("model reservation")
+            .retain(())
+            .expect("model owner");
+        let (_, model_hold) = model.into_parts();
+        let mut session =
+            crate::smart_copy::SmartCopySession::fixture_selection(7123, &["original capture"]);
+        let pane_id = session.pane_id;
+        session.capture_retention = Some(capture_hold);
+        app.smart_copy_session = Some(session);
+        let before = capture_client.usage();
+        app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
+            generation: 7123,
+            pane_id,
+            update: crate::smart_copy_workers::SmartCopyWorkerUpdate::ResponseStarted,
+            retention: Some(model_hold),
+        });
+        let session = app.smart_copy_session.as_ref().expect("same session");
+        assert!(session.capture_retention.is_some());
+        assert!(session.output_retention.is_some());
+        assert_eq!(capture_client.usage().input_bytes, before.input_bytes);
+        assert_eq!(capture_client.usage().result_bytes, before.result_bytes);
+        drop(app.smart_copy_session.take());
+        assert_eq!(capture_client.usage().input_bytes, 0);
+        assert_eq!(capture_client.usage().result_bytes, 0);
+        assert_eq!(model_client.usage().result_bytes, 0);
     }
 }

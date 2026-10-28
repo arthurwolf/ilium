@@ -42,7 +42,7 @@ Two events come from this grant. The host delivers them in batches to `on-events
 
 | Event | Payload | Delivery |
 |---|---|---|
-| `tree-changed` | `list<node-id>` | Coalesced: pending lists merge into one event whose list holds each node once, in first-seen order, at the position of the newest change |
+| `tree-changed` | `list<node-id>` | Coalesced: pending lists merge into one event whose list holds each node once, in the order each node was first seen in the pending events |
 | `node-removed` | `node-id` | Never dropped |
 
 Rules that the reads follow:
@@ -122,7 +122,7 @@ is fixed: "Read the workspace tree".
 │ com.example.tree 0.1.0 by Example Ltd                                      │
 │                                                                            │
 │ <span class="t-hi">Server side</span>                                                                │
-│ [x] Reads the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
+│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
 │                                                                            │
 │ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
 ╰────────────────────────────────────────────────────────────────────────────╯
@@ -148,7 +148,7 @@ Because the reads have no error channel, a missing grant gives an empty answer, 
 - **Declined at install or on the prompt.** `get` returns `none`. `children`, `roots` and `find`
   return empty lists. The first refused call of each plugin instance writes one warn line that
   names `tree.read` and the reason (`declined`). No tree events are delivered.
-- **Revoked while running.** The next read returns `none` or an empty list. The plugin receives
+- **Revoked while running.** The next read returns `none` or an empty list (reads have no error channel, so this is the read-side form of the revoked outcome in ABI-043). The plugin receives
   `deactivate(revoked)`, and it is activated again with the reduced grant set. The restart does not
   count as a failure.
 - **Granted later.** The plugin receives `deactivate(granted)` and is activated again with the new
@@ -287,7 +287,7 @@ export const { lifecycle, handler } = definePlugin({
 
 ## First-party features that request it
 
-These rows of `feature-mapping.md` list `tree.read`: feature 5 (tree ordering), feature 6 (bookmarks,
+These rows of [feature traceability](/pages/reference-feature-traceability/) list `tree.read`: feature 5 (tree ordering), feature 6 (bookmarks,
 locks and removal of empty groups), feature 9 (workspace search), feature 42 (session naming),
 feature 43 (tree organisation) and feature 109 (the `ilium panes` command).
 
@@ -297,7 +297,7 @@ feature 43 (tree organisation) and feature 109 (the `ilium panes` command).
 - [tree.metadata](/pages/capability-tree-metadata/) for the plugin's own bytes on a node.
 - [tree.decorate](/pages/capability-tree-decorate/) for badges and rows.
 - [agent.read](/pages/capability-agent-read/) for the agent data in `node-view.agent`.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes and the trap rules.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the trap rules.
 - [Events and intents](/pages/events-and-intents/) for batching and delivery order.
 
 Checked against the API version `ilium:plugin@0.1.0`.

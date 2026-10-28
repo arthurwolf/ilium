@@ -451,7 +451,7 @@
 </tr>
 </tbody>
 </table>
-<p>The helper binary is installed beside the <code>ilium</code> and <code>ilium-server</code> binaries by the same installer, and the host finds it by looking in the directory of its own executable. A missing helper is not an error for T1-only installs: T2 and T3 packages are refused with <code>host.helper-missing</code> (see <a href="/pages/reference-host-helper/">Sandbox helper</a>).</p>
+<p>The helper binary is installed beside the <code>ilium</code> and <code>ilium-server</code> binaries by the same installer, and the host finds it by looking in the directory of its own executable. A missing helper is not an error for T1-only installs: T2 and T3 packages stay installed but disabled with <code>host.helper-missing</code> (see <a href="/pages/reference-host-helper/">Sandbox helper</a>).</p>
 <h3 id="dependency-edges">Dependency edges</h3>
 <p>The table lists every allowed edge that involves a plugin crate. Any edge not listed is forbidden.</p>
 <table>
@@ -711,7 +711,7 @@ pub trait KernelFacade: Send + Sync {
 <li><strong>[HST-016]</strong> A scene frame that is not ready when the compositor needs it MUST NOT delay the client frame. The compositor MUST reuse the previous complete frame.</li>
 </ul>
 <h3 id="job-instances">Job instances</h3>
-<p>A plugin that uses <code>jobs.run</code> gets a second kind of instance: a <strong>job instance</strong> of the same component, created for one job from the <code>InstancePre</code> of the plugin side (design decision A21 in <a href="/pages/background-jobs/">Background jobs</a>). Job instances are not the plugin's main instance. They have their own Store, their own memory limit (<code>job_memory_mib</code>) and no access to the plugin's main instance state. The number running at once is the plugin's <code>concurrent_jobs</code>. They run on the job worker bank of <code>ilium-execution</code>, not on the plugin executor. See <a href="/pages/api-jobs/">Jobs</a>.</p>
+<p>A plugin that uses <code>jobs.run</code> gets a second kind of instance: a <strong>job instance</strong> of the same component, created for one job from the <code>InstancePre</code> of the plugin side (design decision in <a href="/pages/background-jobs/">Background jobs</a>). Job instances are not the plugin's main instance. They have their own Store, their own memory limit (<code>job_memory_mib</code>) and no access to the plugin's main instance state. The number running at once is the plugin's <code>concurrent_jobs</code>. They run on the job worker bank of <code>ilium-execution</code>, not on the plugin executor. See <a href="/pages/api-jobs/">Jobs</a>.</p>
 <ul>
 <li><strong>[HST-017]</strong> A job MUST run in its own Store, MUST NOT share linear memory with the plugin's main instance, and MUST run on the job worker bank.</li>
 <li><strong>[HST-018]</strong> The count of live job instances of one plugin side MUST NOT exceed <code>concurrent_jobs</code>; further jobs wait in the job queue.</li>

@@ -240,6 +240,9 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         bytes: std::mem::size_of::<R>(),
         visits: 0,
     };
+    if let R::CreateCustomAgentInWorkspace { identity, .. } = request {
+        count.string(&identity.profile_id);
+    }
     match request {
         R::Attach { session, .. } | R::AttachInteractive { session, .. } => count.string(session),
         // Plugin envelopes are bounded by the plugin IPC limits (HST-104), not counted here.
@@ -316,6 +319,13 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
                 count.string(command_line);
                 count.string(initial_input);
             }
+            ilium_ipc::NewPaneKind::CustomAgent {
+                identity,
+                initial_input,
+            } => {
+                count.string(&identity.profile_id);
+                count.optional_string(initial_input);
+            }
         },
         R::NewBoard { name, storage, .. } => {
             count.string(name);
@@ -388,6 +398,11 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
             }
         }
         R::CreateAgentInWorkspace {
+            spec,
+            initial_input,
+            ..
+        }
+        | R::CreateCustomAgentInWorkspace {
             spec,
             initial_input,
             ..

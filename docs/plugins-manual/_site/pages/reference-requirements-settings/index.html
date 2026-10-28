@@ -484,6 +484,12 @@
 <td>(event-delivery) set-json -&gt; settings-changed without delay.</td>
 </tr>
 <tr>
+<td>[SET-032]</td>
+<td>The host MUST show the saving state on a row from the user's edit until the write completes or is refused: the trailing marker <code>Saving…</code> is visible while the debounce runs or a <code>set-json</code> is pending, and gone afterwards.</td>
+<td><a href="/pages/settings-screens/">settings screens</a></td>
+<td>(event-delivery) type into a text row -&gt; marker visible until the write at 600 ms, then gone.</td>
+</tr>
+<tr>
 <td>[SET-050]</td>
 <td>The calls set-info, set-choices, set-row-note, set-row-state, set-item-states, set-choice-items, set-info-rich and set-meter MUST be limited to 10 per second per plugin together. A call over the rate MUST return rate-limited and the previous state MUST stay.</td>
 <td><a href="/pages/reference-settings-schema/#limits">limits</a></td>

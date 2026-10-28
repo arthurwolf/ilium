@@ -478,6 +478,7 @@
 </tr>
 </tbody>
 </table>
+<p>On the wire, <code>transcript</code> returns a <code>request-id</code>; the turns arrive after <code>request-completed</code> through <code>take-transcript</code> (the WIT in <a href="/pages/primitives-agent-transcript/">Agent transcript</a> is authoritative). The <code>agent::transcript(query).block_on()</code> form and the TypeScript <code>await transcript(...)</code> in the examples below are SDK wrappers that submit the request, wait for <code>request-completed</code> and call <code>take-transcript</code> once, so they yield the turn list directly or the request's error.</p>
 <p>See <a href="/pages/primitives-agent/">Agent primitives</a> and <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</p>
 <h3 id="manifest">Manifest</h3>
 <p>The grant goes into <code>manifest.json</code> under <code>capabilities</code>, in the list of the side that uses it (server or client).</p>
@@ -509,7 +510,7 @@ impl Handler for Recap {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != &quot;com.example.recap/count&quot; { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             let query = TranscriptQuery { pane, last_turns: 20, max_bytes: 262_144 };
             match agent::transcript(query).block_on() {
                 Ok(turns) =&gt; {
@@ -533,9 +534,9 @@ export const { lifecycle, handler } = definePlugin({
   side: 'server',
   async onEvents(batch: Event[]): Promise&lt;Submission[]&gt; {
     for (const event of batch) {
-      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.recap/count' || event.val.pane === undefined) continue;
+      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.recap/count' || event.val.context.pane === undefined) continue;
       try {
-        const turns = await transcript({ pane: event.val.pane, lastTurns: 20, maxBytes: 262144 });
+        const turns = await transcript({ pane: event.val.context.pane, lastTurns: 20, maxBytes: 262144 });
         log('info', `${turns.filter((turn) =&gt; turn.role === 'assistant').length} assistant turns`);
       } catch (error) {
         log('warn', `transcript failed: ${String(error)}`);
@@ -582,9 +583,14 @@ export const { lifecycle, handler } = definePlugin({
 <td>Try again after the first turn.</td>
 </tr>
 <tr>
-<td>Grant revoked later</td>
+<td>Grant revoked while a call is in flight</td>
 <td><code>revoked</code></td>
 <td>Discard cached turns.</td>
+</tr>
+<tr>
+<td>Call made after the grant was revoked</td>
+<td><code>not-permitted</code></td>
+<td>Discard cached turns and use <code>agent.read</code> data only.</td>
 </tr>
 </tbody>
 </table>

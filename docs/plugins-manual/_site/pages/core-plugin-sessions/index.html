@@ -393,11 +393,11 @@
 <p class="crumbs"><b>Core plugins</b></p>
 <h1>Sessions</h1>
 
-<p>A session is one project's tree of groups and panes together with the processes that run in it. Sessions outlive the terminal window: the user can detach and reattach, and after a restart the tree comes back from a snapshot. The plugin id is <code>ilium.core.sessions</code> and it runs on the server side only.</p>
+<p>A session is one project's tree of groups and panes together with the processes that run in it. Sessions outlive the terminal window: the user can detach and reattach, and after a restart the tree comes back from a snapshot. The plugin id is <code>ilium.core.sessions</code> and it runs on both sides: the server side owns the session logic and the client side only writes the <code>session</code> kernel setting.</p>
 <p>The snapshot files, the rolling backups, the ordered event journal and the <code>ilium</code>, <code>new-session</code>, <code>ls</code> and <code>kill-session</code> commands are kernel-native: the kernel writes and reads them in its own process before any plugin runs. The plugin drives the parts a plugin can reach through the contract: it relaunches verified agent sessions, freezes panes during a restore, stops processes gracefully, follows client attach and detach events, and creates a project entry.</p>
 <h3 id="what-it-covers">What it covers</h3>
 <ul>
-<li>JSON snapshots and rolling snapshot backups, described in the session recovery guide.</li>
+<li>JSON snapshots and rolling snapshot backups, described in the user documentation page <code>session-recovery.md</code> ("Session recovery" in the Ilium user docs, <code>src/docs/session-recovery.md</code>).</li>
 <li>Restore after a restart and the recovery policy.</li>
 <li>Resuming verified agent sessions, so an agent pane continues its own conversation.</li>
 <li>Detach and reattach, and sessions per project.</li>
@@ -434,7 +434,7 @@
 
 <h3 id="manifest">Manifest</h3>
 <p>This block is a fragment. It lists the contributions. The whole manifest is in <a href="#complete-manifest">Complete manifest</a>.</p>
-<p>The contract version is 0.1. The plugin has a server side only.</p>
+<p>The contract version is 0.1. The plugin has a server side and a client side. The server side owns the session logic; the client side only writes the <code>session</code> kernel setting.</p>
 <pre><code class="language-json">{
   &quot;id&quot;: &quot;ilium.core.sessions&quot;,
   &quot;capabilities&quot;: {
@@ -475,6 +475,7 @@
     &quot;startup&quot;,
     &quot;view:sessions.list&quot;
   ],
+  &quot;replaceable&quot;: false,
   &quot;limits_tier&quot;: &quot;first-party&quot;
 }
 </code></pre>
@@ -586,7 +587,7 @@ export function onEvent(event: { tag: string }): void {
 }
 </code></pre>
 <h4 id="freeze-panes-during-a-restore">Freeze panes during a restore</h4>
-<p>A restored pane is paused until the layout is rebuilt, so no program prints into a half-built screen. The plugin submits <code>freeze-pane</code> for each restored pane and <code>unfreeze-pane</code> once every pane reports <code>running</code> through <code>pane-lifecycle-changed</code>. See <a href="/pages/api-pane-lifecycle/">pane lifecycle</a>, <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle intents</a> and <a href="/pages/api-events/">events</a>.</p>
+<p>A restored pane is paused until the layout is rebuilt, so no program prints into a half-built screen. The plugin submits <code>freeze-pane</code> for each restored pane and <code>unfreeze-pane</code> once every pane reports <code>running</code> through <code>pane-lifecycle-changed</code>. A pane that has not reported <code>running</code> 30 seconds after its <code>freeze-pane</code> is unfrozen anyway, and the plugin logs a warning naming the pane, so one stuck pane never keeps the others frozen. See <a href="/pages/api-pane-lifecycle/">pane lifecycle</a>, <a href="/pages/api-intent-pane-lifecycle/">pane lifecycle intents</a> and <a href="/pages/api-events/">events</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::types::intents::{FreezePaneSpec, UnfreezePaneSpec};
 
@@ -687,7 +688,7 @@ export const openProject = (root: string, title: string): Submission =&gt; ({
 <td><code>snapshot-sections</code></td>
 <td>collect</td>
 <td>Store extra JSON in the session snapshot and receive it back on restore.</td>
-<td>entry: id, max_bytes (the plugin answers <code>snapshot</code> and <code>restore</code> messages)</td>
+<td>entry: id, max_bytes (the plugin answers the <code>snapshot-section</code> and <code>restore-section</code> requests in its handler)</td>
 <td>standard</td>
 </tr>
 <tr>
@@ -709,7 +710,7 @@ export const openProject = (root: string, title: string): Submission =&gt; ({
 </ul>
 <p><strong>Replaceable:</strong> no. Its data and its role in the Plugins screen make a replacement unsafe, so <code>replaceable</code> is <code>false</code>.</p>
 <h4 id="example-keeps-a-small-json-document-with-the-session">Example: Keeps a small JSON document with the session</h4>
-<p>A package adds this entry in its manifest. It needs no code.</p>
+<p>A package adds this entry in its manifest. The manifest only declares the section; the plugin's handler must still answer <code>snapshot-section</code> and <code>restore-section</code> (see <a href="/pages/reference-config-and-data-migration/#snapshot-sections">Config and data migration</a>).</p>
 <pre><code class="language-json">{
   &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
   &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.sessions/snapshot-sections&quot;] },

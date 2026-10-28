@@ -74,7 +74,15 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.bump_tree_version();
             None
         }
-
+        ServerEvent::PaneCustomAgentIdentity { pane_id, identity } => {
+            if let Some(identity) = identity {
+                app.custom_agent_panes.insert(pane_id, identity);
+            } else {
+                app.custom_agent_panes.remove(&pane_id);
+            }
+            app.bump_tree_version();
+            None
+        }
         ServerEvent::PaneStateSnapshot {
             tree,
             detection_evidence,
@@ -830,6 +838,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.frozen_panes
         .retain(|pane_id| live_pane_ids.contains(pane_id));
+    app.custom_agent_panes
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.frozen_screens
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.auto_freeze_since
@@ -1243,6 +1253,48 @@ mod tests {
         let pane = app.tree.get(pane_id).unwrap();
         assert_eq!(pane.parent, Some(first_group));
         assert_eq!(pane.name, "new title");
+    }
+
+    #[test]
+    fn custom_profile_identity_survives_replay_and_is_pruned_with_the_pane() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let first = tree
+            .add_pane(group, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(group, "two", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+        for (pane_id, id) in [(first, "one"), (second, "two")] {
+            apply(
+                &mut app,
+                ServerEvent::PaneCustomAgentIdentity {
+                    pane_id,
+                    identity: Some(ilium_core::custom_agent::CustomAgentIdentity {
+                        profile_id: id.into(),
+                        base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                    }),
+                },
+            );
+        }
+        assert_ne!(
+            app.custom_agent_panes[&first].profile_id,
+            app.custom_agent_panes[&second].profile_id
+        );
+        tree.remove_node(first).unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        assert!(!app.custom_agent_panes.contains_key(&first));
+        assert!(app.custom_agent_panes.contains_key(&second));
+        apply(
+            &mut app,
+            ServerEvent::PaneCustomAgentIdentity {
+                pane_id: second,
+                identity: None,
+            },
+        );
+        assert!(!app.custom_agent_panes.contains_key(&second));
     }
 
     #[test]

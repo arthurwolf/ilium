@@ -406,7 +406,7 @@
 <tbody>
 <tr>
 <td><code>editor.read</code></td>
-<td><code>viewport</code>, <code>set-minimap-marks</code>, <code>editor-pointer</code>, <code>editor-viewport-changed</code>, the <code>token-provider</code> export, the <code>languages</code> manifest key</td>
+<td><code>viewport</code>, <code>set-minimap-marks</code>, <code>editor-pointer</code>, <code>editor-viewport-changed</code>, the <code>token-provider</code> export, the <code>contributes.languages</code> manifest key</td>
 </tr>
 </tbody>
 </table>
@@ -449,7 +449,7 @@ tokens: func(buffer: buffer-id, first-line: u32, lines: list&lt;string&gt;, stat
 <h3 id="viewport">Viewport</h3>
 <p><code>first-line</code> and <code>last-line</code> are the first and last buffer lines that are at least partly visible; <code>columns</code> and <code>rows</code> are the size of the text area. Wrapped lines count once. The event arrives after scrolling, resizing or switching the buffer in the pane. A plugin that mirrors a second view, such as a preview, follows <code>first-line</code> and answers with its own scroll.</p>
 <h3 id="minimap-marks">Minimap marks</h3>
-<p>The minimap is the narrow strip at the right of an editor pane; the host draws it from the text density with the ramp <code>·</code>, <code>-</code>, <code>=</code>, <code>≡</code>, <code>≣</code>, <code>█</code>. A plugin adds marks to three lanes (0 to 2) to show diagnostics, search hits or changes. A mark has a line and a colour; the layer name scopes the set to the plugin, and each call replaces the layer. At most 4,096 marks per layer. Marks are removed when the plugin stops.</p>
+<p>The minimap is the narrow strip at the right of an editor pane; the host draws it from the text density with the ramp <code>·</code>, <code>-</code>, <code>=</code>, <code>≡</code>, <code>≣</code>, <code>█</code>. A plugin adds marks to three lanes (0 to 2) to show diagnostics, search hits or changes. A mark has a line and a colour; the layer name scopes the set to the plugin, and each call replaces the layer. At most 4,096 marks per layer. A layer name is 1 to 32 characters from <code>[a-z0-9-]</code> and is scoped to the calling plugin. A plugin has at most 16 layers per buffer. Marks are removed when the plugin stops.</p>
 <pre class="term">╭──≡ ● · main.rs───────────────────────────────────────╮
 │fn main() {                                       <span class="t-dim">·</span>   │
 │    <span class="t-hi">let</span> total = add(1, 2);                      <span class="t-dim">-</span>     │
@@ -549,8 +549,12 @@ export const { lifecycle, handler, tokenProvider } = definePlugin({
 <td><code>none</code></td>
 </tr>
 <tr>
-<td><code>set-minimap-marks</code> over 4,096 marks, or lane over 2</td>
+<td><code>set-minimap-marks</code> over 4,096 marks, lane over 2, or a bad layer name</td>
 <td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>set-minimap-marks</code> on a 17th layer of the buffer</td>
+<td><code>quota-exceeded</code></td>
 </tr>
 <tr>
 <td><code>set-minimap-marks</code> for an unknown buffer</td>
@@ -558,7 +562,7 @@ export const { lifecycle, handler, tokenProvider } = definePlugin({
 </tr>
 <tr>
 <td><code>tokens</code> over 10 ms</td>
-<td>lines stay plain, retried later</td>
+<td>lines stay plain; the host calls again at the next change of the buffer or viewport (no timer, so no interval), with no retry limit, and each call has the same 10 ms deadline</td>
 </tr>
 <tr>
 <td>Missing grant</td>

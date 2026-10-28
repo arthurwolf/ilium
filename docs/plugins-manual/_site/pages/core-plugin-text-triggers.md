@@ -93,6 +93,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "startup",
     "view:text-triggers.rules"
   ],
+  "replaceable": true,
+  "surface": [
+    "services:test-rule",
+    "points:rule-packs",
+    "points:before-fire",
+    "topics:fired"
+  ],
   "limits_tier": "first-party"
 }
 ```
@@ -304,7 +311,7 @@ Other plugins change what `ilium.core.text-triggers` does through the points bel
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `rule-packs` | collect | Ship a group of rules the user can enable as a set. | entry: id, title, rules (list of pattern, reply, enabled) | standard |
+| `rule-packs` | collect | Ship a group of rules the user can enable as a set. | entry: id, title, rules (list of pattern, reply, enabled) | high |
 | `before-fire` | hook (veto) | Refuse or end a rule that is about to send text. | rule, pane, match, reply_length | high |
 
 **Services** (grant `services.use:<name>`):
@@ -315,7 +322,7 @@ Other plugins change what `ilium.core.text-triggers` does through the points bel
 
 - `ilium.core.text-triggers/fired`: { rule, pane }
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.text-triggers"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.text-triggers"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Refuses rules marked `office` outside 09:00 to 18:00
 

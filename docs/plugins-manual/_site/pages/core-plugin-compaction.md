@@ -8,11 +8,11 @@ An agent's own auto-compact trigger lives inside the agent command-line tool, so
 
 ### What it covers
 
-- **Remote compaction.** The summary is built through the inference model in a job, so the agent keeps working while it runs. The Remote compaction page of the user documentation describes what the user sees.
-- **Compact button routing.** The compact button of the agent toolbar starts the same job as the palette command. See Starting it in Remote compaction.
-- **Compaction optimiser.** The Optimization tab of Settings recommends a threshold, with Apply and Revert. See the Optimization part of the Settings tab reference.
-- **Auto-compact trigger reader.** The plugin reads the trigger each agent uses (see Techniques in Remote compaction), so the recommendation matches the agent.
-- **Session conversion.** Convert a session between Claude and Codex, described under Session recovery in the user documentation.
+- **Remote compaction.** The summary is built through the inference model in a job, so the agent keeps working while it runs. The user page `src/docs/remote-compaction.md` describes what the user sees.
+- **Compact button routing.** The compact button of the agent toolbar starts the same job as the palette command. See the section Starting it in `src/docs/remote-compaction.md`.
+- **Compaction optimiser.** The Optimization tab of Settings recommends a threshold, with Apply and Revert. See the Remote compaction section of `src/docs/settings.md`.
+- **Auto-compact trigger reader.** The plugin reads the trigger each agent uses (see the section Techniques in `src/docs/remote-compaction.md`), so the recommendation matches the agent.
+- **Session conversion.** Convert a session between Claude and Codex, described in `src/docs/session-recovery.md`.
 
 ### See it
 
@@ -119,7 +119,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "event:agent-context-low",
+    "event:agent-activity-changed",
     "service:compact",
     "view:compaction.optimizer"
   ],
@@ -474,7 +474,7 @@ Other plugins change what `ilium.core.compaction` does through the points below.
 
 - `ilium.core.compaction/finished`: { pane, tokens_before, tokens_after }
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.compaction"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.compaction"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Refuses a compaction while a test run is active in the pane
 

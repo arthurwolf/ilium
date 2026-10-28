@@ -20,7 +20,7 @@ The Terminal plugin (`ilium.core.terminal`, side both) owns terminal panes as pl
 
 ### See it
 
-<figure><img src="/assets/demos/05-screen-transfer.gif" alt="The screen of one terminal pane is pasted into another pane" loading="lazy"><figcaption>Screen transfer. The visible screen and history of the source pane arrive in the target pane as one paste.</figcaption></figure>
+<figure><img src="/assets/demos/05-screen-transfer.gif" alt="Ilium transfers a complete visible report to the local receiver in the terminal on the right" loading="lazy"><figcaption>Screen transfer sends the visible report to the terminal on the right as one bracketed paste. Both terminals run local fixtures; the receiver verifies the bytes.</figcaption></figure>
 
 ### What the user sees
 

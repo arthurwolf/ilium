@@ -411,7 +411,7 @@
 <li>Requirements</li>
 </ul>
 <h3 id="how-paths-are-chosen">How paths are chosen</h3>
-<p>Ilium never writes a hard-coded <code>~</code>. It asks the operating system for three roots through the <code>directories</code> crate, with the project name <code>ilium</code> and no organisation. The roots are the configuration folder, the data folder and the cache folder.</p>
+<p>Ilium never writes a hard-coded <code>~</code>. It asks the operating system for three roots through the <code>directories</code> crate, with the project name <code>ilium</code> and no organisation: the configuration folder, the data folder and the cache folder. A fourth root, the state folder (<code>&lt;state&gt;</code>), holds the grant, consent, trust and audit files.</p>
 <table>
 <thead>
 <tr>
@@ -440,14 +440,20 @@
 <td><code>~/Library/Caches/ilium</code></td>
 <td><code>%LOCALAPPDATA%\ilium\cache</code></td>
 </tr>
+<tr>
+<td>State (<code>&lt;state&gt;</code>)</td>
+<td><code>$XDG_STATE_HOME/ilium</code> (default <code>~/.local/state/ilium</code>)</td>
+<td><code>~/Library/Application Support/Ilium/state</code></td>
+<td><code>%LOCALAPPDATA%\Ilium\state</code></td>
+</tr>
 </tbody>
 </table>
-<p>On Linux the roots follow <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code> and <code>XDG_CACHE_HOME</code> when they are set. The rest of this page writes <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code> and <code>&lt;cache&gt;</code> and never repeats the system paths. A project folder (<code>&lt;project&gt;</code>) is the canonical launch folder of a session. Project-scope files live in <code>&lt;project&gt;/.ilium/</code>.</p>
+<p>On Linux the roots follow <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code>, <code>XDG_CACHE_HOME</code> and <code>XDG_STATE_HOME</code> when they are set. The rest of this page writes <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code> and <code>&lt;state&gt;</code> and never repeats the system paths. A project folder (<code>&lt;project&gt;</code>) is the canonical launch folder of a session. Project-scope files live in <code>&lt;project&gt;/.ilium/</code>.</p>
 <ul>
-<li>[USR-200] The host MUST resolve <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code> and <code>&lt;cache&gt;</code> with the <code>directories</code> crate for the project name <code>ilium</code>, and MUST NOT write plugin files anywhere else. Test: start Ilium with <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code> and <code>XDG_CACHE_HOME</code> pointing at three empty folders, install a plugin, and assert that no plugin file appears outside those folders and the project's <code>.ilium</code> folder.</li>
+<li>[USR-200] The host MUST resolve <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code> and <code>&lt;state&gt;</code> (the per-OS paths of [SEC-112]) with the <code>directories</code> crate for the project name <code>ilium</code>, and MUST NOT write plugin files anywhere else. Test: start Ilium with <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code>, <code>XDG_CACHE_HOME</code> and <code>XDG_STATE_HOME</code> pointing at four empty folders, install a plugin, and assert that no plugin file appears outside those folders and the project's <code>.ilium</code> folder.</li>
 </ul>
 <h3 id="the-table-of-items">The table of items</h3>
-<p>Paths start at <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code> or <code>&lt;project&gt;</code>. The plugin root is <code>&lt;data&gt;/plugins/</code>. The layout of the plugin root is owned by <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>; this table repeats it for users and adds the user-facing files.</p>
+<p>Paths start at <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code>, <code>&lt;state&gt;</code> or <code>&lt;project&gt;</code>. The plugin root is <code>&lt;data&gt;/plugins/</code>. The layout of the plugin root is owned by <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>; this table repeats it for users and adds the user-facing files.</p>
 <table>
 <thead>
 <tr>
@@ -502,6 +508,13 @@
 <td><code>uninstall --purge</code>, or Delete data in the uninstall dialog</td>
 </tr>
 <tr>
+<td>Purge note</td>
+<td><code>&lt;data&gt;/plugins/purged.json</code></td>
+<td>JSON list of plugin id and purge time</td>
+<td><code>uninstall --purge</code></td>
+<td>Ilium, once every known project has been opened and cleaned of that plugin's data; a project never reopened keeps its data</td>
+</tr>
+<tr>
 <td>Global storage bucket</td>
 <td><code>&lt;data&gt;/plugins/storage/&lt;id&gt;/global.db</code></td>
 <td>Key-value database</td>
@@ -517,15 +530,15 @@
 </tr>
 <tr>
 <td>Grants and consent answers</td>
-<td><code>$XDG_STATE_HOME/ilium/grants.json</code> and <code>consents.json</code> (one file each for all plugins)</td>
+<td><code>&lt;state&gt;/grants.json</code> and <code>consents.json</code> (one file each for all plugins)</td>
 <td>JSON</td>
 <td>Review dialog, Capabilities tab, <code>ilium plugin grants</code>, first-use prompts</td>
 <td>Every uninstall</td>
 </tr>
 <tr>
 <td>Trusted publisher keys</td>
-<td><code>$XDG_STATE_HOME/ilium/trust.json</code>, or the path in <code>ILIUM_TRUST_STORE</code></td>
-<td>JSON list of <code>{publisher, fingerprint, public_key, added_at}</code></td>
+<td><code>&lt;state&gt;/trust.json</code>, or the path in <code>ILIUM_TRUST_STORE</code></td>
+<td>JSON object <code>ilium-trust/1</code> with a <code>keys</code> list; see <a href="/pages/reference-signing-and-trust/">Signing and trust</a></td>
 <td><code>ilium plugin trust add</code> and the trust prompt</td>
 <td><code>ilium plugin trust remove</code></td>
 </tr>
@@ -552,14 +565,14 @@
 </tr>
 <tr>
 <td>Plugin cache</td>
-<td><code>&lt;cache&gt;/plugins/&lt;id&gt;/</code></td>
+<td><code>&lt;cache dir&gt;/ilium/plugins/&lt;id&gt;/</code></td>
 <td>Whatever the plugin writes</td>
 <td>The plugin, through <code>fs.write:cache</code></td>
 <td>The host may evict it at any time. Every uninstall removes it</td>
 </tr>
 <tr>
 <td>Compile cache</td>
-<td><code>&lt;cache&gt;/plugins/compile/</code></td>
+<td><code>&lt;cache dir&gt;/ilium/plugins/compile/</code></td>
 <td>Compiled components</td>
 <td>Install of a T2 or T3 plugin</td>
 <td>The host, when space is low</td>
@@ -594,7 +607,7 @@
 </tr>
 <tr>
 <td>Audit log</td>
-<td><code>$XDG_STATE_HOME/ilium/audit/audit.jsonl</code> (see <a href="/pages/reference-audit-log/">Audit log</a>)</td>
+<td><code>&lt;state&gt;/audit/audit.jsonl</code> (see <a href="/pages/reference-audit-log/">Audit log</a>)</td>
 <td>JSON lines</td>
 <td>The host</td>
 <td>Rotation by <code>audit.max_mib</code> and <code>audit.keep_days</code></td>
@@ -621,7 +634,7 @@
 }
 </code></pre>
 <p><code>first_start_not_now</code> counts how often the user chose Not now at the first-start prompt of a bundled plugin. See <a href="/pages/user-install-and-manage/#first-start-of-a-bundled-plugin">Install and manage plugins</a>.</p>
-<p>The fingerprint of a key is shown as 32 uppercase hexadecimal characters in 8 groups of 4 separated by <code>-</code> (see the CLI reference). The short form in dialogs shows the first 4 and the last 4 characters joined by an ellipsis, for example <code>3F2A…9C01</code>.</p>
+<p>The fingerprint of a key is shown as 64 lowercase hexadecimal characters in 16 groups of 4 (see the CLI reference, [DEV-112]). The short form is the first 8 characters, for example <code>3f2a91c0</code>. It is shown only beside the full form or in <code>trust list</code> ([SEC-177]).</p>
 <h3 id="the-plugin-log">The plugin log</h3>
 <p>Each plugin has one log, shared by all its sides. The host writes refusals, traps, restarts and process runs into it, and the plugin writes its own lines through the <code>log</code> import. See <a href="/pages/api-log/">log</a>.</p>
 <table>
@@ -705,7 +718,7 @@
 <td>removed</td>
 <td>removed</td>
 <td>kept</td>
-<td>kept when there is no terminal, otherwise asked</td>
+<td>kept, no question asked</td>
 <td>removed</td>
 <td>removed</td>
 <td>kept 7 days</td>
@@ -767,7 +780,7 @@
 <ol>
 <li><code>&lt;data&gt;/plugins/store/</code> and <code>&lt;data&gt;/plugins/installed.json</code>, so the same versions install again.</li>
 <li>The trust store <code>trust.json</code>, so signed packages are still trusted.</li>
-<li><code>$XDG_STATE_HOME/ilium/grants.json</code> and <code>consents.json</code>, if you want the same answers. Skip it to be asked again on the new machine.</li>
+<li><code>&lt;state&gt;/grants.json</code> and <code>consents.json</code>, if you want the same answers. Skip it to be asked again on the new machine.</li>
 <li><code>&lt;config&gt;/config.toml</code> and the <code>.ilium</code> folders of your projects, for settings.</li>
 <li><code>&lt;data&gt;/plugins/data/</code> and <code>&lt;data&gt;/plugins/storage/</code>, for the plugin's own data.</li>
 </ol>
@@ -803,7 +816,7 @@
 </tr>
 <tr>
 <td>Two Ilium servers share one profile</td>
-<td>Each write takes <code>installed.lock</code>. The second writer waits up to 5 s, then fails the action with <code>conflict</code></td>
+<td>Each write takes <code>installed.lock</code>. The second writer polls every 100 ms for up to 30 s, then fails the action with <code>install.locked</code> (exit code 4, [LIF-066])</td>
 </tr>
 </tbody>
 </table>

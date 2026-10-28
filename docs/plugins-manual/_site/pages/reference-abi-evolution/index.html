@@ -660,13 +660,13 @@ export function describe(outcome: Outcome): string {
 </tbody>
 </table>
 <h2 id="7-the-cases-that-the-first-freeze-fixes">7. The cases that the first freeze fixes</h2>
-<p>The counts below are the sizes of the main variants and enums in 0.1.0. A later minor can only make them larger.</p>
+<p>The counts below are the sizes of the main variants and enums in 0.1.0. A later minor can only make them larger. The extension counts are subsets of those totals, not additions introduced in a later API version: the frozen WIT and case-order snapshot already include them in 0.1.0, including <code>ok-epoch</code>. Future additions require a separately recorded introduction version.</p>
 <table>
 <thead>
 <tr>
 <th>Type</th>
 <th>Cases in 0.1.0</th>
-<th>Appended after the base set</th>
+<th>Included extension cases in the same freeze</th>
 </tr>
 </thead>
 <tbody>
@@ -715,7 +715,7 @@ export function describe(outcome: Outcome): string {
 <p>The event catalogue shows 35 rows for the base events, because three rows each describe two cases (<code>editor-opened</code> and <code>editor-closed</code>, <code>key-pressed</code> and <code>key-released</code>, <code>client-attached</code> and <code>client-detached</code>). The count of cases is 38 for the base events [ABI-002].</p>
 <h2 id="8-edge-cases">8. Edge cases</h2>
 <ul>
-<li><strong>A patch release.</strong> A patch version changes no interface. A component built for <code>0.1.0</code> and a host at <code>0.1.1</code> still need the exact <code>api</code> string match, so a package states the patch it was built for. The host at a later patch of the same minor loads it through the same adapter.</li>
+<li><strong>A patch release.</strong> A patch version changes no interface, and the window counts minors only. A component built for <code>0.1.0</code> loads on a host at <code>0.1.1</code>: the <code>api</code> string is well formed and its minor is inside the window, so stage 3 accepts it, and the host uses the adapter of that minor. The string in the manifest and the <code>ilium:api-version</code> section of the component must still equal each other in all three fields (otherwise <code>manifest.api-version</code>), so a package states the patch it was built for.</li>
 <li><strong>A reserved case.</strong> <code>crash-restart</code> exists in <code>deactivation-reason</code> so that the numbering never changes. The host never delivers it [ABI-028].</li>
 <li><strong>A removed feature.</strong> An unstable feature may be removed. A package that lists it fails with <code>manifest.unstable-unknown</code> after the upgrade.</li>
 <li><strong>Names kept by users.</strong> Pane kind ids, command ids, settings keys, decoration slots and topic names are stored in user snapshots and keep their spelling for ever.</li>

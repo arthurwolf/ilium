@@ -62,6 +62,10 @@ impl App {
         if diagnostic != self.statistics_diagnostic {
             if let Some(error) = &diagnostic {
                 self.status_message = Some(error.clone());
+            } else if self.status_message.as_ref() == self.statistics_diagnostic.as_ref() {
+                // Only retire the status owned by this resolved diagnostic;
+                // a newer status from another operation must remain visible.
+                self.status_message = None;
             }
             self.statistics_diagnostic = diagnostic;
             return true;
@@ -75,6 +79,57 @@ impl App {
             crate::config::TreeOrder::CostDescending
         } else {
             self.ui_settings.tree_order
+        }
+    }
+}
+
+#[cfg(test)]
+mod cache_status_tests {
+    use super::*;
+    use crate::session_stats::SessionStats;
+    use crate::session_stats_store::StatsRequest;
+    use ilium_core::AgentClass;
+    use std::{path::PathBuf, sync::Arc};
+
+    #[test]
+    fn resolving_cache_pressure_retires_only_its_own_status_and_f9_details() {
+        for has_other_status in [false, true] {
+            let mut app = App::new(
+                "synthetic-cache-status".into(),
+                PathBuf::from("/fixture/project"),
+            );
+            for pane in 1..=16 {
+                app.session_stats
+                    .insert_ready_for_test(NodeId(pane), Arc::new(SessionStats::default()));
+            }
+            assert!(!app.session_stats.request_refresh(
+                NodeId(8181),
+                StatsRequest {
+                    class: AgentClass::Codex,
+                    session_id: "synthetic-status".into(),
+                    project_path: PathBuf::from("/fixture/project"),
+                    home: PathBuf::from("/fixture/home"),
+                },
+                Instant::now()
+            ));
+            app.tick_cost(Instant::now());
+            let old = app.statistics_diagnostic.clone().unwrap();
+            assert_eq!(app.status_message.as_ref(), Some(&old));
+            if has_other_status {
+                app.status_message = Some("Unrelated operation failed".into());
+            }
+            app.session_stats.forget(NodeId(1));
+            app.tick_cost(Instant::now());
+            assert!(app.statistics_diagnostic.is_none());
+            if has_other_status {
+                assert_eq!(
+                    app.status_message.as_deref(),
+                    Some("Unrelated operation failed")
+                );
+            } else {
+                assert!(app.status_message.is_none());
+            }
+            assert!(!crate::diagnostic::current_text(&app).is_some_and(|text| text.contains(&old)));
         }
     }
 }
