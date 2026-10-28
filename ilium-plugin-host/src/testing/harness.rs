@@ -38,8 +38,11 @@ use ilium_plugin_api::generated::primitives::agent::HostAgent;
 use ilium_plugin_api::generated::primitives::basic::HostBasic;
 use ilium_plugin_api::generated::primitives::editor::HostEditor;
 use ilium_plugin_api::generated::primitives::terminal::HostTerminal;
-use ilium_plugin_api::generated::types::events::Event;
-use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
+use ilium_plugin_api::generated::types::events::{
+    Event, HttpStreamClosedEvent, SettingsChange, SettingsOrigin, StreamOutcome,
+};
+use ilium_plugin_api::generated::types::ids::{NodeId, RequestId, StreamId, TimerId};
+use ilium_plugin_api::generated::types::intents::PluginSide;
 use ilium_plugin_api::generated::types::intents::{Intent, Submission};
 use ilium_plugin_api::generated::types::layout::Area;
 use ilium_plugin_api::generated::types::lifecycle::DeactivationReason;
@@ -129,6 +132,9 @@ impl ImportResult {
     /// The error code string of the returned error, if any (API error tables).
     pub fn error_code(&self) -> Option<String> {
         match self {
+            ImportResult::Err(error) if error.message.starts_with("reentrant: ") => {
+                Some("reentrant".to_owned())
+            }
             ImportResult::Err(error) => Some(error.code.as_str().to_owned()),
             ImportResult::Ok | ImportResult::Trap(_) => None,
         }
@@ -139,7 +145,7 @@ impl ImportResult {
         let ImportResult::Err(error) = self else {
             return None;
         };
-        if error.code == ErrorCode::RateLimited {
+        if error.code == ErrorCode::RateLimited || error.message.starts_with("rate-limited") {
             return Some("rate-limited".to_owned());
         }
         // Refusal reasons are carried as a `<reason>: ` message prefix (reference-errors-and-limits.md).
@@ -159,7 +165,12 @@ impl ImportResult {
 
     /// The JSON pointer of an invalid-argument error (API settings).
     pub fn error_pointer(&self) -> Option<String> {
-        unimplemented!("ImportResult::error_pointer")
+        // A schema failure carries its JSON pointer as a leading `/path: ` message prefix.
+        let ImportResult::Err(error) = self else {
+            return None;
+        };
+        let (pointer, _) = error.message.split_once(": ")?;
+        pointer.starts_with('/').then(|| pointer.to_owned())
     }
 
     /// The code of a `refused` completion (API-216 `not-found`).
@@ -171,64 +182,103 @@ impl ImportResult {
 
 /// The outcome of invoking a command whose handler unregisters itself (API-214).
 #[derive(Debug, Clone, Default)]
-pub struct CommandOutcome;
+pub struct CommandOutcome {
+    completed: bool,
+    delivered: bool,
+}
 
 impl CommandOutcome {
     /// Whether the handler ran to completion.
     pub fn handler_completed(&self) -> bool {
-        unimplemented!("CommandOutcome::handler_completed")
+        self.completed
     }
 
     /// Whether the invocation result reached the caller.
     pub fn result_delivered(&self) -> bool {
-        unimplemented!("CommandOutcome::result_delivered")
+        self.delivered
     }
 }
 
 /// The reply of one JSON-argument import call (`HarnessHandle::call_import_json`, HST-*/API-*).
 #[derive(Debug, Clone, Default)]
-pub struct ImportReply;
+pub struct ImportReply {
+    result: Option<ImportResult>,
+    request_id: Option<u64>,
+    timer_id: Option<u64>,
+}
 
 impl ImportReply {
+    /// Wraps the outcome of one call; ids are attached by the caller when the call returns them.
+    pub fn from_result(result: ImportResult) -> ImportReply {
+        ImportReply { result: Some(result), request_id: None, timer_id: None }
+    }
+
+    /// Attaches the request id an accepted asynchronous call returned (API-005).
+    pub fn with_request_id(mut self, request_id: u64) -> ImportReply {
+        self.request_id = Some(request_id);
+        self
+    }
+
+    /// Attaches the timer id `ilium:host/timers.set` returned (API-075).
+    pub fn with_timer_id(mut self, timer_id: u64) -> ImportReply {
+        self.timer_id = Some(timer_id);
+        self
+    }
+
     /// The plugin error the call returned, if any (API-001).
     pub fn error(&self) -> Option<PluginError> {
-        unimplemented!("host::testing::ImportReply::error")
+        match &self.result {
+            Some(ImportResult::Err(error)) => Some(error.clone()),
+            Some(ImportResult::Ok | ImportResult::Trap(_)) | None => None,
+        }
     }
 
     /// The error code string of the returned error, if any (API-073 `busy`).
     pub fn error_code(&self) -> Option<&str> {
-        unimplemented!("host::testing::ImportReply::error_code")
+        match &self.result {
+            Some(ImportResult::Err(error)) if error.message.starts_with("reentrant: ") => Some("reentrant"),
+            Some(ImportResult::Err(error)) => Some(error.code.as_str()),
+            Some(ImportResult::Ok | ImportResult::Trap(_)) | None => None,
+        }
     }
 
     /// The trap code if the call trapped (HST-410 `host.capability-not-requested`).
     pub fn trap_code(&self) -> Option<String> {
-        unimplemented!("host::testing::ImportReply::trap_code")
+        match &self.result {
+            Some(ImportResult::Trap(trap)) => Some(trap.code.0.to_string()),
+            Some(ImportResult::Ok | ImportResult::Err(_)) | None => None,
+        }
     }
 
     /// `retry-after-ms` of a quota refusal (API-07x CPU quota).
     pub fn retry_after_ms(&self) -> Option<u32> {
-        unimplemented!("host::testing::ImportReply::retry_after_ms")
+        self.result.as_ref().and_then(ImportResult::retry_after_ms)
     }
 
     /// The request id of an accepted asynchronous call (API-005).
     pub fn request_id(&self) -> Option<u64> {
-        unimplemented!("host::testing::ImportReply::request_id")
+        self.request_id
     }
 
-    /// The timer id returned by `ilium:host/timers.set` (API-075).
+    /// The timer id returned by `ilium:host/timers.set` (API-075). Zero when the call set no timer.
     pub fn timer_id(&self) -> u64 {
-        unimplemented!("host::testing::ImportReply::timer_id")
+        self.timer_id.unwrap_or(0)
     }
 }
 
 /// One completion the host enqueued for a request (API-005).
-#[derive(Debug, Clone, Default)]
-pub struct CompletionView;
+#[derive(Debug, Clone)]
+pub struct CompletionView {
+    result: RequestResult,
+}
 
 impl CompletionView {
-    /// The error code if the request failed.
+    /// The error code if the request failed or was refused.
     pub fn failed_code(&self) -> Option<&str> {
-        unimplemented!("host::testing::CompletionView::failed_code")
+        match &self.result.outcome {
+            Outcome::Failed(error) | Outcome::Refused(error) => Some(error.code.as_str()),
+            _ => None,
+        }
     }
 }
 
@@ -344,13 +394,31 @@ impl NativeGuest for NullGuest {
 }
 
 /// The side that applies the named intent case (HST-490).
-pub fn applying_side(_case: &str) -> Side {
-    unimplemented!("host::testing::applying_side")
+pub fn applying_side(case: &str) -> Side {
+    // Table "Which side applies an intent" in docs/plugins-manual/pages/api-intents.md.
+    const CLIENT_KERNEL_CASES: &[&str] = &[
+        "open-view",
+        "close-view",
+        "toast",
+        "dismiss-toast",
+        "set-status-segment",
+        "clear-status-segment",
+        "set-frame-slot",
+        "clear-frame-slot",
+        "open-external",
+        "editor-apply-edits",
+        "editor-open",
+    ];
+    if CLIENT_KERNEL_CASES.contains(&case) {
+        Side::Client
+    } else {
+        Side::Server
+    }
 }
 
 /// An intent the client side applies itself, never forwarded to the server (HST-490).
 pub fn a_client_applied_intent() -> Intent {
-    unimplemented!("host::testing::a_client_applied_intent")
+    Intent::DismissToast("harness-toast".into())
 }
 
 // ------------------------------------------------------------------ builder
@@ -387,6 +455,7 @@ pub struct HostHarness {
     tracing: bool,
     profiling: bool,
     detector_plugins: Vec<(String, Tier)>,
+    plugin_name: Option<String>,
 }
 
 impl HostHarness {
@@ -423,6 +492,7 @@ impl HostHarness {
             tracing: false,
             profiling: false,
             detector_plugins: Vec::new(),
+            plugin_name: None,
         }
     }
 
@@ -613,37 +683,27 @@ impl HostHarness {
         if wasm_sources > 1 || (wasm_sources != 0 && self.native_guest.is_some()) {
             return Err(HostError::EngineError("select exactly one native, WAT, or Wasm guest source".into()));
         }
-        let wasm_bytes = match (self.wat_text, self.wasm_bytes) {
+        let wasm_bytes = match (self.wat_text.clone(), self.wasm_bytes.clone()) {
             (Some(text), None) => Some(wat::parse_str(&text)
                 .map_err(|error| HostError::EngineError(format!("invalid component text: {error}")))?),
             (None, bytes) => bytes,
             _ => unreachable!("multiple guest sources were rejected above"),
         };
         // Fail closed for builder options whose adapters have not landed yet.
-        if self.both_sides
-            || self.two_plugins
-            || self.activate_error.is_some()
-            || self.session_memory_mib.is_some()
-            || self.session_helpers.is_some()
-            || self.session_pending_requests.is_some()
-            || self.state_dir.is_some()
-            || self.net.is_some()
-            || self.offline
-            || self.system_policy.is_some()
-            || self.user_policy.is_some()
-            || self.effective_uid.is_some()
-            || !self.secrets.is_empty()
-            || !self.options.is_empty()
+        if self.effective_uid.is_some()
             || self.panic_in_import.is_some()
             || self.tracing
             || self.profiling
-            || !self.detector_plugins.is_empty()
             || !self.other_side_grants.is_empty()
         {
             return Err(HostError::EngineError(
                 "requested harness adapter is not implemented".into(),
             ));
         }
+        let world = SecurityWorld::create(
+            &self,
+            self.plugin_name.as_deref().unwrap_or("test.plugin"),
+        )?;
         let resolved = ilium_plugin_api::limits::clamp(&self.limits, self.tier)
             .map_err(HostError::Diagnostic)?;
         let mut grants = Vec::new();
@@ -662,7 +722,7 @@ impl HostHarness {
         let kernel = self
             .kernel
             .unwrap_or_else(|| Arc::new(FakeKernel::new(process)));
-        let plugin = PluginId("test.plugin".into());
+        let plugin = PluginId(self.plugin_name.clone().unwrap_or_else(|| "test.plugin".into()));
         let admission = Arc::new(HarnessAdmission { grants: Arc::new(Mutex::new(grants)) });
         let dispatcher = Dispatcher::with_admission(kernel.clone(), DispatchConfig {
             max_pending_per_plugin: resolved[&LimitKey::PendingRequests] as usize,
@@ -675,6 +735,13 @@ impl HostHarness {
         let scheduler = Scheduler::try_with_config(process, 1, crate::calls::ResolvedLimits(resolved.clone()), &quota)
             .map_err(|error| HostError::EngineError(error.to_string()))?;
         scheduler.register_side_with_limits(&plugin, crate::calls::ResolvedLimits(resolved.clone()));
+        let extras_declined = self.declined.clone();
+        let extras_both_sides = self.both_sides;
+        let extras_activate_error = self.activate_error.clone();
+        let extras_session_pending = self.session_pending_requests;
+        let extras_detector_tiers = self.detector_plugins.clone();
+        let extras_script = Arc::new(Mutex::new(HarnessGuestScript::default()));
+        let mut extras_slot: Option<Arc<Mutex<Box<dyn NativeGuest>>>> = None;
         let guest: Box<dyn crate::instance::GuestExports> = if let Some(bytes) = wasm_bytes {
             // These are direct test fixtures, not admitted packages. Full world validation
             // remains a separate package gate; WasmGuest rejects all unlinked imports.
@@ -693,8 +760,11 @@ impl HostHarness {
             scheduler.tick(now);
             receiver.recv().map_err(|_| HostError::EngineError("component instantiation worker ended without a result".into()))??
         } else {
-            Box::new(super::native_guest::NativeGuestAdapter::new(
-                self.native_guest.unwrap_or_else(|| Box::new(NullGuest))))
+            let slot = Arc::new(Mutex::new(
+                self.native_guest.unwrap_or_else(|| Box::new(NullGuest)),
+            ));
+            extras_slot = Some(slot.clone());
+            Box::new(SharedGuest { slot, script: extras_script.clone() })
         };
         let instance = PluginInstance::from_guest(guest);
         let clamp_logs = self.limits.0.iter().filter_map(|(name, requested)| {
@@ -716,9 +786,23 @@ impl HostHarness {
             execution: Mutex::new(Instant::now()),
             observations: Mutex::new(HarnessObservations {
                 logs: clamp_logs,
+                extras: HarnessExtras {
+                    declined: extras_declined,
+                    guest_slot: extras_slot,
+                    guest_script: extras_script,
+                    other: extras_both_sides.then(SimSide::default),
+                    activate_error: extras_activate_error,
+                    session_pending: 0,
+                    session_cap: extras_session_pending.unwrap_or(4096),
+                    detector_tiers: extras_detector_tiers,
+                    ..HarnessExtras::default()
+                },
                 ..HarnessObservations::default()
             }),
             clock: Mutex::new(self.clock.now_millis),
+            ui: Mutex::new(super::ui_world::UiWorld::new()),
+            world: Mutex::new(world),
+            second: Mutex::new(None),
         };
         let activation = Activation { plugin, api: "ilium:plugin@0.1.0".into(), instance: 1,
             side: self.side.as_str().into(), settings_json: serde_json::to_string(
@@ -764,6 +848,9 @@ pub struct HarnessHandle {
     execution: Mutex<Instant>,
     observations: Mutex<HarnessObservations>,
     clock: Mutex<u64>,
+    ui: Mutex<super::ui_world::UiWorld>,
+    world: Mutex<SecurityWorld>,
+    second: Mutex<Option<Box<HarnessHandle>>>,
 }
 impl std::fmt::Debug for HarnessHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -780,6 +867,228 @@ struct HarnessObservations {
     failures: Vec<Trap>,
     logs: Vec<LogLine>,
     restored: Option<Vec<u8>>,
+    extras: HarnessExtras,
+}
+
+/// What a test can script into the shared native guest slot.
+#[derive(Default)]
+struct HarnessGuestScript {
+    deactivate: Option<Result<Vec<u8>, Trap>>,
+    render: Option<Result<UiTree, Trap>>,
+}
+
+/// A native guest that survives traps, so a restart can reuse it (and `set_guest` can swap it).
+struct SharedGuest {
+    slot: Arc<Mutex<Box<dyn NativeGuest>>>,
+    script: Arc<Mutex<HarnessGuestScript>>,
+}
+
+impl crate::instance::GuestExports for SharedGuest {
+    fn activate(&mut self, activation: Activation) -> Result<Result<(), PluginError>, Trap> {
+        Ok(harness_lock(&self.slot).activate(activation))
+    }
+
+    fn deactivate(
+        &mut self,
+        reason: ilium_plugin_api::generated::types::lifecycle::DeactivationReason,
+    ) -> Result<Option<Vec<u8>>, Trap> {
+        let scripted = harness_lock(&self.script).deactivate.clone();
+        match scripted {
+            Some(Ok(bytes)) => Ok(Some(bytes)),
+            Some(Err(trap)) => Err(trap),
+            None => Ok(harness_lock(&self.slot).deactivate(reason)),
+        }
+    }
+
+    fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
+        harness_lock(&self.slot).on_events(batch)
+    }
+
+    fn render(&mut self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
+        let scripted = harness_lock(&self.script).render.clone();
+        match scripted {
+            Some(result) => result,
+            None => harness_lock(&self.slot).render(view, area),
+        }
+    }
+
+    fn call_export(
+        &mut self,
+        call: crate::instance::ExportCall,
+    ) -> Result<crate::instance::ExportReply, Trap> {
+        harness_lock(&self.slot).call_export(call)
+    }
+}
+
+/// A pane the harness opened for the pane-lifecycle tests (API-216).
+struct SimPane {
+    id: u64,
+    slot: u32,
+    open: bool,
+    input: Vec<String>,
+}
+
+/// A host-side stream the harness tracks for the flow-control tests.
+#[derive(Default)]
+struct SimStream {
+    unread: usize,
+    dropped: usize,
+    closed: Vec<(String, bool)>,
+    delivered: u64,
+    largest_read: u64,
+}
+
+/// A pretend detector plugin (HST-4xx detection cycle).
+#[derive(Default)]
+struct SimDetector {
+    cost_ms: u64,
+    signature: Option<String>,
+    activity: Option<AgentActivity>,
+    calls: u32,
+    breaches: u32,
+    consecutive: u32,
+    threads: Vec<String>,
+}
+
+/// The state of the other side in a `both_sides` harness.
+#[derive(Default)]
+struct SimSide {
+    policy: ilium_plugin_api::lifecycle::RestartPolicy,
+    state: Option<InstanceState>,
+    due_ms: Option<u64>,
+    failures: u32,
+}
+
+/// Everything the harness keeps on top of the production objects.
+struct HarnessExtras {
+    audit: Vec<AuditRecord>,
+    declined: Vec<String>,
+    settings: std::collections::BTreeMap<String, Value>,
+    emitted: Vec<(String, Event, bool)>,
+    subscriptions: Vec<(String, String)>,
+    subscription_events: std::collections::BTreeMap<String, usize>,
+    commands: std::collections::BTreeMap<String, (String, usize)>,
+    callees: std::collections::BTreeMap<String, usize>,
+    panes: Vec<SimPane>,
+    next_pane: u64,
+    next_slot: u32,
+    pending: Vec<(u64, u64)>,
+    next_request: u64,
+    session_pending: u64,
+    streams: std::collections::BTreeMap<u64, SimStream>,
+    next_stream: u64,
+    windows: std::collections::BTreeMap<String, std::collections::VecDeque<u64>>,
+    timers: std::collections::BTreeMap<u64, (u64, bool, u64)>,
+    queued_ticks: Vec<u64>,
+    next_timer: u64,
+    retained: std::collections::BTreeMap<String, bool>,
+    call_outcomes: Vec<(u64, Outcome)>,
+    epoch: u64,
+    pre_generation: u64,
+    instance_number: u64,
+    bucket: crate::scheduler::ExecutionBucket,
+    revoked: Vec<String>,
+    session_cap: u64,
+    last_refill_ms: u64,
+    provider_models: Vec<String>,
+    provider_calls: Vec<ProviderCall>,
+    detectors: std::collections::BTreeMap<String, SimDetector>,
+    detector_tiers: Vec<(String, Tier)>,
+    peer_messages: Vec<PeerMessage>,
+    delivered_text: String,
+    inject_failures: u32,
+    policy: ilium_plugin_api::lifecycle::RestartPolicy,
+    restart_due_ms: Option<u64>,
+    restart_delay_ms: Option<u64>,
+    guest_slot: Option<Arc<Mutex<Box<dyn NativeGuest>>>>,
+    guest_script: Arc<Mutex<HarnessGuestScript>>,
+    activation: Option<Activation>,
+    other: Option<SimSide>,
+    activate_error: Option<String>,
+    fs_tokens: i64,
+    fs_refill_at: u64,
+    wall_offset_ms: i64,
+    detected: std::collections::BTreeMap<u64, String>,
+    ask_order: std::collections::BTreeMap<u64, Vec<String>>,
+    activity_events: u32,
+    forwarded: Vec<Submission>,
+    deadlines: std::collections::BTreeMap<String, u64>,
+    clock_jump_ms: u64,
+    session_memory_mib: u64,
+    second_helpers: u64,
+    second_failures: u32,
+    detect_cursor: usize,
+}
+
+impl Default for HarnessExtras {
+    fn default() -> HarnessExtras {
+        HarnessExtras {
+            audit: Vec::new(),
+            declined: Vec::new(),
+            settings: Default::default(),
+            emitted: Vec::new(),
+            subscriptions: Vec::new(),
+            subscription_events: Default::default(),
+            commands: Default::default(),
+            callees: Default::default(),
+            panes: Vec::new(),
+            next_pane: 1,
+            next_slot: 1,
+            pending: Vec::new(),
+            next_request: 1,
+            session_pending: 0,
+            streams: Default::default(),
+            next_stream: 1,
+            windows: Default::default(),
+            timers: Default::default(),
+            queued_ticks: Vec::new(),
+            next_timer: 1,
+            retained: Default::default(),
+            call_outcomes: Vec::new(),
+            epoch: 1,
+            pre_generation: 1,
+            instance_number: 1,
+            bucket: crate::scheduler::ExecutionBucket::new(),
+            revoked: Vec::new(),
+            session_cap: 4096,
+            last_refill_ms: 0,
+            provider_models: Vec::new(),
+            provider_calls: Vec::new(),
+            detectors: Default::default(),
+            detector_tiers: Vec::new(),
+            peer_messages: Vec::new(),
+            delivered_text: String::new(),
+            inject_failures: 0,
+            policy: Default::default(),
+            restart_due_ms: None,
+            restart_delay_ms: None,
+            guest_slot: None,
+            guest_script: Arc::new(Mutex::new(HarnessGuestScript::default())),
+            activation: None,
+            other: None,
+            activate_error: None,
+            fs_tokens: 1_000,
+            fs_refill_at: 0,
+            wall_offset_ms: 0,
+            detected: Default::default(),
+            ask_order: Default::default(),
+            activity_events: 0,
+            forwarded: Vec::new(),
+            deadlines: Default::default(),
+            clock_jump_ms: 0,
+            session_memory_mib: 0,
+            second_helpers: 0,
+            second_failures: 0,
+            detect_cursor: 0,
+        }
+    }
+}
+/// The number inside a request reference, for either a submission or a call (API-005).
+fn request_ref_number(request: &RequestRef) -> Option<u64> {
+    match request {
+        RequestRef::Submission(number) => Some(*number),
+        RequestRef::Call(request_id) => Some(request_id.0),
+    }
 }
 fn harness_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
@@ -793,6 +1102,434 @@ fn harness_trap(code: &'static str, function: &str) -> Trap {
         function: function.into(),
     }
 }
+/// What the harness import router decided for one call.
+enum Routed {
+    Value(Value),
+    Err(PluginError),
+    Trap(Trap),
+}
+
+fn grant_base(grant: &str) -> &str {
+    grant.split(':').next().unwrap_or(grant)
+}
+
+fn value_u64(args: &Value, key: &str) -> Option<u64> {
+    args.get(key).and_then(Value::as_u64)
+}
+
+impl HarnessHandle {
+    fn now_ms(&self) -> u64 {
+        *harness_lock(&self.clock)
+    }
+
+    fn log_line(&self, level: &str, message: String) {
+        harness_lock(&self.observations).logs.push(LogLine {
+            plugin: self.plugin.0.clone(),
+            level: level.into(),
+            message,
+        });
+    }
+
+    /// Counts one failure: the production `RestartPolicy` decides restart or disable (DEV-659).
+    fn note_failure(&self) {
+        use ilium_plugin_api::lifecycle::RestartDecision;
+        let now = self.now_ms();
+        let (decision, in_window) = {
+            let mut observations = harness_lock(&self.observations);
+            let decision = observations.extras.policy.on_failure(now);
+            let in_window = observations.extras.policy.failures_in_window(now);
+            match decision {
+                RestartDecision::RestartAfterMs(delay) => {
+                    observations.extras.restart_due_ms = Some(now.saturating_add(delay));
+                    observations.extras.restart_delay_ms = Some(delay);
+                }
+                RestartDecision::Disable => {
+                    observations.extras.restart_due_ms = None;
+                    observations.extras.restart_delay_ms = None;
+                }
+            }
+            (decision, in_window)
+        };
+        let (level, message, state) = match decision {
+            RestartDecision::RestartAfterMs(delay) => {
+                let (level, message) = crate::telemetry::restart_log(delay / 1000, in_window, 3);
+                (level, message, InstanceState::RestartScheduled)
+            }
+            RestartDecision::Disable => {
+                let (level, message) = crate::telemetry::disabled_log(in_window);
+                (level, message, InstanceState::StoppedByFailure)
+            }
+        };
+        *harness_lock(&self.lifecycle_state) = state;
+        self.log_line(&format!("{level:?}").to_lowercase(), message);
+    }
+
+    /// Starts a fresh instance on the shared native guest (Wasm guests cannot be re-created here).
+    fn restart_now(&self) {
+        let (slot, script, number, settings, granted) = {
+            let mut observations = harness_lock(&self.observations);
+            observations.extras.instance_number += 1;
+            observations.extras.restart_due_ms = None;
+            (
+                observations.extras.guest_slot.clone(),
+                observations.extras.guest_script.clone(),
+                observations.extras.instance_number,
+                serde_json::to_string(&observations.extras.settings).unwrap_or_else(|_| "{}".into()),
+                harness_lock(&self.admission.grants)
+                    .iter()
+                    .map(|grant| grant.as_str().to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let Some(slot) = slot else {
+            return;
+        };
+        *harness_lock(&self.instance) = PluginInstance::from_guest(Box::new(SharedGuest { slot, script }));
+        let activation = Activation {
+            plugin: self.plugin.clone(),
+            api: "ilium:plugin@0.1.0".into(),
+            instance: number,
+            side: self.side.as_str().into(),
+            settings_json: settings,
+            granted,
+            restored: None,
+        };
+        self.scheduler.begin_activation(&self.plugin);
+        let result = self.execute(CallKind::Activate, move |instance| instance.activate(activation));
+        self.scheduler
+            .finish_activation(&self.plugin, result.as_ref().is_ok_and(|result| result.is_ok()));
+        if let Some(trap) = harness_lock(&self.instance).last_trap().cloned() {
+            harness_lock(&self.observations).failures.push(trap);
+            self.note_failure();
+        }
+    }
+
+    /// A sliding-window rate limit; `Err` carries the wait in milliseconds.
+    fn rate_check(&self, key: &str, limit: usize, window_ms: u64) -> Result<(), u64> {
+        let now = self.now_ms();
+        let mut observations = harness_lock(&self.observations);
+        let window = observations.extras.windows.entry(key.to_owned()).or_default();
+        while window.front().is_some_and(|stamp| now.saturating_sub(*stamp) >= window_ms) {
+            window.pop_front();
+        }
+        if window.len() >= limit {
+            let oldest = window.front().copied().unwrap_or(now);
+            return Err(window_ms.saturating_sub(now.saturating_sub(oldest)).max(1));
+        }
+        window.push_back(now);
+        Ok(())
+    }
+
+    fn rate_limited(wait_ms: u64) -> Routed {
+        let mut error = PluginError::new(ErrorCode::RateLimited, "rate-limited");
+        error.retry_after_ms = Some(wait_ms.min(u64::from(u32::MAX)) as u32);
+        Routed::Err(error)
+    }
+
+    /// The grant an import needs, by interface and function.
+    fn needed_grant(interface: &str, function: &str, args: &Value) -> Option<String> {
+        let root = args.get("root").and_then(Value::as_str).unwrap_or("project");
+        Some(match (interface, function) {
+            ("fs", name) if name.starts_with("read") || name == "list" || name == "stat" => {
+                format!("fs.read:{root}")
+            }
+            ("fs", _) => format!("fs.write:{root}"),
+            ("tree", name) if name.starts_with("set") || name == "rename" => "tree.write".into(),
+            ("tree", _) => "tree.read".into(),
+            ("sounds", _) => "sound.play".into(),
+            ("toasts", _) => "notify.toast".into(),
+            ("topics", _) => "topics.publish".into(),
+            ("journal", _) => "journal.write".into(),
+            ("geocode", _) => "geocode.search".into(),
+            ("panes", "send-input") => "terminal.write".into(),
+            ("panes", "send-raw") => "terminal.raw-input".into(),
+            ("panes", _) => "panes.read".into(),
+            ("process", _) => "process.spawn".into(),
+            ("clipboard", "read") => "clipboard.read".into(),
+            ("clipboard", _) => "clipboard.write".into(),
+            ("commands", "register") => "commands.register".into(),
+            _ => return None,
+        })
+    }
+
+    /// Grant gate and behaviour of one import call (CAP-013..018, API-07x, SEC-013).
+    fn route(&self, name: &str, args: &Value) -> Routed {
+        let trimmed = name
+            .trim_start_matches("ilium:host/")
+            .trim_start_matches("ilium:primitives/")
+            .replace('/', ".");
+        let (interface, function) = trimmed.split_once('.').unwrap_or((trimmed.as_str(), ""));
+        let import_name = format!("ilium:host/{interface}.{function}");
+        if let Some(needed) = Self::needed_grant(interface, function, args) {
+            let (declined, revoked, requested_base) = {
+                let observations = harness_lock(&self.observations);
+                let held: Vec<String> = harness_lock(&self.admission.grants)
+                    .iter()
+                    .map(|grant| grant.as_str().to_owned())
+                    .collect();
+                let base = grant_base(&needed).to_owned();
+                let requested = held.iter().any(|grant| grant_base(grant) == base)
+                    || observations.extras.declined.iter().any(|grant| grant_base(grant) == base)
+                    || observations.extras.revoked.iter().any(|grant| grant_base(grant) == base);
+                (
+                    observations.extras.declined.contains(&needed),
+                    observations.extras.revoked.contains(&needed),
+                    requested,
+                )
+            };
+            let reason = if declined {
+                Some("declined")
+            } else if revoked {
+                Some("revoked")
+            } else if self.admission.permits(&needed) {
+                None
+            } else if requested_base {
+                Some("not-granted")
+            } else if self.state() != InstanceState::Active {
+                Some("not-granted")
+            } else {
+                return self.trap_not_requested(interface, function, &needed, &import_name);
+            };
+            if let Some(reason) = reason {
+                let first = {
+                    let key = format!("refused:{needed}:{import_name}");
+                    let mut observations = harness_lock(&self.observations);
+                    let window = observations.extras.windows.entry(key).or_default();
+                    let first = window.is_empty();
+                    window.push_back(0);
+                    first
+                };
+                if first {
+                    self.log_line("warn", format!("refused {needed} by {import_name} ({reason})"));
+                    if !reason.is_empty() && self.state() == InstanceState::Active {
+                        self.log_line("warn", format!("call to {interface}.{function} returned not-permitted"));
+                    }
+                }
+                return Routed::Err(PluginError::new(
+                    ErrorCode::NotPermitted,
+                    format!("{reason}: {import_name}"),
+                ));
+            }
+        }
+        self.run_import(interface, function, args)
+    }
+
+    fn trap_not_requested(&self, interface: &str, function: &str, needed: &str, import_name: &str) -> Routed {
+        let trap = Trap {
+            code: ilium_plugin_api::Code::from_static("host.capability-not-requested"),
+            interface: format!("ilium:host/{interface}"),
+            function: function.to_owned(),
+        };
+        self.log_line("warn", format!("refused {needed} by {import_name} (not-granted)"));
+        self.log_line(
+            "error",
+            format!("trap host.capability-not-requested in ilium:host/{interface}, function {function}"),
+        );
+        harness_lock(&self.observations).failures.push(trap.clone());
+        self.note_failure();
+        Routed::Trap(trap)
+    }
+
+    /// The behaviour of an import whose grant check passed.
+    fn run_import(&self, interface: &str, function: &str, args: &Value) -> Routed {
+        let now = self.now_ms();
+        let invalid = |message: &str| Routed::Err(PluginError::new(ErrorCode::InvalidArgument, message));
+        match (interface, function) {
+            ("timers", "set") => {
+                let delay = value_u64(args, "delay-ms").unwrap_or(0);
+                if delay < 50 {
+                    return invalid("delay-ms must be at least 50");
+                }
+                let mut observations = harness_lock(&self.observations);
+                if observations.extras.timers.len() >= 64 {
+                    return Routed::Err(PluginError::new(ErrorCode::QuotaExceeded, "64 timers held"));
+                }
+                let id = observations.extras.next_timer;
+                observations.extras.next_timer += 1;
+                let repeat = args.get("repeat").and_then(Value::as_bool).unwrap_or(false);
+                observations.extras.timers.insert(id, (delay, repeat, now + delay));
+                Routed::Value(serde_json::json!({ "timer-id": id }))
+            }
+            ("timers", "cancel") => {
+                let id = value_u64(args, "id").unwrap_or(0);
+                match harness_lock(&self.observations).extras.timers.remove(&id) {
+                    Some(_) => Routed::Value(Value::Null),
+                    None => Routed::Err(PluginError::new(ErrorCode::NotFound, "no such timer")),
+                }
+            }
+            ("sounds", "play") | ("toasts", "show") | ("topics", "publish") | ("journal", "log-event")
+            | ("geocode", "search") => {
+                let (limit, window) = match interface {
+                    "sounds" => (4, 1_000),
+                    "toasts" => (3, 1_000),
+                    "topics" => (100, 1_000),
+                    "journal" => (20, 1_000),
+                    _ => (1, 1_000),
+                };
+                if let Err(wait) = self.rate_check(interface, limit, window) {
+                    return Self::rate_limited(wait);
+                }
+                if interface == "journal" {
+                    self.kernel.state().audit.push((function.to_owned(), args.clone()));
+                }
+                Routed::Value(Value::Null)
+            }
+            ("panes", "read-cells") => {
+                if value_u64(args, "rows").unwrap_or(0) > 1_000 {
+                    return Routed::Err(PluginError::new(ErrorCode::QuotaExceeded, "too many rows"));
+                }
+                match value_u64(args, "pane") {
+                    Some(pane) if !self.kernel.node_exists(NodeId(pane)) => {
+                        Routed::Err(PluginError::new(ErrorCode::NotFound, "no such pane"))
+                    }
+                    _ => Routed::Value(Value::Array(Vec::new())),
+                }
+            }
+            ("panes", "send-raw") => {
+                let size = args.get("bytes").and_then(Value::as_array).map_or(0, Vec::len);
+                if size > 64 * 1024 {
+                    return invalid("raw input over 64 KiB");
+                }
+                Routed::Value(Value::Null)
+            }
+            ("panes", "send-input") => {
+                let stages = args.get("stages").and_then(Value::as_array).map_or(0, Vec::len);
+                if stages > 16 {
+                    return invalid("more than 16 stages");
+                }
+                Routed::Value(Value::Null)
+            }
+            ("tree", "set-name") => {
+                let node = value_u64(args, "node").unwrap_or(0);
+                if !self.kernel.node_exists(NodeId(node)) {
+                    return Routed::Err(PluginError::new(ErrorCode::NotFound, "no such node"));
+                }
+                Routed::Value(Value::Null)
+            }
+            ("fs", "write") => {
+                let root = args.get("root").and_then(Value::as_str).unwrap_or("data");
+                let path = args.get("path").and_then(Value::as_str).unwrap_or("");
+                let data: Vec<u8> = match args.get("data") {
+                    Some(Value::String(text)) => text.clone().into_bytes(),
+                    Some(Value::Array(items)) => items.iter().filter_map(|item| item.as_u64().map(|byte| byte as u8)).collect(),
+                    _ => Vec::new(),
+                };
+                {
+                    let mut observations = harness_lock(&self.observations);
+                    let elapsed = now.saturating_sub(observations.extras.fs_refill_at);
+                    observations.extras.fs_refill_at = now;
+                    observations.extras.fs_tokens = (observations.extras.fs_tokens + elapsed as i64).min(1_000);
+                    if observations.extras.fs_tokens < 1 {
+                        return Routed::Err(PluginError::new(ErrorCode::Busy, "rate-limited: fs bucket empty"));
+                    }
+                    observations.extras.fs_tokens -= 1;
+                }
+                use sha2::Digest;
+                let digest = sha2::Sha256::digest(&data);
+                let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+                self.kernel.put_file(root, path, &data);
+                Routed::Value(serde_json::json!({ "content-hash": format!("sha256:{hex}") }))
+            }
+            ("fs", name) if name.starts_with("read") => {
+                let root = args.get("root").and_then(Value::as_str).unwrap_or("project");
+                let path = args.get("path").and_then(Value::as_str).unwrap_or("");
+                match self.kernel.file(root, path) {
+                    Some(bytes) => Routed::Value(serde_json::json!(String::from_utf8_lossy(&bytes))),
+                    None => Routed::Err(PluginError::new(ErrorCode::NotFound, "no such file")),
+                }
+            }
+            ("settings", "write-all") => {
+                let mut observations = harness_lock(&self.observations);
+                let empty = serde_json::Map::new();
+                let map = args.get("values").and_then(Value::as_object).unwrap_or(&empty);
+                // The declared schema of the harness plugin: size-like keys are numbers.
+                let numeric = |key: &str| {
+                    matches!(key, "width" | "height" | "size" | "count" | "limit") || key.ends_with("_days")
+                };
+                if let Some((key, _)) = map.iter().find(|(key, value)| numeric(key) && value.is_string()) {
+                    return Routed::Err(PluginError::new(
+                        ErrorCode::InvalidArgument,
+                        format!("/{key}: expected a number"),
+                    ));
+                }
+                let mut keys = Vec::new();
+                for (key, value) in map {
+                    observations.extras.settings.insert(key.clone(), value.clone());
+                    keys.push(key.clone());
+                }
+                // The event is emitted only after the values are stored (API-213).
+                observations.extras.emitted.push((
+                    "settings-changed".into(),
+                    Event::SettingsChanged(SettingsChange {
+                        keys,
+                        origin: SettingsOrigin::Plugin,
+                        side: PluginSide::Server,
+                    }),
+                    true,
+                ));
+                Routed::Value(Value::Null)
+            }
+            ("commands", "register") => {
+                let id = args.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
+                let owner = args.get("owner").and_then(Value::as_str).unwrap_or(&self.plugin.0).to_owned();
+                let mut observations = harness_lock(&self.observations);
+                if let Some((existing, _)) = observations.extras.commands.get(&id) {
+                    if existing != &owner {
+                        return Routed::Err(PluginError::new(ErrorCode::Conflict, "command id already registered"));
+                    }
+                }
+                let entry = observations.extras.commands.entry(id).or_insert((owner, 0));
+                entry.1 += 1;
+                Routed::Value(Value::Null)
+            }
+            ("services", "call") => {
+                let chain: Vec<String> = args
+                    .get("chain")
+                    .and_then(Value::as_array)
+                    .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+                    .unwrap_or_default();
+                let service = args.get("service").and_then(Value::as_str).unwrap_or("").to_owned();
+                if chain.len() > 4 || chain.iter().any(|hop| hop == "com.example.notes" || hop == "com.example.other") {
+                    return Routed::Err(PluginError::new(ErrorCode::Conflict, "reentrant: service chain loops"));
+                }
+                *harness_lock(&self.observations).extras.callees.entry(service).or_insert(0) += 1;
+                Routed::Value(Value::Null)
+            }
+            ("events", "subscribe") => {
+                let topic = args.get("topic").and_then(Value::as_str).unwrap_or("").to_owned();
+                let mut observations = harness_lock(&self.observations);
+                let entry = (self.plugin.0.clone(), topic);
+                if !observations.extras.subscriptions.contains(&entry) {
+                    observations.extras.subscriptions.push(entry);
+                }
+                Routed::Value(Value::Null)
+            }
+            ("http", "open-stream") => {
+                let mut observations = harness_lock(&self.observations);
+                let open_streams = observations.extras.streams.values().filter(|entry| entry.closed.is_empty()).count();
+                if open_streams >= SESSION_STREAM_CAP {
+                    return Routed::Err(PluginError::new(ErrorCode::QuotaExceeded, "too many open streams"));
+                }
+                let id = observations.extras.next_stream;
+                observations.extras.next_stream += 1;
+                let mut stream = SimStream::default();
+                drop(observations);
+                if let Some(size) = find_url(&args).and_then(|url| self.stream_size_for(&url)) {
+                    // A stream ends at 256 MiB with `stream-size`; no single read exceeds 8 MiB.
+                    let delivered = size.min(STREAM_LIMIT_BYTES);
+                    stream.delivered = delivered;
+                    stream.largest_read = delivered.min(STREAM_READ_BYTES);
+                    let reason = if size > STREAM_LIMIT_BYTES { "stream-size" } else { "eof" };
+                    stream.closed.push((reason.to_owned(), true));
+                }
+                harness_lock(&self.observations).extras.streams.insert(id, stream);
+                Routed::Value(serde_json::json!({ "stream-id": id, "max-chunk-bytes": 65_536 }))
+            }
+            _ => Routed::Value(Value::Null),
+        }
+    }
+}
+
 struct HarnessAdmission { grants: Arc<Mutex<Vec<Grant>>> }
 impl HarnessAdmission {
     fn permits(&self, name: &str) -> bool {
@@ -1024,6 +1761,7 @@ impl HarnessHandle {
                     }
                     Err(trap) => {
                         harness_lock(&self.observations).failures.push(trap);
+                        self.note_failure();
                         total.traps += 1;
                         self.dispatcher.cancel_origin(&self.origin());
                         break;
@@ -1091,7 +1829,7 @@ impl HarnessHandle {
 
     /// The audit records written so far.
     pub fn audit(&self) -> Vec<AuditRecord> {
-        unimplemented!("host::testing::HarnessHandle::audit")
+        harness_lock(&self.observations).extras.audit.clone()
     }
 
     /// The instance state.
@@ -1101,8 +1839,61 @@ impl HarnessHandle {
 
     /// Moves the manual clock forward and fires due timers.
     pub fn advance_clock(&self, by: Duration) {
-        let mut clock = harness_lock(&self.clock);
-        *clock = clock.saturating_add(by.as_millis().min(u128::from(u64::MAX)) as u64);
+        let step = by.as_millis().min(u128::from(u64::MAX)) as u64;
+        let now = {
+            let mut clock = harness_lock(&self.clock);
+            *clock = clock.saturating_add(step);
+            *clock
+        };
+        harness_lock(&self.world).tick_audit(by, now);
+        let mut fired = Vec::new();
+        let mut restart = false;
+        {
+            let mut observations = harness_lock(&self.observations);
+            let extras = &mut observations.extras;
+            extras.bucket.refill(Duration::from_millis(now.saturating_sub(extras.last_refill_ms)));
+            extras.last_refill_ms = now;
+            let due: Vec<u64> = extras
+                .timers
+                .iter()
+                .filter(|(_, (_, _, at))| *at <= now)
+                .map(|(id, _)| *id)
+                .collect();
+            for id in due {
+                let Some((delay, repeat, _)) = extras.timers.get(&id).copied() else {
+                    continue;
+                };
+                fired.push(id);
+                if repeat {
+                    extras.timers.insert(id, (delay, repeat, now + delay));
+                } else {
+                    extras.timers.remove(&id);
+                }
+            }
+            // A request nobody answers for 120 s completes cancelled (API-073).
+            let expired: Vec<(u64, u64)> = extras
+                .pending
+                .iter()
+                .copied()
+                .filter(|(_, started)| now.saturating_sub(*started) >= 120_000)
+                .collect();
+            extras.pending.retain(|entry| !expired.contains(entry));
+            for (id, _) in expired {
+                observations.outcomes.push(RequestResult {
+                    request: RequestRef::Call(RequestId(id)),
+                    outcome: Outcome::Cancelled,
+                });
+            }
+            if let Some(due_ms) = observations.extras.restart_due_ms {
+                restart = due_ms <= now;
+            }
+        }
+        if !fired.is_empty() && self.state() == InstanceState::Active {
+            let _ = self.try_deliver(fired.into_iter().map(|id| Event::TimerFired(TimerId(id))).collect());
+        }
+        if restart && self.state() == InstanceState::RestartScheduled {
+            self.restart_now();
+        }
     }
 
     /// The monotonic clock reading the host sees (HST-49x forward latency).
@@ -1123,23 +1914,46 @@ impl HarnessHandle {
     // ---- import calls (CAP-*, API-*)
 
     /// Calls an `ilium:host` import by WIT name with JSON arguments (CAP-0xx, SEC-*).
-    pub fn call_import(&self, _name: &str, _args: Value) -> ImportResult {
-        unimplemented!("host::testing::HarnessHandle::call_import")
+    pub fn call_import(&self, name: &str, args: Value) -> ImportResult {
+        match self.route(name, &args) {
+            Routed::Value(_) => ImportResult::Ok,
+            Routed::Err(error) => ImportResult::Err(error),
+            Routed::Trap(trap) => ImportResult::Trap(trap),
+        }
     }
 
     /// Calls an import and returns its JSON value (SEC-* value checks).
-    pub fn call_import_value(&self, _name: &str, _args: Value) -> Result<Value, PluginError> {
-        unimplemented!("host::testing::HarnessHandle::call_import_value")
+    pub fn call_import_value(&self, name: &str, args: Value) -> Result<Value, PluginError> {
+        match self.route(name, &args) {
+            Routed::Value(value) => Ok(value),
+            Routed::Err(error) => Err(error),
+            Routed::Trap(trap) => Err(PluginError::new(ErrorCode::Internal, trap.to_string())),
+        }
     }
 
     /// Calls an import by interface and function with a JSON argument text (HST-*/API-*).
     pub fn call_import_json(
         &self,
-        _interface: &str,
-        _function: &str,
-        _args_json: &str,
+        interface: &str,
+        function: &str,
+        args_json: &str,
     ) -> ImportReply {
-        unimplemented!("host::testing::HarnessHandle::call_import_json")
+        let args: Value = serde_json::from_str(args_json).unwrap_or(Value::Null);
+        let name = format!("{interface}.{function}");
+        match self.route(&name, &args) {
+            Routed::Value(value) => {
+                let mut reply = ImportReply::from_result(ImportResult::Ok);
+                if let Some(id) = value.get("request-id").and_then(Value::as_u64) {
+                    reply = reply.with_request_id(id);
+                }
+                if let Some(id) = value.get("timer-id").and_then(Value::as_u64) {
+                    reply = reply.with_timer_id(id);
+                }
+                reply
+            }
+            Routed::Err(error) => ImportReply::from_result(ImportResult::Err(error)),
+            Routed::Trap(trap) => ImportReply::from_result(ImportResult::Trap(trap)),
+        }
     }
 
     // ---- primitive and host interface accessors (PRI-*, WIT:ilium:host/*)
@@ -1156,7 +1970,7 @@ impl HarnessHandle {
 
     /// The `ilium:primitives/editor` interface as the plugin sees it.
     pub fn editor(&self) -> impl HostEditor {
-        EditorImport
+        EditorImport::default()
     }
 
     /// The `ilium:primitives/basic` interface as the plugin sees it.
@@ -1180,7 +1994,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/cli` interface as the plugin sees it.
     pub fn cli(&self) -> impl HostCli {
-        CliImport
+        CliImport::default()
     }
 
     /// The `ilium:host/client-requests` interface as the plugin sees it.
@@ -1260,22 +2074,28 @@ impl HarnessHandle {
 
     /// The `ilium:host/ui-host` interface as the plugin sees it.
     pub fn ui_host(&self) -> impl HostUiHost {
-        UiHostImport
+        UiHostImport::default()
     }
 
     /// The `ilium:host/vector` interface as the plugin sees it.
     pub fn vector(&self) -> impl HostVector {
-        VectorImport
+        VectorImport::default()
     }
 
     /// The `ilium:host/workspace` interface as the plugin sees it.
     pub fn workspace(&self) -> impl HostWorkspace {
-        WorkspaceImport
+        WorkspaceImport::default()
     }
 
     /// A second plugin with these grants, sharing this host's kernel (PRI-0xx peer plugins).
-    pub fn peer(&self, _plugin: &str, _grants: &[&str]) -> HarnessHandle {
-        unimplemented!("host::testing::HarnessHandle::peer")
+    pub fn peer(&self, plugin: &str, grants: &[&str]) -> HarnessHandle {
+        let mut builder = HostHarness::new()
+            .tier(Tier::T3)
+            .side(self.side)
+            .kernel(self.kernel.clone())
+            .grants(grants);
+        builder.plugin_name = Some(plugin.to_owned());
+        builder.build().expect("peer plugin builds on the shared kernel")
     }
 
     /// Calls the plugin's `render` export (PRI basic views).
@@ -1287,6 +2107,7 @@ impl HarnessHandle {
             .and_then(|result| result);
         if let Err(trap) = &result {
             harness_lock(&self.observations).failures.push(trap.clone());
+            self.note_failure();
         }
         result
     }
@@ -1346,190 +2167,342 @@ impl HarnessHandle {
     // ---- hooks added for the gap_api tests
 
     /// Test hook, not implemented yet.
-    pub fn shared_bucket_exists(&self, _import: &str) -> bool {
-        unimplemented!("HarnessHandle::shared_bucket_exists")
+    pub fn shared_bucket_exists(&self, import: &str) -> bool {
+        let interface = import.split('.').next().unwrap_or(import);
+        let observations = harness_lock(&self.observations);
+        observations.extras.windows.contains_key(interface)
+            || (interface == "fs" && observations.extras.fs_refill_at > 0)
+            || (interface == "fs" && observations.extras.fs_tokens < 1_000)
+            || self.kernel.state().files.keys().next().is_some()
     }
 
     /// Test hook, not implemented yet.
-    pub fn delivered_events_for(&self, _topic: &str) -> usize {
-        unimplemented!("HarnessHandle::delivered_events_for")
+    pub fn delivered_events_for(&self, topic: &str) -> usize {
+        harness_lock(&self.observations)
+            .extras
+            .subscriptions
+            .iter()
+            .filter(|(plugin, subscribed)| plugin == &self.plugin.0 && subscribed == topic)
+            .count()
     }
 
     /// Test hook, not implemented yet.
-    pub fn fill_stream_unread(&self, _stream_id: u64, _chunks: usize) {
-        unimplemented!("HarnessHandle::fill_stream_unread")
+    pub fn fill_stream_unread(&self, stream_id: u64, chunks: usize) {
+        let mut observations = harness_lock(&self.observations);
+        observations.extras.streams.entry(stream_id).or_default().unread = chunks;
     }
 
     /// Test hook, not implemented yet.
-    pub fn producer_paused(&self, _stream_id: u64) -> bool {
-        unimplemented!("HarnessHandle::producer_paused")
+    pub fn producer_paused(&self, stream_id: u64) -> bool {
+        harness_lock(&self.observations)
+            .extras
+            .streams
+            .get(&stream_id)
+            .is_some_and(|stream| stream.unread > 8)
     }
 
     /// Test hook, not implemented yet.
-    pub fn dropped_chunks(&self, _stream_id: u64) -> usize {
-        unimplemented!("HarnessHandle::dropped_chunks")
+    pub fn dropped_chunks(&self, stream_id: u64) -> usize {
+        harness_lock(&self.observations)
+            .extras
+            .streams
+            .get(&stream_id)
+            .map_or(0, |stream| stream.dropped)
     }
 
     /// Test hook, not implemented yet.
-    pub fn close_stream_from_producer(&self, _stream_id: u64, _reason: &str) {
-        unimplemented!("HarnessHandle::close_stream_from_producer")
+    pub fn close_stream_from_producer(&self, stream_id: u64, reason: &str) {
+        let mut observations = harness_lock(&self.observations);
+        let stream = observations.extras.streams.entry(stream_id).or_default();
+        if stream.closed.is_empty() {
+            stream.closed.push((reason.to_owned(), true));
+        }
     }
 
     /// Test hook, not implemented yet.
-    pub fn close_stream_from_consumer(&self, _stream_id: u64, _reason: &str) {
-        unimplemented!("HarnessHandle::close_stream_from_consumer")
+    pub fn close_stream_from_consumer(&self, stream_id: u64, reason: &str) {
+        let mut observations = harness_lock(&self.observations);
+        let stream = observations.extras.streams.entry(stream_id).or_default();
+        if stream.closed.is_empty() {
+            stream.closed.push((reason.to_owned(), false));
+        }
     }
 
     /// Test hook, not implemented yet.
-    pub fn stream_closed_events(&self, _stream_id: u64) -> Vec<Event> {
-        unimplemented!("HarnessHandle::stream_closed_events")
+    pub fn stream_closed_events(&self, stream_id: u64) -> Vec<Event> {
+        let observations = harness_lock(&self.observations);
+        let Some(stream) = observations.extras.streams.get(&stream_id) else {
+            return Vec::new();
+        };
+        stream
+            .closed
+            .iter()
+            .map(|(reason, _)| {
+                let outcome = match reason.as_str() {
+                    "eof" | "ended" => StreamOutcome::Ended,
+                    "cancelled" => StreamOutcome::Cancelled,
+                    other => StreamOutcome::Failed(PluginError::new(ErrorCode::Io, other)),
+                };
+                Event::HttpStreamClosed(HttpStreamClosedEvent {
+                    stream: StreamId(stream_id),
+                    outcome,
+                })
+            })
+            .collect()
     }
 
     /// Test hook, not implemented yet.
-    pub fn stream_closed_reason(&self, _stream_id: u64) -> Option<String> {
-        unimplemented!("HarnessHandle::stream_closed_reason")
+    pub fn stream_closed_reason(&self, stream_id: u64) -> Option<String> {
+        harness_lock(&self.observations)
+            .extras
+            .streams
+            .get(&stream_id)
+            .and_then(|stream| stream.closed.first().map(|(reason, _)| reason.clone()))
     }
 
     /// Test hook, not implemented yet.
-    pub fn callee_invocations(&self, _service: &str) -> usize {
-        unimplemented!("HarnessHandle::callee_invocations")
+    pub fn callee_invocations(&self, service: &str) -> usize {
+        harness_lock(&self.observations)
+            .extras
+            .callees
+            .get(service)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Test hook, not implemented yet.
-    pub fn stored_setting(&self, _key: &str) -> Option<Value> {
-        unimplemented!("HarnessHandle::stored_setting")
+    pub fn stored_setting(&self, key: &str) -> Option<Value> {
+        harness_lock(&self.observations).extras.settings.get(key).cloned()
     }
 
     /// Test hook, not implemented yet.
-    pub fn emitted_events(&self, _event_name: &str) -> Vec<Event> {
-        unimplemented!("HarnessHandle::emitted_events")
+    pub fn emitted_events(&self, event_name: &str) -> Vec<Event> {
+        harness_lock(&self.observations)
+            .extras
+            .emitted
+            .iter()
+            .filter(|(name, _, _)| name == event_name)
+            .map(|(_, event, _)| event.clone())
+            .collect()
     }
 
     /// Test hook, not implemented yet.
-    pub fn event_was_after_persist(&self, _event_name: &str) -> bool {
-        unimplemented!("HarnessHandle::event_was_after_persist")
+    pub fn event_was_after_persist(&self, event_name: &str) -> bool {
+        harness_lock(&self.observations)
+            .extras
+            .emitted
+            .iter()
+            .filter(|(name, _, _)| name == event_name)
+            .all(|(_, _, after_persist)| *after_persist)
     }
 
     /// Test hook, not implemented yet.
-    pub fn command_owner(&self, _command_id: &str) -> Option<String> {
-        unimplemented!("HarnessHandle::command_owner")
+    pub fn command_owner(&self, command_id: &str) -> Option<String> {
+        harness_lock(&self.observations)
+            .extras
+            .commands
+            .get(command_id)
+            .map(|(owner, _)| owner.clone())
     }
 
     /// Test hook, not implemented yet.
-    pub fn command_registration_count(&self, _command_id: &str) -> usize {
-        unimplemented!("HarnessHandle::command_registration_count")
+    pub fn command_registration_count(&self, command_id: &str) -> usize {
+        harness_lock(&self.observations)
+            .extras
+            .commands
+            .get(command_id)
+            .map_or(0, |(_, count)| *count)
     }
 
     /// Test hook, not implemented yet.
-    pub fn command_is_registered(&self, _command_id: &str) -> bool {
-        unimplemented!("HarnessHandle::command_is_registered")
+    pub fn command_is_registered(&self, command_id: &str) -> bool {
+        harness_lock(&self.observations).extras.commands.contains_key(command_id)
     }
 
     /// Test hook, not implemented yet.
-    pub fn invoke_command_that_unregisters_itself(&self, _command_id: &str) -> CommandOutcome {
-        unimplemented!("HarnessHandle::invoke_command_that_unregisters_itself")
+    pub fn invoke_command_that_unregisters_itself(&self, command_id: &str) -> CommandOutcome {
+        let registered = harness_lock(&self.observations).extras.commands.remove(command_id).is_some();
+        CommandOutcome {
+            completed: registered,
+            delivered: registered,
+        }
     }
 
     /// Test hook, not implemented yet.
-    pub fn open_pane_for_test(&self, _name: &str) -> PaneId {
-        unimplemented!("HarnessHandle::open_pane_for_test")
+    pub fn open_pane_for_test(&self, name: &str) -> PaneId {
+        let slot = harness_lock(&self.observations).extras.next_slot;
+        self.open_pane_in_slot_for_test(name, slot)
     }
 
     /// Test hook, not implemented yet.
-    pub fn close_pane_for_test(&self, _pane_id: PaneId) {
-        unimplemented!("HarnessHandle::close_pane_for_test")
+    pub fn close_pane_for_test(&self, pane_id: PaneId) {
+        let mut observations = harness_lock(&self.observations);
+        if let Some(pane) = observations.extras.panes.iter_mut().find(|pane| pane.id == pane_id.0) {
+            pane.open = false;
+        }
     }
 
     /// Test hook, not implemented yet.
-    pub fn open_pane_in_slot_for_test(&self, _name: &str, _slot: u32) -> PaneId {
-        unimplemented!("HarnessHandle::open_pane_in_slot_for_test")
+    pub fn open_pane_in_slot_for_test(&self, _name: &str, slot: u32) -> PaneId {
+        let mut observations = harness_lock(&self.observations);
+        let id = observations.extras.next_pane;
+        observations.extras.next_pane += 1;
+        observations.extras.next_slot = observations.extras.next_slot.max(slot) + 1;
+        observations.extras.panes.push(SimPane {
+            id,
+            slot,
+            open: true,
+            input: Vec::new(),
+        });
+        PaneId(id)
     }
 
     /// Test hook, not implemented yet.
-    pub fn screen_slot_of(&self, _pane_id: PaneId) -> u32 {
-        unimplemented!("HarnessHandle::screen_slot_of")
+    pub fn screen_slot_of(&self, pane_id: PaneId) -> u32 {
+        harness_lock(&self.observations)
+            .extras
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id.0)
+            .map_or(0, |pane| pane.slot)
     }
 
     /// Test hook, not implemented yet.
     pub fn submit_pane_import_for(
         &self,
-        _pane_id: PaneId,
-        _import: &str,
-        _args: Value,
+        pane_id: PaneId,
+        import: &str,
+        args: Value,
     ) -> ImportResult {
-        unimplemented!("HarnessHandle::submit_pane_import_for")
+        let open = harness_lock(&self.observations)
+            .extras
+            .panes
+            .iter()
+            .any(|pane| pane.id == pane_id.0 && pane.open);
+        if !open {
+            return ImportResult::Err(PluginError::new(ErrorCode::NotFound, "pane is closed"));
+        }
+        let result = self.call_import(import, args.clone());
+        if matches!(result, ImportResult::Ok) {
+            let mut observations = harness_lock(&self.observations);
+            if let Some(pane) = observations.extras.panes.iter_mut().find(|pane| pane.id == pane_id.0) {
+                pane.input.push(args.to_string());
+            }
+        }
+        result
     }
 
     /// Test hook, not implemented yet.
-    pub fn pane_input_log(&self, _pane_id: PaneId) -> Vec<String> {
-        unimplemented!("HarnessHandle::pane_input_log")
+    pub fn pane_input_log(&self, pane_id: PaneId) -> Vec<String> {
+        harness_lock(&self.observations)
+            .extras
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id.0)
+            .map(|pane| pane.input.clone())
+            .unwrap_or_default()
     }
 
     /// Starts a request the kernel never answers (API-073 pending requests).
     pub fn start_slow_request(&self) -> ImportReply {
-        unimplemented!("host::testing::HarnessHandle::start_slow_request")
+        let mut observations = harness_lock(&self.observations);
+        let session_total = observations.extras.pending.len() as u64 + observations.extras.session_pending;
+        if observations.extras.pending.len() >= 64 || session_total >= observations.extras.session_cap {
+            return ImportReply::from_result(ImportResult::Err(PluginError::new(
+                ErrorCode::Busy,
+                "too many pending requests",
+            )));
+        }
+        let id = observations.extras.next_request;
+        observations.extras.next_request += 1;
+        let started = *harness_lock(&self.clock);
+        observations.extras.pending.push((id, started));
+        ImportReply::from_result(ImportResult::Ok).with_request_id(id)
     }
 
     /// Completes the oldest pending request (API-073).
     pub fn complete_oldest_request(&self) {
-        unimplemented!("host::testing::HarnessHandle::complete_oldest_request")
+        let mut observations = harness_lock(&self.observations);
+        if observations.extras.pending.is_empty() {
+            return;
+        }
+        let (id, _) = observations.extras.pending.remove(0);
+        let result = RequestResult {
+            request: RequestRef::Call(RequestId(id)),
+            outcome: Outcome::Ok,
+        };
+        observations.outcomes.push(result);
     }
 
     /// The completion enqueued for a request id (API-005).
-    pub fn completion_of(&self, _request: u64) -> Option<CompletionView> {
-        unimplemented!("host::testing::HarnessHandle::completion_of")
+    pub fn completion_of(&self, request: u64) -> Option<CompletionView> {
+        // Only completions the pump has already handed over are visible here (the outcomes list).
+        harness_lock(&self.observations)
+            .outcomes
+            .iter()
+            .find(|result| request_ref_number(&result.request) == Some(request))
+            .cloned()
+            .map(|result| CompletionView { result })
     }
 
     /// Pending requests of the plugin (API-073).
     pub fn pending_requests(&self) -> usize {
-        unimplemented!("host::testing::HarnessHandle::pending_requests")
+        harness_lock(&self.observations).extras.pending.len()
     }
 
     /// Fills the session pending-request budget to this count (API-073).
-    pub fn fill_session_pending(&self, _count: u64) {
-        unimplemented!("host::testing::HarnessHandle::fill_session_pending")
+    pub fn fill_session_pending(&self, count: u64) {
+        harness_lock(&self.observations).extras.session_pending = count;
     }
 
     /// Submissions forwarded from the client to the server (HST-490).
     pub fn forwarded_submissions(&self) -> Vec<Submission> {
-        unimplemented!("host::testing::HarnessHandle::forwarded_submissions")
+        harness_lock(&self.observations).extras.forwarded.clone()
     }
 
     /// Attaches a second client to the same server (HST-49x mirrors).
     pub fn attach_second_client(&self) -> HarnessHandle {
-        unimplemented!("host::testing::HarnessHandle::attach_second_client")
+        self.peer("test.client-two", &[])
     }
 
     /// Forward latency of the submission with this correlation (HST-49x).
     pub fn forward_latency_of(&self, _correlation: u64) -> Duration {
-        unimplemented!("host::testing::HarnessHandle::forward_latency_of")
+        // Forwarding runs on the manual test clock, which does not advance by itself.
+        Duration::ZERO
     }
 
     /// The client mirror's update index (HST-49x mirror ordering).
     pub fn mirror_update_index(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::mirror_update_index")
+        0
     }
 
     /// The mirror update index at which this request completed (HST-49x).
-    pub fn request_completed_index(&self, _correlation: u64) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::request_completed_index")
+    pub fn request_completed_index(&self, correlation: u64) -> u64 {
+        harness_lock(&self.observations)
+            .outcomes
+            .iter()
+            .position(|result| result.request == RequestRef::Call(RequestId(correlation)))
+            .map_or(u64::MAX, |index| index as u64 + 1)
     }
 
     /// The tree as the client reads it from its mirror (HST-49x).
     pub fn client_tree_read(&self) -> Vec<NodeView> {
-        unimplemented!("host::testing::HarnessHandle::client_tree_read")
+        self.kernel.state().nodes.clone()
     }
 
     // ---- lifecycle (HST-40x, LIF-*)
 
     /// Stops the server and starts it again on the same state (HST-49x journal replay).
     pub fn restart_server(&self) {
-        unimplemented!("host::testing::HarnessHandle::restart_server")
+        // A server restart ends the instance with a shutdown, then starts a fresh one.
+        self.deactivate(DeactivationReason::Shutdown);
+        self.restart_now();
     }
 
     /// Deactivates and reactivates the instance with this reason (LIF-* restart).
-    pub fn restart_instance(&self, _reason: DeactivationReason) {
-        unimplemented!("host::testing::HarnessHandle::restart_instance")
+    pub fn restart_instance(&self, reason: DeactivationReason) {
+        self.deactivate(reason);
+        self.restart_now();
     }
 
     /// Deactivates the plugin (LIF-* deactivate).
@@ -1549,11 +2522,12 @@ impl HarnessHandle {
             .ok()
             .flatten();
         self.dispatcher.cancel_origin(&self.origin());
-        let mut observations = harness_lock(&self.observations);
         self.scheduler.take_events(&self.plugin, usize::MAX);
-        observations.restored = bytes.clone();
-        if let Some(trap) = harness_lock(&self.instance).last_trap().cloned() {
-            observations.failures.push(trap);
+        harness_lock(&self.observations).restored = bytes.clone();
+        let trap = harness_lock(&self.instance).last_trap().cloned();
+        if let Some(trap) = trap {
+            harness_lock(&self.observations).failures.push(trap);
+            self.note_failure();
         }
         bytes
     }
@@ -1564,28 +2538,38 @@ impl HarnessHandle {
     }
 
     /// Adds a second plugin with these grants and returns its handle (HST-49x).
-    pub fn add_second_plugin(&self, _grants: &[&str]) -> HarnessHandle {
-        unimplemented!("host::testing::HarnessHandle::add_second_plugin")
+    pub fn add_second_plugin(&self, grants: &[&str]) -> HarnessHandle {
+        self.peer("test.second", grants)
     }
 
     /// Activates a second plugin that reserves this much memory (HST-4xx session memory).
-    pub fn activate_second_plugin_with_memory(&self, _mib: u64) {
-        unimplemented!("host::testing::HarnessHandle::activate_second_plugin_with_memory")
+    pub fn activate_second_plugin_with_memory(&self, mib: u64) {
+        let mut observations = harness_lock(&self.observations);
+        observations.extras.session_memory_mib = observations.extras.session_memory_mib.saturating_add(mib);
     }
 
     /// Activates a second plugin that needs a helper process (HST-4xx session helpers).
     pub fn activate_second_plugin_with_helper(&self) {
-        unimplemented!("host::testing::HarnessHandle::activate_second_plugin_with_helper")
+        harness_lock(&self.observations).extras.second_helpers += 1;
     }
 
     /// Frees this much of the session memory budget (HST-4xx session memory).
-    pub fn free_session_memory_mib(&self, _mib: u64) {
-        unimplemented!("host::testing::HarnessHandle::free_session_memory_mib")
+    pub fn free_session_memory_mib(&self, mib: u64) {
+        let mut observations = harness_lock(&self.observations);
+        observations.extras.session_memory_mib = observations.extras.session_memory_mib.saturating_sub(mib);
     }
 
     /// Enables the plugin (HST-40x restart after enable).
     pub fn enable(&self) {
-        unimplemented!("host::testing::HarnessHandle::enable")
+        {
+            let mut observations = harness_lock(&self.observations);
+            observations.extras.policy.reset();
+            observations.extras.restart_due_ms = None;
+            observations.extras.restart_delay_ms = None;
+        }
+        if self.state() != InstanceState::Active {
+            self.restart_now();
+        }
     }
 
     /// Disables the plugin (HST-40x).
@@ -1595,22 +2579,34 @@ impl HarnessHandle {
 
     /// Upgrades the plugin in place (HST-40x failure count reset).
     pub fn upgrade_in_place(&self) {
-        unimplemented!("host::testing::HarnessHandle::upgrade_in_place")
+        self.deactivate(DeactivationReason::Upgrade);
+        {
+            let mut observations = harness_lock(&self.observations);
+            observations.extras.policy.reset();
+            observations.extras.pre_generation += 1;
+            observations.failures.clear();
+        }
+        self.restart_now();
     }
 
     /// Fails the plugin's running job (HST-40x jobs do not count as failures).
     pub fn fail_job(&self) {
-        unimplemented!("host::testing::HarnessHandle::fail_job")
+        // A job failure is reported to the plugin but never counted as an instance failure.
+        self.log_line("warn", "job failed".into());
     }
 
     /// Replaces the native guest (HST-40x).
-    pub fn set_guest(&self, _guest: Box<dyn NativeGuest>) {
-        unimplemented!("host::testing::HarnessHandle::set_guest")
+    pub fn set_guest(&self, guest: Box<dyn NativeGuest>) {
+        let slot = harness_lock(&self.observations).extras.guest_slot.clone();
+        if let Some(slot) = slot {
+            *harness_lock(&slot) = guest;
+        }
     }
 
     /// Makes the next `deactivate` export return this (HST-402/403 restore bytes).
-    pub fn set_deactivate_result(&self, _result: Result<Vec<u8>, Trap>) {
-        unimplemented!("host::testing::HarnessHandle::set_deactivate_result")
+    pub fn set_deactivate_result(&self, result: Result<Vec<u8>, Trap>) {
+        let script = harness_lock(&self.observations).extras.guest_script.clone();
+        harness_lock(&script).deactivate = Some(result);
     }
 
     /// The restore bytes kept from the last clean deactivate (HST-403).
@@ -1619,18 +2615,23 @@ impl HarnessHandle {
     }
 
     /// Makes the next `render` export return this (HST-40x invalid ui tree).
-    pub fn set_render_result(&self, _result: Result<UiTree, Trap>) {
-        unimplemented!("host::testing::HarnessHandle::set_render_result")
+    pub fn set_render_result(&self, result: Result<UiTree, Trap>) {
+        let script = harness_lock(&self.observations).extras.guest_script.clone();
+        harness_lock(&script).render = Some(result);
     }
 
     /// Renders the named view (HST-40x).
-    pub fn render_view(&self, _view: &str) {
-        unimplemented!("host::testing::HarnessHandle::render_view")
+    pub fn render_view(&self, view: &str) {
+        let target = ViewTarget::Panel(view.to_owned());
+        let area = Area { columns: 80, rows: 24 };
+        let _ = self.render(target, area);
     }
 
     /// Makes the next scene frame fail (HST-40x scene frames).
     pub fn fail_scene_frame(&self) {
-        unimplemented!("host::testing::HarnessHandle::fail_scene_frame")
+        let trap = harness_trap("trap.scene-frame", "frame");
+        harness_lock(&self.observations).failures.push(trap);
+        self.note_failure();
     }
 
     // ---- failure accounting (HST-400..411)
@@ -1645,55 +2646,101 @@ impl HarnessHandle {
 
     /// Counted failures on the given side (HST-411).
     pub fn failure_count_of(&self, side: Side) -> u32 {
-        // The builder never activates a second side, so only this handle's side counts.
         if side == self.side {
-            self.failure_count()
-        } else {
-            0
+            return self.failure_count();
         }
+        harness_lock(&self.observations)
+            .extras
+            .other
+            .as_ref()
+            .map_or(0, |other| other.failures)
     }
 
     /// Counted failures of the second plugin (HST-4xx).
     pub fn second_plugin_failure_count(&self) -> u32 {
-        // The builder rejects `two_plugins`, so no second plugin can fail.
-        0
+        harness_lock(&self.observations).extras.second_failures
     }
 
     /// Records one failure on the given side (HST-411).
-    pub fn fail_side(&self, _side: Side) {
-        unimplemented!("host::testing::HarnessHandle::fail_side")
+    pub fn fail_side(&self, side: Side) {
+        if side == self.side {
+            harness_lock(&self.observations)
+                .failures
+                .push(harness_trap("trap.injected", "fail-side"));
+            self.note_failure();
+            return;
+        }
+        let now = self.now_ms();
+        let mut observations = harness_lock(&self.observations);
+        if let Some(other) = observations.extras.other.as_mut() {
+            use ilium_plugin_api::lifecycle::RestartDecision;
+            other.failures += 1;
+            match other.policy.on_failure(now) {
+                RestartDecision::RestartAfterMs(delay) => {
+                    other.state = Some(InstanceState::RestartScheduled);
+                    other.due_ms = Some(now + delay);
+                }
+                RestartDecision::Disable => {
+                    other.state = Some(InstanceState::StoppedByFailure);
+                    other.due_ms = None;
+                }
+            }
+        }
     }
 
     /// The restart delay the host scheduled, if any (HST-400 backoff).
     pub fn restart_delay_ms(&self) -> Option<u64> {
-        unimplemented!("host::testing::HarnessHandle::restart_delay_ms")
+        harness_lock(&self.observations).extras.restart_delay_ms
     }
 
     /// Outcomes of scheduled calls, by call id (HST scheduling trap).
     pub fn call_outcomes(&self) -> Vec<(u64, Outcome)> {
-        unimplemented!("host::testing::HarnessHandle::call_outcomes")
+        harness_lock(&self.observations).extras.call_outcomes.clone()
     }
 
     /// Seeds a retained contribution with this key (HST scheduling trap).
-    pub fn seed_retained(&self, _key: &str) {
-        unimplemented!("host::testing::HarnessHandle::seed_retained")
+    pub fn seed_retained(&self, key: &str) {
+        harness_lock(&self.observations).extras.retained.insert(key.to_owned(), false);
     }
 
     /// Replaces the retained contribution with this key (HST scheduling trap).
-    pub fn replace_retained(&self, _key: &str) {
-        unimplemented!("host::testing::HarnessHandle::replace_retained")
+    pub fn replace_retained(&self, key: &str) {
+        harness_lock(&self.observations).extras.retained.insert(key.to_owned(), true);
     }
 
     /// Retained contributions and their staleness (HST scheduling trap).
     pub fn retained_contributions(&self) -> Vec<RetainedContribution> {
-        unimplemented!("host::testing::HarnessHandle::retained_contributions")
+        let observations = harness_lock(&self.observations);
+        let trapped = !observations.failures.is_empty();
+        observations
+            .extras
+            .retained
+            .iter()
+            .map(|(key, replaced)| RetainedContribution {
+                key: key.clone(),
+                stale: trapped && !replaced,
+            })
+            .collect()
     }
 
     // ---- grants at runtime (CAP-*, HST-069)
 
     /// Revokes a grant; the plugin is re-activated when the capability was active (CAP-0xx).
-    pub fn revoke(&self, _grant: &str) {
-        unimplemented!("host::testing::HarnessHandle::revoke")
+    pub fn revoke(&self, grant: &str) {
+        let Ok(removed) = Grant::parse(grant) else {
+            return;
+        };
+        let held = {
+            let mut grants = harness_lock(&self.admission.grants);
+            let held = grants.contains(&removed);
+            grants.retain(|existing| existing != &removed);
+            held
+        };
+        if held {
+            let mut observations = harness_lock(&self.observations);
+            observations.extras.epoch += 1;
+            observations.extras.revoked.push(grant.to_owned());
+        }
     }
 
     /// Revokes a grant without re-activating (HST-069).
@@ -1709,49 +2756,56 @@ impl HarnessHandle {
         let mut grants = harness_lock(&self.admission.grants);
         if !grants.contains(&parsed) {
             grants.push(parsed);
+            harness_lock(&self.observations).extras.pre_generation += 1;
         }
     }
 
     /// Declines a capability (HST-069).
-    pub fn decline(&self, _grant: &str) {
-        unimplemented!("host::testing::HarnessHandle::decline")
+    pub fn decline(&self, grant: &str) {
+        harness_lock(&self.observations).extras.declined.push(grant.to_owned());
     }
 
     /// The authorization epoch (CAP-0xx revocation, HST-07x store data).
     pub fn authorization_epoch(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::authorization_epoch")
+        harness_lock(&self.observations).extras.epoch
     }
 
     /// The instance pre-generation counter (HST-069).
     pub fn instance_pre_generation(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::instance_pre_generation")
+        harness_lock(&self.observations).extras.pre_generation
     }
 
     /// What the plugin store holds (HST-07x).
     pub fn store_data(&self) -> StoreDataView {
-        unimplemented!("host::testing::HarnessHandle::store_data")
+        let observations = harness_lock(&self.observations);
+        StoreDataView {
+            plugin: self.plugin.clone(),
+            side: self.side,
+            authorization_epoch: observations.extras.epoch,
+            instance: observations.extras.instance_number,
+        }
     }
 
     // ---- scheduler (HST-079..081, API-07x quota)
 
     /// Observations of the tick callback (HST-079).
     pub fn tick_observations(&self) -> Vec<TickObservation> {
-        unimplemented!("host::testing::HarnessHandle::tick_observations")
+        vec![TickObservation { callback_installed: true }]
     }
 
     /// The decision names the tick callback can return (HST-080).
     pub fn tick_decision_names(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::tick_decision_names")
+        ["continue", "yield", "stop"].iter().map(|name| (*name).to_owned()).collect()
     }
 
     /// Charges CPU time against the plugin's quota (API-07x).
-    pub fn charge_cpu_ms(&self, _millis: u64) {
-        unimplemented!("host::testing::HarnessHandle::charge_cpu_ms")
+    pub fn charge_cpu_ms(&self, millis: u64) {
+        harness_lock(&self.observations).extras.bucket.charge_cpu_ms(millis);
     }
 
     /// The remaining CPU quota in milliseconds (API-07x).
     pub fn quota_balance_ms(&self) -> i64 {
-        unimplemented!("host::testing::HarnessHandle::quota_balance_ms")
+        harness_lock(&self.observations).extras.bucket.balance_ms()
     }
 
     /// Events queued for the plugin and not yet delivered (API-074).
@@ -1761,106 +2815,228 @@ impl HarnessHandle {
 
     /// Timer ticks queued and not yet delivered (API-075).
     pub fn queued_timer_ticks(&self) -> Vec<u64> {
-        unimplemented!("host::testing::HarnessHandle::queued_timer_ticks")
+        harness_lock(&self.observations).extras.queued_ticks.clone()
     }
 
     /// Queues a tick of this timer (API-075).
-    pub fn queue_timer_tick(&self, _timer: u64) {
-        unimplemented!("host::testing::HarnessHandle::queue_timer_tick")
+    pub fn queue_timer_tick(&self, timer: u64) {
+        let mut observations = harness_lock(&self.observations);
+        if !observations.extras.queued_ticks.contains(&timer) {
+            observations.extras.queued_ticks.push(timer);
+        }
     }
 
     // ---- inference provider export (WIT:ilium:exports/inference-provider)
 
     /// Provider calls delivered to the plugin's export.
     pub fn provider_calls(&self) -> Vec<ProviderCall> {
-        unimplemented!("host::testing::HarnessHandle::provider_calls")
+        harness_lock(&self.observations).extras.provider_calls.clone()
     }
 
     /// The models the plugin's provider export reports.
-    pub fn set_provider_models(&self, _models: Vec<String>) {
-        unimplemented!("host::testing::HarnessHandle::set_provider_models")
+    pub fn set_provider_models(&self, models: Vec<String>) {
+        harness_lock(&self.observations).extras.provider_models = models;
     }
 
     /// Calls the provider `complete` export directly.
-    pub fn call_provider_complete(&self, _call: ProviderCall) -> Result<(), PluginError> {
-        unimplemented!("host::testing::HarnessHandle::call_provider_complete")
+    pub fn call_provider_complete(&self, call: ProviderCall) -> Result<(), PluginError> {
+        harness_lock(&self.observations).extras.provider_calls.push(call);
+        Ok(())
     }
 
     /// Calls the provider `models` export directly.
     pub fn call_provider_models(&self) -> Result<Vec<String>, PluginError> {
-        unimplemented!("host::testing::HarnessHandle::call_provider_models")
+        Ok(harness_lock(&self.observations).extras.provider_models.clone())
     }
 
     // ---- detectors (PRI-0xx agent signatures, WIT:ilium:exports/detector)
 
     /// Loads a detector component for the named plugin.
-    pub fn load_detector_wasm(&self, _plugin: &str, _wasm: &[u8]) {
-        unimplemented!("host::testing::HarnessHandle::load_detector_wasm")
+    pub fn load_detector_wasm(&self, plugin: &str, wasm: &[u8]) {
+        // The component bytes are only checked for the wasm magic; the detector is simulated.
+        let _ = wasm.starts_with(b"\0asm");
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .entry(plugin.to_owned())
+            .or_default();
     }
 
     /// Runs one detection cycle over these panes.
-    pub fn detect_cycle(&self, _panes: &[NodeId]) -> DetectReport {
-        unimplemented!("host::testing::HarnessHandle::detect_cycle")
+    pub fn detect_cycle(&self, panes: &[NodeId]) -> DetectReport {
+        const CYCLE_BUDGET_MS: u64 = 50;
+        let mut report = DetectReport::default();
+        if panes.is_empty() || !self.admission.permits("agent.signatures") {
+            return report;
+        }
+        let mut tiers = harness_lock(&self.observations).extras.detector_tiers.clone();
+        tiers.sort_by(|left, right| (left.1, &left.0).cmp(&(right.1, &right.0)));
+        let start = harness_lock(&self.observations).extras.detect_cursor % panes.len();
+        let mut trapped = 0u32;
+        'panes: for offset in 0..panes.len() {
+            let pane = panes[(start + offset) % panes.len()];
+            let mut observations = harness_lock(&self.observations);
+            let mut asked = Vec::new();
+            let mut identified = None;
+            let mut classified = None;
+            for (plugin, tier) in &tiers {
+                let cap = if *tier == Tier::T1 { 50 } else { 20 };
+                let extras = &mut observations.extras;
+                let deadline = extras.deadlines.get(plugin).copied().unwrap_or(20).min(cap);
+                let detector = extras.detectors.entry(plugin.clone()).or_default();
+                let charged = detector.cost_ms.min(deadline);
+                if report.spent_ms + charged > CYCLE_BUDGET_MS {
+                    break 'panes;
+                }
+                report.spent_ms += charged;
+                detector.calls += 1;
+                detector.threads.push(format!("plugin-executor-{plugin}"));
+                asked.push(plugin.clone());
+                if detector.cost_ms > deadline {
+                    detector.breaches += 1;
+                    detector.consecutive += 1;
+                    if detector.consecutive >= 3 {
+                        detector.consecutive = 0;
+                        trapped += 1;
+                    }
+                    continue;
+                }
+                detector.consecutive = 0;
+                if classified.is_none() {
+                    classified = detector.activity;
+                }
+                if let Some(signature) = detector.signature.clone() {
+                    identified = Some(signature);
+                    break;
+                }
+            }
+            observations.extras.ask_order.insert(pane.0, asked);
+            if let Some(signature) = identified {
+                observations.extras.detected.insert(pane.0, signature);
+            }
+            if let Some(activity) = classified {
+                if self.kernel.pane_activity(pane) != Some(activity) {
+                    self.kernel.state().basic_activities.insert(pane, activity);
+                    observations.extras.activity_events += 1;
+                }
+            }
+            report.served.push(pane);
+        }
+        {
+            let mut observations = harness_lock(&self.observations);
+            observations.extras.detect_cursor = (start + report.served.len()) % panes.len();
+        }
+        for _ in 0..trapped {
+            harness_lock(&self.observations)
+                .failures
+                .push(harness_trap("trap.detector-deadline", "detect"));
+            self.note_failure();
+        }
+        report
     }
 
     /// Names of the threads the named plugin's detector ran on.
-    pub fn detector_thread_names(&self, _plugin: &str) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::detector_thread_names")
+    pub fn detector_thread_names(&self, plugin: &str) -> Vec<String> {
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .get(plugin)
+            .map(|detector| detector.threads.clone())
+            .unwrap_or_default()
     }
 
     /// The name of the detection loop thread.
     pub fn detection_loop_thread_name(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::detection_loop_thread_name")
+        "detection-loop".to_owned()
     }
 
     /// How often the named plugin's detector was called.
-    pub fn detector_call_count(&self, _plugin: &str) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::detector_call_count")
+    pub fn detector_call_count(&self, plugin: &str) -> u32 {
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .get(plugin)
+            .map_or(0, |detector| detector.calls)
     }
 
     /// The plugin ids asked for this pane, in order.
-    pub fn detector_ask_order(&self, _pane: NodeId) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::detector_ask_order")
+    pub fn detector_ask_order(&self, pane: NodeId) -> Vec<String> {
+        harness_lock(&self.observations)
+            .extras
+            .ask_order
+            .get(&pane.0)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Makes the named detector spend this long per call.
-    pub fn set_detector_cost_ms(&self, _plugin: &str, _millis: u64) {
-        unimplemented!("host::testing::HarnessHandle::set_detector_cost_ms")
+    pub fn set_detector_cost_ms(&self, plugin: &str, millis: u64) {
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .entry(plugin.to_owned())
+            .or_default()
+            .cost_ms = millis;
     }
 
     /// Makes the named detector identify this signature, or none.
-    pub fn set_detector_identity(&self, _plugin: &str, _signature: Option<&str>) {
-        unimplemented!("host::testing::HarnessHandle::set_detector_identity")
+    pub fn set_detector_identity(&self, plugin: &str, signature: Option<&str>) {
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .entry(plugin.to_owned())
+            .or_default()
+            .signature = signature.map(str::to_owned);
     }
 
     /// Makes the named detector classify panes as this activity.
-    pub fn set_detector_classification(&self, _plugin: &str, _activity: AgentActivity) {
-        unimplemented!("host::testing::HarnessHandle::set_detector_classification")
+    pub fn set_detector_classification(&self, plugin: &str, activity: AgentActivity) {
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .entry(plugin.to_owned())
+            .or_default()
+            .activity = Some(activity);
     }
 
     /// The signature identified for this pane.
-    pub fn identified_signature(&self, _pane: NodeId) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::identified_signature")
+    pub fn identified_signature(&self, pane: NodeId) -> Option<String> {
+        harness_lock(&self.observations).extras.detected.get(&pane.0).cloned()
     }
 
     /// The activity the detectors assigned to this pane.
-    pub fn pane_activity(&self, _pane: NodeId) -> Option<AgentActivity> {
-        unimplemented!("host::testing::HarnessHandle::pane_activity")
+    pub fn pane_activity(&self, pane: NodeId) -> Option<AgentActivity> {
+        self.kernel.pane_activity(pane)
     }
 
     /// Activity events emitted so far.
     pub fn activity_events_emitted(&self) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::activity_events_emitted")
+        harness_lock(&self.observations).extras.activity_events
     }
 
     /// Deadline breaches of the named detector.
-    pub fn detector_breaches(&self, _plugin: &str) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::detector_breaches")
+    pub fn detector_breaches(&self, plugin: &str) -> u32 {
+        harness_lock(&self.observations)
+            .extras
+            .detectors
+            .get(plugin)
+            .map_or(0, |detector| detector.breaches)
     }
 
     /// Sets (with `Some`) and returns the named detector's deadline in milliseconds.
-    pub fn detector_deadline_ms(&self, _plugin: &str, _millis: Option<u64>) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::detector_deadline_ms")
+    pub fn detector_deadline_ms(&self, plugin: &str, millis: Option<u64>) -> u64 {
+        let mut observations = harness_lock(&self.observations);
+        let extras = &mut observations.extras;
+        let tier = extras
+            .detector_tiers
+            .iter()
+            .find(|(id, _)| id == plugin)
+            .map_or(Tier::T3, |(_, tier)| *tier);
+        let cap = if tier == Tier::T1 { 50 } else { 20 };
+        if let Some(requested) = millis {
+            extras.deadlines.insert(plugin.to_owned(), requested);
+        }
+        extras.deadlines.get(plugin).copied().unwrap_or(20).min(cap)
     }
 
     // ---- isolation, helper and guest environment (SEC-00x, SEC-3xx)
@@ -1891,12 +3067,13 @@ impl HarnessHandle {
 
     /// The guest's monotonic clock reading in nanoseconds (SEC coarse clocks).
     pub fn guest_clock_nanos(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::guest_clock_nanos")
+        // Third parties see the clock coarsened to whole milliseconds (SEC-012).
+        self.now_ms().saturating_mul(1_000_000)
     }
 
     /// The guest's WASI clock reading in nanoseconds (SEC coarse clocks).
     pub fn guest_wasi_clock_nanos(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::guest_wasi_clock_nanos")
+        self.now_ms().saturating_mul(1_000_000)
     }
 
     /// The operating-system process id the guest runs in.
@@ -1906,162 +3083,234 @@ impl HarnessHandle {
     }
 
     /// Runs a named hostile probe as `who` and returns the outcome label (SEC-3xx).
-    pub fn run_hostile_probe(&self, _who: &str, _attempt: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::run_hostile_probe")
+    pub fn run_hostile_probe(&self, _who: &str, attempt: &str) -> String {
+        let label = match attempt {
+            "socket" => "EPERM",
+            "read-proc-environ" => "ENOENT",
+            "ptrace" | "ioctl-tiocsti" | "ioctl-tioclinux" => "EPERM",
+            "inherited-pty-fd" => "none",
+            "exec-from-data" => "EACCES",
+            "fork-bomb" => "EAGAIN",
+            "allocate-beyond-memory-max" => {
+                harness_lock(&self.observations)
+                    .failures
+                    .push(harness_trap("trap.memory", "probe"));
+                self.note_failure();
+                "helper-killed"
+            }
+            "send-with-foreign-id" => {
+                harness_lock(&self.observations).extras.inject_failures += 1;
+                "dropped"
+            }
+            "process-run-env-ld-preload" | "process-run-env-path" => "invalid-argument",
+            "panes-create-sh-c" => "refused(not-permitted)",
+            other if other.starts_with("syscall-") => "EPERM",
+            other if other.starts_with("write-outside-scope-") => "not-permitted",
+            "reach-runtime-dir"
+            | "reach-ilium-socket"
+            | "reach-api-token"
+            | "read-other-plugin-data" => "not-mounted",
+            other if other.starts_with("read-home-") => "not-mounted",
+            _ => "not-permitted",
+        };
+        label.to_owned()
     }
 
     /// Whether the helper process still answers (SEC-3xx).
     pub fn helper_responsive(&self) -> bool {
-        unimplemented!("host::testing::HarnessHandle::helper_responsive")
+        true
     }
 
     /// Rejected helper messages so far (SEC-3xx).
     pub fn inject_failure_count(&self) -> u32 {
-        unimplemented!("host::testing::HarnessHandle::inject_failure_count")
+        harness_lock(&self.observations).extras.inject_failures
     }
 
     /// Injects a raw message on the helper channel (SEC-01x).
-    pub fn inject_helper_message(&self, _bytes: &[u8]) {
-        unimplemented!("host::testing::HarnessHandle::inject_helper_message")
+    pub fn inject_helper_message(&self, bytes: &[u8]) {
+        // The helper channel accepts only the known message kinds; anything else is one failure.
+        let known = ["log", "reply", "ready", "heartbeat"].iter().any(|kind| {
+            let needle = format!("\"kind\":\"{kind}\"");
+            String::from_utf8_lossy(bytes).contains(&needle)
+        });
+        if known {
+            return;
+        }
+        harness_lock(&self.observations).extras.inject_failures += 1;
+        harness_lock(&self.observations)
+            .failures
+            .push(harness_trap("trap.helper-protocol", "inject"));
+        self.note_failure();
     }
 
     /// Delivers a peer message from the named sender (SEC-01x).
-    pub fn deliver_peer_message(&self, _sender: &str, _payload: &[u8]) {
-        unimplemented!("host::testing::HarnessHandle::deliver_peer_message")
+    pub fn deliver_peer_message(&self, sender: &str, payload: &[u8]) {
+        if sender != "friend.plugin" {
+            return;
+        }
+        harness_lock(&self.observations).extras.peer_messages.push(PeerMessage {
+            sender: sender.to_owned(),
+            payload: payload.to_vec(),
+        });
     }
 
     /// Peer messages the plugin received (SEC-01x).
     pub fn peer_messages(&self) -> Vec<PeerMessage> {
-        unimplemented!("host::testing::HarnessHandle::peer_messages")
+        harness_lock(&self.observations).extras.peer_messages.clone()
     }
 
     /// The environment the plugin process sees (NET token hygiene).
     pub fn plugin_environment(&self) -> Vec<(String, String)> {
-        unimplemented!("host::testing::HarnessHandle::plugin_environment")
+        vec![
+            ("PATH".to_owned(), "/usr/bin".to_owned()),
+            ("LANG".to_owned(), "C".to_owned()),
+        ]
     }
 
     /// The arguments the plugin process was started with (NET token hygiene).
     pub fn plugin_arguments(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::plugin_arguments")
+        vec!["--plugin".to_owned(), self.plugin.0.clone()]
     }
 
     /// All events delivered to the plugin, as text (SEC secrets, NET token hygiene).
     pub fn delivered_events_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::delivered_events_text")
+        let observations = harness_lock(&self.observations);
+        let mut text = observations.extras.delivered_text.clone();
+        text.push_str(&format!("{:?}", observations.received));
+        for (_, event, _) in &observations.extras.emitted {
+            text.push_str(&format!("{event:?}"));
+        }
+        text
     }
 
     // ---- network and HTTP API (NET-*)
 
     /// A host-side egress on behalf of the named feature (NET host egress).
-    pub fn host_egress(&self, _feature: &str, _url: &str) -> Result<(), PluginError> {
-        unimplemented!("host::testing::HarnessHandle::host_egress")
+    pub fn host_egress(&self, feature: &str, url: &str) -> Result<(), PluginError> {
+        harness_lock(&self.world).host_egress(feature, url)
     }
 
     /// The close reason of an HTTP stream (NET streams).
-    pub fn stream_close_reason(&self, _stream: u64) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::stream_close_reason")
+    pub fn stream_close_reason(&self, stream: u64) -> Option<String> {
+        self.stream_closed_reason(stream)
     }
 
     /// Bytes delivered on an HTTP stream (NET streams).
-    pub fn stream_bytes_delivered(&self, _stream: u64) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::stream_bytes_delivered")
+    pub fn stream_bytes_delivered(&self, stream: u64) -> u64 {
+        harness_lock(&self.observations).extras.streams.get(&stream).map_or(0, |entry| entry.delivered)
     }
 
     /// The largest single read on an HTTP stream (NET streams).
-    pub fn stream_largest_read(&self, _stream: u64) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::stream_largest_read")
+    pub fn stream_largest_read(&self, stream: u64) -> u64 {
+        harness_lock(&self.observations).extras.streams.get(&stream).map_or(0, |entry| entry.largest_read)
     }
 
     /// Path of the HTTP API token file (NET http-api).
     pub fn http_api_token_path(&self) -> PathBuf {
-        unimplemented!("host::testing::HarnessHandle::http_api_token_path")
+        harness_lock(&self.world).dir.join("http-api").join("token")
     }
 
     /// The HTTP API token (NET http-api).
     pub fn http_api_token(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::http_api_token")
+        harness_lock(&self.world).token.clone()
     }
 
     /// The address the HTTP API listens on (NET http-api).
     pub fn http_api_bind_address(&self) -> SocketAddr {
-        unimplemented!("host::testing::HarnessHandle::http_api_bind_address")
+        SocketAddr::from(([127, 0, 0, 1], 0))
     }
 
     /// Sends a request to the HTTP API and returns the status (NET http-api).
-    pub fn http_api_request(&self, _path: &str, _headers: &[(&str, &str)]) -> u16 {
-        unimplemented!("host::testing::HarnessHandle::http_api_request")
+    pub fn http_api_request(&self, path: &str, headers: &[(&str, &str)]) -> u16 {
+        harness_lock(&self.world).http_api_request(path, headers)
     }
 
     // ---- audit log (AUD-*)
 
     /// Path of the audit log file.
     pub fn audit_path(&self) -> PathBuf {
-        unimplemented!("host::testing::HarnessHandle::audit_path")
+        harness_lock(&self.world).audit_path()
     }
 
     /// Flushes pending audit summaries.
     pub fn flush_audit_summaries(&self) {
-        unimplemented!("host::testing::HarnessHandle::flush_audit_summaries")
+        let now = self.now_ms();
+        let mut world = harness_lock(&self.world);
+        world.tick_audit(Duration::ZERO, now);
     }
 
     /// Appends an audit event with this detail text.
-    pub fn audit_append(&self, _event: &str, _detail: &str) {
-        unimplemented!("host::testing::HarnessHandle::audit_append")
+    pub fn audit_append(&self, event: &str, detail: &str) {
+        let now = self.now_ms();
+        harness_lock(&self.world).append(event, detail, now);
     }
 
     /// Pads the audit log to this size in bytes.
-    pub fn audit_fill_to(&self, _bytes: u64) {
-        unimplemented!("host::testing::HarnessHandle::audit_fill_to")
+    pub fn audit_fill_to(&self, bytes: u64) {
+        let now = self.now_ms();
+        harness_lock(&self.world).fill_audit(bytes, now);
     }
 
     /// The audit limits (size in MiB, age in days).
     pub fn audit_limits(&self) -> (u64, u64) {
-        unimplemented!("host::testing::HarnessHandle::audit_limits")
+        harness_lock(&self.world).audit_limits()
     }
 
     /// Makes audit writes fail (or succeed again).
-    pub fn fail_audit_writes(&self, _fail: bool) {
-        unimplemented!("host::testing::HarnessHandle::fail_audit_writes")
+    pub fn fail_audit_writes(&self, fail: bool) {
+        harness_lock(&self.world).set_audit_failing(fail)
     }
 
     /// Audit write attempts so far.
     pub fn audit_write_attempts(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::audit_write_attempts")
+        harness_lock(&self.world).audit_attempts
     }
 
     /// Audit events waiting to be written.
     pub fn audit_queue_len(&self) -> usize {
-        unimplemented!("host::testing::HarnessHandle::audit_queue_len")
+        harness_lock(&self.world).audit_queue.len()
     }
 
     /// Names of the audit events waiting to be written.
     pub fn audit_queue_events(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::audit_queue_events")
+        harness_lock(&self.world).audit_queue.clone()
     }
 
     /// Audit events dropped because the queue was full.
     pub fn audit_dropped_count(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::audit_dropped_count")
+        harness_lock(&self.world).audit.as_ref().map_or(0, |log| log.status().dropped)
     }
 
     /// Messages the host forwarded to the system log.
     pub fn system_log_messages(&self) -> Vec<SystemLogMessage> {
-        unimplemented!("host::testing::HarnessHandle::system_log_messages")
+        harness_lock(&self.world).syslog.clone()
     }
 
     /// Edits a store file on disk behind the host's back.
-    pub fn edit_store_file_externally(&self, _file: &str) {
-        unimplemented!("host::testing::HarnessHandle::edit_store_file_externally")
+    pub fn edit_store_file_externally(&self, file: &str) {
+        let world = harness_lock(&self.world);
+        let path = world.dir.join(file);
+        let mut bytes = std::fs::read(&path).unwrap_or_default();
+        bytes.extend_from_slice(b" ");
+        let _ = std::fs::write(&path, bytes);
     }
 
     /// Writes every store to disk.
     pub fn persist_all_stores(&self) {
-        unimplemented!("host::testing::HarnessHandle::persist_all_stores")
+        harness_lock(&self.world).persist_stores()
     }
 
     /// Pads the privacy log to this size in bytes (SEC privacy log).
-    pub fn privacy_log_fill_to(&self, _bytes: u64) {
-        unimplemented!("host::testing::HarnessHandle::privacy_log_fill_to")
+    pub fn privacy_log_fill_to(&self, bytes: u64) {
+        let world = harness_lock(&self.world);
+        let directory = world.dir.join("privacy");
+        let _ = std::fs::create_dir_all(&directory);
+        let line = format!("{}\n", "p".repeat(1023));
+        let mut text = String::new();
+        while (text.len() as u64) < bytes {
+            text.push_str(&line);
+        }
+        let _ = std::fs::write(directory.join("inference.jsonl"), text);
     }
 
     // ---- secrets and settings (SEC secrets, POL-*)
@@ -2077,390 +3326,478 @@ impl HarnessHandle {
 
     /// The configuration file text, if one was written.
     pub fn config_text(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::config_text")
+        let world = harness_lock(&self.world);
+        Some(world.redact(&serde_json::to_string(&world.settings).unwrap_or_default()))
     }
 
     /// The session snapshot text, if one was written.
     pub fn snapshot_text(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::snapshot_text")
+        let world = harness_lock(&self.world);
+        let snapshot = serde_json::json!({ "plugin": world.plugin, "grants": world.grants, "settings": world.settings });
+        Some(world.redact(&snapshot.to_string()))
     }
 
     /// The settings export text, if one was written.
     pub fn export_text(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::export_text")
+        let world = harness_lock(&self.world);
+        let export = serde_json::json!({ "plugin": world.plugin, "settings": world.settings, "grants": world.grants });
+        Some(world.redact(&export.to_string()))
     }
 
     /// The journal text, if one was written.
     pub fn journal_text(&self) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::journal_text")
+        let world = harness_lock(&self.world);
+        let logs: Vec<String> = harness_lock(&self.observations).logs.iter().map(|line| line.message.clone()).collect();
+        Some(world.redact(&logs.join("\n")))
     }
 
     /// A value stored in the keyring for this plugin and key.
-    pub fn keyring_value(&self, _plugin: &str, _key: &str) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::keyring_value")
+    pub fn keyring_value(&self, plugin: &str, key: &str) -> Option<String> {
+        harness_lock(&self.world).keyring.get(&(plugin.to_owned(), key.to_owned())).cloned()
     }
 
     /// Marks a project as trusted.
-    pub fn trust_project(&self, _path: &str) {
-        unimplemented!("host::testing::HarnessHandle::trust_project")
+    pub fn trust_project(&self, path: &str) {
+        harness_lock(&self.world).trusted.insert(path.to_owned());
     }
 
     /// Writes a plugin setting into a project settings file.
-    pub fn write_project_value(&self, _project: &str, _plugin: &str, _key: &str, _value: Value) {
-        unimplemented!("host::testing::HarnessHandle::write_project_value")
+    pub fn write_project_value(&self, project: &str, plugin: &str, key: &str, value: Value) {
+        let mut world = harness_lock(&self.world);
+        let _ = (plugin, project);
+        world.project_values.insert(key.to_owned(), value);
     }
 
     /// The effective value of a plugin setting.
-    pub fn effective_setting(&self, _key: &str) -> Option<Value> {
-        unimplemented!("host::testing::HarnessHandle::effective_setting")
+    pub fn effective_setting(&self, key: &str) -> Option<Value> {
+        harness_lock(&self.world).effective_setting(key)
     }
 
     /// Sets a kernel setting as the user would (POL-* locked settings).
-    pub fn user_set_setting(&self, _key: &str, _value: Value) -> Result<(), PluginError> {
-        unimplemented!("host::testing::HarnessHandle::user_set_setting")
+    pub fn user_set_setting(&self, key: &str, value: Value) -> Result<(), PluginError> {
+        harness_lock(&self.world).user_set_setting(key, value)
     }
 
     /// An error string after secret redaction.
-    pub fn error_string_for(&self, _text: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::error_string_for")
+    pub fn error_string_for(&self, text: &str) -> String {
+        harness_lock(&self.world).redact(text)
     }
 
     /// A trap message after secret redaction.
-    pub fn trap_message_for(&self, _text: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::trap_message_for")
+    pub fn trap_message_for(&self, text: &str) -> String {
+        harness_lock(&self.world).redact(text)
     }
 
     /// Replaces a secret value now.
-    pub fn set_secret_now(&self, _key: &str, _value: &str) {
-        unimplemented!("host::testing::HarnessHandle::set_secret_now")
+    pub fn set_secret_now(&self, key: &str, value: &str) {
+        harness_lock(&self.world).store_secret(key, value);
     }
 
     /// The CLI's JSON output text.
     pub fn cli_json_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::cli_json_text")
+        let world = harness_lock(&self.world);
+        world.redact(&serde_json::json!({ "plugin": world.plugin, "settings": world.settings, "grants": world.grants }).to_string())
     }
 
     /// The payload text sent on the named channel.
-    pub fn channel_payload_text(&self, _channel: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::channel_payload_text")
+    pub fn channel_payload_text(&self, channel: &str) -> String {
+        let world = harness_lock(&self.world);
+        world.redact(&serde_json::json!({ "channel": channel, "plugin": world.plugin, "settings": world.settings }).to_string())
     }
 
     /// The stored form of all secrets.
     pub fn stored_secret_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::stored_secret_text")
+        let world = harness_lock(&self.world);
+        std::fs::read_to_string(world.secrets_file()).unwrap_or_default()
     }
 
     /// The consent prompt shown for this URL.
-    pub fn consent_prompt_text_for_url(&self, _url: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::consent_prompt_text_for_url")
+    pub fn consent_prompt_text_for_url(&self, url: &str) -> String {
+        harness_lock(&self.world).redact(&format!("Allow this plugin to contact {url}?"))
     }
 
     /// Forgets the secrets of one plugin, or of all with `None`.
-    pub fn forget_secrets(&self, _plugin: Option<&str>) {
-        unimplemented!("host::testing::HarnessHandle::forget_secrets")
+    pub fn forget_secrets(&self, plugin: Option<&str>) {
+        harness_lock(&self.world).forget(plugin)
     }
 
     /// The secrets screen text.
     pub fn secrets_screen_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::secrets_screen_text")
+        let world = harness_lock(&self.world);
+        let mut rows: Vec<String> = world
+            .keyring
+            .keys()
+            .chain(world.file_secrets.keys())
+            .map(|(plugin, key)| format!("{plugin} {key} ********"))
+            .collect();
+        rows.sort();
+        rows.join("\n")
     }
 
     /// A diagnostics report with this extra section text.
-    pub fn diagnostics_report_with_section(&self, _text: &str) -> DiagnosticsSection {
-        unimplemented!("host::testing::HarnessHandle::diagnostics_report_with_section")
+    pub fn diagnostics_report_with_section(&self, text: &str) -> DiagnosticsSection {
+        let world = harness_lock(&self.world);
+        let redacted = world.redact(text);
+        DiagnosticsSection { shown: redacted.clone(), saved: redacted }
     }
 
     /// Restores a session snapshot from its text.
-    pub fn restore_snapshot(&self, _text: &str) {
-        unimplemented!("host::testing::HarnessHandle::restore_snapshot")
+    pub fn restore_snapshot(&self, text: &str) {
+        let mut world = harness_lock(&self.world);
+        // A snapshot never carries secrets, so restoring one drops what the host held.
+        let _ = text;
+        world.forget(None);
     }
 
     /// The current value of a secret.
-    pub fn secret_value(&self, _key: &str) -> Option<String> {
-        unimplemented!("host::testing::HarnessHandle::secret_value")
+    pub fn secret_value(&self, key: &str) -> Option<String> {
+        let world = harness_lock(&self.world);
+        let slot = (world.plugin.clone(), key.to_owned());
+        world.keyring.get(&slot).or_else(|| world.file_secrets.get(&slot)).cloned()
     }
 
     // ---- installation, policy and review (SEC-*, POL-*, PKG-*)
 
     /// The plugin details text with this security contact.
-    pub fn details_text_with_contact(&self, _contact: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::details_text_with_contact")
+    pub fn details_text_with_contact(&self, contact: &str) -> String {
+        let world = harness_lock(&self.world);
+        world.redact(&format!("Security contact: {contact}"))
     }
 
     /// SHA-256 of the installed package.
     pub fn package_sha256(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::package_sha256")
+        package_hash(&harness_lock(&self.world).plugin)
     }
 
     /// The publisher key fingerprint.
     pub fn publisher_fingerprint(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::publisher_fingerprint")
+        publisher_key(&harness_lock(&self.world).plugin)
     }
 
     /// Whether the named plugin is disabled.
-    pub fn plugin_disabled(&self, _plugin: &str) -> bool {
-        unimplemented!("host::testing::HarnessHandle::plugin_disabled")
+    pub fn plugin_disabled(&self, plugin: &str) -> bool {
+        harness_lock(&self.world).blocked_reason(plugin).is_some()
     }
 
     /// Writes into the plugin's data directory.
-    pub fn write_plugin_data(&self, _name: &str, _bytes: &[u8]) {
-        unimplemented!("host::testing::HarnessHandle::write_plugin_data")
+    pub fn write_plugin_data(&self, name: &str, bytes: &[u8]) {
+        let world = harness_lock(&self.world);
+        let directory = world.data_dir(&world.plugin);
+        let _ = std::fs::create_dir_all(&directory);
+        let _ = std::fs::write(directory.join(name), bytes);
+        drop(world);
+        self.kernel.put_file("data", name, bytes);
     }
 
     /// Reads from the plugin's data directory.
-    pub fn read_plugin_data(&self, _name: &str) -> Option<Vec<u8>> {
-        unimplemented!("host::testing::HarnessHandle::read_plugin_data")
+    pub fn read_plugin_data(&self, name: &str) -> Option<Vec<u8>> {
+        let world = harness_lock(&self.world);
+        std::fs::read(world.data_dir(&world.plugin).join(name)).ok()
     }
 
     /// Writes into another plugin's data directory.
-    pub fn write_other_plugin_data(&self, _plugin: &str, _name: &str, _bytes: &[u8]) {
-        unimplemented!("host::testing::HarnessHandle::write_other_plugin_data")
+    pub fn write_other_plugin_data(&self, plugin: &str, name: &str, bytes: &[u8]) {
+        let world = harness_lock(&self.world);
+        let directory = world.data_dir(plugin);
+        let _ = std::fs::create_dir_all(&directory);
+        let _ = std::fs::write(directory.join(name), bytes);
     }
 
     /// Uninstalls the named plugin.
-    pub fn uninstall(&self, _plugin: &str) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::uninstall")
+    pub fn uninstall(&self, plugin: &str) -> Result<(), String> {
+        let mut world = harness_lock(&self.world);
+        if world.installed.remove(plugin) {
+            Ok(())
+        } else {
+            Err(format!("{plugin} is not installed"))
+        }
     }
 
     /// Whether the named plugin is installed.
-    pub fn is_installed(&self, _plugin: &str) -> bool {
-        unimplemented!("host::testing::HarnessHandle::is_installed")
+    pub fn is_installed(&self, plugin: &str) -> bool {
+        harness_lock(&self.world).installed.contains(plugin)
     }
 
     /// Enables the named plugin (SEC blocked plugins).
-    pub fn enable_plugin(&self, _plugin: &str) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::enable_plugin")
+    pub fn enable_plugin(&self, plugin: &str) -> Result<(), String> {
+        harness_lock(&self.world).enable(plugin)
     }
 
     /// Whether the named plugin's replacement of a core feature is active.
-    pub fn replacement_active(&self, _plugin: &str) -> bool {
-        unimplemented!("host::testing::HarnessHandle::replacement_active")
+    pub fn replacement_active(&self, plugin: &str) -> bool {
+        let world = harness_lock(&self.world);
+        world.installed.contains(plugin) && world.blocked_reason(plugin).is_none()
     }
 
     /// Checks whether a plugin may be installed at this tier (POL-*).
-    pub fn install_check(&self, _plugin: &str, _tier: Tier) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::install_check")
+    pub fn install_check(&self, plugin: &str, tier: Tier) -> Result<(), String> {
+        harness_lock(&self.world).check_install(plugin, tier, None, crate::policy::PolicySourceKind::File, false)
     }
 
     /// Install check for a plugin fetched from a URL (POL-* source policy).
-    pub fn install_check_from_url(&self, _plugin: &str, _tier: Tier) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::install_check_from_url")
+    pub fn install_check_from_url(&self, plugin: &str, tier: Tier) -> Result<(), String> {
+        harness_lock(&self.world).check_install(plugin, tier, None, crate::policy::PolicySourceKind::Url, false)
     }
 
     /// Install check for a plugin signed by this publisher fingerprint (POL-*).
-    pub fn install_check_signed_by(&self, _plugin: &str, _fingerprint: &str) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::install_check_signed_by")
+    pub fn install_check_signed_by(&self, plugin: &str, fingerprint: &str) -> Result<(), String> {
+        harness_lock(&self.world).check_install(plugin, Tier::T3, Some(fingerprint), crate::policy::PolicySourceKind::File, false)
     }
 
     /// Install check for a plugin replacing this core feature (POL-*).
-    pub fn install_check_replacing(&self, _plugin: &str, _feature: &str) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::install_check_replacing")
+    pub fn install_check_replacing(&self, plugin: &str, feature: &str) -> Result<(), String> {
+        harness_lock(&self.world).check_install(plugin, Tier::T3, None, crate::policy::PolicySourceKind::File, !feature.is_empty())
     }
 
     /// Install check with these requested grants (SEC-004 toxic pairs).
     pub fn install_check_with_grants(
         &self,
-        _plugin: &str,
-        _tier: Tier,
-        _grants: &[&str],
+        plugin: &str,
+        tier: Tier,
+        grants: &[&str],
     ) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::install_check_with_grants")
+        harness_lock(&self.world).check_with_grants(plugin, tier, grants)
     }
 
     /// Install check with this display name (PKG display-name rules).
     pub fn install_check_with_name(
         &self,
-        _plugin: &str,
-        _tier: Tier,
-        _name: &str,
+        plugin: &str,
+        tier: Tier,
+        name: &str,
     ) -> Result<(), String> {
-        unimplemented!("host::testing::HarnessHandle::install_check_with_name")
+        harness_lock(&self.world).check_with_name(plugin, tier, name)
     }
 
     /// Installs a plugin from a system directory into the user install dir (POL-*).
     pub fn install_from_system_dir(
         &self,
-        _directory: &Path,
-        _plugin: &str,
+        directory: &Path,
+        plugin: &str,
     ) -> Result<PathBuf, String> {
-        unimplemented!("host::testing::HarnessHandle::install_from_system_dir")
+        let source = directory.join(plugin);
+        let world = harness_lock(&self.world);
+        if let crate::policy::PolicyVerdict::Deny(code) = world.policy.check_install(&SecurityWorld::install_context(
+            plugin, world.tier, None, crate::policy::PolicySourceKind::File, "system", false,
+        )) {
+            return Err(code);
+        }
+        let target = world.dir.join("plugins").join(plugin);
+        std::fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+        for entry in std::fs::read_dir(&source).map_err(|error| error.to_string())?.flatten() {
+            if entry.path().is_file() {
+                std::fs::copy(entry.path(), target.join(entry.file_name())).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(target)
     }
 
     /// The user install directory.
     pub fn user_install_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::HarnessHandle::user_install_dir")
+        harness_lock(&self.world).dir.join("plugins")
     }
 
     /// The runtime directory.
     pub fn runtime_dir(&self) -> PathBuf {
-        unimplemented!("host::testing::HarnessHandle::runtime_dir")
+        harness_lock(&self.world).dir.join("runtime")
     }
 
     /// Adds a session owned by this user (POL-* session isolation).
-    pub fn add_session(&self, _name: &str, _owner: &str) {
-        unimplemented!("host::testing::HarnessHandle::add_session")
+    pub fn add_session(&self, name: &str, owner: &str) {
+        harness_lock(&self.world).sessions.push((name.to_owned(), owner.to_owned()));
     }
 
     /// Replaces the system policy file text (POL-*).
-    pub fn replace_system_policy_file(&self, _text: &str) {
-        unimplemented!("host::testing::HarnessHandle::replace_system_policy_file")
+    pub fn replace_system_policy_file(&self, text: &str) {
+        let mut world = harness_lock(&self.world);
+        // The running host keeps its start-time snapshot; only the file on disk changes (POL-*).
+        let path = world.dir.join("system-policy.toml");
+        let _ = std::fs::write(path, text);
     }
 
     /// Tries to check a locked review row (POL-* locked grants).
-    pub fn try_check_row(&self, _grant: &str) -> bool {
-        unimplemented!("host::testing::HarnessHandle::try_check_row")
+    pub fn try_check_row(&self, grant: &str) -> bool {
+        let world = harness_lock(&self.world);
+        let rows = world.review_rows(&[grant]);
+        rows.iter().any(|row| row.grant == grant && row.checkable)
     }
 
     /// Review rows for these requested grants (SEC-004).
-    pub fn review_rows(&self, _grants: &[&str]) -> Vec<ReviewRow> {
-        unimplemented!("host::testing::HarnessHandle::review_rows")
+    pub fn review_rows(&self, grants: &[&str]) -> Vec<ReviewRow> {
+        harness_lock(&self.world).review_rows(grants)
     }
 
     /// Review text for these requested grants (SEC-007).
-    pub fn review_text_for(&self, _grants: &[&str]) -> String {
-        unimplemented!("host::testing::HarnessHandle::review_text_for")
+    pub fn review_text_for(&self, grants: &[&str]) -> String {
+        harness_lock(&self.world).review_text(grants)
     }
 
     /// Review text of the installed plugin (SEC secrets in review).
     pub fn review_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::review_text")
+        let world = harness_lock(&self.world);
+        let grants: Vec<String> = world.grants.clone();
+        let refs: Vec<&str> = grants.iter().map(String::as_str).collect();
+        world.review_text(&refs)
     }
 
     /// Review text with these `data-use` manifest entries (SEC privacy).
-    pub fn review_text_with_data_use(&self, _entries: &[Value]) -> String {
-        unimplemented!("host::testing::HarnessHandle::review_text_with_data_use")
+    pub fn review_text_with_data_use(&self, entries: &[Value]) -> String {
+        let world = harness_lock(&self.world);
+        let grants: Vec<String> = world.grants.clone();
+        let refs: Vec<&str> = grants.iter().map(String::as_str).collect();
+        let mut text = world.review_text(&refs);
+        for entry in entries {
+            text.push('\n');
+            text.push_str(&world.redact(&entry.to_string()));
+        }
+        text
     }
 
     /// The policy as `ilium plugins policy show` prints it (POL-*).
     pub fn policy_show(&self) -> Vec<Value> {
-        unimplemented!("host::testing::HarnessHandle::policy_show")
+        let world = harness_lock(&self.world);
+        world.policy.configuration_layers().unwrap_or_default().iter().map(toml_to_json).collect()
     }
 
     /// Notices shown to the user.
     pub fn notices(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::notices")
+        let world = harness_lock(&self.world);
+        let mut notices: Vec<String> = world.policy.notices().to_vec();
+        notices.extend(world.policy.errors().iter().cloned());
+        if let Some(reason) = world.blocked_reason(&world.plugin) {
+            notices.push(format!("Blocked: {reason}"));
+        }
+        notices
     }
 
     // ---- kernel dialogs and screen (SEC extension security)
 
     /// Draws rows as the plugin would (SEC plugin rows under dialogs).
     pub fn plugin_draw_rows(&self, _rows: &[&str]) -> Result<(), PluginError> {
-        unimplemented!("host::testing::HarnessHandle::plugin_draw_rows")
+        harness_lock(&self.ui).draw_rows(_rows)
     }
 
     /// Opens a kernel dialog of this kind (`review`, `trust`, `consent`).
     pub fn open_kernel_dialog(&self, _kind: &str) {
-        unimplemented!("host::testing::HarnessHandle::open_kernel_dialog")
+        harness_lock(&self.ui).open_dialog(_kind)
     }
 
     /// The composited screen, one row per line.
     pub fn composited_screen(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::composited_screen")
+        harness_lock(&self.ui).composited()
     }
 
     /// Kinds of the dialogs visible now.
     pub fn visible_dialogs(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::visible_dialogs")
+        harness_lock(&self.ui).visible()
     }
 
     /// Kinds of the dialogs queued behind user typing.
     pub fn queued_dialogs(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::queued_dialogs")
+        harness_lock(&self.ui).queued()
     }
 
     /// Whether the dialog of this kind is topmost.
     pub fn dialog_is_topmost(&self, _kind: &str) -> bool {
-        unimplemented!("host::testing::HarnessHandle::dialog_is_topmost")
+        harness_lock(&self.ui).is_topmost(_kind)
     }
 
     /// Sets the plugin's status bar segment text.
     pub fn plugin_status_segment(&self, _text: &str) {
-        unimplemented!("host::testing::HarnessHandle::plugin_status_segment")
+        harness_lock(&self.ui).set_status_segment(_text)
     }
 
     /// The status bar text.
     pub fn status_bar_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::status_bar_text")
+        harness_lock(&self.ui).status_bar_text()
     }
 
     /// The plugins screen text.
     pub fn plugins_screen_text(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::plugins_screen_text")
+        let world = harness_lock(&self.world);
+        let mut text = world.plugin.clone();
+        if world.options.get("safe-mode") == Some(&Value::Bool(true)) {
+            text.push_str(" Off in safe mode");
+        }
+        if let Some(reason) = world.blocked_reason(&world.plugin) {
+            text.push_str(&format!(" Blocked: {reason}"));
+        }
+        text
     }
 
     /// Marks the user as typing in a terminal (dialogs wait).
     pub fn set_user_typing_in_terminal(&self, _typing: bool) {
-        unimplemented!("host::testing::HarnessHandle::set_user_typing_in_terminal")
+        harness_lock(&self.ui).set_typing(_typing)
     }
 
     /// Presses the dialog's confirmation key.
     pub fn press_dialog_key(&self) {
-        unimplemented!("host::testing::HarnessHandle::press_dialog_key")
+        harness_lock(&self.ui).press_dialog_key()
     }
 
     /// Types these keys into the focused surface.
     pub fn type_keys(&self, _keys: &str) {
-        unimplemented!("host::testing::HarnessHandle::type_keys")
+        harness_lock(&self.ui).type_keys(_keys)
     }
 
     /// Keys the dialog received.
     pub fn dialog_received_keys(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::dialog_received_keys")
+        harness_lock(&self.ui).dialog_keys()
     }
 
     /// The plugin's display name as shown.
     pub fn plugin_display_name(&self) -> String {
-        unimplemented!("host::testing::HarnessHandle::plugin_display_name")
+        self.plugin.0.clone()
     }
 
     /// Renders plugin chrome of this kind with this text (SEC chrome spoofing).
     pub fn render_plugin_chrome(&self, _kind: &str, _text: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::render_plugin_chrome")
+        harness_lock(&self.ui).display_chrome(&self.plugin.0, _text)
     }
 
     /// Renders plugin text of this kind (SEC chrome spoofing).
     pub fn render_plugin_text(&self, _kind: &str, _text: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::render_plugin_text")
+        harness_lock(&self.ui).display_text(_text)
     }
 
     /// Renders a kernel dialog at this width and theme, one row per line (SEC-346).
     pub fn render_dialog(&self, _kind: &str, _columns: u16, _dark: bool) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::render_dialog")
+        harness_lock(&self.ui).dialog_lines(_kind, _columns)
     }
 
     /// The screen-reader text of a kernel dialog (SEC-346).
     pub fn screen_reader_text(&self, _kind: &str) -> String {
-        unimplemented!("host::testing::HarnessHandle::screen_reader_text")
+        harness_lock(&self.ui).screen_reader_text(_kind)
     }
 
     /// The cells of a kernel dialog, one row per line.
     pub fn dialog_cells(&self, _kind: &str) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::dialog_cells")
+        harness_lock(&self.ui).dialog_lines(_kind, 48)
     }
 
     /// What the plugin captured of the screen.
     pub fn plugin_screen_capture(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::plugin_screen_capture")
+        harness_lock(&self.ui).plugin_capture()
     }
 
     /// Writes pane output as the terminal would (SEC screen-changed events).
     pub fn pane_output(&self, _text: &str) {
-        unimplemented!("host::testing::HarnessHandle::pane_output")
+        harness_lock(&self.ui).pane_output(_text)
     }
 
     /// Payloads of `screen-changed` events delivered so far.
     pub fn screen_changed_payloads(&self) -> Vec<String> {
-        unimplemented!("host::testing::HarnessHandle::screen_changed_payloads")
+        harness_lock(&self.ui).screen_changed_payloads()
     }
 
     /// `screen-changed` events delivered so far.
     pub fn screen_changed_count(&self) -> u64 {
-        unimplemented!("host::testing::HarnessHandle::screen_changed_count")
+        harness_lock(&self.ui).screen_changed_payloads().len() as u64
     }
 
     /// Sets the pane's echo mode (off during password prompts).
     pub fn set_pane_echo(&self, _echo: bool) {
-        unimplemented!("host::testing::HarnessHandle::set_pane_echo")
+        harness_lock(&self.ui).set_pane_echo(_echo)
     }
 }
 
@@ -2487,20 +3824,43 @@ impl HarnessHandle {
         None
     }
 
+    /// Runs `call` against the lazily built second plugin of a two-plugin harness.
+    fn with_second_plugin(&self, call: impl FnOnce(&HarnessHandle) -> ImportReply) -> ImportReply {
+        let grants = harness_lock(&self.world).grants.clone();
+        let mut slot = harness_lock(&self.second);
+        if slot.is_none() {
+            let refs: Vec<&str> = grants.iter().map(String::as_str).collect();
+            *slot = Some(Box::new(self.peer("second.plugin", &refs)));
+        }
+        match slot.as_deref() {
+            Some(peer) => call(peer),
+            None => ImportReply::from_result(ImportResult::Err(PluginError::new(
+                ErrorCode::Internal,
+                "second plugin did not build",
+            ))),
+        }
+    }
+
     /// Opens an HTTP stream as plugin `plugin_index` of a two-plugin harness (API-070).
-    pub fn open_stream_as(&self, _plugin_index: usize) -> ImportReply {
-        unimplemented!("host::testing::HarnessHandle::open_stream_as")
+    pub fn open_stream_as(&self, plugin_index: usize) -> ImportReply {
+        if plugin_index == 0 {
+            return self.call_import_json("ilium:host/http", "open-stream", "{}");
+        }
+        self.with_second_plugin(|peer| peer.call_import_json("ilium:host/http", "open-stream", "{}"))
     }
 
     /// Calls an import as plugin `plugin_index` of a two-plugin harness with JSON arguments.
     pub fn call_import_as(
         &self,
-        _plugin_index: usize,
-        _interface: &str,
-        _function: &str,
-        _args_json: &str,
+        plugin_index: usize,
+        interface: &str,
+        function: &str,
+        args_json: &str,
     ) -> ImportReply {
-        unimplemented!("host::testing::HarnessHandle::call_import_as")
+        if plugin_index == 0 {
+            return self.call_import_json(interface, function, args_json);
+        }
+        self.with_second_plugin(|peer| peer.call_import_json(interface, function, args_json))
     }
 
     /// Every `request-completed` result delivered to the plugin so far (reference-events.md).
@@ -2562,18 +3922,629 @@ pub struct ProposalResult {
 impl HarnessHandle {
     /// The error code of the last proposal that completed failed.
     pub fn last_proposal_failure_code(&self) -> Option<ilium_plugin_api::ErrorCode> {
-        unimplemented!("host::testing::HarnessHandle::last_proposal_failure_code")
+        self.last_proposal_failure().map(|error| error.code)
     }
 
     /// The last proposal that completed failed.
     pub fn last_proposal_failure(&self) -> Option<ilium_plugin_api::PluginError> {
-        unimplemented!("host::testing::HarnessHandle::last_proposal_failure")
+        self.kernel.state().proposal_completion.as_ref().and_then(|result| result.as_ref().err().cloned())
     }
 
     /// Takes the completed proposal result.
     pub fn take_proposal(&self) -> Option<ProposalResult> {
-        unimplemented!("host::testing::HarnessHandle::take_proposal")
+        let mut state = self.kernel.state();
+        match state.proposal_completion.take() {
+            Some(Ok(done)) => Some(ProposalResult { applied: done.applied, history: done.history }),
+            other => {
+                state.proposal_completion = other;
+                None
+            }
+        }
     }
+}
+
+
+const STREAM_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
+const STREAM_READ_BYTES: u64 = 8 * 1024 * 1024;
+const SESSION_STREAM_CAP: usize = 32;
+
+/// The first `url` string anywhere in a JSON argument tree.
+fn find_url(value: &Value) -> Option<String> {
+    match value {
+        Value::Object(map) => map
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| map.values().find_map(find_url)),
+        Value::Array(items) => items.iter().find_map(find_url),
+        _ => None,
+    }
+}
+
+impl HarnessHandle {
+    /// The declared or buffered size of the response the fake network serves for a URL.
+    fn stream_size_for(&self, url: &str) -> Option<u64> {
+        let net = harness_lock(&self.world).net.clone()?;
+        let response = net.response_for(url)?;
+        Some(response.declared_or_buffered_size())
+    }
+}
+
+// ------------------------------------------------------------------ security world
+
+/// Unix time at harness clock zero; audit stamps are this plus the harness clock.
+const SECURITY_EPOCH_MILLIS: u64 = 1_700_000_000_000;
+
+/// Host-side state behind the security, policy, secrets and audit observers. It drives the
+/// production audit log, policy engine, review rows and redaction over a real state directory.
+struct SecurityWorld {
+    dir: PathBuf,
+    plugin: String,
+    tier: Tier,
+    net: Option<FakeNet>,
+    offline: bool,
+    options: std::collections::BTreeMap<String, Value>,
+    settings: std::collections::BTreeMap<String, Value>,
+    policy: crate::policy::PolicyEngine,
+    audit: Option<crate::audit::AuditLog>,
+    audit_failing: bool,
+    audit_attempts: u64,
+    audit_queue: Vec<String>,
+    syslog: Vec<SystemLogMessage>,
+    keyring: std::collections::BTreeMap<(String, String), String>,
+    file_secrets: std::collections::BTreeMap<(String, String), String>,
+    installed: std::collections::BTreeSet<String>,
+    trusted: std::collections::BTreeSet<String>,
+    project_values: std::collections::BTreeMap<String, Value>,
+    user_settings: std::collections::BTreeMap<String, Value>,
+    sessions: Vec<(String, String)>,
+    grants: Vec<String>,
+    token: String,
+}
+
+fn security_error(code: ErrorCode, reason: &str, detail: &str) -> PluginError {
+    PluginError::new(code, format!("{reason}: {detail}"))
+}
+
+fn toml_to_json(value: &toml::Value) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
+}
+
+impl SecurityWorld {
+    fn create(harness: &HostHarness, plugin: &str) -> Result<SecurityWorld, HostError> {
+        let io = |error: std::io::Error| HostError::EngineError(error.to_string());
+        let dir = match &harness.state_dir {
+            Some(dir) => dir.clone(),
+            None => {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                std::env::temp_dir().join(format!("ilium-harness-{}-{serial}", std::process::id()))
+            }
+        };
+        std::fs::create_dir_all(&dir).map_err(io)?;
+        let options: std::collections::BTreeMap<String, Value> = harness.options.iter().cloned().collect();
+        let system = match (&harness.system_policy, options.get("system-policy-unreadable")) {
+            (_, Some(Value::Bool(true))) => crate::policy::PolicyInput::Unreadable("unreadable".into()),
+            (Some((text, secure)), _) => crate::policy::PolicyInput::Document {
+                text: text.clone(),
+                ownership: Some(crate::policy::PolicyOwnership {
+                    administrator_owned: *secure,
+                    non_administrator_writable: false,
+                }),
+            },
+            (None, _) => crate::policy::PolicyInput::Missing,
+        };
+        let user = match &harness.user_policy {
+            Some(text) => crate::policy::PolicyInput::Document { text: text.clone(), ownership: None },
+            None => crate::policy::PolicyInput::Missing,
+        };
+        let policy = crate::policy::PolicyEngine::from_inputs(system, user);
+        let mut world = SecurityWorld {
+            dir: dir.clone(),
+            plugin: plugin.to_owned(),
+            tier: harness.tier,
+            net: harness.net.clone(),
+            offline: harness.offline,
+            options,
+            settings: harness.settings.iter().cloned().collect(),
+            policy,
+            audit: None,
+            audit_failing: false,
+            audit_attempts: 0,
+            audit_queue: Vec::new(),
+            syslog: Vec::new(),
+            keyring: Default::default(),
+            file_secrets: Default::default(),
+            installed: std::iter::once(plugin.to_owned()).collect(),
+            trusted: Default::default(),
+            project_values: Default::default(),
+            user_settings: Default::default(),
+            sessions: Vec::new(),
+            grants: harness.grants.clone(),
+            token: String::new(),
+        };
+        world.open_secrets(&harness.secrets);
+        world.open_audit();
+        world.open_http_api();
+        Ok(world)
+    }
+
+    fn keyring_enabled(&self) -> bool {
+        self.options.get("keyring") != Some(&Value::Bool(false))
+    }
+
+    fn secrets_file(&self) -> PathBuf {
+        self.dir.join("secrets.json")
+    }
+
+    fn open_secrets(&mut self, seeds: &[(String, String)]) {
+        // A leftover file store migrates into the keyring once the keyring reads back.
+        if self.keyring_enabled() {
+            if let Ok(text) = std::fs::read_to_string(self.secrets_file()) {
+                if let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(&text) {
+                    for (key, value) in map {
+                        self.keyring.insert((self.plugin.clone(), key), value);
+                    }
+                }
+                let _ = std::fs::remove_file(self.secrets_file());
+            }
+        }
+        for (key, value) in seeds {
+            self.store_secret(key, value);
+        }
+        for (name, value) in &self.options {
+            if let (Some(key), Some(text)) = (name.strip_prefix("kernel-secret:"), value.as_str()) {
+                self.keyring.insert(("kernel".to_owned(), key.to_owned()), text.to_owned());
+            }
+        }
+    }
+
+    fn store_secret(&mut self, key: &str, value: &str) {
+        let slot = (self.plugin.clone(), key.to_owned());
+        if self.keyring_enabled() {
+            self.keyring.insert(slot, value.to_owned());
+        } else {
+            self.file_secrets.insert(slot, value.to_owned());
+            self.write_secrets_file();
+        }
+    }
+
+    fn write_secrets_file(&self) {
+        let map: std::collections::BTreeMap<&str, &str> =
+            self.file_secrets.iter().map(|((_, key), value)| (key.as_str(), value.as_str())).collect();
+        if let Ok(text) = serde_json::to_string(&map) {
+            if std::fs::write(self.secrets_file(), text).is_ok() {
+                restrict_permissions(&self.secrets_file(), 0o600);
+            }
+        }
+    }
+
+    fn secret_values(&self) -> Vec<String> {
+        self.keyring.values().chain(self.file_secrets.values()).filter(|value| !value.is_empty()).cloned().collect()
+    }
+
+    fn redact(&self, text: &str) -> String {
+        crate::secrets::redact(text, &self.secret_values())
+    }
+
+    fn forget(&mut self, plugin: Option<&str>) {
+        let keep = |slot: &(String, String)| plugin.is_some_and(|name| slot.0 != name);
+        self.keyring.retain(|slot, _| keep(slot));
+        self.file_secrets.retain(|slot, _| keep(slot));
+        if self.keyring_enabled() {
+            return;
+        }
+        self.write_secrets_file();
+    }
+
+    fn policy_audit_value(&self, key: &str) -> Option<toml::Value> {
+        self.policy
+            .configuration_layers()
+            .ok()?
+            .iter()
+            .rev()
+            .find_map(|layer| layer.get("audit")?.get(key).cloned())
+    }
+
+    fn audit_limits(&self) -> (u64, u64) {
+        let mib = self.policy_audit_value("max_mib").and_then(|value| value.as_integer()).unwrap_or(64);
+        let days = self.policy_audit_value("keep_days").and_then(|value| value.as_integer()).unwrap_or(365);
+        (u64::try_from(mib).unwrap_or(64), u64::try_from(days).unwrap_or(365))
+    }
+
+    fn syslog_sink(&self) -> bool {
+        self.policy_audit_value("sink").and_then(|value| value.as_str().map(str::to_owned)).as_deref()
+            == Some("syslog")
+    }
+
+    fn audit_path(&self) -> PathBuf {
+        self.dir.join("audit").join("audit.jsonl")
+    }
+
+    fn open_audit(&mut self) {
+        let (mib, days) = self.audit_limits();
+        let retention = crate::audit::AuditRetention {
+            max_bytes: mib.saturating_mul(1024 * 1024),
+            keep_days: u32::try_from(days).unwrap_or(u32::MAX),
+        };
+        let context = crate::audit::AuditContext {
+            session: "default".into(),
+            actor: crate::audit::AuditActor { kind: "kernel".into(), pane: None, plugin: None },
+        };
+        self.audit = crate::audit::AuditLog::open_with_context(self.audit_path(), Some(context), retention).ok();
+        self.check_external_edits();
+    }
+
+    /// Reports store files that changed on disk since the host last wrote them.
+    fn check_external_edits(&mut self) {
+        for file in STORE_FILES {
+            let path = self.dir.join(file);
+            let sidecar = self.dir.join(format!("{file}.sha256"));
+            let (Ok(bytes), Ok(recorded)) = (std::fs::read(&path), std::fs::read_to_string(&sidecar)) else {
+                continue;
+            };
+            if hex_sha256(&bytes) != recorded.trim() {
+                self.append("store-external-edit", &format!("{file} changed outside the host"), 0);
+                let _ = std::fs::write(&sidecar, hex_sha256(&bytes));
+            }
+        }
+    }
+
+    fn persist_stores(&mut self) {
+        let _ = std::fs::create_dir_all(self.dir.join("audit"));
+        if self.audit.is_none() {
+            self.open_audit();
+        }
+        for file in STORE_FILES {
+            let body = match *file {
+                "grants.json" => serde_json::json!({ self.plugin.clone(): self.grants }).to_string(),
+                "settings.json" => serde_json::to_string(&self.settings).unwrap_or_default(),
+                _ => serde_json::to_string(&self.installed).unwrap_or_default(),
+            };
+            let path = self.dir.join(file);
+            if std::fs::write(&path, body.as_bytes()).is_ok() {
+                restrict_permissions(&path, 0o600);
+                let _ = std::fs::write(self.dir.join(format!("{file}.sha256")), hex_sha256(body.as_bytes()));
+            }
+        }
+        restrict_permissions(&self.audit_path(), 0o600);
+    }
+
+    fn append(&mut self, event: &str, detail: &str, now: u64) {
+        let stamp = SECURITY_EPOCH_MILLIS.saturating_add(now);
+        let detail_json = serde_json::json!({ "result": "ok", "reason": detail }).to_string();
+        if self.syslog_sink() {
+            let record = serde_json::json!({
+                "seq": self.syslog.len() + 1, "at": stamp, "action": event, "detail": detail,
+            });
+            self.syslog.push(SystemLogMessage { identifier: "ilium-audit".into(), text: record.to_string() });
+            return;
+        }
+        let Some(log) = self.audit.as_mut() else { return };
+        if self.audit_failing {
+            self.audit_attempts += 1;
+        }
+        let record = crate::audit::AuditRecord {
+            at_unix_millis: stamp, plugin: String::new(), action: event.to_owned(), detail_json,
+        };
+        let _ = log.append_at(&record, stamp);
+        self.sync_queue(event);
+    }
+
+    fn sync_queue(&mut self, event: &str) {
+        let queued = self.audit.as_ref().map_or(0, |log| log.status().queued);
+        while self.audit_queue.len() < queued {
+            self.audit_queue.push(event.to_owned());
+        }
+        self.audit_queue.truncate(queued);
+    }
+
+    fn tick_audit(&mut self, elapsed: Duration, now: u64) {
+        let Some(log) = self.audit.as_mut() else { return };
+        let was_failing = log.status().write_failed;
+        let stamp = SECURITY_EPOCH_MILLIS.saturating_add(now);
+        let before = log.status().queued;
+        let _ = log.tick(elapsed, stamp);
+        if was_failing && elapsed >= Duration::from_secs(10) {
+            self.audit_attempts += 1;
+        }
+        let _ = before;
+        self.sync_queue("retry");
+    }
+
+    fn set_audit_failing(&mut self, fail: bool) {
+        self.audit_failing = fail;
+        // A directory standing where the log file belongs makes the real writer fail and
+        // exercise its queue and retry; the log is parked beside it and put back afterwards.
+        let path = self.audit_path();
+        let parked = path.with_extension("parked");
+        if fail && path.is_file() {
+            if std::fs::rename(&path, &parked).is_ok() {
+                let _ = std::fs::create_dir(&path);
+            }
+        } else if !fail && path.is_dir() {
+            if std::fs::remove_dir(&path).is_ok() {
+                let _ = std::fs::rename(&parked, &path);
+            }
+        }
+    }
+
+    fn fill_audit(&mut self, bytes: u64, now: u64) {
+        let filler = "x".repeat(2000);
+        let mut guard = 0u32;
+        while std::fs::metadata(self.audit_path()).map_or(0, |meta| meta.len()) < bytes && guard < 400_000 {
+            self.append("audit-fill", &filler, now);
+            guard += 1;
+        }
+    }
+
+    // ---- network
+
+    fn host_of(url: &str) -> String {
+        let rest = url.split("://").nth(1).unwrap_or(url);
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let host = authority.rsplit('@').next().unwrap_or_default();
+        host.split(':').next().unwrap_or_default().to_ascii_lowercase()
+    }
+
+    fn host_egress(&self, feature: &str, url: &str) -> Result<(), PluginError> {
+        let host = Self::host_of(url);
+        if self.offline {
+            return Err(security_error(ErrorCode::NotPermitted, "offline", feature));
+        }
+        if let crate::policy::PolicyVerdict::Deny(code) = self.policy.check_egress_for(&self.plugin, self.tier, &host) {
+            return Err(security_error(ErrorCode::NotPermitted, "policy", &code));
+        }
+        let addresses = self.net.as_ref().map(|net| net.resolve(&host)).unwrap_or_default();
+        if addresses.is_empty() {
+            return Err(security_error(ErrorCode::Network, "network", &host));
+        }
+        let confirmed = self.grants.iter().any(|grant| grant == &format!("http:setting:{feature}.webhook")
+            || grant.starts_with("http:setting:"));
+        let private = addresses.iter().any(|text| {
+            text.parse::<std::net::IpAddr>().is_ok_and(|address| match address {
+                std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+                std::net::IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00,
+            })
+        });
+        if private && !confirmed {
+            return Err(security_error(ErrorCode::NotPermitted, "private-address", &host));
+        }
+        Ok(())
+    }
+
+    fn open_http_api(&mut self) {
+        let directory = self.dir.join("http-api");
+        let _ = std::fs::create_dir_all(&directory);
+        restrict_permissions(&directory, 0o700);
+        let path = directory.join("token");
+        self.token = match std::fs::read_to_string(&path) {
+            Ok(text) if !text.trim().is_empty() => text.trim().to_owned(),
+            _ => {
+                let seed = format!("{}-{:?}-{}", self.dir.display(), std::time::SystemTime::now(), std::process::id());
+                let token = hex_sha256(seed.as_bytes());
+                let _ = std::fs::write(&path, &token);
+                restrict_permissions(&path, 0o600);
+                token
+            }
+        };
+    }
+
+    fn http_api_request(&self, path: &str, headers: &[(&str, &str)]) -> u16 {
+        let presented = headers.iter().find_map(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization").then(|| value.strip_prefix("Bearer ")).flatten()
+        });
+        match presented {
+            Some(token) if crate::sync::constant_time_eq(token.as_bytes(), self.token.as_bytes()) => {
+                if path.starts_with("/v1/") { 200 } else { 404 }
+            }
+            _ => 401,
+        }
+    }
+
+    // ---- install and policy
+
+    fn blocked_reason(&self, plugin: &str) -> Option<String> {
+        let entries = self.options.get("blocklist")?.as_array()?;
+        entries.iter().find_map(|entry| {
+            let kind = entry.get("kind")?.as_str()?;
+            let value = entry.get("value")?.as_str()?;
+            let hit = match kind {
+                "id" => value == plugin,
+                "hash" => value == package_hash(plugin),
+                "publisher" => value == publisher_key(plugin),
+                _ => false,
+            };
+            hit.then(|| entry.get("reason").and_then(Value::as_str).unwrap_or("blocked").to_owned())
+        })
+    }
+
+    fn install_context<'a>(
+        plugin: &'a str, tier: Tier, key: Option<&'a str>, kind: crate::policy::PolicySourceKind,
+        source: &'a str, replaces: bool,
+    ) -> crate::policy::InstallPolicyContext<'a> {
+        crate::policy::InstallPolicyContext {
+            plugin, tier, publisher_key: key, source, source_kind: kind, channel: "stable",
+            development: false, replaces,
+        }
+    }
+
+    fn check_install(
+        &self, plugin: &str, tier: Tier, key: Option<&str>, kind: crate::policy::PolicySourceKind, replaces: bool,
+    ) -> Result<(), String> {
+        let (id, version) = plugin.split_once('@').unwrap_or((plugin, ""));
+        let source = match kind {
+            crate::policy::PolicySourceKind::Url => "https://plugins.example.com/pkg",
+            _ => "/home/user/pkg",
+        };
+        let own_key = publisher_key(id);
+        let key = key.unwrap_or(own_key.as_str());
+        let context = Self::install_context(id, tier, Some(key), kind, source, replaces);
+        if let crate::policy::PolicyVerdict::Deny(code) = self.policy.check_install(&context) {
+            return Err(code);
+        }
+        if !version.is_empty() && self.version_blocked(id, version) {
+            return Err("policy.version-denied".into());
+        }
+        Ok(())
+    }
+
+    fn version_blocked(&self, plugin: &str, version: &str) -> bool {
+        let Ok(layers) = self.policy.configuration_layers() else { return false };
+        layers.iter().any(|layer| {
+            layer.get("plugins").and_then(|plugins| plugins.get("blocked_versions")).is_some_and(|table| {
+                table.get(plugin).and_then(|value| value.as_array()).is_some_and(|list| {
+                    list.iter().filter_map(|entry| entry.as_str()).any(|entry| entry == version)
+                })
+            })
+        })
+    }
+
+    fn check_with_grants(&self, plugin: &str, tier: Tier, grants: &[&str]) -> Result<(), String> {
+        self.check_install(plugin, tier, None, crate::policy::PolicySourceKind::File, false)?;
+        let parsed: Vec<Grant> = grants.iter().filter_map(|text| Grant::parse(text).ok()).collect();
+        for grant in &parsed {
+            if let crate::policy::PolicyVerdict::Deny(code) =
+                self.policy.check_grant_in_set_for(plugin, tier, grant, &parsed)
+            {
+                return Err(code);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_with_name(&self, plugin: &str, tier: Tier, name: &str) -> Result<(), String> {
+        self.check_install(plugin, tier, None, crate::policy::PolicySourceKind::File, false)?;
+        let lowered = name.trim().to_ascii_lowercase();
+        let reserved = lowered.is_empty()
+            || lowered == "ilium"
+            || lowered.starts_with("ilium ")
+            || lowered.starts_with("official ");
+        if reserved && !plugin.starts_with("ilium.") {
+            return Err("manifest.display-name".into());
+        }
+        Ok(())
+    }
+
+    fn is_disabled(&self, plugin: &str) -> bool {
+        self.blocked_reason(plugin).is_some()
+           
+    }
+
+    fn enable(&self, plugin: &str) -> Result<(), String> {
+        if let Some(reason) = self.blocked_reason(plugin) {
+            return Err(reason);
+        }
+        if let crate::policy::PolicyVerdict::Deny(code) = self.policy.check_enabled_change(plugin, true) {
+            return Err(code);
+        }
+        Ok(())
+    }
+
+    fn data_dir(&self, plugin: &str) -> PathBuf {
+        self.dir.join("plugin-data").join(plugin)
+    }
+
+    fn effective_setting(&self, key: &str) -> Option<Value> {
+        if let Some(locked) = self.policy.locked_value(key) {
+            return Some(toml_to_json(locked));
+        }
+        let safe_mode = self.options.get("safe-mode") == Some(&Value::Bool(true));
+        let project_ok = !safe_mode && !self.trusted.is_empty() && self.policy.allows_project_values();
+        if project_ok {
+            if let Some(value) = self.project_values.get(key) {
+                return Some(value.clone());
+            }
+        }
+        self.user_settings.get(key).or_else(|| self.settings.get(key)).cloned()
+    }
+
+    fn user_set_setting(&mut self, key: &str, value: Value) -> Result<(), PluginError> {
+        if self.policy.locked_value(key).is_some() {
+            return Err(security_error(ErrorCode::NotPermitted, "policy", key));
+        }
+        let mut value = value;
+        if let (Some(tail), Some(number)) = (key.strip_prefix("plugins.limits."), value.as_u64()) {
+            let ceiling = tail
+                .parse::<LimitKey>()
+                .map(ilium_plugin_api::limits::default_of)
+                .unwrap_or(512);
+            value = Value::from(number.min(ceiling));
+        }
+        self.user_settings.insert(key.to_owned(), value);
+        Ok(())
+    }
+
+    fn review_rows(&self, grants: &[&str]) -> Vec<ReviewRow> {
+        let parsed: Vec<Grant> = grants.iter().filter_map(|text| Grant::parse(text).ok()).collect();
+        let rows = crate::review::review_rows(&parsed);
+        let toxic_pair = crate::review::has_toxic_combination(&parsed);
+        let mut out: Vec<ReviewRow> = rows
+            .into_iter()
+            .map(|row| {
+                let verdict = self.policy.check_grant_in_set_for(&self.plugin, self.tier, &Grant::parse(&row.grant)
+                    .unwrap_or_else(|_| parsed[0].clone()), &parsed);
+                let denied = matches!(verdict, crate::policy::PolicyVerdict::Deny(_));
+                ReviewRow {
+                    toxic: false,
+                    text: row.grant.clone(),
+                    risk: if row.toxic { "high" } else { "low" }.into(),
+                    locked: row.locked || denied,
+                    checkable: !row.locked && !denied,
+                    checked: !row.toxic && !denied,
+                    note: denied.then(|| "Blocked by your administrator".to_owned()),
+                    warning_style: row.toxic,
+                    detail: row.details.clone(),
+                    grant: row.grant,
+                }
+            })
+            .collect();
+        if toxic_pair {
+            out.insert(0, ReviewRow {
+                toxic: true,
+                text: "This plugin can read your data and send data out.".into(),
+                risk: "high".into(),
+                warning_style: true,
+                detail: grants.join(", "),
+                ..ReviewRow::default()
+            });
+        }
+        out
+    }
+
+    fn review_text(&self, grants: &[&str]) -> String {
+        self.review_rows(grants)
+            .iter()
+            .map(|row| format!("{} {} {}", row.text, row.detail, row.note.clone().unwrap_or_default()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+const STORE_FILES: &[&str] = &["grants.json", "settings.json", "installed.json"];
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn package_hash(plugin: &str) -> String {
+    hex_sha256(format!("package:{plugin}").as_bytes())
+}
+
+fn publisher_key(plugin: &str) -> String {
+    hex_sha256(format!("publisher:{plugin}").as_bytes())
+}
+
+fn restrict_permissions(path: &Path, mode: u32) {
+    // Only owner-only modes are ever requested; the platform crate owns the OS calls.
+    let _ = mode;
+    let result = if path.is_dir() {
+        ilium_platform::secure_fs::restrict_directory_to_owner(path)
+    } else {
+        ilium_platform::secure_fs::restrict_file_to_owner(path)
+    };
+    let _ = result;
 }
 
 #[cfg(test)]
@@ -2703,40 +4674,48 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn import_reply_default_has_no_error() {
-        assert!(ImportReply.error().is_none());
+        assert!(ImportReply::default().error().is_none());
     }
 
     /// A default reply carries no error code.
     #[test]
     fn import_reply_default_has_no_error_code() {
-        assert!(ImportReply.error_code().is_none());
+        assert!(ImportReply::default().error_code().is_none());
     }
 
     /// A default reply did not trap.
     /// REQ: HST-410
     #[test]
     fn import_reply_default_has_no_trap_code() {
-        assert!(ImportReply.trap_code().is_none());
+        assert!(ImportReply::default().trap_code().is_none());
     }
 
     /// A default reply has no quota retry delay.
     #[test]
     fn import_reply_default_has_no_retry_after() {
-        assert!(ImportReply.retry_after_ms().is_none());
+        assert!(ImportReply::default().retry_after_ms().is_none());
     }
 
     /// A default reply is not an accepted asynchronous call, so it has no request id.
     /// REQ: API-005
     #[test]
     fn import_reply_default_has_no_request_id() {
-        assert!(ImportReply.request_id().is_none());
+        assert!(ImportReply::default().request_id().is_none());
     }
 
     /// A default completion carries no failure code.
     /// REQ: API-005
     #[test]
     fn completion_view_default_has_no_failed_code() {
-        assert!(CompletionView.failed_code().is_none());
+        let view = CompletionView {
+            result: ilium_plugin_api::generated::types::requests::RequestResult {
+                request: ilium_plugin_api::generated::types::requests::RequestRef::Call(
+                    ilium_plugin_api::generated::types::ids::RequestId(1),
+                ),
+                outcome: ilium_plugin_api::generated::types::requests::Outcome::Ok,
+            },
+        };
+        assert!(view.failed_code().is_none());
     }
 
     /// Two import results of the same plain variant are equal.

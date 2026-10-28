@@ -257,7 +257,7 @@ fn f_112_empty_shell_screen_is_idle_not_failed_and_starts_no_job() {
 /// REQ: F-112
 #[test]
 fn f_112_shell_screen_is_read_visible_part_with_at_most_40_rows() {
-    let (host, _, _) = start_shell_run(&["$ cargo test"]);
+    let (mut host, _, _) = start_shell_run(&["$ cargo test"]);
     let read = host.screen_requests().pop().expect("a screen read");
     assert_eq!(read.rows, 40);
     assert!(read.visible_only);

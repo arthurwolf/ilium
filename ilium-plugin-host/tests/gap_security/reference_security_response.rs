@@ -124,3 +124,101 @@ fn sec_729_response_page_commits_to_emergency_disable_status_page_and_postmortem
         output.stdout_jsonl
     );
 }
+
+/// REQ: SEC-700
+#[test]
+fn sec_700_exported_advisory_declares_the_osv_1_6_schema_version() {
+    assert_manual_says("reference-security-response", "OSV schema 1.6");
+    let rig = rig();
+    let output = rig.cli(&[
+        "security",
+        "advisory",
+        "export",
+        "--format",
+        "osv",
+        "--id",
+        "ILIUM-2026-0001",
+    ]);
+    let advisory = output
+        .stdout_jsonl
+        .first()
+        .expect("the export prints one OSV document");
+    assert_eq!(
+        advisory["schema_version"], "1.6",
+        "the document declares OSV schema 1.6"
+    );
+}
+
+/// REQ: SEC-702
+#[test]
+fn sec_702_high_severity_advisory_with_a_cve_id_publishes() {
+    assert_manual_says(
+        "reference-security-response",
+        "MUST request a CVE id through a CNA",
+    );
+    let rig = rig();
+    let output = rig.cli(&[
+        "security",
+        "advisory",
+        "publish",
+        "--id",
+        "ILIUM-2026-0002",
+        "--severity",
+        "high",
+        "--cve",
+        "CVE-2026-0002",
+    ]);
+    assert_eq!(
+        output.exit_code, 0,
+        "a High advisory with a CVE id publishes"
+    );
+    assert!(
+        !error_codes(&output)
+            .iter()
+            .any(|code| code == "advisory.cve-missing"),
+        "no missing-CVE refusal when the id is present"
+    );
+}
+
+/// REQ: SEC-703
+#[test]
+fn sec_703_no_quarantine_before_the_14_day_acknowledgement_window_ends() {
+    assert_manual_says(
+        "reference-security-response",
+        "if the publisher does not acknowledge within 14 days the registry MAY quarantine",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.cli(&[
+        "security",
+        "report",
+        NOTES,
+        "--version",
+        "1.0.0",
+        "--private",
+    ]);
+    rig.advance(secs(13 * 86_400));
+    let entry = registry_entry(&rig, NOTES);
+    assert!(
+        entry["quarantine"].is_null(),
+        "the version is not quarantined inside the 14 day window"
+    );
+}
+
+/// REQ: SEC-729
+#[test]
+fn sec_729_emergency_disable_for_an_unknown_advisory_is_refused() {
+    assert_manual_says("reference-security-response", "within 4 hours");
+    let rig = rig();
+    let output = rig.cli(&[
+        "security",
+        "emergency-disable",
+        "--advisory",
+        "ILIUM-0000-NONE",
+        "--dry-run",
+    ]);
+    assert_ne!(
+        output.exit_code, 0,
+        "an emergency disable must name a real advisory"
+    );
+}

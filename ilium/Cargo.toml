@@ -24,6 +24,7 @@ ilium-core = { version = "0.1.1", path = "../ilium-core" }
 ilium-control = { version = "0.1.1", path = "../ilium-control" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
 ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
+ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
 ilium-platform = { version = "0.1.1", path = "../ilium-platform" }

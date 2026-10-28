@@ -777,3 +777,41 @@ fn dev_835_two_events_and_a_render_of_one_instance_never_overlap() {
         vec![CallKind::OnEvents, CallKind::OnEvents, CallKind::Render]
     );
 }
+
+/// REQ: DEV-834
+#[test]
+fn dev_834_three_slow_frames_in_a_row_each_paint_within_10_ms() {
+    let kernel = kernel_with_nodes(1);
+    kernel.declare_panel("demo");
+    kernel.commit_view_tree("demo", &[("title", "held")], &[]);
+    let handle = build_with(
+        HostHarness::new().kernel(kernel.clone()),
+        ScriptedGuest::new(Shared::new()).sleeping(200),
+    );
+    for _ in 0..3 {
+        handle.deliver(vec![theme()]);
+        let frame_started = Instant::now();
+        handle.pump(1);
+        assert!(
+            frame_started.elapsed() < ms(10),
+            "a frame waited for the plugin: {:?}",
+            frame_started.elapsed()
+        );
+    }
+}
+
+/// REQ: DEV-835
+#[test]
+fn dev_835_queued_render_runs_after_the_events_call_it_follows() {
+    let scheduler = Scheduler::new(10);
+    let who = plugin("demo.order");
+    let base = Instant::now();
+    scheduler.enqueue(&who, CallKind::Render, base, sleeper(10));
+    scheduler.enqueue(&who, CallKind::OnEvents, base, noop());
+    drain(&scheduler, base, 4);
+    assert_eq!(
+        kinds_run(&scheduler),
+        vec![CallKind::Render, CallKind::OnEvents]
+    );
+    assert_eq!(scheduler.max_concurrent_calls_in_store(&who), 1);
+}

@@ -27,3 +27,22 @@ fn port_045_a_spoken_message_is_submitted_to_the_pane_with_enter_delivery() {
     assert_eq!(sends[0].text, "message from voice");
     assert_eq!(sends[0].delivery, Delivery::Submitted);
 }
+
+/// REQ: PORT:ilium-server/tests/smoke.rs::voice_submission_unblocks_a_real_pty_reader_with_enter
+#[test]
+fn port_046_two_spoken_messages_are_submitted_in_the_order_they_were_heard() {
+    let mut host = enabled_client("push_to_talk");
+    add_pane(&mut host, "echo");
+    host.realtime().set_active_agent("echo");
+    hear(&mut host, "first message");
+    hear(&mut host, "second message");
+    let texts: Vec<String> = host
+        .submitted()
+        .into_iter()
+        .filter_map(|submission| match submission.intent {
+            Intent::SendInput(spec) => Some(spec.text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["first message", "second message"]);
+}

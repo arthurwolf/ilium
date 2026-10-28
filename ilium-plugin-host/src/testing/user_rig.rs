@@ -2,7 +2,7 @@
 //! network and dialogs, driven the way the user-facing manual pages describe
 //! (user-plugins-*.md USR-001..USR-220, reference-plugin-policy.md, reference-plugin-files.md).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -36,13 +36,69 @@ impl Fetcher for UnreachableFetcher {
     }
 }
 
-/// Consent that approves exactly the grants a package requests, as the default review does.
-struct ApproveRequested;
+/// Dialogs the rig's attached client answers and records. Answers are consumed in order by
+/// review dialogs only; a non-review answer stays queued for the prompt it belongs to.
+#[derive(Debug, Default)]
+struct DialogLog {
+    answers: VecDeque<DialogAnswer>,
+    shown: Vec<ReviewDialog>,
+}
 
-impl Consent for ApproveRequested {
+/// The consent the rig's CLI installs use: the attached client answers the review dialog, and
+/// with no answer queued the review approves exactly the requested grants (the default review).
+struct RigConsent {
+    dialogs: Arc<Mutex<DialogLog>>,
+}
+
+impl Consent for RigConsent {
     fn decide(&self, request: &ConsentRequest) -> ConsentDecision {
-        ConsentDecision::Approve(request.requested.clone())
+        let mut log = self.dialogs.lock().unwrap_or_else(PoisonError::into_inner);
+        let rows: Vec<ReviewRow> = request
+            .requested
+            .iter()
+            .map(|grant| ReviewRow {
+                grant: grant.as_str().to_owned(),
+                high: false,
+                checked: true,
+                locked: false,
+                note: None,
+            })
+            .collect();
+        log.shown.push(ReviewDialog { rows });
+        let is_review_answer = matches!(
+            log.answers.front(),
+            Some(
+                DialogAnswer::Review(_)
+                    | DialogAnswer::ReviewAcceptDefaults
+                    | DialogAnswer::ReviewDecline
+                    | DialogAnswer::ReviewPause
+            )
+        );
+        let answer = if is_review_answer { log.answers.pop_front() } else { None };
+        match answer {
+            Some(DialogAnswer::Review(granted)) => ConsentDecision::Approve(
+                request
+                    .requested
+                    .iter()
+                    .filter(|grant| granted.iter().any(|text| text == grant.as_str()))
+                    .cloned()
+                    .collect(),
+            ),
+            Some(DialogAnswer::ReviewDecline) => ConsentDecision::Deny,
+            // Pausing approves the grants; the start is held back by the lifecycle, not by consent.
+            Some(DialogAnswer::ReviewPause) | Some(DialogAnswer::ReviewAcceptDefaults) | None => {
+                ConsentDecision::Approve(request.requested.clone())
+            }
+            Some(_) => ConsentDecision::Approve(request.requested.clone()),
+        }
     }
+}
+
+/// Reports a production hook the rig needs but the production host does not expose yet. The
+/// test that reaches it fails at this line with the missing hook named, instead of passing on a
+/// value the rig made up.
+fn blocked(hook: &str) -> ! {
+    panic!("rig blocked: the production host does not expose {hook} yet")
 }
 
 /// Collects every path below `directory`, depth first, without following a missing directory.
@@ -284,6 +340,7 @@ pub struct PackageSpec {
     replaces: Vec<String>,
     corrupt_archive: bool,
     corrupt_signature: bool,
+    corrupt_file_hash: bool,
     /// Builder declarations, kept in the order given; `build_bytes` does not serialize them yet.
     declarations: Vec<PackageDeclaration>,
 }
@@ -301,6 +358,7 @@ impl PackageSpec {
             replaces: Vec::new(),
             corrupt_archive: false,
             corrupt_signature: false,
+            corrupt_file_hash: false,
             declarations: Vec::new(),
         }
     }
@@ -354,8 +412,9 @@ impl PackageSpec {
     }
 
     /// Corrupts one file hash of the package.
-    pub fn corrupt_file_hash(self) -> PackageSpec {
-        unimplemented!("host::testing::user_rig::PackageSpec::corrupt_file_hash")
+    pub fn corrupt_file_hash(mut self) -> PackageSpec {
+        self.corrupt_file_hash = true;
+        self
     }
 
     /// Corrupts the archive bytes.
@@ -485,14 +544,23 @@ impl PackageSpec {
         if !self.grants.is_empty() {
             manifest["capabilities"] = serde_json::json!(self.grants);
         }
+        let wasm_bytes = crate::testing::wat::wat_component("(component)");
+        if self.corrupt_file_hash {
+            // The inventory lists server.wasm with a SHA-256 that is one digit off the real one.
+            let mut digest = format!("{:x}", Sha256::digest(&wasm_bytes));
+            let flipped = if digest.starts_with('0') { "1" } else { "0" };
+            digest.replace_range(0..1, flipped);
+            manifest["files"] = serde_json::json!([{
+                "path": "server.wasm",
+                "length": wasm_bytes.len(),
+                "sha256": digest,
+            }]);
+        }
         // Serializing a JSON value cannot fail.
         let manifest_text = serde_json::to_string_pretty(&manifest).expect("manifest serializes");
         let files = vec![
             ("manifest.json".to_owned(), manifest_text.into_bytes()),
-            (
-                "server.wasm".to_owned(),
-                crate::testing::wat::wat_component("(component)"),
-            ),
+            ("server.wasm".to_owned(), wasm_bytes),
         ];
         let mut bytes = crate::package::write_package(&files)
             .unwrap_or_else(|diagnostic| panic!("rig package failed: {diagnostic:?}"));
@@ -579,6 +647,8 @@ pub struct UserRig {
     input_locked: bool,
     /// Journal lines per plugin id, oldest first.
     journal_lines: BTreeMap<String, Vec<String>>,
+    /// Dialog answers queued by `attach_client` and the dialogs shown so far.
+    dialogs: Arc<Mutex<DialogLog>>,
 }
 
 impl Drop for UserRig {
@@ -591,7 +661,7 @@ impl Drop for UserRig {
 impl UserRig {
     /// Replacements the install recorded, as `(replaced id, replacing id)` (USR-043).
     pub fn replacements(&self) -> Vec<(String, String)> {
-        unimplemented!("host::testing::user_rig::UserRig::replacements")
+        blocked("replaces record of an install (USR-043)")
     }
 
     /// A rig on Linux.
@@ -634,6 +704,7 @@ impl UserRig {
             toasts: Vec::new(),
             input_locked: false,
             journal_lines: BTreeMap::new(),
+            dialogs: Arc::new(Mutex::new(DialogLog::default())),
         }
     }
 
@@ -680,7 +751,9 @@ impl UserRig {
             .join(format!("{}-{}.iliumpkg", package.id, package.version));
         std::fs::write(&package_path, package.build_bytes())
             .unwrap_or_else(|error| panic!("write package {}: {error}", package_path.display()));
-        let consent: Arc<dyn Consent + Send + Sync> = Arc::new(ApproveRequested);
+        let consent: Arc<dyn Consent + Send + Sync> = Arc::new(RigConsent {
+            dialogs: Arc::clone(&self.dialogs),
+        });
         let audit_context = AuditContext {
             session: "user-rig".to_owned(),
             actor: AuditActor {
@@ -715,12 +788,12 @@ impl UserRig {
         _package: &PackageSpec,
         _args: &[&str],
     ) -> PendingInstall {
-        unimplemented!("host::testing::user_rig::UserRig::install_file_nonblocking")
+        blocked("a pending install that waits for its review")
     }
 
     /// Installs a package through the Plugins settings screen.
     pub fn install_from_plugins_screen(&mut self, _package: &PackageSpec) -> CliOutput {
-        unimplemented!("host::testing::user_rig::UserRig::install_from_plugins_screen")
+        blocked("the Plugins settings screen install action")
     }
 
     /// The rows of `ilium plugin list`.
@@ -755,7 +828,7 @@ impl UserRig {
 
     /// How often the install instructions of a package ran.
     pub fn package_instructions_run(&self, _id: &str) -> u32 {
-        unimplemented!("host::testing::user_rig::UserRig::package_instructions_run")
+        blocked("a run counter for package install instructions")
     }
 
     // ---- Paths ----------------------------------------------------------------------------
@@ -816,12 +889,12 @@ impl UserRig {
 
     /// Sets the umask of the host process.
     pub fn set_umask(&mut self, _mask: u32) {
-        unimplemented!("host::testing::user_rig::UserRig::set_umask")
+        blocked("a process umask control (ilium-platform)")
     }
 
     /// Sets the mode of a file.
     pub fn set_file_mode(&mut self, _path: &Path, _mode: u32) {
-        unimplemented!("host::testing::user_rig::UserRig::set_file_mode")
+        blocked("a file mode control (ilium-platform)")
     }
 
     /// Ages a file by `days`.
@@ -885,59 +958,67 @@ impl UserRig {
 
     /// The startup trace of the last server start.
     pub fn startup_trace(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::startup_trace")
+        blocked("a startup trace of the lifecycle start")
     }
 
     /// The uninstall trace of a plugin.
     pub fn uninstall_trace(&self, _id: &str) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::uninstall_trace")
+        blocked("an uninstall trace")
     }
 
     /// Uninstalls a plugin and reports which host steps observers saw.
     pub fn uninstall_observing_steps(&mut self, _id: &str) -> UninstallSteps {
-        unimplemented!("host::testing::user_rig::UserRig::uninstall_observing_steps")
+        blocked("observer hooks in the uninstall cascade")
     }
 
     /// Starts recording file-system operations.
     pub fn record_fs_operations(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::record_fs_operations")
+        blocked("a file-system operation recorder")
     }
 
     /// The recorded file-system operations.
     pub fn fs_operations(&self) -> Vec<FsOperation> {
-        unimplemented!("host::testing::user_rig::UserRig::fs_operations")
+        blocked("a file-system operation recorder")
     }
 
     // ---- Dialogs and prompts --------------------------------------------------------------
 
     /// Attaches a client that answers dialogs in order.
     pub fn attach_client(&mut self, _answers: Vec<DialogAnswer>) {
-        unimplemented!("host::testing::user_rig::UserRig::attach_client")
+        self.dialogs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .answers
+            .extend(_answers);
     }
 
     /// The review dialogs shown so far.
     pub fn dialogs_shown(&self) -> Vec<ReviewDialog> {
-        unimplemented!("host::testing::user_rig::UserRig::dialogs_shown")
+        self.dialogs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .shown
+            .clone()
     }
 
     /// The trust prompts shown so far.
     pub fn trust_prompts(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::trust_prompts")
+        blocked("a recorder for publisher trust prompts")
     }
 
     /// The replacement prompts shown so far.
     pub fn replace_prompts(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::replace_prompts")
+        blocked("a recorder for replacement prompts")
     }
 
     /// The confirmations shown so far.
     pub fn confirmations_shown(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::confirmations_shown")
+        blocked("a recorder for confirmations")
     }
 
     /// The link prompts shown so far.
     pub fn link_prompts(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::link_prompts")
+        blocked("a recorder for link prompts")
     }
 
     // ---- Grants, trust and state ----------------------------------------------------------
@@ -970,7 +1051,7 @@ impl UserRig {
 
     /// Trusts a publisher key.
     pub fn trust(&mut self, _key: &KeyPair) {
-        unimplemented!("host::testing::user_rig::UserRig::trust")
+        blocked("a publisher public-key file import")
     }
 
     /// The trusted key fingerprints.
@@ -990,7 +1071,7 @@ impl UserRig {
 
     /// The grant-store bytes expected after a grant is given.
     pub fn expected_grants_after(&self, _id: &str, _grant: &str) -> Vec<u8> {
-        unimplemented!("host::testing::user_rig::UserRig::expected_grants_after")
+        blocked("the grant-store byte serialization")
     }
 
     /// Sets a plugin setting.
@@ -1006,86 +1087,98 @@ impl UserRig {
             .cloned()
     }
 
+    /// The data directory of a plugin: the production layout keeps it under `plugins/data/<id>`
+    /// (install.rs removes `data/<id>` from the same plugin root).
+    fn plugin_data_dir(&self, id: &str) -> PathBuf {
+        self.data_dir().join("plugins").join("data").join(id)
+    }
+
     /// Writes a file into a plugin's cache directory.
     pub fn write_cache_file(&mut self, _id: &str, _name: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::write_cache_file")
+        let path = self.cache_dir().join(_id).join(_name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|error| panic!("cache folder {}: {error}", parent.display()));
+        }
+        std::fs::write(&path, b"cache")
+            .unwrap_or_else(|error| panic!("cache file {}: {error}", path.display()));
     }
 
     /// Writes a storage bucket of a plugin.
     pub fn write_storage_bucket(&mut self, _id: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::write_storage_bucket")
+        blocked("the plugin storage bucket layout")
     }
 
     /// Whether a file exists in a plugin's data directory.
     pub fn data_file_exists(&self, _id: &str, _name: &str) -> bool {
-        unimplemented!("host::testing::user_rig::UserRig::data_file_exists")
+        self.plugin_data_dir(_id).join(_name).is_file()
     }
 
     /// Reads a file of a plugin's data directory.
     pub fn read_data_file(&self, _id: &str, _name: &str) -> Option<String> {
-        unimplemented!("host::testing::user_rig::UserRig::read_data_file")
+        std::fs::read_to_string(self.plugin_data_dir(_id).join(_name)).ok()
     }
 
     // ---- Calls ----------------------------------------------------------------------------
 
     /// A plugin side makes a call needing `grant`.
     pub fn call_needing(&mut self, _id: &str, _side: &str, _grant: &str) -> CallOutcome {
-        unimplemented!("host::testing::user_rig::UserRig::call_needing")
+        blocked("a plugin instance call hook")
     }
 
     /// A plugin side makes a call needing a grant its manifest never listed.
     pub fn call_needing_unlisted(&mut self, _id: &str, _side: &str, _grant: &str) -> CallOutcome {
-        unimplemented!("host::testing::user_rig::UserRig::call_needing_unlisted")
+        blocked("a plugin instance call hook")
     }
 
     /// Starts a long call needing `grant`.
     pub fn start_long_call(&mut self, _id: &str, _side: &str, _grant: &str) -> CallHandle {
-        unimplemented!("host::testing::user_rig::UserRig::start_long_call")
+        blocked("a plugin instance call hook")
     }
 
     /// Finishes a long call.
     pub fn finish_call(&mut self, _call: CallHandle) -> CallOutcome {
-        unimplemented!("host::testing::user_rig::UserRig::finish_call")
+        blocked("a plugin instance call hook")
     }
 
     /// The granted list a plugin side's instance saw.
     pub fn granted_list_seen_by_instance(&self, _id: &str, _side: &str) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::granted_list_seen_by_instance")
+        blocked("the granted list seen by a plugin instance")
     }
 
     /// A plugin makes an HTTP request.
     pub fn plugin_http(&mut self, _id: &str, _url: &str) -> CallOutcome {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_http")
+        blocked("a plugin HTTP call hook")
     }
 
     /// A plugin opens a raw socket.
     pub fn plugin_raw_socket(&mut self, _id: &str, _address: &str) -> CallOutcome {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_raw_socket")
+        blocked("a plugin raw-socket call hook")
     }
 
     /// Makes the fake network redirect one URL to another.
     pub fn script_redirect(&mut self, _from: &str, _to: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::script_redirect")
+        blocked("a scripted network redirect")
     }
 
     /// A plugin asks to open a link.
     pub fn plugin_opens_link(&mut self, _id: &str, _url: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_opens_link")
+        blocked("a plugin link-open hook")
     }
 
     /// The links actually opened.
     pub fn opened_links(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::opened_links")
+        blocked("the list of links opened")
     }
 
     /// A plugin requests a URL.
     pub fn plugin_requests(&mut self, _id: &str, _url: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::plugin_requests")
+        blocked("a plugin network request hook")
     }
 
     /// The hosts connections were attempted to.
     pub fn connections_attempted(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::connections_attempted")
+        blocked("the connection attempt record")
     }
 
     /// A plugin shows a toast.
@@ -1115,7 +1208,7 @@ impl UserRig {
 
     /// Whether the clipboard-access indicator is visible.
     pub fn clipboard_indicator_visible(&self) -> bool {
-        unimplemented!("host::testing::user_rig::UserRig::clipboard_indicator_visible")
+        blocked("the clipboard indicator state")
     }
 
     /// A plugin logs one line at a level.
@@ -1145,32 +1238,32 @@ impl UserRig {
 
     /// Makes a plugin trap on its next call.
     pub fn inject_trap(&mut self, _id: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::inject_trap")
+        blocked("a trap injection hook in plugin instances")
     }
 
     /// How often a plugin's instance started.
     pub fn instance_starts(&self, _id: &str) -> u32 {
-        unimplemented!("host::testing::user_rig::UserRig::instance_starts")
+        blocked("the instance start counter")
     }
 
     /// The failure count of a plugin.
     pub fn failure_count(&self, _id: &str) -> u32 {
-        unimplemented!("host::testing::user_rig::UserRig::failure_count")
+        blocked("the plugin failure counter")
     }
 
     /// The N14 notice text for a plugin, if shown.
     pub fn n14_text(&self, _id: &str) -> Option<String> {
-        unimplemented!("host::testing::user_rig::UserRig::n14_text")
+        blocked("the N14 notice text")
     }
 
     /// The notices shown so far.
     pub fn notices(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::notices")
+        blocked("the kernel notice list")
     }
 
     /// The notices that persist across restarts.
     pub fn persistent_notices(&self) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::persistent_notices")
+        blocked("the persistent notice list")
     }
 
     // ---- Network observation --------------------------------------------------------------
@@ -1193,116 +1286,116 @@ impl UserRig {
 
     /// Turns request logging on or off.
     pub fn set_request_logging(&mut self, _on: bool) {
-        unimplemented!("host::testing::user_rig::UserRig::set_request_logging")
+        blocked("a request logging switch on the fetcher")
     }
 
     /// Removes every network interface.
     pub fn deny_network(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::deny_network")
+        blocked("a network interface removal hook")
     }
 
     // ---- Extensions and panes -------------------------------------------------------------
 
     /// The order in which a point's contributors were called.
     pub fn call_point_order(&mut self, _owner: &str, _point: &str) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::call_point_order")
+        blocked("the extension call order of a point")
     }
 
     /// Moves a contributor up in the Extensions screen.
     pub fn extensions_move_up(&mut self, _owner: &str, _point: &str, _plugin: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::extensions_move_up")
+        blocked("the Extensions screen move action")
     }
 
     /// Moves a contributor down in the Extensions screen.
     pub fn extensions_move_down(&mut self, _owner: &str, _point: &str, _plugin: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::extensions_move_down")
+        blocked("the Extensions screen move action")
     }
 
     /// Toggles a contributor in the Extensions screen.
     pub fn extensions_toggle(&mut self, _owner: &str, _point: &str, _plugin: &str, _on: bool) {
-        unimplemented!("host::testing::user_rig::UserRig::extensions_toggle")
+        blocked("the Extensions screen toggle action")
     }
 
     /// Records the current extension order of a plugin.
     pub fn extensions_remember_order(&mut self, _plugin: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::extensions_remember_order")
+        blocked("the remembered extension order")
     }
 
     /// The extension order entries kept for a plugin.
     pub fn extension_order_entries(&self, _plugin: &str) -> Vec<String> {
-        unimplemented!("host::testing::user_rig::UserRig::extension_order_entries")
+        blocked("the remembered extension order")
     }
 
     /// Whether a contributor is active on a point.
     pub fn extension_active(&self, _owner: &str, _point: &str, _plugin: &str) -> bool {
-        unimplemented!("host::testing::user_rig::UserRig::extension_active")
+        blocked("the extension active state")
     }
 
     /// The label the Extensions screen shows for a contributor.
     pub fn extension_label(&self, _owner: &str, _point: &str, _plugin: &str) -> String {
-        unimplemented!("host::testing::user_rig::UserRig::extension_label")
+        blocked("the Extensions screen label")
     }
 
     /// Resets a contributor after breaches.
     pub fn extension_reset(&mut self, _owner: &str, _point: &str, _plugin: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::extension_reset")
+        blocked("the extension reset action")
     }
 
     /// Whether a reset is offered for a contributor.
     pub fn extension_reset_offered(&self, _owner: &str, _point: &str, _plugin: &str) -> bool {
-        unimplemented!("host::testing::user_rig::UserRig::extension_reset_offered")
+        blocked("the extension reset offer")
     }
 
     /// Runs a filter point and returns the filtered value.
     pub fn run_filter_point(&mut self, _owner: &str, _point: &str, _input: &str) -> String {
-        unimplemented!("host::testing::user_rig::UserRig::run_filter_point")
+        blocked("the filter point runner")
     }
 
     /// Runs a veto point.
     pub fn run_veto_point(&mut self, _owner: &str, _point: &str) -> VetoOutcome {
-        unimplemented!("host::testing::user_rig::UserRig::run_veto_point")
+        blocked("the veto point runner")
     }
 
     /// Calls a service of a provider from a consumer; returns the result word.
     pub fn call_service(&mut self, _consumer: &str, _provider: &str, _service: &str) -> String {
-        unimplemented!("host::testing::user_rig::UserRig::call_service")
+        blocked("the service call path")
     }
 
     /// The decorations a plugin currently draws.
     pub fn decoration_count(&self, _id: &str) -> usize {
-        unimplemented!("host::testing::user_rig::UserRig::decoration_count")
+        blocked("the tree decoration count")
     }
 
     /// Opens a plugin pane.
     pub fn open_plugin_pane(&mut self, _id: &str, _kind: &str) -> PaneId {
-        unimplemented!("host::testing::user_rig::UserRig::open_plugin_pane")
+        blocked("the plugin pane opener")
     }
 
     /// Whether a pane is in the tree.
     pub fn pane_exists(&self, _pane: PaneId) -> bool {
-        unimplemented!("host::testing::user_rig::UserRig::pane_exists")
+        blocked("the pane tree query")
     }
 
     /// The content kind of a pane (`placeholder` once its plugin is gone).
     pub fn pane_content_kind(&self, _pane: PaneId) -> String {
-        unimplemented!("host::testing::user_rig::UserRig::pane_content_kind")
+        blocked("the pane content kind query")
     }
 
     // ---- Policy and audit -----------------------------------------------------------------
 
     /// Writes the system policy file.
     pub fn write_system_policy(&mut self, _toml: &str) {
-        unimplemented!("host::testing::user_rig::UserRig::write_system_policy")
+        blocked("a system policy source (the policy inputs read only the user file)")
     }
 
     /// Sets the mode of the system policy file.
     pub fn set_system_policy_mode(&mut self, _mode: u32) {
-        unimplemented!("host::testing::user_rig::UserRig::set_system_policy_mode")
+        blocked("a system policy file mode control")
     }
 
     /// Makes the system policy file unreadable.
     pub fn make_system_policy_unreadable(&mut self) {
-        unimplemented!("host::testing::user_rig::UserRig::make_system_policy_unreadable")
+        blocked("a system policy file mode control")
     }
 
     /// The audit records of one event kind.

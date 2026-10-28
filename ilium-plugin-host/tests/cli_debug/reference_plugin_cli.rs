@@ -366,3 +366,74 @@ fn dev_830_one_timing_per_export_that_ran_then_a_summary() {
     let output = run(&env, &["profile", ID, "--json"]);
     assert_eq!(record_types(&output)[..], ["timing", "summary", "result"]);
 }
+
+/// REQ: DEV-730
+#[test]
+fn dev_730_refused_view_prints_no_render_artifact() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), stopped());
+    let output = run(&env, &["inspect", ID, "--view", "main", "--json"]);
+    assert!(records_of(&output, "artifact").is_empty());
+    assert_eq!(error_code(&output).as_deref(), Some("inspect.no-render"));
+}
+
+/// REQ: DEV-731
+#[test]
+fn dev_731_profile_of_a_running_plugin_is_not_refused_as_not_running() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    let output = run(&env, &["profile", ID, "--json"]);
+    assert_ne!(error_code(&output).as_deref(), Some("plugin.not-running"));
+}
+
+/// REQ: DEV-801
+#[test]
+fn dev_801_hash_mismatch_diff_record_names_the_differing_file() {
+    let scratch = scratch();
+    let file = package_file(scratch.path(), "00");
+    let output = run(
+        &env(scratch.path()),
+        &["inspect", &file, "--verify", "--json"],
+    );
+    let diffs = records_of(&output, "diff");
+    assert!(!diffs.is_empty());
+    assert!(diffs
+        .iter()
+        .any(|record| record.to_string().contains("dist/server.wasm")));
+}
+
+/// REQ: DEV-802
+#[test]
+fn dev_802_session_unreachable_exits_6_for_view_and_memory() {
+    let scratch = scratch();
+    let env = env(scratch.path());
+    for flag in [vec!["--view", "main"], vec!["--memory"]] {
+        let mut args = vec!["inspect", ID];
+        args.extend(flag);
+        args.push("--json");
+        let output = run(&env, &args);
+        assert_eq!(output.exit_code, 6);
+    }
+}
+
+/// REQ: DEV-822
+#[test]
+fn dev_822_replay_artifact_record_names_the_written_file() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), trace_backend());
+    let file = scratch.path().join("second.replay");
+    let output = run(
+        &env,
+        &[
+            "trace",
+            ID,
+            "--record",
+            file.to_str().expect("utf8"),
+            "--json",
+        ],
+    );
+    let artifacts = records_of(&output, "artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert!(artifacts[0].to_string().contains("second.replay"));
+    assert!(std::fs::metadata(&file).expect("replay file").len() > 0);
+}

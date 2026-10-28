@@ -110,3 +110,75 @@ fn port_090_typing_inserts_characters_in_order() {
     press(&mut host, TAB, &["a", "b", "Enter"]);
     assert_eq!(value_of(&mut host, KEY), Some(json!("ab")));
 }
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::backspace_at_start_is_a_no_op, F-090
+#[test]
+fn port_090_backspace_with_the_cursor_at_the_start_keeps_the_text() {
+    let mut host = client_host();
+    start(&mut host, "ab");
+    press(&mut host, TAB, &["Home", "Backspace", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("ab")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::backspace_removes_before_cursor, F-090
+#[test]
+fn port_090_backspace_in_the_middle_removes_only_the_character_before_the_cursor() {
+    let mut host = client_host();
+    start(&mut host, "abc");
+    press(&mut host, TAB, &["Left", "Backspace", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("ac")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::delete_forward_removes_after_cursor, F-090
+#[test]
+fn port_090_delete_with_the_cursor_at_the_end_changes_nothing() {
+    let mut host = client_host();
+    start(&mut host, "abc");
+    press(&mut host, TAB, &["Delete", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("abc")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::home_and_end_jump_to_bounds, F-090
+#[test]
+fn port_090_home_twice_stays_at_the_start_and_typing_inserts_there() {
+    let mut host = client_host();
+    start(&mut host, "abc");
+    press(&mut host, TAB, &["Home", "Home", "x", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("xabc")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::left_then_insert_splices_mid_buffer, F-090
+#[test]
+fn port_090_left_past_the_start_clamps_and_inserts_at_the_start() {
+    let mut host = client_host();
+    start(&mut host, "ac");
+    press(&mut host, TAB, &["Left", "Left", "Left", "z", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("zac")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::multibyte_characters_are_never_split, F-090
+#[test]
+fn port_090_delete_removes_a_whole_multibyte_character_ahead_of_the_cursor() {
+    let mut host = client_host();
+    start(&mut host, "a\u{4e16}\u{754c}");
+    press(&mut host, TAB, &["Home", "Right", "Delete", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("a\u{754c}")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::new_places_cursor_at_end, F-090
+#[test]
+fn port_090_a_character_typed_into_an_existing_text_is_appended_after_it() {
+    let mut host = client_host();
+    start(&mut host, "ab");
+    press(&mut host, TAB, &["c", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("abc")));
+}
+
+/// REQ: PORT:ilium-client/src/text_prompt.rs::typing_inserts_at_cursor, F-090
+#[test]
+fn port_090_typing_after_moving_home_inserts_before_the_existing_text() {
+    let mut host = client_host();
+    start(&mut host, "");
+    press(&mut host, TAB, &["x", "y", "z", "Home", "w", "Enter"]);
+    assert_eq!(value_of(&mut host, KEY), Some(json!("wxyz")));
+}

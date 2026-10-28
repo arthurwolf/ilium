@@ -1,8 +1,7 @@
 //! Core plugin `ilium.core.worktrees` (manual page core-plugin-worktrees.md).
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -18,13 +17,13 @@ pub struct WorktreesServer;
 
 impl Lifecycle for WorktreesServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.worktrees: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for WorktreesServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.worktrees: server handler.on_events")
+        Vec::new()
     }
 }
 
@@ -35,19 +34,23 @@ pub struct WorktreesClient;
 
 impl Lifecycle for WorktreesClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.worktrees: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for WorktreesClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.worktrees: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for WorktreesClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.worktrees: client views.render")
+        UiTree {
+            version: 1,
+            nodes: Vec::new(),
+            root: 0,
+        }
     }
 }
 

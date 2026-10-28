@@ -369,3 +369,210 @@ fn port_090_the_text_prompt_shows_cancel_and_a_distinct_primary_action() {
         screen.cell(cancel_row, cancel_column).background
     );
 }
+
+/// REQ: PORT:ilium-client/src/popover.rs::crossing_directly_between_button_and_popover_preserves_preview, F-090
+#[test]
+fn port_090_the_preview_closes_250_ms_after_the_pointer_leaves_the_popover() {
+    let mut host = client_host();
+    hover(&mut host, ActionKind::HoverEnter);
+    host.advance_clock(200);
+    host.settle();
+    host.send_action(launcher(), "surface", ActionKind::HoverEnter, ActionValue::None);
+    host.send_action(launcher(), "surface", ActionKind::HoverLeave, ActionValue::None);
+    host.advance_clock(250);
+    host.settle();
+    assert!(!visible(&mut host));
+}
+
+/// REQ: PORT:ilium-client/src/popover.rs::leaving_before_hover_delay_never_opens_preview, F-090
+#[test]
+fn port_090_a_click_still_opens_the_menu_after_an_aborted_hover() {
+    let mut host = client_host();
+    hover(&mut host, ActionKind::HoverEnter);
+    host.advance_clock(50);
+    hover(&mut host, ActionKind::HoverLeave);
+    host.advance_clock(150);
+    host.settle();
+    host.send_action(launcher(), "anchor", ActionKind::Activated, ActionValue::None);
+    host.settle();
+    assert!(visible(&mut host));
+}
+
+/// REQ: PORT:ilium-client/src/popover.rs::pinning_opens_immediately_and_does_not_expire, F-090
+#[test]
+fn port_090_a_pinned_menu_survives_the_pointer_leaving_for_250_ms() {
+    let mut host = client_host();
+    host.send_action(launcher(), "anchor", ActionKind::Activated, ActionValue::None);
+    host.settle();
+    hover(&mut host, ActionKind::HoverLeave);
+    host.advance_clock(250);
+    host.settle();
+    assert!(visible(&mut host));
+}
+
+/// REQ: PORT:ilium-client/src/popover.rs::returning_after_an_aborted_hover_starts_a_fresh_delay, F-090
+#[test]
+fn port_090_an_aborted_hover_timer_never_opens_the_preview_later() {
+    let mut host = client_host();
+    hover(&mut host, ActionKind::HoverEnter);
+    host.advance_clock(50);
+    hover(&mut host, ActionKind::HoverLeave);
+    host.advance_clock(300);
+    host.settle();
+    assert!(!visible(&mut host));
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::composed_startup_progress_overlay_is_visible_at_terminal_sizes, F-089
+#[test]
+fn port_089_no_startup_overlay_row_is_wider_than_a_small_terminal() {
+    for (width, height) in [(24u16, 10u16), (40, 12)] {
+        let mut host = client_host();
+        let text = host.render(startup(), width, height).text();
+        assert!(
+            text.lines().all(|line| line.chars().count() <= usize::from(width)),
+            "{width}x{height}: {text}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::every_row_is_exactly_the_dialog_width, F-089
+#[test]
+fn port_089_the_bottom_border_is_closed_at_both_corners() {
+    let mut host = client_host();
+    let screen = host.render(startup(), 40, 7);
+    let row = (0..7)
+        .find(|row| screen.row(*row).contains('\u{2570}'))
+        .expect("bottom border");
+    let line = screen.row(row);
+    let line = line.trim();
+    assert!(line.starts_with('\u{2570}'), "{line:?}");
+    assert!(line.ends_with('\u{256f}'), "{line:?}");
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::known_progress_fills_proportionally_and_labels_percent, F-089
+#[test]
+fn port_089_complete_progress_fills_the_whole_bar_and_labels_100_percent() {
+    let mut host = client_host();
+    host.send_action(
+        startup(),
+        "progress",
+        ActionKind::Changed,
+        ActionValue::Number(1.0),
+    );
+    host.settle();
+    let text = host.render(startup(), 100, 30).text();
+    assert!(text.contains("100%"), "{text}");
+    let line = text
+        .lines()
+        .find(|line| line.contains('\u{2588}'))
+        .expect("bar row");
+    assert!(!line.contains('\u{2591}'), "{line}");
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::top_border_uses_shared_ilium_chrome_title, F-089
+#[test]
+fn port_089_the_top_border_fills_the_space_after_its_title_with_rules() {
+    let mut host = client_host();
+    let screen = host.render(startup(), 40, 7);
+    let line = (0..7)
+        .map(|row| screen.row(row))
+        .find(|line| line.contains('\u{256d}'))
+        .expect("top");
+    assert!(line.contains("\u{2500}\u{2500}"), "{line:?}");
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::unknown_progress_moves_between_ticks, F-089
+#[test]
+fn port_089_an_unknown_progress_bar_shows_no_percent_label() {
+    let mut host = client_host();
+    let text = host.render(startup(), 100, 30).text();
+    assert!(!text.contains('%'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::small_terminals_get_no_dialog_and_large_ones_get_it_centred, F-089
+#[test]
+fn port_089_a_24_by_7_terminal_is_the_smallest_that_gets_a_dialog() {
+    let mut host = client_host();
+    assert!(!host.render(startup(), 24, 7).text().trim().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/startup_dialog.rs::small_terminals_get_no_dialog_and_large_ones_get_it_centred, F-089
+#[test]
+fn port_089_a_dialog_in_a_64_column_terminal_starts_at_column_zero() {
+    let mut host = client_host();
+    let screen = host.render(startup(), 64, 10);
+    let row = (0..10)
+        .find(|row| screen.row(*row).contains('\u{256d}'))
+        .expect("top border");
+    let line = screen.row(row);
+    assert_eq!(line.chars().position(|c| c == '\u{256d}'), Some(0));
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::compact_buttons_keep_complete_labels_before_shortcut_hints, F-090
+#[test]
+fn port_090_the_create_button_shows_its_enter_hint_at_40_columns() {
+    let mut host = client_host();
+    let text = host
+        .render(ViewTarget::Popup("form-actions".to_string()), 40, 1)
+        .text();
+    assert!(text.contains("Create board"), "{text}");
+    assert!(text.contains("Enter"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::compact_text_prompt_uses_a_complete_hint_that_fits, F-090
+#[test]
+fn port_090_the_prompt_hint_stays_on_a_single_row_at_wide_sizes() {
+    let mut host = client_host();
+    let screen = host.render(ViewTarget::Popup("text-prompt".to_string()), 100, 12);
+    let hints = (0..12)
+        .filter(|row| screen.row(*row).contains("Esc cancel"))
+        .count();
+    assert_eq!(hints, 1);
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::confirmation_keyboard_hint_adapts_to_available_width, F-090
+#[test]
+fn port_090_the_mouse_hint_is_dropped_on_a_narrow_confirmation() {
+    let mut host = client_host();
+    let text = host.render(confirm(), 24, 12).text();
+    assert!(!text.contains("Click either button"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::confirmation_layout_exposes_two_distinct_mouse_targets_on_small_screens, F-090
+#[test]
+fn port_090_a_click_on_the_dialog_border_hits_no_button() {
+    let mut host = client_host();
+    assert!(!host.click(confirm(), 0, 0));
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::destructive_confirmation_renders_aerated_named_buttons_with_dark_safe_tones, F-090
+#[test]
+fn port_090_both_confirmation_buttons_stay_named_at_60_columns() {
+    let mut host = client_host();
+    let text = host.render(confirm(), 60, 30).text();
+    assert!(text.contains("Keep open"), "{text}");
+    assert!(text.contains("Close"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::destructive_confirmation_renders_aerated_named_buttons_with_dark_safe_tones, F-090
+#[test]
+fn port_090_the_destructive_button_background_is_uniform_across_its_label() {
+    let mut host = client_host();
+    let screen = host.render(confirm(), 100, 30);
+    let (row, column) = screen.find("Close").expect("close button");
+    assert_eq!(
+        screen.cell(row, column).background,
+        screen.cell(row, column + 1).background
+    );
+}
+
+/// REQ: PORT:ilium-client/src/modal.rs::text_prompt_renders_clickable_cancel_and_primary_actions, F-090
+#[test]
+fn port_090_the_text_prompt_keeps_cancel_and_rename_at_40_columns() {
+    let mut host = client_host();
+    let text = host
+        .render(ViewTarget::Popup("text-prompt".to_string()), 40, 12)
+        .text();
+    assert!(text.contains("Cancel"), "{text}");
+    assert!(text.contains("Rename"), "{text}");
+}

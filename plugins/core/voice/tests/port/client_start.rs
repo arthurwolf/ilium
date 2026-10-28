@@ -69,3 +69,15 @@ fn offer_052_without_start_a_switched_off_client_answers_voice_off() {
         Some(json!(false))
     );
 }
+
+/// REQ: PORT:ilium-client/src/lib.rs::a_server_offer_becomes_a_pending_offer_for_the_voice_owner
+#[test]
+fn offer_052_an_offer_to_an_enabled_client_is_not_answered_voice_off() {
+    let mut host = enabled_client("semantic_vad");
+    let line = answer(
+        &mut host,
+        3,
+        json!({ "sentences": ["hello"], "start": false }),
+    );
+    assert!(!line.contains("voice-off"), "{line}");
+}

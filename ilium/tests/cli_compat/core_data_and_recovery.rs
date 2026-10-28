@@ -114,3 +114,86 @@ fn cor_109_plugin_restart_command_restarts_a_core_plugin_and_names_it() {
         run.stdout
     );
 }
+
+/// REQ: COR-093
+#[test]
+fn cor_093_newer_build_creates_no_other_session_file() {
+    let sandbox = Sandbox::new();
+    let sessions = sandbox.project.join(".ilium/sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions dir");
+    std::fs::write(sessions.join("default.json"), r#"{"version": 99}"#).expect("snapshot");
+
+    let _run = sandbox.ilium(&["ls"]);
+
+    let mut names: Vec<String> = std::fs::read_dir(&sessions)
+        .expect("sessions dir readable")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["default.json".to_string()],
+        "read-only persistence must not create or move any session file"
+    );
+}
+
+/// REQ: COR-094
+#[test]
+fn cor_094_unreadable_version_is_not_reported_as_a_newer_build() {
+    let sandbox = Sandbox::new();
+    let sessions = sandbox.project.join(".ilium/sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions dir");
+    std::fs::write(
+        sessions.join("default.json"),
+        r#"{"version": "not-a-number"}"#,
+    )
+    .expect("snapshot");
+
+    let run = sandbox.ilium(&["ls"]);
+
+    let output = format!("{}{}", run.stdout, run.stderr);
+    assert!(
+        !output.contains("newer"),
+        "an unreadable version must not be taken for a newer build: {output}"
+    );
+}
+
+/// REQ: COR-095
+#[test]
+fn cor_095_newer_section_is_unchanged_after_a_second_start() {
+    let sandbox = Sandbox::new();
+    let sessions = sandbox.project.join(".ilium/sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions dir");
+    let snapshot_path = sessions.join("default.json");
+    let section_text = r#"{"schema_version": 99, "data": {"monitors": ["keep-me"]}}"#;
+    let snapshot_text = format!(
+        r#"{{"version": 4, "plugin_sections": {{"ilium.core.progress": {section_text}}}}}"#
+    );
+    std::fs::write(&snapshot_path, &snapshot_text).expect("snapshot");
+
+    let _first = sandbox.ilium(&["ls"]);
+    let _second = sandbox.ilium(&["ls"]);
+
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&snapshot_path).expect("snapshot readable"))
+            .expect("snapshot must remain valid JSON");
+    let expected: serde_json::Value =
+        serde_json::from_str(section_text).expect("expected section parses");
+    assert_eq!(stored["plugin_sections"]["ilium.core.progress"], expected);
+}
+
+/// REQ: COR-109
+#[test]
+fn cor_109_restart_of_an_unknown_core_plugin_fails_and_names_it() {
+    let sandbox = Sandbox::new();
+
+    let run = sandbox.ilium(&["plugin", "restart", "ilium.core.no-such-plugin"]);
+
+    assert!(run.code != 0, "restarting an unknown plugin must fail");
+    let output = format!("{}{}", run.stdout, run.stderr);
+    assert!(
+        output.contains("ilium.core.no-such-plugin"),
+        "the failure must name the plugin: {output}"
+    );
+}

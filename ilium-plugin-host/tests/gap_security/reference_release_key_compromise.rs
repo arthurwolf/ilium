@@ -51,3 +51,26 @@ fn sec_728_release_key_ceremony_record_shows_hardware_key_two_of_three_and_match
         "the transcript hash in the record must match the transcript file"
     );
 }
+
+/// REQ: SEC-728
+#[test]
+fn sec_728_ceremony_record_lists_at_least_three_custodians() {
+    assert_manual_says("reference-release-key-compromise", "hardware");
+    let record_path = repo_root().join(CEREMONY_DIR).join("ceremony-record.json");
+    let record_text = std::fs::read_to_string(&record_path).unwrap_or_else(|error| {
+        panic!(
+            "the key ceremony record must exist at {}: {error}",
+            record_path.display()
+        )
+    });
+    let record: serde_json::Value =
+        serde_json::from_str(&record_text).expect("the ceremony record must be valid JSON");
+    let custodians = record["custodians"]
+        .as_array()
+        .map(|list| list.len())
+        .unwrap_or(0);
+    assert!(
+        custodians >= 3,
+        "a 2-of-3 rule needs at least three named custodians, got {custodians}"
+    );
+}

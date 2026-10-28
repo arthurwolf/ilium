@@ -31,3 +31,18 @@ fn usr_339_t2_window_keeps_a_host_title_with_name_and_badge_that_the_plugin_cann
         "a plugin must not draw into the row holding the title"
     );
 }
+
+/// REQ: USR-339
+#[test]
+fn usr_339_t3_window_title_shows_the_tier_three_badge() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").tier(3));
+    let server = rig.start_server("s1");
+    rig.advance(secs(3));
+    let window = server.open_plugin_window(NOTES);
+    let title = window.title_line();
+    assert!(
+        title.contains("T3"),
+        "a tier three window must show the T3 badge: {title}"
+    );
+}

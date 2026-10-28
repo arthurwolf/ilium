@@ -238,3 +238,72 @@ fn port_067_a_refused_request_is_not_revived_by_a_repeat_and_does_not_block_the_
     create_worktree(&mut host, &request("agent/fresh"));
     assert_eq!(add_arguments(&mut host)[3], "agent/fresh");
 }
+
+/// REQ: PORT:ilium-client/src/worktree_dialog.rs::loads_facts_and_creates_collision_free_branch_in_main_sibling
+#[test]
+fn port_067_a_default_branch_skips_every_taken_suffix_and_the_path_follows_it() {
+    let mut host = server_host_at(PROJECT);
+    host.process().on_args(
+        &["branch", "--format=%(refname:short)"],
+        stdout_exit("main\nagent/task\nagent/task-2\n"),
+    );
+    host.process().on_args(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        stdout_exit("topic\n"),
+    );
+    host.process().on_args(
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        stdout_exit("origin/main\n"),
+    );
+    create_worktree(&mut host, &json!({}));
+    let arguments = add_arguments(&mut host);
+    assert_eq!(arguments[3], "agent/task-3");
+    assert_eq!(arguments[4], "/projects/acme.worktrees/agent-task-3");
+}
+
+/// REQ: PORT:ilium-client/src/worktree_dialog.rs::default_path_preserves_inserted_placeholder_literals_in_repository_name
+#[test]
+fn port_067_a_placeholder_text_in_the_project_root_is_not_expanded_by_the_location_template() {
+    let mut host = server_host_at("/projects/{branch_slug}-repo");
+    with_repository_facts(&mut host);
+    set_git(
+        &mut host,
+        "worktree_location_template",
+        json!("{project}/.ilium/worktrees/{branch_slug}"),
+    )
+    .expect("valid");
+    create_worktree(&mut host, &json!({}));
+    assert_eq!(
+        add_arguments(&mut host)[4],
+        "/projects/{branch_slug}-repo/.ilium/worktrees/agent-task-2"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/worktree_dialog.rs::oversized_setup_is_rejected_before_submission
+#[test]
+fn port_072_a_setup_command_of_exactly_8192_bytes_is_accepted_and_runs_unchanged() {
+    let mut host = server_host_at(PROJECT);
+    let setup = "x".repeat(8 * 1024);
+    set_git(&mut host, "setup_command", json!(setup.clone()))
+        .expect("8192 bytes is within the limit");
+    create_worktree(&mut host, &request("fix-auth"));
+    let shell: Vec<_> = host
+        .process()
+        .calls()
+        .into_iter()
+        .filter(|call| call.program == "sh")
+        .collect();
+    assert_eq!(shell.len(), 1);
+    assert_eq!(shell[0].arguments, ["-c", setup.as_str()]);
+}
+
+/// REQ: PORT:ilium-client/src/connection.rs::accepted_dialog_error_owner_survives_stale_same_kind_response
+#[test]
+fn port_067_a_refused_branch_does_not_block_a_default_request_that_follows() {
+    let mut host = server_host_at(PROJECT);
+    with_repository_facts(&mut host);
+    let refused = create_worktree(&mut host, &request("main"));
+    assert!(create_panes(&refused).is_empty());
+    create_worktree(&mut host, &json!({}));
+    assert_eq!(add_arguments(&mut host)[3], "agent/task-2");
+}

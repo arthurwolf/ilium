@@ -213,3 +213,101 @@ fn usr_337_doctor_prints_one_ok_warn_or_fail_line_per_check_and_exits_0_only_wit
         "free space below 100 MiB must warn"
     );
 }
+
+/// REQ: USR-332
+#[test]
+fn usr_332_bundle_shown_in_the_viewer_has_the_token_redacted() {
+    assert_manual_says(
+        "core-plugin-diagnostics",
+        "the host MUST show the redacted `summary.txt` and `log.txt` in a viewer",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_log_line(NOTES, "token=abc123");
+    assert_eq!(rig.cli(&["support-bundle", NOTES]).exit_code, 0);
+    let viewed = rig.viewer_documents();
+    assert!(
+        viewed.iter().all(|doc| !doc.contains("abc123")),
+        "the secret value must be redacted in every viewed document"
+    );
+}
+
+/// REQ: USR-334
+#[test]
+fn usr_334_default_bundle_has_no_host_log_tail() {
+    assert_manual_says(
+        "core-plugin-diagnostics",
+        "`--include-host` MUST add the host log tail (last 500 lines, redacted)",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    assert_eq!(rig.cli(&["support-bundle", NOTES]).exit_code, 0);
+    let text = read_bundle_text(&rig.last_bundle_path());
+    assert!(
+        !text.contains("host log tail"),
+        "the host log tail is added only with --include-host"
+    );
+}
+
+/// REQ: USR-335
+#[test]
+fn usr_335_summary_sha256_is_a_64_digit_hex_digest_of_the_other_files() {
+    assert_manual_says(
+        "core-plugin-diagnostics",
+        "and a SHA-256 of the other three files",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    assert_eq!(rig.cli(&["support-bundle", NOTES]).exit_code, 0);
+    let text = read_bundle_text(&rig.last_bundle_path());
+    let digest_line = text
+        .lines()
+        .find(|line| line.to_lowercase().starts_with("sha256:"))
+        .expect("summary.txt has a sha256 line");
+    let digest = digest_line["sha256:".len()..].trim();
+    assert_eq!(digest.len(), 64, "a SHA-256 is 64 hex digits: {digest}");
+    assert!(
+        digest.chars().all(|c| c.is_ascii_hexdigit()),
+        "the digest is hexadecimal: {digest}"
+    );
+}
+
+/// REQ: USR-336
+#[test]
+fn usr_336_bundle_builds_for_a_blocked_plugin() {
+    assert_manual_says(
+        "core-plugin-diagnostics",
+        "MUST work for a plugin in state `failed`, `blocked`, `incompatible` or missing helper",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.put_plugin_in_state(NOTES, "blocked");
+    let output = rig.cli(&["support-bundle", NOTES]);
+    assert_eq!(
+        output.exit_code, 0,
+        "a blocked plugin still gets a bundle: {}",
+        output.stderr
+    );
+}
+
+/// REQ: USR-337
+#[test]
+fn usr_337_unreadable_installed_json_is_reported_as_a_fail_line_and_exits_nonzero() {
+    assert_manual_says("core-plugin-diagnostics", "`installed.json` readability");
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.corrupt_file(&rig.state_dir().join("installed.json"), b"{not json");
+    let output = rig.cli(&["doctor"]);
+    assert_ne!(
+        output.exit_code, 0,
+        "a fail line makes doctor exit non-zero"
+    );
+    assert!(
+        output
+            .stdout_raw
+            .lines()
+            .any(|line| line.starts_with("fail") && line.contains("installed.json")),
+        "doctor reports installed.json as fail: {}",
+        output.stdout_raw
+    );
+}

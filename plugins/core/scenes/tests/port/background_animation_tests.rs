@@ -1053,3 +1053,218 @@ fn port_zero_kelp_current_freezes_stems_and_ribbon_twisting() {
         "the manual page covers this feature"
     );
 }
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::a_scene_reporting_cell_colors_colors_the_cells_and_others_do_not
+#[test]
+fn port_second_clock_is_tone_only_and_palette_keeps_its_text() {
+    let mut scene = fake_scene("clock", 40, 10);
+    let before = scene.frame(braille_frame(40, 10, 1000));
+    scene.set_palette(vec![0x112233, 0x445566]);
+    let with_palette = scene.frame(braille_frame(40, 10, 1000));
+    assert_eq!(
+        before.text(),
+        with_palette.text(),
+        "the host colours the clock, the clock's glyphs stay"
+    );
+    assert!(
+        !fake_scene("clock", 40, 10).uses_cell_colors(),
+        "clock is tone-only"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::actual_dome_normals_project_light_in_opposite_directions_on_opposite_slopes
+#[test]
+fn port_second_waves_quarter_period_changes_the_frame() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let start = scene.frame(braille_frame(40, 10, 0));
+    let quarter = scene.frame(braille_frame(40, 10, 785));
+    assert_ne!(
+        start.text(),
+        quarter.text(),
+        "a quarter period moves the light on every slope"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::braille_bit_layout_is_exact
+#[test]
+fn port_second_waves_cells_are_braille_patterns_only() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let screen = scene.frame(braille_frame(40, 10, 1500));
+    let lit = lit_cells(&screen);
+    assert!(!lit.is_empty(), "waves draws dots at 1500 ms");
+    for (row, column) in lit {
+        let symbol = screen.cell(row, column).symbol;
+        assert!(
+            symbol
+                .chars()
+                .all(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch)),
+            "cell ({row},{column}) is {symbol:?}, not a Braille pattern"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::cached_builtin_playback_releases_a_previous_hosted_scene
+#[test]
+fn port_second_another_instance_leaves_the_first_scene_running() {
+    let mut first = fake_scene("waves", 24, 12);
+    let before = first.frame(braille_frame(24, 12, 1000));
+    let mut other = fake_scene("clock", 10, 4);
+    let _ = other.frame(braille_frame(10, 4, 1000));
+    let after = first.frame(braille_frame(24, 12, 1000));
+    assert_eq!((after.columns, after.rows), (24, 12));
+    assert_eq!(
+        before.text(),
+        after.text(),
+        "a second scene does not disturb the first one's frames"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::catalog_has_unique_serializable_scenes_in_user_order
+#[test]
+fn port_second_catalog_order_matches_the_manifest_order() {
+    let mut session = session_with_plugin();
+    let listed: Vec<String> = catalog_scenes(&mut session)
+        .iter()
+        .map(|scene| scene["id"].as_str().expect("id").to_string())
+        .collect();
+    let manifest: Vec<String> = scene_entries()
+        .iter()
+        .map(|scene| scene["id"].as_str().expect("id").to_string())
+        .collect();
+    assert_eq!(listed, manifest, "the catalog lists scenes in manifest order");
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::every_scene_is_deterministic_nonempty_distinct_and_animated
+#[test]
+fn port_second_scenes_differ_from_each_other_and_move_over_time() {
+    let waves = fake_scene("waves", 40, 10)
+        .frame(braille_frame(40, 10, 1500))
+        .text();
+    let clock = fake_scene("clock", 40, 10)
+        .frame(braille_frame(40, 10, 1500))
+        .text();
+    assert_ne!(waves, clock, "waves and clock draw different frames");
+    let early = fake_scene("waves", 40, 10)
+        .frame(braille_frame(40, 10, 1500))
+        .text();
+    let later = fake_scene("waves", 40, 10)
+        .frame(braille_frame(40, 10, 2500))
+        .text();
+    assert_ne!(early, later, "waves moves between 1.5 s and 2.5 s");
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::geometry_handles_empty_tiny_resize_and_outside_queries
+#[test]
+fn port_second_zero_size_has_no_cells_and_one_cell_renders() {
+    for id in MANIFEST_SCENES {
+        let empty = fake_scene(id, 0, 0).frame(braille_frame(0, 0, 0));
+        assert!(empty.cells.is_empty(), "{id}: a zero-size scene has no cells");
+        let tiny = fake_scene(id, 1, 1).frame(braille_frame(1, 1, 0));
+        assert_eq!(tiny.cells.len(), 1, "{id}: a 1 by 1 scene has one cell");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::hosted_controls_route_through_the_crate_and_report_errors
+#[test]
+fn port_second_non_object_settings_are_refused() {
+    for id in MANIFEST_SCENES {
+        let mut scene = fake_scene(id, 40, 10);
+        assert!(
+            !scene.reconfigure("[]"),
+            "{id}: settings must be a JSON object"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::hosted_frame_reuses_the_render_inside_one_bucket_and_repacks_for_density
+#[test]
+fn port_second_in_place_reconfigure_keeps_the_current_frame() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let before = scene.frame(braille_frame(40, 10, 1000));
+    assert!(scene.reconfigure("{}"), "empty settings apply in place");
+    let after = scene.frame(braille_frame(40, 10, 1000));
+    assert_eq!(
+        before.text(),
+        after.text(),
+        "the same scene time gives the same frame after an in-place update"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::hosted_kinds_map_to_the_crate_and_are_live_only
+#[test]
+fn port_second_clock_and_stars_are_live_only_in_the_manifest() {
+    for id in ["clock", "stars-overhead"] {
+        let modes = scene_entry(id)["modes"].clone();
+        assert_eq!(modes, json!(["live"]), "{id} offers only live mode");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::hosted_scene_renders_scene_time_wall_time_and_speed_through_the_host
+#[test]
+fn port_second_wall_clock_does_not_move_the_waves_frame() {
+    let mut skewed = braille_frame(40, 10, 1000);
+    skewed.wall_millis = 9_000;
+    let scene_time = fake_scene("waves", 40, 10).frame(braille_frame(40, 10, 1000));
+    let wall_time = fake_scene("waves", 40, 10).frame(skewed);
+    assert_eq!(
+        scene_time.text(),
+        wall_time.text(),
+        "waves follows scene time, not wall time"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::hosted_scene_takes_new_settings_in_place_or_is_rebuilt
+#[test]
+fn port_second_with_empty_settings_matches_a_fresh_scene() {
+    let fresh = fake_scene("waves", 40, 10).frame(braille_frame(40, 10, 2000));
+    let configured = fake_scene("waves", 40, 10)
+        .with_settings("{}")
+        .frame(braille_frame(40, 10, 2000));
+    assert_eq!(
+        fresh.text(),
+        configured.text(),
+        "a scene built with empty settings draws what a fresh scene draws"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::identical_requests_reuse_buffers_and_palette_changes_reuse_geometry
+#[test]
+fn port_second_palette_keeps_the_lit_cell_positions() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let before = scene.frame(braille_frame(40, 10, 1500));
+    scene.set_palette(vec![0x112233, 0x445566, 0xffeedd, 0x000000]);
+    let after = scene.frame(braille_frame(40, 10, 1500));
+    assert_eq!(
+        lit_cells(&before),
+        lit_cells(&after),
+        "a palette changes colours, never which cells are lit"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::ripple_crests_survive_destructive_interference_as_continuous_arcs
+#[test]
+fn port_second_waves_lights_part_of_the_frame_not_all_or_none() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let screen = scene.frame(braille_frame(40, 10, 1500));
+    let lit = lit_cells(&screen).len();
+    let total = usize::from(screen.columns) * usize::from(screen.rows);
+    assert!(
+        lit > 0 && lit < total,
+        "crests leave dark gaps and lit arcs: {lit} of {total} cells lit"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/tests.rs::settings_defaults_and_untrusted_ranges_are_normalized
+#[test]
+fn port_second_untrusted_settings_still_render_the_requested_size() {
+    for id in MANIFEST_SCENES {
+        let mut scene = fake_scene(id, 40, 10);
+        let _ = scene.reconfigure(r#"{"frame_rate": 1e308, "unknown": [null, true]}"#);
+        let screen = scene.frame(braille_frame(40, 10, 1000));
+        assert_eq!(
+            (screen.columns, screen.rows),
+            (40, 10),
+            "{id}: the size comes from the host, not from the settings"
+        );
+    }
+}

@@ -1,8 +1,8 @@
 //! Core plugin `ilium.core.settings` (manual page core-plugin-settings.md).
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
+//! activation state and answer event batches with no submissions.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -16,23 +16,27 @@ use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
 /// The client side of `ilium.core.settings` (core-plugin-settings.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
-pub struct SettingsClient;
+pub struct SettingsClient {
+    activated: bool,
+}
 
 impl Lifecycle for SettingsClient {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.settings: client lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        let _ = &context;
+        self.activated = true;
+        Ok(())
     }
 }
 
 impl Handler for SettingsClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.settings: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for SettingsClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.settings: client views.render")
+        UiTree::default()
     }
 }
 
@@ -142,7 +146,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn density_change_produces_no_submission() {
-        let mut client = SettingsClient;
+        let mut client = SettingsClient::default();
         let submissions = client.on_events(vec![settings_changed(&["density"])]);
         assert!(
             submissions.is_empty(),
@@ -153,7 +157,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn empty_event_batch_produces_no_submission() {
-        let mut client = SettingsClient;
+        let mut client = SettingsClient::default();
         assert!(client.on_events(Vec::new()).is_empty());
     }
 
@@ -161,7 +165,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn unrelated_setting_change_is_ignored() {
-        let mut client = SettingsClient;
+        let mut client = SettingsClient::default();
         let submissions = client.on_events(vec![settings_changed(&["ui.motion_level"])]);
         assert!(submissions.is_empty());
     }
@@ -170,7 +174,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn onboarding_step_renders_first_run_schema_form() {
-        let mut client = SettingsClient;
+        let mut client = SettingsClient::default();
         let tree = client.render(
             ViewTarget::OnboardingStep("first-run".to_string()),
             Area {
@@ -187,7 +191,7 @@ mod spec_tests {
     /// REQ: COR-011
     #[test]
     fn overview_panel_renders_appearance_schema_form() {
-        let mut client = SettingsClient;
+        let mut client = SettingsClient::default();
         let tree = client.render(
             ViewTarget::Panel("overview".to_string()),
             Area {

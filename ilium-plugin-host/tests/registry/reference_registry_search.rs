@@ -396,3 +396,16 @@ proptest! {
         prop_assert!(plugin_ids(&output).is_empty());
     }
 }
+
+/// REQ: PKG-381
+#[test]
+fn pkg_381_install_counts_do_not_lift_an_equal_text_match() {
+    let mut popular = plain("com.q.b").described("zed");
+    popular.extra_index = serde_json::json!({ "installs": 5_000_000 });
+    let quiet = plain("com.q.a").described("zed");
+    let sandbox = sandbox_with(vec![popular, quiet]);
+    assert_eq!(
+        search(&sandbox, &["zed"]),
+        vec!["com.q.a".to_owned(), "com.q.b".to_owned()]
+    );
+}

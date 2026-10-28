@@ -52,3 +52,26 @@ fn doc_abi_067_size_table_has_a_row_for_every_string_list_or_blob_field() {
         "fields without a size row: {missing:#?}"
     );
 }
+
+/// REQ: ABI-067
+#[test]
+fn doc_abi_067_every_size_row_names_a_refusal_code_in_backticks() {
+    let page = manual_page("reference-wit.md");
+    let table = section(&page, "## Per-field size limits");
+    let rows: Vec<&str> = table
+        .lines()
+        .filter(|line| line.trim_start().starts_with('|'))
+        .collect();
+    // The first two table lines are the header and its separator.
+    let data_rows = rows.get(2..).unwrap_or(&[]);
+    assert!(!data_rows.is_empty(), "the size table has no data rows");
+    let rows_without_code: Vec<&str> = data_rows
+        .iter()
+        .copied()
+        .filter(|row| row.matches('`').count() < 2)
+        .collect();
+    assert!(
+        rows_without_code.is_empty(),
+        "size rows without a refusal code: {rows_without_code:#?}"
+    );
+}

@@ -342,6 +342,10 @@ pub mod policy {
     pub const REPLACEMENT: &str = "policy.replacement";
     /// `policy.invalid`.
     pub const INVALID: &str = "policy.invalid";
+    /// `policy.version-denied`.
+    pub const VERSION_DENIED: &str = "policy.version-denied";
+    /// `policy.version-pinned`.
+    pub const VERSION_PINNED: &str = "policy.version-pinned";
     /// `policy.managed-plugin`.
     pub const MANAGED_PLUGIN: &str = "policy.managed-plugin";
 }

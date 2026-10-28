@@ -112,3 +112,30 @@ fn port_009_the_reply_waits_for_the_rules_delay_after_detection() {
     host.settle();
     assert_eq!(texts(&host.submitted()), ["yes"]);
 }
+
+/// REQ: PORT:ilium-server/tests/text_triggers.rs::matched_terminal_output_submits_the_literal_reply_with_enter
+#[test]
+fn port_010_the_reply_text_is_sent_unchanged_with_spaces_and_regex_characters() {
+    let reply = "  $1 \\d+ (y/n)  ";
+    let (mut host, pane) = armed("Continue\\? \\(y/n\\)", reply);
+    let submissions = host.deliver_one(matched(pane, &rule_id(0), "Continue? (y/n)", 0));
+    assert_eq!(send_inputs(&submissions), [expected_spec(pane, reply)]);
+}
+
+/// REQ: PORT:ilium-server/tests/text_triggers.rs::repainting_one_matching_screen_line_submits_only_once
+#[test]
+fn port_011_the_same_reply_on_a_different_row_submits_again() {
+    let (mut host, pane) = armed("go", "yes");
+    assert_eq!(deliver_rows(&mut host, pane, &[2, 3]), (2, 0));
+}
+
+/// REQ: PORT:ilium-server/tests/text_triggers.rs::a_match_reappearing_after_the_row_clears_submits_again
+#[test]
+fn port_012_a_repeat_one_millisecond_inside_the_dedup_window_is_dropped() {
+    let (mut host, pane) = armed("go", "yes");
+    host.deliver_one(hit(pane, 4));
+    host.advance_clock(DEDUP_WINDOW_MS - 1);
+    host.deliver_one(hit(pane, 4));
+    assert_eq!(applied(&mut host), 1);
+    assert_eq!(duplicates(&mut host), 1);
+}

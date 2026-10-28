@@ -416,3 +416,21 @@ fn sec_250_snapshots_and_exports_exclude_secrets_and_a_restore_leaves_the_rows_e
         .delivered_events_text()
         .contains("settings-changed"));
 }
+
+/// REQ: SEC-246
+#[test]
+fn sec_246_a_changed_secret_stays_redacted_in_late_log_lines_for_60_s() {
+    assert_page_has(
+        "reference-secrets.md",
+        &["forgets it for redaction purposes after 60 s (so late log lines are still redacted)"],
+    );
+}
+
+/// REQ: SEC-250
+#[test]
+fn sec_250_an_archive_without_include_secrets_leaves_secret_rows_empty() {
+    assert_page_has(
+        "reference-secrets.md",
+        &["Archive made without `--include-secrets`", "the user re-enters them"],
+    );
+}

@@ -323,3 +323,166 @@ fn settings_050_an_engine_budget_change_whose_write_is_refused_is_reported_unsav
         assert_eq!(before, after, "nothing was saved or applied");
     }
 }
+
+/// REQ: PORT:ilium-client/src/control/resolver.rs::resolve_parent_walks_past_a_split_view_to_its_enclosing_group
+#[test]
+fn resolver_050_two_agents_without_a_target_share_the_enclosing_group() {
+    let (mut host, group) = host_with_split_view();
+    for _ in 0..2 {
+        host.realtime()
+            .call_tool(
+                "ilium_create_agent",
+                &json!({ "provider": "claude" }).to_string(),
+            )
+            .expect("created");
+    }
+    let parents: Vec<NodeId> = host
+        .submitted()
+        .iter()
+        .filter_map(|submission| match &submission.intent {
+            Intent::CreatePane(spec) => spec.parent,
+            _ => None,
+        })
+        .collect();
+    assert_eq!(parents, [NodeId(group), NodeId(group)]);
+}
+
+/// REQ: PORT:ilium-client/src/control/resolver.rs::resolve_parent_treats_a_blank_path_exactly_like_an_omitted_target
+#[test]
+fn resolver_050_an_empty_path_resolves_like_an_omitted_target() {
+    let (mut host, group) = host_with_split_view();
+    host.realtime()
+        .call_tool(
+            "ilium_create_agent",
+            &json!({ "provider": "claude", "path": "" }).to_string(),
+        )
+        .expect("created");
+    assert_eq!(created_parent(&host), Some(NodeId(group)));
+}
+
+/// REQ: PORT:ilium-client/src/normal_voice.rs::whole_batch_refusal_leaves_existing_fifo_unchanged
+#[test]
+fn queue_052_a_batch_with_one_empty_sentence_is_refused_whole() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    let record = say(&mut host, 10, json!(["valid one", ""]));
+    assert_eq!(record["code"], "invalid-request", "{record}");
+    assert!(host.realtime().typed_text().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/normal_voice.rs::actual_prepared_context_fills_original_slot_before_younger_semantic_input
+#[test]
+fn queue_052_text_typed_across_two_agent_context_updates_stays_in_order() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    host.realtime().set_active_agent("claude");
+    host.realtime()
+        .call_tool("ilium_type_text", &json!({ "text": "first" }).to_string())
+        .expect("typed");
+    host.realtime().set_active_agent("codex");
+    host.realtime()
+        .call_tool("ilium_type_text", &json!({ "text": "second" }).to_string())
+        .expect("typed");
+    assert_eq!(host.realtime().typed_text(), ["first", "second"]);
+}
+
+/// REQ: PORT:ilium-client/src/lib.rs::voice_actor_acceptance_waits_for_reply_credit_and_all_original_sentence_slots
+#[test]
+fn queue_052_an_empty_sentence_list_is_not_accepted() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    let record = say(&mut host, 11, json!([]));
+    assert_ne!(record["accepted_sentences"], 0, "{record}");
+    assert!(host.realtime().typed_text().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/control/executor.rs::full_shared_outbound_credit_refuses_semantic_control_and_exit_receipts
+#[test]
+fn executor_050_a_refused_text_send_does_not_count_as_pressing_enter() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    host.inject_failure(
+        "terminal.write",
+        PluginError::new(ErrorCode::Busy, "rejected before admission"),
+    );
+    let _ = host
+        .realtime()
+        .call_tool("ilium_send_text", &json!({ "text": "hello" }).to_string());
+    assert_ne!(host.realtime().last_submit_enter(), Some(true));
+}
+
+/// REQ: PORT:ilium-client/src/control/snapshot.rs::redaction_suffix_keeps_valid_unicode_and_the_requested_limit
+#[test]
+fn snapshot_050_a_short_non_ascii_setting_is_kept_whole() {
+    let mut host = enabled_client("semantic_vad");
+    configure(&mut host, "custom_prompt", json!("café au lait"));
+    let snapshot: Value = serde_json::from_str(
+        &host
+            .realtime()
+            .call_tool("ilium_read_settings", "{}")
+            .expect("settings"),
+    )
+    .expect("JSON");
+    let mut strings = Vec::new();
+    strings_in(&snapshot, &mut strings);
+    assert!(
+        strings.iter().any(|text| text.contains("café au lait")),
+        "{strings:?}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/control/mod.rs::pending_confirmation_capacity_evicts_the_oldest_token_by_insertion_order
+#[test]
+fn confirmation_051_cancelling_the_newest_kill_request_runs_nothing() {
+    let mut host = enabled_client("push_to_talk");
+    contribute_phrase(
+        &mut host,
+        "kill",
+        "kill the session",
+        "kernel.kill_session",
+        true,
+    );
+    for _ in 0..33 {
+        hear(&mut host, "kill the session");
+    }
+    let answered = host.deliver_one(popup_button(CONFIRM_POPUP, "cancel"));
+    assert!(invoked_commands(&answered).is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/lib.rs::provider_failure_survives_the_following_voice_channel_close
+#[test]
+fn session_050_the_provider_failure_is_reported_before_any_close() {
+    let mut host = enabled_client("push_to_talk");
+    let grab = f8_grab(&mut host);
+    host.deliver_one(key_pressed(grab, false));
+    host.deliver_one(key_released(grab));
+    host.settle();
+    let request = host.jobs().list().last().expect("job").request;
+    host.jobs().finish(
+        request,
+        Err(PluginError::new(
+            ErrorCode::Io,
+            "OpenAI rejected one production tool schema",
+        )),
+    );
+    host.settle();
+    let failure = host.last_notice().expect("the failure is reported");
+    assert!(!failure.contains("stopped unexpectedly"), "{failure}");
+}
+
+/// REQ: PORT:ilium-client/src/control/parser_pool_settings_regressions.rs::parser_pool_execute_reports_missing_or_closed_writer_as_unsaved
+#[test]
+fn settings_050_an_engine_budget_change_that_is_written_shows_in_the_settings() {
+    let mut host = enabled_client("semantic_vad");
+    host.realtime()
+        .call_tool(
+            "ilium_set_setting",
+            &json!({ "path": "terminal.engine_memory_budget_mib", "value": 257 }).to_string(),
+        )
+        .expect("saved");
+    let settings = host
+        .realtime()
+        .call_tool("ilium_read_settings", "{}")
+        .expect("settings");
+    assert!(settings.contains("257"), "{settings}");
+}

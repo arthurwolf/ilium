@@ -376,3 +376,39 @@ fn port_084_the_plugin_tabs_sit_between_reset_planning_and_titles_in_the_rail() 
     assert_eq!(position("llm-instructions"), position("inference") + 1);
     assert_eq!(position("titles"), position("llm-instructions") + 1);
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::ollama_discovery_keeps_existing_models_and_exposes_the_transport_error
+#[test]
+fn port_084b_a_failed_ollama_refresh_still_performs_a_request_each_time() {
+    let settings = json!({"selected_provider": "ollama", "ollama": {"base_url": "http://127.0.0.1:11434", "model": "qwen3.6:latest"}});
+    let mut host = server_host(settings);
+    host.http().expect(
+        "GET",
+        OLLAMA_TAGS_URL,
+        ok(json!({"models": [{"name": "qwen3.6:latest"}]})),
+    );
+    load_models(&mut host);
+    host.http().expect("GET", OLLAMA_TAGS_URL, status(503));
+    load_models(&mut host);
+    let calls = host.http().calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|call| call.url == OLLAMA_TAGS_URL));
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::settings_tabs_cycle_through_inference_and_every_existing_tab
+#[test]
+fn port_084b_the_inference_tab_appears_exactly_once_in_the_rail() {
+    let mut session = FakeSession::new();
+    session
+        .try_install(manifest_path().parent().expect("package dir"))
+        .expect("install");
+    let order = session.settings_tab_order();
+    assert_eq!(order.iter().filter(|tab| *tab == "inference").count(), 1);
+    assert_eq!(
+        order
+            .iter()
+            .filter(|tab| *tab == "llm-instructions")
+            .count(),
+        1
+    );
+}

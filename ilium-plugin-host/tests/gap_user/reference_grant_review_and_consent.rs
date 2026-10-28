@@ -95,3 +95,57 @@ fn usr_321_review_dialog_shows_full_wording_and_keeps_confirm_disabled_until_scr
         "the plain wording must be shown untruncated"
     );
 }
+
+/// REQ: USR-318
+#[test]
+fn usr_318_consent_records_carry_the_plugin_id_version_and_grant_string() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    let granted = rig.cli(&["grant", NOTES, "fs.read", "--yes"]);
+    assert_eq!(granted.exit_code, 0, "grant failed: {}", granted.stderr);
+
+    let listing = rig.cli(&["consents", NOTES]);
+    assert_eq!(listing.exit_code, 0, "consents failed: {}", listing.stderr);
+    let records = listing.stdout_jsonl;
+    assert!(!records.is_empty(), "the grant must leave a consent record");
+    for record in &records {
+        assert_eq!(record["plugin"], NOTES, "wrong plugin id: {record}");
+        assert_eq!(record["version"], "1.0.0", "wrong version: {record}");
+        assert_eq!(record["grant"], "fs.read", "wrong grant string: {record}");
+    }
+}
+
+/// REQ: USR-319
+#[test]
+fn usr_319_dialog_revoke_is_recorded_as_a_revoke_from_the_dialog_surface() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    let server = rig.start_server("s1");
+    let _outcome = server.revoke_via_capabilities_tab(NOTES, "fs.read");
+
+    let listing = rig.cli(&["consents", NOTES]);
+    let records = listing.stdout_jsonl;
+    assert!(
+        records
+            .iter()
+            .any(|record| record["decision"] == "revoke" && record["surface"] == "dialog"),
+        "the dialog revoke must be recorded: {records:?}"
+    );
+}
+
+/// REQ: USR-321
+#[test]
+fn usr_321_a_single_screen_of_rows_enables_confirm_without_scrolling() {
+    let rig = rig();
+    let spec = pkg(NOTES, "1.0.0").grant("fs.read");
+    let dialog = rig.open_review_dialog(&spec, 60, 12);
+    assert_eq!(
+        dialog.rows_below_fold(),
+        0,
+        "one row must fit the 12-row dialog"
+    );
+    assert!(
+        dialog.confirm_enabled(),
+        "Confirm must not wait for a scroll when no more than one screen of rows exists"
+    );
+}

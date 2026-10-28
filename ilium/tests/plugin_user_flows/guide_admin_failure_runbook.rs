@@ -373,3 +373,75 @@ fn usr_235_escalation_runs_publisher_then_project_then_blocklist_with_placeholde
     assert!(row[1].contains("security@ilium.example"), "{}", row[1]);
     assert!(row[1].contains("placeholder"), "{}", row[1]);
 }
+
+/// REQ: USR-230
+#[test]
+fn usr_230_crash_loop_row_names_the_safe_mode_first_command() {
+    let runbook = manual_page(RUNBOOK);
+    for phrase in [
+        "Ilium stops or restarts again and again at start",
+        "`ilium --safe-mode=third-party`",
+    ] {
+        assert!(runbook.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-231
+#[test]
+fn usr_231_deny_ids_disables_at_next_start_and_keeps_data_on_disk() {
+    let runbook = manual_page(RUNBOOK);
+    for phrase in [
+        "the plugin is disabled at the next start and shows `Blocked by policy`",
+        "Its data stays on disk.",
+    ] {
+        assert!(runbook.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-232
+#[test]
+fn usr_232_revocation_moves_signed_plugins_to_disabled_blocked_and_logs_it() {
+    let runbook = manual_page(RUNBOOK);
+    for phrase in [
+        "Plugins signed by the key move to `disabled-blocked`",
+        "The revocation itself is logged as `trust.key-revoked`.",
+    ] {
+        assert!(runbook.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-233
+#[test]
+fn usr_233_failure_window_and_crash_loop_clearing_rule_are_stated() {
+    let runbook = manual_page(RUNBOOK);
+    for phrase in [
+        "in a sliding window of 10 minutes",
+        "one start has stayed up for 5 minutes after startup completed",
+    ] {
+        assert!(runbook.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-234
+#[test]
+fn usr_234_audit_search_ends_at_plugin_killed_event() {
+    let runbook = manual_page(RUNBOOK);
+    for phrase in [
+        "stop at `plugin.killed`",
+        "The names are those used by the pages that define them.",
+    ] {
+        assert!(runbook.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-235
+#[test]
+fn usr_235_security_contact_is_a_named_placeholder_until_published() {
+    let runbook = manual_page(RUNBOOK);
+    for phrase in [
+        "Until that address is published the contact is the placeholder `security@ilium.example` (SEC-320)",
+        "`security@ilium.example`, a placeholder (SEC-320).",
+    ] {
+        assert!(runbook.contains(phrase), "missing: {phrase}");
+    }
+}

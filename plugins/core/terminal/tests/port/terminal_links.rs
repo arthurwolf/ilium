@@ -159,3 +159,85 @@ fn port_normal_tree_paste_uses_the_retained_bounded_replay() {
     assert_eq!(sends[0].text, text);
     assert_eq!(sends[0].delivery, ilium_plugin_sdk::types::Delivery::Pasted);
 }
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_url_and_file_line
+#[test]
+fn port_links_line_one_maps_to_zero_based_line_zero() {
+    assert_eq!(open("src/main.rs:1"), expect_open("src/main.rs", 0));
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_relative_references_relative_instead_of_becoming_absolute
+#[test]
+fn port_links_dot_slash_reference_keeps_its_prefix() {
+    assert_eq!(open("./src/lib.rs:10"), expect_open("./src/lib.rs", 9));
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::expands_home_relative_references_against_the_injected_home_dir
+#[test]
+fn port_links_home_reference_with_two_digit_line_maps_to_zero_based() {
+    assert_eq!(open("~/notes/a.md:10"), expect_open("~/notes/a.md", 9));
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_a_non_numeric_middle_segment_attached_to_the_path
+#[test]
+fn port_links_colon_inside_the_file_name_stays_in_the_path() {
+    assert_eq!(open("x:y.rs:3"), expect_open("x:y.rs", 2));
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::strips_markdown_backticks_around_a_fenced_path
+#[test]
+fn port_links_backtick_wrapped_path_match_excludes_the_backticks() {
+    assert_eq!(
+        found("`src/a.rs:7`"),
+        Some("src/a.rs:7".to_string())
+    );
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::strips_a_matching_opening_bracket_from_a_wrapped_url
+#[test]
+fn port_links_square_bracketed_path_line_is_matched_without_brackets() {
+    assert_eq!(
+        found("[src/x.rs:2]"),
+        Some("src/x.rs:2".to_string())
+    );
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_a_bare_project_local_file_with_trailing_prose_punctuation
+#[test]
+fn port_links_file_line_before_a_semicolon_is_matched_without_it() {
+    assert_eq!(
+        found("Edit main.rs:3; then rerun"),
+        Some("main.rs:3".to_string())
+    );
+}
+
+/// REQ: PORT:ilium-client/src/terminal_links.rs::accounts_for_multi_byte_glyphs_when_mapping_a_cell_column
+#[test]
+fn port_links_emoji_before_a_readme_reference_is_skipped_by_the_match() {
+    assert_eq!(
+        found("✅ README.md:1"),
+        Some("README.md:1".to_string())
+    );
+    assert_eq!(open("README.md:1"), expect_open("README.md", 0));
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::normal_tree_paste_uses_the_retained_bounded_replay
+#[test]
+fn port_normal_tree_paste_without_a_pane_sends_no_input() {
+    let mut host = FakeHost::for_manifest(concat!(env!("CARGO_MANIFEST_DIR"), "/manifest.json"))
+        .expect("manifest loads")
+        .side("client")
+        .build();
+    host.activate::<TerminalClient>();
+    let submissions = host.deliver_one(Event::CommandInvoked(
+        ilium_plugin_sdk::types::CommandInvokedEvent {
+            command: "terminal.paste".to_string(),
+            arguments_json: serde_json::json!({ "text": "abc" }).to_string(),
+            origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
+            context: ilium_plugin_sdk::types::CommandContext::default(),
+        },
+    ));
+    assert!(submissions
+        .iter()
+        .all(|s| !matches!(s.intent, Intent::SendInput(_))));
+}

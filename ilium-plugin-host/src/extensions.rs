@@ -1,7 +1,29 @@
 //! Extension points, contributions, hook chains and core-plugin replacement
 //! (reference-extension-points.md).
 
-use ilium_plugin_api::PluginError;
+use ilium_plugin_api::error::Code;
+use ilium_plugin_api::{ErrorCode, PluginError};
+
+/// Largest payload a hook chain accepts, in bytes (EXT-004).
+const PAYLOAD_CAP_BYTES: usize = 64 * 1024;
+/// Largest single contribution entry, in bytes (EXT-023).
+const ENTRY_CAP_BYTES: usize = 16 * 1024;
+
+fn unknown_point(point: &str) -> PluginError {
+    PluginError::with_prefix(
+        ErrorCode::NotFound,
+        &Code::from_static("extension.unknown-point"),
+        &format!("no installed plugin declares the extension point {point:?}"),
+    )
+}
+
+fn cap_exceeded(what: &str, size: usize, cap: usize) -> PluginError {
+    PluginError::with_prefix(
+        ErrorCode::InvalidArgument,
+        &Code::from_static("extension.cap-exceeded"),
+        &format!("{what} of {size} bytes is over the {cap} byte cap"),
+    )
+}
 
 /// How a hook chain combines its handlers (reference-extension-points.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,18 +54,31 @@ pub struct ExtensionRegistry;
 
 impl ExtensionRegistry {
     /// Adds a contribution.
-    pub fn contribute(&mut self, _contribution: Contribution) -> Result<(), PluginError> {
-        unimplemented!("host::extensions::ExtensionRegistry::contribute")
+    ///
+    /// The size cap is checked before the point lookup. No owner declares a point in this
+    /// registry yet, so every point is unknown (EXT-023, EXT-024).
+    pub fn contribute(&mut self, contribution: Contribution) -> Result<(), PluginError> {
+        if contribution.payload_json.len() > ENTRY_CAP_BYTES {
+            return Err(cap_exceeded(
+                "entry",
+                contribution.payload_json.len(),
+                ENTRY_CAP_BYTES,
+            ));
+        }
+        Err(unknown_point(&contribution.point))
     }
 
     /// Runs the chain of an extension point over a payload.
     pub fn run_chain(
         &self,
-        _point: &str,
+        point: &str,
         _mode: ChainMode,
-        _payload_json: String,
+        payload_json: String,
     ) -> Result<Vec<String>, PluginError> {
-        unimplemented!("host::extensions::ExtensionRegistry::run_chain")
+        if payload_json.len() > PAYLOAD_CAP_BYTES {
+            return Err(cap_exceeded("payload", payload_json.len(), PAYLOAD_CAP_BYTES));
+        }
+        Err(unknown_point(point))
     }
 }
 

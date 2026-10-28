@@ -19,6 +19,175 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
 
 /// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_budget_of_one_keeps_only_the_first_line_marked_as_the_seam
 #[test]
+fn port_last_prompt_banner_a_budget_of_one_keeps_only_the_first_line_marked_as_the_seam_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "only", "width": 80, "budget": 1}"####,
+        r####"{"lines": [["only", false]]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_long_single_line_word_wraps_instead_of_being_clipped
+#[test]
+fn port_last_prompt_banner_a_long_single_line_word_wraps_instead_of_being_clipped_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "the quick brown fox jumps over the lazy dog", "width": 20, "wrap_only": true}"####,
+        r####"{"lines": ["the quick brown fox", "jumps over the lazy", "dog"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_narrow_width_of_zero_does_not_panic
+#[test]
+fn port_last_prompt_banner_a_narrow_width_of_zero_does_not_panic_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "a b", "width": 1, "wrap_only": true}"####,
+        r####"{"no_panic": true, "every_row_width_at_most": 1}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_prompt_exactly_at_the_wrap_boundary_stays_on_one_row
+#[test]
+fn port_last_prompt_banner_a_prompt_exactly_at_the_wrap_boundary_stays_on_one_row_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "12345 12345 1", "width": 11, "wrap_only": true}"####,
+        r####"{"lines": ["12345 12345", "1"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_word_wider_than_the_column_hard_breaks_at_grapheme_boundaries
+#[test]
+fn port_last_prompt_banner_a_word_wider_than_the_column_hard_breaks_at_grapheme_boundaries_alternate(
+) {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "日本語のテキストは長い", "width": 10, "wrap_only": true}"####,
+        r####"{"every_row_width_at_most": 10, "rows_joined_equal_text": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_zero_budget_is_treated_as_one
+#[test]
+fn port_last_prompt_banner_a_zero_budget_is_treated_as_one_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "one\ntwo", "width": 80, "budget": 0}"####,
+        r####"{"lines": [["one", true]]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_zero_prompt_budget_still_reserves_one_row
+#[test]
+fn port_last_prompt_banner_a_zero_prompt_budget_still_reserves_one_row_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"reserved_height_of": [0], "also_empty": ""}"####,
+        r####"{"reserved": [1], "empty": []}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::blank_lines_inside_a_multiline_prompt_survive_wrapping_as_empty_rows
+#[test]
+fn port_last_prompt_banner_blank_lines_inside_a_multiline_prompt_survive_wrapping_as_empty_rows_alternate(
+) {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "\n\n", "width": 80, "wrap_only": true}"####,
+        r####"{"lines": ["", "", ""]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::lone_carriage_returns_split_lines_same_as_line_feeds
+#[test]
+fn port_last_prompt_banner_lone_carriage_returns_split_lines_same_as_line_feeds_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "alpha\r\nbeta", "width": 80, "wrap_only": true}"####,
+        r####"{"lines": ["alpha", "beta"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::odd_budgets_give_the_extra_kept_line_to_the_head
+#[test]
+fn port_last_prompt_banner_odd_budgets_give_the_extra_kept_line_to_the_head_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "one\ntwo\nthree\nfour\nfive\nsix\nseven", "width": 80, "budget": 3}"####,
+        r####"{"lines": [["one", false], ["two", true], ["seven", true]]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::over_budget_keeps_first_two_and_last_two_at_the_default_of_four
+#[test]
+fn port_last_prompt_banner_over_budget_keeps_first_two_and_last_two_at_the_default_of_four_alternate(
+) {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "one\ntwo\nthree\nfour\nfive", "width": 80, "budget": 4}"####,
+        r####"{"lines": [["one", false], ["two", true], ["four", true], ["five", false]]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::small_prompt_slot_retains_the_end_of_the_prompt
+#[test]
+fn port_last_prompt_banner_small_prompt_slot_retains_the_end_of_the_prompt_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "FIRST\nSECOND\nTHIRD\nLAST", "slot": [40, 4], "budget": 4}"####,
+        r####"{"contains": ["FIRST", "SECOND", "THIRD", "LAST"], "excludes": []}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::text_at_or_under_budget_keeps_every_line_untouched
+#[test]
+fn port_last_prompt_banner_text_at_or_under_budget_keeps_every_line_untouched_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "a\nb\nc\nd\ne", "width": 80, "budget": 5}"####,
+        r####"{"lines": [["a", false], ["b", false], ["c", false], ["d", false], ["e", false]]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::the_prompt_slot_reserves_the_full_configured_budget
+#[test]
+fn port_last_prompt_banner_the_prompt_slot_reserves_the_full_configured_budget_alternate() {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"reserved_height_of": [9]}"####,
+        r####"{"reserved": [9]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::wrapping_that_still_exceeds_max_lines_is_middle_truncated_over_wrapped_rows
+#[test]
+fn port_last_prompt_banner_wrapping_that_still_exceeds_max_lines_is_middle_truncated_over_wrapped_rows_alternate(
+) {
+    check(
+        Place::Client,
+        "banner.layout",
+        r####"{"text": "aa bb cc dd ee ff gg hh ii jj", "width": 4, "budget": 2}"####,
+        r####"{"wrapped_rows": 10, "lines": [["aa", true], ["jj", true]]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/last_prompt_banner.rs::a_budget_of_one_keeps_only_the_first_line_marked_as_the_seam
+#[test]
 fn port_last_prompt_banner_a_budget_of_one_keeps_only_the_first_line_marked_as_the_seam() {
     check(
         Place::Client,

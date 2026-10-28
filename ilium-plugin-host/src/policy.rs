@@ -211,6 +211,15 @@ impl PolicyEngine {
         }
         PolicyVerdict::Allow
     }
+    /// Exact-version rules (SEC-951, SEC-952): `packages.blocked_versions` entries are
+    /// `id@version`; `packages.pinned_versions` maps one id to the only installable version.
+    pub fn check_install_version(&self, plugin: &str, version: &str) -> PolicyVerdict {
+        if !self.is_valid() { return deny("policy.invalid"); }
+        let entry = format!("{plugin}@{version}");
+        if self.layers.iter().any(|p| p.packages.blocked_versions.iter().any(|blocked| *blocked == entry)) { return deny("policy.version-denied"); }
+        if self.layers.iter().any(|p| p.packages.pinned_versions.get(plugin).is_some_and(|pinned| pinned != version)) { return deny("policy.version-pinned"); }
+        PolicyVerdict::Allow
+    }
     pub fn check_enabled_change(&self, plugin: &str, enabled: bool) -> PolicyVerdict {
         if !self.is_valid() { return deny("policy.invalid"); }
         if self.layers.iter().any(|p| if enabled { p.plugins.force_disabled.iter().any(|id| id==plugin) || p.plugins.deny_ids.iter().any(|pattern| glob(pattern,plugin)) } else { p.plugins.force_enabled.iter().any(|id| id==plugin) && !self.layers.iter().any(|p| p.plugins.force_disabled.iter().any(|id| id==plugin) || p.plugins.deny_ids.iter().any(|pattern| glob(pattern,plugin))) }) { return deny("policy.forced-state"); }
@@ -243,6 +252,7 @@ struct Packages {
     allow_third_party: Option<bool>, allowed_tiers: Option<Vec<String>>, allow_unsigned: Option<bool>, allow_dev_mode: Option<bool>,
     allowed_sources: Option<Vec<String>>, blocklist_file: Option<String>, precompiled_cache: Option<bool>,
     allow_url_installs: Option<bool>, allowed_channels: Option<Vec<String>>, block_vulnerable_runtime: Option<bool>,
+    blocked_versions: Vec<String>, pinned_versions: std::collections::BTreeMap<String, String>,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]

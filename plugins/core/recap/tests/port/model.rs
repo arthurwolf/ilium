@@ -85,3 +85,35 @@ fn port_model_goal_lines_come_from_recorded_state_only() {
         "model text never becomes a goal line"
     );
 }
+
+/// REQ: PORT:ilium-client/src/recap/model.rs::parses_both_lengths_inside_a_code_fence
+#[test]
+fn port_model_plain_code_fence_without_a_language_tag_is_parsed() {
+    let body = format!("```\n{}\n```", String::from_utf8(answer(2, 2)).unwrap());
+    assert_eq!(outcome(body.into_bytes())["state"], "summarized");
+}
+
+/// REQ: PORT:ilium-client/src/recap/model.rs::rejects_missing_empty_and_malformed_answers
+#[test]
+fn port_model_answer_missing_the_long_text_is_failed_without_long_text() {
+    let record = outcome(
+        json!({"short": {"text": "only short", "pointers": []}})
+            .to_string()
+            .into_bytes(),
+    );
+    assert_eq!(record["state"], "failed");
+    assert!(record["long"].is_null(), "{record}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/model.rs::rejects_text_over_the_word_limit_instead_of_truncating
+#[test]
+fn port_model_over_limit_text_leaves_no_partial_words_in_the_record() {
+    let record = outcome(answer(5, LONG_WORD_LIMIT + 1));
+    assert!(!record.to_string().contains(&words(5)), "{record}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/model.rs::goal_lines_come_from_recorded_state_only
+#[test]
+fn port_model_goal_words_in_the_transcript_never_become_goal_lines() {
+    assert!(goal_lines(&["user: Goal done: typed by the user"], &[]).is_empty());
+}

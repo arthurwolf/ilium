@@ -396,6 +396,18 @@ fn process_child_id_is_stable_and_distinct_between_children() {
     assert_ne!(fixture.process().child_id(second), first_id);
 }
 
+/// REQ: WIT:ilium:host/process.child.id
+#[test]
+fn process_child_id_is_not_reused_after_the_child_is_killed() {
+    let mut fixture = spawner(&["cat"]);
+    let first = expect_ok(fixture.process().spawn(spawn_spec("cat", &[])));
+    let first_id = fixture.process().child_id(first);
+    expect_ok(fixture.process().child_signal(first, "kill".to_owned()));
+    assert_eq!(fixture.process().child_id(first), first_id);
+    let second = expect_ok(fixture.process().spawn(spawn_spec("cat", &[])));
+    assert_ne!(fixture.process().child_id(second), first_id);
+}
+
 /// REQ: WIT:ilium:host/process.child.pid-hint
 #[test]
 fn process_child_pid_hint_differs_between_children() {
@@ -522,4 +534,16 @@ fn process_take_exit_for_a_signalled_child_run_reports_the_signal() {
     let exit = run_exit(&mut fixture, spec("sh", &["-c", "kill -TERM $$"]));
     assert_eq!(exit.status, None);
     assert_eq!(exit.signal, Some("SIGTERM".to_owned()));
+}
+
+/// REQ: WIT:ilium:host/process.child.pid-hint
+#[test]
+fn process_child_pid_hint_is_nonzero_for_a_running_child() {
+    let mut fixture = spawner(&["cat"]);
+    let child = expect_ok(fixture.process().spawn(spawn_spec("cat", &[])));
+    assert_ne!(
+        fixture.process().child_pid_hint(child),
+        0,
+        "a live child must report a real process id"
+    );
 }

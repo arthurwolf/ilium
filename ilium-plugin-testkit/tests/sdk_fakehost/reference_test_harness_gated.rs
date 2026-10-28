@@ -257,4 +257,42 @@ mod session_routing {
             assert_eq!(order, vec![1, 1]);
         });
     }
+
+    /// REQ: DEV-481
+    #[test]
+    fn dev_481_a_message_to_an_uninstalled_plugin_is_not_delivered() {
+        with_clean_env(|| {
+            spy_reset();
+            let dir = package("s481b", "example.both", r#""x-note": "one side""#);
+            let mut session = FakeSession::new();
+            session.install_native::<Spy>(&dir).start();
+            use ilium_plugin_sdk_core::types::{
+                Event, Intent, MessageSpec, MessageTarget, PluginId, PluginSide, Submission,
+            };
+            spy_script(vec![vec![Submission {
+                intent: Intent::Message(MessageSpec {
+                    to: MessageTarget {
+                        plugin: PluginId("example.absent".to_string()),
+                        side: PluginSide::Client,
+                        client: None,
+                    },
+                    channel: "note".to_string(),
+                    payload: b"lost".to_vec(),
+                }),
+                correlation: 1,
+                dedup_key: None,
+            }]]);
+            session
+                .server("example.both")
+                .deliver(vec![events::command("send", &[])]);
+            session.pump().expect("settles");
+            let received = spy()
+                .batches
+                .iter()
+                .flatten()
+                .filter(|event| matches!(event, Event::Message(_)))
+                .count();
+            assert_eq!(received, 0, "no message reaches a plugin that is not installed");
+        });
+    }
 }

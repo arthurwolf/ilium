@@ -75,3 +75,16 @@ fn failing_test_output_has_no_absolute_paths_user_names_or_wall_clock_times() {
         "CI logs from two machines compare equal"
     );
 }
+
+/// REQ: DEV-890
+#[test]
+fn failing_output_is_bounded_to_about_forty_context_lines() {
+    let root = scratch();
+    let failing = failing_case_run(root.path(), "/home/any-user");
+    assert_ne!(failing.exit_code, 0, "the failing case fails the run");
+    let line_count = failing.stdout_raw.lines().count();
+    assert!(
+        line_count <= 80,
+        "at most 40 lines of context plus the header lines, got {line_count} lines"
+    );
+}

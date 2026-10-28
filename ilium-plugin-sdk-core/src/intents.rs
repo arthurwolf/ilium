@@ -1,15 +1,39 @@
 //! One builder per `Intent` case and `Submission` constructors (rust-sdk.md "Intents").
 use crate::generated::types::*;
 
+/// First SDK-assigned correlation number: 2^63 (rust-sdk.md "Submissions").
+const FIRST_CORRELATION: u64 = 1 << 63;
+
+thread_local! {
+    /// Next correlation number of this instance; the counter lives as long as the instance thread.
+    static NEXT_CORRELATION: std::cell::Cell<u64> = const { std::cell::Cell::new(FIRST_CORRELATION) };
+}
+
+fn next_correlation() -> u64 {
+    NEXT_CORRELATION.with(|counter| {
+        let value = counter.get();
+        counter.set(value.wrapping_add(1).max(FIRST_CORRELATION));
+        value
+    })
+}
+
 impl Submission {
     /// A submission without a dedup key; the SDK numbers `correlation` from 2^63 (rust-sdk.md "Submissions").
-    pub fn new(_intent: Intent) -> Submission {
-        unimplemented!("rust-sdk.submission-correlation")
+    pub fn new(intent: Intent) -> Submission {
+        Submission {
+            intent,
+            correlation: next_correlation(),
+            dedup_key: None,
+        }
     }
 
     /// A submission with an explicit dedup key (rust-sdk.md "Submissions").
-    pub fn keyed(_intent: Intent, _dedup_key: impl Into<String>) -> Submission {
-        unimplemented!("rust-sdk.submission-correlation")
+    pub fn keyed(intent: Intent, dedup_key: impl Into<String>) -> Submission {
+        Submission {
+            intent,
+            correlation: next_correlation(),
+            dedup_key: Some(dedup_key.into()),
+        }
     }
 }
 

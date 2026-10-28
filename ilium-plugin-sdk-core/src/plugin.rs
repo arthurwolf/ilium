@@ -72,12 +72,30 @@ impl<T: ?Sized + HostCalls> HostApi for T {}
 
 /// The host handle of the current instance (rust-sdk.md "Calling the host").
 pub fn host() -> Box<dyn HostApi> {
-    unimplemented!("rust-sdk.host")
+    let installed = INSTALLED_HOST.with(|slot| slot.borrow().clone());
+    Box::new(HostHandle { installed })
+}
+
+/// Handle returned by `host()`; clones share the installed host of the thread.
+pub struct HostHandle {
+    installed: Option<std::rc::Rc<dyn HostApi>>,
+}
+
+impl HostHandle {
+    /// True when a host was installed with `set_host` on this thread.
+    pub fn is_installed(&self) -> bool {
+        self.installed.is_some()
+    }
+}
+
+thread_local! {
+    static INSTALLED_HOST: std::cell::RefCell<Option<std::rc::Rc<dyn HostApi>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Installs the host handle for the current thread; the testkit calls this in native mode.
-pub fn set_host(_handle: Box<dyn HostApi>) {
-    unimplemented!("rust-sdk.set-host")
+pub fn set_host(handle: Box<dyn HostApi>) {
+    INSTALLED_HOST.with(|slot| *slot.borrow_mut() = Some(std::rc::Rc::from(handle)));
 }
 
 /// Pixel buffer a native scene renderer draws into (reference-test-harness.md "FakeScene").

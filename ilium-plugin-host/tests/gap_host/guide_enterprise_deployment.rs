@@ -107,3 +107,56 @@ fn hst_689_purge_user_requires_yes_audits_and_refuses_an_active_session_server()
         "system audit entry written"
     );
 }
+
+/// REQ: HST-686
+#[test]
+fn hst_686_an_install_under_the_user_disk_cap_succeeds() {
+    let rig = rig();
+    rig.set_policy("max_user_plugin_disk_mib", "100");
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    assert_eq!(
+        rig.active_version(NOTES).as_deref(),
+        Some("1.0.0"),
+        "the install under the cap is active"
+    );
+}
+
+/// REQ: HST-687
+#[test]
+fn hst_687_an_intact_system_install_passes_the_start_check_for_another_user() {
+    let rig = rig();
+    rig.install_system_wide(&pkg(NOTES, "1.0.0"));
+    let server = rig.start_server_as_user("bob");
+    assert!(
+        server.log_lines_with_code("store.manifest-mismatch").is_empty(),
+        "an intact system install passes the manifest.sha256 check"
+    );
+    server.shutdown();
+}
+
+/// REQ: HST-688
+#[test]
+fn hst_688_a_grant_given_to_one_user_is_not_visible_to_the_other() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.grant_as_user("alice", NOTES, "fs:project");
+    assert!(
+        !rig.user_has_grant("bob", NOTES, "fs:project"),
+        "bob does not inherit alice's grant"
+    );
+}
+
+/// REQ: HST-689
+#[test]
+fn hst_689_a_refused_purge_of_an_active_user_deletes_no_data() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server_as_user("alice");
+    let refused = rig.cli(&["plugin", "admin", "purge-user", "alice", "--yes"]);
+    assert_ne!(refused.exit_code, 0, "the purge of an active user is refused");
+    assert!(
+        !rig.user_plugin_data_absent("alice"),
+        "a refused purge deletes no data"
+    );
+    server.shutdown();
+}

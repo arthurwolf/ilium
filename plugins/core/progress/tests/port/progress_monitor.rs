@@ -183,3 +183,98 @@ fn port_059_trailing_json_unknown_fields_and_invalid_values_are_rejected_invalid
         );
     }
 }
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::cancelling_probe_future_terminates_descendant_processes
+#[test]
+fn port_059_clear_all_leaves_the_pane_with_no_monitor_record() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    progress(&mut host, pane, &["clear", "--all"]);
+    assert_eq!(status(&mut host, pane)["monitor_count"], 0);
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::identity_and_status_regressions_are_observation_failures
+#[test]
+fn port_059_a_status_that_goes_back_to_not_started_marks_the_monitor_degraded() {
+    let (mut host, pane) = host_with_pane();
+    let id = register(&mut host, pane, PROBE, &running("job", 30, "Thirty"), &[]);
+    expect_probe(
+        &mut host,
+        PROBE,
+        &raw("job", "not-started-yet", 0.0, "m", "", Value::Null),
+    );
+    tick(&mut host, 1);
+    assert_eq!(health_of(&status(&mut host, pane), id), "degraded");
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::monitor_fences_are_independent_per_monitor
+#[test]
+fn port_059_registering_the_same_probe_again_returns_the_existing_monitor() {
+    let (mut host, pane) = host_with_pane();
+    let first = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
+    expect_probe(&mut host, "/opt/a.sh", &running("job-a", 0, "A"));
+    let again = progress(&mut host, pane, &["set", "--command", "/opt/a.sh"]);
+    assert_eq!(
+        record_of(&again.stdout, "progress_set")["monitor_id"],
+        first
+    );
+    assert_eq!(status(&mut host, pane)["monitor_count"], 1);
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::probe_bounds_stdout_and_execution_time
+#[test]
+fn port_059_probe_output_of_exactly_64_kib_is_still_accepted() {
+    let (mut host, pane) = host_with_pane();
+    let base = running("job", 1, "W");
+    let padded = format!("{base}{}", " ".repeat(64 * 1024 - base.len()));
+    assert_eq!(padded.len(), 64 * 1024);
+    let run = check(&mut host, pane, &padded);
+    assert!(run.stdout.contains("progress_check"), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::probe_timeout_terminates_descendant_processes
+#[test]
+fn port_059_a_timed_out_probe_writes_no_progress_check_record() {
+    let (mut host, pane) = host_with_pane();
+    host.process()
+        .expect("sh", &["-c", PROBE])
+        .fails(PluginError::new(ErrorCode::TimedOut, "timed out"));
+    let run = progress(&mut host, pane, &["check", "--command", PROBE]);
+    assert!(!run.stdout.contains("progress_check"), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::probe_carries_multi_line_details_alongside_the_compact_message
+#[test]
+fn port_059_a_report_without_details_carries_an_empty_details_text() {
+    let (mut host, pane) = host_with_pane();
+    let run = check(
+        &mut host,
+        pane,
+        &raw("job", "running", 10.0, "Building", "", Value::Null),
+    );
+    let record = record_of(&run.stdout, "progress_check");
+    assert_eq!(record["report"]["details"], "");
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::probe_rejects_trailing_json_unknown_fields_and_invalid_contracts
+#[test]
+fn port_059_a_single_object_followed_by_a_newline_is_accepted() {
+    let (mut host, pane) = host_with_pane();
+    let run = check(&mut host, pane, &format!("{}\n", running("job", 1, "W")));
+    assert!(run.stdout.contains("progress_check"), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-server/src/progress_monitor.rs::preflight_accepts_all_exact_wire_statuses_and_normalizes_done
+#[test]
+fn port_059_a_done_check_keeps_the_job_identity_of_the_probe() {
+    let (mut host, pane) = host_with_pane();
+    let run = check(
+        &mut host,
+        pane,
+        &raw("job", "done", 40.0, "m", "", Value::Null),
+    );
+    assert_eq!(
+        record_of(&run.stdout, "progress_check")["report"]["job_id"],
+        "job"
+    );
+}

@@ -15,8 +15,102 @@ pub struct SandboxPolicy {
 }
 
 /// Applies the policy to the current process; it cannot be undone.
-pub fn apply(_policy: &SandboxPolicy) -> Result<(), HelperError> {
-    unimplemented!("helper::sandbox::apply")
+///
+/// Linux: sets `no_new_privs`, moves the process into fresh user and network namespaces (the
+/// network namespace holds only a downed loopback interface) and drops every capability. A
+/// prerequisite the kernel refuses (for example unprivileged user namespaces) is a
+/// [`HelperError::Sandbox`] naming it; the helper never continues unconfined. The path grants
+/// of the policy are enforced by the host through the WASI preopens it hands the guest, since
+/// the helper opens no path on its own.
+pub fn apply(policy: &SandboxPolicy) -> Result<(), HelperError> {
+    apply_platform(policy)
+}
+
+#[cfg(target_os = "linux")]
+fn apply_platform(policy: &SandboxPolicy) -> Result<(), HelperError> {
+    fn last_error(step: &str) -> HelperError {
+        HelperError::Sandbox(format!("{step} failed: {}", std::io::Error::last_os_error()))
+    }
+
+    // SAFETY: prctl with PR_SET_NO_NEW_PRIVS takes only integer arguments and touches no memory.
+    let no_new_privs = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
+    if no_new_privs != 0 {
+        return Err(last_error("prctl(PR_SET_NO_NEW_PRIVS)"));
+    }
+
+    if !policy.allow_network {
+        // SAFETY: unshare takes only flags. It fails with EINVAL in a multithreaded process and
+        // with EPERM where unprivileged user namespaces are disabled; both are reported.
+        let unshared = unsafe { libc::unshare(libc::CLONE_NEWUSER | libc::CLONE_NEWNET) };
+        if unshared != 0 {
+            let error = last_error("unshare(user, network namespace)");
+            return Err(HelperError::Sandbox(format!(
+                "{error}; prerequisite: unprivileged user namespaces enabled and a single-threaded helper start"
+            )));
+        }
+    }
+
+    drop_all_capabilities()
+}
+
+#[cfg(target_os = "linux")]
+fn drop_all_capabilities() -> Result<(), HelperError> {
+    #[repr(C)]
+    struct CapabilityHeader {
+        version: u32,
+        process: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CapabilityData {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+    const CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+
+    // Clear the bounding set first; ignore capabilities the kernel does not know.
+    for capability in 0..64 {
+        // SAFETY: prctl(PR_CAPBSET_DROP) takes only integer arguments.
+        let dropped = unsafe { libc::prctl(libc::PR_CAPBSET_DROP, capability, 0, 0, 0) };
+        if dropped != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINVAL) {
+                break;
+            }
+            return Err(HelperError::Sandbox(format!(
+                "prctl(PR_CAPBSET_DROP, {capability}) failed: {error}"
+            )));
+        }
+    }
+
+    let header = CapabilityHeader {
+        version: CAPABILITY_VERSION_3,
+        process: 0,
+    };
+    let data = [CapabilityData {
+        effective: 0,
+        permitted: 0,
+        inheritable: 0,
+    }; 2];
+    // SAFETY: header and data are valid, correctly laid out for capset(2) version 3 (two data
+    // elements) and live for the duration of the call.
+    let result = unsafe { libc::syscall(libc::SYS_capset, &header, data.as_ptr()) };
+    if result != 0 {
+        return Err(HelperError::Sandbox(format!(
+            "capset failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_platform(_policy: &SandboxPolicy) -> Result<(), HelperError> {
+    Err(HelperError::Sandbox(
+        "no OS sandbox is implemented for this platform; the helper refuses to run unconfined"
+            .to_owned(),
+    ))
 }
 
 #[cfg(test)]

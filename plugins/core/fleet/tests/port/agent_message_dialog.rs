@@ -30,3 +30,14 @@ fn agent_message_dialog_all_recipients_start_selected_and_message_field_is_prese
     assert!(text.contains("All agents"), "{text}");
     assert!(text.contains("Message"), "{text}");
 }
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::all_recipients_start_selected_and_plain_enter_edits_message
+#[test]
+fn agent_message_dialog_offers_send_and_cancel_buttons() {
+    let mut host = open();
+    let text = host
+        .render(ViewTarget::Popup("ask-for-update".to_string()), 80, 24)
+        .text();
+    assert!(text.contains("Send"), "{text}");
+    assert!(text.contains("Cancel"), "{text}");
+}

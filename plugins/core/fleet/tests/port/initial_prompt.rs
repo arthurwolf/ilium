@@ -40,3 +40,15 @@ fn initial_prompt_multiline_initial_prompt_is_one_bracketed_paste_body() {
         Some("line one\nline two")
     );
 }
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::single_line_initial_prompt_is_written_verbatim
+#[test]
+fn initial_prompt_single_line_keeps_tabs_and_inner_spacing() {
+    assert_eq!(initial_input_for("a\tb  c").as_deref(), Some("a\tb  c"));
+}
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::multiline_initial_prompt_is_one_bracketed_paste_body
+#[test]
+fn initial_prompt_multiline_keeps_blank_lines_inside_the_body() {
+    assert_eq!(initial_input_for("a\n\nb").as_deref(), Some("a\n\nb"));
+}

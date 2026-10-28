@@ -107,3 +107,18 @@ fn dev_848_every_cli_name_of_a_row_gives_the_same_output_and_exit_code_with_a_re
         "`ilium chat context --since-last-read` changed its output"
     );
 }
+
+/// REQ: DEV-848
+#[test]
+fn dev_848_matrix_rows_with_cli_names_belong_to_core_plugins_and_the_rule_is_stated() {
+    let rows = matrix_cli_rows();
+    assert!(!rows.is_empty(), "the matrix lists no CLI names");
+    for (core, names) in &rows {
+        assert!(core.starts_with("ilium.core."), "{core} is not a core plugin id");
+        assert!(!names.is_empty(), "{core} lists no CLI name");
+    }
+    let text = manual_page(MATRIX_PAGE);
+    assert!(text.contains(
+        "Each name MUST give the arguments, output and exit codes of the CLI reference"
+    ));
+}

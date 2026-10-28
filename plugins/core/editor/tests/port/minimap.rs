@@ -144,3 +144,57 @@ fn port_minimap_click_below_the_last_line_is_handled() {
 fn port_minimap_click_on_an_empty_buffer_is_handled() {
     assert!(click_minimap(0, 5));
 }
+
+/// REQ: PORT:ilium-client/src/minimap.rs::classifies_common_line_shapes
+#[test]
+fn port_minimap_heading_and_plain_lines_both_draw_glyphs() {
+    assert!(glyph_count("# Title\n", 1) > 0);
+    assert!(glyph_count("plain text\n", 1) > 0);
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::density_index_scales_with_content_width
+#[test]
+fn port_minimap_very_long_line_never_exceeds_the_column_width() {
+    let full = glyph_count(&format!("{}\n", "x".repeat(400)), 1);
+    assert!(full <= 8, "full {full}");
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::heading_dominates_bucket_classification
+#[test]
+fn port_minimap_heading_changes_a_bucket_of_plain_lines() {
+    let plain: String = (0..60).map(|_| "plain text\n").collect();
+    let with_heading: String = std::iter::once("# Title\n".to_string())
+        .chain((0..59).map(|_| "plain text\n".to_string()))
+        .collect();
+    assert_ne!(minimap_row(&plain, 1), minimap_row(&with_heading, 1));
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::render_shapes_bars_by_length_indent_and_kind
+#[test]
+fn port_minimap_heading_bar_draws_at_least_one_glyph() {
+    assert!(glyph_count("# Hi\n", 1) > 0);
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::whitespace_only_line_draws_no_glyph
+#[test]
+fn port_minimap_tab_only_line_draws_no_glyph() {
+    assert_eq!(glyph_count("\t\t\n", 1), 0);
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::line_for_click_inverts_render_bucketing
+#[test]
+fn port_minimap_click_on_the_bottom_row_of_a_long_buffer_is_handled() {
+    assert!(click_minimap(100, 19));
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::line_for_click_clamps_to_last_line
+#[test]
+fn port_minimap_click_on_the_top_row_of_a_short_buffer_is_handled() {
+    assert!(click_minimap(3, 0));
+}
+
+/// REQ: PORT:ilium-client/src/minimap.rs::line_for_click_on_empty_buffer_is_zero
+#[test]
+fn port_minimap_click_on_the_bottom_row_of_an_empty_buffer_is_handled() {
+    assert!(click_minimap(0, 19));
+}

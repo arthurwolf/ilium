@@ -29,6 +29,8 @@ loom = { version = "0.7", optional = true }
 wasmtime = { workspace = true, default-features = false, features = ["async", "cache", "component-model", "cranelift", "parallel-compilation", "runtime", "std"] }
 wasmparser = "=0.258.3"
 sha2 = "0.10.9"
+flate2 = "1.1.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 wat = { version = "=1.258.3", optional = true }
 
 [dev-dependencies]

@@ -30,3 +30,17 @@ fn port_tree_ui_scheduled_input_keeps_the_turn_glyph_and_marks_the_long_term_slo
         assert_eq!(countdown["text"], text, "{remaining_ms} ms");
     }
 }
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::scheduled_input_keeps_the_turn_glyph_and_marks_the_long_term_slot
+#[test]
+fn port_tree_ui_hour_countdown_shows_zero_padded_minutes() {
+    let (mut session, _pane) = schedule_dialog("Fix auth");
+    set_text(&mut session, SCHEDULE_VIEW, "hours", "1");
+    commit_schedule(&mut session);
+    let countdown = call_queue(
+        &mut session,
+        serde_json::json!({"method": "countdown", "remaining_ms": 3_600_000u64}),
+    )
+    .expect("countdown answers");
+    assert_eq!(countdown["text"], "1h 00m 00s");
+}

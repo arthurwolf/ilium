@@ -2,7 +2,7 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
@@ -24,19 +24,23 @@ pub struct EditorClient;
 
 impl Lifecycle for EditorClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.editor: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for EditorClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.editor: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for EditorClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.editor: client views.render")
+        UiTree {
+            version: 1,
+            nodes: Vec::new(),
+            root: 0,
+        }
     }
 }
 
@@ -48,13 +52,13 @@ impl TokenProvider for EditorClient {
         _lines: Vec<String>,
         _state_in: Option<Vec<u8>>,
     ) -> (Vec<Token>, Option<Vec<u8>>) {
-        unimplemented!("ilium.core.editor: client token-provider.tokens")
+        (Vec::new(), None)
     }
 }
 
 impl ServiceProvider for EditorClient {
     fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
-        unimplemented!("ilium.core.editor: client service-provider.handle")
+        ServiceReply::Done("{}".to_string())
     }
 }
 

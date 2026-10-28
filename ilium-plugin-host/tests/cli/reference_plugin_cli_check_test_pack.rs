@@ -1118,3 +1118,25 @@ fn dev_102_out_refuses_a_package_of_another_id() {
     );
     assert_eq!(code(&output).as_deref(), Some("pack.out-exists"));
 }
+
+/// REQ: DEV-084
+#[test]
+fn dev_084_a_trapped_fixture_is_reported_as_trap_and_never_as_fail() {
+    let root = scratch();
+    let env = env(root.path()).with_runner(ScriptedRunner::trapping("unreachable"));
+    let dir = tested_project(&env, root.path());
+    clear_fixtures(&dir);
+    write_fixture(
+        &dir,
+        "one",
+        json!({"schema": 1, "side": "server"}),
+        Some(MATCHING()),
+    );
+    let output = run_in(&env, &dir, &["test"]);
+    let cases = recs(&output, "test-case");
+    assert_eq!(cases.len(), 1, "one fixture gives one test-case record");
+    assert_ne!(
+        cases[0]["status"], "fail",
+        "a trap must not be reported as an ordinary failure"
+    );
+}

@@ -136,3 +136,81 @@ fn port_060_set_runs_the_command_and_reports_its_progress() {
     assert_eq!(record["monitors"][0]["report"]["percent"], 42.5);
     assert_eq!(record["monitors"][0]["report"]["message"], "frame 10/100");
 }
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::clear_pane_progress_monitor_stops_the_loop_and_clears_reported_progress
+#[test]
+fn port_060_waiting_on_a_cleared_monitor_reports_no_monitor() {
+    let (mut host, pane) = host_with_pane();
+    let id = register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    progress(&mut host, pane, &["clear", "--monitor-id", &id.to_string()]);
+    let run = progress(&mut host, pane, &["wait", &id.to_string()]);
+    assert_eq!(run.exit, Some(5), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::disabling_progress_monitor_setting_rejects_new_requests_and_stops_running_ones
+#[test]
+fn port_059_re_enabling_the_setting_accepts_a_new_monitor_again() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false)).expect("accepted");
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(true)).expect("accepted");
+    let id = register(&mut host, pane, "/opt/other.sh", &running("job-other", 5, "O"), &[]);
+    assert!(id > 0);
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::held_progress_wait_takes_the_outcome_instead_of_the_composer
+#[test]
+fn port_060_a_held_wait_stays_silent_while_the_monitor_is_still_running() {
+    let (mut host, pane) = host_with_pane();
+    expect_probe(&mut host, PROBE, &running(JOB, 10, "W"));
+    let open = start_in_pane(
+        &mut host,
+        pane,
+        &["progress", "set", "--command", PROBE, "--wait"],
+    );
+    assert!(!open.read().stdout.contains("progress_wait"));
+    settle_with(&mut host, &done(JOB, "Finished"));
+    assert!(open.read().stdout.contains("progress_wait"));
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::progress_set_acknowledges_only_after_snapshot_contains_the_monitor
+#[test]
+fn port_059_an_acknowledged_set_returns_a_nonzero_monitor_id() {
+    let (mut host, pane) = host_with_pane();
+    let id = register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    assert!(id > 0);
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::repeated_progress_set_request_replays_one_committed_result_without_rerunning_probe
+#[test]
+fn port_059_a_repeated_set_leaves_the_existing_report_in_place() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    let record = status(&mut host, pane);
+    assert_eq!(record["monitors"][0]["report"]["status"], "running");
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::set_pane_progress_monitor_rejects_an_empty_command_and_a_non_terminal_pane
+#[test]
+fn port_060_a_probe_set_on_a_terminal_pane_is_accepted() {
+    let (mut host, pane) = host_with_pane();
+    expect_probe(&mut host, PROBE, &running(JOB, 10, "W"));
+    let run = progress(&mut host, pane, &["set", "--command", PROBE]);
+    assert!(run.stdout.contains("progress_set"), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::set_pane_progress_monitor_runs_the_command_and_broadcasts_reported_progress
+#[test]
+fn port_060_the_reported_job_identity_is_kept_on_the_monitor_record() {
+    let (mut host, pane) = host_with_pane();
+    register(
+        &mut host,
+        pane,
+        PROBE,
+        &running("render-job", 10, "frame 10/100"),
+        &[],
+    );
+    let record = status(&mut host, pane);
+    assert_eq!(record["monitors"][0]["report"]["job_id"], "render-job");
+}

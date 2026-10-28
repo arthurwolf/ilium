@@ -1,21 +1,117 @@
-//! Host implementation of `ilium:host/kernel-settings` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/kernel-settings`.
 //!
-//! Written once by the skeleton lane from the generated `HostKernelSettings` trait; hand-owned afterwards.
+//! Process-wide table of the 25 frozen kernel tabs. Secret values read as `"<redacted>"`.
 
 use ilium_plugin_api::generated::host::kernel_settings::HostKernelSettings;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use serde_json::{Map, Value, json};
+use std::sync::{Mutex, PoisonError};
+
+/// The frozen kernel tab ids.
+const KERNEL_TAB_IDS: [&str; 25] = [
+    "user-interface",
+    "icons",
+    "agent-monitoring",
+    "agent-cost",
+    "optimization",
+    "remote-compaction",
+    "keyboard",
+    "terminal",
+    "editor",
+    "session",
+    "git",
+    "kanban-board",
+    "animations",
+    "sound",
+    "voice-control",
+    "reset-planning",
+    "inference",
+    "llm-instructions",
+    "titles",
+    "triggers",
+    "text-triggers",
+    "debug",
+    "api",
+    "about",
+    "setup",
+];
+
+static SETTINGS: Mutex<Option<Map<String, Value>>> = Mutex::new(None);
+
+fn refuse(code: ErrorCode, message: String) -> PluginError {
+    PluginError {
+        code,
+        message,
+        retry_after_ms: None,
+    }
+}
+
+fn default_tab(tab: &str) -> Value {
+    match tab {
+        "terminal" => json!({ "scrollback_budget_mib": 64 }),
+        "api" => json!({ "api_key": "secret-placeholder", "listen_port": 0 }),
+        "sound" => json!({ "is_enabled": true }),
+        _ => json!({}),
+    }
+}
+
+fn default_table() -> Map<String, Value> {
+    KERNEL_TAB_IDS
+        .iter()
+        .map(|tab| ((*tab).to_string(), default_tab(tab)))
+        .collect()
+}
+
+fn is_secret_key(key: &str) -> bool {
+    ["key", "token", "secret", "password"]
+        .iter()
+        .any(|marker| key.contains(marker))
+}
 
 /// Host side of the `kernel-settings` interface.
 #[derive(Debug)]
 pub struct KernelSettingsImport;
 
 impl HostKernelSettings for KernelSettingsImport {
-    fn read(&mut self, _tab: String) -> Result<String, PluginError> {
-        unimplemented!("host::imports::kernel_settings::read")
+    fn read(&mut self, tab: String) -> Result<String, PluginError> {
+        let guard = SETTINGS.lock().unwrap_or_else(PoisonError::into_inner);
+        let table = guard.as_ref().cloned().unwrap_or_else(default_table);
+        let Some(Value::Object(values)) = table.get(&tab) else {
+            return Err(refuse(ErrorCode::NotFound, format!("unknown tab {tab:?}")));
+        };
+        let redacted: Map<String, Value> = values
+            .iter()
+            .map(|(key, value)| {
+                if is_secret_key(key) {
+                    (key.clone(), Value::String("<redacted>".to_string()))
+                } else {
+                    (key.clone(), value.clone())
+                }
+            })
+            .collect();
+        Ok(Value::Object(redacted).to_string())
     }
 
-    fn write(&mut self, _tab: String, _key: String, _value: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::kernel_settings::write")
+    fn write(&mut self, tab: String, key: String, value: String) -> Result<(), PluginError> {
+        let mut guard = SETTINGS.lock().unwrap_or_else(PoisonError::into_inner);
+        let table = guard.get_or_insert_with(default_table);
+        let Some(Value::Object(values)) = table.get_mut(&tab) else {
+            return Err(refuse(ErrorCode::NotFound, format!("unknown tab {tab:?}")));
+        };
+        let Some(existing) = values.get(&key) else {
+            return Err(refuse(ErrorCode::NotFound, format!("unknown key {key:?}")));
+        };
+        let parsed: Value = serde_json::from_str(&value).map_err(|error| {
+            refuse(ErrorCode::InvalidArgument, format!("value is not JSON: {error}"))
+        })?;
+        if std::mem::discriminant(existing) != std::mem::discriminant(&parsed) {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "value has the wrong JSON type".to_string(),
+            ));
+        }
+        values.insert(key, parsed);
+        Ok(())
     }
 }
 

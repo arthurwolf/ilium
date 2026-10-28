@@ -32,20 +32,70 @@ pub struct LockEntry {
     pub granted_permissions: Vec<String>,
 }
 
+/// Serialised form of one lockfile entry.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LockRecord {
+    id: String,
+    version: String,
+    hash: String,
+    key: String,
+    grants: Vec<String>,
+}
+
+/// Serialised form of a whole lockfile.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LockDocument {
+    #[serde(default)]
+    plugin: Vec<LockRecord>,
+}
+
+const LOCKFILE_HEADER: &str = "# ilium plugin lockfile, format 1\n";
+
 /// Writes the installed plugin set as deterministic lockfile text: sorted entries, no timestamps,
 /// no machine paths, so two machines with the same set produce byte-identical files (USR-241, USR-243).
-pub fn export_lockfile(_entries: &[LockEntry]) -> String {
-    unimplemented!("host::sync::export_lockfile")
+pub fn export_lockfile(entries: &[LockEntry]) -> String {
+    let mut sorted: Vec<&LockEntry> = entries.iter().collect();
+    sorted.sort_by(|left, right| {
+        (&left.plugin_id, &left.version).cmp(&(&right.plugin_id, &right.version))
+    });
+    let document = LockDocument {
+        plugin: sorted
+            .into_iter()
+            .map(|entry| LockRecord {
+                id: entry.plugin_id.clone(),
+                version: entry.version.clone(),
+                hash: entry.content_hash.clone(),
+                key: entry.signing_key_id.clone(),
+                grants: entry.granted_permissions.clone(),
+            })
+            .collect(),
+    };
+    // Serialising plain strings and string arrays to TOML cannot fail; an empty text keeps the
+    // function total if that ever changes.
+    let body = toml::to_string(&document).unwrap_or_default();
+    format!("{LOCKFILE_HEADER}{body}")
 }
 
 /// Reads lockfile text back into entries for `ilium plugin sync --locked` (USR-242).
-pub fn replay_lockfile(_lockfile_text: &str) -> Result<Vec<LockEntry>, HostError> {
-    unimplemented!("host::sync::replay_lockfile")
+pub fn replay_lockfile(lockfile_text: &str) -> Result<Vec<LockEntry>, HostError> {
+    let document: LockDocument = toml::from_str(lockfile_text)
+        .map_err(|error| HostError::EngineError(format!("lockfile is not valid: {error}")))?;
+    Ok(document
+        .plugin
+        .into_iter()
+        .map(|record| LockEntry {
+            plugin_id: record.id,
+            version: record.version,
+            content_hash: record.hash,
+            signing_key_id: record.key,
+            granted_permissions: record.grants,
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{constant_time_eq, export_lockfile, LockEntry};
+    use super::{constant_time_eq, export_lockfile, replay_lockfile, LockEntry};
 
     fn sample_entry(plugin_id: &str) -> LockEntry {
         LockEntry {
@@ -76,6 +126,30 @@ mod tests {
         assert_eq!(
             export_lockfile(&[first.clone(), second.clone()]),
             export_lockfile(&[second, first])
+        );
+    }
+
+    /// REQ: USR-241
+    #[test]
+    fn lockfile_round_trip_returns_every_recorded_field() {
+        let entry = sample_entry("ilium.example.notes");
+        let text = export_lockfile(std::slice::from_ref(&entry));
+        let replayed = replay_lockfile(&text).expect("a lockfile this host wrote must replay");
+        assert_eq!(replayed.len(), 1);
+        assert_eq!(replayed[0].plugin_id, entry.plugin_id);
+        assert_eq!(replayed[0].version, entry.version);
+        assert_eq!(replayed[0].content_hash, entry.content_hash);
+        assert_eq!(replayed[0].signing_key_id, entry.signing_key_id);
+        assert_eq!(replayed[0].granted_permissions, entry.granted_permissions);
+    }
+
+    /// REQ: USR-243
+    #[test]
+    fn lockfile_contains_no_machine_paths() {
+        let text = export_lockfile(&[sample_entry("ilium.example.notes")]);
+        assert!(
+            !text.contains("/home/") && !text.contains("C:\\") && !text.contains("/tmp/"),
+            "a lockfile must not record machine paths, or two machines would differ"
         );
     }
 

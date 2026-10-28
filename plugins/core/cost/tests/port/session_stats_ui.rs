@@ -411,3 +411,231 @@ fn port_session_stats_ui_unsupported_agents_are_told_why_there_are_no_statistics
         "{reply}"
     );
 }
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::activity_and_prompts_tabs_list_their_content
+#[test]
+fn port_session_stats_ui_prompts_tab_omits_the_repeat_note_for_single_prompts() {
+    let reply = scenario(
+        "prompts-tab-omits-the-repeat-note-for-single-prompts",
+        json!({ "tabs": ["prompts"], "prompt": "fix the login bug", "repeats": 1 }),
+    );
+    assert!(
+        !reply["text"].as_str().unwrap_or("").contains("sent in a row"),
+        "{reply}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::dump_tabs
+#[test]
+fn port_session_stats_ui_dump_tabs_output_is_identical_across_two_runs() {
+    let reply = scenario(
+        "dump-tabs-output-is-identical-across-two-runs",
+        json!({ "tabs": "all", "width": 120, "height": 40, "runs": 2 }),
+    );
+    assert_eq!(reply["identical_runs"], json!(true), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::every_tab_renders_without_panicking_on_small_and_large_terminals
+#[test]
+fn port_session_stats_ui_every_tab_survives_a_one_cell_terminal() {
+    let reply = scenario(
+        "every-tab-survives-a-one-cell-terminal",
+        json!({ "tabs": "all", "sizes": [[1, 1]] }),
+    );
+    assert_eq!(reply["panicked"], json!(false), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::failed_refresh_keeps_retained_metrics_and_explains_incomplete_statistics
+#[test]
+fn port_session_stats_ui_failed_refresh_without_retained_metrics_still_flags_incomplete_statistics()
+{
+    let reply = scenario(
+        "failed-refresh-without-retained-metrics-still-flags-incomplete-statistics",
+        json!({ "retained": null, "failure": "filesystem entries limit reached: used 4096, at least 1 over", "tabs": "all" }),
+    );
+    assert!(
+        reply["text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Statistics may be incomplete"),
+        "{reply}"
+    );
+    assert!(!reply["text"].as_str().unwrap_or("").contains('$'), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::formatting_helpers
+#[test]
+fn port_session_stats_ui_zero_values_format_as_zero() {
+    let reply = scenario(
+        "zero-values-format-as-zero",
+        json!({ "duration_label_ms": [0], "percent_label": [0.0], "compact_count": [0], "grouped_count": [0] }),
+    );
+    assert_eq!(reply["duration_label"], json!(["0s"]));
+    assert_eq!(reply["percent_label"], json!(["0%"]));
+    assert_eq!(reply["compact_count"], json!(["0"]));
+    assert_eq!(reply["grouped_count"], json!(["0"]));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::geometry_is_stable_and_clickable_regions_do_not_overlap
+#[test]
+fn port_session_stats_ui_repeated_layout_of_the_same_inputs_is_identical() {
+    let reply = scenario(
+        "repeated-layout-of-the-same-inputs-is-identical",
+        json!({ "screen": [0, 0, 120, 40], "anchor": [2, 0], "repeat": 2 }),
+    );
+    assert_eq!(reply["second_equals_first"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::geometry_refuses_terminals_that_are_too_small
+#[test]
+fn port_session_stats_ui_geometry_accepts_the_exact_minimum_terminal() {
+    let reply = scenario(
+        "geometry-accepts-the-exact-minimum-terminal",
+        json!({ "screens": [[0, 0, 60, 18]], "anchor": [2, 0] }),
+    );
+    assert_ne!(reply["layouts"][0], Value::Null, "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::geometry_stays_on_screen_when_the_anchor_is_far_right
+#[test]
+fn port_session_stats_ui_anchor_past_the_screen_edge_is_clamped_to_the_screen() {
+    let reply = scenario(
+        "anchor-past-the-screen-edge-is-clamped-to-the-screen",
+        json!({ "screen": [0, 0, 120, 40], "anchor": [500, 0] }),
+    );
+    assert_eq!(reply["area_within_screen"], json!(true));
+    assert_eq!(reply["body_above_footer"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::hover_popover_has_no_close_control_and_says_how_to_pin
+#[test]
+fn port_session_stats_ui_pinned_popover_offers_a_close_control() {
+    let reply = scenario(
+        "pinned-popover-offers-a-close-control",
+        json!({ "pinned": true }),
+    );
+    assert!(
+        reply["text"].as_str().unwrap_or("").contains("✕ close"),
+        "{reply}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::nothing_is_drawn_outside_the_popover_on_the_narrowest_terminal
+#[test]
+fn port_session_stats_ui_footer_stays_inside_the_popover_on_the_narrowest_terminal() {
+    let reply = scenario(
+        "footer-stays-inside-the-popover-on-the-narrowest-terminal",
+        json!({ "screen": [0, 0, 60, 18] }),
+    );
+    assert_eq!(reply["footer_inside_area"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::output_chart_has_work_ribbon_outcome_icons_legend_and_scale_buttons
+#[test]
+fn port_session_stats_ui_chart_legend_explains_the_failure_icon() {
+    let reply = scenario(
+        "chart-legend-explains-the-failure-icon",
+        json!({ "tab": "overview" }),
+    );
+    assert_eq!(reply["legend_has_failure_entry"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::overview_capture_shows_section_rules_at_a_wide_terminal_size
+#[test]
+fn port_session_stats_ui_section_rules_stay_inside_a_narrow_screen() {
+    let reply = scenario(
+        "section-rules-stay-inside-a-narrow-screen",
+        json!({ "tab": "overview", "screen": [0, 0, 60, 18] }),
+    );
+    assert_eq!(reply["rule_width_within_screen"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::overview_renders_the_headline_facts
+#[test]
+fn port_session_stats_ui_running_time_under_an_hour_shows_minutes_and_seconds() {
+    let reply = scenario(
+        "running-time-under-an-hour-shows-minutes-and-seconds",
+        json!({ "tab": "overview", "running_ms": 300000 }),
+    );
+    assert!(
+        reply["text"].as_str().unwrap_or("").contains("5m 0s"),
+        "{reply}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::placeholders_explain_missing_data
+#[test]
+fn port_session_stats_ui_no_placeholder_renders_empty() {
+    let reply = scenario(
+        "no-placeholder-renders-empty",
+        json!({ "cases": "every missing-data placeholder" }),
+    );
+    assert_eq!(reply["empty_placeholders"], json!(0), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::scale_buttons_hit_test_and_narrow_the_window
+#[test]
+fn port_session_stats_ui_clicking_a_scale_button_selects_that_window() {
+    let reply = scenario(
+        "clicking-a-scale-button-selects-that-window",
+        json!({ "scales": "all", "click": "five_minutes" }),
+    );
+    assert_eq!(reply["selected_scale"], json!("five_minutes"), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::scrolling_clamps_to_the_content
+#[test]
+fn port_session_stats_ui_scrolling_a_window_that_fits_stays_at_the_top() {
+    let reply = scenario(
+        "scrolling-a-window-that-fits-stays-at-the-top",
+        json!({ "window": "tall", "scroll_down": 1000 }),
+    );
+    assert_eq!(reply["max_scroll"], json!(0));
+    assert_eq!(reply["scroll_after_down"], json!(0));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::segmented_bar_always_fills_the_requested_width
+#[test]
+fn port_session_stats_ui_zero_width_segmented_bar_draws_nothing() {
+    let reply = scenario(
+        "zero-width-segmented-bar-draws-nothing",
+        json!({ "widths": [0], "segments": [0.5, 0.5] }),
+    );
+    assert_eq!(reply["zero_width_cells"], json!(0));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::the_popover_fills_the_right_panel_and_never_leaves_it
+#[test]
+fn port_session_stats_ui_popover_on_a_short_panel_is_clipped_to_the_panel() {
+    let reply = scenario(
+        "popover-on-a-short-panel-is-clipped-to-the-panel",
+        json!({ "panel": [100, 0, 40, 4], "icon_row": 0 }),
+    );
+    assert_eq!(reply["area_fits_panel"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::tokens_tab_shows_breakdown_models_and_a_context_chart
+#[test]
+fn port_session_stats_ui_tokens_tab_without_context_samples_draws_no_context_chart() {
+    let reply = scenario(
+        "tokens-tab-without-context-samples-draws-no-context-chart",
+        json!({ "tab": "tokens", "context_samples": 0 }),
+    );
+    assert_eq!(reply["chart_glyphs_present"], json!([]), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_ui.rs::unsupported_agents_are_told_why_there_are_no_statistics
+#[test]
+fn port_session_stats_ui_supported_agent_shows_no_unsupported_message() {
+    let reply = scenario(
+        "supported-agent-shows-no-unsupported-message",
+        json!({ "agent": "claude" }),
+    );
+    assert!(
+        !reply["text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("No statistics for this agent"),
+        "{reply}"
+    );
+}

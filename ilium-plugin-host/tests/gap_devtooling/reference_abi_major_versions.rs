@@ -70,3 +70,37 @@ fn major_release_is_announced_six_months_ahead_and_the_announced_list_does_not_g
         "the announced list of removals and limit changes does not grow"
     );
 }
+
+/// REQ: DEV-964
+#[test]
+fn a_minor_is_listed_as_supported_while_inside_its_twelve_month_window() {
+    assert!(
+        supported_minors_at("1.4.1").contains(&"1.4".to_string()),
+        "minor 1.4 is inside its support period at 1.4.1"
+    );
+}
+
+/// REQ: DEV-966
+#[test]
+fn the_patch_rule_is_stated_for_minors_inside_their_support_period() {
+    let page = manual_page("reference-abi-major-versions");
+    assert!(
+        page.contains("inside its support period"),
+        "the page states the patch rule for minors inside their support period"
+    );
+    assert!(
+        patch_release_exists_for("1.4"),
+        "a patch release exists for minor 1.4"
+    );
+}
+
+/// REQ: DEV-995
+#[test]
+fn major_announcement_for_two_point_zero_is_published_before_its_release() {
+    let announcement = major_announcement("2.0.0");
+    assert!(
+        announcement.days_before_release > 0,
+        "the announcement precedes the release: {} days",
+        announcement.days_before_release
+    );
+}

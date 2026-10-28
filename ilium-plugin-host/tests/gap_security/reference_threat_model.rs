@@ -100,3 +100,60 @@ fn sec_715_threat_model_lists_out_of_scope_attackers_under_not_defended() {
         );
     }
 }
+
+/// REQ: SEC-706
+#[test]
+fn sec_706_refused_component_is_not_listed_as_installed() {
+    assert_manual_says(
+        "reference-threat-model",
+        "a module using a disabled proposal MUST be refused with `manifest.component-invalid`",
+    );
+    let rig = rig();
+    let output = install(
+        &rig,
+        &pkg(NOTES, "1.0.0").component_with_proposal("threads"),
+    );
+    assert_ne!(output.exit_code, 0, "the install fails");
+    assert!(
+        rig.cli(&["plugin", "list", "--json"])
+            .stdout_jsonl
+            .iter()
+            .all(|row| row["id"] != NOTES),
+        "a refused component leaves no installed row"
+    );
+}
+
+/// REQ: SEC-714
+#[test]
+fn sec_714_threat_model_ci_check_passes_for_the_shipped_threat_model() {
+    assert_manual_says(
+        "reference-threat-model",
+        "a CI check MUST fail when a listed SEC id does not exist",
+    );
+    let rig = rig();
+    let output = rig.cli(&["release", "check", "--threat-model"]);
+    assert_eq!(
+        output.exit_code,
+        0,
+        "every SEC id in the shipped threat model exists: {:?}",
+        error_codes(&output)
+    );
+}
+
+/// REQ: SEC-715
+#[test]
+fn sec_715_not_defended_is_a_markdown_heading() {
+    assert_manual_says(
+        "reference-threat-model",
+        "the docs site MUST list them under the heading `Not defended`",
+    );
+    let page = manual_page("reference-threat-model");
+    let heading_line = page
+        .lines()
+        .find(|line| line.contains("Not defended"))
+        .expect("the threat model must contain the Not defended text");
+    assert!(
+        heading_line.trim_start().starts_with('#'),
+        "`Not defended` must be a heading, got {heading_line:?}"
+    );
+}

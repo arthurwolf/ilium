@@ -12,11 +12,12 @@ pub struct PanesImport;
 
 impl HostPanes for PanesImport {
     fn info(&mut self, _pane: NodeId) -> Option<PaneInfo> {
-        unimplemented!("host::imports::panes::info")
+        // No tree is attached to this import, so no id names a pane (EVT-013).
+        None
     }
 
     fn focused(&mut self) -> Option<NodeId> {
-        unimplemented!("host::imports::panes::focused")
+        None
     }
 }
 

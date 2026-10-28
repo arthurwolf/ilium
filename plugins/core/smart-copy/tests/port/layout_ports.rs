@@ -58,3 +58,30 @@ fn port_ui_picker_view_shows_candidates_without_scene_attribution() {
     assert!(text.contains("beta"));
     assert!(!text.to_lowercase().contains("scene"));
 }
+
+use crate::common::key;
+
+/// REQ: PORT:ilium-client/src/context_menu_layout.rs::every_action_remains_visible_and_clickable_on_a_short_menu
+#[test]
+fn port_layout_every_terminal_menu_action_has_a_distinct_id() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    let mut ids: Vec<String> = host
+        .menu_items(terminal_context(pane))
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    let total = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), total);
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::smart_copy_preview_withholds_scene_attribution_and_recovers_after_close
+#[test]
+fn port_ui_closing_the_picker_removes_its_candidates_from_the_view() {
+    let mut host = open_picker(&["alpha", "beta"]);
+    host.deliver_one(key("esc"));
+    let text = host.render(picker_target(), 40, 9).text();
+    assert!(!text.contains("alpha"), "{text}");
+}

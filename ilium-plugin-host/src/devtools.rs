@@ -3,7 +3,9 @@
 
 use std::path::Path;
 
+use ilium_plugin_api::error::{Code, Severity};
 use ilium_plugin_api::manifest::Diagnostic;
+use serde_json::{json, Value};
 
 /// One lint finding of `ilium plugin check` (DEV-200..233).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,22 +25,278 @@ pub struct BuildPlan {
     pub env: Vec<(String, String)>,
 }
 
+const TEMPLATES: [&str; 8] = [
+    "server",
+    "client",
+    "both",
+    "scene",
+    "pane-kind",
+    "service-provider",
+    "extension",
+    "core-style",
+];
+
+fn diagnostic(code: &'static str, severity: Severity, message: impl Into<String>) -> Diagnostic {
+    Diagnostic {
+        code: Code::from_static(code),
+        severity,
+        pointer: String::new(),
+        message: message.into(),
+        stage: None,
+    }
+}
+
+fn is_valid_plugin_id(plugin_id: &str) -> bool {
+    let segments: Vec<&str> = plugin_id.split('.').collect();
+    segments.len() >= 2
+        && segments.iter().all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+}
+
+/// Grants a template requests, by side (DEV-274).
+fn template_grants(template: &str) -> (Vec<&'static str>, Vec<&'static str>) {
+    match template {
+        "server" | "core-style" => (vec!["tree.read", "tree.decorate"], vec![]),
+        "client" => (vec![], vec!["ui.panels"]),
+        "both" => (vec!["tree.read", "tree.decorate"], vec!["ui.panels"]),
+        _ => (vec![], vec![]),
+    }
+}
+
+fn template_manifest(template: &str, plugin_id: &str) -> Value {
+    let (server_grants, client_grants) = template_grants(template);
+    let has_server = !matches!(template, "client" | "scene");
+    let has_client = matches!(template, "client" | "both");
+    let mut manifest = json!({
+        "api": "ilium:plugin@0.1.0",
+        "id": plugin_id,
+        "name": plugin_id,
+        "version": "0.1.0",
+        "publisher": plugin_id.split('.').next().unwrap_or_default(),
+        "description": format!("The {template} plugin {plugin_id}."),
+        "license": "MIT",
+        "capabilities": {},
+        "contributes": {
+            "help": [{ "id": "overview", "file": "help/overview.md", "title": plugin_id }]
+        }
+    });
+    if has_server {
+        manifest["server"] =
+            json!({ "entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": [] });
+        if !server_grants.is_empty() {
+            manifest["capabilities"]["server"] = json!(server_grants);
+        }
+    }
+    if has_client {
+        manifest["client"] =
+            json!({ "entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": [] });
+        if !client_grants.is_empty() {
+            manifest["capabilities"]["client"] = json!(client_grants);
+        }
+    }
+    if template == "scene" {
+        manifest["client"] =
+            json!({ "entry": "client.wasm", "world": "ilium:client/scene@0.1.0", "exports": [] });
+    }
+    manifest
+}
+
 /// The files a template creates.
+///
+/// Output is a pure function of the arguments (DEV-263): no clock, no randomness.
 pub fn template_files(
-    _template: &str,
-    _plugin_id: &str,
+    template: &str,
+    plugin_id: &str,
 ) -> Result<Vec<(String, String)>, Diagnostic> {
-    unimplemented!("host::devtools::template_files")
+    if !TEMPLATES.contains(&template) {
+        return Err(diagnostic(
+            "new.template-unknown",
+            Severity::Error,
+            format!("the template {template:?} does not exist"),
+        ));
+    }
+    if !is_valid_plugin_id(plugin_id) {
+        return Err(diagnostic(
+            "new.id-invalid",
+            Severity::Error,
+            format!("{plugin_id:?} is not a dotted lowercase plugin id"),
+        ));
+    }
+    let in_ilium_namespace = plugin_id.split('.').next() == Some("ilium");
+    if template == "core-style" && !in_ilium_namespace {
+        return Err(diagnostic(
+            "new.id-invalid",
+            Severity::Error,
+            "the core-style template needs an id in the ilium namespace",
+        ));
+    }
+    if template != "core-style" && in_ilium_namespace {
+        return Err(diagnostic(
+            "new.id-reserved",
+            Severity::Error,
+            "the ilium namespace is reserved for first-party plugins",
+        ));
+    }
+    let manifest = serde_json::to_string_pretty(&template_manifest(template, plugin_id))
+        .map_err(|error| diagnostic("new.id-invalid", Severity::Error, error.to_string()))?;
+    let crate_name = plugin_id.replace(['.', '-'], "_");
+    let (server_grants, client_grants) = template_grants(template);
+    let grant_lines: String = server_grants
+        .iter()
+        .chain(client_grants.iter())
+        .map(|grant| format!("- `{grant}`: requested by the {template} template.\n"))
+        .collect();
+    let grants_section = if grant_lines.is_empty() {
+        "This plugin requests no grants.\n".to_owned()
+    } else {
+        grant_lines
+    };
+    Ok(vec![
+        ("manifest.json".to_owned(), format!("{manifest}\n")),
+        (
+            "README.md".to_owned(),
+            format!("# {plugin_id}\n\nA {template} plugin for Ilium.\n\n## Grants\n\n{grants_section}"),
+        ),
+        (
+            "CHANGELOG.md".to_owned(),
+            "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- First version.\n".to_owned(),
+        ),
+        ("LICENSE".to_owned(), "MIT License\n".to_owned()),
+        (
+            ".gitignore".to_owned(),
+            "dist/\n.ilium/\ntarget/\nnode_modules/\n".to_owned(),
+        ),
+        (
+            "help/overview.md".to_owned(),
+            format!("# {plugin_id}\n\nA {template} plugin for Ilium.\n"),
+        ),
+        (
+            "Cargo.toml".to_owned(),
+            format!("[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\ncrate-type = [\"cdylib\"]\n"),
+        ),
+        ("src/lib.rs".to_owned(), "//! Plugin entry point.\n".to_owned()),
+    ])
 }
 
 /// The plan of `ilium plugin build` for a project directory.
-pub fn build_plan(_project_dir: &Path) -> Result<BuildPlan, Diagnostic> {
-    unimplemented!("host::devtools::build_plan")
+pub fn build_plan(project_dir: &Path) -> Result<BuildPlan, Diagnostic> {
+    let has_rust = project_dir.join("Cargo.toml").is_file();
+    let has_typescript = project_dir.join("package.json").is_file();
+    match (has_rust, has_typescript) {
+        (true, true) => Err(diagnostic(
+            "toolchain.language-ambiguous",
+            Severity::Error,
+            "the project has both Cargo.toml and package.json",
+        )),
+        (false, false) => Err(diagnostic(
+            "toolchain.language-unknown",
+            Severity::Error,
+            "the project has neither Cargo.toml nor package.json",
+        )),
+        (true, false) => Ok(BuildPlan {
+            command: ["cargo", "build", "--release", "--target", "wasm32-wasip2"]
+                .map(str::to_owned)
+                .to_vec(),
+            env: Vec::new(),
+        }),
+        (false, true) => Ok(BuildPlan {
+            command: ["bun", "run", "build"].map(str::to_owned).to_vec(),
+            env: Vec::new(),
+        }),
+    }
 }
 
-/// Lints a project directory.
-pub fn lint(_project_dir: &Path) -> Vec<LintFinding> {
-    unimplemented!("host::devtools::lint")
+fn lint_finding(rule: &'static str, severity: Severity, message: impl Into<String>) -> LintFinding {
+    LintFinding {
+        rule: rule.to_owned(),
+        diagnostic: diagnostic(rule, severity, message),
+    }
+}
+
+/// Lints a project directory. Every rule id starts with `lint.` (DEV-075); a rule that lacks
+/// its input is announced as `lint.skipped` (DEV-211).
+pub fn lint(project_dir: &Path) -> Vec<LintFinding> {
+    let mut findings = Vec::new();
+    let manifest: Option<Value> = std::fs::read_to_string(project_dir.join("manifest.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let Some(manifest) = manifest else {
+        findings.push(lint_finding(
+            "lint.skipped",
+            Severity::Info,
+            "manifest.json is missing or unreadable, so the manifest rules were skipped",
+        ));
+        return findings;
+    };
+    let text_of = |key: &str| manifest.get(key).and_then(Value::as_str).unwrap_or_default();
+    let description_chars = text_of("description").chars().count();
+    if description_chars == 0 || description_chars > 280 {
+        findings.push(lint_finding(
+            "lint.description-missing",
+            Severity::Warning,
+            "the description must hold 1 to 280 characters",
+        ));
+    }
+    if text_of("license").is_empty() {
+        findings.push(lint_finding(
+            "lint.license-missing",
+            Severity::Info,
+            "the manifest names no license",
+        ));
+    }
+    if !project_dir.join("README.md").is_file() {
+        findings.push(lint_finding(
+            "lint.readme-missing",
+            Severity::Warning,
+            "README.md is missing",
+        ));
+    }
+    if !project_dir.join("CHANGELOG.md").is_file() {
+        findings.push(lint_finding(
+            "lint.changelog-missing",
+            Severity::Warning,
+            "CHANGELOG.md is missing",
+        ));
+    }
+    let topics = manifest
+        .get("contributes")
+        .and_then(|contributes| contributes.get("help"))
+        .and_then(Value::as_array);
+    for topic in topics.into_iter().flatten() {
+        let file = topic.get("file").and_then(Value::as_str).unwrap_or_default();
+        let title = topic.get("title").and_then(Value::as_str).unwrap_or_default();
+        let Ok(body) = std::fs::read_to_string(project_dir.join(file)) else {
+            findings.push(lint_finding(
+                "lint.help-missing",
+                Severity::Warning,
+                format!("the help file {file} is missing"),
+            ));
+            continue;
+        };
+        let heading = body
+            .lines()
+            .find_map(|line| line.strip_prefix("# "))
+            .map(str::trim);
+        if heading != Some(title) {
+            findings.push(lint_finding(
+                "lint.help-title-mismatch",
+                Severity::Warning,
+                format!("the first heading of {file} differs from the title {title:?}"),
+            ));
+        }
+    }
+    if !project_dir.join("dist").is_dir() {
+        findings.push(lint_finding(
+            "lint.skipped",
+            Severity::Info,
+            "no dist folder, so the unused-grant rule was skipped",
+        ));
+    }
+    findings
 }
 
 #[cfg(test)]

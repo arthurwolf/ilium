@@ -51,3 +51,12 @@ pub fn install_ok(rig: &OpsRig, spec: &PackageSpec) -> CliOutput {
     assert_eq!(output.exit_code, 0, "install failed: {}", output.stderr);
     output
 }
+
+/// Asserts that a manual page states the MUST sentence a Doc check quotes.
+pub fn assert_manual_says(page: &str, must_text: &str) {
+    let text = manual_page(page);
+    assert!(
+        text.contains(must_text),
+        "manual page {page} must state: {must_text}"
+    );
+}

@@ -2,6 +2,8 @@
 //! is written (HST-129), the ban on personal data in logs and counters (HST-130), the 4 KiB log line
 //! cut (HST-131), and the trace file rules (HST-979, HST-980, HST-981).
 
+use ilium_plugin_host::trace_file::{erase_plugin_spans, prune_at_server_start, redact_personal};
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-host-telemetry.md";
@@ -19,7 +21,14 @@ fn hst_129_e_mails_and_outside_paths_are_replaced_by_placeholders() {
 /// REQ: HST-129
 #[test]
 fn hst_129_a_log_line_written_with_log_is_redacted_before_it_is_written() {
-    unimplemented!("ilium_plugin_host::telemetry::host_line (e-mail and absolute path redaction)")
+    let (line, count) = redact_personal(
+        "mail ana@example.org read /etc/passwd and /home/ana/notes.txt",
+        "/home/ana",
+    );
+    assert_eq!(line, "mail [redacted-email] read [redacted-path] and /home/ana/notes.txt");
+    assert_eq!(count, 2);
+    let (clean, none) = redact_personal("plain text", "/home/ana");
+    assert_eq!((clean.as_str(), none), ("plain text", 0));
 }
 
 /// REQ: HST-130
@@ -68,7 +77,20 @@ fn hst_979_trace_spans_older_than_7_days_are_deleted_at_server_start() {
 /// REQ: HST-979
 #[test]
 fn hst_979_spans_of_seven_days_or_less_survive_the_server_start_deletion() {
-    unimplemented!("ilium_plugin_host::telemetry::trace_file::prune_at_server_start")
+    let day = 86_400_000u64;
+    let now = 100 * day;
+    let folder = tempfile::tempdir().expect("state folder");
+    let path = folder.path().join("plugin-trace.jsonl");
+    let lines = [
+        format!("{{\"plugin\":\"a\",\"time_ms\":{}}}", now - 8 * day),
+        format!("{{\"plugin\":\"a\",\"time_ms\":{}}}", now - 7 * day),
+        format!("{{\"plugin\":\"a\",\"time_ms\":{}}}", now - day),
+    ];
+    std::fs::write(&path, lines.join("\n") + "\n").expect("trace file");
+    assert_eq!(prune_at_server_start(&path, now).expect("prune"), 1);
+    let kept = std::fs::read_to_string(&path).expect("pruned file");
+    assert_eq!(kept.lines().count(), 2, "spans of seven days or less survive");
+    assert!(!kept.contains(&format!("{}", now - 8 * day)));
 }
 
 /// REQ: HST-980
@@ -89,7 +111,18 @@ fn hst_980_erase_data_rewrites_the_trace_file_and_reports_the_trace_kind() {
 /// REQ: HST-980
 #[test]
 fn hst_980_spans_of_other_plugins_stay_in_the_trace_file() {
-    unimplemented!("ilium_plugin_host::cli::erase_data_trace_rewrite")
+    let folder = tempfile::tempdir().expect("state folder");
+    let path = folder.path().join("plugin-trace.jsonl");
+    std::fs::write(
+        &path,
+        "{\"plugin\":\"a\",\"span_id\":1}\n{\"plugin\":\"b\",\"span_id\":2}\n{\"plugin\":\"a\",\"span_id\":3}\n",
+    )
+    .expect("trace file");
+    assert_eq!(erase_plugin_spans(&path, "a").expect("erase"), 2);
+    let kept = std::fs::read_to_string(&path).expect("rewritten file");
+    assert_eq!(kept.lines().count(), 1);
+    assert!(kept.contains("\"plugin\":\"b\""), "spans of other plugins stay: {kept}");
+    assert!(!folder.path().join("plugin-trace.jsonl.partial").exists());
 }
 
 /// REQ: HST-981

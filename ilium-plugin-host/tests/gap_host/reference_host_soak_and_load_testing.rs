@@ -74,3 +74,32 @@ fn hst_699_fault_injection_suite_keeps_every_acknowledged_write_readable_or_quar
         "a release fails when this suite fails"
     );
 }
+
+/// REQ: HST-514
+#[test]
+fn hst_514_soak_run_record_contains_at_least_one_cycle() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let record = rig.soak_run_record(Duration::from_secs(72 * 3600));
+    assert!(!record.cycles.is_empty(), "the run record lists its cycles");
+}
+
+/// REQ: HST-681
+#[test]
+fn hst_681_soft_descriptor_limit_is_raised_to_the_hard_limit_at_start() {
+    let rig = rig();
+    assert_eq!(
+        rig.soft_fd_limit(),
+        rig.hard_fd_limit(),
+        "the soft limit equals the hard limit after start"
+    );
+}
+
+/// REQ: HST-699
+#[test]
+fn hst_699_repeated_fault_injection_run_still_loses_no_acknowledged_write() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let second = rig.run_storage_fault_injection(NOTES, 10_000);
+    assert_eq!(second.silently_lost, 0, "a second run loses no acknowledged write");
+}

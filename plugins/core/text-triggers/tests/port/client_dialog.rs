@@ -181,3 +181,134 @@ fn port_009_text_trigger_dialog_visually_marks_matches_and_loop_risk() {
         "{text}"
     );
 }
+
+/// REQ: PORT:ilium-client/src/text_trigger_dialog.rs::a_new_trigger_starts_at_sixty_seconds
+#[test]
+fn port_010_every_new_trigger_in_a_fresh_list_starts_at_sixty_seconds() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a", "b"], &["r", "s"]);
+    assert_eq!(host.settings().get("delays"), Some(json!([60, 60])));
+}
+
+/// REQ: PORT:ilium-client/src/text_trigger_dialog.rs::an_existing_trigger_keeps_its_delay_and_blank_means_default
+#[test]
+fn port_011_toggling_a_rule_leaves_its_delay_untouched() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a"], &["r"]);
+    host.settings().set("delays", json!([30])).expect("delay");
+    host.send_action(
+        tab(),
+        "rule-0",
+        ActionKind::Toggled,
+        ActionValue::Flag(false),
+    );
+    host.settle();
+    assert_eq!(host.settings().get("delays"), Some(json!([30])));
+}
+
+/// REQ: PORT:ilium-client/src/text_trigger_dialog.rs::delay_buttons_preserve_authored_rule_and_stop_at_domain_bounds
+#[test]
+fn port_012_delay_at_the_domain_maximum_is_kept_exactly() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a"], &["r"]);
+    host.send_action(
+        tab(),
+        "delay-0",
+        ActionKind::Changed,
+        ActionValue::Number(MAX_DELAY_SECONDS as f64),
+    );
+    host.settle();
+    assert_eq!(
+        host.settings().get("delays"),
+        Some(json!([MAX_DELAY_SECONDS]))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/text_trigger_dialog.rs::delay_star_retains_exact_draft_and_blank_steps_from_native_default
+#[test]
+fn port_013_typed_zero_delay_is_kept_and_not_replaced_by_default() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a"], &["r"]);
+    host.send_action(
+        tab(),
+        "delay-0",
+        ActionKind::Changed,
+        ActionValue::Text("0".to_string()),
+    );
+    host.settle();
+    assert_eq!(host.settings().get("delays"), Some(json!([0])));
+}
+
+/// REQ: PORT:ilium-client/src/text_trigger_dialog.rs::target_selector_paints_and_hits_both_directions_and_catalogue
+#[test]
+fn port_014_target_index_out_of_range_leaves_targets_unchanged() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a"], &["r"]);
+    let before = host.settings().get("targets");
+    host.send_action(
+        tab(),
+        "target-0",
+        ActionKind::Selected,
+        ActionValue::Index(9),
+    );
+    host.settle();
+    assert_eq!(host.settings().get("targets"), before);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::acknowledged_exact_text_trigger_save_still_closes_only_its_dialog
+#[test]
+fn port_015_toggling_one_rule_leaves_the_other_patterns_as_authored() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a", "b"], &["r", "s"]);
+    host.send_action(
+        tab(),
+        "rule-1",
+        ActionKind::Toggled,
+        ActionValue::Flag(false),
+    );
+    host.settle();
+    assert_eq!(host.settings().get("patterns"), Some(json!(["a", "b"])));
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::editing_text_trigger_preserves_its_id_persists_and_queues_live_update
+#[test]
+fn port_016_editing_a_pattern_produces_no_refused_outcome() {
+    let mut host = client_host();
+    set_rules(&mut host, &["a"], &["r"]);
+    host.settings()
+        .set("patterns", json!(["edited"]))
+        .expect("edit");
+    host.settle();
+    assert!(host
+        .outcomes()
+        .iter()
+        .all(|o| !matches!(o, Outcome::Refused(_))));
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/tests.rs::text_trigger_modal_waits_for_real_durable_writer_and_server_request
+#[test]
+fn port_017_revoked_write_leaves_no_successful_outcome() {
+    let mut host = client_host();
+    host.revoke("settings.write-kernel:text-triggers");
+    host.send_action(
+        tab(),
+        "rule-0",
+        ActionKind::Toggled,
+        ActionValue::Flag(false),
+    );
+    host.settle();
+    assert!(host
+        .outcomes()
+        .iter()
+        .all(|o| !matches!(o, Outcome::Ok)));
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::text_trigger_dialog_visually_marks_matches_and_loop_risk
+#[test]
+fn port_018_non_matching_reply_shows_no_loop_warning() {
+    let mut host = client_host();
+    set_rules(&mut host, &["y"], &["y"]);
+    let reply = preview(&mut host, "y", "ok", "yes\nno");
+    let text = reply["preview"].as_str().expect("preview text");
+    assert!(!text.contains("\u{26a0}"), "{text}");
+}

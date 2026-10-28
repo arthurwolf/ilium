@@ -52,3 +52,51 @@ fn pkg_699_registry_changed_names_url_and_asks_user_to_repin() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: PKG-696
+#[test]
+fn pkg_696_signature_refusal_keeps_last_good_metadata_in_the_error_table() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "`registry.signature-invalid`",
+        "Refused; the client keeps its last good metadata",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-697
+#[test]
+fn pkg_697_rotated_root_version_is_previous_plus_one() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "A new `root.json` has a `version` equal to the previous version plus 1",
+        "Its `version` is the previous version plus 1",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-698
+#[test]
+fn pkg_698_compromised_timestamp_key_is_replaced_by_a_new_key_id() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "a `timestamp` entry that names a new key id",
+        "then re-signs `timestamp.json` with that key",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-699
+#[test]
+fn pkg_699_registry_changed_stop_is_listed_with_user_repin() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "`registry.changed`",
+        "Stops; the user re-pins under",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

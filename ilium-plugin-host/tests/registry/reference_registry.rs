@@ -2206,3 +2206,267 @@ proptest! {
         prop_assert!(error_codes(&output).iter().any(|code| code == "registry.metadata-expired"));
     }
 }
+
+/// REQ: PKG-372
+#[test]
+fn pkg_372_second_refresh_still_accepts_the_cached_documents() {
+    let sandbox = Sandbox::standard();
+    assert_ok(&refresh(&sandbox));
+    let second = refresh(&sandbox);
+    assert_ok(&second);
+    assert_eq!(plugin_ids(&second), vec![NOTES.to_owned()]);
+}
+
+/// REQ: PKG-374
+#[test]
+fn doc_pkg_374_registry_proxy_is_set_under_plugins_registry() {
+    let text = page_text("reference-registry.md");
+    assert!(text.contains("[plugins.registry] proxy"));
+}
+
+/// REQ: PKG-385
+#[test]
+fn doc_pkg_385_segment_grammar_is_written_out_in_the_row() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-385]"))
+        .expect("row");
+    assert!(row.contains("`[a-z][a-z0-9]*(-[a-z0-9]+)*`"), "{row}");
+}
+
+/// REQ: PKG-386
+#[test]
+fn doc_pkg_386_a_vanished_domain_record_keeps_published_versions() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-386]"))
+        .expect("row");
+    assert!(
+        row.contains("loses new-publish rights") && row.contains("published versions stay"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-390
+#[test]
+fn pkg_390_untransferred_namespace_shows_no_previous_owner() {
+    let sandbox = Sandbox::standard();
+    let output = sandbox.run(&["info", NOTES, "--json"]);
+    assert_ok(&output);
+    assert!(!output_contains(&output, "com.oldacme"), "{output:?}");
+}
+
+/// REQ: PKG-391
+#[test]
+fn doc_pkg_391_reassignment_needs_a_clearly_marked_new_publisher() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-391]"))
+        .expect("row");
+    assert!(
+        row.contains("downloaded in the last 365 days") && row.contains("clearly marked new publisher"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-393
+#[test]
+fn pkg_393_publish_of_a_dummy_package_is_refused_by_the_server() {
+    let sandbox = Sandbox::standard();
+    let output = publish(&sandbox, &dummy_package("com.acme.dummy", "1.0.0"), &[]);
+    assert_ne!(output.exit_code, 0, "{output:?}");
+}
+
+/// REQ: PKG-395
+#[test]
+fn pkg_395_a_valid_signed_publish_succeeds() {
+    let sandbox = Sandbox::standard();
+    let package = signed_package("com.acme.fresh", "1.0.0");
+    sandbox
+        .net
+        .script(&format!("{BASE}publish/com.acme.fresh/1.0.0"), vec![]);
+    let output = publish(&sandbox, &package, &[]);
+    assert_ok(&output);
+}
+
+/// REQ: PKG-397
+#[test]
+fn pkg_397_deprecation_message_alone_is_shown_without_a_successor() {
+    let mut builder = RegistryBuilder::standard();
+    builder.plugins[0].deprecated = Some(("Retired without a successor".to_owned(), String::new()));
+    let sandbox = Sandbox::with_registry(&builder);
+    let info = sandbox.run(&["info", NOTES, "--json"]);
+    assert!(
+        output_contains(&info, "Retired without a successor"),
+        "{info:?}"
+    );
+}
+
+/// REQ: PKG-399
+#[test]
+fn doc_pkg_399_publishers_never_delete_a_blob_and_only_takedown_removes_one() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-399]"))
+        .expect("row");
+    assert!(
+        row.contains("MUST NOT delete a published blob") && row.contains("takedown"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-401
+#[test]
+fn doc_pkg_401_level_a_is_automated_checks_and_level_b_is_human_review() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-401]"))
+        .expect("row");
+    assert!(
+        row.contains("Level A: automated checks only") && row.contains("Level B"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-402
+#[test]
+fn doc_pkg_402_content_policy_forbids_undeclared_behaviour_and_unlawful_plugins() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-402]"))
+        .expect("row");
+    assert!(
+        row.contains("hide behaviour that the manifest does not declare")
+            && row.contains("break the law"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-404
+#[test]
+fn doc_pkg_404_appeal_goes_in_writing_to_the_policy_contact() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-404]"))
+        .expect("row");
+    assert!(
+        row.contains("in writing to the contact in `policy.json`"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-405
+#[test]
+fn doc_pkg_405_emergency_revocation_is_recorded_in_revocations_json() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-405]"))
+        .expect("row");
+    assert!(
+        row.contains("[PKG-242]") && row.contains("`revocations.json`"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-406
+#[test]
+fn doc_pkg_406_ratings_are_out_of_scope_for_version_0_1() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-406]"))
+        .expect("row");
+    assert!(
+        row.contains("out of scope for 0.1") && row.contains("MUST NOT show a rating"),
+        "{row}"
+    );
+}
+
+/// REQ: PKG-408
+#[test]
+fn pkg_408_a_full_mirror_install_yields_the_original_version() {
+    let builder = RegistryBuilder::standard();
+    let sandbox = Sandbox::new();
+    sandbox.net.serve(BASE_TWO, &builder.build());
+    assert_ok(&sandbox.pin(BASE_TWO, &builder.pinned_key_id()));
+    assert_ok(&install_notes(&sandbox, &[]));
+    assert_eq!(sandbox.installed_version(NOTES).as_deref(), Some("1.0.0"));
+}
+
+/// REQ: PKG-409
+#[test]
+fn pkg_409_a_partial_mirror_still_installs_a_listed_plugin() {
+    let mut partial =
+        RegistryBuilder::with_plugins(vec![RegistryBuilder::standard().plugins[0].clone()]);
+    partial.role_keys = vec![KEY_B];
+    let sandbox = Sandbox::new();
+    sandbox.net.serve(BASE_TWO, &partial.build());
+    assert_ok(&sandbox.pin(BASE_TWO, &partial.pinned_key_id()));
+    assert_ok(&install_notes(&sandbox, &[]));
+}
+
+/// REQ: PKG-411
+#[test]
+fn pkg_411_a_mirror_serving_the_pinned_root_keys_installs_like_a_registry() {
+    let genuine = RegistryBuilder::standard();
+    let sandbox = Sandbox::new();
+    sandbox.net.serve(BASE_TWO, &genuine.build());
+    assert_ok(&sandbox.pin(BASE_TWO, &genuine.pinned_key_id()));
+    assert_ok(&install_notes(&sandbox, &[]));
+}
+
+/// REQ: PKG-414
+#[test]
+fn doc_pkg_414_air_gapped_operators_re_export_bundles_regularly() {
+    let text = page_text("reference-registry.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-414]"))
+        .expect("row");
+    assert!(row.contains("re-exports a bundle regularly"), "{row}");
+}
+
+/// REQ: PKG-416
+#[test]
+fn pkg_416_offline_flag_installs_from_the_expired_cache() {
+    let sandbox = Sandbox::standard();
+    let mut env = sandbox.env.clone();
+    env.now = now_plus(3 * 86_400);
+    let key = publisher_key_id();
+    let output = run_in(&env, &["install", NOTES, "--yes", "--trust", &key, "--offline"]);
+    assert_ok(&output);
+}
+
+/// REQ: PKG-417
+#[test]
+fn pkg_417_refused_rollback_leaves_the_cached_plugin_installable() {
+    let sandbox = Sandbox::standard();
+    assert_ok(&refresh(&sandbox));
+    let mut older = RegistryBuilder::standard();
+    older.timestamp_version = 4000;
+    older.snapshot_version = 4000;
+    sandbox.net.serve(BASE, &older.build());
+    assert_code(&refresh(&sandbox), "registry.rollback");
+    assert_ok(&install_notes(&sandbox, &[]));
+}
+
+/// REQ: PKG-421
+#[test]
+fn pkg_421_a_compromised_revoked_key_installs_nothing() {
+    let mut builder = RegistryBuilder::standard();
+    builder.revoked_keys = vec![
+        serde_json::json!({ "publisher_id": PUBLISHER_ID, "key_id": publisher_key_id(), "reason": "compromised", "effective": "2030-01-01 09:00:00" }),
+    ];
+    let sandbox = Sandbox::with_registry(&builder);
+    let output = install_notes(&sandbox, &[]);
+    assert_ne!(output.exit_code, 0, "{output:?}");
+    assert!(sandbox.installed().is_empty());
+}

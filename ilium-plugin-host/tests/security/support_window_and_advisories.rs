@@ -43,19 +43,85 @@ fn sec_966_a_minor_past_its_end_date_reports_end_of_life_and_keeps_loading_plugi
 /// REQ: SEC-966
 #[test]
 fn sec_966_a_host_past_its_end_date_still_loads_installed_plugins_unchanged() {
-    unimplemented!("ilium_plugin_host::host_info::end_of_life_minor_loads_installed_plugins")
+    let rig = setup(&[])
+        .option("host-version", json!("0.1.0"))
+        .option("host-support", json!("end-of-life"))
+        .option("installed-plugins", json!(["example.demo"]))
+        .start();
+    assert!(
+        !rig.host.plugin_disabled("example.demo"),
+        "an end-of-life host must not disable an installed plugin"
+    );
+    let restarted = rig.restart();
+    assert!(
+        !restarted.host.plugin_disabled("example.demo"),
+        "the plugin loads unchanged at the next start of the end-of-life host"
+    );
+    let root = scratch();
+    let mut env = cli_env(root.path());
+    env.host_release = "v0.1.0".to_owned();
+    env.now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(4_000_000_000);
+    let output = ilium_plugin_host::cli::run(&args(&["version", "--json"]), &env);
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    let text = format!("{:?}", output.stdout_jsonl);
+    assert!(text.contains("end-of-life"), "version --json reports support end-of-life: {text}");
 }
 
 /// REQ: SEC-967
 #[test]
 fn sec_967_an_affected_host_writes_one_host_advisory_affected_warn_line_at_start() {
-    unimplemented!("ilium_plugin_host::host_info::advisory_check_writes_one_warn_line_at_start")
+    let advisory = json!({ "id": "ILIUM-2026-0001", "severity": "High", "fixed": "1.0.0" });
+    let affected = setup(&[])
+        .option("runtime-advisory", advisory.clone())
+        .option("host-version", json!("0.9.0"))
+        .start();
+    let lines: Vec<String> = affected
+        .log_messages()
+        .into_iter()
+        .filter(|message| message.contains("host.advisory-affected"))
+        .collect();
+    assert_eq!(lines.len(), 1, "exactly one host.advisory-affected line per start: {lines:?}");
+    assert!(lines[0].contains("ILIUM-2026-0001"), "the line names the advisory id: {lines:?}");
+    assert!(lines[0].contains("1.0.0"), "the line names the fixed version: {lines:?}");
+    let fixed = setup(&[])
+        .option("runtime-advisory", advisory)
+        .option("host-version", json!("1.0.0"))
+        .start();
+    assert!(
+        fixed
+            .log_messages()
+            .iter()
+            .all(|message| !message.contains("host.advisory-affected")),
+        "a host at the fixed version writes no advisory line"
+    );
 }
 
 /// REQ: SEC-967
 #[test]
 fn sec_967_ilium_version_json_lists_the_affected_advisory_ids_and_a_fixed_host_lists_none() {
-    unimplemented!("ilium_plugin_host::cli::run version --json advisories field")
+    let root = scratch();
+    let mut env = cli_env(root.path());
+    env.host_release = "v0.1.0".to_owned();
+    let output = ilium_plugin_host::cli::run(&args(&["version", "--json"]), &env);
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    let record = output
+        .stdout_jsonl
+        .iter()
+        .find(|record| record.get("advisories").is_some())
+        .unwrap_or_else(|| panic!("version --json must carry an advisories field: {:?}", output.stdout_jsonl));
+    let affected = record["advisories"].as_array().expect("advisories is a list");
+    for entry in affected {
+        let id = entry.as_str().or_else(|| entry["id"].as_str()).expect("an advisory id");
+        assert!(id.starts_with("ILIUM-"), "advisory ids look like ILIUM-YYYY-NNNN, got {id}");
+    }
+    env.host_release = "v99.0.0".to_owned();
+    let fixed = ilium_plugin_host::cli::run(&args(&["version", "--json"]), &env);
+    let fixed_record = fixed
+        .stdout_jsonl
+        .iter()
+        .find(|record| record.get("advisories").is_some())
+        .unwrap_or_else(|| panic!("a fixed host still reports the field: {:?}", fixed.stdout_jsonl));
+    assert_eq!(fixed_record["advisories"], json!([]), "a fixed host lists no advisory");
 }
 
 /// REQ: SEC-968

@@ -153,3 +153,113 @@ fn port_toolbar_click_outside_toolbar_row_misses() {
         "a click on a content row is not a toolbar hit"
     );
 }
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::click_outside_toolbar_row_misses
+#[test]
+fn port_toolbar_click_on_the_save_label_is_a_toolbar_hit() {
+    let (mut host, screen) = toolbar("a.txt", "plaintext", 60, false);
+    let (row, column) = screen.find("Save").expect("Save");
+    assert!(
+        host.click(ViewTarget::Pane(NodeId(7)), column, row),
+        "a click on the Save label must hit the toolbar"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::dirty_pane_highlights_the_save_button
+#[test]
+fn port_toolbar_dirty_state_does_not_move_the_save_label() {
+    let (_, clean) = toolbar("a.txt", "plaintext", 60, false);
+    let (_, dirty) = toolbar("a.txt", "plaintext", 60, true);
+    assert_eq!(clean.find("Save"), dirty.find("Save"));
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::eighty_columns_keep_every_markdown_source_action_and_full_selector_chrome
+#[test]
+fn port_toolbar_markdown_source_toolbar_ends_with_save_as_at_80_columns() {
+    let (_, screen) = toolbar("n.md", "markdown", 80, false);
+    let row = screen.row(0);
+    assert!(row.trim_end().ends_with("Save As"), "{row:?}");
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::every_editor_exposes_the_line_display_switch
+#[test]
+fn port_toolbar_line_display_switch_survives_a_60_column_toolbar_in_every_editor() {
+    for (file, language) in [
+        ("a.txt", "plaintext"),
+        ("n.md", "markdown"),
+        ("m.rs", "rust"),
+    ] {
+        let (_, screen) = toolbar(file, language, 60, false);
+        assert!(
+            screen.row(0).contains("Clip") || screen.row(0).contains("Wrap"),
+            "{file}: {}",
+            screen.row(0)
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::line_display_choice_has_arrows_and_catalog_in_plain_and_markdown_toolbars
+#[test]
+fn port_toolbar_rendered_markdown_line_display_choice_has_arrows() {
+    let mut host = plain_host(
+        "n.md",
+        Some("markdown"),
+        "# T\n",
+        &[("markdown_rendered_by_default", json!(true))],
+    );
+    let screen = render_pane(&mut host, 40, 10);
+    let row = screen.row(0);
+    assert!(row.contains('←') && row.contains('→'), "{row}");
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::markdown_pane_shows_view_mode_buttons
+#[test]
+fn port_toolbar_markdown_source_mode_offers_the_rendered_button() {
+    let (_, screen) = toolbar("n.md", "markdown", 80, false);
+    assert!(screen.row(0).contains("Rendered"), "{}", screen.row(0));
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::narrow_toolbar_drops_right_buttons_before_overlapping_the_left_group
+#[test]
+fn port_toolbar_narrow_toolbar_keeps_some_left_chrome_visible() {
+    let (_, screen) = toolbar("a.txt", "plaintext", 10, false);
+    assert!(!screen.row(0).trim().is_empty(), "{}", screen.row(0));
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::plain_text_pane_has_no_view_mode_buttons
+#[test]
+fn port_toolbar_plain_text_pane_has_no_source_button() {
+    let (_, screen) = toolbar("a.txt", "plaintext", 80, false);
+    assert!(!screen.row(0).contains("Source"), "{}", screen.row(0));
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::rendered_markdown_exposes_the_same_clip_wrap_switch
+#[test]
+fn port_toolbar_rendered_markdown_shows_wrap_when_wrap_is_the_line_display() {
+    let mut host = plain_host(
+        "n.md",
+        Some("markdown"),
+        "# T\n",
+        &[
+            ("markdown_rendered_by_default", json!(true)),
+            ("line_display", json!("wrap")),
+        ],
+    );
+    let screen = render_pane(&mut host, 80, 10);
+    assert!(screen.row(0).contains("Wrap"), "{}", screen.row(0));
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::rendered_markdown_shows_a_pixel_header_checkbox
+#[test]
+fn port_toolbar_source_markdown_hides_the_pixel_header_checkbox() {
+    let (_, screen) = toolbar("n.md", "markdown", 80, false);
+    assert!(screen.find("Pixel headers").is_none(), "{}", screen.row(0));
+}
+
+/// REQ: PORT:ilium-client/src/editor_toolbar.rs::save_and_save_as_are_anchored_to_the_right_edge
+#[test]
+fn port_toolbar_save_as_stays_at_the_edge_at_80_columns() {
+    let (_, screen) = toolbar("a.txt", "plaintext", 80, false);
+    let row = screen.row(0);
+    assert!(row.trim_end().ends_with("Save As"), "{row:?}");
+}

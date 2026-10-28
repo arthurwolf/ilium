@@ -240,3 +240,196 @@ fn port_pipeline_protected_project_directory_is_denied_without_reading() {
     let record = first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()));
     assert_eq!(record["state"], "denied");
 }
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::goal_is_extracted_from_evidence_and_text_is_validated
+#[test]
+fn port_pipeline_goal_run_keeps_only_the_pointer_named_in_evidence() {
+    let goals = [("ship recap".to_string(), "done")];
+    let (mut host, _, invocation) =
+        start_agent_run_with_goals(&["user: ship it", "assistant: edited src/lib.rs"], &goals);
+    host.fs().write("project:src/lib.rs", b"x");
+    let records = finish_run(&mut host, &invocation, GOOD_ANSWER.as_bytes().to_vec());
+    let record = first_recap(&records);
+    assert_eq!(record["short"]["pointers"][0]["path"], "src/lib.rs");
+    assert_eq!(record["short"]["pointers"].as_array().map(Vec::len), Some(1));
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::secrets_never_reach_the_prompt
+#[test]
+fn port_pipeline_agent_transcript_secrets_never_reach_the_job_input() {
+    let (mut host, _, _) = start_agent_run(&["user: rotate api_key=abcd1234efgh5678 today"]);
+    let job = host.jobs().list().remove(0);
+    let text = String::from_utf8_lossy(&job.input).to_string();
+    assert!(!text.contains("abcd1234efgh5678"), "{text}");
+    assert!(text.contains("[redacted]"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::malformed_answer_is_a_labelled_per_pane_failure
+#[test]
+fn port_pipeline_malformed_answer_still_exits_zero_with_no_text() {
+    let (mut host, _, invocation) = start_shell_run(&["$ ls"]);
+    let request = host.jobs().list()[0].request;
+    host.jobs().finish(request, Ok(b"nonsense".to_vec()));
+    host.settle();
+    let output = host.cli().refresh(&invocation);
+    assert_eq!(output.exit_code(), Some(0));
+    let record = first_recap(&jsonl(&output.stdout()));
+    assert!(record["long"].is_null(), "{record}");
+    assert!(record["short"].is_null(), "{record}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::provider_failure_on_one_pane_keeps_the_other_pane_text
+#[test]
+fn port_pipeline_failed_pane_leaves_the_other_pane_summary_readable() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    let first = host.tree().add(shell_pane("first shell"));
+    let second = host.tree().add(shell_pane("second shell"));
+    host.tree().set_screen(first, rows(&["$ one"]));
+    host.tree().set_screen(second, rows(&["$ two"]));
+    let invocation = host.cli().invoke(&["recap"], b"");
+    let jobs = host.jobs().list();
+    host.jobs().finish(
+        jobs[0].request,
+        Err(PluginError {
+            code: ErrorCode::Network,
+            message: "boom".into(),
+            retry_after_ms: None,
+        }),
+    );
+    host.jobs().finish(jobs[1].request, Ok(answer(3, 3)));
+    host.settle();
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    let kept = of_type(&records, "recap")
+        .into_iter()
+        .find(|record| record["state"] == "summarized")
+        .expect("the second pane is summarized");
+    assert_eq!(kept["pane_name"], "second shell");
+    assert_eq!(kept["short"]["text"], words(3));
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::cancellation_before_start_returns_labelled_partial_results
+#[test]
+fn port_pipeline_cancelled_run_summarizes_nothing() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    let pane = host.tree().add(shell_pane("build shell"));
+    host.tree().set_screen(pane, rows(&["$ ls"]));
+    let invocation = host.cli().invoke(&["recap"], b"");
+    host.cli().cancel(&invocation);
+    host.settle();
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    assert_eq!(of_type(&records, "recap").len(), 1);
+    assert_eq!(summary(&records)["summarized"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::session_change_during_inference_drops_text_as_stale
+#[test]
+fn port_pipeline_stale_run_is_counted_once_and_never_summarized() {
+    let (mut host, pane, invocation) = start_agent_run(&["user: work"]);
+    host.tree()
+        .set_agent_session(pane, "session-2", rows(&["user: work"]));
+    let records = finish_run(&mut host, &invocation, answer(3, 3));
+    assert_eq!(summary(&records)["stale"], 1);
+    assert_eq!(summary(&records)["summarized"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::final_fence_drops_text_when_session_changed_after_inference
+#[test]
+fn port_pipeline_final_fence_marks_the_pane_stale_and_keeps_no_long_text() {
+    let (mut host, pane, invocation) = start_shell_run(&["$ ls"]);
+    let request = host.jobs().list()[0].request;
+    host.tree().set_screen(pane, rows(&["$ pwd"]));
+    host.jobs().finish(request, Ok(answer(3, 3)));
+    host.settle();
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    let record = first_recap(&records);
+    assert_eq!(record["state"], "stale");
+    assert!(record["long"].is_null(), "{record}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::vanished_pane_is_stale_not_summarized
+#[test]
+fn port_pipeline_vanished_pane_keeps_no_summary_text() {
+    let (mut host, pane, invocation) = start_shell_run(&["$ ls"]);
+    host.tree().remove(pane);
+    let records = finish_run(&mut host, &invocation, answer(3, 3));
+    assert!(first_recap(&records)["short"].is_null());
+    assert_eq!(summary(&records)["summarized"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::cache_reuses_summarized_text_for_unchanged_evidence_only
+#[test]
+fn port_pipeline_failed_answer_is_not_cached_for_unchanged_evidence() {
+    let (mut host, _, invocation) = start_shell_run(&["a"]);
+    let records = finish_run(&mut host, &invocation, b"nonsense".to_vec());
+    assert_eq!(first_recap(&records)["state"], "failed");
+    host.cli().invoke(&["recap"], b"");
+    assert_eq!(
+        host.jobs().list().len(),
+        1,
+        "a failed answer is retried, not reused"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::agent_without_verified_transcript_is_unavailable_and_never_calls_the_model
+#[test]
+fn port_pipeline_agent_without_transcript_never_falls_back_to_the_screen() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    let pane = host.tree().add(agent_pane("worker", "claude"));
+    host.tree().set_screen(pane, rows(&["$ visible screen"]));
+    host.cli().invoke(&["recap"], b"");
+    assert_eq!(host.screen_reads(), 0);
+    assert!(host.transcript_queries().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::empty_shell_screen_is_idle_and_skips_the_model
+#[test]
+fn port_pipeline_idle_screen_is_neither_failed_nor_summarized() {
+    let (mut host, _, invocation) = start_shell_run(&["", "   "]);
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    assert_eq!(summary(&records)["failed"], 0);
+    assert_eq!(summary(&records)["summarized"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::unavailable_shell_screen_is_unavailable_and_skips_the_model
+#[test]
+fn port_pipeline_unavailable_screen_counts_as_unavailable_not_failed() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    let pane = host.tree().add(shell_pane("build shell"));
+    host.tree().set_screen_unavailable(pane);
+    let invocation = host.cli().invoke(&["recap"], b"");
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    assert_eq!(summary(&records)["unavailable"], 1);
+    assert_eq!(summary(&records)["failed"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::permission_denied_gives_one_denied_record_per_pane_without_inference
+#[test]
+fn port_pipeline_denied_agent_pane_never_reads_its_transcript() {
+    let mut host = activated_server();
+    close_gate(&mut host);
+    let pane = host.tree().add(agent_pane("worker", "claude"));
+    host.tree()
+        .set_agent_session(pane, "session-1", rows(&["user: work"]));
+    let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
+    assert_eq!(host.transcript_reads(), 0);
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    assert_eq!(first_recap(&records)["state"], "denied");
+}
+
+/// REQ: PORT:ilium-client/src/recap/pipeline_tests.rs::protected_project_directory_is_denied_without_reading
+#[test]
+fn port_pipeline_denied_directory_reads_no_screen_text() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    let pane = host.tree().add(shell_pane("keys shell"));
+    host.tree().set_pane_directory(pane, "project:.ssh");
+    host.tree().set_screen(pane, rows(&["$ cat id_rsa"]));
+    host.cli().invoke(&["recap"], b"");
+    host.settle();
+    assert_eq!(host.screen_reads(), 0);
+}

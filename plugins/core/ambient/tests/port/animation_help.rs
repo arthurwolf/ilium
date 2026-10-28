@@ -43,6 +43,34 @@ fn port_animation_help_explains_the_palette_ranges_and_has_a_topic_per_scene_con
     }
 }
 
+/// REQ: PORT:ilium-client/src/settings_help/tests.rs::animation_help_covers_shared_palette_and_all_named_scene_controls
+#[test]
+fn port_animation_help_palette_topics_have_non_empty_text_and_unknown_topics_stay_absent() {
+    for id in ["AN-30", "AN-31", "AN-32"] {
+        let text = topic_text(id).unwrap_or_default();
+        assert!(!text.trim().is_empty(), "palette help topic {id} has text");
+    }
+    assert!(
+        topic_text("AN-999").is_none(),
+        "an undeclared help topic is not contributed"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/settings_help/tests.rs::narrow_animation_settings_help_anchors_reach_every_lower_control
+#[test]
+fn port_narrow_animation_settings_page_renders_without_failures_at_minimum_size() {
+    let mut host = activated_client();
+    let _ = host.render(
+        ilium_plugin_sdk::types::ViewTarget::SettingsPage("ambient".to_string()),
+        24,
+        6,
+    );
+    assert!(
+        host.failures().is_empty(),
+        "narrow settings page renders cleanly"
+    );
+}
+
 /// REQ: PORT:ilium-client/src/settings_help/tests.rs::narrow_animation_settings_help_anchors_reach_every_lower_control
 #[test]
 fn port_narrow_animation_settings_render_every_control_with_its_help_reachable() {

@@ -629,6 +629,41 @@ fn sec_305_kernel_owned_security_functions_stay_with_the_kernel_after_a_replacem
     }
 }
 
+/// REQ: SEC-305
+#[test]
+fn sec_305_kernel_owned_functions_stay_with_the_kernel_while_an_installed_replacement_is_off() {
+    let mut world = ExtWorld::with_core_plugins();
+    assert_eq!(
+        diag_code(&install_replacement(
+            &mut world,
+            REPLACEMENT,
+            SEARCH,
+            Tier::T1,
+            shape()
+        )),
+        "ok"
+    );
+    world.set_enabled(REPLACEMENT, false);
+    for function in [
+        "grant-check",
+        "admission-gate",
+        "inference-privacy-log",
+        "consent-prompts",
+        "review-dialog",
+        "breach-notices",
+        "recovery-page",
+        "audit-log",
+        "safe-mode",
+        "policy",
+    ] {
+        assert_eq!(
+            world.owner_of_kernel_function(function),
+            "kernel",
+            "{function}"
+        );
+    }
+}
+
 /// REQ: SEC-306
 #[test]
 fn sec_306_turning_a_replacement_on_and_off_writes_audit_records() {
@@ -892,4 +927,18 @@ fn ext_056_restore_call_has_a_2_s_limit() {
     );
     // manual does not pin the log name of a restore timeout
     assert!(has_log(&world, "sessions.section-restore-timeout") || has_log(&world, "timed-out"));
+}
+
+/// REQ: SEC-302
+#[test]
+fn sec_302_t1_replacement_with_the_same_surface_installs() {
+    let mut world = ExtWorld::with_core_plugins();
+    let result = install_replacement(
+        &mut world,
+        REPLACEMENT,
+        "ilium.core.fleet",
+        Tier::T1,
+        shape(),
+    );
+    assert_eq!(diag_code(&result), "ok");
 }

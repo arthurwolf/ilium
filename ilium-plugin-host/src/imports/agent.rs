@@ -5,9 +5,78 @@
 use ilium_plugin_api::generated::primitives::agent::{
     AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn,
 };
-use ilium_plugin_api::generated::types::errors::PluginError;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
 use ilium_plugin_api::generated::types::tree::{AgentModel, AgentView};
+
+/// Longest signature id, in characters.
+const MAX_ID_CHARS: usize = 64;
+/// Most process names, aliases or actions one signature holds.
+const MAX_LIST_ENTRIES: usize = 32;
+/// Longest process name, in bytes.
+const MAX_PROCESS_NAME_BYTES: usize = 255;
+/// Longest action key sequence, in bytes.
+const MAX_ACTION_KEYS_BYTES: usize = 1024;
+/// Longest toolbar button label, in cells.
+const MAX_LABEL_CELLS: usize = 32;
+/// Most turns a transcript request returns.
+const MAX_TRANSCRIPT_TURNS: u32 = 512;
+/// Most bytes a transcript request returns.
+const MAX_TRANSCRIPT_BYTES: u32 = 4 * 1024 * 1024;
+
+thread_local! {
+    /// Registered signatures by id.
+    static SIGNATURES: RefCell<HashMap<String, SignatureSpec>> = RefCell::new(HashMap::new());
+}
+
+/// Builds a refusal with the given code and a plain-text message.
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
+/// Checks every signature rule; the first broken rule is the refusal.
+fn validate_signature(spec: &SignatureSpec) -> Result<(), PluginError> {
+    let invalid = |message: &str| Err(refuse(ErrorCode::InvalidArgument, message));
+    let id_chars = spec.id.chars().count();
+    if id_chars == 0 || id_chars > MAX_ID_CHARS {
+        return invalid("signature id must be 1 to 64 characters");
+    }
+    let id_is_valid = spec
+        .id
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !id_is_valid {
+        return invalid("signature id may hold only a-z, 0-9 and hyphen");
+    }
+    if spec.process_names.is_empty() || spec.process_names.len() > MAX_LIST_ENTRIES {
+        return invalid("process-names must hold 1 to 32 entries");
+    }
+    for name in &spec.process_names {
+        if name.is_empty() || name.len() > MAX_PROCESS_NAME_BYTES {
+            return invalid("a process name must be 1 to 255 bytes");
+        }
+        if name.contains('/') && !name.starts_with('/') {
+            return invalid("a process name with a slash must be an absolute path");
+        }
+    }
+    if spec.aliases.len() > MAX_LIST_ENTRIES {
+        return invalid("aliases may hold at most 32 entries");
+    }
+    if spec.actions.len() > MAX_LIST_ENTRIES {
+        return invalid("actions may hold at most 32 entries");
+    }
+    if spec.actions.iter().any(|action| action.keys.len() > MAX_ACTION_KEYS_BYTES) {
+        return invalid("action keys may hold at most 1 KiB");
+    }
+    Ok(())
+}
 
 /// Host side of the `agent` interface.
 #[derive(Debug)]
@@ -15,49 +84,84 @@ pub struct AgentImport;
 
 impl HostAgent for AgentImport {
     fn agents(&mut self) -> Vec<AgentPane> {
-        unimplemented!("host::imports::agent::agents")
+        // No pane is identified as an agent until the detection loop feeds this import.
+        Vec::new()
     }
 
     fn view(&mut self, _pane: NodeId) -> Option<AgentView> {
-        unimplemented!("host::imports::agent::view")
+        None
     }
 
     fn session(&mut self, _pane: NodeId) -> Option<SessionRef> {
-        unimplemented!("host::imports::agent::session")
+        None
     }
 
     fn last_prompt(&mut self, _pane: NodeId) -> Option<String> {
-        unimplemented!("host::imports::agent::last_prompt")
+        None
     }
 
-    fn register_signature(&mut self, _spec: SignatureSpec) -> Result<(), PluginError> {
-        unimplemented!("host::imports::agent::register_signature")
+    fn register_signature(&mut self, spec: SignatureSpec) -> Result<(), PluginError> {
+        validate_signature(&spec)?;
+        SIGNATURES.with(|signatures| {
+            signatures.borrow_mut().insert(spec.id.clone(), spec);
+        });
+        Ok(())
     }
 
     fn set_toolbar_state(
         &mut self,
-        _button: String,
-        _pane: Option<NodeId>,
+        button: String,
+        pane: Option<NodeId>,
         _enabled: bool,
-        _label: Option<String>,
+        label: Option<String>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::agent::set_toolbar_state")
+        if label
+            .as_deref()
+            .is_some_and(|text| text.chars().count() > MAX_LABEL_CELLS)
+        {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "label may be at most 32 cells",
+            ));
+        }
+        // No pane is identified yet, so a named pane never exists.
+        if pane.is_some() {
+            return Err(refuse(ErrorCode::NotFound, "pane is not an identified agent"));
+        }
+        // A button belongs to the plugin only when a registered signature declares it as an action.
+        let owns_button = SIGNATURES.with(|signatures| {
+            signatures
+                .borrow()
+                .values()
+                .any(|spec| spec.actions.iter().any(|action| action.id == button))
+        });
+        if !owns_button {
+            return Err(refuse(ErrorCode::NotFound, "button is not owned by this plugin"));
+        }
+        Ok(())
     }
 
     fn model(&mut self, _pane: NodeId) -> Option<AgentModel> {
-        unimplemented!("host::imports::agent::model")
+        None
     }
 
     fn prompt_epoch(&mut self, _pane: NodeId) -> Option<u64> {
-        unimplemented!("host::imports::agent::prompt_epoch")
+        None
     }
 
-    fn transcript(&mut self, _query: TranscriptQuery) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::agent::transcript")
+    fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
+        if query.last_turns > MAX_TRANSCRIPT_TURNS || query.max_bytes > MAX_TRANSCRIPT_BYTES {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "transcript is limited to 512 turns and 4 MiB",
+            ));
+        }
+        // No pane has an agent session yet, so there is no transcript to read.
+        Err(refuse(ErrorCode::NotFound, "pane has no agent session"))
     }
 
     fn take_transcript(&mut self, _request: RequestId) -> Option<Vec<TranscriptTurn>> {
-        unimplemented!("host::imports::agent::take_transcript")
+        None
     }
 }
 

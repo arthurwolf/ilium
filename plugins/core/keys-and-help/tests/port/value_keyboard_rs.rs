@@ -149,3 +149,56 @@ fn port_001_unadmitted_prefix_changes_preserve_the_saved_values() {
     assert!(text.contains("Prefix is Ctrl+B."), "{text}");
     assert!(!text.contains("Ctrl+Z"), "{text}");
 }
+
+/// REQ: PORT:ilium-client/src/value_keyboard.rs::both_prefix_catalogs_contain_every_letter_and_paint_precise_controls
+#[test]
+fn value_keyboard_port_second_a_digit_is_not_an_admitted_prefix_letter() {
+    let mut host = tmux_host();
+    change(&mut host, "shortcut_base", "ctrl+1");
+    assert!(host.kernel_settings().writes().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_keyboard.rs::prefix_catalog_retains_selection_after_save_failure_then_retries_without_remapping
+#[test]
+fn value_keyboard_port_second_a_failed_save_does_not_touch_the_navigation_prefix() {
+    let mut host = tmux_host();
+    host.inject_failure(
+        "kernel-settings.write",
+        PluginError {
+            code: ErrorCode::NotPermitted,
+            message: "read-only file".to_string(),
+            retry_after_ms: None,
+        },
+    );
+    change(&mut host, "shortcut_base", "ctrl+z");
+    assert!(host
+        .kernel_settings()
+        .writes()
+        .iter()
+        .all(|(_, key, _)| key != "navigation_shortcut_base"));
+}
+
+/// REQ: PORT:ilium-client/src/value_keyboard.rs::settings_renderer_paints_both_prefixes_at_the_pointer_geometry
+#[test]
+fn value_keyboard_port_second_the_prefix_row_does_not_carry_the_navigation_value() {
+    let mut host = host_with_tab(
+        json!({"shortcut_base": "ctrl+b", "navigation_shortcut_base": "ctrl+g", "preset": "tmux"}),
+    );
+    let screen = host.render(keyboard_page(), 100, 30);
+    let (row, _) = screen.find("Prefix").expect("Prefix row");
+    let line = screen.row(row);
+    assert!(!line.contains("Ctrl+G"), "{line:?}");
+}
+
+/// REQ: PORT:ilium-client/src/value_keyboard.rs::onboarding_prefix_rejects_replacement_editor_and_unadmitted_steps_preserve_values
+#[test]
+fn value_keyboard_port_second_an_admitted_prefix_change_is_saved_to_the_tab() {
+    let mut host = tmux_host();
+    change(&mut host, "shortcut_base", "ctrl+d");
+    assert!(host
+        .kernel_settings()
+        .tab("keyboard")
+        .expect("tab")
+        .to_string()
+        .contains("ctrl+d"));
+}

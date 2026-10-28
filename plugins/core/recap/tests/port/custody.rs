@@ -92,3 +92,68 @@ fn port_custody_allows_ordinary_project_files() {
         assert_eq!(short["rejected_pointers"], 0, "{path}");
     }
 }
+
+/// REQ: PORT:ilium-client/src/recap/custody.rs::redacts_token_value_suffix_without_hiding_the_key_name
+#[test]
+fn port_custody_access_token_value_is_redacted_and_its_name_kept() {
+    let evidence = evidence_of(&["export ACCESS_TOKEN=mytokenvalue456"]);
+    assert!(evidence.contains("ACCESS_TOKEN=[redacted]"), "{evidence}");
+    assert!(!evidence.contains("mytokenvalue456"));
+}
+
+/// REQ: PORT:ilium-client/src/recap/custody.rs::redacts_key_values_but_keeps_key_names
+#[test]
+fn port_custody_password_value_is_redacted_and_its_name_kept() {
+    let evidence = evidence_of(&["db password=hunter2hunter2 in config"]);
+    assert!(evidence.contains("password=[redacted]"), "{evidence}");
+    assert!(!evidence.contains("hunter2hunter2"));
+}
+
+/// REQ: PORT:ilium-client/src/recap/custody.rs::redacts_token_shapes_and_private_key_blocks
+#[test]
+fn port_custody_rsa_private_key_block_body_is_redacted() {
+    let evidence = evidence_of(&[
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "MIIEowIBAAKCAQEAvQ0kLe",
+        "-----END RSA PRIVATE KEY-----",
+    ]);
+    assert!(!evidence.contains("MIIEowIBAAKCAQEAvQ0kLe"), "{evidence}");
+    assert!(evidence.contains("[redacted]"), "{evidence}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/custody.rs::leaves_ordinary_prose_untouched
+#[test]
+fn port_custody_prose_mentioning_secrets_without_values_is_untouched() {
+    let text = "Reviewed the token budget and the secrets folder layout.";
+    let evidence = evidence_of(&[text]);
+    assert!(evidence.contains(text), "{evidence}");
+    assert!(!evidence.contains("[redacted]"), "{evidence}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/custody.rs::denies_credential_stores_and_key_files
+#[test]
+fn port_custody_denied_key_file_is_dropped_while_its_sibling_survives() {
+    let body = serde_json::json!({
+        "short": {"text": "wrote two files", "pointers": [
+            {"path": "deploy/id_ed25519", "note": "key"},
+            {"path": "src/lib.rs", "note": "code"}
+        ]},
+        "long": {"text": "wrote two files", "pointers": []}
+    });
+    let short = short_after_answer(
+        &["wrote deploy/id_ed25519 and src/lib.rs"],
+        &[("deploy/id_ed25519", "x"), ("src/lib.rs", "x")],
+        body,
+    );
+    assert_eq!(short["pointers"].as_array().map(Vec::len), Some(1));
+    assert_eq!(short["pointers"][0]["path"], "src/lib.rs");
+    assert_eq!(short["rejected_pointers"], 1);
+}
+
+/// REQ: PORT:ilium-client/src/recap/custody.rs::allows_ordinary_project_files
+#[test]
+fn port_custody_ordinary_pointer_keeps_its_path_and_note() {
+    let short = pointer_outcome("docs/TODO.md");
+    assert_eq!(short["pointers"][0]["path"], "docs/TODO.md");
+    assert_eq!(short["pointers"][0]["note"], "note");
+}

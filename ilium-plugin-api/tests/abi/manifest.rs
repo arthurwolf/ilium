@@ -424,3 +424,14 @@ proptest! {
         prop_assert!(ApiVersion::from_custom_section(&bytes).is_err());
     }
 }
+
+/// REQ: ABI-007
+#[test]
+fn abi_007_a_listed_export_that_the_component_has_is_not_refused() {
+    let mut component = matching_server();
+    component.exports.push("detector".to_owned());
+    let mut value = minimal_manifest();
+    value["server"]["exports"] = json!(["detector"]);
+    assert!(!component_codes(&value, &component)
+        .contains(&codes::manifest::EXPORTS_MISMATCH.to_owned()));
+}

@@ -129,3 +129,99 @@ fn port_061_a_hide_delay_of_zero_keeps_a_done_and_an_error_row_visible() {
         "{text}"
     );
 }
+
+/// REQ: PORT:ilium-client/src/progress_display.rs::absent_report_is_hidden_and_future_timestamp_does_not_underflow
+#[test]
+fn port_061_an_absent_report_does_not_hide_its_sibling_row() {
+    let mut host = activated_client();
+    let mut absent = retained("done", "absent sibling");
+    absent["report"] = Value::Null;
+    show(
+        &mut host,
+        vec![
+            absent,
+            monitor_with(18, "sibling", "done", 100.0, "present sibling", "", Value::Null),
+        ],
+    );
+    let text = footer(&mut host, 80, 12);
+    assert!(!text.contains("absent sibling"), "{text}");
+    assert!(text.contains("present sibling"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/progress_display.rs::completed_footer_expires_at_configured_deadline_without_mutation
+#[test]
+fn port_061_an_expired_done_row_is_hidden_while_a_running_row_beside_it_stays() {
+    let mut host = activated_client();
+    show(
+        &mut host,
+        vec![
+            retained("done", "expired done"),
+            monitor_with(18, "live", "running", 30.0, "still live row", "", Value::Null),
+        ],
+    );
+    pass(&mut host, 60_000);
+    let text = footer(&mut host, 80, 12);
+    assert!(!text.contains("expired done"), "{text}");
+    assert!(text.contains("still live row"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/progress_display.rs::running_at_one_hundred_percent_is_not_completion
+#[test]
+fn port_061_a_healthy_running_monitor_at_one_hundred_percent_stays_after_the_done_deadline() {
+    let mut host = activated_client();
+    show(
+        &mut host,
+        vec![monitor_with(
+            17,
+            "expiry-regression",
+            "running",
+            100.0,
+            "healthy hundred",
+            "",
+            Value::Null,
+        )],
+    );
+    pass(&mut host, 600_000);
+    assert!(footer(&mut host, 80, 12).contains("healthy hundred"));
+}
+
+/// REQ: PORT:ilium-client/src/progress_display.rs::task_errors_expire_without_removing_the_error_record
+#[test]
+fn port_061_an_expired_task_error_keeps_its_monitor_in_the_status_count() {
+    let (mut server, pane) = host_with_pane();
+    register(
+        &mut server,
+        pane,
+        PROBE,
+        &running("expiry-regression", 10, "W"),
+        &[],
+    );
+    settle_with(
+        &mut server,
+        &failed("expiry-regression", 100, "failed row", "task failed"),
+    );
+    tick(&mut server, 120);
+    assert_eq!(status(&mut server, pane)["monitor_count"], 1);
+}
+
+/// REQ: PORT:ilium-client/src/progress_display.rs::zero_duration_keeps_completed_results_visible
+#[test]
+fn port_061_a_non_zero_delay_after_zero_hides_an_already_finished_row() {
+    let mut host = activated_client();
+    set_kernel_setting(
+        &mut host,
+        "ui.completed_progress_hide_after_seconds",
+        json!(0),
+    )
+    .expect("accepted");
+    show(&mut host, vec![retained("done", "delay changed")]);
+    pass(&mut host, 86_400_000);
+    assert!(footer(&mut host, 80, 12).contains("delay changed"));
+    set_kernel_setting(
+        &mut host,
+        "ui.completed_progress_hide_after_seconds",
+        json!(1),
+    )
+    .expect("accepted");
+    assert!(!footer(&mut host, 80, 12).contains("delay changed"));
+}

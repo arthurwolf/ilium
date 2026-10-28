@@ -150,3 +150,77 @@ fn port_dirty_flag_of_an_edited_buffer_is_true() {
     seed_text(&mut editor, 1, "changed");
     assert_eq!(dirty_of(&mut editor), json!(true));
 }
+
+/// REQ: PORT:ilium-client/tests/editor_navigation.rs::source_pane_wheel_event_routes_to_the_editor_viewport
+#[test]
+fn port_navigation_wheel_up_at_the_top_keeps_the_first_line_visible() {
+    let mut host = scrolling_host();
+    host.deliver_one(wheel(PointerKind::WheelUp));
+    let screen = render_pane(&mut host, 30, 6);
+    assert!(screen.find("line 0").is_some(), "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::wheel_scroll_does_not_move_the_cursor_in_highlighted_files
+#[test]
+fn port_navigation_one_wheel_step_hides_the_lines_below_the_six_row_window() {
+    let mut host = plain_host(
+        "scroll.rs",
+        Some("rust"),
+        &(0..10)
+            .map(|r| format!("let line_{r} = {r};\n"))
+            .collect::<String>(),
+        &[("show_line_numbers", json!(false))],
+    );
+    host.deliver_one(wheel(PointerKind::WheelDown));
+    let screen = render_pane(&mut host, 40, 6);
+    assert!(screen.find("line_9").is_none(), "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::cursor_navigation_reveals_cursor_after_source_wheel_scroll
+#[test]
+fn port_navigation_ctrl_home_hides_the_bottom_lines_again() {
+    let mut host = scrolling_host();
+    for _ in 0..40 {
+        host.deliver_one(wheel(PointerKind::WheelDown));
+    }
+    host.key(ViewTarget::Pane(NodeId(7)), "ctrl+home");
+    let screen = render_pane(&mut host, 30, 6);
+    assert!(screen.find("line 9").is_none(), "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::save_without_path_errors
+#[test]
+fn port_pane_save_of_a_pathless_buffer_leaves_no_pending_request() {
+    let mut host = crate::support::active_host(&[]);
+    host.deliver_one(Event::EditorOpened(crate::support::buffer_ref(
+        1, None, None, 1,
+    )));
+    host.send_action(
+        ViewTarget::Pane(NodeId(7)),
+        "save",
+        ilium_plugin_sdk::generated::types::ActionKind::Activated,
+        ilium_plugin_sdk::generated::types::ActionValue::None,
+    );
+    assert!(
+        host.pending_requests().is_empty(),
+        "{} request(s) pending",
+        host.pending_requests().len()
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::close_confirmation_is_none_for_a_clean_editor
+#[test]
+fn port_dirty_flag_of_a_clean_highlighted_buffer_is_false() {
+    let mut editor = direct("{}");
+    direct_open(&mut editor, 1, Some("rust"), 1);
+    assert_eq!(dirty_of(&mut editor), json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::close_confirmation_warns_about_a_dirty_editor
+#[test]
+fn port_dirty_flag_of_an_edited_highlighted_buffer_is_true() {
+    let mut editor = direct("{}");
+    direct_open(&mut editor, 1, Some("rust"), 1);
+    seed_text(&mut editor, 1, "fn main() {}");
+    assert_eq!(dirty_of(&mut editor), json!(true));
+}

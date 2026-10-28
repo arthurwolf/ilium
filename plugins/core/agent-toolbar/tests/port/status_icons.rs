@@ -19,6 +19,198 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
 
 /// REQ: PORT:ilium-client/src/status_icons.rs::detector_provenance_names_the_rule_and_sanitizes_terminal_text
 #[test]
+fn port_status_icons_detector_provenance_names_the_rule_and_sanitizes_terminal_text_alternate() {
+    check(
+        Place::Client,
+        "status.provenance",
+        r####"{"observed": null}"####,
+        r####"{"includes": ["rule", "context"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::every_non_empty_signal_has_an_explanation
+#[test]
+fn port_status_icons_every_non_empty_signal_has_an_explanation_alternate() {
+    check(
+        Place::Client,
+        "status.explanation",
+        r####"{"signal": "none"}"####,
+        r####"{"explanation": null}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::family_members_animate_from_their_own_frame_and_others_stay_static
+#[test]
+fn port_status_icons_family_members_animate_from_their_own_frame_and_others_stay_static_alternate() {
+    check(
+        Place::Client,
+        "status.animate",
+        r####"{"cases": [["🕗", "background-clock", 220, 220], ["🕗", "background-clock", 220, 220]]}"####,
+        r####"{"deterministic": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::goal_and_parked_explanations_describe_observed_state_without_claiming_control
+#[test]
+fn port_status_icons_goal_and_parked_explanations_describe_observed_state_without_claiming_control_alternate(
+) {
+    check(
+        Place::Client,
+        "status.explanation",
+        r####"{"signals": ["goal-blocked"]}"####,
+        r####"{"goal_contains": ["does not control"], "goal_excludes": ["/goal resume"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::identity_provenance_fallback_matches_the_server_status_kind
+#[test]
+fn port_status_icons_identity_provenance_fallback_matches_the_server_status_kind_alternate() {
+    check(
+        Place::Client,
+        "status.identity",
+        r####"{"server_kind": "Board", "detector": null}"####,
+        r####"{"contains": ["board pane"], "excludes": ["classification evidence yet"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::missing_identity_provenance_matches_each_pane_content_kind
+#[test]
+fn port_status_icons_missing_identity_provenance_matches_each_pane_content_kind_alternate() {
+    check(
+        Place::Client,
+        "status.identity-missing",
+        r####"{"content": "editor"}"####,
+        r####"{"contains": ["editor pane", "rather than an agent process"], "excludes": ["classification evidence yet"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::missing_worktree_and_control_characters_are_explicit
+#[test]
+fn port_status_icons_missing_worktree_and_control_characters_are_explicit_alternate() {
+    check(
+        Place::Client,
+        "status.worktree-tooltip",
+        r####"{"missing": true, "branch": "agent/fix"}"####,
+        r####"{"contains": ["Live Git status: worktree missing", "Branch: agent/fix"], "excludes": ["Changes:"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::owned_worktree_tooltip_renders_above_a_second_line_anchor_near_bottom
+#[test]
+fn port_status_icons_owned_worktree_tooltip_renders_above_a_second_line_anchor_near_bottom_alternate(
+) {
+    check(
+        Place::Client,
+        "status.tooltip-render",
+        r####"{"anchor_line": 2, "near_bottom": false}"####,
+        r####"{"renders_above": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::progress_frames_are_two_cells_and_monotonic_in_fill
+#[test]
+fn port_status_icons_progress_frames_are_two_cells_and_monotonic_in_fill_alternate() {
+    check(
+        Place::Client,
+        "status.progress",
+        r####"{"frames": "task-progress", "frame_index": 0}"####,
+        r####"{"dots": 0}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::provenance_is_rendered_below_the_description_in_muted_text
+#[test]
+fn port_status_icons_provenance_is_rendered_below_the_description_in_muted_text_alternate() {
+    check(
+        Place::Client,
+        "status.tooltip-render",
+        r####"{"provenance": null}"####,
+        r####"{"why_row_present": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::provenance_stays_visible_when_a_long_body_exceeds_the_screen_height
+#[test]
+fn port_status_icons_provenance_stays_visible_when_a_long_body_exceeds_the_screen_height_alternate() {
+    check(
+        Place::Client,
+        "status.tooltip-render",
+        r####"{"long_body": true, "screen_height": 5}"####,
+        r####"{"why_row_visible": true, "body_truncated": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::shell_activity_provenance_reports_the_latest_cause_and_suppresses_stale_phase
+#[test]
+fn port_status_icons_shell_activity_provenance_reports_the_latest_cause_and_suppresses_stale_phase_alternate(
+) {
+    check(
+        Place::Client,
+        "status.shell-activity",
+        r####"{"cause": "VisibleTextChanged", "phase": "fast"}"####,
+        r####"{"contains": ["visible-cell text fingerprint changed"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::shell_activity_reason_sanitizes_and_bounds_observed_terminal_text
+#[test]
+fn port_status_icons_shell_activity_reason_sanitizes_and_bounds_observed_terminal_text_alternate() {
+    check(
+        Place::Client,
+        "status.shell-activity",
+        r####"{"visible_text": true, "text_length": 600}"####,
+        r####"{"max_chars": 512, "ends_with": "[truncated]"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::shorter_progress_family_maps_zero_and_bucket_boundaries
+#[test]
+fn port_status_icons_shorter_progress_family_maps_zero_and_bucket_boundaries_alternate() {
+    check(
+        Place::Client,
+        "status.progress-family",
+        r####"{"buckets": [13], "preset_index": 2}"####,
+        r####"{"glyphs": ["🌕"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::unavailable_agent_has_distinct_recovery_glyph_and_explicit_uncertainty
+#[test]
+fn port_status_icons_unavailable_agent_has_distinct_recovery_glyph_and_explicit_uncertainty_alternate(
+) {
+    check(
+        Place::Client,
+        "status.explanation",
+        r####"{"signal": "agent-unavailable"}"####,
+        r####"{"contains": ["did not establish a live agent composer"], "excludes": ["crashed", "exited"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::workspace_tooltip_distinguishes_unchecked_live_state_from_a_clean_checkout
+#[test]
+fn port_status_icons_workspace_tooltip_distinguishes_unchecked_live_state_from_a_clean_checkout_alternate(
+) {
+    check(
+        Place::Client,
+        "status.worktree-tooltip",
+        r####"{"branch": "agent/fix", "git_dir": null}"####,
+        r####"{"contains": ["Branch: agent/fix"], "excludes": ["Repository Git dir"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::workspace_tooltip_reports_live_counts_and_foreign_ownership
+#[test]
+fn port_status_icons_workspace_tooltip_reports_live_counts_and_foreign_ownership_alternate() {
+    check(
+        Place::Client,
+        "status.worktree-tooltip",
+        r####"{"status": {"staged": 0, "modified": 0, "untracked": 0, "conflicted": 0, "upstream": null, "ahead": 0, "behind": 0, "last_commit": null}, "foreign": false}"####,
+        r####"{"contains": ["Changes: 0 staged, 0 modified, 0 untracked, 0 conflicted"], "excludes": ["will not remove"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/status_icons.rs::detector_provenance_names_the_rule_and_sanitizes_terminal_text
+#[test]
 fn port_status_icons_detector_provenance_names_the_rule_and_sanitizes_terminal_text() {
     check(
         Place::Client,

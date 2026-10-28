@@ -443,3 +443,177 @@ fn port_cost_settings_toml_round_trip_keeps_nested_options_and_accepts_partial_f
     assert_eq!(partial["settings"]["meter"]["enabled"], json!(false));
     assert_eq!(partial["settings"]["sparkline_window_minutes"], json!(360));
 }
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::always_visible_options_show_without_hover
+#[test]
+fn port_cost_settings_always_visible_option_leaves_other_options_on_hover() {
+    let reply = apply(
+        json!({}),
+        json!([adjust("visibility:meter", 0), { "probe": { "option": "level_glyph", "hovered": false } }]),
+    );
+    assert_eq!(reply["settings"]["meter"]["visibility"], json!("always"));
+    assert_eq!(reply["settings"]["level_glyph"]["visibility"], json!("hover"));
+    assert_eq!(reply["probes"][0], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::defaults_show_only_the_meter_and_only_on_hover
+#[test]
+fn port_cost_settings_disabling_the_meter_hides_it_even_when_hovered() {
+    let reply = apply(
+        json!({}),
+        json!([adjust("display:meter", 0), { "probe": { "option": "meter", "hovered": true } }]),
+    );
+    assert_eq!(reply["settings"]["meter"]["enabled"], json!(false));
+    assert_eq!(reply["probes"][0], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::direct_numbers_accept_valid_intermediates_without_ladder_quantization
+#[test]
+fn port_cost_settings_direct_budget_entry_leaves_quota_percent_alone() {
+    let reply = apply(json!({}), json!([set_number("budget", "17.125")]));
+    assert!(!is_err(&reply["results"][0]));
+    assert_eq!(reply["settings"]["budget_usd"], json!(17.125));
+    assert_eq!(reply["settings"]["quota_budget_percent"], json!(10.0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::direct_sparkline_window_preserves_native_duration_entry_and_rejects_invalid_drafts
+#[test]
+fn port_cost_settings_duration_entry_accepts_days_and_hours_equivalently() {
+    let days = apply(json!({}), json!([set_number("sparkline_window", "1d")]));
+    let hours = apply(json!({}), json!([set_number("sparkline_window", "24h")]));
+    assert_eq!(days["settings"]["sparkline_window_minutes"], json!(1440));
+    assert_eq!(
+        hours["settings"]["sparkline_window_minutes"],
+        days["settings"]["sparkline_window_minutes"]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::every_row_has_a_distinct_catalogued_help_id
+#[test]
+fn port_cost_settings_every_visible_row_carries_exactly_one_help_id() {
+    let reply = client(
+        "settings.rows",
+        json!({ "settings": { "calibration": "peer_relative" } }),
+    );
+    let rows = reply["rows"].as_array().cloned().unwrap_or_default();
+    let help_ids = reply["help_ids"].as_array().cloned().unwrap_or_default();
+    assert_eq!(help_ids.len(), rows.len());
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::every_row_has_a_distinct_or_shared_help_id_in_range
+#[test]
+fn port_cost_settings_help_ids_use_the_cost_prefix() {
+    let reply = client("settings.rows", json!({ "settings": {} }));
+    for id in reply["help_ids"].as_array().cloned().unwrap_or_default() {
+        assert!(
+            id.as_str().is_some_and(|text| text.starts_with("COST-")),
+            "{id}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::invalid_direct_number_never_changes_settings
+#[test]
+fn port_cost_settings_rejected_entry_keeps_the_quota_metric_settings() {
+    let before = apply(json!({ "metric": "quota" }), json!([]));
+    let reply = apply(
+        json!({ "metric": "quota" }),
+        json!([set_number("budget", "0")]),
+    );
+    assert!(is_err(&reply["results"][0]));
+    assert_eq!(reply["settings"], before["settings"]);
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::numeric_ladders_preserve_endpoints_and_values_outside_presets
+#[test]
+fn port_cost_settings_history_ladder_steps_between_adjacent_rungs() {
+    let step = |current: Value, direction: i64| {
+        client(
+            "settings.step-ladder",
+            json!({ "ladder": "history_day_steps", "current": current, "direction": direction }),
+        )
+    };
+    assert_eq!(step(json!(30), -1), json!(14));
+    assert_eq!(step(json!(14), 1), json!(30));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::presets_wrap_and_custom_cuts_snap
+#[test]
+fn port_cost_settings_fixed_presets_wrap_upwards_from_the_last_rung() {
+    let presets = client("settings.presets", json!({}));
+    assert_eq!(presets["fixed_presets"].as_array().map(Vec::len), Some(5));
+    let last = presets["fixed_presets"][4].clone();
+    let first = presets["fixed_presets"][0].clone();
+    let reply = apply(json!({ "fixed_cuts": last }), json!([adjust("fixed_preset", 1)]));
+    assert_eq!(reply["settings"]["fixed_cuts"], first);
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::quota_metric_adds_its_window_row_and_keeps_dollar_values_apart
+#[test]
+fn port_cost_settings_quota_window_toggle_leaves_the_budget_percent_unchanged() {
+    let quota = apply(json!({}), json!([adjust("metric:dollars", 1)]));
+    let before = quota["settings"]["quota_budget_percent"].clone();
+    let toggled = apply(quota["settings"].clone(), json!([adjust("quota_window", 0)]));
+    assert_eq!(toggled["settings"]["quota_budget_percent"], before);
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::rows_follow_the_selected_calibration
+#[test]
+fn port_cost_settings_budget_calibration_drops_the_burn_rate_rows() {
+    let reply = client("settings.rows", json!({ "settings": { "calibration": "budget" } }));
+    let rows = reply["rows"].as_array().cloned().unwrap_or_default();
+    assert!(!rows.contains(&json!("burn_preset")));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::sanitizing_repairs_hand_edited_nonsense
+#[test]
+fn port_cost_settings_sanitizing_keeps_valid_hand_edited_values() {
+    let reply = apply(
+        json!({ "history_days": 90, "sparkline_window_minutes": 240 }),
+        json!([{ "sanitize": true }]),
+    );
+    assert_eq!(reply["settings"]["history_days"], json!(90));
+    assert_eq!(reply["settings"]["sparkline_window_minutes"], json!(240));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::sparkline_cells_are_clamped
+#[test]
+fn port_cost_settings_sparkline_cells_step_inside_the_range() {
+    let range = apply(json!({}), json!([]))["sparkline_cell_range"].clone();
+    let reply = apply(
+        json!({ "sparkline_cells": range[0] }),
+        json!([adjust("sparkline_cells", 1)]),
+    );
+    assert_eq!(reply["results"][0], json!(true));
+    assert_eq!(
+        reply["settings"]["sparkline_cells"],
+        json!(range[0].as_i64().unwrap_or(0) + 1)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::sparkline_window_steps_through_the_ladder_and_snaps_custom_values
+#[test]
+fn port_cost_settings_sparkline_window_steps_down_from_the_top_rung() {
+    let reply = apply(
+        json!({ "sparkline_window_minutes": 43_200 }),
+        json!([adjust("sparkline_window", -1)]),
+    );
+    assert_eq!(reply["results"][0], json!(true));
+    assert!(reply["settings"]["sparkline_window_minutes"]
+        .as_i64()
+        .is_some_and(|minutes| minutes < 43_200));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings.rs::toml_round_trip_keeps_nested_options_and_accepts_partial_files
+#[test]
+fn port_cost_settings_toml_round_trip_keeps_custom_price_rows() {
+    let reply = apply(
+        json!({ "prices": { "gpt-reserve": { "input": 1.0, "output": 2.0, "cache_read": 0.1, "cache_write": 0.0 } } }),
+        json!([]),
+    );
+    let round = client(
+        "settings.toml-round-trip",
+        json!({ "settings": reply["settings"].clone() }),
+    );
+    assert_eq!(round["settings"]["prices"]["gpt-reserve"]["output"], json!(2.0));
+}

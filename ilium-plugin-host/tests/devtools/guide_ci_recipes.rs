@@ -586,3 +586,12 @@ fn dev_778_the_documented_sign_step_runs_only_on_tags() {
     assert!(guide.contains("if: startsWith(github.ref, 'refs/tags/v')"));
     assert!(guide.contains("rm -f \"$RUNNER_TEMP/key\""));
 }
+
+/// REQ: DEV-766
+#[test]
+fn dev_766_hash_check_is_present_and_never_masked_by_or_true() {
+    for text in [github_file(), gitlab_file()] {
+        assert!(text.contains("sha256sum --check"), "no hash check in the recipe");
+        assert!(!text.contains("sha256sum --check || true"), "the hash check can be skipped");
+    }
+}

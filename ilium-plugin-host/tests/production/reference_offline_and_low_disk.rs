@@ -1,6 +1,8 @@
 //! Manual page `reference-offline-and-low-disk`: the backup and restore disk-space checks and the
 //! disk-full behaviour of both commands (HST-132..HST-135).
 
+use ilium_plugin_host::host_capacity::{backup_space_precheck, BACKUP_RESERVE_BYTES};
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-offline-and-low-disk.md";
@@ -19,7 +21,10 @@ fn hst_132_backup_refuses_with_backup_no_space_before_any_write() {
 /// REQ: HST-132
 #[test]
 fn hst_132_backup_refusal_one_byte_under_the_threshold_leaves_no_archive() {
-    unimplemented!("ilium_plugin_host::cli::backup_space_precheck")
+    let backed_up = 1_000_000u64;
+    let threshold = backed_up + BACKUP_RESERVE_BYTES;
+    assert_eq!(backup_space_precheck(backed_up, threshold - 1), Err("backup.no-space"));
+    assert_eq!(backup_space_precheck(backed_up, threshold), Ok(()));
 }
 
 /// REQ: HST-133

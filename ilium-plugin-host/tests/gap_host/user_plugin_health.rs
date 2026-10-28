@@ -33,3 +33,15 @@ fn hst_640_plugins_screen_shows_health_error_rates_and_memory_and_renders_64_plu
     );
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
 }
+
+/// REQ: HST-640
+#[test]
+fn hst_640_plugins_screen_lists_one_row_per_installed_plugin() {
+    let rig = rig();
+    rig.install_many(64);
+    let screen = rig.open_plugins_screen();
+    assert!(
+        screen.rows().len() >= 64,
+        "the Plugins screen has a row for each of the 64 installed plugins"
+    );
+}

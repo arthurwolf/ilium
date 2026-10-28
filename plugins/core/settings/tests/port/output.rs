@@ -96,3 +96,91 @@ fn port_089_each_view_keeps_its_own_frame_and_no_view_borrows_anothers_cells() {
     );
     assert!(host.failures().is_empty());
 }
+
+/// REQ: PORT:ilium-client/src/presentation.rs::blocked_logical_drop_retains_worker_and_escaped_frame_until_actual_join, F-089, F-090
+#[test]
+fn port_089_the_frame_after_a_failed_write_still_fills_the_requested_size() {
+    let mut host = client_host();
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Io, "write failed"),
+    );
+    toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
+    let screen = render_checked(&mut host, tab("user-interface"), 60, 20);
+    assert_eq!((screen.columns, screen.rows), (60, 20));
+}
+
+/// REQ: PORT:ilium-client/src/presentation.rs::blocked_output_bounds_admission_and_emits_fifo_before_shutdown, F-089, F-090
+#[test]
+fn port_089_writes_are_applied_in_the_order_the_user_made_them() {
+    let mut host = client_host();
+    toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
+    toggle(&mut host, "user-interface", "ui.use_stable_glyphs", false);
+    toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
+    assert_eq!(
+        value_of(&mut host, "ui.use_stable_glyphs"),
+        Some(json!(true))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/presentation.rs::failed_output_returns_uncertain_custody_without_success_proof, F-089, F-090
+#[test]
+fn port_089_a_failed_scheme_change_is_not_reported_as_stored() {
+    let mut host = client_host();
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Io, "write failed"),
+    );
+    choose(&mut host, "user-interface", "ui.color_scheme", "light");
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("dark")));
+}
+
+/// REQ: PORT:ilium-client/src/presentation.rs::oversized_graphics_symbol_releases_reserved_capacity, F-089, F-090
+#[test]
+fn port_089_a_one_cell_frame_keeps_its_symbol_within_the_bound() {
+    let mut host = client_host();
+    let screen = host.render(tab("user-interface"), 1, 1);
+    assert_eq!((screen.columns, screen.rows), (1, 1));
+    assert!(screen.cell(0, 0).symbol.chars().count() <= 8);
+}
+
+/// REQ: PORT:ilium-client/src/presentation.rs::reservations_cannot_cross_output_owners, F-089, F-090
+#[test]
+fn port_089_two_hosts_rendering_in_turn_keep_their_own_frames() {
+    let mut first = client_host();
+    let mut second = client_host();
+    let first_frame = first.render(tab("icons"), 80, 24);
+    let second_frame = second.render(tab("user-interface"), 80, 24);
+    assert_ne!(first_frame, second_frame);
+    assert_eq!(first.render(tab("icons"), 80, 24), first_frame);
+    assert_eq!(
+        second.render(tab("user-interface"), 80, 24),
+        second_frame
+    );
+}
+
+/// REQ: PORT:ilium-client/src/presentation.rs::retained_acknowledged_buffers_keep_distinct_frame_admission, F-089, F-090
+#[test]
+fn port_089_a_frame_of_another_tab_does_not_change_the_next_frame_of_the_first() {
+    let mut host = client_host();
+    let first = host.render(tab("icons"), 80, 24);
+    let _other = host.render(tab("user-interface"), 120, 40);
+    assert_eq!(host.render(tab("icons"), 80, 24), first);
+}
+
+/// REQ: PORT:ilium-client/src/presentation.rs::uncertain_output_tail_is_not_retried_on_drop, F-089, F-090
+#[test]
+fn port_089_a_failed_write_is_not_retried_by_the_passage_of_time() {
+    let mut host = client_host();
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Io, "write failed"),
+    );
+    toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
+    host.advance_clock(5000);
+    host.settle();
+    assert_eq!(
+        value_of(&mut host, "ui.use_stable_glyphs"),
+        Some(json!(false))
+    );
+}

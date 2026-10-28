@@ -1,5 +1,5 @@
 //! The disabled-blocked state (user-install-and-manage.md, user-troubleshooting.md and
-//! guide-publishing.md): USR-174 to USR-177. Red phase: the rig operations below are skeletons.
+//! guide-publishing.md): USR-174 to USR-177. The helpers below drive the plugin command line; they fail until the host blocks plugins.
 
 use crate::support::*;
 
@@ -10,27 +10,64 @@ enum BlockCause {
 }
 
 /// Blocks an installed plugin the way the registry or the trust list would.
-fn block_plugin(_rig: &mut UserRig, _plugin_id: &str, _cause: BlockCause) {
-    unimplemented!("revoke the signing key as compromised or apply a registry takedown")
+fn block_plugin(rig: &mut UserRig, plugin_id: &str, cause: BlockCause) {
+    let output = match cause {
+        BlockCause::KeyRevokedCompromised => rig.cli(&[
+            "trust",
+            "revoke",
+            plugin_id,
+            "--reason",
+            "compromised",
+            "--json",
+        ]),
+        BlockCause::RegistryTakedown => rig.cli(&["registry", "takedown", plugin_id, "--json"]),
+    };
+    assert_eq!(
+        result_exit_code(&output),
+        0,
+        "blocking {plugin_id} failed: {:?}",
+        error_codes(&output)
+    );
 }
 
 /// The files that must survive a block: grants, settings and data of one plugin.
-fn plugin_state_files(_rig: &UserRig, _plugin_id: &str) -> Vec<(String, Vec<u8>)> {
-    unimplemented!("read the grant file, the settings file and the data folder of the plugin")
+fn plugin_state_files(rig: &UserRig, plugin_id: &str) -> Vec<(String, Vec<u8>)> {
+    let mut files = Vec::new();
+    if let Ok(bytes) = std::fs::read(rig.grants_path()) {
+        files.push(("grants".to_string(), bytes));
+    }
+    if let Some(value) = rig.plugin_setting(plugin_id, "mode") {
+        files.push(("setting:mode".to_string(), value.into_bytes()));
+    }
+    for (name, bytes) in tree_snapshot(&rig.data_dir().join("plugins").join("data").join(plugin_id)) {
+        files.push((format!("data:{name}"), bytes));
+    }
+    files
 }
 
 /// Runs `ilium plugin enable` and returns the error codes and the row state afterwards.
 fn enable_blocked(
-    _rig: &mut UserRig,
-    _plugin_id: &str,
-    _accept_risk: bool,
+    rig: &mut UserRig,
+    plugin_id: &str,
+    accept_risk: bool,
 ) -> (Vec<String>, String) {
-    unimplemented!("run the enable command and read the plugin row")
+    let mut arguments = vec!["enable", plugin_id, "--json"];
+    if accept_risk {
+        arguments.push("--accept-risk");
+    }
+    let output = rig.cli(&arguments);
+    (error_codes(&output), list_row(rig, plugin_id).state)
 }
 
 /// The failure count `ilium plugin list` reports for the plugin.
-fn reported_failure_count(_rig: &mut UserRig, _plugin_id: &str) -> u32 {
-    unimplemented!("read the failure count of the plugin row")
+fn reported_failure_count(rig: &mut UserRig, plugin_id: &str) -> u32 {
+    let output = rig.cli(&["list", "--json"]);
+    let row = records(&output, "plugin")
+        .into_iter()
+        .find(|record| record["id"] == plugin_id)
+        .unwrap_or_else(|| panic!("plugin {plugin_id} is not listed"));
+    // A blocked plugin carries no failure count; a missing field reads as zero.
+    row["failures"].as_u64().map_or(0, |count| count as u32)
 }
 
 /// REQ: USR-174
@@ -116,4 +153,16 @@ fn usr_177_publisher_guide_explains_revocation_and_takedown_effects() {
     assert!(page.contains("disabled-blocked"));
     assert!(page.contains("--accept-risk"));
     assert!(page.contains("another trusted key of your publisher id"));
+}
+
+/// REQ: USR-177
+#[test]
+fn usr_177_publisher_guide_says_blocked_version_is_not_installable_from_store() {
+    let page = manual_page("guide-publishing");
+    for phrase in [
+        "a blocked version cannot be installed from the store",
+        "A registry takedown (PKG-403) has the same effect on the named version.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
 }

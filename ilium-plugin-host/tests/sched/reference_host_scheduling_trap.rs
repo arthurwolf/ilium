@@ -450,3 +450,16 @@ fn dev_839_event_sent_during_activate_runs_only_after_activate_returns_ok() {
     drain(&scheduler, base, 2);
     assert_eq!(kinds_run(&scheduler), vec![CallKind::OnEvents]);
 }
+
+/// REQ: DEV-839
+#[test]
+fn dev_839_events_queued_during_a_failed_activate_never_run() {
+    let scheduler = Scheduler::new(10);
+    let who = plugin("demo.failing");
+    let base = Instant::now();
+    scheduler.begin_activation(&who);
+    scheduler.enqueue(&who, CallKind::OnEvents, base, noop());
+    scheduler.finish_activation(&who, false);
+    drain(&scheduler, base, 4);
+    assert_eq!(executed_count(&scheduler, &who), 0);
+}

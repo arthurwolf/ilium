@@ -1,45 +1,220 @@
-//! Host implementation of `ilium:host/extensions` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/extensions`.
 //!
-//! Written once by the skeleton lane from the generated `HostExtensions` trait; hand-owned afterwards.
+//! The import keeps the points the host has declared and the entries contributed to them. The
+//! import is a unit struct, so this state is per thread (one host instance per thread). The host
+//! declares points with [`declare_point`] when it installs an owner, and names the calling plugin
+//! with [`bind_contributor`] before it runs the plugin's code.
+//!
+//! Handlers live in the plugin instances, so `run-hook` here validates the call, rejects re-entry
+//! and completes the chain with the host-side result only: no registered handler answered, so
+//! `take-reply` yields nothing. The engine that owns the instances replaces that completion with
+//! the real chain result.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use ilium_plugin_api::generated::host::extensions::{
     ExtensionEntry, ExtensionError, HostExtensions,
 };
-use ilium_plugin_api::generated::types::ids::RequestId;
+use ilium_plugin_api::generated::types::ids::{PluginId, RequestId};
+
+/// Largest payload, reply or chain result in bytes (EXT-023).
+const PAYLOAD_CAP_BYTES: usize = 64 * 1024;
+/// Largest contributor entry in bytes (EXT-023).
+const ENTRY_CAP_BYTES: usize = 16 * 1024;
+/// Highest priority a manifest may declare (EXT-007).
+const MAX_MANIFEST_PRIORITY: u8 = 100;
+/// Longest point id after the owner prefix.
+const POINT_ID_MAX_CHARS: usize = 64;
+/// Longest owner plugin id.
+const OWNER_ID_MAX_CHARS: usize = 128;
+/// Contributor assumed when the host has not bound one.
+const UNBOUND_CONTRIBUTOR: &str = "ilium.host.unbound";
+
+/// One declared extension point.
+#[derive(Debug, Default)]
+struct PointState {
+    dynamic: bool,
+    entries: Vec<ExtensionEntry>,
+}
+
+#[derive(Debug, Default)]
+struct ExtensionsState {
+    points: HashMap<String, PointState>,
+    contributor: Option<PluginId>,
+    next_request: u64,
+    replies: HashMap<u64, Option<String>>,
+    /// Points on the current chain stack, outermost first (EXT re-entry rule).
+    active_chain: Vec<String>,
+}
+
+thread_local! {
+    static STATE: RefCell<ExtensionsState> = RefCell::new(ExtensionsState::default());
+}
+
+fn with_state<R>(action: impl FnOnce(&mut ExtensionsState) -> R) -> R {
+    STATE.with(|cell| action(&mut cell.borrow_mut()))
+}
+
+/// True when `point` looks like `<owner plugin id>/<point id>` with the documented character sets.
+fn is_well_formed_point(point: &str) -> bool {
+    let Some((owner, point_id)) = point.split_once('/') else {
+        return false;
+    };
+    let owner_ok = !owner.is_empty()
+        && owner.chars().count() <= OWNER_ID_MAX_CHARS
+        && owner
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-');
+    let point_ok = !point_id.is_empty()
+        && point_id.chars().count() <= POINT_ID_MAX_CHARS
+        && point_id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    owner_ok && point_ok
+}
+
+/// Declares an extension point of the current host thread. `dynamic` points accept `register`.
+///
+/// Returns [`ExtensionError::UnknownPoint`] when the name is not `<owner>/<point-id>`.
+pub fn declare_point(point: &str, dynamic: bool) -> Result<(), ExtensionError> {
+    if !is_well_formed_point(point) {
+        return Err(ExtensionError::UnknownPoint);
+    }
+    with_state(|state| {
+        state
+            .points
+            .entry(point.to_owned())
+            .or_default()
+            .dynamic = dynamic;
+    });
+    Ok(())
+}
+
+/// Names the plugin whose code is calling the import, so entries carry the right contributor.
+pub fn bind_contributor(contributor: PluginId) {
+    with_state(|state| state.contributor = Some(contributor));
+}
+
+fn contributor_of(state: &ExtensionsState) -> PluginId {
+    state
+        .contributor
+        .clone()
+        .unwrap_or_else(|| PluginId(UNBOUND_CONTRIBUTOR.to_owned()))
+}
 
 /// Host side of the `extensions` interface.
 #[derive(Debug)]
 pub struct ExtensionsImport;
 
 impl HostExtensions for ExtensionsImport {
-    fn list(&mut self, _point: String) -> Result<Vec<ExtensionEntry>, ExtensionError> {
-        unimplemented!("host::imports::extensions::list")
+    fn list(&mut self, point: String) -> Result<Vec<ExtensionEntry>, ExtensionError> {
+        with_state(|state| {
+            let declared = state.points.get(&point).ok_or(ExtensionError::UnknownPoint)?;
+            let mut entries = declared.entries.clone();
+            // Run order without user order or tier data: priority, plugin id, extension id.
+            entries.sort_by(|left, right| {
+                (left.priority, &left.contributor.0, &left.extension).cmp(&(
+                    right.priority,
+                    &right.contributor.0,
+                    &right.extension,
+                ))
+            });
+            Ok(entries)
+        })
     }
 
     fn run_hook(
         &mut self,
-        _point: String,
-        _payload_json: String,
+        point: String,
+        payload_json: String,
     ) -> Result<RequestId, ExtensionError> {
-        unimplemented!("host::imports::extensions::run_hook")
+        if payload_json.len() > PAYLOAD_CAP_BYTES {
+            return Err(ExtensionError::CapExceeded);
+        }
+        with_state(|state| {
+            if !state.points.contains_key(&point) {
+                return Err(ExtensionError::UnknownPoint);
+            }
+            if state.active_chain.contains(&point) {
+                return Err(ExtensionError::Reentrant);
+            }
+            if serde_json::from_str::<serde_json::Value>(&payload_json).is_err() {
+                return Err(ExtensionError::SchemaMismatch);
+            }
+            state.next_request += 1;
+            let request = state.next_request;
+            state.replies.insert(request, None);
+            Ok(RequestId(request))
+        })
     }
 
-    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
-        unimplemented!("host::imports::extensions::take_reply")
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        with_state(|state| state.replies.remove(&request.0)).flatten()
     }
 
     fn register(
         &mut self,
-        _point: String,
-        _extension: String,
-        _priority: u8,
-        _entry_json: String,
+        point: String,
+        extension: String,
+        priority: u8,
+        entry_json: String,
     ) -> Result<(), ExtensionError> {
-        unimplemented!("host::imports::extensions::register")
+        if entry_json.len() > ENTRY_CAP_BYTES {
+            return Err(ExtensionError::CapExceeded);
+        }
+        if priority > MAX_MANIFEST_PRIORITY {
+            return Err(ExtensionError::SchemaMismatch);
+        }
+        with_state(|state| {
+            let contributor = contributor_of(state);
+            let declared = state
+                .points
+                .get_mut(&point)
+                .ok_or(ExtensionError::UnknownPoint)?;
+            if !declared.dynamic {
+                return Err(ExtensionError::NotDynamic);
+            }
+            if extension.is_empty() || serde_json::from_str::<serde_json::Value>(&entry_json).is_err()
+            {
+                return Err(ExtensionError::SchemaMismatch);
+            }
+            let entry = ExtensionEntry {
+                extension: extension.clone(),
+                contributor: contributor.clone(),
+                priority,
+                entry_json,
+            };
+            match declared
+                .entries
+                .iter_mut()
+                .find(|held| held.extension == extension && held.contributor == contributor)
+            {
+                Some(held) => *held = entry,
+                None => declared.entries.push(entry),
+            }
+            Ok(())
+        })
     }
 
-    fn unregister(&mut self, _point: String, _extension: String) -> Result<(), ExtensionError> {
-        unimplemented!("host::imports::extensions::unregister")
+    fn unregister(&mut self, point: String, extension: String) -> Result<(), ExtensionError> {
+        with_state(|state| {
+            let contributor = contributor_of(state);
+            let declared = state
+                .points
+                .get_mut(&point)
+                .ok_or(ExtensionError::UnknownPoint)?;
+            if !declared.dynamic {
+                return Err(ExtensionError::NotDynamic);
+            }
+            let position = declared
+                .entries
+                .iter()
+                .position(|held| held.extension == extension && held.contributor == contributor)
+                .ok_or(ExtensionError::NotFound)?;
+            declared.entries.remove(position);
+            Ok(())
+        })
     }
 }
 

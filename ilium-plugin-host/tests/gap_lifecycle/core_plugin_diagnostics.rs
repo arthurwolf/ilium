@@ -135,3 +135,36 @@ fn lif_314_bundle_is_written_only_after_consent_and_old_bundles_are_deleted_at_s
     );
     assert_eq!(rig.network_attempts(), 0, "no bundle is sent anywhere");
 }
+
+/// REQ: LIF-312
+#[test]
+fn lif_312_bundle_records_the_installed_plugin_version() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let path = build_bundle(&rig);
+    assert!(
+        rig.bundle_text(&path).contains("1.0.0"),
+        "the manifest and version of the plugin appear in the bundle"
+    );
+}
+
+/// REQ: LIF-314
+#[test]
+fn lif_314_a_bundle_aged_13_days_survives_the_start_sweep() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    for _ in 0..6 {
+        server.fail(NOTES, Side::Server);
+    }
+    rig.answer_bundle_offer("accept");
+    assert_eq!(rig.bundle_files().len(), 1, "one bundle after consent");
+    rig.age_bundles(days(13));
+    server.shutdown();
+    let _restarted = rig.start_server("default");
+    assert_eq!(
+        rig.bundle_files().len(),
+        1,
+        "a 13-day-old bundle is kept, the limit is 14 days"
+    );
+}

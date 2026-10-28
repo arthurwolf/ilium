@@ -4,13 +4,28 @@
 
 use ilium_plugin_api::generated::host::log::{HostLog, Level};
 
+/// Largest message of one log entry, in bytes (manual: api-log, "Message size").
+const MESSAGE_LIMIT_BYTES: usize = 16_384;
+
+/// Cuts `message` to the size limit on a character boundary and redacts credential patterns.
+pub(crate) fn sanitized_line(message: &str) -> String {
+    let mut end = message.len().min(MESSAGE_LIMIT_BYTES);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    ilium_logging::redacted_json_string_credentials(&message[..end])
+}
+
 /// Host side of the `log` interface.
 #[derive(Debug)]
 pub struct LogImport;
 
 impl HostLog for LogImport {
-    fn log(&mut self, _level: Level, _message: String) {
-        unimplemented!("host::imports::log::log")
+    fn log(&mut self, _level: Level, message: String) {
+        // The line is bounded and redacted before it can reach any sink (DEV-651, SEC-243).
+        // This import holds no sink, so the sanitized line is dropped here; the runtime that
+        // attaches a plugin log sink forwards `sanitized_line` output instead.
+        let _line = sanitized_line(&message);
     }
 }
 

@@ -161,3 +161,83 @@ fn port_006_a_client_that_hangs_up_mid_request_leaves_the_route_and_job_banks_he
         assert_eq!(kernel.bank_worker_count("bank-a"), workers_before);
     });
 }
+
+/// REQ: PORT:ilium-server/src/agent_delivery.rs::initial_prompt_waits_for_owned_process_even_when_composer_is_visible
+#[test]
+fn port_004_plain_shell_without_any_agent_banner_never_gets_the_body() {
+    let delivered = in_both_modes(|kernel| {
+        let pane = terminal_with_initial_input(kernel, &["sh", "-c", "exec cat"], "no agent here");
+        kernel.settle();
+        kernel.advance_clock_ms(5_000);
+        kernel.settle();
+        kernel.pane_input_log(pane)
+    });
+    assert_eq!(delivered, Vec::<u8>::new());
+}
+
+/// REQ: PORT:ilium-server/src/agent_delivery.rs::initial_prompt_waits_past_codex_loading_composer
+#[test]
+fn port_005_initial_input_is_typed_exactly_once_after_the_banner_clears() {
+    let typed_count = in_both_modes(|kernel| {
+        let pane = terminal_with_initial_input(
+            kernel,
+            &[
+                "bash",
+                "-c",
+                "printf '>_ OpenAI Codex\\nmodel:     GPT-6-Luna low   /model to change\\n\u{203a} Ask Codex to do anything'; exec -a codex cat",
+            ],
+            "typed once only",
+        );
+        kernel.settle();
+        kernel.advance_clock_ms(3_000);
+        kernel.settle();
+        kernel.advance_clock_ms(3_000);
+        kernel.settle();
+        String::from_utf8_lossy(&kernel.pane_input_log(pane))
+            .matches("typed once only")
+            .count()
+    });
+    assert_eq!(typed_count, 1);
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::lookup_refusal_precedes_callback_and_allows_original_input_retry
+#[test]
+fn port_007_a_second_oversized_project_is_refused_again_and_creates_nothing() {
+    on_plugin_build(|kernel| {
+        let oversized = "x".repeat(8_193);
+        let nodes_before = kernel.tree().nodes().len();
+        for _ in 0..2 {
+            let (status, body) = kernel.http_post(
+                "/create_agent",
+                json!({"agent_type": "claude", "project": oversized.clone(), "prompt": "again"}),
+            );
+            assert_eq!(status, 400, "{body}");
+        }
+        kernel.settle();
+        assert_eq!(kernel.tree().nodes().len(), nodes_before);
+    });
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::cancelled_lookup_waiter_keeps_native_callback_admitted_until_return
+#[test]
+fn port_006_a_partly_sent_request_that_hangs_up_does_not_block_a_later_job() {
+    on_plugin_build(|kernel| {
+        let address = kernel
+            .http_listener_address()
+            .expect("the local listener is up");
+        {
+            let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))
+                .expect("connect to the listener");
+            stream
+                .write_all(
+                    b"POST /create_agent HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 500\r\nConnection: close\r\n\r\n{",
+                )
+                .expect("send the partial request");
+            // Dropped here before the body is complete.
+        }
+        kernel.settle();
+        let ticket = kernel.run_finite_job("bank-a", Box::new(|| 3 * 3));
+        kernel.settle();
+        assert_eq!(kernel.job_result(ticket), Some(9));
+    });
+}

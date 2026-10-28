@@ -206,3 +206,219 @@ fn demo_053_the_demonstration_offers_only_the_bulb_and_runs_it_by_call_id() {
         .is_err());
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
 }
+
+fn bulb_call(
+    host: &mut FakeHost,
+    call_id: &str,
+    on: bool,
+) -> Result<String, ilium_plugin_sdk::types::PluginError> {
+    host.onboarding_demo("voice")
+        .call(call_id, "set_lightbulb", &json!({ "on": on }).to_string())
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::actual_tool_execution_turns_bulb_on_and_off
+#[test]
+fn step_054_a_new_call_id_after_off_turns_the_bulb_back_on() {
+    let mut host = client_host();
+    bulb_call(&mut host, "a1", true).expect("on");
+    bulb_call(&mut host, "a2", false).expect("off");
+    assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
+    bulb_call(&mut host, "a3", true).expect("on again");
+    assert_eq!(host.onboarding_demo("voice").bulb(), Some(true));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::duplicate_on_after_off_returns_original_receipt_without_relighting
+#[test]
+fn step_054_a_repeated_call_id_with_different_arguments_returns_the_original_receipt() {
+    let mut host = client_host();
+    let first = bulb_call(&mut host, "b1", true).expect("on");
+    bulb_call(&mut host, "b2", false).expect("off");
+    let replay = bulb_call(&mut host, "b1", false).expect("replay");
+    assert_eq!(replay, first);
+    assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::exhausted_demo_retains_replay_receipts_and_refuses_new_mutations
+#[test]
+fn step_054_after_1024_calls_new_calls_are_refused_and_old_receipts_still_replay() {
+    let mut host = client_host();
+    for index in 0..1024 {
+        bulb_call(&mut host, &format!("bulk-{index}"), index % 2 == 0)
+            .expect("within the call budget");
+    }
+    let before = host.onboarding_demo("voice").bulb();
+    assert!(bulb_call(&mut host, "bulk-over", true).is_err());
+    assert_eq!(host.onboarding_demo("voice").bulb(), before);
+    assert!(bulb_call(&mut host, "bulk-0", false).is_ok());
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_demo.rs::real_controls_and_malformed_arguments_are_rejected_without_state_changes
+#[test]
+fn step_054_a_call_without_the_on_field_is_refused_and_leaves_the_bulb_alone() {
+    let mut host = client_host();
+    bulb_call(&mut host, "d1", true).expect("on");
+    let error = host
+        .onboarding_demo("voice")
+        .call("d2", "set_lightbulb", "{}")
+        .expect_err("a missing field is refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(host.onboarding_demo("voice").bulb(), Some(true));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::actual_cpu_projection_executes_ordered_tools_and_duplicate_receipt_without_relighting
+#[test]
+fn step_054_an_unadvertised_call_between_two_bulb_calls_does_not_disturb_their_order() {
+    let mut host = client_host();
+    bulb_call(&mut host, "e1", true).expect("on");
+    assert!(host
+        .onboarding_demo("voice")
+        .call("e2", "ilium_close_pane", "{}")
+        .is_err());
+    bulb_call(&mut host, "e3", false).expect("off");
+    assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::advertised_capability_is_only_the_bulb
+#[test]
+fn step_054_names_other_than_the_bulb_are_refused_and_leave_the_bulb_unchanged() {
+    let mut host = client_host();
+    bulb_call(&mut host, "f0", true).expect("on");
+    let before = host.onboarding_demo("voice").bulb();
+    for tool in ["ilium_type_text", "ilium_stop_voice", "ilium_press_key"] {
+        assert!(
+            host.onboarding_demo("voice")
+                .call(&format!("f-{tool}"), tool, "{}")
+                .is_err(),
+            "{tool}"
+        );
+    }
+    assert_eq!(host.onboarding_demo("voice").bulb(), before);
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::bounded_redaction_preserves_replace_prefix_unicode_and_no_secret
+#[test]
+fn step_054_the_configured_key_stays_hidden_on_a_narrow_screen_including_its_tail() {
+    let mut host = client_host();
+    configure(&mut host, "api_key", json!("sk-narrow-secret-7731"));
+    let text = step_text(&mut host, 50, 20);
+    assert!(!text.contains("sk-narrow-secret-7731"), "{text}");
+    assert!(!text.contains("7731"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::gate_release_retries_exact_intent_and_preserves_invalid_configuration_error_without_audio
+#[test]
+fn step_054_pressing_test_twice_with_an_empty_key_opens_no_audio() {
+    let mut host = client_host();
+    configure(&mut host, "api_key", json!(""));
+    let target = ViewTarget::OnboardingStep("voice".to_string());
+    host.key(target.clone(), "t");
+    host.settle();
+    host.key(target, "t");
+    host.settle();
+    assert!(host.audio().captures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::invalid_configuration_never_starts_audio
+#[test]
+fn step_054_push_to_talk_with_an_empty_key_never_starts_audio() {
+    let mut host = client_host();
+    configure(&mut host, "input_mode", json!("push_to_talk"));
+    configure(&mut host, "api_key", json!(""));
+    host.key(ViewTarget::OnboardingStep("voice".to_string()), "t");
+    host.settle();
+    host.settle();
+    assert!(host.audio().captures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::normal_owner_gate_keeps_original_test_and_stop_cancels_without_starting_audio
+#[test]
+fn step_054_escape_without_a_waiting_test_never_creates_a_capture() {
+    let mut host = client_host();
+    host.key(ViewTarget::OnboardingStep("voice".to_string()), "Esc");
+    host.settle();
+    assert!(host.audio().captures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::saturated_outbox_retains_original_event_and_no_tool_state_effect
+#[test]
+fn step_054_an_argument_over_1024_bytes_is_refused_and_the_bulb_keeps_its_state() {
+    let mut host = client_host();
+    bulb_call(&mut host, "k1", true).expect("on");
+    let padded = json!({ "on": false, "pad": "x".repeat(1100) }).to_string();
+    let error = host
+        .onboarding_demo("voice")
+        .call("k2", "set_lightbulb", &padded)
+        .expect_err("an oversized argument is refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(host.onboarding_demo("voice").bulb(), Some(true));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::settings_change_cancels_waiting_test_before_external_ownership_releases
+#[test]
+fn step_054_changing_a_setting_while_a_test_waits_never_creates_a_capture() {
+    let mut host = client_host();
+    host.key(ViewTarget::OnboardingStep("voice".to_string()), "t");
+    host.settle();
+    configure(&mut host, "model", json!("gpt-realtime-2.1-mini"));
+    host.settle();
+    host.settle();
+    assert!(host.audio().captures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_during_shared_startup_discards_prepared_original_without_starting_audio
+#[test]
+fn step_054_stopping_a_waiting_test_leaves_no_capture_even_after_the_settle() {
+    let mut host = client_host();
+    let target = ViewTarget::OnboardingStep("voice".to_string());
+    host.key(target.clone(), "t");
+    host.settle();
+    host.key(target, "Esc");
+    host.settle();
+    host.settle();
+    assert!(host.audio().captures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::every_configuration_and_live_action_is_reachable_on_small_and_wide_screens
+#[test]
+fn step_054_the_test_action_comes_into_view_by_moving_focus_on_a_small_screen() {
+    let mut host = client_host();
+    let target = ViewTarget::OnboardingStep("voice".to_string());
+    let mut seen = false;
+    for _ in 0..ROWS.len() * 2 {
+        if step_text(&mut host, 40, 8).contains("Test") {
+            seen = true;
+            break;
+        }
+        host.key(target.clone(), "Down");
+    }
+    assert!(
+        seen,
+        "the Test action never came into view on a 40x8 screen"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::narrow_scrolling_reveals_real_transcripts_and_keyboard_focus_wraps
+#[test]
+fn step_054_moving_focus_up_from_the_first_row_wraps_to_the_last_row() {
+    let mut host = client_host();
+    host.key(ViewTarget::OnboardingStep("voice".to_string()), "Up");
+    host.settle();
+    assert!(step_text(&mut host, 40, 8).contains("Pause other media"));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::render_never_exposes_configured_key_and_keeps_test_visible
+#[test]
+fn step_054_the_configured_key_is_not_rendered_on_a_wide_screen_either() {
+    let mut host = client_host();
+    configure(&mut host, "api_key", json!("sk-wide-secret-42"));
+    let text = step_text(&mut host, 160, 50);
+    assert!(!text.contains("sk-wide-secret-42"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::voice_configuration_cards_use_rounded_frames_at_compact_and_regular_sizes
+#[test]
+fn step_054_the_rounded_top_left_corner_appears_on_a_mid_sized_screen() {
+    let mut host = client_host();
+    let text = step_text(&mut host, 50, 30);
+    assert!(text.contains('\u{256d}'), "{text}");
+}

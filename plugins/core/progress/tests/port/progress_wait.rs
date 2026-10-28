@@ -88,3 +88,18 @@ fn port_060_a_wait_without_an_id_is_refused_when_a_done_and_an_error_monitor_rem
     let run = progress(&mut host, pane, &["wait"]);
     assert_eq!(code(&run), "monitor-ambiguous");
 }
+
+/// REQ: PORT:ilium/src/progress_wait.rs::a_settled_wait_names_the_exact_clear_command_for_its_own_monitor
+#[test]
+fn port_060_a_wait_that_ends_on_a_task_error_names_the_clear_command_of_that_monitor() {
+    let (mut host, pane) = host_with_pane();
+    let id = register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    settle_with(&mut host, &failed(JOB, 40, "Encoding", "encoder stopped"));
+    let run = progress(&mut host, pane, &["wait", &id.to_string()]);
+    assert_eq!(run.exit, Some(3), "{}", run.stdout);
+    assert!(
+        wait_next(&run).ends_with(&format!("`ilium progress clear --monitor-id {id}`.")),
+        "{}",
+        wait_next(&run)
+    );
+}

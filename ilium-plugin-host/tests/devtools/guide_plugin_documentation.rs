@@ -529,3 +529,28 @@ fn dev_796_the_manual_example_changelog_dates_use_the_iso_form() {
         assert_eq!(date.matches('-').count(), 2, "{line}");
     }
 }
+
+/// REQ: DEV-790
+#[test]
+fn dev_790_a_settings_row_named_in_a_help_topic_does_not_warn() {
+    let (_root, env, dir) = fresh("server");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+    manifest["contributes"]["settings"] = json!([{
+        "id": "main",
+        "title": "Agent tools",
+        "schema": { "type": "object", "properties": { "refresh_seconds": { "type": "integer" } } }
+    }]);
+    write_text(&dir, "ilium-plugin.json", &manifest.to_string());
+    let topic = read_text(&dir, "help/overview.md");
+    write_text(
+        &dir,
+        "help/overview.md",
+        &format!("{topic}\n\nThe refresh_seconds setting sets the polling interval.\n"),
+    );
+    assert!(!has_rule(
+        &lint_dir(&env, &dir),
+        "lint",
+        "lint.settings-help-missing"
+    ));
+}

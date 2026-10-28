@@ -3,7 +3,7 @@
 
 use ilium_plugin_sdk::types::{ErrorCode, PluginError};
 
-use crate::common::{board_file, board_host, press, sections, BOARD_PATH, SAMPLE_BOARD};
+use crate::common::{board_file, board_host, draw, press, sections, BOARD_PATH, SAMPLE_BOARD};
 
 fn conflict() -> PluginError {
     PluginError {
@@ -91,5 +91,107 @@ fn port_server_an_external_file_change_redraws_the_board_without_any_key_input()
 fn port_app_unrelated_client_flows_leave_the_board_file_untouched() {
     let (mut host, _node) = board_host(SAMPLE_BOARD);
     host.settle();
+    assert_eq!(board_file(&mut host), SAMPLE_BOARD);
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/app.rs::filesystem_shutdown_keeps_accepted_board_write_until_disk_readback
+#[test]
+fn port_fs_second_shutdown_keeps_every_card_in_the_file() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    press(&mut host, node, "j");
+    press(&mut host, node, "shift+right");
+    host.deactivate(ilium_plugin_sdk::types::DeactivationReason::Shutdown);
+    let cards: usize = sections(&board_file(&mut host))
+        .iter()
+        .map(|(_, cards)| cards.len())
+        .sum();
+    assert_eq!(cards, 4);
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/tests.rs::board_conflict_preserves_foreign_file_and_newer_authored_updates
+#[test]
+fn port_fs_second_conflicts_leave_the_first_column_cards_in_order() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    for _ in 0..3 {
+        host.inject_failure("fs.write-atomic", conflict());
+    }
+    press(&mut host, node, "j");
+    press(&mut host, node, "shift+right");
+    assert_eq!(
+        sections(&board_file(&mut host))[0].1,
+        vec!["Write docs".to_string(), "Add tests".to_string()]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/tests.rs::isolated_board_conflict_rolls_back_only_exact_revision_and_retains_authored_source
+#[test]
+fn port_fs_second_a_single_conflict_does_not_change_the_file() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    host.inject_failure("fs.write-atomic", conflict());
+    press(&mut host, node, "j");
+    press(&mut host, node, "shift+right");
+    assert_eq!(board_file(&mut host), SAMPLE_BOARD);
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/tests.rs::board_ordered_snapshots_advance_only_after_real_publication
+#[test]
+fn port_fs_second_reloads_show_the_done_column_count() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    for _ in 0..8 {
+        press(&mut host, node, "r");
+    }
+    let text = draw(&mut host, node, 100, 20).text();
+    assert!(text.contains("Done (1)"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/tests.rs::board_read_retains_exact_target_under_overload_and_deduplicates
+#[test]
+fn port_fs_second_a_reload_keeps_every_card_visible() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    press(&mut host, node, "r");
+    let text = draw(&mut host, node, 100, 20).text();
+    assert!(text.contains("Write docs") && text.contains("Fix typos"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/filesystem/tests.rs::loaded_board_source_credit_survives_reader_retirement_until_last_pane_clone
+#[test]
+fn port_fs_second_a_reload_on_a_small_pane_still_shows_a_card() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    for _ in 0..4 {
+        press(&mut host, node, "r");
+    }
+    let text = draw(&mut host, node, 40, 12).text();
+    assert!(text.contains("Port parser") || text.contains("Write docs"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/mouse.rs::close_confirmation_buttons_preserve_cancel_and_confirm_keyboard_behavior
+#[test]
+fn port_mouse_second_a_cancelled_delete_can_be_asked_again_with_the_same_prompt() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    press(&mut host, node, "j");
+    press(&mut host, node, "d");
+    let asking = draw(&mut host, node, 80, 20).text();
+    press(&mut host, node, "escape");
+    press(&mut host, node, "d");
+    let asking_again = draw(&mut host, node, 80, 20).text();
+    assert_eq!(asking, asking_again);
+}
+
+/// REQ: PORT:ilium-server/src/ipc/ordered_owner_regressions.rs::changed_owner_status_wakes_a_forwarder_with_no_output_or_keyboard_input
+#[test]
+fn port_server_second_an_external_rewrite_drops_the_old_cards_from_the_screen() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    host.fs()
+        .write(BOARD_PATH, b"# Board\n\n## To do\n- Brand new card\n");
+    host.settle();
+    let text = draw(&mut host, node, 80, 20).text();
+    assert!(!text.contains("Write docs"), "{text}");
+}
+
+/// REQ: PORT:ilium-server/tests/smoke.rs::keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter
+#[test]
+fn port_server_second_pressing_enter_on_the_board_does_not_rewrite_the_file() {
+    let (mut host, node) = board_host(SAMPLE_BOARD);
+    press(&mut host, node, "enter");
     assert_eq!(board_file(&mut host), SAMPLE_BOARD);
 }

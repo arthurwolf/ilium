@@ -2,12 +2,13 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! Bodies follow the manual; behaviour beyond activation is driven by host events.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::UiTree;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
 
 /// The server side of `ilium.core.layout` (core-plugin-layout.md, world `ilium:server/base@0.1.0`).
@@ -16,14 +17,14 @@ use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
 pub struct LayoutServer;
 
 impl Lifecycle for LayoutServer {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.layout: server lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        validate_settings(&context.settings_json)
     }
 }
 
 impl Handler for LayoutServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.layout: server handler.on_events")
+        Vec::new()
     }
 }
 
@@ -33,14 +34,47 @@ impl Handler for LayoutServer {
 pub struct LayoutClient;
 
 impl Lifecycle for LayoutClient {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.layout: client lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        validate_settings(&context.settings_json)
     }
 }
 
 impl Handler for LayoutClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.layout: client handler.on_events")
+        Vec::new()
+    }
+}
+
+/// Activation succeeds when the settings JSON is an object (an empty string means no settings).
+fn validate_settings(settings_json: &str) -> Result<(), PluginError> {
+    if settings_json.trim().is_empty() {
+        return Ok(());
+    }
+    match serde_json::from_str::<serde_json::Value>(settings_json) {
+        Ok(value) if value.is_object() => Ok(()),
+        _ => Err(PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::InvalidArgument,
+            message: "settings must be one JSON object".to_string(),
+            retry_after_ms: None,
+        }),
+    }
+}
+
+/// An empty, valid view tree: one root node that draws nothing.
+fn empty_tree() -> UiTree {
+    use ilium_plugin_sdk::types::{NodeFlags, UiNode, Widget};
+    UiTree {
+        version: 1,
+        nodes: vec![UiNode {
+            key: None,
+            widget: Widget::Clear,
+            children: Vec::new(),
+            flags: NodeFlags::default(),
+            tooltip: None,
+            tab_index: None,
+            disabled_reason: None,
+        }],
+        root: 0,
     }
 }
 

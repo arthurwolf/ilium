@@ -120,3 +120,91 @@ fn port_infer_outstanding_calls_never_exceed_the_gate_after_timeouts_and_cancels
     );
     let _ = host.cli().refresh(&first);
 }
+
+/// REQ: PORT:ilium-client/src/recap/infer.rs::returns_provider_text_on_success
+#[test]
+fn port_infer_successful_call_counts_one_summarized_pane() {
+    let (mut host, _, invocation) = start_shell_run(&["$ cargo test"]);
+    let records = finish_run(&mut host, &invocation, answer(4, 6));
+    assert_eq!(summary(&records)["summarized"], 1);
+    assert_eq!(summary(&records)["failed"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/infer.rs::reports_provider_failure_without_panicking
+#[test]
+fn port_infer_provider_failure_keeps_no_long_text() {
+    let (mut host, _, invocation) = start_shell_run(&["$ cargo test"]);
+    let request = host.jobs().list()[0].request;
+    host.jobs().finish(
+        request,
+        Err(PluginError {
+            code: ErrorCode::Network,
+            message: "no key".to_string(),
+            retry_after_ms: None,
+        }),
+    );
+    host.settle();
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    assert_eq!(summary(&records)["failed"], 1);
+    assert!(first_recap(&records)["long"].is_null());
+}
+
+/// REQ: PORT:ilium-client/src/recap/infer.rs::times_out_slow_calls
+#[test]
+fn port_infer_call_is_still_running_just_before_its_timeout() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    let pane = host.tree().add(shell_pane("slow shell"));
+    host.tree().set_screen(pane, rows(&["$ sleep 100"]));
+    host.cli().invoke(&["recap", "--timeout-seconds", "1"], b"");
+    host.advance_clock(999);
+    host.settle();
+    assert_eq!(
+        host.jobs().list().len(),
+        1,
+        "the call is not timed out before one second"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/recap/infer.rs::cancellation_abandons_waiting_call
+#[test]
+fn port_infer_cancelled_call_never_summarizes_a_late_answer() {
+    let (mut host, _, invocation) = start_shell_run(&["$ sleep 100"]);
+    let request = host.jobs().list()[0].request;
+    host.cli().cancel(&invocation);
+    host.jobs().finish(request, Ok(answer(3, 3)));
+    host.settle();
+    let records = jsonl(&host.cli().refresh(&invocation).stdout());
+    assert_eq!(summary(&records)["summarized"], 0);
+}
+
+/// REQ: PORT:ilium-client/src/recap/infer.rs::concurrency_gate_bounds_parallel_calls
+#[test]
+fn port_infer_single_slot_gate_runs_one_call_at_a_time() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    many_shell_panes(&mut host, 3);
+    host.cli().invoke(&["recap", "--max-concurrency", "1"], b"");
+    assert_eq!(host.running_job_limit(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/recap/infer.rs::outstanding_provider_calls_never_exceed_gate_after_timeouts_and_cancels
+#[test]
+fn port_infer_timed_out_pane_is_reported_as_failed_not_pending() {
+    let mut host = activated_server();
+    open_gate(&mut host);
+    many_shell_panes(&mut host, 4);
+    let first = host.cli().invoke(
+        &["recap", "--max-concurrency", "2", "--timeout-seconds", "1"],
+        b"",
+    );
+    host.advance_clock(1_001);
+    host.settle();
+    let records = jsonl(&host.cli().refresh(&first).stdout());
+    assert!(
+        of_type(&records, "recap")
+            .iter()
+            .any(|record| record["state"] == "failed"),
+        "{records:?}"
+    );
+}

@@ -47,6 +47,21 @@ fn abi_071_runtime_upgrade_gated_on_full_conformance_corpus() {
     );
 }
 
+/// REQ: ABI-071
+#[test]
+fn abi_071_gate_cannot_pass_vacuously_on_an_empty_corpus() {
+    let manifest = ilium_plugin_api::conformance::corpus_manifest();
+    assert!(
+        !manifest.cases.is_empty(),
+        "an empty corpus would let the upgrade gate pass without checking anything"
+    );
+    let page = host_runtime_page();
+    assert!(
+        page.contains("ABI-073"),
+        "reference-host-runtime.md must name the ABI-073 corpus that the upgrade gate waits for"
+    );
+}
+
 /// REQ: ABI-072
 #[test]
 fn abi_072_release_notes_list_every_trap_and_refusal_change() {
@@ -54,5 +69,31 @@ fn abi_072_release_notes_list_every_trap_and_refusal_change() {
     assert!(
         page.contains("[ABI-072] A runtime upgrade MUST list in the release notes every observable change in traps or refusal codes"),
         "reference-host-runtime.md must state the ABI-072 MUST text"
+    );
+}
+
+/// REQ: ABI-070
+#[test]
+fn abi_070_pinned_wasmtime_and_canonical_abi_revision_do_not_change_between_reports() {
+    let first = doctor_report();
+    let second = doctor_report();
+    assert_eq!(
+        first.wasmtime_version, second.wasmtime_version,
+        "the pinned Wasmtime version must not change between doctor reports"
+    );
+    assert_eq!(
+        first.canonical_abi_revision, second.canonical_abi_revision,
+        "the canonical ABI revision must not change between doctor reports"
+    );
+}
+
+/// REQ: ABI-072
+#[test]
+fn abi_072_release_notes_rule_points_a_changed_code_to_the_removal_rules_of_abi_052() {
+    let page = host_runtime_page();
+    assert!(
+        page.lines()
+            .any(|line| line.contains("[ABI-072]") && line.contains("ABI-052")),
+        "the ABI-072 requirement must send a changed refusal code to the removal rules of ABI-052"
     );
 }

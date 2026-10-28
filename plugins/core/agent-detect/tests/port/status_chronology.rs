@@ -133,3 +133,118 @@ fn port_026_folder_trust_after_completion_is_awaiting_approval() {
     );
     assert_eq!(activity("claude", &text), AgentActivity::AwaitingApproval);
 }
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::a_later_final_summary_supersedes_old_waits_and_old_still_running_suffixes
+#[test]
+fn port_026_later_summary_with_only_an_old_wait_above_it_is_idle() {
+    assert_eq!(
+        activity("claude", &screen(&[OLD_WAIT, DONE])),
+        AgentActivity::Idle
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::claude_completion_boundaries_are_not_imposed_on_other_known_providers
+#[test]
+fn port_026_codex_working_marker_alone_is_working() {
+    assert_eq!(
+        activity("codex", "• Working… (5m)\n\nSend a message"),
+        AgentActivity::Working
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::codex_completed_timing_prose_still_is_not_a_live_status
+#[test]
+fn port_026_codex_live_working_marker_with_timing_is_working() {
+    assert_eq!(
+        activity("codex", "• Working… (12s)\n\nSend a message"),
+        AgentActivity::Working
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::current_interrupt_marker_below_completion_is_working
+#[test]
+fn port_026_interrupt_marker_without_a_summary_is_working() {
+    assert_eq!(
+        activity("claude", &screen(&["✻ Working… (5s · esc to interrupt)"])),
+        AgentActivity::Working
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::current_wait_without_a_completed_summary_remains_waiting
+#[test]
+fn port_026_old_wait_alone_without_summary_is_not_idle() {
+    assert!(is_busy(&activity("claude", &screen(&[OLD_WAIT]))));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::folder_trust_after_completion_is_not_mistaken_for_idle
+#[test]
+fn port_026_folder_trust_prompt_alone_is_awaiting_approval() {
+    assert_eq!(
+        activity("claude", &crate::common::fixture("claude_folder_trust.txt")),
+        AgentActivity::AwaitingApproval
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::goal_evidence_is_not_used_as_an_activity_override
+#[test]
+fn port_026_live_working_status_beside_goal_wording_is_working() {
+    assert_eq!(
+        activity(
+            "claude",
+            &screen(&["◎ /goal active (4m)", "✻ Working… (3s · esc to interrupt)"])
+        ),
+        AgentActivity::Working
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::historical_working_markers_above_completion_do_not_keep_the_turn_working
+#[test]
+fn port_026_working_marker_without_any_summary_is_working() {
+    assert_eq!(
+        activity("claude", &screen(&["✻ Working… (3m)"])),
+        AgentActivity::Working
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::new_wait_below_an_old_completed_summary_is_current
+#[test]
+fn port_026_wait_below_a_summary_keeps_the_turn_busy_with_a_working_line_above() {
+    assert!(is_busy(&activity(
+        "claude",
+        &screen(&["✻ Working… (3m)", DONE, OLD_WAIT])
+    )));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::old_work_cannot_mask_a_new_wait_after_completion
+#[test]
+fn port_026_old_work_above_a_new_wait_without_summary_is_busy() {
+    assert!(is_busy(&activity(
+        "claude",
+        &screen(&["✻ Working… (3m)", NEW_WAIT])
+    )));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::one_subagent_finishing_does_not_prove_all_background_work_finished
+#[test]
+fn port_026_finished_subagent_above_a_wait_keeps_the_turn_busy() {
+    assert!(is_busy(&activity(
+        "claude",
+        &screen(&[AGENT_FINISHED, NEW_WAIT])
+    )));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::reported_wait_then_agent_finished_then_final_summary_is_idle
+#[test]
+fn port_026_old_wait_then_agent_finished_then_summary_is_idle() {
+    assert_eq!(
+        activity("claude", &screen(&[OLD_WAIT, AGENT_FINISHED, DONE])),
+        AgentActivity::Idle
+    );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::utf8_and_crlf_preserve_byte_safe_current_evidence
+#[test]
+fn port_026_multibyte_text_before_a_wait_keeps_the_turn_busy() {
+    let text = screen(&["Résumé ✓ naïve 日本語", NEW_WAIT]);
+    assert!(is_busy(&activity("claude", &text)));
+}

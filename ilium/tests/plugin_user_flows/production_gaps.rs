@@ -587,3 +587,528 @@ fn lif_298_upgrade_checks_then_restart() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: PKG-686
+#[test]
+fn pkg_686_staged_version_falls_back_to_the_choice_without_it_and_full_is_plain() {
+    let page = manual_page("reference-release-rollout");
+    for phrase in [
+        "It MUST choose the version it would have chosen if the staged version did not exist.",
+        "A version at 100 is offered to every client, the same as a version with no rollout.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-687
+#[test]
+fn pkg_687_cohort_is_decided_on_the_machine_and_stored_locally() {
+    let page = manual_page("reference-release-rollout");
+    for phrase in [
+        "store that value locally, and compare it with the rollout percentage.",
+        "so that it does not move in and out of a rollout between checks.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-688
+#[test]
+fn pkg_688_halt_reaches_every_client_and_removal_is_a_takedown() {
+    let page = manual_page("reference-release-rollout");
+    for phrase in [
+        "stop new offers of that version to every client at its next metadata refresh, including clients that are inside the cohort.",
+        "A version that must be removed from installed copies is handled by a takedown in the registry reference, not by a halt.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-689
+#[test]
+fn pkg_689_rollout_change_rollback_protected_and_token_refusals() {
+    let page = manual_page("reference-release-rollout");
+    for phrase in [
+        "so that rollback protection stops an older percentage from being served again.",
+        "A missing or refused token MUST be refused with `registry.auth`.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-424
+#[test]
+fn sec_424_compromised_release_key_signs_no_other_artefact() {
+    let page = manual_page("reference-release-key-compromise");
+    for phrase in [
+        "When the release key is lost or may be exposed,",
+        "it MUST NOT sign any other release artefact with it.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-425
+#[test]
+fn sec_425_wrong_key_blocklist_is_refused_with_an_audit_line() {
+    let page = manual_page("reference-release-key-compromise");
+    for phrase in [
+        "writes an audit line, and does not apply the new entries.",
+        "A release blocklist signed by any other key MUST be refused",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-426
+#[test]
+fn sec_426_new_release_key_found_in_other_files_is_not_accepted() {
+    let page = manual_page("reference-release-key-compromise");
+    for phrase in [
+        "A new release key found in any file other than a new release binary",
+        "Not accepted ([SEC-426])",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-427
+#[test]
+fn sec_427_advisory_fingerprint_and_trust_store_wording() {
+    let page = manual_page("reference-release-key-compromise");
+    for phrase in [
+        "names the compromised key by its fingerprint, states that binaries using it no longer receive blocklist updates",
+        "so users who trust publishers keep the same trust store.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-690
+#[test]
+fn pkg_690_stolen_root_threshold_is_not_recovered_by_a_new_set() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "A new root key set that the attacker could also sign is not a recovery.",
+        "[PKG-693](/pages/reference-registry-key-compromise/)",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-691
+#[test]
+fn pkg_691_new_root_json_signed_by_current_threshold_and_error_code() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "signed by the threshold of the current root keys, whose `roles` entry for that role names the new key ids.",
+        "with `registry.signature-invalid`.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-692
+#[test]
+fn pkg_692_root_key_announced_before_old_key_retires_and_not_from_mirror() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "before it retires the old root key.",
+        "or from the registry response that carries the change.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-693
+#[test]
+fn pkg_693_changed_root_key_stops_with_registry_changed_and_remove_add_steps() {
+    let page = manual_page("reference-registry-key-compromise");
+    for phrase in [
+        "and the client stops with `registry.changed`.",
+        "The user runs `ilium plugin registry remove <url>` and then `ilium plugin registry add <url> --root-key <new_key_id>`",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-428
+#[test]
+fn sec_428_verification_table_lists_hashes_and_attestation() {
+    let page = manual_page("reference-host-release-verification");
+    for phrase in ["Hashes and attestation, as in [SEC-428] and [SEC-429]"] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-429
+#[test]
+fn sec_429_attestation_needs_github_and_offline_sites_cannot_run_it() {
+    let page = manual_page("reference-host-release-verification");
+    for phrase in [
+        "that carries the same archive name",
+        "The attestation check of [SEC-429] needs GitHub, so an offline site cannot run it itself.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-430
+#[test]
+fn sec_430_installer_compares_hash_before_unpacking() {
+    let page = manual_page("reference-host-release-verification");
+    for phrase in [
+        "The installer MUST compare the archive hash with `SHA256SUMS`",
+        "when the two hashes differ.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: ABI-055
+#[test]
+fn abi_055_only_the_final_zero_x_minor_is_retained_on_a_one_point_zero_host() {
+    let page = manual_page("reference-abi-major-versions");
+    for phrase in [
+        "Retained 0.x minors on a `1.0.0` host: exactly one (the final minor) [ABI-055].",
+        "whose `api` is any other `0.x` minor.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: ABI-056
+#[test]
+fn abi_056_unsupported_major_refused_with_package_api_unsupported() {
+    let page = manual_page("reference-abi-major-versions");
+    for phrase in [
+        "whose `api` is not the one retained under [ABI-055] MUST be refused with `package.api-unsupported`",
+        "the versions the host supports.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: ABI-057
+#[test]
+fn abi_057_deprecated_record_names_the_major_where_loading_stops() {
+    let page = manual_page("reference-abi-major-versions");
+    for phrase in [
+        "when it loads a package whose `api` is the final `0.x` minor",
+        "and the record MUST name the major version in which that `0.x` minor stops loading.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: ABI-058
+#[test]
+fn abi_058_limit_lowered_only_when_marked_in_an_earlier_release() {
+    let page = manual_page("reference-abi-major-versions");
+    for phrase in [
+        "unless the change was marked in an earlier release under [ABI-052] and [ABI-053]",
+        "the change MUST take effect in that major release only.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: API-082
+#[test]
+fn api_082_deprecation_note_names_successor_and_removal_minor() {
+    let page = manual_page("reference-sdk-deprecation");
+    for phrase in [
+        "The note MUST name the successor and the removal minor",
+        "on the item itself.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: API-083
+#[test]
+fn api_083_deprecated_item_keeps_signature_and_patch_removes_nothing() {
+    let page = manual_page("reference-sdk-deprecation");
+    for phrase in [
+        "A deprecated SDK item MUST keep its signature and its behaviour",
+        "Patch releases remove nothing ([API-083]).",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: API-084
+#[test]
+fn api_084_changelog_headings_follow_keep_a_changelog_names() {
+    let page = manual_page("reference-sdk-deprecation");
+    for phrase in [
+        "The headings use the Keep a Changelog section names.",
+        "Each SDK release MUST list every item it marks",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-500
+#[test]
+fn hst_500_helper_memory_counted_like_session_memory_mib() {
+    let page = manual_page("reference-host-aggregate-limits");
+    for phrase in ["counts a helper against `session_memory_mib`."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-501
+#[test]
+fn hst_501_passing_one_admission_check_never_skips_another() {
+    let page = manual_page("reference-host-aggregate-limits");
+    for phrase in ["Passing one check MUST NOT skip another."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-502
+#[test]
+fn hst_502_waiting_requests_admitted_in_the_stated_order() {
+    let page = manual_page("reference-host-aggregate-limits");
+    for phrase in ["The host MUST admit waiting requests against the aggregate ceiling in this order:"] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-503
+#[test]
+fn hst_503_capacity_refusal_leaves_side_inactive_and_retries_in_order() {
+    let page = manual_page("reference-host-aggregate-limits");
+    for phrase in [
+        "MUST leave the side `inactive`",
+        "MUST be retried when capacity returns, in the order of HST-502.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-504
+#[test]
+fn hst_504_helper_and_job_threads_count_against_thread_ceiling() {
+    let page = manual_page("reference-host-aggregate-limits");
+    for phrase in [
+        "The host MUST count the threads of every helper and job against an aggregate thread ceiling.",
+        "It MUST refuse a new helper or job with `host-capacity`",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-505
+#[test]
+fn hst_505_soak_records_resident_memory_each_cycle() {
+    let page = manual_page("reference-host-soak-and-load-testing");
+    for phrase in ["and the resident memory of the server and of each helper."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-506
+#[test]
+fn hst_506_resident_memory_stays_within_release_tolerance() {
+    let page = manual_page("reference-host-soak-and-load-testing");
+    for phrase in [
+        "at the end of every cycle",
+        "tolerance set for the release.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-507
+#[test]
+fn hst_507_soak_fails_on_unreplaced_helper_or_self_restart() {
+    let page = manual_page("reference-host-soak-and-load-testing");
+    for phrase in [
+        "when a helper that was restarted is not replaced by a new process",
+        "or when the server records a restart of itself during the run.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: HST-508
+#[test]
+fn hst_508_soak_run_record_names_commit_wasmtime_and_cycles() {
+    let page = manual_page("reference-host-soak-and-load-testing");
+    for phrase in [
+        "the run record MUST name the commit, the Wasmtime version and the number of cycles completed.",
+        "MUST NOT count as a pass.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-855
+#[test]
+fn dev_855_each_completion_script_completes_every_subcommand() {
+    let page = manual_page("reference-cli-completion");
+    for phrase in ["Each script MUST complete every subcommand"] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-856
+#[test]
+fn dev_856_refused_cli_name_never_appears_in_completion() {
+    let page = manual_page("reference-cli-completion");
+    for phrase in ["A name the install refused with `manifest.cli-name-reserved`"] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-857
+#[test]
+fn dev_857_man_pages_cover_core_and_contributed_commands() {
+    let page = manual_page("reference-cli-completion");
+    for phrase in ["each core plugin command and each contributed subcommand."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-858
+#[test]
+fn dev_858_removal_of_a_flag_is_marked_first_and_keeps_working_until_then() {
+    let page = manual_page("reference-cli-output-stability");
+    for phrase in [
+        "A flag, field or record type that a release removes or renames",
+        "Until that release, the item MUST keep working as before.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-859
+#[test]
+fn dev_859_deprecation_notice_shape_in_jsonl_and_text() {
+    let page = manual_page("reference-cli-output-stability");
+    for phrase in [
+        "In JSONL output the notice is one `warning` record with the code `deprecated`.",
+        "In text output it is one line on standard error.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-860
+#[test]
+fn dev_860_breaking_change_includes_rename_governed_by_deprecation() {
+    let page = manual_page("reference-cli-output-stability");
+    for phrase in ["A breaking change is a removal or rename that [DEV-858] governs"] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: DEV-861
+#[test]
+fn dev_861_new_exit_code_listed_in_release_notes() {
+    let page = manual_page("reference-cli-output-stability");
+    for phrase in [
+        "The number and the meaning of an exit code",
+        "listed in the release notes",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-236
+#[test]
+fn usr_236_oldest_crash_records_removed_first_down_to_two_hundred() {
+    let page = manual_page("user-privacy");
+    for phrase in ["the oldest records MUST be removed first until 200 remain."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-237
+#[test]
+fn usr_237_purge_deletes_every_pre_migration_backup() {
+    let page = manual_page("user-privacy");
+    for phrase in [
+        "`ilium plugin uninstall <id> --purge` MUST delete every pre-migration backup of that plugin.",
+        "Only the newest one per plugin, kept after each committed update",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-238
+#[test]
+fn usr_238_uninstall_without_purge_keeps_backups_in_the_delete_table() {
+    let page = manual_page("user-privacy");
+    for phrase in ["An uninstall without `--purge` keeps them ([USR-238])."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-239
+#[test]
+fn usr_239_replacement_keeps_ids_spelled_as_they_are() {
+    let page = manual_page("guide-internationalisation");
+    for phrase in [
+        "with the same spelling, and MUST NOT translate them.",
+        "A replacement MAY give its tab and command titles in another language.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: USR-240
+#[test]
+fn usr_240_replacement_keeps_stored_tab_settings_and_translates_own_text() {
+    let page = manual_page("guide-internationalisation");
+    for phrase in [
+        "the stored settings of the tab stay as they were.",
+        "Third-party replacements always translate their own text, as [USR-240] states.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: LIF-295
+#[test]
+fn lif_295_binary_replacement_does_not_touch_running_server_until_restart() {
+    let page = manual_page("guide-operator-upgrades");
+    for phrase in [
+        "When the Ilium binary on disk is replaced, the running server",
+        "the new binary MUST take effect only at the next server start.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: LIF-296
+#[test]
+fn lif_296_kill_signal_loses_restore_bytes_and_plugin_state() {
+    let page = manual_page("guide-operator-upgrades");
+    for phrase in ["so the server side loses its restore bytes and every plugin loses its in-memory state."] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: LIF-297
+#[test]
+fn lif_297_host_rollback_needs_a_host_release_undo_not_plugin_rollback() {
+    let page = manual_page("guide-operator-upgrades");
+    for phrase in ["or the host version, so an operator who needs to undo a host release"] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: LIF-298
+#[test]
+fn lif_298_failure_window_cleared_by_enabling_so_fix_cause_first() {
+    let page = manual_page("guide-operator-upgrades");
+    for phrase in [
+        "`ilium plugin logs <id> --tail 100`",
+        "because enabling clears its failure window.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

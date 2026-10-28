@@ -88,3 +88,88 @@ fn port_007_split_osc_highwater_tracks_library_termination_and_retained_capacity
     let submissions = host.deliver_one(matched(pane, &rule_id(0), &long, 1));
     assert_eq!(texts(&submissions), ["yes"]);
 }
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::cancelled_queued_step_preserves_original_engine_and_bytes
+#[test]
+fn port_008_queued_step_keeps_its_dedup_key_and_reply_text() {
+    let (mut host, pane) = armed("go", "yes");
+    let submissions = host.deliver_one(hit(pane, 1));
+    assert_eq!(send_inputs(&submissions), [expected_spec(pane, "yes")]);
+    assert_eq!(
+        submissions
+            .iter()
+            .map(|submission| submission.dedup_key.clone())
+            .collect::<Vec<_>>(),
+        [Some(dedup_key(&rule_id(0), pane, 1))]
+    );
+}
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::matching_runs_on_a_real_cpu_owner_without_retaining_finite_job_credit
+#[test]
+fn port_009_a_batch_of_distinct_rows_sends_one_reply_per_row() {
+    let (mut host, pane) = armed("go", "yes");
+    let batch: Vec<_> = (0..50u32).map(|row| hit(pane, row)).collect();
+    let submissions = host.deliver(batch);
+    assert_eq!(texts(&submissions).len(), 50);
+}
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::ordered_cpu_steps_preserve_split_escape_sequences_and_resize_quiet_policy
+#[test]
+fn port_010_ordered_steps_send_each_rule_reply_in_arrival_order() {
+    let (mut host, pane) = armed("go", "yes");
+    set_rules(&mut host, &["a", "b"], &["one", "two"]);
+    let submissions = host.deliver(vec![
+        matched(pane, &rule_id(0), "a", 1),
+        matched(pane, &rule_id(1), "b", 2),
+    ]);
+    assert_eq!(texts(&submissions), ["one", "two"]);
+}
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::refused_delivery_retains_decision_and_resumes_without_duplicate_matching
+#[test]
+fn port_011_retained_decision_is_sent_once_after_the_permission_returns() {
+    let (mut host, pane) = armed("go", "yes");
+    host.revoke("terminal.write");
+    host.deliver_one(hit(pane, 1));
+    host.settle();
+    host.grant_now("terminal.write").expect("grant accepted");
+    host.settle();
+    let sent = texts(&host.submitted());
+    assert_eq!(sent.iter().filter(|text| text.as_str() == "yes").count(), 1);
+}
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::replay_resync_retains_rule_admissions_and_settle_clock
+#[test]
+fn port_012_dropped_events_alone_send_nothing() {
+    let (mut host, _pane) = armed("go", "yes");
+    let submissions = host.deliver_one(dropped(&rule_id(0), 50));
+    assert!(send_inputs(&submissions).is_empty());
+    assert_eq!(applied(&mut host), 0);
+}
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::same_size_native_resize_rejects_a_prepared_screen_projection
+#[test]
+fn port_013_instance_after_the_resize_window_carries_its_own_dedup_key() {
+    let (mut host, pane) = armed("go", "yes");
+    host.deliver_one(hit(pane, 1));
+    host.advance_clock(2_001);
+    let submissions = host.deliver_one(hit(pane, 9));
+    assert_eq!(
+        submissions
+            .iter()
+            .map(|submission| submission.dedup_key.clone())
+            .collect::<Vec<_>>(),
+        [Some(dedup_key(&rule_id(0), pane, 9))]
+    );
+}
+
+/// REQ: PORT:ilium-server/src/text_triggers/matching.rs::split_osc_highwater_tracks_library_termination_and_retained_capacity
+#[test]
+fn port_014_plain_and_long_titled_lines_each_send_their_reply() {
+    let (mut host, pane) = armed("go", "yes");
+    let plain = host.deliver_one(matched(pane, &rule_id(0), "go", 1));
+    let long = format!("go \u{1b}]0;{}\u{7}", "t".repeat(4_096));
+    let titled = host.deliver_one(matched(pane, &rule_id(0), &long, 2));
+    assert_eq!(texts(&plain), ["yes"]);
+    assert_eq!(texts(&titled), ["yes"]);
+}

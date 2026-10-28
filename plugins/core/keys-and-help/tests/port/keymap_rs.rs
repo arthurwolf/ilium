@@ -329,3 +329,215 @@ fn keymap_port_documented_preset_letters_have_mnemonics_except_the_unmnemonicabl
     let text = render_text(&mut screen, keyboard_page(), 160, 80);
     assert!(mnemonic_words_of_row(&text, "search", "/").is_empty());
 }
+
+/// REQ: PORT:ilium-client/src/keymap.rs::shortcut_base_accepts_exactly_one_ascii_letter
+#[test]
+fn keymap_port_second_shortcut_base_refuses_digits_and_spaces_and_writes_the_letter_verbatim() {
+    for refused in ["ctrl+1", "ctrl+ ", "ctrl+0"] {
+        assert!(!accepted_prefix(refused), "{refused:?} must be refused");
+    }
+    let mut host = column_host(Column::Tmux);
+    host.send_action(
+        keyboard_page(),
+        "shortcut_base",
+        ilium_plugin_sdk::prelude::ActionKind::Changed,
+        ilium_plugin_sdk::prelude::ActionValue::Text("ctrl+q".to_string()),
+    );
+    host.settle();
+    assert!(host
+        .kernel_settings()
+        .writes()
+        .iter()
+        .any(|(_, k, v)| k == "shortcut_base" && v == "\"ctrl+q\""));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::shortcut_base_steps_through_all_letters_with_wrapping
+#[test]
+fn keymap_port_second_changing_the_shortcut_base_leaves_the_navigation_base_untouched() {
+    for letter in ['a', 'm', 'z'] {
+        let mut host = column_host(Column::Tmux);
+        host.send_action(
+            keyboard_page(),
+            "shortcut_base",
+            ilium_plugin_sdk::prelude::ActionKind::Changed,
+            ilium_plugin_sdk::prelude::ActionValue::Text(format!("ctrl+{letter}")),
+        );
+        host.settle();
+        let writes = host.kernel_settings().writes();
+        assert!(
+            writes.iter().all(|(_, k, _)| k != "navigation_shortcut_base"),
+            "letter {letter} must not rewrite the navigation base: {writes:?}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::every_allowed_letter_has_specific_advice
+#[test]
+fn keymap_port_second_advice_of_one_letter_never_shows_another_letters_advice() {
+    let mut host = host_with_tab(
+        json!({"shortcut_base": "ctrl+c", "navigation_shortcut_base": "ctrl+b", "preset": "custom"}),
+    );
+    let text = render_text(&mut host, keyboard_page(), 160, 60);
+    assert!(text.contains(ADVICE[2].1), "advice of Ctrl+c missing: {text}");
+    assert!(!text.contains(ADVICE[1].1), "advice of Ctrl+b leaked: {text}");
+    assert!(!text.contains(ADVICE[0].1), "advice of Ctrl+a leaked: {text}");
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::is_leader_key_matches_configured_ctrl_a
+#[test]
+fn keymap_port_second_the_screen_column_shows_ctrl_a_on_the_keys_panel() {
+    let mut host = column_host(Column::Screen);
+    assert!(render_text(&mut host, keys_panel(), 100, 20).contains("Prefix is Ctrl+A."));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::is_leader_key_rejects_plain_a
+#[test]
+fn keymap_port_second_a_plain_a_base_is_never_accepted_as_the_leader() {
+    assert!(!accepted_prefix("a"));
+    assert!(!accepted_prefix("A"));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::is_leader_key_changes_with_the_configured_base
+#[test]
+fn keymap_port_second_switching_the_base_to_ctrl_c_moves_the_leader_on_the_keys_panel() {
+    let mut host = tmux_host();
+    set_tab(
+        &mut host,
+        json!({"shortcut_base": "ctrl+c", "navigation_shortcut_base": "ctrl+b", "preset": "custom"}),
+        "shortcut_base",
+    );
+    let text = render_text(&mut host, keys_panel(), 100, 20);
+    assert!(text.contains("Prefix is Ctrl+C."), "{text}");
+    assert!(!text.contains("Prefix is Ctrl+B."), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::ctrl_i_and_ctrl_m_terminal_ambiguities_remain_selectable
+#[test]
+fn keymap_port_second_ctrl_m_base_is_written_to_the_kernel_settings() {
+    let mut host = tmux_host();
+    host.send_action(
+        keyboard_page(),
+        "shortcut_base",
+        ilium_plugin_sdk::prelude::ActionKind::Changed,
+        ilium_plugin_sdk::prelude::ActionValue::Text("ctrl+m".to_string()),
+    );
+    host.settle();
+    assert!(host
+        .kernel_settings()
+        .writes()
+        .iter()
+        .any(|(_, k, v)| k == "shortcut_base" && v == "\"ctrl+m\""));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::action_for_known_letter
+#[test]
+fn keymap_port_second_a_known_action_name_opens_its_capture() {
+    let mut host = column_host(Column::Tmux);
+    activate(&mut host, "detach");
+    assert!(render_text(&mut host, keyboard_page(), 120, 60).contains("Press the new key chord."));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::action_for_unknown_letter
+#[test]
+fn keymap_port_second_a_letter_owned_by_detach_is_reported_as_used() {
+    let mut host = column_host(Column::Tmux);
+    activate(&mut host, "new_terminal");
+    write_chord(&mut host, "d");
+    host.settle();
+    assert!(render_text(&mut host, keyboard_page(), 120, 60).contains("used by"));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::action_from_name_rejects_an_unknown_name
+#[test]
+fn keymap_port_second_an_unknown_name_does_not_disturb_a_later_known_capture() {
+    let mut host = column_host(Column::Tmux);
+    activate(&mut host, "not_a_real_action");
+    activate(&mut host, "detach");
+    assert!(render_text(&mut host, keyboard_page(), 120, 60).contains("Press the new key chord."));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::action_name_round_trips_through_action_from_name_for_every_binding
+#[test]
+fn keymap_port_second_every_action_name_of_the_table_is_unique() {
+    let rows = action_rows();
+    let names: std::collections::HashSet<&String> = rows.iter().map(|row| &row.name).collect();
+    assert_eq!(names.len(), rows.len());
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::assignment_refuses_a_key_already_owned_by_another_action
+#[test]
+fn keymap_port_second_an_action_may_keep_its_own_key_without_a_conflict() {
+    let mut host = tmux_host();
+    set_keymap(
+        &mut host,
+        vec![
+            binding("Keyboard", "New terminal", "prefix+c", true),
+            binding("Keyboard", "Quit", "prefix+&", true),
+        ],
+        &[("prefix+c", "c"), ("prefix+&", "&")],
+    );
+    activate(&mut host, "Quit");
+    write_chord(&mut host, "&");
+    host.key(keyboard_page(), "Enter");
+    host.settle();
+    assert!(!render_text(&mut host, keyboard_page(), 120, 20).contains("used by New terminal"));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::default_keys_follow_tmux_for_navigation
+#[test]
+fn keymap_port_second_focus_actions_share_their_default_and_tmux_keys() {
+    for name in ["focus_pane_left", "focus_pane_right", "focus_next_pane", "focus_previous_pane"] {
+        let row = action_rows()
+            .into_iter()
+            .find(|row| row.name == name)
+            .unwrap_or_else(|| panic!("{name} row"));
+        assert_eq!(row.default, row.tmux, "{name}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::tmux_preset_equals_the_default_table
+#[test]
+fn keymap_port_second_unbound_actions_are_the_same_in_default_and_tmux() {
+    let rows = action_rows();
+    let default_unbound: Vec<&String> = rows
+        .iter()
+        .filter(|row| row.default == "unbound")
+        .map(|row| &row.name)
+        .collect();
+    let tmux_unbound: Vec<&String> = rows
+        .iter()
+        .filter(|row| row.tmux == "unbound")
+        .map(|row| &row.name)
+        .collect();
+    assert_eq!(default_unbound, tmux_unbound);
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::presets_have_their_documented_prefixes_and_no_collisions
+#[test]
+fn keymap_port_second_the_screen_preset_does_not_show_the_tmux_prefix() {
+    let mut screen = column_host(Column::Screen);
+    assert!(!render_text(&mut screen, keys_panel(), 100, 20).contains("Prefix is Ctrl+B."));
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::mnemonic_words_start_with_their_registered_letters
+#[test]
+fn keymap_port_second_every_action_command_appears_on_the_keyboard_page() {
+    let mut host = column_host(Column::Tmux);
+    let text = render_text(&mut host, keyboard_page(), 160, 80);
+    for row in action_rows() {
+        assert!(text.contains(&row.command), "{} missing from page", row.command);
+    }
+}
+
+/// REQ: PORT:ilium-client/src/keymap.rs::documented_preset_letters_have_mnemonics_except_explicitly_unmnemonicable_keys
+#[test]
+fn keymap_port_second_every_single_letter_screen_action_has_its_row_on_the_page() {
+    let mut host = column_host(Column::Screen);
+    let screen = host.render(keyboard_page(), 160, 80);
+    for row in action_rows() {
+        let key = row.screen.clone();
+        if key.len() == 1 && key.chars().all(|c| c.is_ascii_alphabetic()) {
+            assert!(screen.find(&row.name).is_some(), "{} row missing", row.name);
+        }
+    }
+}

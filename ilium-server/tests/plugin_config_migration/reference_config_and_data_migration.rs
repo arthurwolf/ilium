@@ -354,3 +354,17 @@ fn doc_cor_034_the_manual_pins_the_keys_written_column_to_settings_key_not_owned
         assert!(text.contains(needle), "{needle} missing from {page:?}");
     }
 }
+
+/// REQ: COR-034
+#[test]
+fn cor_034_key_of_another_tab_in_the_same_table_writes_nothing() {
+    let page = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/plugins-manual/pages/reference-config-and-data-migration.md");
+    let text = std::fs::read_to_string(&page).expect("the config migration page");
+    for needle in [
+        "A write names a key that belongs to another tab of the same table | Nothing is written",
+        "each tab rewrites only its own keys",
+    ] {
+        assert!(text.contains(needle), "{needle} missing from {page:?}");
+    }
+}

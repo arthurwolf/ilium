@@ -35,17 +35,35 @@ pub struct PluginLinker {
 }
 
 /// Builds the linker for a world and the granted capabilities (reference-host-runtime.md).
-pub fn build_linker(_world: World, _grants: &[Grant]) -> Result<PluginLinker, HostError> {
-    unimplemented!("host::linker::build_linker")
+pub fn build_linker(world: World, _grants: &[Grant]) -> Result<PluginLinker, HostError> {
+    Ok(PluginLinker { world })
 }
 
 /// The cache key of a linker: side, tier and the sorted grants (reference-host-runtime.md HST-06x).
 pub fn linker_cache_key(
-    _side: ilium_plugin_api::Side,
-    _tier: ilium_plugin_api::Tier,
-    _grants: &[Grant],
+    side: ilium_plugin_api::Side,
+    tier: ilium_plugin_api::Tier,
+    grants: &[Grant],
 ) -> String {
-    unimplemented!("host::linker::linker_cache_key")
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+
+    let mut sorted: Vec<&str> = grants.iter().map(Grant::as_str).collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let mut hasher = Sha256::new();
+    hasher.update(side.as_str().as_bytes());
+    hasher.update([0]);
+    hasher.update(tier.as_str().as_bytes());
+    for grant in sorted {
+        hasher.update([0]);
+        hasher.update(grant.as_bytes());
+    }
+    hasher.finalize().iter().fold(String::new(), |mut hex, byte| {
+        // Writing to a String cannot fail.
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    })
 }
 
 #[cfg(test)]

@@ -245,3 +245,183 @@ fn port_067_a_request_with_only_a_branch_gets_a_server_chosen_path() {
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(worktree_add_calls(&host.process().calls())[0].arguments[4].contains("fix-auth"));
 }
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree
+#[test]
+fn port_067_an_empty_branch_name_runs_no_git_command() {
+    let mut host = server_host();
+    create_worktree(&mut host, &json!({"branch": ""}));
+    assert!(host.process().calls().is_empty());
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::concurrent_clients_cannot_create_two_worktrees_on_one_branch
+#[test]
+fn port_067_repeated_requests_on_one_branch_commit_exactly_one_pane() {
+    let mut host = server_host();
+    for _ in 0..4 {
+        host.deliver_one(new_agent_message(&json!({"branch": "same"})));
+    }
+    host.deliver_one(pane_created(14, "same"));
+    host.settle();
+    assert_eq!(create_panes(&host.submitted()).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::disconnect_during_worktree_add_finishes_git_then_rolls_back
+#[test]
+fn port_067_a_cancelled_creation_publishes_no_changed_topic() {
+    let mut host = server_host();
+    host.deliver_one(new_agent_message(&json!({"branch": "fix-auth"})));
+    host.cancel_pending();
+    host.settle();
+    assert!(host.published(TOPIC_CHANGED).is_empty());
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::existing_worktree_cannot_start_a_second_agent_pane
+#[test]
+fn port_068_an_existing_worktree_runs_no_git_worktree_add() {
+    let mut host = server_host();
+    host.workspace().add_foreign("docs-sweep", "docs-sweep");
+    host.deliver_one(new_agent_message(&json!({"worktree": "docs-sweep"})));
+    host.settle();
+    assert!(worktree_add_calls(&host.process().calls()).is_empty());
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::concurrent_existing_worktree_requests_admit_one_agent
+#[test]
+fn port_068_a_refused_second_existing_request_shows_a_notice() {
+    let mut host = server_host();
+    host.workspace().add_foreign("docs-sweep", "docs-sweep");
+    for _ in 0..2 {
+        host.deliver_one(new_agent_message(&json!({"worktree": "docs-sweep"})));
+    }
+    host.settle();
+    assert!(host.last_notice().is_some());
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::isolated_server_creates_attaches_and_removes_only_owned_worktree
+#[test]
+fn port_070_removing_an_unowned_path_leaves_the_registry_unchanged() {
+    let mut host = server_host();
+    let before = registered(&mut host).len();
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "/elsewhere/tree", "branch": "tree"})
+            .to_string()
+            .into_bytes(),
+    ));
+    host.settle();
+    assert_eq!(registered(&mut host).len(), before);
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::live_worktree_status_refreshes_and_replays_after_head_changes
+#[test]
+fn port_069_a_probe_before_ten_seconds_does_not_republish() {
+    let mut host = server_host();
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    host.deliver_one(pane_created(14, "fix-auth"));
+    host.settle();
+    let before = host.published(TOPIC_CHANGED).len();
+    host.advance_clock(3_000);
+    host.settle();
+    assert_eq!(host.published(TOPIC_CHANGED).len(), before);
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::configured_setup_runs_before_agent_start_and_failure_retains_worktree
+#[test]
+fn port_071_the_setup_command_is_run_through_sh() {
+    let mut host = server_host();
+    set_git(&mut host, "setup_command", json!("exit 1")).expect("valid");
+    host.process().on_program("sh", failed_exit(1));
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .any(|call| call.program == "sh"));
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::partial_include_copy_retains_prior_files_and_worktree
+#[test]
+fn port_071_a_partial_include_failure_keeps_the_worktree_registered() {
+    let mut host = server_host();
+    host.fs().seed("/project/.worktreeinclude", b"a\n../bad\n");
+    host.fs().seed("/project/a", b"1");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(registered(&mut host).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::retained_owned_worktree_is_recognized_and_reused_after_pane_close
+#[test]
+fn port_067_closing_the_pane_of_a_retained_worktree_runs_no_remove() {
+    let mut host = server_host();
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    host.deliver_one(pane_created(14, "fix-auth"));
+    host.deliver_one(ilium_plugin_sdk::types::Event::NodeRemoved(
+        ilium_plugin_sdk::types::NodeId(14),
+    ));
+    host.settle();
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::retained_worktree_with_a_folder_root_cannot_be_pruned
+#[test]
+fn port_070_a_pane_in_a_sibling_with_a_shared_prefix_does_not_protect_the_worktree() {
+    let mut host = server_host();
+    host.panes().add_running_in("/w/ab");
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "/w/a", "branch": "a"})
+            .to_string()
+            .into_bytes(),
+    ));
+    host.settle();
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .any(|c| c.arguments.get(1).map(String::as_str) == Some("remove")));
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_ipc.rs::retained_worktree_with_an_open_editor_cannot_be_pruned
+#[test]
+fn port_070_a_pane_outside_the_worktree_does_not_block_its_removal() {
+    let mut host = server_host();
+    host.panes().add_running_in("/elsewhere");
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "/w/a", "branch": "a"})
+            .to_string()
+            .into_bytes(),
+    ));
+    host.settle();
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .any(|c| c.arguments.get(1).map(String::as_str) == Some("remove")));
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_http.rs::disconnect_during_worktree_add_never_commits_a_pane
+#[test]
+fn port_067_a_new_request_after_a_cancelled_one_is_admitted() {
+    let mut host = server_host();
+    host.deliver_one(new_agent_message(&json!({"branch": "fix-auth"})));
+    host.cancel_pending();
+    host.settle();
+    host.deliver_one(new_agent_message(&json!({"branch": "fix-auth"})));
+    host.settle();
+    assert!(!worktree_add_calls(&host.process().calls()).is_empty());
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::create_agent_request_accepts_server_chosen_worktree_path_and_legacy_shape
+#[test]
+fn port_067_the_chosen_path_ends_with_the_branch_name() {
+    let mut host = server_host();
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    let calls = worktree_add_calls(&host.process().calls());
+    assert!(calls[0].arguments[4].ends_with("/fix-auth"));
+}

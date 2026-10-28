@@ -1,27 +1,96 @@
-//! Host implementation of `ilium:host/geocode` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/geocode`.
 //!
-//! Written once by the skeleton lane from the generated `HostGeocode` trait; hand-owned afterwards.
+//! The import validates every call (API-005, API-060) and completes the request with the places
+//! the host knows. No geocoding provider is linked into this crate, so a valid request completes
+//! with an empty place list; the location service replaces that completion when it is wired in.
+//! The import is a unit struct, so answers waiting for `take-places` are kept per thread.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use ilium_plugin_api::generated::host::geocode::{GeocodeQuery, HostGeocode};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::geo::{GeoPlace, GeoPoint};
 use ilium_plugin_api::generated::types::ids::RequestId;
+
+/// Shortest and longest search text in characters.
+const TEXT_MIN_CHARS: usize = 2;
+const TEXT_MAX_CHARS: usize = 200;
+/// Largest number of places one search may ask for.
+const LIMIT_MAX: u8 = 8;
+
+#[derive(Debug, Default)]
+struct GeocodeState {
+    next_request: u64,
+    answers: HashMap<u64, Vec<GeoPlace>>,
+}
+
+thread_local! {
+    static STATE: RefCell<GeocodeState> = RefCell::new(GeocodeState::default());
+}
+
+fn invalid_argument(message: &str) -> PluginError {
+    PluginError {
+        code: ErrorCode::InvalidArgument,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
+/// True for a finite latitude/longitude pair inside the valid range.
+fn is_valid_point(point: &GeoPoint) -> bool {
+    point.lat.is_finite()
+        && point.lon.is_finite()
+        && (-90.0..=90.0).contains(&point.lat)
+        && (-180.0..=180.0).contains(&point.lon)
+}
+
+fn complete_with(places: Vec<GeoPlace>) -> RequestId {
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        state.next_request += 1;
+        let request = state.next_request;
+        state.answers.insert(request, places);
+        RequestId(request)
+    })
+}
 
 /// Host side of the `geocode` interface.
 #[derive(Debug)]
 pub struct GeocodeImport;
 
 impl HostGeocode for GeocodeImport {
-    fn search(&mut self, _q: GeocodeQuery) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::geocode::search")
+    fn search(&mut self, q: GeocodeQuery) -> Result<RequestId, PluginError> {
+        let text_chars = q.text.chars().count();
+        if !(TEXT_MIN_CHARS..=TEXT_MAX_CHARS).contains(&text_chars) {
+            return Err(invalid_argument(
+                "text must be 2 to 200 characters long",
+            ));
+        }
+        if q.limit == 0 || q.limit > LIMIT_MAX {
+            return Err(invalid_argument("limit must be 1 to 8"));
+        }
+        if let Some(near) = &q.near {
+            if !is_valid_point(near) {
+                return Err(invalid_argument(
+                    "near must be latitude -90 to 90 and longitude -180 to 180",
+                ));
+            }
+        }
+        Ok(complete_with(Vec::new()))
     }
 
-    fn reverse(&mut self, _point: GeoPoint) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::geocode::reverse")
+    fn reverse(&mut self, point: GeoPoint) -> Result<RequestId, PluginError> {
+        if !is_valid_point(&point) {
+            return Err(invalid_argument(
+                "point must be latitude -90 to 90 and longitude -180 to 180",
+            ));
+        }
+        Ok(complete_with(Vec::new()))
     }
 
-    fn take_places(&mut self, _request: RequestId) -> Option<Vec<GeoPlace>> {
-        unimplemented!("host::imports::geocode::take_places")
+    fn take_places(&mut self, request: RequestId) -> Option<Vec<GeoPlace>> {
+        STATE.with(|cell| cell.borrow_mut().answers.remove(&request.0))
     }
 }
 

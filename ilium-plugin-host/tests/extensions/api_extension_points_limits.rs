@@ -703,3 +703,19 @@ fn ext_050_program_running_entry_with_matching_process_run_installs() {
         "ok"
     );
 }
+
+/// REQ: WIT:ilium:host/extensions.list
+#[test]
+fn list_of_a_point_with_no_contributors_is_empty() {
+    let mut world = ExtWorld::new();
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest(OWNER, vec![collect_point("c", 8, false)]),
+            Vec::new()
+        )),
+        "ok"
+    );
+    let entries = world.list(OWNER, "com.example.owner/c");
+    assert!(matches!(&entries, Ok(list) if list.is_empty()), "{entries:?}");
+}

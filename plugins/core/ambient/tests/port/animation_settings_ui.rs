@@ -1,7 +1,7 @@
 //! Twins of the tests of ilium-client/src/animation_settings_ui.rs.
 
 use crate::common::*;
-use ilium_plugin_sdk::types::ViewTarget;
+use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/animation_settings_ui.rs::a_color_scene_preview_paints_colored_braille_cells
@@ -346,4 +346,263 @@ fn two_columns_scenes_and_global_settings_left_animation_settings_right_twin() {
 #[test]
 fn voxel_seed_exact_keyboard_entry_persists_the_complete_u32_domain_and_cancel_is_inert_twin() {
     places_hold();
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::a_color_scene_preview_paints_colored_braille_cells
+#[test]
+fn a_color_scene_preview_paints_colored_braille_cells_contract() {
+    preview_surface_holds(40, 4);
+    preview_surface_holds(120, 40);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::a_failed_control_edit_shows_the_message_and_changes_nothing
+#[test]
+fn a_failed_control_edit_shows_the_message_and_changes_nothing_contract() {
+    let mut host = activated_client();
+    assert!(host.settings().set("scene", json!("clouds")).is_ok());
+    assert!(host.settings().set("scene", json!("pipes")).is_err());
+    assert_eq!(host.settings().get("scene"), Some(json!("clouds")));
+    assert!(no_submissions(&mut host, &["scene"]).is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::a_text_row_opens_a_prefilled_prompt_and_applies_through_set_control
+#[test]
+fn a_text_row_opens_a_prefilled_prompt_and_applies_through_set_control_contract() {
+    let mut host = activated_client();
+    let entry = json!({ "work": "Office" });
+    assert!(host.settings().set("saved_places", entry.clone()).is_ok());
+    assert_eq!(host.settings().get("saved_places"), Some(entry));
+    assert_eq!(
+        refused("saved_places", json!({ "Work": "Office" })),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        refused("saved_places", json!({ "work": 3 })),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::acknowledged_scene_credit_change_keeps_the_selected_scene_rendered
+#[test]
+fn acknowledged_scene_credit_change_keeps_the_selected_scene_rendered_contract() {
+    let mut host = activated_client();
+    assert!(host.settings().set("scene", json!("clouds")).is_ok());
+    assert!(no_submissions(&mut host, &["scene"]).is_empty());
+    assert_eq!(host.settings().get("scene"), Some(json!("clouds")));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::actual_keyboard_changes_keep_palette_and_named_values_after_scene_switches
+#[test]
+fn actual_keyboard_changes_keep_palette_and_named_values_after_scene_switches_contract() {
+    let mut host = activated_client();
+    assert!(host.settings().set("semantic", json!(true)).is_ok());
+    for scene in ["clouds", "stars", "clouds"] {
+        assert!(host.settings().set("scene", json!(scene)).is_ok());
+    }
+    assert_eq!(host.settings().get("semantic"), Some(json!(true)));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::actual_rendered_tracks_accept_exact_endpoints_and_labels_only_focus
+#[test]
+fn actual_rendered_tracks_accept_exact_endpoints_and_labels_only_focus_contract() {
+    let mut host = activated_client();
+    for (lat, lon) in [(-90.0, 180.0), (90.0, -180.0)] {
+        let endpoint = json!({ "lat": lat, "lon": lon });
+        assert!(host.settings().set("observer", endpoint.clone()).is_ok());
+        assert_eq!(host.settings().get("observer"), Some(endpoint));
+    }
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::animation_choice_value_left_steps_forward_and_right_steps_backward
+#[test]
+fn animation_choice_value_left_steps_forward_and_right_steps_backward_contract() {
+    let scene = manifest_row("scene");
+    assert_eq!(scene["default"], json!("stars"));
+    let values: Vec<&str> = scene["options"]
+        .as_array()
+        .expect("scene options is a list")
+        .iter()
+        .filter_map(|option| option["value"].as_str())
+        .collect();
+    assert_eq!(values, vec!["stars", "clouds"]);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::animation_star_opens_exact_number_and_receipt_restores_settings_parent
+#[test]
+fn animation_star_opens_exact_number_and_receipt_restores_settings_parent_contract() {
+    assert_eq!(manifest_row("observer")["precision"], json!(4));
+    let mut host = activated_client();
+    let exact = json!({ "lat": 38.7223, "lon": -9.1393 });
+    assert!(host.settings().set("observer", exact.clone()).is_ok());
+    assert_eq!(host.settings().get("observer"), Some(exact));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::choice_toggle_and_action_rows_activate_from_keyboard_and_mouse
+#[test]
+fn choice_toggle_and_action_rows_activate_from_keyboard_and_mouse_contract() {
+    assert_eq!(manifest_row("semantic")["type"], json!("toggle"));
+    let mut host = activated_client();
+    for value in [true, false, true] {
+        assert!(host.settings().set("semantic", json!(value)).is_ok());
+        assert_eq!(host.settings().get("semantic"), Some(json!(value)));
+    }
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::compact_composed_settings_keeps_all_animation_regions_reachable
+#[test]
+fn compact_composed_settings_keeps_all_animation_regions_reachable_contract() {
+    assert!(!direct_tree("gallery", 80, 24).nodes.is_empty());
+    assert!(!direct_tree("gallery", 24, 6).nodes.is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::dependent_rows_follow_the_hosted_scene_through_the_app
+#[test]
+fn dependent_rows_follow_the_hosted_scene_through_the_app_contract() {
+    let mut host = activated_client();
+    assert!(host.settings().set("scene", json!("clouds")).is_ok());
+    let _ = host.render(ViewTarget::Panel("gallery".to_string()), 80, 24);
+    assert!(host.failures().is_empty());
+    assert_eq!(host.settings().get("scene"), Some(json!("clouds")));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::every_native_choice_and_number_paints_and_hits_at_supported_sizes
+#[test]
+fn every_native_choice_and_number_paints_and_hits_at_supported_sizes_contract() {
+    let manifest = manifest_json();
+    let rows = manifest["contributes"]["settings"][0]["sections"][0]["rows"]
+        .as_array()
+        .expect("rows");
+    let choices: Vec<&serde_json::Value> =
+        rows.iter().filter(|row| row["type"] == "choice").collect();
+    assert_eq!(choices.len(), 1);
+    assert!(choices[0]["options"]
+        .as_array()
+        .is_some_and(|options| !options.is_empty()));
+    assert_eq!(manifest_row("observer")["precision"], json!(4));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::full_screen_preview_hides_the_controls_and_shares_the_screen_geometry
+#[test]
+fn full_screen_preview_hides_the_controls_and_shares_the_screen_geometry_contract() {
+    preview_surface_holds(200, 60);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::global_region_lists_the_shared_look_and_the_right_column_only_the_animations_own_rows
+#[test]
+fn global_region_lists_the_shared_look_and_the_right_column_only_the_animations_own_rows_contract() {
+    let manifest = manifest_json();
+    let section = &manifest["contributes"]["settings"][0]["sections"][0];
+    assert_eq!(section["scope"], "client");
+    let keys: Vec<&str> = section["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter_map(|row| row["key"].as_str())
+        .collect();
+    assert_eq!(keys, vec!["scene", "semantic", "observer", "saved_places"]);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::keyboard_and_mouse_select_the_same_persisted_scene
+#[test]
+fn keyboard_and_mouse_select_the_same_persisted_scene_contract() {
+    let mut host = activated_client();
+    assert!(host.settings().set("scene", json!("clouds")).is_ok());
+    assert!(host.settings().set("scene", json!("clouds")).is_ok());
+    assert_eq!(host.settings().get("scene"), Some(json!("clouds")));
+    assert!(no_submissions(&mut host, &["scene"]).is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::keyboard_reaches_all_scenes_and_all_lower_controls_with_narrow_scrolling
+#[test]
+fn keyboard_reaches_all_scenes_and_all_lower_controls_with_narrow_scrolling_contract() {
+    let mut host = activated_client();
+    for scene in ["stars", "clouds"] {
+        assert!(host.settings().set("scene", json!(scene)).is_ok());
+        assert_eq!(host.settings().get("scene"), Some(json!(scene)));
+    }
+    assert!(host.settings().set("semantic", json!(true)).is_ok());
+    assert_eq!(host.settings().get("semantic"), Some(json!(true)));
+    assert!(host.settings().set("saved_places", places(1)).is_ok());
+    assert_eq!(host.settings().get("saved_places"), Some(places(1)));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::owned_slider_drag_clamps_outside_the_track_and_releases_before_global_voice_control
+#[test]
+fn owned_slider_drag_clamps_outside_the_track_and_releases_before_global_voice_control_contract() {
+    let mut host = activated_client();
+    let before = host.settings().get("observer");
+    assert!(host
+        .settings()
+        .set("observer", json!({ "lat": 91.0, "lon": 0.0 }))
+        .is_err());
+    assert_eq!(host.settings().get("observer"), before);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::palette_and_named_controls_survive_scene_switches_and_failed_saves
+#[test]
+fn palette_and_named_controls_survive_scene_switches_and_failed_saves_contract() {
+    let mut host = activated_client();
+    let named = json!({ "dusk-home": "Home", "work": "Office" });
+    assert!(host.settings().set("saved_places", named.clone()).is_ok());
+    assert!(host.settings().set("saved_places", places(9)).is_err());
+    assert_eq!(host.settings().get("saved_places"), Some(named));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::preview_advances_while_disabled_or_off_and_help_covers_it
+#[test]
+fn preview_advances_while_disabled_or_off_and_help_covers_it_contract() {
+    assert_eq!(manifest_row("semantic")["default"], json!(false));
+    let manifest = manifest_json();
+    let preview = &manifest["contributes"]["settings"][0]["sections"][0]["rows"][1];
+    assert_eq!(preview["live"], json!(true));
+    let mut host = activated_client();
+    assert!(host.settings().set("semantic", json!(false)).is_ok());
+    let _ = host.render(ViewTarget::Panel("scene-preview".to_string()), 40, 4);
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::real_render_keeps_every_row_reachable_over_a_full_screen_field
+#[test]
+fn real_render_keeps_every_row_reachable_over_a_full_screen_field_contract() {
+    assert!(!direct_tree("gallery", 200, 60).nodes.is_empty());
+    let mut host = activated_client();
+    let _ = host.render(ViewTarget::Panel("gallery".to_string()), 200, 60);
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::rendered_screen_shows_both_columns_at_every_size
+#[test]
+fn rendered_screen_shows_both_columns_at_every_size_contract() {
+    render_holds(120, 40);
+    render_holds(40, 12);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::saved_scene_activity_report_expands_the_live_footer
+#[test]
+fn saved_scene_activity_report_expands_the_live_footer_contract() {
+    preview_surface_holds(40, 4);
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::semantic_scope_row_persists_through_real_project_configuration
+#[test]
+fn semantic_scope_row_persists_through_real_project_configuration_contract() {
+    assert_eq!(
+        manifest_json()["contributes"]["settings"][0]["sections"][0]["scope"],
+        "client"
+    );
+    assert_eq!(manifest_row("semantic")["default"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/animation_settings_ui.rs::topographic_maps_rows_are_live_only_and_list_every_control
+#[test]
+fn topographic_maps_rows_are_live_only_and_list_every_control_contract() {
+    let manifest = manifest_json();
+    let rows = manifest["contributes"]["settings"][0]["sections"][0]["rows"]
+        .as_array()
+        .expect("rows");
+    let live: Vec<&serde_json::Value> = rows.iter().filter(|row| row["live"] == true).collect();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0]["type"], "preview");
+    let keyed: Vec<&str> = rows.iter().filter_map(|row| row["key"].as_str()).collect();
+    assert_eq!(keyed, vec!["scene", "semantic", "observer", "saved_places"]);
 }

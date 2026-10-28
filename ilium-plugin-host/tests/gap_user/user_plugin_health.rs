@@ -43,3 +43,25 @@ fn usr_338_failed_view_dims_the_last_frame_then_shows_a_placeholder_and_leaves_o
         "another plugin's window must not be blanked"
     );
 }
+
+/// REQ: USR-338
+#[test]
+fn usr_338_placeholder_replaces_the_dimmed_frame_within_two_seconds_of_the_failure() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("s1");
+    rig.advance(secs(3));
+    let notes_window = server.open_plugin_window(NOTES);
+    server.set_view_delay(NOTES, Duration::from_millis(250));
+
+    rig.advance(Duration::from_secs(1));
+    assert!(
+        notes_window.is_dimmed_last_frame(),
+        "the last good frame must still be dimmed one second in"
+    );
+    rig.advance(Duration::from_secs(2));
+    assert!(
+        notes_window.is_placeholder(),
+        "the dimmed frame must give way to the placeholder by 2 s"
+    );
+}

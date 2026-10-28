@@ -277,3 +277,202 @@ fn port_026_the_title_style_can_be_set_and_is_read_back() {
         serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
     assert_eq!(settings["inference"]["title_style"], json!("labeling"));
 }
+
+/// REQ: PORT:ilium-client/src/control/mod.rs::control_argument_overflow_is_truthfully_rejected_before_preparation
+#[test]
+fn port_009_an_oversized_argument_to_a_read_tool_is_refused_and_the_next_read_still_works() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    let oversized = " ".repeat(1024 * 1024 + 1);
+    let result = host.realtime().call_tool("ilium_get_state", &oversized);
+    assert_eq!(refused_code(result), ErrorCode::InvalidArgument);
+    host.realtime()
+        .call_tool("ilium_get_state", "{}")
+        .expect("a normal read still works after the refusal");
+}
+
+/// REQ: PORT:ilium-client/src/control/mod.rs::git_settings_control_paths_persist_and_read_back
+#[test]
+fn port_010_an_unknown_git_branch_line_is_refused_and_the_saved_value_is_kept() {
+    let mut host = enabled_client("semantic_vad");
+    set_setting(&mut host, "git.branch_line", json!("off")).expect("off accepted");
+    assert_eq!(
+        refused_code(set_setting(&mut host, "git.branch_line", json!("sideways"))),
+        ErrorCode::InvalidArgument
+    );
+    let settings: Value =
+        serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(settings["git"]["branch_line"], json!("off"));
+}
+
+/// REQ: PORT:ilium-client/src/control/mod.rs::state_preparation_is_deferred_ordered_and_shares_its_retained_json
+#[test]
+fn port_012_a_different_call_id_runs_its_own_state_read() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    host.realtime()
+        .call_tool_with_id("state-1", "ilium_get_state", "{}")
+        .expect("first state");
+    assert_eq!(host.realtime().executions("state-2"), 0);
+    host.realtime()
+        .call_tool_with_id("state-2", "ilium_get_state", "{}")
+        .expect("second state");
+    assert_eq!(host.realtime().executions("state-2"), 1);
+    assert_eq!(host.realtime().executions("state-1"), 1);
+}
+
+/// REQ: PORT:ilium-client/src/control/mod.rs::voice_replacement_cancels_old_reads_and_fences_cached_call_ids
+#[test]
+fn port_013_after_a_voice_replacement_the_fresh_state_lists_the_pane_added_since() {
+    let mut host = enabled_client("semantic_vad");
+    add_pane(&mut host, "docs");
+    let before = host
+        .realtime()
+        .call_tool_with_id("state-1", "ilium_get_state", "{}")
+        .expect("state before");
+    configure(&mut host, "enabled", json!(false));
+    configure(&mut host, "enabled", json!(true));
+    add_pane(&mut host, "api");
+    let after = host
+        .realtime()
+        .call_tool_with_id("state-2", "ilium_get_state", "{}")
+        .expect("state after");
+    assert!(!before.contains("\"api\""));
+    assert!(after.contains("\"api\""));
+}
+
+/// REQ: PORT:ilium-client/src/control/parser_pool_settings_regressions.rs::parser_pool_execute_rejects_invalid_values_without_reporting_a_save
+#[test]
+fn port_014_a_string_null_or_boolean_engine_budget_is_refused_and_the_old_value_is_kept() {
+    let mut host = enabled_client("semantic_vad");
+    set_setting(&mut host, "terminal.engine_memory_budget_mib", json!(512)).expect("seed");
+    for value in [json!("512"), json!(null), json!(true)] {
+        let code = refused_code(set_setting(
+            &mut host,
+            "terminal.engine_memory_budget_mib",
+            value.clone(),
+        ));
+        assert_eq!(code, ErrorCode::InvalidArgument, "{value}");
+        let settings: Value =
+            serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+        assert_eq!(
+            settings["terminal"]["engine_memory_budget_mib"],
+            json!(512),
+            "{value}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/control/parser_pool_settings_regressions.rs::parser_pool_execute_reports_pending_then_reloads_every_valid_boundary_and_custom_value
+#[test]
+fn port_016_the_engine_memory_budget_path_is_advertised_as_writable() {
+    let mut host = enabled_client("semantic_vad");
+    let settings: Value =
+        serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert!(settings["writable_path_patterns"]
+        .as_array()
+        .is_some_and(|paths| paths
+            .iter()
+            .any(|path| path == "terminal.engine_memory_budget_mib")));
+}
+
+/// REQ: PORT:ilium-client/src/control/settings.rs::kilo_model_setting_accepts_only_discovered_free_choices
+#[test]
+fn port_019_a_refused_paid_kilo_model_leaves_the_current_model_in_place() {
+    let mut host = enabled_client("semantic_vad");
+    let before: Value = serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(
+        refused_code(set_setting(
+            &mut host,
+            "inference.kilo_gateway.model",
+            json!("provider/paid"),
+        )),
+        ErrorCode::InvalidArgument
+    );
+    let after: Value = serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(
+        after["inference"]["kilo_gateway"]["model"],
+        before["inference"]["kilo_gateway"]["model"]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/control/settings.rs::left_panel_widths_reject_invalid_values_without_mutating_state
+#[test]
+fn port_020_a_refused_left_panel_width_keeps_the_previously_accepted_width() {
+    let mut host = enabled_client("semantic_vad");
+    set_setting(&mut host, "ui.left_panel_fixed_width", json!(40)).expect("40 is valid");
+    assert_eq!(
+        refused_code(set_setting(
+            &mut host,
+            "ui.left_panel_fixed_width",
+            json!(5)
+        )),
+        ErrorCode::InvalidArgument
+    );
+    let settings: Value =
+        serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(settings["ui"]["left_panel_fixed_width"], json!(40));
+}
+
+/// REQ: PORT:ilium-client/src/control/settings.rs::reset_planning_control_paths_toggle_independently
+#[test]
+fn port_022_switching_the_codex_monitor_off_leaves_the_claude_monitor_as_it_was() {
+    let mut host = enabled_client("semantic_vad");
+    let before: Value = serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    set_setting(&mut host, "reset_planning.monitor_codex", json!(false)).expect("codex off");
+    let after: Value = serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(after["reset_planning"]["monitor_codex"], json!(false));
+    assert_eq!(
+        after["reset_planning"]["monitor_claude"],
+        before["reset_planning"]["monitor_claude"]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/control/settings.rs::restructure_token_setting_validates_and_updates_snapshot
+#[test]
+fn port_023_the_smallest_positive_restructure_token_limit_is_accepted_and_read_back() {
+    let mut host = enabled_client("semantic_vad");
+    set_setting(
+        &mut host,
+        "inference.restructure_prompt_token_limit",
+        json!(1),
+    )
+    .expect("1 is the smallest positive limit");
+    let settings: Value =
+        serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(
+        settings["inference"]["restructure_prompt_token_limit"],
+        json!(1)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/control/settings.rs::scrollback_budget_rejects_rather_than_hangs_when_misaligned
+#[test]
+fn port_024_a_larger_aligned_scrollback_budget_is_accepted_and_read_back() {
+    let mut host = enabled_client("semantic_vad");
+    set_setting(&mut host, "terminal.scrollback_budget_mib", json!(128)).expect("128 is aligned");
+    let settings: Value =
+        serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(settings["terminal"]["scrollback_budget_mib"], json!(128));
+}
+
+/// REQ: PORT:ilium-client/src/control/snapshot.rs::settings_snapshot_exposes_title_style_as_a_writable_choice
+#[test]
+fn port_026_an_unknown_title_style_is_refused_and_the_snapshot_lists_the_path_as_writable() {
+    let mut host = enabled_client("semantic_vad");
+    set_setting(&mut host, "inference.title_style", json!("labeling")).expect("labeling accepted");
+    assert_eq!(
+        refused_code(set_setting(
+            &mut host,
+            "inference.title_style",
+            json!("bogus")
+        )),
+        ErrorCode::InvalidArgument
+    );
+    let settings: Value =
+        serde_json::from_str(&read_settings(&mut host)).expect("settings are JSON");
+    assert_eq!(settings["inference"]["title_style"], json!("labeling"));
+    assert!(settings["writable_path_patterns"]
+        .as_array()
+        .is_some_and(|paths| paths.iter().any(|path| path == "inference.title_style")));
+}

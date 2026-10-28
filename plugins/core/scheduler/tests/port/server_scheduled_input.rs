@@ -68,3 +68,47 @@ fn port_server_raw_payload_bytes_cover_text_only_and_enter_only() {
         );
     }
 }
+
+/// REQ: PORT:ilium-server/src/scheduled_input.rs::relative_deadline_rejects_zero_and_overflow
+#[test]
+fn port_server_one_hour_delay_is_accepted_and_pending() {
+    let mut session = session();
+    let pane = terminal_pane(&mut session, "shell");
+    schedule(&mut session, pane, 1, 0, 0, "hour", true).expect("one hour is accepted");
+    let reply = call_queue(
+        &mut session,
+        serde_json::json!({"method": "pending", "pane": pane.0}),
+    )
+    .expect("pending answers");
+    assert_eq!(reply["schedules"].as_array().map(Vec::len), Some(1));
+}
+
+/// REQ: PORT:ilium-server/src/scheduled_input.rs::nearest_deadline_tracks_replacement_and_multiple_panes
+#[test]
+fn port_server_equal_deadlines_fire_both_panes_together() {
+    let mut session = session();
+    let first = terminal_pane(&mut session, "first");
+    let second = terminal_pane(&mut session, "second");
+    schedule(&mut session, first, 0, 0, 2, "a", true).expect("first");
+    schedule(&mut session, second, 0, 0, 2, "b", true).expect("second");
+    assert_eq!(sent_after(&mut session, 2_000), 2);
+    let panes: Vec<_> = sends(&server(&mut session).submitted())
+        .iter()
+        .map(|submission| submission.0.pane)
+        .collect();
+    assert!(panes.contains(&first) && panes.contains(&second), "{panes:?}");
+}
+
+/// REQ: PORT:ilium-server/src/scheduled_input.rs::raw_payload_bytes_cover_text_only_and_enter_only
+#[test]
+fn port_server_empty_payload_without_enter_is_refused() {
+    let mut session = session();
+    let pane = terminal_pane(&mut session, "shell");
+    let error = schedule(&mut session, pane, 0, 0, 1, "", false)
+        .expect_err("nothing to send is refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        error.message,
+        "Enter text, enable Send Enter, or use both"
+    );
+}

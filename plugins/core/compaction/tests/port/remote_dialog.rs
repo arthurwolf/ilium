@@ -210,3 +210,112 @@ fn rdlg_bars_scale_to_the_largest_figure_and_show_small_values() {
     );
     assert!(!lines[3].contains('\u{2588}'), "zero shows no cells");
 }
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::events_update_steps_progress_tokens_and_log
+#[test]
+fn rdlg_progress_is_clamped_to_the_unit_interval() {
+    let mut host = dialog();
+    host.dialog_event(json!({"progress": 1.7}));
+    let state = host.dialog_state();
+    assert!(
+        state["progress"].as_f64().unwrap() <= 1.0,
+        "progress above 100 percent: {}",
+        state["progress"]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::failure_marks_the_running_stage
+#[test]
+fn rdlg_failure_message_is_kept_in_the_dialog_state() {
+    let mut host = dialog();
+    host.dialog_fail("no network");
+    let state = host.dialog_state();
+    assert!(state.to_string().contains("no network"), "{state}");
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::render_shows_stages_tokens_destination_and_banner
+#[test]
+fn rdlg_running_render_advertises_cancel_and_hide_keys() {
+    let host = dialog();
+    let text = host.dialog_render(
+        100,
+        44,
+        Some("Your session is sent to Kilo Gateway / test-model."),
+    );
+    for expected in ["Esc cancel", "x hide"] {
+        assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::render_without_banner_publishes_no_close_rect
+#[test]
+fn rdlg_render_without_banner_still_shows_the_stages() {
+    let host = dialog();
+    let text = host.dialog_render(100, 44, None);
+    assert!(text.contains("Context before"), "{text}");
+    assert!(text.contains("Kilo Gateway / test-model"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::failed_dialog_offers_resume_once_the_agent_is_stopped
+#[test]
+fn rdlg_resume_hint_names_the_enter_key() {
+    let mut host = dialog();
+    host.dialog_fail("boom");
+    host.dialog_set_agent_stopped(true);
+    assert!(
+        host.dialog_hint().contains("Enter"),
+        "{}",
+        host.dialog_hint()
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::failed_dialog_keeps_disclosure_error_and_actions_at_narrow_and_wide_sizes
+#[test]
+fn rdlg_failed_dialog_lines_never_exceed_the_panel_width() {
+    let mut host = dialog();
+    host.dialog_set_agent_stopped(true);
+    host.dialog_fail("Synthetic provider failure: the session can be resumed safely");
+    for (width, height) in [(40usize, 12usize), (120, 40)] {
+        let text = host.dialog_render(width as u16, height as u16, Some(PRIVACY_NOTICE));
+        for line in text.lines() {
+            assert!(
+                line.chars().count() <= width,
+                "{width}: line too wide: {line:?}"
+            );
+        }
+    }
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::running_dialog_keeps_disclosure_phase_progress_and_cancel_at_narrow_sizes
+#[test]
+fn rdlg_running_dialog_lines_never_exceed_the_panel_width() {
+    let mut host = dialog();
+    host.dialog_event(json!({"progress": 0.6}));
+    for (width, height) in [(40usize, 12usize), (60, 20)] {
+        let text = host.dialog_render(width as u16, height as u16, Some(PRIVACY_NOTICE));
+        for line in text.lines() {
+            assert!(
+                line.chars().count() <= width,
+                "{width}: line too wide: {line:?}"
+            );
+        }
+    }
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::oversized_disclosure_requests_more_room_without_hiding_failure_actions
+#[test]
+fn rdlg_a_normal_disclosure_is_not_reported_as_too_long() {
+    let mut host = dialog();
+    host.dialog_set_agent_stopped(true);
+    host.dialog_fail("network error");
+    let text = host.dialog_render(120, 40, Some(PRIVACY_NOTICE));
+    assert!(!text.contains("Privacy notice too long"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_dialog.rs::bars_scale_to_the_largest_figure_and_show_small_values
+#[test]
+fn rdlg_the_largest_bar_fills_the_requested_width() {
+    let host = dialog();
+    let lines = host.dialog_token_bar_lines(json!({"before_context": 100000, "tail_kept": 1}), 20);
+    assert_eq!(lines[0].matches('\u{2588}').count(), 20, "{:?}", lines[0]);
+}

@@ -134,3 +134,84 @@ fn port_004_stale_success_preserves_newer_error_after_edit_away_and_back() {
     submit(&mut host, "inference", BUDGET_KEY);
     assert_eq!(value_of(&mut host, BUDGET_KEY), Some(json!(111111)));
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::atomic_paste_reuses_existing_character_input_for_text_prompt_modes
+#[test]
+fn port_001_escape_discards_a_pasted_text_and_keeps_the_stored_value() {
+    let mut host = client_host();
+    host.send_action(
+        tab("git"),
+        TEXT_KEY,
+        ActionKind::Changed,
+        ActionValue::Text("kept".to_string()),
+    );
+    host.advance_clock(600);
+    host.settle();
+    host.send_action(
+        tab("git"),
+        TEXT_KEY,
+        ActionKind::Changed,
+        ActionValue::Text("kept-and-pasted".to_string()),
+    );
+    press(&mut host, "git", &["Esc"]);
+    host.advance_clock(600);
+    host.settle();
+    assert_eq!(value_of(&mut host, TEXT_KEY), Some(json!("kept")));
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::modal_stack_restores_arbitrary_depth_in_last_opened_first_closed_order
+#[test]
+fn port_002_a_stack_emptied_by_closing_every_dialog_opens_a_single_dialog_again() {
+    let mut host = client_host();
+    open_row(&mut host, "inference", BUDGET_KEY);
+    open_row(&mut host, "git", TEXT_KEY);
+    let stack = host.popups();
+    assert_eq!(stack.len(), 2, "{stack:?}");
+    host.send_action(
+        ViewTarget::Popup(stack[1].clone()),
+        &stack[1],
+        ActionKind::Closed,
+        ActionValue::None,
+    );
+    host.settle();
+    host.send_action(
+        ViewTarget::Popup(stack[0].clone()),
+        &stack[0],
+        ActionKind::Closed,
+        ActionValue::None,
+    );
+    host.settle();
+    assert!(host.popups().is_empty());
+    open_row(&mut host, "inference", BUDGET_KEY);
+    assert_eq!(host.popups().len(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::escaped_reopened_and_covered_dialogs_reject_old_dismissal
+#[test]
+fn port_003_escape_key_closes_a_dialog_and_a_late_closed_event_changes_nothing() {
+    let mut host = client_host();
+    open_row(&mut host, "inference", BUDGET_KEY);
+    let dialog = host.popups();
+    assert_eq!(dialog.len(), 1);
+    host.key(ViewTarget::Popup(dialog[0].clone()), "Esc");
+    host.settle();
+    assert!(host.popups().is_empty());
+    host.send_action(
+        ViewTarget::Popup(dialog[0].clone()),
+        &dialog[0],
+        ActionKind::Closed,
+        ActionValue::None,
+    );
+    host.settle();
+    assert!(host.popups().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::stale_success_preserves_newer_error_after_edit_away_and_back
+#[test]
+fn port_004_a_successful_save_shows_no_error_text() {
+    let mut host = client_host();
+    type_number(&mut host, "inference", BUDGET_KEY, 333333.0);
+    let text = tab_text(&mut host, "inference", 100, 40);
+    assert!(!text.contains("disk full"), "{text}");
+    assert_eq!(value_of(&mut host, BUDGET_KEY), Some(json!(333333)));
+}

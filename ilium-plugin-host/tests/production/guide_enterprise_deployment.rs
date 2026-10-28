@@ -2,6 +2,9 @@
 //! stdout-only metrics (HST-991), owner-only copies of logs (HST-992) and no log or metric
 //! forwarding key in the admin policy (HST-993).
 
+use ilium_plugin_host::testing::ops::OpsRig;
+use ilium_plugin_host::policy::{PolicyEngine, PolicyInput, PolicyOwnership};
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "guide-enterprise-deployment.md";
@@ -39,7 +42,23 @@ fn hst_991_plugin_metrics_writes_prometheus_text_to_standard_output_only() {
 /// REQ: HST-991
 #[test]
 fn hst_991_plugin_metrics_never_opens_a_listening_socket() {
-    unimplemented!("ilium_plugin_host::cli::plugin_metrics_opens_no_socket")
+    let ops = OpsRig::new();
+    let output = ops.cli(&["plugin", "metrics"]);
+    assert_eq!(output.exit_code, 0, "{:?}", output.stderr);
+    let text = format!("{}{}", output.stdout_raw, output.stdout_jsonl.iter().map(|line| line.to_string()).collect::<String>());
+    assert!(text.contains("# TYPE"), "Prometheus text goes to standard output: {text}");
+    // No socket, listener address or port file appears in the state folder.
+    let mut stack = vec![ops.state_dir()];
+    while let Some(folder) = stack.pop() {
+        for entry in std::fs::read_dir(&folder).expect("read state folder").flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            assert!(!name.ends_with(".sock") && !name.contains("listen"), "socket artefact: {}", path.display());
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
 }
 
 /// REQ: HST-992
@@ -75,5 +94,23 @@ fn hst_993_the_admin_policy_defines_no_key_that_forwards_logs_or_metrics() {
 /// REQ: HST-993
 #[test]
 fn hst_993_a_policy_file_with_a_forwarding_key_is_rejected() {
-    unimplemented!("ilium_plugin_host::policy::forwarding_key_rejected")
+    let admin_owned = Some(PolicyOwnership {
+        administrator_owned: true,
+        non_administrator_writable: false,
+    });
+    for key in ["forward_logs", "forward_metrics", "log_sink"] {
+        let engine = PolicyEngine::from_inputs(
+            PolicyInput::Document {
+                text: format!("[logs]\n{key} = \"https://collector.example/ingest\"\n"),
+                ownership: admin_owned,
+            },
+            PolicyInput::Missing,
+        );
+        assert!(!engine.is_valid(), "{key} must be rejected");
+    }
+    let plain = PolicyEngine::from_inputs(
+        PolicyInput::Document { text: String::new(), ownership: admin_owned },
+        PolicyInput::Missing,
+    );
+    assert!(plain.is_valid(), "an empty policy stays valid");
 }

@@ -609,3 +609,61 @@ fn doc_services_page_states_the_limits_the_tests_use() {
         assert!(present, "api-services.md no longer mentions `{needle}`");
     }
 }
+
+/// REQ: SVC-013
+#[test]
+fn svc_013_bumping_the_provider_leaves_the_provider_itself_active() {
+    let mut world = ExtWorld::new();
+    let v1 = provider_manifest("com.example.prov", SERVICE, "1.0.0");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            v1,
+            vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]
+        )),
+        "ok"
+    );
+    world.settle();
+    let v2 = provider_manifest("com.example.prov", SERVICE, "2.0.0");
+    assert_eq!(
+        diag_code(&world.update(
+            Tier::T3,
+            v2,
+            vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]
+        )),
+        "ok"
+    );
+    world.settle();
+    assert!(world.plugin_active("com.example.prov"));
+}
+
+/// REQ: WIT:ilium:host/services.call
+#[test]
+fn services_call_hands_out_a_new_request_id_for_each_call() {
+    let mut world = service_world("0.1.0", done(1, r#""fine""#));
+    let first = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
+    let second = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
+    assert_ne!(first, second);
+}
+
+/// REQ: WIT:ilium:host/services.take-reply
+#[test]
+fn take_reply_for_an_unknown_request_id_is_none() {
+    let mut world = service_world("0.1.0", done(1, r#""fine""#));
+    assert_eq!(
+        world.service_take_reply("com.example.cons", RequestId(424_242)),
+        None
+    );
+}
+
+/// REQ: WIT:ilium:host/services.reply
+#[test]
+fn reply_to_an_unknown_call_id_returns_not_found() {
+    let mut world = service_world("0.1.0", deferred());
+    let error = err_of(world.service_reply(
+        "com.example.prov",
+        424_242,
+        Ok(r#""late""#.to_owned()),
+    ));
+    assert_eq!(code_of(&error), ErrorCode::NotFound);
+}

@@ -187,3 +187,100 @@ fn sec_732_guest_string_with_controls_and_bidi_overrides_is_escaped_before_displ
         );
     }
 }
+
+/// REQ: SEC-707
+#[test]
+fn sec_707_component_over_the_64_mib_byte_bound_is_refused_before_compilation() {
+    let rig = rig();
+    let output = install(
+        &rig,
+        &pkg(NOTES, "1.0.0").declared_size(64 * 1024 * 1024 + 1),
+    );
+    assert_ne!(
+        output.exit_code, 0,
+        "a component over 64 MiB must be refused"
+    );
+    assert!(
+        error_codes(&output)
+            .iter()
+            .any(|code| code == "manifest.component-too-large"),
+        "expected manifest.component-too-large, got {:?}",
+        error_codes(&output)
+    );
+    assert_eq!(
+        rig.compile_count(NOTES),
+        0,
+        "no compilation starts for an oversized component"
+    );
+}
+
+/// REQ: SEC-708
+#[test]
+fn sec_708_a_server_start_reuses_the_helper_artifact_and_does_not_compile_again() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    assert_eq!(
+        rig.compile_count(NOTES),
+        1,
+        "one helper compilation at install time"
+    );
+    let _server = rig.start_server("s1");
+    assert_eq!(
+        rig.compile_count(NOTES),
+        1,
+        "the server accepts the serialised artifact instead of compiling it"
+    );
+}
+
+/// REQ: SEC-710
+#[test]
+fn sec_710_two_fuel_exhaustions_do_not_disable_the_guest() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").spins_forever());
+    let server = rig.start_server("s1");
+    for _ in 0..2 {
+        rig.exhaust_fuel(NOTES);
+    }
+    assert!(
+        !server.is_disabled_by_failure(NOTES),
+        "two limit hits are below the threshold of three"
+    );
+    assert_eq!(
+        server.active_version(NOTES).as_deref(),
+        Some("1.0.0"),
+        "the guest keeps running"
+    );
+    assert!(rig.audit_records("limit-disable").is_empty());
+}
+
+/// REQ: SEC-712
+#[test]
+fn sec_712_no_sandbox_degraded_audit_when_landlock_succeeds() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let _server = rig.start_server("s1");
+    assert!(
+        rig.audit_records("sandbox-degraded").is_empty(),
+        "a fully applied sandbox writes no sandbox-degraded audit line"
+    );
+}
+
+/// REQ: SEC-732
+#[test]
+fn sec_732_plain_guest_text_without_controls_is_shown_unchanged() {
+    let rig = rig();
+    install_ok(
+        &rig,
+        &pkg(NOTES, "1.0.0").guest_message("plain status text"),
+    );
+    let server = rig.start_server("s1");
+    rig.advance(secs(2));
+    assert!(
+        server
+            .notices()
+            .iter()
+            .chain(server.toasts().iter())
+            .any(|shown| shown.contains("plain status text")),
+        "text without control or bidi characters is displayed as written"
+    );
+}

@@ -1,5 +1,5 @@
 //! Rule statements of the guide-internationalisation page as the manual states them (doc-lint tests, part 2).
-use crate::support::assert_rule;
+use crate::support::{assert_page_line, assert_rule};
 
 /// REQ: AUT-601
 #[test]
@@ -277,4 +277,106 @@ fn aut_007_saturating_sub_does_not_underflow_when_wall_time_goes_backwards() {
     let (now, last): (u64, u64) = (1_000, 5_000);
     assert_eq!(now.saturating_sub(last), 0);
     assert!(now.checked_sub(last).is_none());
+}
+
+/// REQ: AUT-601
+#[test]
+fn doc_aut_601_cost_format_page_states_the_host_gives_no_locale() {
+    assert_page_line("AUT-601", &["The host gives the plugin no locale"]);
+}
+
+/// REQ: AUT-602
+#[test]
+fn doc_aut_602_host_widgets_share_the_display_width_rule() {
+    assert_page_line("AUT-602", &["So does every host widget"]);
+}
+
+/// REQ: AUT-603
+#[test]
+fn doc_aut_603_badge_is_cut_with_an_ellipsis_at_twelve_cells() {
+    assert_page_line(
+        "AUT-603",
+        &["The host cuts a badge at 12 cells and ends it with `…`"],
+    );
+}
+
+/// REQ: AUT-604
+#[test]
+fn doc_aut_604_long_text_is_measured_once_then_cut_only_if_too_wide() {
+    assert_page_line(
+        "AUT-604",
+        &["Measure once, and cut only when the text is too wide."],
+    );
+}
+
+/// REQ: AUT-605
+#[test]
+fn doc_aut_605_leader_row_shrinks_value_then_label() {
+    assert_page_line(
+        "AUT-605",
+        &["It shrinks the value first, then the label, with `…`."],
+    );
+}
+
+/// REQ: AUT-606
+#[test]
+fn doc_aut_606_escape_sequences_are_removed_from_plugin_text() {
+    assert_page_line(
+        "AUT-606",
+        &["The host removes terminal escape sequences from text a plugin passes to a widget"],
+    );
+}
+
+/// REQ: AUT-607
+#[test]
+fn doc_aut_607_host_does_not_reorder_or_mirror_bidirectional_text() {
+    assert_page_line(
+        "AUT-607",
+        &["It does not reorder bidirectional text and it does not mirror a layout."],
+    );
+}
+
+/// REQ: AUT-608
+#[test]
+fn doc_aut_608_missing_translation_shows_english_not_the_id() {
+    assert_page_line(
+        "AUT-608",
+        &["A missing translation falls back to English and never shows a message id"],
+    );
+}
+
+/// REQ: AUT-609
+#[test]
+fn doc_aut_609_settings_row_title_and_help_have_one_value() {
+    assert_page_line(
+        "AUT-609",
+        &["The settings row `title` and `help` are text in the manifest and have one value."],
+    );
+}
+
+/// REQ: AUT-610
+#[test]
+fn doc_aut_610_command_titles_may_translate_but_ids_do_not() {
+    assert_page_line(
+        "AUT-610",
+        &["Titles shown to people, such as a command `title`, are text and MAY be in any language."],
+    );
+}
+
+/// REQ: AUT-611
+#[test]
+fn doc_aut_611_epoch_zero_is_labelled_with_the_utc_zone() {
+    assert_eq!(format_utc_millis(0), "1970-01-01 00:00:00 UTC");
+}
+
+/// REQ: AUT-615
+#[test]
+fn doc_aut_615_storage_keys_sort_by_byte_order_not_language() {
+    assert_page_line("AUT-615", &["The host sorts storage keys by byte order."]);
+}
+
+/// REQ: AUT-617
+#[test]
+fn doc_aut_617_wide_character_takes_two_cells_in_a_text_widget() {
+    assert_page_line("AUT-617", &["a wide character takes two cells"]);
 }

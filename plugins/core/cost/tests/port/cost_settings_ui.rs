@@ -427,3 +427,141 @@ fn port_cost_settings_ui_cost_window_accepts_an_exact_typed_value_and_keeps_the_
         json!(600)
     );
 }
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::clicking_a_metric_control_steps_it_and_the_window_row_toggles
+#[test]
+fn port_cost_settings_ui_right_click_on_a_metric_value_steps_back() {
+    let reply = client(
+        "settings-ui.value-hit",
+        json!({ "settings": {}, "width": 110, "height": 60, "row": "metric:dollars", "at": "value", "button": "right" }),
+    );
+    assert_eq!(reply["action"], json!("previous_choice"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::clicking_cost_number_star_opens_keyboard_entry_dialog
+#[test]
+fn port_cost_settings_ui_malformed_typed_budget_keeps_the_stored_budget() {
+    let reply = client(
+        "settings-ui.number-dialog",
+        json!({ "settings": { "calibration": "budget" }, "row": "budget", "click": "open", "draft_keys": "abc", "confirm": true }),
+    );
+    assert_eq!(reply["dialog_kind"], json!("number"));
+    assert!(reply["error"].as_str().is_some_and(|error| !error.is_empty()));
+    assert_eq!(reply["settings"]["budget_usd"], json!(10.0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::clicks_toggle_options_and_step_parameters
+#[test]
+fn port_cost_settings_ui_clicking_a_visibility_control_toggles_without_stepping() {
+    let view_value = view(json!({}), 110);
+    let visibility = span_of(&view_value, "visibility:meter");
+    let click = hit(
+        json!({}),
+        110,
+        visibility["control_x"].as_u64().unwrap_or(0),
+        visibility["control_line"].as_u64().unwrap_or(0),
+    );
+    assert_eq!(click["row"], json!("visibility:meter"));
+    assert_eq!(click["direction"], json!(0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::cost_choice_right_click_reverses_and_plus_opens_the_complete_dialog
+#[test]
+fn port_cost_settings_ui_choice_dialog_lists_at_least_two_metrics() {
+    let reply = client(
+        "settings-ui.choice-dialog",
+        json!({ "settings": { "metric": "dollars" }, "row": "metric", "right_click_value": false, "click": "open", "pick_first_option": false }),
+    );
+    assert_eq!(reply["dialog_kind"], json!("choice"));
+    assert!(reply["option_count"].as_u64().unwrap_or(0) >= 2);
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::cost_settings_sections_use_rounded_title_bars_without_widening_the_page
+#[test]
+fn port_cost_settings_ui_quota_page_keeps_four_title_bars() {
+    let reply = view(json!({ "metric": "quota" }), 110);
+    assert_eq!(reply["bars"].as_array().map(Vec::len), Some(4));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::every_display_option_has_a_checkbox_visibility_and_sample
+#[test]
+fn port_cost_settings_ui_only_the_enabled_display_option_is_ticked_by_default() {
+    let text = page(json!({}), 110);
+    assert_eq!(text.matches("[x]").count(), 1, "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::metric_selector_switches_every_unit_and_quota_window
+#[test]
+fn port_cost_settings_ui_quota_metric_names_its_window_row() {
+    let text = page(json!({ "metric": "quota" }), 110);
+    assert!(text.contains("Quota window"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::page_explains_every_calibration_and_shows_live_ladders
+#[test]
+fn port_cost_settings_ui_burn_rate_page_has_no_history_window_row() {
+    let text = page(json!({ "calibration": "burn_rate" }), 110);
+    assert!(!text.contains("History window"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::row_spans_cover_every_row_once_in_order
+#[test]
+fn port_cost_settings_ui_narrow_page_has_the_same_row_count_as_wide_page() {
+    let wide = view(json!({}), 110);
+    let narrow = view(json!({}), 28);
+    assert_eq!(
+        wide["rows"].as_array().map(Vec::len),
+        narrow["rows"].as_array().map(Vec::len)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::scroll_follows_the_selection_in_both_directions
+#[test]
+fn port_cost_settings_ui_tall_panel_needs_no_scrolling() {
+    let max = client(
+        "settings-ui.max-scroll",
+        json!({ "settings": {}, "width": 100, "height": 200 }),
+    );
+    assert_eq!(max["max_scroll"], json!(0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::selecting_a_calibration_reveals_its_parameter_row
+#[test]
+fn port_cost_settings_ui_quota_budget_parameter_row_is_shown_as_percent() {
+    let text = page(json!({ "metric": "quota", "calibration": "budget" }), 110);
+    assert!(text.contains("- 10% + *"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_settings_ui.rs::shared_cost_chrome_renders_and_hits_every_numeric_and_choice_variant
+#[test]
+fn port_cost_settings_ui_chrome_check_holds_at_narrow_width() {
+    let reply = client(
+        "settings-ui.chrome-check",
+        json!({ "settings": { "metric": "quota", "calibration": "fixed_bands" }, "width": 28 }),
+    );
+    assert_eq!(reply["mismatches"], json!([]), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view
+#[test]
+fn port_cost_settings_ui_keyboard_right_then_left_returns_the_sparkline_window() {
+    let reply = client(
+        "settings-ui.keyboard",
+        json!({ "settings": {}, "width": 110, "height": 12, "select": "sparkline_window", "chords": ["right", "left"] }),
+    );
+    assert_eq!(
+        reply["settings"]["sparkline_window_minutes"],
+        json!(360)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo
+#[test]
+fn port_cost_settings_ui_typed_days_save_as_minutes() {
+    let saved = client(
+        "settings-ui.number-dialog",
+        json!({ "settings": {}, "row": "sparkline_window", "click": "open", "draft_keys": "<bs><bs>2d", "confirm": true }),
+    );
+    assert_eq!(saved["settings"]["sparkline_window_minutes"], json!(2880));
+    assert_eq!(saved["mode_after"], json!("settings"));
+}

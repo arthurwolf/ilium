@@ -405,3 +405,245 @@ fn hst_690_wall_clock_moving_backwards_never_shortens_retention_or_lock_stalenes
         "lock staleness uses a monotonic clock"
     );
 }
+
+/// REQ: HST-651
+#[test]
+fn hst_651_du_for_one_plugin_counts_at_least_the_known_data_bytes() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.write_known_bytes(NOTES, "data/known.bin", &[7u8; 1_234]);
+    let output = rig.cli(&["plugin", "du", NOTES, "--json"]);
+    assert_eq!(output.exit_code, 0, "du for one plugin succeeds");
+    let report = output.stdout_jsonl.last().expect("du report").clone();
+    let row = report["plugins"]
+        .as_array()
+        .expect("plugins array")
+        .iter()
+        .find(|row| row["plugin"] == NOTES)
+        .expect("a row for the plugin");
+    let data_bytes = row["data"].as_u64().expect("data bytes is an integer");
+    assert!(
+        data_bytes >= 1_234,
+        "data bytes include the 1,234 known bytes, got {data_bytes}"
+    );
+}
+
+/// REQ: HST-652
+#[test]
+fn hst_652_backup_without_include_grants_leaves_out_grants_and_consents() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let archive = rig.path_in_scratch("backup-no-grants.tar.zst");
+    let output = rig.cli(&["plugin", "backup", archive.to_str().expect("utf-8 path")]);
+    assert_eq!(output.exit_code, 0, "backup succeeds");
+    let entries = rig.archive_entries(&archive);
+    assert!(
+        entries
+            .iter()
+            .all(|name| !name.contains("grants.json") && !name.contains("consents.json")),
+        "grants.json and consents.json need --include-grants"
+    );
+}
+
+/// REQ: HST-653
+#[test]
+fn hst_653_restore_dry_run_changes_no_file() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let archive = rig.make_backup_archive();
+    let before = rig.snapshot_plugin_tree();
+    let output = rig.cli(&[
+        "plugin",
+        "restore",
+        archive.to_str().expect("utf-8 path"),
+        "--dry-run",
+    ]);
+    assert_eq!(output.exit_code, 0, "dry run succeeds");
+    assert_eq!(
+        rig.snapshot_plugin_tree(),
+        before,
+        "a dry run leaves every file as it was"
+    );
+}
+
+/// REQ: HST-654
+#[test]
+fn hst_654_a_newer_host_archive_restores_with_force() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let archive = rig.make_backup_archive();
+    rig.rewrite_archive_host_version(&archive, "99.0.0");
+    let forced = rig.cli(&[
+        "plugin",
+        "restore",
+        archive.to_str().expect("utf-8 path"),
+        "--force",
+    ]);
+    assert_eq!(
+        forced.exit_code, 0,
+        "--force accepts an archive written by a newer host"
+    );
+}
+
+/// REQ: HST-655
+#[test]
+fn hst_655_a_plugin_for_this_platform_is_not_refused_in_the_restore_result() {
+    let rig = rig();
+    install_ok(&rig, &pkg(OTHER, "1.0.0"));
+    let archive = rig.make_backup_archive_from_os("linux");
+    let result = rig.cli(&[
+        "plugin",
+        "restore",
+        archive.to_str().expect("utf-8 path"),
+        "--merge",
+    ]);
+    let row = result
+        .stdout_jsonl
+        .iter()
+        .find(|row| row["plugin"] == OTHER)
+        .expect("plugin listed in the restore result");
+    assert_ne!(
+        row["state"], "refused-at-load",
+        "a plugin whose platform is available is not refused at load"
+    );
+}
+
+/// REQ: HST-665
+#[test]
+fn hst_665_a_network_filesystem_with_a_working_lock_scheme_stays_writable() {
+    let rig = rig();
+    rig.mount_as_network_filesystem("data");
+    let server = rig.start_server("default");
+    assert!(
+        !rig.is_read_only(&server),
+        "the owner-id lock file keeps the data folder writable"
+    );
+}
+
+/// REQ: HST-666
+#[test]
+fn hst_666_unicode_normalisation_collisions_are_refused_at_install() {
+    let rig = rig();
+    let colliding = rig.write_package(
+        &pkg(NOTES, "1.0.0")
+            .with_file("docs/caf\u{e9}.md")
+            .with_file("docs/cafe\u{301}.md"),
+    );
+    let output = rig.cli(&[
+        "install",
+        colliding.to_str().expect("utf-8 path"),
+        "--yes",
+        "--allow-unsigned",
+    ]);
+    assert_eq!(
+        output.exit_code, 1,
+        "the NFC and NFD spellings of one name collide"
+    );
+    assert!(
+        output.stderr.contains("package.path-collision"),
+        "refused with package.path-collision"
+    );
+}
+
+/// REQ: HST-667
+#[test]
+fn hst_667_the_path_limit_counts_utf8_bytes_not_characters() {
+    let rig = rig();
+    let name = "\u{e9}".repeat(121);
+    let package = rig.write_package(&pkg(NOTES, "1.0.0").with_file(&name));
+    let output = rig.cli(&[
+        "install",
+        package.to_str().expect("utf-8 path"),
+        "--yes",
+        "--allow-unsigned",
+    ]);
+    assert!(
+        output.stderr.contains("package.path-too-long"),
+        "121 characters are 242 UTF-8 bytes, over the 240-byte limit"
+    );
+}
+
+/// REQ: HST-668
+#[test]
+fn hst_668_a_regular_file_beside_a_refused_symlink_still_reads() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_symlink_inside_data(NOTES, "data/link.bin");
+    rig.write_known_bytes(NOTES, "data/plain.bin", b"ok");
+    let plain = rig.read_plugin_file(NOTES, "data/plain.bin");
+    assert!(
+        plain.is_ok(),
+        "only the symlink is refused, a regular file in the same folder reads"
+    );
+}
+
+/// REQ: HST-669
+#[test]
+fn hst_669_a_missing_data_dir_override_target_refuses_to_start_plugins() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let missing = rig.path_in_scratch("does-not-exist");
+    rig.set_env(
+        "ILIUM_PLUGIN_DATA_DIR",
+        missing.to_str().expect("utf-8 path"),
+    );
+    let server = rig.start_server("default");
+    assert!(
+        !server.is_running(),
+        "a target that does not exist refuses to start plugins"
+    );
+    assert_eq!(
+        server.log_lines_with_code("data.root-invalid").len(),
+        1,
+        "refusal logged as data.root-invalid"
+    );
+}
+
+/// REQ: HST-672
+#[test]
+fn hst_672_the_compile_cache_cap_follows_the_plugins_compile_cache_mib_setting() {
+    let rig = rig();
+    rig.set_config_value("plugins.compile_cache_mib", "16");
+    assert_eq!(
+        rig.compile_cache_cap_mib(),
+        16,
+        "the cap follows plugins.compile_cache_mib"
+    );
+}
+
+/// REQ: HST-673
+#[test]
+fn hst_673_a_write_within_cache_mib_is_accepted() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_config_value("cache_mib", "64");
+    let result = rig.write_plugin_cache(NOTES, 32 * 1024 * 1024);
+    assert!(result.is_ok(), "a 32 MiB write under the 64 MiB cap succeeds");
+}
+
+/// REQ: HST-675
+#[test]
+fn hst_675_purged_project_data_is_not_removed_before_the_project_is_opened_again() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.purge_plugin_in_project(NOTES);
+    assert!(
+        rig.project_bucket_exists(NOTES),
+        "the purge is applied only when the project is next opened"
+    );
+}
+
+/// REQ: HST-690
+#[test]
+fn hst_690_a_backup_kept_through_repeated_sweeps_after_a_backwards_clock_step() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.create_backup_file_aged_days("kept-backup.tar.zst", 20);
+    rig.set_wall_clock_back_days(30);
+    rig.advance_retention_sweep();
+    rig.advance_retention_sweep();
+    assert!(
+        rig.path_in_scratch("kept-backup.tar.zst").exists(),
+        "repeated sweeps after the clock step keep a 20-day-old backup"
+    );
+}

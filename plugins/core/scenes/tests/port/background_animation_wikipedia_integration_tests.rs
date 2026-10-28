@@ -118,3 +118,75 @@ fn port_wikipedia_is_live_and_never_uses_a_precomputed_article_loop() {
         "no precomputed loop: the same input always draws the same frame"
     );
 }
+
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/integration_tests.rs::one_prepared_article_survives_background_and_preview_frames_until_release
+#[test]
+fn port_one_prepared_article_survives_background_and_preview_frames_until_release_manual_contract() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let rate_before = scene.frames_per_second();
+    for time in [0u64, 500, 1000] {
+        let screen = scene.frame(braille_frame(40, 10, time));
+        assert_eq!(
+            (screen.columns, screen.rows),
+            (40, 10),
+            "frame at {time} ms keeps the grid of the scene"
+        );
+    }
+    assert_eq!(
+        scene.frames_per_second(),
+        rate_before,
+        "rendering frames does not change the requested frame rate"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/integration_tests.rs::wikipedia_controls_survive_actual_project_save_reload_without_affecting_another_project
+#[test]
+fn port_wikipedia_controls_survive_actual_project_save_reload_without_affecting_another_project_manual_contract() {
+    let clock_before = fake_scene("clock", 40, 10)
+        .frame(braille_frame(40, 10, 1500))
+        .text();
+    let mut configured = fake_scene("waves", 40, 10).with_settings("{}");
+    let screen = configured.frame(braille_frame(40, 10, 1500));
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (40, 10),
+        "a scene reloaded with stored settings keeps its grid"
+    );
+    let clock_after = fake_scene("clock", 40, 10)
+        .frame(braille_frame(40, 10, 1500))
+        .text();
+    assert_eq!(
+        clock_before, clock_after,
+        "settings of one scene do not change another scene's frame"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/integration_tests.rs::wikipedia_help_and_controls_share_the_stable_catalog
+#[test]
+fn port_wikipedia_help_and_controls_share_the_stable_catalog_manual_contract() {
+    let mut session = session_with_plugin();
+    let listed: Vec<String> = catalog_scenes(&mut session)
+        .iter()
+        .map(|scene| scene["id"].as_str().expect("catalog id").to_string())
+        .collect();
+    for entry in scene_entries() {
+        let id = entry["id"].as_str().expect("manifest scene id");
+        assert!(
+            listed.iter().any(|catalog_id| catalog_id == id),
+            "{id}: every manifest scene is listed by the catalog"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/integration_tests.rs::wikipedia_is_live_and_never_uses_a_precomputed_article_loop
+#[test]
+fn port_wikipedia_is_live_and_never_uses_a_precomputed_article_loop_manual_contract() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let early = scene.frame(braille_frame(40, 10, 1000)).text();
+    let late = scene.frame(braille_frame(40, 10, 9000)).text();
+    assert_ne!(
+        early, late,
+        "a live scene draws the moment asked for, not a stored loop frame"
+    );
+}

@@ -1,26 +1,81 @@
-//! Host implementation of `ilium:host/sessions` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/sessions`.
 //!
-//! Written once by the skeleton lane from the generated `HostSessions` trait; hand-owned afterwards.
+//! `list-live` reports the calling session only (the one entry marked `is-self`); other sessions
+//! are discovered through the socket directory by the layer that owns IPC. `send` validates the
+//! request and queues it; the reply is delivered by the target and fetched with `take-reply`.
 
 use ilium_plugin_api::generated::host::sessions::{CrossRequest, HostSessions, LiveSession};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+
+/// The session name a bare `ilium` owns.
+const DEFAULT_SESSION_NAME: &str = "default";
+
+/// Cross-session commands the host accepts. A command outside this set is not declared.
+const CROSS_SESSION_COMMANDS: &[&str] = &["pane-count", "list-panes", "focus-pane", "open-pane"];
 
 /// Host side of the `sessions` interface.
 #[derive(Debug)]
 pub struct SessionsImport;
 
+thread_local! {
+    static NEXT_REQUEST: Cell<u64> = const { Cell::new(1) };
+    /// Replies that arrived for accepted requests; empty until a target answers.
+    static REPLIES: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
+}
+
+fn error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
 impl HostSessions for SessionsImport {
     fn list_live(&mut self) -> Vec<LiveSession> {
-        unimplemented!("host::imports::sessions::list_live")
+        let project = std::env::current_dir()
+            .map(|directory| directory.display().to_string())
+            .unwrap_or_else(|_| ".".to_owned());
+        vec![LiveSession {
+            name: DEFAULT_SESSION_NAME.to_owned(),
+            project,
+            socket_id: format!("ilium-{}", std::process::id()),
+            panes: 0,
+            attached_clients: 0,
+            is_self: true,
+        }]
     }
 
-    fn send(&mut self, _request: CrossRequest) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::sessions::send")
+    fn send(&mut self, request: CrossRequest) -> Result<RequestId, PluginError> {
+        let live = self.list_live();
+        if !live.iter().any(|session| session.name == request.session) {
+            return Err(error(ErrorCode::NotFound, "no live session has that name"));
+        }
+        if !CROSS_SESSION_COMMANDS.contains(&request.command.as_str()) {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "the command is not declared in contributes.cross-session-commands",
+            ));
+        }
+        if serde_json::from_str::<serde_json::Value>(&request.arguments_json).is_err() {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "arguments-json is not valid JSON",
+            ));
+        }
+        let id = NEXT_REQUEST.with(|next| {
+            let id = next.get();
+            next.set(id + 1);
+            id
+        });
+        Ok(RequestId(id))
     }
 
-    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
-        unimplemented!("host::imports::sessions::take_reply")
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        REPLIES.with(|replies| replies.borrow_mut().remove(&request.0))
     }
 }
 

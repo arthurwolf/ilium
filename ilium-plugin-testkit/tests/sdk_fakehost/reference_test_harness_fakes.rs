@@ -189,6 +189,17 @@ fn dev_457_the_fake_file_system_creates_no_file_on_the_real_disk() {
     });
 }
 
+/// REQ: DEV-457
+#[test]
+fn dev_457_a_file_written_by_one_host_is_not_seen_by_a_new_host() {
+    with_clean_env(|| {
+        let mut first_host = active_host_with(&[]);
+        first_host.fs().write("project:in_memory_457.txt", b"memory only");
+        let mut second_host = active_host_with(&[]);
+        assert_eq!(second_host.fs().read("project:in_memory_457.txt"), None);
+    });
+}
+
 /// REQ: DEV-458
 #[test]
 fn dev_458_an_absolute_path_fails_with_fs_path_invalid() {

@@ -679,3 +679,62 @@ fn cap_891_an_applied_file_leaves_a_history_entry_an_audit_record_and_the_applie
     assert!(String::from_utf8_lossy(&history).contains("old"));
     assert_eq!(rig.kernel.audit_records("write-outside-data").len(), 1);
 }
+
+/// REQ: CAP-887
+#[test]
+fn cap_887_only_the_checked_file_is_written_when_a_proposal_has_two_changes() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    let mut request = proposal("CLAUDE.md");
+    request["changes"]
+        .as_array_mut()
+        .expect("changes is a list")
+        .push(json!({ "path": "AGENTS.md", "content": [104, 105], "revision": null, "summary": "add" }));
+    let pending = rig.host.call_import(PROPOSE_IMPORT, request);
+    assert!(is_ok(&pending), "{pending:?}");
+    rig.kernel.check_row_and_apply(0);
+    rig.host.pump(8);
+    assert!(rig.kernel.agent_config_file_exists("claude", "CLAUDE.md"));
+    assert!(
+        !rig.kernel.agent_config_file_exists("claude", "AGENTS.md"),
+        "an unchecked file must not be written"
+    );
+}
+
+/// REQ: CAP-888
+#[test]
+fn cap_888_two_changes_to_one_path_return_invalid_argument_without_a_dialog() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    let request = json!({
+        "agent": "claude",
+        "title": "t",
+        "changes": [
+            { "path": "CLAUDE.md", "content": [104], "revision": null, "summary": "a" },
+            { "path": "CLAUDE.md", "content": [105], "revision": null, "summary": "b" },
+        ],
+    });
+    match rig.host.call_import(PROPOSE_IMPORT, request) {
+        ImportResult::Err(error) => assert_eq!(error.code, ErrorCode::InvalidArgument),
+        other => panic!("expected invalid-argument, got {other:?}"),
+    }
+    assert!(rig.kernel.open_proposal_dialog().is_none());
+}
+
+/// REQ: CAP-889
+#[test]
+fn cap_889_a_stale_revision_at_submission_opens_no_dialog() {
+    let rig = rig(Tier::T2, Side::Server, &PROPOSE_GRANTS);
+    rig.kernel
+        .write_agent_config_file("claude", "CLAUDE.md", b"old");
+    let mut request = proposal("CLAUDE.md");
+    request["changes"][0]["revision"] = json!("stale-revision");
+    let _submitted = rig.host.call_import(PROPOSE_IMPORT, request);
+    rig.host.pump(8);
+    assert!(
+        rig.kernel.open_proposal_dialog().is_none(),
+        "a revision that no longer matches must not open the dialog"
+    );
+    assert_eq!(
+        rig.kernel.read_agent_config_file("claude", "CLAUDE.md"),
+        b"old".to_vec()
+    );
+}

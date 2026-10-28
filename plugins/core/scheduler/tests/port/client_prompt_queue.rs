@@ -157,3 +157,92 @@ fn port_001_prompt_queue_paste_normalizes_crlf_to_single_newlines() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["text"], "one\ntwo\nthree\nfour");
 }
+
+/// REQ: PORT:ilium-client/src/prompt_queue.rs::repeat_count_buttons_step_and_saturate_without_submitting
+#[test]
+fn port_prompt_queue_stepped_count_is_the_count_committed() {
+    let (mut session, pane) = times_dialog();
+    press(&mut session, QUEUE_VIEW, "tab");
+    press(&mut session, QUEUE_VIEW, "tab");
+    press(&mut session, QUEUE_VIEW, "left");
+    set_text(&mut session, QUEUE_VIEW, "prompt", "stepped");
+    commit_queue(&mut session);
+    let entries = list_queue(&mut session, pane);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["times"], 1, "the stepped count is what is queued");
+}
+
+/// REQ: PORT:ilium-client/src/prompt_queue.rs::direct_entry_focus_preserves_draft_and_invalid_numbers
+#[test]
+fn port_prompt_queue_typed_count_is_queued_as_entered() {
+    let (mut session, pane) = times_dialog();
+    set_text(&mut session, QUEUE_VIEW, "prompt", "typed count");
+    set_text(&mut session, QUEUE_VIEW, "times", "7");
+    commit_queue(&mut session);
+    let entries = list_queue(&mut session, pane);
+    assert_eq!(entries[0]["times"], 7);
+}
+
+/// REQ: PORT:ilium-client/src/prompt_queue.rs::repeat_count_has_no_active_controls_outside_times_mode
+#[test]
+fn port_prompt_queue_once_mode_queues_a_single_entry_with_once() {
+    let (mut session, pane) = queue_dialog("agent");
+    set_text(&mut session, QUEUE_VIEW, "prompt", "single");
+    commit_queue(&mut session);
+    let entries = list_queue(&mut session, pane);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["mode"], "once");
+}
+
+/// REQ: PORT:ilium-client/src/prompt_queue.rs::repeat_control_geometry_uses_inner_row_and_centers_value
+#[test]
+fn port_prompt_queue_two_digit_count_stays_right_aligned_before_border() {
+    let (mut session, _pane) = times_dialog();
+    set_text(&mut session, QUEUE_VIEW, "times", "10");
+    let screen = draw(&mut session, QUEUE_VIEW, 48, 12);
+    let (row, _) = screen.find("Times").expect("Times label");
+    assert!(
+        screen.row(row).trim_end().ends_with("10 │"),
+        "{}",
+        screen.row(row)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/prompt_queue.rs::delivery_glyphs_value_clicks_and_option_button_share_rendered_cells
+#[test]
+fn port_prompt_queue_right_arrow_clicks_reach_enqueue_forever() {
+    let (mut session, _pane) = queue_dialog("agent");
+    for _ in 0..2 {
+        let screen = draw(&mut session, QUEUE_VIEW, 48, 12);
+        let (row, column) = screen.find("›").expect("right arrow");
+        assert!(client(&mut session).click(popup(QUEUE_VIEW), column, row));
+    }
+    assert!(
+        draw(&mut session, QUEUE_VIEW, 48, 12)
+            .text()
+            .contains("DANGER"),
+        "the second arrow click selects Enqueue forever"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/prompt_queue.rs::compact_queue_keeps_draft_controls_and_warning_inside_popup
+#[test]
+fn port_prompt_queue_long_draft_stays_inside_a_compact_popup() {
+    let (mut session, _pane) = queue_dialog("agent");
+    set_text(&mut session, QUEUE_VIEW, "prompt", &"word ".repeat(80));
+    let screen = draw(&mut session, QUEUE_VIEW, 40, 12);
+    assert_eq!((screen.columns, screen.rows), (40, 12));
+    for line in screen.text().lines() {
+        assert!(line.chars().count() <= 40, "{line}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::prompt_queue_paste_normalizes_crlf_to_single_newlines
+#[test]
+fn port_prompt_queue_blank_crlf_line_becomes_two_newlines() {
+    let (mut session, pane) = queue_dialog("agent");
+    set_text(&mut session, QUEUE_VIEW, "prompt", "a\r\n\r\nb");
+    commit_queue(&mut session);
+    let entries = list_queue(&mut session, pane);
+    assert_eq!(entries[0]["text"], "a\n\nb");
+}

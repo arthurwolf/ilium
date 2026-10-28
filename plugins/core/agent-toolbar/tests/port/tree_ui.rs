@@ -86,3 +86,60 @@ fn port_tree_ui_agent_context_menu_enter_enter_creates_here_without_worktree() {
         r####"{"submenu_after_first_enter": 0, "menu_open": false, "created": [{"kind": "command", "command": "claude", "worktree": false}]}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::toolbar_and_row_controls_use_their_configured_icons
+#[test]
+fn port_tree_ui_toolbar_and_row_controls_use_their_configured_icons_without_ascii_fallback() {
+    check(
+        Place::Client,
+        "tree-toolbar.icons",
+        r####"{"icon_mode": "unicode-default"}"####,
+        r####"{"follows_configured_icons": true, "ascii_fallback_used": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::toolbar_is_visible_for_tree_focus_or_footer_hover
+#[test]
+fn port_tree_ui_toolbar_is_visible_for_tree_focus_or_footer_hover_hidden_when_neither() {
+    check(
+        Place::Client,
+        "tree-toolbar.visible",
+        r####"{"cases": [[false, false], [true, false]]}"####,
+        r####"{"visible": [false, true]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::toolbar_keeps_settings_right_aligned_without_overlapping_left_actions
+#[test]
+fn port_tree_ui_toolbar_keeps_settings_right_aligned_without_overlapping_left_actions_at_narrow_width(
+) {
+    check(
+        Place::Client,
+        "tree-toolbar.layout",
+        r####"{"width": 12}"####,
+        r####"{"overlap": false, "settings_visible": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::stopped_agent_tree_row_keeps_recovery_indicator_in_normal_and_attention_modes
+#[test]
+fn port_tree_ui_running_agent_row_shows_no_recovery_indicator() {
+    let request = serde_json::json!({
+        "agent": "claude", "display_mode": "normal", "stable_glyphs": false,
+        "row": {"kind": "agent-running", "title": "Fix login"},
+    });
+    let reply = ask(Place::Client, "tree-row.render", request.clone());
+    assert_eq!(reply["indicator"], Value::Null, "{request} -> {reply}");
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::agent_context_menu_enter_enter_creates_here_without_worktree
+#[test]
+fn port_tree_ui_agent_context_menu_escape_creates_nothing() {
+    // Assumed op `tree-toolbar.context-menu-keys`: replays chords on the tree context menu of a group.
+    check(
+        Place::Client,
+        "tree-toolbar.context-menu-keys",
+        r####"{"select": "new-agent:claude", "chords": ["escape"]}"####,
+        r####"{"menu_open": false, "created": []}"####,
+    );
+}

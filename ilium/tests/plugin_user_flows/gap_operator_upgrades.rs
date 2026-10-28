@@ -31,3 +31,27 @@ fn lif_300_shutdown_drops_plugin_without_deactivate() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: LIF-299
+#[test]
+fn lif_299_before_and_after_listings_are_compared_after_restart() {
+    let page = manual_page("guide-operator-upgrades");
+    for phrase in [
+        "ilium plugin list --json > before.json",
+        "A plugin whose package state differs between `before.json` and `after.json`",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: LIF-300
+#[test]
+fn lif_300_whole_shutdown_row_names_five_seconds_and_timeout_record() {
+    let page = manual_page("guide-operator-upgrades");
+    for phrase in [
+        "| The whole shutdown exceeds 5 s |",
+        "`host.shutdown-timeout`: the server shutdown took longer than the host allows",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

@@ -29,3 +29,21 @@ fn port_mouse_scheduled_input_checkbox_and_button_have_real_mouse_targets() {
     let sent = sends(&server(&mut session).submitted());
     assert_eq!(sent[0].0, plain_spec(pane, "status", Delivery::Typed));
 }
+
+/// REQ: PORT:ilium-client/src/mouse.rs::scheduled_input_checkbox_and_button_have_real_mouse_targets
+#[test]
+fn port_mouse_scheduled_input_checkbox_click_twice_restores_send_enter() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    let screen = draw(&mut session, SCHEDULE_VIEW, 100, 30);
+    let (row, column) = screen.find("[x]").expect("Send Enter checkbox");
+    assert!(client(&mut session).click(popup(SCHEDULE_VIEW), column, row));
+    client(&mut session).settle();
+    assert!(client(&mut session).click(popup(SCHEDULE_VIEW), column, row));
+    client(&mut session).settle();
+    assert!(
+        draw(&mut session, SCHEDULE_VIEW, 100, 30)
+            .text()
+            .contains("[x]"),
+        "a second click turns Send Enter back on"
+    );
+}

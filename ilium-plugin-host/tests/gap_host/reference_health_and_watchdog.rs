@@ -185,3 +185,103 @@ fn hst_680_kill_point_matrix_leaves_a_consistent_state_on_next_start() {
         );
     }
 }
+
+/// REQ: HST-615
+#[test]
+fn hst_615_one_health_change_writes_one_line_with_the_new_state() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.force_health(NOTES, "failed");
+    let lines = rig.log_lines_with_code("host.health.changed");
+    assert_eq!(lines.len(), 1, "one transition, one line");
+    assert!(
+        lines[0].to_string().contains("failed"),
+        "the line carries the new state: {}",
+        lines[0]
+    );
+}
+
+/// REQ: HST-617
+#[test]
+fn hst_617_health_exits_0_and_prints_one_line_per_plugin_when_all_are_healthy() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    install_ok(&rig, &pkg(OTHER, "1.0.0"));
+    rig.force_health(NOTES, "healthy");
+    rig.force_health(OTHER, "healthy");
+    let output = rig.cli(&["plugin", "health"]);
+    assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.stdout_jsonl.len(),
+        2,
+        "one JSON line per installed plugin"
+    );
+}
+
+/// REQ: HST-618
+#[test]
+fn hst_618_one_second_without_a_loop_tick_writes_no_loop_stalled_line() {
+    let rig = rig();
+    let server = rig.start_server("default");
+    rig.advance_clock(Duration::from_secs(1));
+    assert!(
+        rig.log_lines_with_code("host.loop-stalled").is_empty(),
+        "one second without a tick is under the 2 second limit"
+    );
+    server.shutdown();
+}
+
+/// REQ: HST-641
+#[test]
+fn hst_641_a_plugin_that_turns_degraded_once_raises_exactly_one_notification() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.force_health(NOTES, "degraded");
+    assert_eq!(
+        rig.notifications_for(NOTES),
+        1,
+        "one notification for the first degraded state"
+    );
+}
+
+/// REQ: HST-648
+#[test]
+fn hst_648_a_plugin_side_that_stops_in_time_is_not_reported_as_forced() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    server.shutdown();
+    assert!(
+        rig.log_lines_with_code("host.shutdown.forced").is_empty(),
+        "no forced stop for a plugin side that stops in time"
+    );
+}
+
+/// REQ: HST-679
+#[test]
+fn hst_679_recovery_after_an_interrupted_update_writes_one_counted_recovery_line() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.begin_update_swap(NOTES, &pkg(NOTES, "1.1.0"));
+    rig.kill_host_between_steps();
+    let server = rig.start_server("default");
+    let recovered = rig.log_lines_with_code("recovery.completed");
+    assert_eq!(recovered.len(), 1, "one recovery line");
+    assert!(
+        recovered[0].to_string().contains("count"),
+        "the recovery line carries a count: {}",
+        recovered[0]
+    );
+    server.shutdown();
+}
+
+/// REQ: HST-680
+#[test]
+fn hst_680_the_kill_point_matrix_covers_all_seven_listed_points() {
+    let rig = rig();
+    assert_eq!(
+        rig.kill_points().into_iter().count(),
+        7,
+        "install staging, rename into store, update swap, migrate, storage batch, snapshot write and grants.json write"
+    );
+}

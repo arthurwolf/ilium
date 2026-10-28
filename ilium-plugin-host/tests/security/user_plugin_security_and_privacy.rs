@@ -449,3 +449,12 @@ fn sec_268_a_plain_http_url_or_free_text_is_not_a_contact() {
     assert!(!contact_errors("http://example.com/security").is_empty());
     assert!(!contact_errors("call me maybe").is_empty());
 }
+
+/// REQ: SEC-266
+#[test]
+fn sec_266_future_telemetry_is_opt_in_off_by_default_and_listed_on_the_page() {
+    assert_page_has(
+        "user-plugin-security-and-privacy.md",
+        &["it will be opt-in, off by default, and listed on this page before it ships"],
+    );
+}

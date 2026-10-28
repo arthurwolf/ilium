@@ -185,3 +185,75 @@ fn toolchain_pin_mismatch_fails_build_and_matching_pin_builds_reproducibly() {
         "a pinned build is reproducible across two hosts"
     );
 }
+
+/// REQ: DEV-882
+#[test]
+fn repeated_matrix_builds_on_one_host_give_the_same_component_hashes() {
+    let (_root, env, _dir) = new_rust_project();
+    let first = matrix_component_hashes(&env);
+    let second = matrix_component_hashes(&env);
+    assert_eq!(first, second, "a rebuild on the same host is reproducible");
+    assert!(
+        first.values().all(|hash| hash.len() == 64),
+        "each hash is a SHA-256 hex digest: {first:?}"
+    );
+}
+
+/// REQ: DEV-965
+#[test]
+fn host_before_its_end_of_support_date_reports_a_supported_status_and_no_end_of_life_warning() {
+    let root = scratch();
+    let env = end_of_life_host_env(root.path(), "2999-01-01");
+    let version = run(&env, &["version", "--json"]);
+    assert_eq!(version.exit_code, 0, "{:?}", version.stdout_jsonl);
+    let record = records_of(&version, "version")[0];
+    assert_ne!(record["support"], "end-of-life", "{record}");
+    let logs = server_start_log_lines(&env);
+    assert!(
+        logs.iter().all(|line| line["code"] != "host.end-of-life"),
+        "no end-of-life warning before the date"
+    );
+}
+
+/// REQ: DEV-988
+#[test]
+fn toolchain_minimums_name_rust_bun_and_wasm_tools_in_every_release() {
+    for release in ["1.4.0", "1.4.1"] {
+        let minimums = toolchain_minimums(release);
+        for tool in ["rust", "bun", "wasm-tools"] {
+            assert!(
+                minimums
+                    .keys()
+                    .any(|name| name.to_lowercase().contains(tool)),
+                "{release} names a minimum for {tool}: {minimums:?}"
+            );
+        }
+    }
+}
+
+/// REQ: DEV-989
+#[test]
+fn the_untested_toolchain_version_is_not_listed_as_tested_in_the_support_matrix() {
+    let (_root, env, _dir) = new_rust_project();
+    let untested = install_toolchain_one_minor_newer_than_tested(&env);
+    let page = manual_page("reference-toolchain-support-matrix");
+    assert!(
+        !page.contains(&untested),
+        "the newer untested version {untested} is not claimed as tested"
+    );
+}
+
+/// REQ: DEV-990
+#[test]
+fn toolchain_pin_mismatch_writes_no_artifact_before_failing() {
+    let (_root, env, dir) = new_rust_project();
+    write_text(&dir, "ilium-toolchain.json", "{\"rust\": \"0.0.1\"}\n");
+    let built = run_in_project(&env, "build", &[]);
+    assert_ne!(built.exit_code, 0, "{:?}", built.stdout_jsonl);
+    assert!(
+        records_of(&built, "artifact").is_empty(),
+        "a mismatched pin produces no artifact: {:?}",
+        built.stdout_jsonl
+    );
+    assert!(!dir.join("dist").exists(), "nothing is written to dist/");
+}

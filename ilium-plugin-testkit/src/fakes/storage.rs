@@ -4,27 +4,73 @@ use std::collections::BTreeMap;
 
 use ilium_plugin_sdk_core::generated::host::Bucket;
 
+/// Largest single value a bucket accepts (1 MiB, DEV-465).
+const MAX_VALUE_BYTES: usize = 1024 * 1024;
+/// Largest total size of one bucket (16 MiB, DEV-465).
+const MAX_BUCKET_BYTES: usize = 16 * 1024 * 1024;
+
 /// Read handle on the fake storage of a host.
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct FakeStorage {
-    _private: (),
+    buckets: BTreeMap<&'static str, BTreeMap<String, Vec<u8>>>,
+}
+
+fn bucket_name(bucket: Bucket) -> &'static str {
+    match bucket {
+        Bucket::Global => "global",
+        Bucket::Project => "project",
+        Bucket::Session => "session",
+        Bucket::Shared => "shared",
+    }
 }
 
 impl FakeStorage {
+    /// An empty store.
+    pub fn new() -> FakeStorage {
+        FakeStorage::default()
+    }
+
     /// Every key and value of one bucket.
-    pub fn dump(&self, _bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
-        unimplemented!("DEV-465")
+    pub fn dump(&self, bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
+        self.buckets
+            .get(bucket_name(bucket))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// One value.
-    pub fn get(&self, _bucket: Bucket, _key: &str) -> Option<Vec<u8>> {
-        unimplemented!("DEV-465")
+    pub fn get(&self, bucket: Bucket, key: &str) -> Option<Vec<u8>> {
+        self.buckets
+            .get(bucket_name(bucket))
+            .and_then(|map| map.get(key))
+            .cloned()
     }
 
     /// Seeds one value before the plugin runs, as the real store would hold it (DEV-465, via
-    /// `FakeHost::storage_mut`).
-    pub fn put(&mut self, _bucket: Bucket, _key: &str, _value: &[u8]) {
-        unimplemented!("DEV-465")
+    /// `FakeHost::storage_mut`). A value above the quota is ignored, as the real store refuses it.
+    pub fn put(&mut self, bucket: Bucket, key: &str, value: &[u8]) {
+        if value.len() > MAX_VALUE_BYTES {
+            return;
+        }
+        let map = self.buckets.entry(bucket_name(bucket)).or_default();
+        let others: usize = map
+            .iter()
+            .filter(|(existing, _)| existing.as_str() != key)
+            .map(|(_, stored)| stored.len())
+            .sum();
+        if others + value.len() > MAX_BUCKET_BYTES {
+            return;
+        }
+        map.insert(key.to_string(), value.to_vec());
+    }
+
+    /// Whole content as `{bucket: {key: bytes}}`, for snapshots; empty buckets are left out.
+    pub(crate) fn dump_all(&self) -> BTreeMap<String, BTreeMap<String, Vec<u8>>> {
+        self.buckets
+            .iter()
+            .filter(|(_, map)| !map.is_empty())
+            .map(|(name, map)| (name.to_string(), map.clone()))
+            .collect()
     }
 }
 

@@ -87,3 +87,26 @@ fn api_095_waiting_side_shows_a_notice_naming_its_plugin_until_admitted() {
     queue.admit_next(1);
     assert!(queue.notice_for("vendor.second").is_none());
 }
+
+/// REQ: API-093
+#[test]
+fn api_093_enable_keeps_the_crash_record_until_ten_clean_minutes() {
+    let (mut host, _) = trapped_host_at(&[0, 2_000, 4_000]);
+    host.enable();
+    assert_eq!(host.failure_count(), 3);
+}
+
+/// REQ: API-094
+#[test]
+fn api_094_every_limit_entry_has_a_name_and_a_known_source() {
+    let record = limits_record();
+    assert!(!record.is_empty());
+    for entry in &record {
+        assert!(!entry.name.is_empty());
+        assert!(
+            matches!(entry.source.as_str(), "default" | "manifest" | "user"),
+            "{}",
+            entry.name
+        );
+    }
+}

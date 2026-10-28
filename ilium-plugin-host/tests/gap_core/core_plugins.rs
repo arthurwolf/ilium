@@ -565,3 +565,253 @@ fn cor_225_the_settings_terminal_plugin_has_no_larger_limit_than_tier_two() {
         "terminal exceeds T2 memory"
     );
 }
+
+/// REQ: COR-097
+#[test]
+fn cor_097_a_replacement_declaring_every_cli_command_is_accepted_at_enable() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    rig.install_replacement_of_core(
+        &PackageSpec::new(REPLACEMENT, "1.0.0")
+            .replaces_core(TREE)
+            .declares_cli("tree-list")
+            .declares_cli("tree-open"),
+        TREE,
+    );
+    let output = rig.cli(&["enable", REPLACEMENT]);
+    assert_eq!(
+        output.exit_code, 0,
+        "a complete replacement must be enabled: {:?}",
+        output.stdout_jsonl
+    );
+    assert_eq!(server.active_owner(TREE), REPLACEMENT.to_string());
+}
+
+/// REQ: COR-099
+#[test]
+fn cor_099_disabling_a_replacement_returns_ownership_and_its_written_data_stays_readable() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    rig.install_replacement_of_core(
+        &PackageSpec::new(REPLACEMENT, "1.0.0").replaces_core(TREE),
+        TREE,
+    );
+    server.enable(REPLACEMENT);
+    server.write_storage(REPLACEMENT, "layout", "pane-order", b"x,y");
+    rig.cli(&["disable", REPLACEMENT]);
+    assert_eq!(
+        server.active_owner(TREE),
+        TREE.to_string(),
+        "disabling the replacement must return ownership to tree"
+    );
+    assert_eq!(
+        server.read_storage(TREE, "layout", "pane-order").as_deref(),
+        Some(b"x,y".as_slice()),
+        "the core plugin must still read the data written during the replacement"
+    );
+}
+
+/// REQ: COR-205
+#[test]
+fn cor_205_the_conformance_command_runs_against_the_replacement_that_owns_the_core_plugin() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    rig.install_replacement_of_core(
+        &PackageSpec::new(REPLACEMENT, "1.0.0").replaces_core(TREE),
+        TREE,
+    );
+    server.enable(REPLACEMENT);
+    let output = rig.cli(&["plugin", "conformance", TREE]);
+    let text = format!("{:?} {}", output.stdout_jsonl, output.stdout_raw);
+    assert!(
+        text.contains(REPLACEMENT),
+        "the run must name the active owner {REPLACEMENT}: {text}"
+    );
+}
+
+/// REQ: COR-209
+#[test]
+fn cor_209_enabling_a_disabled_core_plugin_takes_effect_within_two_seconds_without_restart() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    server.disable(SETTINGS);
+    let started = rig.virtual_elapsed();
+    server.enable(SETTINGS);
+    let elapsed = rig.virtual_elapsed() - started;
+    assert!(elapsed <= Duration::from_secs(2), "took {elapsed:?}");
+    assert!(server.is_enabled(SETTINGS), "the plugin must be enabled");
+    assert!(
+        !server.contributions(SETTINGS).is_empty(),
+        "UI contributions must return once the plugin is enabled"
+    );
+}
+
+/// REQ: COR-210
+#[test]
+fn cor_210_a_section_at_the_current_schema_version_loads_without_a_refusal() {
+    let rig = OpsRig::new();
+    rig.plant_data(TREE, 1);
+    let _server = rig.start_server("s1");
+    assert!(
+        !rig.log_codes().iter().any(|code| code == "core.data-newer"),
+        "a section at the current version must not be refused"
+    );
+}
+
+/// REQ: COR-213
+#[test]
+fn cor_213_disabling_the_command_plugin_keeps_the_focused_pane_and_still_renders_a_frame() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    let client = server.attach_client("c1");
+    let pane = server.focused_pane_id();
+    server.disable(COMMANDS);
+    let frame = client.next_frame_text();
+    assert!(!frame.is_empty(), "a frame must render after the disable");
+    assert_eq!(
+        server.focused_pane_id(),
+        pane,
+        "disabling the command plugin must not move the focused pane"
+    );
+}
+
+/// REQ: COR-220
+#[test]
+fn cor_220_every_bundled_core_plugin_calls_only_public_wit_functions() {
+    let rig = OpsRig::new();
+    let public = rig.t1_public_api();
+    for core_id in rig.core_plugin_ids() {
+        for call in rig.host_calls_of(&core_id) {
+            assert!(
+                public.contains(&call),
+                "{core_id} calls {call}, which is not in the public WIT"
+            );
+        }
+    }
+}
+
+/// REQ: COR-222
+#[test]
+fn cor_222_a_corrupted_core_plugin_is_not_served_from_its_bundled_copy() {
+    let rig = OpsRig::new();
+    rig.corrupt_bundled_core(TREE);
+    let server = rig.start_server("s1");
+    assert_ne!(
+        server.active_version(TREE),
+        Some(rig.bundled_version(TREE)),
+        "the corrupted bundled copy must not be activated"
+    );
+}
+
+/// REQ: COR-223
+#[test]
+fn cor_223_startup_core_plugins_stay_without_ui_contributions_until_a_client_attaches() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    rig.advance(Duration::from_secs(3));
+    for core_id in [COMMANDS, SETTINGS] {
+        assert_eq!(
+            server.state_of(core_id, Side::Server),
+            ilium_plugin_api::generated::host::plugins::InstanceState::Active,
+            "{core_id} must run without a client"
+        );
+        assert!(
+            server.contributions(core_id).is_empty(),
+            "{core_id} must not activate UI without a client"
+        );
+    }
+}
+
+/// REQ: COR-224
+#[test]
+fn cor_224_a_lazy_core_plugin_is_not_active_before_its_trigger_fires() {
+    let rig = OpsRig::new();
+    install_ok(
+        &rig,
+        &PackageSpec::new(LAZY, "1.0.0").activation_trigger("command:lazy-run"),
+    );
+    let server = rig.start_server("s1");
+    assert_ne!(
+        server.state_of(LAZY, Side::Server),
+        ilium_plugin_api::generated::host::plugins::InstanceState::Active,
+        "a lazy plugin must stay inactive until its trigger fires"
+    );
+}
+
+/// REQ: COR-226
+#[test]
+fn cor_226_a_degraded_core_plugin_leaves_its_stored_snapshot_bytes_unchanged() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    server.write_storage(COMMANDS, "state", "history", b"one");
+    let before = rig.snapshot_bytes("s1");
+    for _ in 0..3 {
+        server.fail(COMMANDS, Side::Server);
+    }
+    assert_eq!(server.plugin_status(COMMANDS), "degraded");
+    assert_eq!(
+        rig.snapshot_bytes("s1"),
+        before,
+        "the kernel must not modify the degraded plugin's stored sections"
+    );
+}
+
+/// REQ: COR-228
+#[test]
+fn cor_228_two_failures_within_sixty_seconds_keep_the_replacement_as_owner() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    rig.install_replacement_of_core(
+        &PackageSpec::new(REPLACEMENT, "1.0.0").replaces_core(TREE),
+        TREE,
+    );
+    server.enable(REPLACEMENT);
+    for _ in 0..2 {
+        server.fail(REPLACEMENT, Side::Server);
+        rig.advance(Duration::from_secs(10));
+    }
+    assert_eq!(
+        server.active_owner(TREE),
+        REPLACEMENT.to_string(),
+        "two failures are below the rollback threshold of three"
+    );
+    assert!(
+        server.refusal(REPLACEMENT).is_none(),
+        "the replacement must not be marked failed after two failures"
+    );
+}
+
+/// REQ: COR-229
+#[test]
+fn cor_229_after_the_first_replacement_is_disabled_a_second_one_can_be_enabled() {
+    let rig = OpsRig::new();
+    let _server = rig.start_server("s1");
+    rig.install_replacement_of_core(
+        &PackageSpec::new(REPLACEMENT, "1.0.0").replaces_core(TREE),
+        TREE,
+    );
+    rig.install_replacement_of_core(
+        &PackageSpec::new(SECOND_REPLACEMENT, "1.0.0").replaces_core(TREE),
+        TREE,
+    );
+    assert_eq!(rig.cli(&["enable", REPLACEMENT]).exit_code, 0);
+    assert_eq!(rig.cli(&["disable", REPLACEMENT]).exit_code, 0);
+    let output = rig.cli(&["enable", SECOND_REPLACEMENT]);
+    assert_eq!(
+        output.exit_code, 0,
+        "one replacement at a time: the second may be enabled once the first is disabled"
+    );
+}
+
+/// REQ: COR-230
+#[test]
+fn cor_230_an_incompatible_override_leaves_the_core_plugin_owned_by_itself() {
+    let rig = OpsRig::new();
+    rig.install_override_incompatible_abi(TREE);
+    let server = rig.start_server("s1");
+    assert_eq!(
+        server.active_owner(TREE),
+        TREE.to_string(),
+        "the refused override must not take ownership"
+    );
+}

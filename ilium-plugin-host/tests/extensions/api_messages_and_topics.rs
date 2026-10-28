@@ -666,3 +666,26 @@ fn doc_page_resolves_the_message_queue_rule_to_refused_busy_without_restart() {
     assert!(text.contains("completes `refused(busy)`"));
     assert!(text.contains("The receiver is not restarted"));
 }
+
+/// REQ: SVC-029
+#[test]
+fn svc_029_second_message_to_the_woken_plugin_is_delivered_without_reactivating_it() {
+    let mut world = message_world(true);
+    world.deactivate(RECV);
+    let _ = message_outcome(&mut world, "chan", b"first");
+    let _ = message_outcome(&mut world, "chan", b"second");
+    let activations = world
+        .event_order(RECV)
+        .iter()
+        .filter(|event| event.to_string() == "activate")
+        .count();
+    assert_eq!(activations, 1);
+    assert_eq!(world.messages_received(RECV).len(), 2);
+}
+
+/// REQ: WIT:ilium:host/topics.publish
+#[test]
+fn publish_to_the_second_declared_topic_is_accepted() {
+    let mut world = topic_world();
+    assert!(world.publish(PUB, "com.example.pub/other", "{}").is_ok());
+}

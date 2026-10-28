@@ -463,3 +463,306 @@ fn app_control_keys_and_unrelated_keys_fall_through_to_settings() {
     }
     assert!(host.scans_started().is_empty());
 }
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::a_missing_configuration_file_reads_as_not_set
+#[test]
+fn app_opening_the_tab_with_no_configuration_files_creates_nothing() {
+    let mut host = opened();
+    assert!(
+        host.fs().read(CODEX_FILE).is_none(),
+        "opening the tab creates no file"
+    );
+    assert!(
+        host.fs().read(CLAUDE_FILE).is_none(),
+        "opening the tab creates no file"
+    );
+    assert!(host.agent_file_writes().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::a_second_scan_cannot_start_while_one_runs
+#[test]
+fn app_a_new_scan_can_start_once_the_running_one_has_finished() {
+    let mut host = opened();
+    write_codex_corpus(&mut host, 3);
+    keys(&mut host, &["s", "s"]);
+    host.finish_scans();
+    keys(&mut host, &["s"]);
+    assert_eq!(
+        host.scans_started().len(),
+        2,
+        "the guard releases when the scan ends"
+    );
+    assert!(host.is_scanning("codex"));
+    host.finish_scans();
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::a_stale_file_is_reported_in_the_tab_and_nothing_is_written
+#[test]
+fn app_a_refused_stale_apply_is_not_recorded_as_a_write() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["Enter"]);
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 100000\n",
+    );
+    keys(&mut host, &["Enter"]);
+    assert!(
+        host.agent_file_writes().is_empty(),
+        "a refused apply writes nothing"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::apply_confirm_writes_one_key_keeps_a_record_and_revert_restores_it
+#[test]
+fn app_apply_confirm_records_exactly_one_write_to_the_agent_file() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["a", "y"]);
+    assert_eq!(
+        host.agent_file_writes().len(),
+        1,
+        "one confirmed apply is one write"
+    );
+    assert!(host
+        .agent_file_writes()
+        .iter()
+        .any(|path| path.contains("config.toml")));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::applying_without_a_configuration_file_is_a_clear_error_not_a_created_file
+#[test]
+fn app_applying_without_a_configuration_file_records_no_write() {
+    let mut host = opened();
+    write_codex_corpus(&mut host, 8);
+    keys(&mut host, &["s"]);
+    host.finish_scans();
+    keys(&mut host, &["Enter"]);
+    assert!(screen_text(&mut host, 160, 50).contains("does not exist"));
+    assert!(host.agent_file_writes().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::claude_apply_targets_settings_json_and_reports_environment_overrides
+#[test]
+fn app_claude_apply_keeps_settings_json_parseable_with_other_keys_intact() {
+    let mut host = opened();
+    write_text(
+        &mut host,
+        CLAUDE_FILE,
+        &format!("{{\n  \"theme\": \"dark\",\n  \"autoCompactWindow\": {CLAUDE_CURRENT}\n}}\n"),
+    );
+    keys(&mut host, &["Right"]);
+    write_claude_corpus(&mut host, 8);
+    keys(&mut host, &["s"]);
+    host.finish_scans();
+    let recommended = host.recommended_tokens();
+    keys(&mut host, &["Enter"]);
+    keys(&mut host, &["Enter"]);
+    let after = read_text(&mut host, CLAUDE_FILE);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&after).expect("settings.json stays valid JSON");
+    assert_eq!(parsed["autoCompactWindow"], serde_json::json!(recommended));
+    assert_eq!(parsed["theme"], "dark");
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::clicking_the_page_buttons_runs_scan_apply_and_revert
+#[test]
+fn app_clicking_apply_opens_the_confirmation_and_writes_nothing_yet() {
+    let mut host = scanned_codex();
+    let (row, column) = host
+        .render(panel(), 160, 50)
+        .find("Apply to Codex")
+        .expect("apply button");
+    host.click(panel(), column + 2, row);
+    assert!(screen_text(&mut host, 160, 50).contains("Apply to Codex?"));
+    assert!(
+        host.agent_file_writes().is_empty(),
+        "the click only asks for confirmation"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::control_keys_and_unrelated_keys_fall_through_to_settings
+#[test]
+fn app_arrow_keys_are_consumed_by_the_panel() {
+    let mut host = opened();
+    assert!(
+        host.key_consumed(panel(), "Right"),
+        "Right switches the agent in the panel"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::enter_scans_then_the_page_shows_the_report_with_the_apply_button_on_top
+#[test]
+fn app_a_scan_key_on_a_finished_report_starts_a_new_scan() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["s"]);
+    assert_eq!(
+        host.scans_started().len(),
+        2,
+        "a second scan request is sent"
+    );
+    assert!(host.is_scanning("codex"));
+    host.finish_scans();
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::escape_cancels_a_running_scan_instead_of_closing_settings_and_keeps_the_report
+#[test]
+fn app_escape_stops_the_running_scan_at_once() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["s"]);
+    keys(&mut host, &["Esc"]);
+    assert!(
+        !host.is_scanning("codex"),
+        "Esc cancelled the scan without waiting for it"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::help_icons_open_the_help_topics_of_the_tab
+#[test]
+fn app_every_help_anchor_of_the_tab_names_an_existing_help_topic() {
+    let mut host = opened();
+    let topics = host.help_anchor_topics(panel());
+    assert!(!topics.is_empty(), "the tab has help icons");
+    for topic in &topics {
+        assert!(host.help_topic_exists(topic), "{topic} has no help text");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::left_right_and_clicks_switch_the_agent_and_reset_the_scroll
+#[test]
+fn app_switching_the_agent_resets_the_report_scroll_to_the_top() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["End"]);
+    assert!(
+        host.scroll_offset(panel()) > 0,
+        "the report is scrolled down"
+    );
+    keys(&mut host, &["Right"]);
+    assert_eq!(
+        host.scroll_offset(panel()),
+        0,
+        "the other agent starts at the top"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::opening_the_tab_reads_the_current_settings_and_never_starts_a_scan
+#[test]
+fn app_opening_the_tab_never_writes_the_agent_file() {
+    let mut host = client_host();
+    write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
+    host.open_view(panel());
+    assert_eq!(read_text(&mut host, CODEX_FILE), CODEX_CONFIG);
+    assert!(host.agent_file_writes().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::revert_restores_the_previous_value_and_refuses_after_an_outside_edit
+#[test]
+fn app_a_refused_revert_adds_no_agent_file_write() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["a", "Enter"]);
+    let writes_before = host.agent_file_writes().len();
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 99999\n",
+    );
+    keys(&mut host, &["r"]);
+    assert_eq!(
+        host.agent_file_writes().len(),
+        writes_before,
+        "the refused revert wrote nothing"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::scan_settings_carry_the_current_value_and_the_cost_tab_price_overrides
+#[test]
+fn app_claude_scan_request_is_not_sent_as_codex() {
+    let mut host = client_host();
+    write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
+    host.open_view(panel());
+    host.select_agent_target("claude");
+    host.key(panel(), "s");
+    assert_eq!(host.scans_started().len(), 1);
+    assert_ne!(host.scan_request(0)["agent"], "codex");
+    host.finish_scans();
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::the_cancel_button_and_c_key_stop_a_running_scan
+#[test]
+fn app_a_cancelled_scan_leaves_no_report_on_the_page() {
+    let mut host = opened();
+    write_codex_corpus(&mut host, 3);
+    keys(&mut host, &["s", "c"]);
+    host.finish_scans();
+    assert!(!screen_text(&mut host, 160, 50).contains("RECOMMENDATION"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::the_confirmation_buttons_and_wheel_work_with_the_mouse
+#[test]
+fn app_cancel_in_the_confirmation_records_no_write() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["a"]);
+    let (cancel_row, cancel_column) = host
+        .render(panel(), 80, 14)
+        .find("Cancel")
+        .expect("cancel button");
+    host.click(panel(), cancel_column, cancel_row);
+    assert!(host.agent_file_writes().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::the_current_values_are_read_again_each_time_the_tab_becomes_visible
+#[test]
+fn app_a_scan_after_reopening_uses_the_value_read_on_reopen() {
+    let mut host = client_host();
+    write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
+    host.open_view(panel());
+    host.close_view(panel());
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 150000\n",
+    );
+    host.open_view(panel());
+    host.key(panel(), "s");
+    assert_eq!(host.scan_request(0)["current_setting_value"], 150_000_u64);
+    host.finish_scans();
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::the_e_key_applies_the_extrapolated_alternative_through_the_same_confirmation
+#[test]
+fn app_the_e_key_opens_the_shared_confirmation_before_any_write() {
+    let mut host = scanned_codex();
+    let alternative = host.extrapolated_alternative_tokens();
+    keys(&mut host, &["e"]);
+    if alternative.is_some() {
+        assert!(screen_text(&mut host, 160, 50).contains("Apply to Codex?"));
+    }
+    assert!(
+        host.agent_file_writes().is_empty(),
+        "nothing is written before confirmation"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::the_report_scrolls_with_arrows_pages_home_end_and_the_wheel_within_bounds
+#[test]
+fn app_end_stops_exactly_at_the_maximum_report_scroll() {
+    let mut host = scanned_codex();
+    let maximum = host.max_scroll(panel(), 160, 30);
+    assert!(maximum > 0, "the report overflows a 30-row panel");
+    keys(&mut host, &["End"]);
+    assert_eq!(host.scroll_offset(panel()), maximum);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_app/tests.rs::write_errors_get_actionable_wording
+#[test]
+fn app_a_stale_error_names_the_configuration_file() {
+    let mut host = scanned_codex();
+    keys(&mut host, &["Enter"]);
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 1\n",
+    );
+    keys(&mut host, &["Enter"]);
+    let text = screen_text(&mut host, 200, 50);
+    assert!(text.contains("config.toml"), "{text}");
+}

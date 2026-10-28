@@ -68,3 +68,32 @@ fn hst_697_lock_is_stale_only_when_holder_is_gone_rebooted_or_silent_and_waiters
         "log carries the old holder's pid and boot id"
     );
 }
+
+/// REQ: HST-696
+#[test]
+fn hst_696_doctor_exits_0_on_a_clean_install() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let report = rig.cli(&["plugin", "doctor"]);
+    assert_eq!(
+        report.exit_code, 0,
+        "exit 0 when there are no findings: {:?}",
+        report.stdout_jsonl
+    );
+}
+
+/// REQ: HST-697
+#[test]
+fn hst_697_a_lock_holder_silent_for_61_seconds_is_taken_over_with_a_pid_in_the_log() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.hold_lock_with_holder(NOTES, "silent", 61);
+    let server = rig.start_server("default");
+    let takeovers = rig.log_lines_with_code("lock.takeover");
+    assert!(!takeovers.is_empty(), "the takeover is logged");
+    assert!(
+        takeovers.iter().all(|line| line.to_string().contains("pid")),
+        "each takeover names the old holder's pid"
+    );
+    server.shutdown();
+}

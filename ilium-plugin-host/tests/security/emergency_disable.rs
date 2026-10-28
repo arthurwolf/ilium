@@ -29,3 +29,24 @@ fn sec_458_the_enterprise_guide_states_the_audited_disable_and_the_explicit_re_e
         ],
     );
 }
+
+/// REQ: SEC-457
+#[test]
+fn sec_457_the_emergency_disable_keeps_safe_mode_as_a_separate_switch() {
+    assert_page_has(
+        "guide-enterprise-deployment.md",
+        &["apart from safe mode", "`[plugins] disable_third_party = true`"],
+    );
+}
+
+/// REQ: SEC-458
+#[test]
+fn sec_458_each_emergency_disable_and_re_enable_writes_one_audit_record() {
+    assert_page_has(
+        "guide-enterprise-deployment.md",
+        &[
+            "Each emergency disable and each re-enable MUST write one audit record",
+            "`ilium plugin enable --all-third-party`",
+        ],
+    );
+}

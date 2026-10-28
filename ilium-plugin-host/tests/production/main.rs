@@ -3,7 +3,7 @@
 //!
 //! Documentation rows read the manual page under `docs/plugins-manual/pages` and assert its
 //! concrete values, codes and steps. Behaviour rows call the existing host API where one exists
-//! and otherwise use `unimplemented!` naming the missing item; those tests stay red until the
+//! and otherwise name the missing item in the failing assertion; those tests stay red until the
 //! feature exists. Gaps are listed in API_GAPS.md.
 
 mod common;

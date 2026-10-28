@@ -3,8 +3,70 @@
 //! Written once by the skeleton lane from the generated `HostAudio` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::audio::{AudioDevice, HostAudio};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
+
+/// Lowest sample rate any audio call accepts, in hertz.
+const MIN_SAMPLE_RATE: u32 = 8_000;
+/// Highest sample rate any audio call accepts, in hertz.
+const MAX_SAMPLE_RATE: u32 = 192_000;
+/// Most capture streams a plugin may hold open (default quota).
+const MAX_OPEN_STREAMS: usize = 2;
+/// Longest playback one `play` call accepts, in seconds.
+const MAX_PLAY_SECONDS: u64 = 30;
+
+/// Open capture streams and the id counters.
+#[derive(Debug)]
+struct AudioState {
+    next_capture: u64,
+    next_request: u64,
+    open: HashSet<u64>,
+}
+
+thread_local! {
+    static STATE: RefCell<AudioState> = RefCell::new(AudioState { next_capture: 1, next_request: 1, open: HashSet::new() });
+}
+
+/// Builds a refusal with the given code and a plain-text message.
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
+/// Checks sample rate and channel count shared by every audio call.
+fn validate_format(sample_rate: u32, channels: u8) -> Result<(), PluginError> {
+    if !(MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(&sample_rate) {
+        return Err(refuse(
+            ErrorCode::InvalidArgument,
+            "sample rate must be 8000 to 192000 Hz",
+        ));
+    }
+    match channels {
+        0 => Err(refuse(ErrorCode::InvalidArgument, "channels must be 1 or 2")),
+        1 | 2 => Ok(()),
+        _ => Err(refuse(ErrorCode::Unsupported, "only mono and stereo are supported")),
+    }
+}
+
+/// Registers a new open stream, enforcing the stream quota.
+fn open_stream() -> Result<u64, PluginError> {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.open.len() >= MAX_OPEN_STREAMS {
+            return Err(refuse(ErrorCode::QuotaExceeded, "too many open capture streams"));
+        }
+        let id = state.next_capture;
+        state.next_capture += 1;
+        state.open.insert(id);
+        Ok(id)
+    })
+}
 
 /// Host side of the `audio` interface.
 #[derive(Debug)]
@@ -12,33 +74,60 @@ pub struct AudioImport;
 
 impl HostAudio for AudioImport {
     fn devices(&mut self) -> Vec<AudioDevice> {
-        unimplemented!("host::imports::audio::devices")
+        // Listing needs the `audio` grant; without a grant or a backend the list is empty.
+        Vec::new()
     }
 
     fn open_capture(
         &mut self,
-        _device: Option<String>,
-        _sample_rate: u32,
-        _channels: u8,
+        device: Option<String>,
+        sample_rate: u32,
+        channels: u8,
     ) -> Result<u64, PluginError> {
-        unimplemented!("host::imports::audio::open_capture")
+        validate_format(sample_rate, channels)?;
+        // `devices()` lists nothing here, so any named device is not in the list.
+        if device.is_some() {
+            return Err(refuse(ErrorCode::NotFound, "device is not in devices()"));
+        }
+        open_stream()
     }
 
-    fn open_loopback(&mut self, _sample_rate: u32, _channels: u8) -> Result<u64, PluginError> {
-        unimplemented!("host::imports::audio::open_loopback")
+    fn open_loopback(&mut self, sample_rate: u32, channels: u8) -> Result<u64, PluginError> {
+        validate_format(sample_rate, channels)?;
+        open_stream()
     }
 
-    fn close_capture(&mut self, _capture: u64) {
-        unimplemented!("host::imports::audio::close_capture")
+    fn close_capture(&mut self, capture: u64) {
+        STATE.with(|state| {
+            state.borrow_mut().open.remove(&capture);
+        });
     }
 
     fn play(
         &mut self,
-        _samples: Vec<i16>,
-        _sample_rate: u32,
-        _channels: u8,
+        samples: Vec<i16>,
+        sample_rate: u32,
+        channels: u8,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::audio::play")
+        validate_format(sample_rate, channels)?;
+        let sample_count = samples.len() as u64;
+        if sample_count % u64::from(channels) != 0 {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "sample count must be a multiple of the channel count",
+            ));
+        }
+        let frames = sample_count / u64::from(channels);
+        if frames > MAX_PLAY_SECONDS * u64::from(sample_rate) {
+            return Err(refuse(ErrorCode::InvalidArgument, "playback is longer than 30 s"));
+        }
+        let id = STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            let id = state.next_request;
+            state.next_request += 1;
+            id
+        });
+        Ok(RequestId(id))
     }
 }
 

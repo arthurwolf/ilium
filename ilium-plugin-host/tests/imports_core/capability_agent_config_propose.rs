@@ -48,3 +48,37 @@ fn take_proposal_returns_the_result_once_and_every_path_is_accounted_for() {
     assert_eq!(result.applied.len() + result.rejected.len(), 1);
     assert!(fixture.fs().take_proposal(request).is_none());
 }
+
+/// REQ: WIT:ilium:host/fs.take-proposal
+#[test]
+fn take_proposal_is_none_while_the_user_has_not_answered() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut fixture = fixture_in(dir.path(), Tier::T2, &PROPOSE);
+    let request = expect_ok(fixture.fs().propose_agent_config(
+        "gemini".to_owned(),
+        "Update Gemini settings".to_owned(),
+        vec![create_settings_change()],
+    ));
+    assert!(
+        fixture.fs().take_proposal(request).is_none(),
+        "no proposal result may exist before the user answers"
+    );
+}
+
+/// REQ: WIT:ilium:host/fs.propose-agent-config
+#[test]
+fn propose_agent_config_with_an_empty_change_list_is_invalid_argument() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut fixture = fixture_in(dir.path(), Tier::T2, &PROPOSE);
+    match fixture.fs().propose_agent_config(
+        "gemini".to_owned(),
+        "Empty".to_owned(),
+        Vec::new(),
+    ) {
+        Err(error) => assert_eq!(
+            error.code,
+            ilium_plugin_api::generated::types::ErrorCode::InvalidArgument
+        ),
+        Ok(_) => panic!("an empty change list must be refused"),
+    }
+}

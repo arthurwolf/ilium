@@ -242,6 +242,36 @@ fn doc_abi_005_wit_excerpts_on_other_pages_match_reference_wit() {
     assert!(drift.is_empty(), "excerpt drift: {drift:#?}");
 }
 
+/// REQ: ABI-005
+#[test]
+fn doc_abi_005_labelled_excerpt_names_an_interface_the_reference_declares() {
+    let reference = manual_page("reference-wit.md");
+    let mut undeclared = Vec::new();
+    for (page_name, page) in manual_pages() {
+        if page_name == "reference-wit.md" {
+            continue;
+        }
+        for line in page.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("// Excerpt of ilium:") else {
+                continue;
+            };
+            let Some(label) = rest.strip_suffix(" in reference-wit") else {
+                undeclared.push(format!("{page_name}: malformed excerpt label {line:?}"));
+                continue;
+            };
+            let interface = label
+                .split_once('/')
+                .map_or(label, |(_, interface)| interface);
+            if !reference.contains(&format!("interface {interface} {{")) {
+                undeclared.push(format!(
+                    "{page_name}: excerpt of {label} names no interface in reference-wit.md"
+                ));
+            }
+        }
+    }
+    assert!(undeclared.is_empty(), "{undeclared:#?}");
+}
+
 /// REQ: ABI-016
 #[test]
 fn doc_abi_016_wit_names_are_kebab_case() {

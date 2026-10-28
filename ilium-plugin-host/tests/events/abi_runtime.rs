@@ -478,3 +478,44 @@ fn abi_047_every_activation_repeats_the_listing() {
         vec![vec![1, 2, 3], vec![1, 2, 3]]
     );
 }
+
+/// REQ: ABI-025
+#[test]
+fn abi_025_two_queued_triggers_never_nest_the_export() {
+    let (host, deepest, _batches) = depth_host(Some(invoke_own_command()));
+    host.deliver(vec![trigger()]);
+    host.deliver(vec![trigger()]);
+    host.pump(64);
+    assert_eq!(deepest.load(Ordering::SeqCst), 1);
+}
+
+/// REQ: ABI-049
+#[test]
+fn abi_049_two_queued_triggers_both_run_without_nesting() {
+    let (host, deepest, batches) = depth_host(Some(invoke_own_command()));
+    host.deliver(vec![trigger()]);
+    host.deliver(vec![trigger()]);
+    host.pump(64);
+    assert_eq!(deepest.load(Ordering::SeqCst), 1);
+    let invoked: usize = lock(&batches)
+        .iter()
+        .flatten()
+        .filter(|e| is_command_invoked(e))
+        .count();
+    assert_eq!(invoked, 2, "both queued triggers must run their command");
+}
+
+/// REQ: ABI-050
+#[test]
+fn abi_050_extra_pump_never_duplicates_the_queued_own_command() {
+    let (host, _deepest, batches) = depth_host(Some(invoke_own_command()));
+    host.deliver(vec![trigger()]);
+    host.pump(64);
+    host.pump(64);
+    let invoked: usize = lock(&batches)
+        .iter()
+        .flatten()
+        .filter(|event| is_command_invoked(event))
+        .count();
+    assert_eq!(invoked, 1);
+}

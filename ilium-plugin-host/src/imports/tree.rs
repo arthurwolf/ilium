@@ -1,9 +1,11 @@
-//! Host implementation of `ilium:host/tree` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/tree`.
 //!
-//! Written once by the skeleton lane from the generated `HostTree` trait; hand-owned afterwards.
+//! Hand-owned. This import has no attached session tree yet (HST-020), so every node lookup
+//! finds nothing and metadata writes are refused. The session-backed tree replaces the empty
+//! view when a session is attached.
 
 use ilium_plugin_api::generated::host::tree::HostTree;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::NodeId;
 use ilium_plugin_api::generated::types::tree::{NodeQuery, NodeView};
 
@@ -13,27 +15,38 @@ pub struct TreeImport;
 
 impl HostTree for TreeImport {
     fn get(&mut self, _node: NodeId) -> Option<NodeView> {
-        unimplemented!("host::imports::tree::get")
+        None
     }
 
     fn children(&mut self, _node: NodeId) -> Vec<NodeId> {
-        unimplemented!("host::imports::tree::children")
+        Vec::new()
     }
 
     fn roots(&mut self) -> Vec<NodeId> {
-        unimplemented!("host::imports::tree::roots")
+        Vec::new()
     }
 
     fn find(&mut self, _query: NodeQuery) -> Vec<NodeId> {
-        unimplemented!("host::imports::tree::find")
+        Vec::new()
     }
 
     fn metadata(&mut self, _node: NodeId) -> Option<Vec<u8>> {
-        unimplemented!("host::imports::tree::metadata")
+        None
     }
 
-    fn set_metadata(&mut self, _node: NodeId, _bytes: Vec<u8>) -> Result<(), PluginError> {
-        unimplemented!("host::imports::tree::set_metadata")
+    fn set_metadata(&mut self, node: NodeId, _bytes: Vec<u8>) -> Result<(), PluginError> {
+        // Without an attached session there is no node to write to. Node 0 stands for the
+        // session-less host (a CLI process) and is refused; any other id is simply absent.
+        let (code, message) = if node.0 == 0 {
+            (ErrorCode::NotPermitted, "no session is attached")
+        } else {
+            (ErrorCode::NotFound, "the node does not exist")
+        };
+        Err(PluginError {
+            code,
+            message: message.to_string(),
+            retry_after_ms: None,
+        })
     }
 }
 

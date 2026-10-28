@@ -129,3 +129,81 @@ fn usr_346_bisect_narrows_to_one_plugin_in_log_rounds_and_restores_the_enabled_s
         assert!(server.is_enabled(id), "{id} was not restored after bisect");
     }
 }
+
+/// REQ: USR-254
+#[test]
+fn usr_254_list_command_shows_the_incompatible_state_word_for_the_plugin() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").api_version("2.0"));
+    rig.set_host_api_version("1.0");
+    let _server = rig.start_server("s1");
+    let listing = rig.cli(&["list"]).stdout_raw;
+    let line = listing
+        .lines()
+        .find(|line| line.contains(NOTES))
+        .expect("the plugin must still be listed");
+    assert!(
+        line.contains("Incompatible"),
+        "the list must show the state word: {line}"
+    );
+}
+
+/// REQ: USR-255
+#[test]
+fn usr_255_notice_is_not_raised_for_a_plugin_that_is_compatible() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").api_version("2.0"));
+    install_ok(&rig, &pkg(OTHER, "1.0.0").api_version("1.0"));
+    rig.set_host_api_version("1.0");
+    let server = rig.start_server("s1");
+    rig.advance(secs(3));
+    let notices = server.notices().join("\n");
+    assert!(
+        !notices.contains(OTHER),
+        "a compatible plugin must not get an incompatibility notice: {notices}"
+    );
+}
+
+/// REQ: USR-256
+#[test]
+fn usr_256_after_the_compatible_update_no_incompatible_state_remains_in_the_list() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").api_version("2.0"));
+    rig.set_host_api_version("1.0");
+    let server = rig.start_server("s1");
+    rig.advance(secs(3));
+    rig.publish_to_registry(&pkg(NOTES, "1.1.0").api_version("1.0"));
+    let accepted = rig.cli(&["update", NOTES, "--yes"]);
+    assert_eq!(
+        accepted.exit_code, 0,
+        "accepting the update failed: {}",
+        accepted.stderr
+    );
+    rig.advance(secs(3));
+    assert_eq!(server.active_version(NOTES).as_deref(), Some("1.1.0"));
+    assert!(
+        !rig.cli(&["list"]).stdout_raw.contains("Incompatible"),
+        "no plugin may stay Incompatible after the compatible update"
+    );
+}
+
+/// REQ: USR-346
+#[test]
+fn usr_346_cancelled_bisect_restores_the_enabled_set() {
+    let rig = rig();
+    let ids: Vec<String> = (0..4)
+        .map(|index| format!("com.example.q{index}"))
+        .collect();
+    for id in &ids {
+        install_ok(&rig, &pkg(id, "1.0.0"));
+    }
+    let server = rig.start_server("s1");
+    rig.advance(secs(3));
+    let _output = rig.cli_tty(&["bisect"], &["no"]);
+    for id in &ids {
+        assert!(
+            server.is_enabled(id),
+            "{id} was not restored after the bisect was cancelled"
+        );
+    }
+}

@@ -166,6 +166,32 @@ fn doc_progress_b10_the_cli_waits_forty_five_seconds_for_the_server_reply() {
         .contains("The CLI waits up to 45 seconds for the server's correlated reply."));
 }
 
+/// REQ: progress-B10
+#[test]
+fn doc_progress_b10_the_cited_source_anchor_resolves_to_a_cli_reference_heading() {
+    let cited_source = row("progress-B10")[3].clone();
+    let target = cited_source.trim_matches('`');
+    let (file, anchor) = target
+        .split_once('#')
+        .unwrap_or_else(|| panic!("source cell has no anchor: {cited_source}"));
+    assert_eq!(file, "src/docs/cli-reference.md");
+    let heading_exists = user_doc("cli-reference.md")
+        .lines()
+        .filter(|line| line.starts_with('#'))
+        .any(|heading| {
+            heading
+                .trim_start_matches('#')
+                .trim()
+                .to_lowercase()
+                .replace(' ', "-")
+                == anchor
+        });
+    assert!(
+        heading_exists,
+        "no heading in cli-reference.md slugs to #{anchor}"
+    );
+}
+
 /// REQ: progress-B11
 #[test]
 fn doc_progress_b11_same_probe_twice_returns_the_existing_monitor() {

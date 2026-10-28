@@ -75,3 +75,20 @@ fn check_reports_error_when_removed_item_is_still_declared() {
         "a removed item that is still declared is an error"
     );
 }
+
+/// REQ: DEV-887
+#[test]
+fn check_does_not_report_removed_before_the_remove_in_version() {
+    let root = scratch();
+    let env = env(root.path());
+    let dir = project_dir(&env);
+    project_with(&dir, |manifest| {
+        manifest["version"] = json!("0.2.0");
+        set_deprecation(manifest, "0.1.0", "0.3.0");
+    });
+    let output = run_in_project(&env, "check", &[]);
+    assert!(
+        !mentions(&output, "lint.deprecated-removed"),
+        "an item still before remove_in is not reported as removed"
+    );
+}

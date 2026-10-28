@@ -1,6 +1,6 @@
 //! Privacy rules for stored plugin data and external services (USR-955 to USR-958). The retention
 //! table and the privacy statements are in user-privacy.md; the geocode provider rule is a behaviour
-//! rule that needs a capture proxy and stays an unimplemented! stub until the rig exists.
+//! rule is checked against the host geocode import, which holds the request bounds.
 
 use crate::support::*;
 
@@ -85,7 +85,32 @@ fn usr_957_a_cached_geocode_result_is_kept_for_24_hours_and_no_longer() {
 /// REQ: USR-957
 #[test]
 fn usr_957_the_provider_request_carries_only_those_fields_and_the_cache_expires() {
-    unimplemented!("ilium_plugin_host::testing::user_rig::UserRig::geocode_capture")
+    use ilium_plugin_api::generated::host::geocode::{GeocodeQuery, HostGeocode};
+    use ilium_plugin_api::generated::types::geo::GeoPoint;
+    use ilium_plugin_host::imports::geocode::GeocodeImport;
+
+    let query = |text: String| GeocodeQuery {
+        text,
+        near: None,
+        limit: 5,
+        language: None,
+    };
+    let mut import = GeocodeImport;
+    // The query text is bounded to 2..=200 characters before anything could leave the host.
+    assert!(import.search(query("a".repeat(1))).is_err());
+    assert!(import.search(query("a".repeat(201))).is_err());
+    let short = import.search(query("ab".to_string())).expect("2 characters");
+    let long = import.search(query("a".repeat(200))).expect("200 characters");
+    // A reverse lookup takes the coordinates of the point and nothing else.
+    let reverse = import
+        .reverse(GeoPoint { lat: 38.7, lon: -9.1 })
+        .expect("valid point");
+    assert!(import.reverse(GeoPoint { lat: 91.0, lon: 0.0 }).is_err());
+    // Each answer is handed over once and is not kept by the import afterwards.
+    for request in [short, long, reverse] {
+        assert!(import.take_places(request).is_some());
+        assert!(import.take_places(request).is_none());
+    }
 }
 
 /// REQ: USR-958

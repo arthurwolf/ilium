@@ -210,3 +210,14 @@ proptest! {
         prop_assert_eq!(restore_bytes_accepted(length), length <= 1_048_576);
     }
 }
+
+/// REQ: ABI-017
+#[test]
+fn abi_017_invalid_utf8_trap_is_not_retryable_and_is_documented_in_errors_and_limits() {
+    let info = ilium_plugin_api::error::registry()
+        .iter()
+        .find(|info| info.code == codes::trap::ABI)
+        .expect("trap.abi is in the error registry");
+    assert!(!info.retryable, "a trap on invalid UTF-8 repeats on retry");
+    assert_eq!(info.page, "reference-errors-and-limits.md");
+}

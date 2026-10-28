@@ -61,3 +61,28 @@ fn hst_683_limits_command_shows_source_usage_and_requested_versus_applied_for_cl
     assert_eq!(clamped["requested"], 99_999, "requested value shown");
     assert_eq!(clamped["applied"], 1024, "applied value shown");
 }
+
+/// REQ: HST-682
+#[test]
+fn hst_682_manual_table_has_at_least_one_row_per_named_limit() {
+    let rig = rig();
+    let table = rig.manual_limits_table();
+    let named = rig.limits_named_in_requirements().into_iter().count();
+    assert!(
+        table.rows.len() >= named,
+        "{} table rows for {named} named limits",
+        table.rows.len()
+    );
+}
+
+/// REQ: HST-683
+#[test]
+fn hst_683_limits_command_without_a_plugin_id_lists_the_host_limits() {
+    let rig = rig();
+    let output = rig.cli(&["plugin", "limits", "--json"]);
+    assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
+    assert!(
+        !output.stdout_jsonl.is_empty(),
+        "host limits are printed without a plugin id"
+    );
+}

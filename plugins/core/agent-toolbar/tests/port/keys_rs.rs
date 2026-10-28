@@ -17,6 +17,28 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
     }
 }
 
+/// REQ: PORT:ilium-client/src/keys.rs::plus_opens_the_full_catalog_for_the_selected_status_icon
+#[test]
+fn port_keys_plus_opens_the_full_catalog_for_the_selected_status_icon_alternate() {
+    check(
+        Place::Client,
+        "icon-picker.status-controls",
+        r####"{"control": "open", "key": "x", "row": "status-icon", "target_index": 0}"####,
+        r####"{"picker_open": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::icon_picker_queues_cpu_semantic_search_and_selects_its_result
+#[test]
+fn port_keys_icon_picker_queues_cpu_semantic_search_and_selects_its_result_alternate() {
+    check(
+        Place::Client,
+        "icon-picker.semantic-search",
+        r####"{"typed_in_sequence": ["r", "ro", "rocket"]}"####,
+        r####"{"requests_queued": 1, "queued_query": "rocket"}"####,
+    );
+}
+
 /// REQ: F-081, PORT:ilium-client/src/keys.rs::plus_opens_the_full_catalog_for_the_selected_status_icon
 #[test]
 fn port_keys_plus_opens_the_full_catalog_for_the_selected_status_icon() {

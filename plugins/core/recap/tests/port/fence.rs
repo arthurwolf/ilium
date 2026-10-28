@@ -45,3 +45,27 @@ fn port_fence_fingerprint_changes_with_evidence() {
         "different evidence starts a new job"
     );
 }
+
+/// REQ: PORT:ilium-client/src/recap/fence.rs::fence_rejects_reattached_session_and_vanished_pane
+#[test]
+fn port_fence_reattached_session_is_counted_as_stale_and_keeps_no_short_text() {
+    let (mut host, pane, invocation) = start_agent_run(&["user: fix the parser"]);
+    host.tree()
+        .set_agent_session(pane, "session-2", rows(&["user: fix the parser"]));
+    let records = finish_run(&mut host, &invocation, answer(5, 5));
+    assert_eq!(summary(&records)["stale"], 1);
+    assert!(first_recap(&records)["short"].is_null());
+}
+
+/// REQ: PORT:ilium-client/src/recap/fence.rs::fingerprint_changes_with_evidence
+#[test]
+fn port_fence_new_screen_text_reaches_the_new_job_evidence() {
+    let (mut host, pane, _) = start_shell_run(&["first marker row"]);
+    host.tree().set_screen(pane, rows(&["second marker row"]));
+    host.cli().invoke(&["recap"], b"");
+    let mut jobs = host.jobs().list();
+    let latest = jobs.pop().expect("a second job was started");
+    let text = String::from_utf8_lossy(&latest.input).to_string();
+    assert!(text.contains("second marker row"), "{text}");
+    assert!(!text.contains("first marker row"), "{text}");
+}

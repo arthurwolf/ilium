@@ -177,3 +177,97 @@ fn hst_644_telemetry_memory_is_bounded_to_16_mib_plus_64_kib_per_side_and_printe
         "stats --host prints the current value"
     );
 }
+
+/// REQ: HST-628
+#[test]
+fn hst_628_peak_memory_is_never_below_current_memory() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.activate(NOTES);
+    rig.advance_clock(std::time::Duration::from_secs(2));
+    let current = rig.memory_bytes_current(NOTES, Side::Server);
+    let peak = rig.memory_bytes_peak(NOTES, Side::Server);
+    assert!(peak >= current, "peak {peak} is at least current {current}");
+}
+
+/// REQ: HST-629
+#[test]
+fn hst_629_no_memory_high_line_is_logged_below_90_percent() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.use_memory_fraction(NOTES, 0.5);
+    assert_eq!(
+        rig.log_lines_with_code("host.memory.high").len(),
+        0,
+        "no host.memory.high line at 50 percent of the limit"
+    );
+}
+
+/// REQ: HST-630
+#[test]
+fn hst_630_an_idle_plugin_side_reports_little_cpu_time() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.activate(NOTES);
+    let stats = rig.plugin_side_stats(NOTES, Side::Server);
+    let total = stats["cpu_ms_total"].as_u64().expect("cpu_ms_total present");
+    assert!(total < 200, "an idle side uses little CPU time, got {total} ms");
+}
+
+/// REQ: HST-631
+#[test]
+fn hst_631_a_refused_open_is_not_counted_as_a_handle() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.activate(NOTES);
+    let limit = rig.handle_limit_per_side();
+    for _ in 0..limit {
+        rig.plugin_open_handle(NOTES, "file")
+            .expect("open within the limit");
+    }
+    assert!(
+        rig.plugin_open_handle(NOTES, "timer").is_err(),
+        "an open over the limit is refused"
+    );
+    assert_eq!(
+        rig.handles_open_total(NOTES, Side::Server),
+        limit,
+        "refused opens are not counted"
+    );
+}
+
+/// REQ: HST-633
+#[test]
+fn hst_633_an_event_with_no_payload_is_charged_64_bytes() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.activate(NOTES);
+    rig.queue_events_without_consuming(NOTES, 2, 0);
+    assert_eq!(
+        rig.queue_charge_bytes(NOTES, Side::Server),
+        2 * 64,
+        "64 bytes per event when the payload is empty"
+    );
+}
+
+/// REQ: HST-634
+#[test]
+fn hst_634_top_once_succeeds_with_twelve_installed_plugins() {
+    let rig = rig();
+    rig.install_many(12);
+    let output = rig.cli(&["plugin", "top", "--once"]);
+    assert_eq!(output.exit_code, 0, "plugin top --once succeeds");
+}
+
+/// REQ: HST-644
+#[test]
+fn hst_644_the_host_stats_command_succeeds_while_telemetry_buffers_are_full() {
+    let rig = rig();
+    rig.install_many(4);
+    rig.flood_telemetry_buffers();
+    let output = rig.cli(&["plugin", "stats", "--host"]);
+    assert_eq!(
+        output.exit_code, 0,
+        "stats --host succeeds while telemetry buffers are full"
+    );
+}

@@ -115,3 +115,35 @@ fn verify_reproducible_refuses_missing_lockfile_before_any_build() {
     assert!(!dir.join("target").exists(), "no build folder is created");
     assert!(!dir.join("dist").exists(), "no component is built");
 }
+
+/// REQ: DEV-877
+#[test]
+fn debug_endpoint_artifact_never_names_the_unspecified_address() {
+    let (_root, env, _dir) = new_rust_project();
+    let started = run_in_project(&env, "debug", &[]);
+    let endpoint = records_of(&started, "artifact")
+        .into_iter()
+        .find(|record| record.get("kind").and_then(Value::as_str) == Some("debug-endpoint"))
+        .expect("an artifact record of kind debug-endpoint");
+    assert!(
+        !endpoint.to_string().contains("0.0.0.0"),
+        "the endpoint is not bound to all interfaces"
+    );
+}
+
+/// REQ: DEV-892
+#[test]
+fn verify_reproducible_twice_on_the_clean_fixture_gives_the_same_exit_code() {
+    let (_root, env, _dir) = new_rust_project();
+    let first = run_in_project(&env, "verify-reproducible", &[]);
+    let second = run_in_project(&env, "verify-reproducible", &[]);
+    assert_eq!(first.exit_code, second.exit_code);
+}
+
+/// REQ: DEV-893
+#[test]
+fn verify_reproducible_does_not_refuse_a_project_with_its_lockfile() {
+    let (_root, env, _dir) = new_rust_project();
+    let output = run_in_project(&env, "verify-reproducible", &[]);
+    assert_ne!(error_code(&output).as_deref(), Some("build.unpinned-input"));
+}

@@ -199,3 +199,20 @@ proptest! {
         prop_assert_eq!(label.split('+').count(), parts.len());
     }
 }
+
+/// REQ: WIT:ilium:host/kernel-settings.write
+#[test]
+fn wit_kernel_settings_write_without_the_tab_write_grant_is_refused() {
+    let rig = rig(&["settings.read-kernel:*"]);
+    rig.kernel
+        .set_kernel_tab("terminal", "{\"scrollback\":5000}");
+    let result = rig.host.kernel_settings().write(
+        "terminal".to_owned(),
+        "scrollback".to_owned(),
+        "6000".to_owned(),
+    );
+    assert!(
+        result.is_err(),
+        "a plugin without settings.write-kernel for the tab must be refused"
+    );
+}

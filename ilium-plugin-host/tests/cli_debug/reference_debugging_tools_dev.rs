@@ -274,3 +274,56 @@ fn dev_744_pack_without_a_built_side_fails_pack_not_built() {
     assert_eq!(error_code(&output).as_deref(), Some("pack.not-built"));
     let _ = write_package;
 }
+
+/// REQ: DEV-742
+#[test]
+fn dev_742_sha256_sidecar_of_empty_input_is_the_known_empty_digest() {
+    let line = sha256_sidecar_line(b"", "empty.ilp");
+    assert_eq!(
+        line,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  empty.ilp"
+    );
+}
+
+/// REQ: DEV-743
+#[test]
+fn dev_743_every_error_record_code_is_a_dotted_catalogue_style_code() {
+    let scratch = scratch();
+    let output = run(
+        &env(scratch.path()),
+        &[
+            "inspect",
+            scratch.path().join("missing.ilp").to_str().expect("utf8"),
+            "--json",
+        ],
+    );
+    let errors = records_of(&output, "error");
+    assert!(!errors.is_empty());
+    for error in errors {
+        assert!(
+            error["code"]
+                .as_str()
+                .is_some_and(|code| code.contains('.')),
+            "CI logs need a namespaced code, got {error}"
+        );
+    }
+}
+
+/// REQ: DEV-744
+#[test]
+fn dev_744_pack_with_no_declared_side_does_not_report_pack_not_built() {
+    let scratch = scratch();
+    let env = env(scratch.path());
+    let project = env.cwd.clone();
+    std::fs::write(
+        project.join("manifest.json"),
+        r#"{"id":"example.notes","version":"0.1.0","sides":[]}"#,
+    )
+    .expect("manifest");
+    let output = run(&env, &["pack", "--json"]);
+    assert_ne!(
+        error_code(&output).as_deref(),
+        Some("pack.not-built"),
+        "pack.not-built is only for a declared side without a component"
+    );
+}

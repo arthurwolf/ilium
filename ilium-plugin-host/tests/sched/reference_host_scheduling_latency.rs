@@ -106,3 +106,16 @@ fn hst_216_call_that_started_in_time_logs_nothing_and_counts_nothing() {
         .all(|line| !line.contains("host.queue-timeout")));
     assert_eq!(scheduler.breach_count(&who, CallClass::MenuItems), 0);
 }
+
+/// REQ: HST-215
+#[test]
+fn hst_215_every_key_press_reaches_the_pty_exactly_once() {
+    let kernel = kernel_with_nodes(1);
+    let guest = ScriptedGuest::new(Shared::new()).submitting(vec![play_sound_submission(1)]);
+    let handle = build_with(HostHarness::new().kernel(kernel.clone()), guest.sleeping(0));
+    for round in 0..20usize {
+        handle.deliver(vec![key_pressed()]);
+        handle.pump(1);
+        assert_eq!(kernel.applied_intents().len(), round + 1, "key press {round}");
+    }
+}

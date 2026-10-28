@@ -14,11 +14,24 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ilium_plugin_api::ids::parse_plugin_id;
 use ilium_plugin_api::{PluginError, Tier};
 
+use crate::audit::{AuditActor, AuditContext};
+use crate::cli::local_install::factory;
 use crate::cli::{self, CliEnv, CliOutput};
+use crate::install::{Consent, ConsentDecision, ConsentRequest};
+use crate::package::write_package;
+use crate::testing::wat::wat_component;
 use crate::registry_client::{FetchError, Fetcher};
 use crate::storage::{PluginStorage, StorageContext, BUCKET_MAX_BYTES};
 
 pub use ilium_plugin_api::generated::host::Bucket;
+
+
+/// Reports a production hook the rig needs but the production host does not expose yet. The
+/// test that reaches it fails at this line with the missing hook named, instead of passing on a
+/// value the rig made up.
+fn blocked(hook: &str) -> ! {
+    panic!("rig blocked: the production host does not expose {hook} yet")
+}
 
 /// Shared-cache size the rig opens storage with (the host default for T3 plugins).
 const SHARED_BUCKET_BYTES: usize = 64 * 1024 * 1024;
@@ -263,17 +276,17 @@ impl MigServer {
 
     /// Writes one setting through the host's settings write path (COR-090).
     pub fn write_setting(&self, _table: &str, _key: &str, _value: &str) {
-        unimplemented!("host::testing::migration::MigServer::write_setting")
+        blocked("the settings table of the in-process server")
     }
 
     /// Activates a plugin.
     pub fn activate(&self, _id: &str) -> ActivateReport {
-        unimplemented!("host::testing::migration::MigServer::activate")
+        blocked("the in-process activation of a plugin version")
     }
 
     /// Applies the pending update of a plugin.
     pub fn upgrade(&self, _id: &str) -> ActivateReport {
-        unimplemented!("host::testing::migration::MigServer::upgrade")
+        blocked("the in-process upgrade of a plugin version")
     }
 
     /// The storage of a plugin.
@@ -303,17 +316,74 @@ impl MigServer {
 
     /// The data-version stamp of a bucket.
     pub fn stamp(&self, _id: &str, _bucket: Bucket) -> Option<u32> {
-        unimplemented!("host::testing::migration::MigServer::stamp")
+        blocked("the data-version stamp of a bucket")
     }
 
     /// Calls `migrate` directly.
     pub fn call_migrate(&self, _id: &str, _from: u32, _to: u32) -> Result<(), PluginError> {
-        unimplemented!("host::testing::migration::MigServer::call_migrate")
+        blocked("a direct call of the migrate export")
     }
 
     /// Kills the server.
     pub fn kill(&self) {
         self.running.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Consent that approves exactly the grants a package requests, as the default review does.
+struct ApproveRequested;
+
+impl Consent for ApproveRequested {
+    fn decide(&self, request: &ConsentRequest) -> ConsentDecision {
+        ConsentDecision::Approve(request.requested.clone())
+    }
+}
+
+/// The package bytes of a spec without a scripted migrator: a manifest with the declared data
+/// version and an empty server component.
+fn package_bytes(spec: &PluginSpec) -> Vec<u8> {
+    if spec.migrator.is_some() {
+        blocked("a scripted migrate export in the plugin guest");
+    }
+    if spec.migrate_deadline_ms.is_some() || spec.restore_bytes.is_some() {
+        blocked("the manifest migrate deadline and the restore blob of deactivate");
+    }
+    let mut manifest = serde_json::json!({
+        "api": "ilium:plugin@0.1.0",
+        "id": spec.id,
+        "name": spec.id,
+        "version": spec.version,
+        "publisher": "Example Developer",
+        "replaces": [],
+        "server": {"entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": []},
+    });
+    match &spec.data_version {
+        DataVersionField::Absent => {}
+        DataVersionField::Number(version) => manifest["data_version"] = serde_json::json!(version),
+        DataVersionField::Json(text) => {
+            manifest["data_version"] = serde_json::from_str(text)
+                .unwrap_or_else(|error| panic!("data_version JSON {text}: {error}"));
+        }
+    }
+    let manifest_text = serde_json::to_string_pretty(&manifest).expect("manifest serializes");
+    let files = vec![
+        ("manifest.json".to_owned(), manifest_text.into_bytes()),
+        ("server.wasm".to_owned(), wat_component("(component)")),
+    ];
+    write_package(&files).unwrap_or_else(|diagnostic| panic!("migration package failed: {diagnostic:?}"))
+}
+
+fn list_files(directory: &std::path::Path, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            list_files(&path, found);
+        } else {
+            found.push(path);
+        }
     }
 }
 
@@ -438,19 +508,62 @@ impl MigrationRig {
         }
     }
 
+    /// The plugin root of the production layout: `plugins/` under the data directory.
+    fn plugin_root(&self) -> PathBuf {
+        self.root.join("data").join("plugins")
+    }
+
+    /// Writes a package file and runs `ilium plugin install` on it with the given flags.
+    fn install_package_file(&self, file_name: &str, bytes: &[u8], flags: &[&str]) -> CliOutput {
+        let folder = self.root.join("packages");
+        fs::create_dir_all(&folder)
+            .unwrap_or_else(|failure| panic!("creating {}: {failure}", folder.display()));
+        let path = folder.join(file_name);
+        fs::write(&path, bytes)
+            .unwrap_or_else(|failure| panic!("writing {}: {failure}", path.display()));
+        let consent: Arc<dyn Consent + Send + Sync> = Arc::new(ApproveRequested);
+        let audit_context = AuditContext {
+            session: "migration-rig".to_owned(),
+            actor: AuditActor {
+                kind: "cli".to_owned(),
+                pane: None,
+                plugin: None,
+            },
+        };
+        let mut env = self.cli_env();
+        env.cwd = self.root.clone();
+        let backend = match factory(&env, consent, audit_context) {
+            Ok(backend) => backend,
+            Err(diagnostic) => {
+                return CliOutput {
+                    exit_code: 1,
+                    stdout_jsonl: Vec::new(),
+                    stderr: diagnostic.message.clone(),
+                    stdout_raw: String::new(),
+                    stdout_text: String::new(),
+                };
+            }
+        };
+        let env = env.with_installer(backend);
+        let mut owned = vec!["install".to_owned(), path.display().to_string()];
+        owned.extend(flags.iter().map(|flag| (*flag).to_owned()));
+        cli::run(&owned, &env)
+    }
+
     /// Installs a plugin.
-    pub fn install(&self, _spec: &PluginSpec) -> CliOutput {
-        unimplemented!("host::testing::migration::MigrationRig::install")
+    pub fn install(&self, spec: &PluginSpec) -> CliOutput {
+        let bytes = package_bytes(spec);
+        self.install_package_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &bytes, &[])
     }
 
     /// Updates a plugin.
     pub fn update(&self, _spec: &PluginSpec, _flags: &[&str]) -> CliOutput {
-        unimplemented!("host::testing::migration::MigrationRig::update")
+        blocked("the ilium plugin update command")
     }
 
     /// Rolls a plugin back.
     pub fn rollback(&self, _id: &str, _flags: &[&str]) -> CliOutput {
-        unimplemented!("host::testing::migration::MigrationRig::rollback")
+        blocked("the ilium plugin rollback command")
     }
 
     /// Runs a CLI command.
@@ -460,48 +573,85 @@ impl MigrationRig {
     }
 
     /// Installs a package file with flags.
-    pub fn cli_install_file(&self, _spec: &PluginSpec, _flags: &[&str]) -> CliOutput {
-        unimplemented!("host::testing::migration::MigrationRig::cli_install_file")
+    pub fn cli_install_file(&self, spec: &PluginSpec, flags: &[&str]) -> CliOutput {
+        let bytes = package_bytes(spec);
+        self.install_package_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &bytes, flags)
     }
 
     /// `installed.json` parsed.
     pub fn registry_json(&self) -> serde_json::Value {
-        unimplemented!("host::testing::migration::MigrationRig::registry_json")
+        // A registry that was never written holds no plugins; the rig reports it as null.
+        fs::read_to_string(self.plugin_root().join("installed.json"))
+            .ok()
+            .map(|text| {
+                serde_json::from_str(&text)
+                    .unwrap_or_else(|error| panic!("installed.json is not JSON: {error}"))
+            })
+            .unwrap_or(serde_json::Value::Null)
     }
 
     /// The data-version stamp of a bucket.
     pub fn stamp(&self, _id: &str, _bucket: Bucket) -> Option<u32> {
-        unimplemented!("host::testing::migration::MigrationRig::stamp")
+        blocked("the data-version stamp of a bucket")
     }
 
     /// The data-version stamp of the data directory.
     pub fn data_dir_stamp(&self, _id: &str) -> Option<u32> {
-        unimplemented!("host::testing::migration::MigrationRig::data_dir_stamp")
+        blocked("the data-version stamp of the data directory")
     }
 
     /// Where the stamp is stored.
     pub fn stamp_location(&self, _id: &str) -> PathBuf {
-        unimplemented!("host::testing::migration::MigrationRig::stamp_location")
+        blocked("the stamp file layout")
     }
 
     /// The data directory of a plugin.
-    pub fn plugin_data_dir(&self, _id: &str) -> PathBuf {
-        unimplemented!("host::testing::migration::MigrationRig::plugin_data_dir")
+    pub fn plugin_data_dir(&self, id: &str) -> PathBuf {
+        self.plugin_root().join("data").join(id)
     }
 
     /// The files of the data directory, by relative path.
-    pub fn data_dir_files(&self, _id: &str) -> BTreeMap<String, Vec<u8>> {
-        unimplemented!("host::testing::migration::MigrationRig::data_dir_files")
+    pub fn data_dir_files(&self, id: &str) -> BTreeMap<String, Vec<u8>> {
+        let directory = self.plugin_data_dir(id);
+        let mut found = Vec::new();
+        list_files(&directory, &mut found);
+        found
+            .into_iter()
+            .map(|path| {
+                let relative = path
+                    .strip_prefix(&directory)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                let bytes = fs::read(&path)
+                    .unwrap_or_else(|failure| panic!("reading {}: {failure}", path.display()));
+                (relative, bytes)
+            })
+            .collect()
     }
 
     /// Writes a data file.
-    pub fn write_data_file(&self, _id: &str, _name: &str, _bytes: &[u8]) {
-        unimplemented!("host::testing::migration::MigrationRig::write_data_file")
+    pub fn write_data_file(&self, id: &str, name: &str, bytes: &[u8]) {
+        let path = self.plugin_data_dir(id).join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .unwrap_or_else(|failure| panic!("creating {}: {failure}", parent.display()));
+        }
+        fs::write(&path, bytes)
+            .unwrap_or_else(|failure| panic!("writing {}: {failure}", path.display()));
     }
 
     /// The backup names of a plugin.
-    pub fn backups(&self, _id: &str) -> Vec<String> {
-        unimplemented!("host::testing::migration::MigrationRig::backups")
+    pub fn backups(&self, id: &str) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(self.plugin_root().join("backups").join(id)) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     /// A bucket of a backup.
@@ -511,42 +661,42 @@ impl MigrationRig {
         _backup: &str,
         _bucket: Bucket,
     ) -> BTreeMap<String, Vec<u8>> {
-        unimplemented!("host::testing::migration::MigrationRig::backup_dump")
+        blocked("the backup bucket readback")
     }
 
     /// The data files of a backup.
     pub fn backup_data_files(&self, _id: &str, _backup: &str) -> BTreeMap<String, Vec<u8>> {
-        unimplemented!("host::testing::migration::MigrationRig::backup_data_files")
+        blocked("the backup data file layout")
     }
 
     /// The `migrate` calls of a plugin.
     pub fn migrate_calls(&self, _id: &str) -> Vec<MigrateCall> {
-        unimplemented!("host::testing::migration::MigrationRig::migrate_calls")
+        blocked("the record of migrate calls of the fake runtime")
     }
 
     /// The log codes so far.
     pub fn log_codes(&self) -> Vec<String> {
-        unimplemented!("host::testing::migration::MigrationRig::log_codes")
+        blocked("the migration log code record")
     }
 
     /// The last log line with a code, as its JSON record (`level`, `code`, `message`).
     pub fn log_line(&self, _code: &str) -> Option<serde_json::Value> {
-        unimplemented!("host::testing::migration::MigrationRig::log_line")
+        blocked("the migration log line record")
     }
 
     /// Failures in the window of a plugin.
     pub fn failures_in_window(&self, _id: &str) -> u32 {
-        unimplemented!("host::testing::migration::MigrationRig::failures_in_window")
+        blocked("the failure window counter")
     }
 
     /// `plugin info` as JSON.
     pub fn info_json(&self, _id: &str) -> serde_json::Value {
-        unimplemented!("host::testing::migration::MigrationRig::info_json")
+        blocked("the plugin info report")
     }
 
     /// The migrate lock path.
     pub fn lock_path(&self, _id: &str) -> PathBuf {
-        unimplemented!("host::testing::migration::MigrationRig::lock_path")
+        blocked("the migrate lock file layout")
     }
 
     /// The current bytes of the config file as text (COR-090).
@@ -576,42 +726,42 @@ impl MigrationRig {
 
     /// Sets the free disk space.
     pub fn set_free_bytes(&self, _bytes: u64) {
-        unimplemented!("host::testing::migration::MigrationRig::set_free_bytes")
+        blocked("a fake disk with a settable free space")
     }
 
     /// Fills the disk.
     pub fn fill_disk(&self) {
-        unimplemented!("host::testing::migration::MigrationRig::fill_disk")
+        blocked("a fake disk with a settable free space")
     }
 
     /// Frees the disk.
     pub fn free_disk(&self) {
-        unimplemented!("host::testing::migration::MigrationRig::free_disk")
+        blocked("a fake disk with a settable free space")
     }
 
     /// Sets the quota of a bucket.
     pub fn set_plugin_quota(&self, _id: &str, _bucket: Bucket, _bytes: u64) {
-        unimplemented!("host::testing::migration::MigrationRig::set_plugin_quota")
+        blocked("a per-plugin bucket quota setter")
     }
 
     /// Simulates a power loss.
     pub fn power_loss(&self) {
-        unimplemented!("host::testing::migration::MigrationRig::power_loss")
+        blocked("a fake disk that loses unflushed writes")
     }
 
     /// Reads a value after a power loss.
     pub fn read_after_power_loss(&self, _id: &str, _bucket: Bucket, _key: &str) -> Option<Vec<u8>> {
-        unimplemented!("host::testing::migration::MigrationRig::read_after_power_loss")
+        blocked("a fake disk that loses unflushed writes")
     }
 
     /// Bytes not yet flushed.
     pub fn unflushed_bytes(&self, _id: &str) -> u64 {
-        unimplemented!("host::testing::migration::MigrationRig::unflushed_bytes")
+        blocked("a fake disk that loses unflushed writes")
     }
 
     /// Crashes during the next write.
     pub fn crash_during_next_write(&self) {
-        unimplemented!("host::testing::migration::MigrationRig::crash_during_next_write")
+        blocked("a crash injection hook in the storage write")
     }
 }
 

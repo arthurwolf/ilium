@@ -16,21 +16,80 @@ pub struct FuzzFailure {
 }
 
 /// One valid random event drawn from the catalogue (DEV-522).
-pub fn arbitrary_event(_rng: &mut ChaCha8Rng) -> Event {
-    unimplemented!("DEV-522")
+pub fn arbitrary_event(rng: &mut ChaCha8Rng) -> Event {
+    use ilium_plugin_sdk_core::types::{ClientId, NodeId, TimerId};
+    use rand::Rng;
+    match rng.random_range(0..9u8) {
+        0 => {
+            let count = rng.random_range(0..4usize);
+            Event::TreeChanged((0..count).map(|_| NodeId(rng.random_range(1..64u64))).collect())
+        }
+        1 => Event::NodeRemoved(NodeId(rng.random_range(1..64u64))),
+        2 => Event::PaneFocused(if rng.random_bool(0.2) {
+            None
+        } else {
+            Some(NodeId(rng.random_range(1..64u64)))
+        }),
+        3 => Event::ThemeChanged,
+        4 => Event::KeymapChanged,
+        5 => Event::CliCancelled(rng.random_range(1..1000u64)),
+        6 => Event::DisplayModeChanged(if rng.random_bool(0.5) {
+            None
+        } else {
+            Some(["compact", "wide", "focus"][rng.random_range(0..3usize)].to_string())
+        }),
+        7 => Event::TimerFired(TimerId(rng.random_range(1..1000u64))),
+        _ => Event::ClientAttached(ClientId(rng.random_range(1..16u64))),
+    }
 }
 
 /// A valid random event batch; the same seed gives the same batch (DEV-520).
-pub fn fuzz_events(_seed: u64, _count: u32) -> Vec<Event> {
-    unimplemented!("DEV-520")
+pub fn fuzz_events(seed: u64, count: u32) -> Vec<Event> {
+    use rand::SeedableRng;
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    (0..count).map(|_| arbitrary_event(&mut rng)).collect()
 }
 
 /// Delivers `rounds` random batches to a fresh host of plugin type `P` (DEV-521).
-pub fn fuzz_run<P: ilium_plugin_sdk_core::NativeEntry + Default>(
-    _seed: u64,
-    _rounds: u32,
+pub fn fuzz_run<P: ilium_plugin_sdk_core::NativeEntry + Default + 'static>(
+    seed: u64,
+    rounds: u32,
 ) -> Result<(), FuzzFailure> {
-    unimplemented!("DEV-521")
+    use crate::host::FakeHost;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    if rounds == 0 {
+        return Ok(());
+    }
+    let mut host = FakeHost::new().seed(seed);
+    let activated = catch_unwind(AssertUnwindSafe(|| {
+        host.activate::<P>();
+    }));
+    if let Err(payload) = activated {
+        return Err(FuzzFailure { seed, round: 0, code: panic_code(payload.as_ref()) });
+    }
+    for round in 0..rounds {
+        let batch = fuzz_events(seed.wrapping_add(u64::from(round)), 8);
+        let delivered = catch_unwind(AssertUnwindSafe(|| {
+            host.deliver(batch);
+            host.settle();
+        }));
+        if let Err(payload) = delivered {
+            return Err(FuzzFailure { seed, round, code: panic_code(payload.as_ref()) });
+        }
+        if let Some(failure) = host.failures().first() {
+            return Err(FuzzFailure { seed, round, code: failure.code.clone() });
+        }
+    }
+    Ok(())
+}
+
+fn panic_code(payload: &(dyn std::any::Any + Send)) -> String {
+    let text = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|text| (*text).to_string()))
+        .unwrap_or_else(|| "panic".to_string());
+    text.split_whitespace().next().unwrap_or("panic").to_string()
 }
 
 #[cfg(test)]

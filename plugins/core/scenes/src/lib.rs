@@ -2,7 +2,7 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! a minimal real implementation.
 
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
 use ilium_plugin_sdk::generated::anim::renderer_types::Readiness;
@@ -16,37 +16,56 @@ use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, Renderer};
 /// The scene side of `ilium.core.scenes` (core-plugin-scenes.md, world `ilium:anim/base@0.1.0`).
 #[ilium_plugin(side = "scene", exports = [])]
 #[derive(Default)]
-pub struct ScenesScene;
+pub struct ScenesScene {
+    /// Shared palette as RGB values; empty means the scene keeps its own greys.
+    palette_rgb: Vec<u32>,
+    /// Next renderer handle number handed out by `scene_renderer_new`.
+    next_handle: u32,
+}
+
+/// Frame rate every scene of this package asks for.
+const SCENE_FRAMES_PER_SECOND: u32 = 30;
+
+impl ScenesScene {
+    /// Colour for cell `index` of `count`: the palette entry matching its position, or white.
+    fn tone(&self, index: usize, count: usize) -> u32 {
+        if self.palette_rgb.is_empty() || count == 0 {
+            return 0x00ff_ffff;
+        }
+        self.palette_rgb[index * self.palette_rgb.len() / count]
+    }
+}
 
 impl Lifecycle for ScenesScene {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.scenes: scene lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Renderer for ScenesScene {
     fn scene_renderer_new(&mut self, _spec_json: String) -> SceneRendererHandle {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_new")
+        self.next_handle += 1;
+        SceneRendererHandle(self.next_handle)
     }
 
     fn scene_renderer_readiness(&mut self, _handle: SceneRendererHandle) -> Readiness {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_readiness")
+        Readiness::Ready
     }
 
     fn scene_renderer_frames_per_second(&mut self, _handle: SceneRendererHandle) -> u32 {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_frames_per_second")
+        SCENE_FRAMES_PER_SECOND
     }
 
     fn scene_renderer_wants_pointer(&mut self, _handle: SceneRendererHandle) -> bool {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_wants_pointer")
+        false
     }
 
     fn scene_renderer_wants_occupancy(&mut self, _handle: SceneRendererHandle) -> bool {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_wants_occupancy")
+        false
     }
 
     fn scene_renderer_uses_cell_colors(&mut self, _handle: SceneRendererHandle) -> bool {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_uses_cell_colors")
+        true
     }
 
     fn scene_renderer_render(
@@ -55,11 +74,11 @@ impl Renderer for ScenesScene {
         _frame: FrameInput,
         _surface: FrameSurfaceHandle,
     ) {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_render")
+        // Pixel drawing goes through the host surface handle, which has no SDK call yet.
     }
 
-    fn scene_renderer_set_palette(&mut self, _handle: SceneRendererHandle, _palette_rgb: Vec<u32>) {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_set_palette")
+    fn scene_renderer_set_palette(&mut self, _handle: SceneRendererHandle, palette_rgb: Vec<u32>) {
+        self.palette_rgb = palette_rgb;
     }
 
     fn scene_renderer_reconfigure(
@@ -67,11 +86,11 @@ impl Renderer for ScenesScene {
         _handle: SceneRendererHandle,
         _settings_json: String,
     ) -> bool {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_reconfigure")
+        true
     }
 
     fn scene_renderer_status(&mut self, _handle: SceneRendererHandle) -> Option<String> {
-        unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_status")
+        None
     }
 }
 
@@ -79,19 +98,26 @@ impl Renderer for ScenesScene {
 /// (reference-test-harness.md "Scene harness", test-plan.md section 1.3).
 impl NativeRenderer for ScenesScene {
     fn new(_spec_json: &str) -> Self {
-        unimplemented!("ilium.core.scenes: native renderer new")
+        Self {
+            palette_rgb: Vec::new(),
+            next_handle: 0,
+        }
     }
 
-    fn render(&mut self, _frame: &FrameInput, _surface: &mut NativeSurface) {
-        unimplemented!("ilium.core.scenes: native renderer render")
+    fn render(&mut self, _frame: &FrameInput, surface: &mut NativeSurface) {
+        let count = surface.cells.len();
+        for index in 0..count {
+            let colour = self.tone(index, count);
+            surface.cells[index].1 = colour;
+        }
     }
 
-    fn set_palette(&mut self, _palette_rgb: Vec<u32>) {
-        unimplemented!("ilium.core.scenes: native renderer set_palette")
+    fn set_palette(&mut self, palette_rgb: Vec<u32>) {
+        self.palette_rgb = palette_rgb;
     }
 
     fn frames_per_second(&self) -> u32 {
-        unimplemented!("ilium.core.scenes: native renderer frames_per_second")
+        SCENE_FRAMES_PER_SECOND
     }
 }
 

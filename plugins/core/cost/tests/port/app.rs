@@ -60,3 +60,36 @@ fn port_app_reset_planning_controls_are_independent_and_persist_immediately() {
     assert_eq!(reply["reset_planning"]["time_style"], json!("human"));
     assert_eq!(reply["persisted_reset_planning"], reply["reset_planning"]);
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::an_unchanged_cost_row_does_not_touch_the_config_file
+#[test]
+fn port_app_an_unchanged_cost_row_keeps_the_selected_calibration() {
+    let reply = run(json!({ "adjust": [{ "row": "calibration:own_history", "direction": 0 }] }));
+    assert_eq!(
+        reply["settings"]["calibration"],
+        json!("own_history"),
+        "{reply}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::cost_controls_persist_immediately_and_sorting_follows_the_switch
+#[test]
+fn port_app_sort_by_cost_switch_is_persisted_immediately() {
+    let reply = run(json!({ "adjust": [{ "row": "sort_by_cost", "direction": 0 }] }));
+    assert_eq!(
+        reply["persisted_cost"]["sort_by_cost"],
+        json!(true),
+        "{reply}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::reset_planning_controls_are_independent_and_persist_immediately
+#[test]
+fn port_app_reset_planning_change_is_written_to_the_saved_settings() {
+    let reply = run(json!({ "reset_planning_rows": [0] }));
+    assert_eq!(
+        reply["persisted_reset_planning"]["monitor_claude"],
+        json!(false),
+        "{reply}"
+    );
+}

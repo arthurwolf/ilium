@@ -1,8 +1,7 @@
 //! Core plugin `ilium.core.text-triggers` (manual page core-plugin-text-triggers.md).
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -17,13 +16,13 @@ pub struct TextTriggersServer;
 
 impl Lifecycle for TextTriggersServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.text-triggers: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for TextTriggersServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.text-triggers: server handler.on_events")
+        Vec::new()
     }
 }
 
@@ -34,13 +33,13 @@ pub struct TextTriggersClient;
 
 impl Lifecycle for TextTriggersClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.text-triggers: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for TextTriggersClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.text-triggers: client handler.on_events")
+        Vec::new()
     }
 }
 

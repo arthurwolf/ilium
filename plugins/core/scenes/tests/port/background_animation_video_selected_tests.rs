@@ -34,3 +34,15 @@ fn port_actual_selected_video_picker_controller_replay_pixels_and_revocation() {
         "the manual page covers this feature"
     );
 }
+
+/// REQ: PORT:ilium-client/src/background_animation/video_selected_tests.rs::actual_selected_video_picker_controller_replay_pixels_and_revocation
+#[test]
+fn port_actual_selected_video_picker_controller_replay_pixels_and_revocation_playback_moves() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let early = scene.frame(braille_frame(40, 10, 1500)).text();
+    let later = scene.frame(braille_frame(40, 10, 6000)).text();
+    assert_ne!(
+        early, later,
+        "playback advances: later ticks of the same scene show new pixels"
+    );
+}

@@ -65,8 +65,13 @@ trait StudioHostExt {
 }
 
 impl StudioHostExt for FakeHost {
-    fn set_preview_revision(&mut self, _revision: u64) {
-        unimplemented!("voice.studio-set-preview-revision")
+    fn set_preview_revision(&mut self, revision: u64) {
+        self.call_service(
+            "ilium.core.voice/studio",
+            "set-preview-revision",
+            &json!({ "revision": revision }).to_string(),
+        )
+        .unwrap_or_else(|error| panic!("studio.set-preview-revision failed: {error:?}"));
     }
 }
 
@@ -535,5 +540,164 @@ fn port_012_previews_use_titled_rounded_frames_at_regular_and_compact_sizes() {
                 lines[bottom]
             );
         }
+    }
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio.rs::exact_studio_entries_preserve_non_step_values_and_reject_invalid_input
+#[test]
+fn port_001_non_numeric_entries_leave_the_pitch_unchanged() {
+    let mut host = client_host();
+    enter(&mut host, "pitch_hz", "731");
+    let before = design(&mut host, "pitch_hz");
+    for text in ["abc", ""] {
+        enter(&mut host, "pitch_hz", text);
+        assert_eq!(
+            design(&mut host, "pitch_hz"),
+            before,
+            "{text:?} must leave the pitch unchanged"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio.rs::sound_preview_install_rejects_stale_revision_and_replaced_studio
+#[test]
+fn port_002_a_stale_preview_finishing_last_does_not_hide_the_current_ready_preview() {
+    let mut host = client_host();
+    request_preview(&mut host);
+    let old_request = preview_jobs(&mut host).pop().expect("old job").request;
+    adjust(&mut host, "pitch_hz", 801.0);
+    request_preview(&mut host);
+    let current_request = preview_jobs(&mut host).pop().expect("current job").request;
+    host.jobs().finish(current_request, Ok(vec![0u8; 64]));
+    host.settle();
+    host.jobs().finish(old_request, Ok(vec![0u8; 64]));
+    host.settle();
+    assert!(
+        studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "a late stale result does not hide the current preview"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio.rs::sound_preview_is_not_synthesized_during_interactive_model_changes
+#[test]
+fn port_003_typed_entries_start_no_preview_job() {
+    let mut host = client_host();
+    enter(&mut host, "pitch_hz", "801");
+    enter(&mut host, "sweep", "5");
+    assert!(
+        preview_jobs(&mut host).is_empty(),
+        "typed values alone start no synthesis"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio.rs::sound_preview_revision_wrap_rotates_studio_identity
+#[test]
+fn port_004_a_reopened_studio_starts_its_revision_counter_again() {
+    let mut host = client_host();
+    adjust(&mut host, "pitch_hz", 801.0);
+    let before = request_preview(&mut host);
+    host.send_action(step(), "sound", ActionKind::Closed, ActionValue::None);
+    host.settle();
+    let after = request_preview(&mut host);
+    assert_eq!(after["revision"], json!(0));
+    assert_ne!(before["studio"], after["studio"]);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::sound_preview_refusal_retry_reports_only_admitted_request
+#[test]
+fn port_005_the_studio_keeps_its_controls_after_a_refused_preview_start() {
+    let mut host = client_host();
+    host.inject_failure("jobs.start", busy_start());
+    host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
+    host.settle();
+    assert!(
+        studio_text(&mut host, 118, 33).contains("Pitch"),
+        "controls still render after a refused start"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::compact_sound_studio_previews_keep_a_row_between_their_frames
+#[test]
+fn port_005_second_compact_previews_show_both_titles() {
+    let mut host = client_host();
+    let text = host.render(step(), 40, 16).text();
+    assert!(
+        text.contains("Waveform") && text.contains("Envelope"),
+        "{text}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::every_control_is_reachable_at_minimum_and_wide_sizes
+#[test]
+fn port_006_focus_reaches_a_marked_row_at_every_step_of_the_narrowest_size() {
+    let mut host = client_host();
+    for step_index in 0..20 {
+        host.key(step(), "Down");
+        assert!(
+            focused_row(&mut host, 38, 9).is_some(),
+            "no focus arrow after {} presses",
+            step_index + 1
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/render_cache.rs::sound_preview_status_changes_only_after_server_completion
+#[test]
+fn port_006_a_fresh_studio_shows_no_ready_preview() {
+    let mut host = client_host();
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/sound_preview.rs::newer_design_cancels_running_preview_and_coalesces_to_latest_revision
+#[test]
+fn port_007_two_edits_before_a_preview_request_give_the_request_revision_two() {
+    let mut host = client_host();
+    adjust(&mut host, "pitch_hz", 801.0);
+    adjust(&mut host, "pitch_hz", 802.0);
+    let request = request_preview(&mut host);
+    assert_eq!(request["revision"], json!(2));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::keyboard_focus_wraps_and_edits_use_the_real_control_step
+#[test]
+fn port_007_up_from_the_first_control_wraps_focus_to_save() {
+    let mut host = client_host();
+    host.key(step(), "Up");
+    let focused = focused_row(&mut host, 118, 33).expect("a row carries the focus arrow");
+    assert!(focused.contains("Save"), "{focused}");
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/sound_preview.rs::waveform_is_prepared_on_cpu_worker_and_remains_charged_until_replaced
+#[test]
+fn port_008_a_failed_waveform_job_leaves_nothing_ready_and_a_retry_starts_a_job() {
+    let mut host = client_host();
+    request_preview(&mut host);
+    let failed = preview_jobs(&mut host).pop().expect("job").request;
+    host.jobs().finish(failed, Err(busy_start()));
+    host.settle();
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"));
+    request_preview(&mut host);
+    assert!(
+        preview_jobs(&mut host).len() >= 2,
+        "the retry is admitted as a new job"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::render_handles_empty_tiny_and_extremely_wide_viewports
+#[test]
+fn port_010_the_studio_renders_at_one_cell_and_at_a_very_wide_size() {
+    let mut host = client_host();
+    for (columns, rows) in [(1, 1), (2, 3), (500, 16)] {
+        let _ = host.render(step(), columns, rows).text();
+    }
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::sound_studio_previews_use_titled_rounded_frames_at_regular_and_compact_sizes
+#[test]
+fn port_012_second_frame_titles_appear_at_regular_and_compact_sizes() {
+    for (columns, rows) in [(118, 33), (40, 16)] {
+        let mut host = client_host();
+        let text = host.render(step(), columns, rows).text();
+        assert!(text.contains("Envelope"), "{columns}x{rows}: {text}");
     }
 }

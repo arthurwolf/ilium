@@ -57,3 +57,26 @@ fn deprecated_cli_flag_keeps_working_for_two_minor_releases_of_the_contract() {
         );
     }
 }
+
+/// REQ: DEV-891
+#[test]
+fn compatibility_failure_names_the_record_field_that_changed() {
+    let root = scratch();
+    let changed_env = cli_build_with_changed_record_field(root.path(), "artifact", "extra_field");
+    let failed = run(&changed_env, &["compat-check", "--json"]);
+    assert!(
+        format!("{:?}", failed.stdout_jsonl).contains("extra_field"),
+        "the failure names the changed field: {:?}",
+        failed.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-998
+#[test]
+fn reference_states_that_a_deprecated_flag_keeps_working_for_two_minor_releases() {
+    let page = crate::manual_page("reference-cli-output-stability");
+    assert!(
+        page.contains("at least two minor releases"),
+        "the page states the two-minor keep-working period"
+    );
+}

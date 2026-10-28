@@ -499,3 +499,45 @@ fn pan_032_without_the_grant_freeze_refused_not_permitted() {
         Some(ErrorCode::NotPermitted)
     );
 }
+
+/// REQ: PAN-007
+#[test]
+fn pan_007_restarted_exited_pane_is_not_left_frozen() {
+    let kernel = world(LIFECYCLE);
+    assert!(matches!(
+        submit(&kernel, replace(EXITED_PANE, None)),
+        Outcome::Ok
+    ));
+    assert!(!states(&kernel, EXITED_PANE).contains(&PaneLifecycleState::Frozen));
+}
+
+/// REQ: PAN-022
+#[test]
+fn pan_022_failing_first_operation_refused_conflict_and_tree_unchanged() {
+    let kernel = world(TREE);
+    let before = kernel.tree_fingerprint();
+    let mut ops = rename_ops(3);
+    ops[0] = RestructureOp::Move(MoveNodeSpec {
+        node: RUNNING_PANE,
+        target: RUNNING_PANE,
+        placement: Placement::Before,
+    });
+    let outcome = submit(&kernel, restructure(ops));
+    assert_eq!(refusal(&outcome), Some(ErrorCode::Conflict));
+    assert_eq!(kernel.tree_fingerprint(), before);
+}
+
+/// REQ: PAN-025
+#[test]
+fn pan_025_inferred_icon_without_a_manual_icon_is_accepted() {
+    let kernel = world(TREE);
+    let outcome = submit(
+        &kernel,
+        Intent::SetInferredIcon(SetInferredIconSpec {
+            node: RUNNING_PANE,
+            icon: Some("bolt".into()),
+            source: "test".into(),
+        }),
+    );
+    assert!(matches!(outcome, Outcome::Ok));
+}

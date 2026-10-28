@@ -7,7 +7,8 @@
 //! referenced by path and never called.
 
 use ilium_plugin_sdk::ilium_plugin;
-use ilium_plugin_sdk::NativeEntry;
+use ilium_plugin_sdk::types::{Activation, PluginError};
+use ilium_plugin_sdk::{Lifecycle, NativeEntry};
 use std::any::type_name;
 
 #[ilium_plugin(side = "server")]
@@ -27,6 +28,22 @@ struct ClientPlugin {
 #[ilium_plugin(side = "scene", exports = ["renderer"])]
 #[derive(Default)]
 struct ScenePlugin;
+
+macro_rules! quiet_lifecycle {
+    ($($plugin:ty),*) => {$(
+        impl Lifecycle for $plugin {
+            fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+                Ok(())
+            }
+        }
+    )*};
+}
+quiet_lifecycle!(
+    MinimalServerPlugin,
+    EmptyExportsServerPlugin,
+    ClientPlugin,
+    ScenePlugin
+);
 
 fn assert_native_entry<Plugin: NativeEntry>() {}
 

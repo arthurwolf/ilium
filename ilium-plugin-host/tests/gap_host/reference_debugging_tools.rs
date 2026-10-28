@@ -53,3 +53,37 @@ fn hst_671_session_log_folder_older_than_14_days_is_deleted_at_start_and_purge_c
         "purge removes the plugin's log files everywhere"
     );
 }
+
+/// REQ: HST-670
+#[test]
+fn hst_670_eviction_deletes_nothing_while_logs_are_under_the_cap() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.emit_plugin_log(NOTES, "info", "small line");
+    let before = rig.plugin_log_files(NOTES);
+    rig.trigger_log_cap_eviction();
+    assert_eq!(
+        rig.plugin_log_files(NOTES),
+        before,
+        "no log file is deleted while under the cap"
+    );
+    assert_eq!(
+        rig.log_code_count("log.cap-evict"),
+        0,
+        "no eviction record while under the cap"
+    );
+}
+
+/// REQ: HST-671
+#[test]
+fn hst_671_a_recent_session_log_folder_is_kept_at_start() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.create_session_log_folder("recent-session", 1);
+    let server = rig.start_server("default");
+    assert!(
+        rig.session_log_folder_exists("recent-session"),
+        "a folder whose newest file is 1 day old is kept"
+    );
+    server.shutdown();
+}

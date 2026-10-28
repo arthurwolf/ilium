@@ -2,7 +2,7 @@
 //! envelope sequencing, payload caps, forwarded-request dedup, outcome replay, the detached queue
 //! and the writer queues. No I/O; `ilium-server` drives these from its connection tasks.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A forwarded request's dedup key is remembered this long, milliseconds (HST-113).
 pub const DEDUP_WINDOW_MS: u64 = 600_000;
@@ -34,6 +34,9 @@ pub const ENVELOPE_MAX_BYTES: usize = 17 * 1024 * 1024;
 /// Exit code of a client whose plugin protocol does not match the server's (HST-104).
 pub const EXIT_CODE_PROTOCOL_MISMATCH: i32 = 76;
 
+/// Error id of an oversize payload or envelope (HST-124, HST-125).
+const PAYLOAD_TOO_LARGE: &str = "ipc.payload-too-large";
+
 /// Why a connection was closed or a payload refused (reference-host-ipc.md errors table).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpcFault {
@@ -57,7 +60,7 @@ impl IpcFault {
     /// The error id a refused submission reports: `ipc.payload-too-large` for a payload over the
     /// cap, refused before it is encoded, none otherwise (HST-124).
     pub fn completion_outcome(&self) -> Option<&'static str> {
-        unimplemented!("host::ipc::IpcFault::completion_outcome")
+        (self.code == PAYLOAD_TOO_LARGE).then_some(PAYLOAD_TOO_LARGE)
     }
 }
 
@@ -81,44 +84,75 @@ pub enum PayloadKind {
 }
 
 /// Refuses a payload longer than its kind's cap (HST-124).
-pub fn check_payload(_kind: PayloadKind, _len: usize) -> Result<(), IpcFault> {
-    unimplemented!("host::ipc::check_payload")
+pub fn check_payload(kind: PayloadKind, len: usize) -> Result<(), IpcFault> {
+    const KIB: usize = 1024;
+    const MIB: usize = 1024 * KIB;
+    let cap = match kind {
+        PayloadKind::MessageBody | PayloadKind::UiTree => MIB,
+        PayloadKind::TopicPayload => 64 * KIB,
+        PayloadKind::UiTreeT1 | PayloadKind::ContributionDelta => 4 * MIB,
+        PayloadKind::SurfaceWrite => 16 * MIB,
+        PayloadKind::Envelope => ENVELOPE_MAX_BYTES,
+    };
+    if len > cap {
+        return Err(IpcFault::new(PAYLOAD_TOO_LARGE));
+    }
+    Ok(())
 }
 
 /// Encodes a payload only when its declared length is within the cap; `encode` is never called
 /// for an oversize payload (HST-124).
 pub fn encode_checked<F: FnOnce() -> Vec<u8>>(
-    _kind: PayloadKind,
-    _declared_len: usize,
-    _encode: F,
+    kind: PayloadKind,
+    declared_len: usize,
+    encode: F,
 ) -> Result<Vec<u8>, IpcFault> {
-    unimplemented!("host::ipc::encode_checked")
+    check_payload(kind, declared_len)?;
+    Ok(encode())
 }
 
 /// The receiving side of one connection: envelope sequence numbers start at 1 and increase by
 /// one; a gap or an oversize envelope closes the connection (HST-102, HST-125).
 #[derive(Debug, Default)]
-pub struct ReceiverConnection;
+pub struct ReceiverConnection {
+    last_seq: u64,
+    closed_with: Option<String>,
+}
 
 impl ReceiverConnection {
     /// An open connection expecting sequence 1.
     pub fn new() -> ReceiverConnection {
-        ReceiverConnection
+        ReceiverConnection::default()
     }
 
     /// Accepts one envelope; the fault closes the connection.
-    pub fn on_envelope(&mut self, _seq: u64, _encoded_len: usize) -> Result<(), IpcFault> {
-        unimplemented!("host::ipc::ReceiverConnection::on_envelope")
+    pub fn on_envelope(&mut self, seq: u64, encoded_len: usize) -> Result<(), IpcFault> {
+        if let Some(code) = &self.closed_with {
+            return Err(IpcFault::new(code));
+        }
+        let fault = if encoded_len > ENVELOPE_MAX_BYTES {
+            Some(IpcFault::new(PAYLOAD_TOO_LARGE))
+        } else if seq != self.last_seq.saturating_add(1) {
+            Some(IpcFault::new("ipc.sequence-gap"))
+        } else {
+            None
+        };
+        if let Some(fault) = fault {
+            self.closed_with = Some(fault.code().to_owned());
+            return Err(fault);
+        }
+        self.last_seq = seq;
+        Ok(())
     }
 
     /// Whether the connection is still open.
     pub fn is_open(&self) -> bool {
-        unimplemented!("host::ipc::ReceiverConnection::is_open")
+        self.closed_with.is_none()
     }
 
     /// The error id the connection was closed with, when closed.
     pub fn closed_with(&self) -> Option<String> {
-        unimplemented!("host::ipc::ReceiverConnection::closed_with")
+        self.closed_with.clone()
     }
 }
 
@@ -133,24 +167,39 @@ pub enum DedupVerdict {
 
 /// Remembers forwarded requests per plugin and client for `DEDUP_WINDOW_MS` (HST-113).
 #[derive(Debug, Default)]
-pub struct ForwardedDedup;
+pub struct ForwardedDedup {
+    /// (plugin, client id, dedup key) to the time the request was accepted.
+    accepted: HashMap<(String, String, String), u64>,
+}
 
 impl ForwardedDedup {
     /// An empty window.
     pub fn new() -> ForwardedDedup {
-        ForwardedDedup
+        ForwardedDedup::default()
     }
 
     /// Admits a request once per window; a key is free again at exactly `DEDUP_WINDOW_MS` after
     /// it was accepted.
     pub fn admit(
         &mut self,
-        _plugin: &str,
-        _client_id: &str,
-        _dedup_key: &str,
-        _now_ms: u64,
+        plugin: &str,
+        client_id: &str,
+        dedup_key: &str,
+        now_ms: u64,
     ) -> DedupVerdict {
-        unimplemented!("host::ipc::ForwardedDedup::admit")
+        const PRUNE_ABOVE: usize = 1_024;
+        if self.accepted.len() > PRUNE_ABOVE {
+            self.accepted
+                .retain(|_, accepted_ms| now_ms < accepted_ms.saturating_add(DEDUP_WINDOW_MS));
+        }
+        let key = (plugin.to_owned(), client_id.to_owned(), dedup_key.to_owned());
+        if let Some(accepted_ms) = self.accepted.get(&key) {
+            if now_ms < accepted_ms.saturating_add(DEDUP_WINDOW_MS) {
+                return DedupVerdict::Duplicate;
+            }
+        }
+        self.accepted.insert(key, now_ms);
+        DedupVerdict::Fresh
     }
 }
 
@@ -165,38 +214,84 @@ pub struct StoredOutcome {
 
 /// Outcomes kept per client id for replay after a reattach (HST-116, HST-117).
 #[derive(Debug, Default)]
-pub struct OutcomeStore;
+pub struct OutcomeStore {
+    clients: BTreeMap<String, ClientOutcomes>,
+}
+
+/// The outcomes of one client id and when its connection closed.
+#[derive(Debug, Default)]
+struct ClientOutcomes {
+    records: VecDeque<StoredOutcome>,
+    disconnected_at_ms: Option<u64>,
+}
 
 impl OutcomeStore {
     /// An empty store.
     pub fn new() -> OutcomeStore {
-        OutcomeStore
+        OutcomeStore::default()
+    }
+
+    /// Drops a client whose grace period has elapsed.
+    fn expire(&mut self, client_id: &str, now_ms: u64) {
+        let expired = self
+            .clients
+            .get(client_id)
+            .and_then(|client| client.disconnected_at_ms)
+            .is_some_and(|closed_ms| now_ms.saturating_sub(closed_ms) > OUTCOME_GRACE_MS);
+        if expired {
+            self.clients.remove(client_id);
+        }
     }
 
     /// Records an outcome; the oldest beyond `OUTCOME_RECORD_LIMIT` per client is dropped.
-    pub fn record(&mut self, _client_id: &str, _seq: u64, _outcome: &str, _now_ms: u64) {
-        unimplemented!("host::ipc::OutcomeStore::record")
+    pub fn record(&mut self, client_id: &str, seq: u64, outcome: &str, now_ms: u64) {
+        self.expire(client_id, now_ms);
+        let client = self.clients.entry(client_id.to_owned()).or_default();
+        // A new outcome means the client is attached again.
+        client.disconnected_at_ms = None;
+        client.records.push_back(StoredOutcome {
+            seq,
+            outcome: outcome.to_owned(),
+        });
+        while client.records.len() > OUTCOME_RECORD_LIMIT {
+            client.records.pop_front();
+        }
     }
 
     /// Starts the grace period of a disconnected client.
-    pub fn on_disconnect(&mut self, _client_id: &str, _now_ms: u64) {
-        unimplemented!("host::ipc::OutcomeStore::on_disconnect")
+    pub fn on_disconnect(&mut self, client_id: &str, now_ms: u64) {
+        self.clients
+            .entry(client_id.to_owned())
+            .or_default()
+            .disconnected_at_ms = Some(now_ms);
     }
 
     /// The outcomes after `last_seen_seq` for a reattaching client, in order; empty once the
     /// grace period has elapsed.
     pub fn replay(
         &mut self,
-        _client_id: &str,
-        _last_seen_seq: u64,
-        _now_ms: u64,
+        client_id: &str,
+        last_seen_seq: u64,
+        now_ms: u64,
     ) -> Vec<StoredOutcome> {
-        unimplemented!("host::ipc::OutcomeStore::replay")
+        self.expire(client_id, now_ms);
+        let Some(client) = self.clients.get(client_id) else {
+            return Vec::new();
+        };
+        client
+            .records
+            .iter()
+            .filter(|stored| stored.seq > last_seen_seq)
+            .cloned()
+            .collect()
     }
 
     /// The records currently kept for a client.
-    pub fn record_count(&mut self, _client_id: &str, _now_ms: u64) -> usize {
-        unimplemented!("host::ipc::OutcomeStore::record_count")
+    pub fn record_count(&mut self, client_id: &str, now_ms: u64) -> usize {
+        self.expire(client_id, now_ms);
+        self.clients
+            .get(client_id)
+            .map_or(0, |client| client.records.len())
     }
 }
 
@@ -222,8 +317,12 @@ impl DetachedQueue {
     }
 
     /// Queues one submission by dedup key.
-    pub fn push(&mut self, _dedup_key: &str) -> QueueVerdict {
-        unimplemented!("host::ipc::DetachedQueue::push")
+    pub fn push(&mut self, dedup_key: &str) -> QueueVerdict {
+        if self.keys.len() >= DETACHED_QUEUE_LIMIT {
+            return QueueVerdict::RefusedBusy;
+        }
+        self.keys.push_back(dedup_key.to_owned());
+        QueueVerdict::Queued
     }
 
     /// Queued submissions.
@@ -238,7 +337,7 @@ impl DetachedQueue {
 
     /// The keys cancelled when the client exits, in queue order.
     pub fn on_client_exit(&mut self) -> Vec<String> {
-        unimplemented!("host::ipc::DetachedQueue::on_client_exit")
+        self.keys.drain(..).collect()
     }
 }
 
@@ -279,7 +378,11 @@ pub enum PushOutcome {
 /// back-pressure rules of HST-120..123.
 #[derive(Debug, Default)]
 pub struct WriterQueues {
+    pty: VecDeque<u32>,
     plugin: VecDeque<PluginRecord>,
+    plugin_bytes: usize,
+    /// PTY frames written since the last plugin record.
+    pty_since_plugin: u32,
     resync_flagged: bool,
 }
 
@@ -290,13 +393,39 @@ impl WriterQueues {
     }
 
     /// Queues a PTY frame.
-    pub fn push_pty_frame(&mut self, _id: u32) {
-        unimplemented!("host::ipc::WriterQueues::push_pty_frame")
+    pub fn push_pty_frame(&mut self, id: u32) {
+        self.pty.push_back(id);
     }
 
     /// Queues a plugin record.
-    pub fn push_plugin(&mut self, _record: PluginRecord) -> PushOutcome {
-        unimplemented!("host::ipc::WriterQueues::push_plugin")
+    pub fn push_plugin(&mut self, record: PluginRecord) -> PushOutcome {
+        // Coalescable increments merge first, also when the queue is full (HST-121).
+        let merge_at = record.coalesce_key.as_ref().and_then(|key| {
+            self.plugin
+                .iter()
+                .position(|queued| queued.coalesce_key.as_ref() == Some(key))
+        });
+        let (new_bytes, merged) = match merge_at {
+            Some(position) => (
+                self.plugin_bytes - self.plugin[position].bytes + record.bytes,
+                true,
+            ),
+            None => (self.plugin_bytes + record.bytes, false),
+        };
+        if new_bytes > CLIENT_TOO_SLOW_BYTES {
+            return PushOutcome::Disconnect(IpcFault::new("ipc.client-too-slow"));
+        }
+        self.plugin_bytes = new_bytes;
+        if let (Some(position), true) = (merge_at, merged) {
+            self.plugin[position] = record;
+            return PushOutcome::Merged;
+        }
+        self.plugin.push_back(record);
+        if self.plugin.len() > PLUGIN_QUEUE_MAX_RECORDS || self.plugin_bytes > PLUGIN_QUEUE_MAX_BYTES {
+            self.resync_flagged = true;
+            return PushOutcome::ResyncFlagged;
+        }
+        PushOutcome::Queued
     }
 
     /// Whether the plugin queue overflowed its soft cap.
@@ -306,7 +435,7 @@ impl WriterQueues {
 
     /// Bytes queued in the plugin queue.
     pub fn plugin_queued_bytes(&self) -> usize {
-        unimplemented!("host::ipc::WriterQueues::plugin_queued_bytes")
+        self.plugin_bytes
     }
 
     /// Records queued in the plugin queue.
@@ -320,7 +449,17 @@ impl Iterator for WriterQueues {
 
     /// The next item to write: `PTY_FRAMES_PER_PLUGIN_ENVELOPE` PTY frames per plugin record.
     fn next(&mut self) -> Option<Written> {
-        unimplemented!("host::ipc::WriterQueues::next")
+        let plugin_due = !self.plugin.is_empty()
+            && (self.pty.is_empty() || self.pty_since_plugin >= PTY_FRAMES_PER_PLUGIN_ENVELOPE);
+        if plugin_due {
+            let record = self.plugin.pop_front()?;
+            self.plugin_bytes = self.plugin_bytes.saturating_sub(record.bytes);
+            self.pty_since_plugin = 0;
+            return Some(Written::Plugin(record.id));
+        }
+        let frame = self.pty.pop_front()?;
+        self.pty_since_plugin += 1;
+        Some(Written::Pty(frame))
     }
 }
 

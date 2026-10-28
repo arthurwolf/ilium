@@ -1360,3 +1360,39 @@ fn wit_terminal_take_matches_second_take_returns_none() {
     assert!(rig.host.terminal().take_matches(request).is_some());
     assert!(rig.host.terminal().take_matches(request).is_none());
 }
+
+/// REQ: WIT:ilium:primitives/terminal.unlock-input
+#[test]
+fn wit_terminal_unlock_input_hands_the_lock_to_a_peer() {
+    let rig = rig(WRITE);
+    let peer = rig.host.peer("peer.plugin", WRITE);
+    rig.host
+        .terminal()
+        .lock_input(PANE, 1_000)
+        .expect("owner lock");
+    rig.host.terminal().unlock_input(PANE);
+    assert!(peer.terminal().lock_input(PANE, 1_000).is_ok());
+}
+
+/// REQ: WIT:ilium:primitives/terminal.release-pointer
+#[test]
+fn wit_terminal_release_pointer_without_a_claim_is_harmless() {
+    let rig = rig(POINTER);
+    rig.host.terminal().release_pointer(PANE);
+    assert!(rig.host.terminal().claim_pointer(PANE).is_ok());
+}
+
+/// REQ: WIT:ilium:primitives/terminal.drop-snapshot
+#[test]
+fn wit_terminal_drop_snapshot_leaves_the_other_snapshots_readable() {
+    let rig = rig(READ_CELLS);
+    let snapshots: Vec<u64> = (0..3)
+        .map(|_| rig.host.terminal().freeze_snapshot(PANE).expect("snapshot"))
+        .collect();
+    rig.host.terminal().drop_snapshot(snapshots[0]);
+    assert!(rig
+        .host
+        .terminal()
+        .read_snapshot_cells(snapshots[1], 0, 1)
+        .is_some());
+}

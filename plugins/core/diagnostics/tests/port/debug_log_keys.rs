@@ -95,3 +95,34 @@ fn port_005_s_key_opens_a_log_path_prompt_and_enter_saves_the_complete_report() 
     );
     assert!(report.contains("Detected Codex"), "{report}");
 }
+
+/// REQ: F-010, PORT:ilium-client/src/keys.rs::debug_log_r_key_reveals_panel_animation_resize_events
+#[test]
+fn port_004_history_without_panel_resizes_is_fully_visible_under_the_filter() {
+    let mut session = session();
+    let history: Vec<Value> = resize_history().into_iter().take(1).collect();
+    let view = agent_debug(
+        &mut session,
+        "view",
+        json!({ "entries": history, "hide_tree_animation": true }),
+    )
+    .expect("view");
+    assert_eq!(
+        (view["visible"].clone(), view["hidden"].clone()),
+        (json!(1), json!(0))
+    );
+}
+
+/// REQ: F-010, PORT:ilium-client/src/keys.rs::debug_log_s_key_opens_path_prompt_and_enter_saves_complete_report
+#[test]
+fn port_005_save_prompt_suggests_a_log_path_without_loaded_history() {
+    let mut session = session();
+    let prompt = agent_debug(
+        &mut session,
+        "save_prompt",
+        json!({ "pane": 3, "pane_name": "Shell", "has_loaded_retained_history": false }),
+    )
+    .expect("prompt");
+    let path = prompt["path"].as_str().expect("path");
+    assert!(path.ends_with(".log"), "{path}");
+}

@@ -265,3 +265,138 @@ fn port_cost_overlay_visibility_is_decided_per_option() {
     );
     assert_eq!(hovered["text"], json!("▰▰▱▱▱ ▂ $2.00"));
 }
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::default_settings_show_the_meter_only_while_hovered
+#[test]
+fn port_cost_overlay_hovered_empty_level_shows_one_filled_cell() {
+    let hovered =
+        segments(json!({ "row": row(0, 0.0), "settings": {}, "hovered": true, "is_group": false }));
+    assert_eq!(hovered["text"], json!("▰▱▱▱▱"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::detail_card_for_quota_shows_percent_and_explains_missing_data
+#[test]
+fn port_cost_overlay_detail_card_keeps_the_dollar_estimate_without_quota() {
+    let cost = json!({
+        "usd": 4.0, "is_lower_bound": false, "burn_usd_per_hour": 0.0, "is_spike": false, "spark_cells": [],
+        "quota_points": 7.5, "quota_burn_per_hour": 3.0, "has_quota": false, "model_costs": [],
+        "reported_usd": null, "quota": [["primary", 41.0]], "spend_points": [],
+    });
+    let page = client(
+        "overlay.detail-card",
+        json!({ "cost": cost, "row": row(0, 0.0), "settings": { "metric": "quota", "calibration": "fixed_bands" } }),
+    );
+    let text = page["text"].as_str().unwrap_or("");
+    assert!(text.contains("$4.00"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::drawing_keeps_the_row_background_and_drops_leading_segments_to_fit
+#[test]
+fn port_cost_overlay_single_segment_is_right_aligned_to_the_end_column() {
+    let reply = draw(12, None, None, 2, 12, &[("$9.99", "red")]);
+    assert_eq!(reply["start"], json!(7));
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::drawing_right_aligns_before_the_edge_and_overwrites_title_text
+#[test]
+fn port_cost_overlay_last_drawn_cell_sits_on_the_end_column() {
+    let reply = draw(
+        30,
+        None,
+        Some("a-long-agent-title-that-runs-on"),
+        4,
+        26,
+        &[("▰▰▱▱▱", "green")],
+    );
+    assert_eq!(reply["symbol"]["25"], json!("▱"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::group_rows_show_only_their_total_and_only_when_enabled
+#[test]
+fn port_cost_overlay_group_total_carries_no_level_meter() {
+    let on = segments(json!({
+        "row": row(2, 6.0), "settings": {}, "adjust": [display_adjust("group_totals")], "hovered": true, "is_group": true,
+    }));
+    let text = on["text"].as_str().unwrap_or("");
+    assert!(text.contains("$6.00"), "{text}");
+    assert!(!text.contains('▰'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::loading_rows_show_an_empty_track_and_an_ellipsis
+#[test]
+fn port_cost_overlay_loading_row_shows_no_dollar_amount() {
+    let mut loading = row(0, 0.0);
+    loading["level"] = Value::Null;
+    loading["is_loading"] = json!(true);
+    let reply = segments(json!({
+        "row": loading, "settings": {}, "adjust": [display_adjust("level_dollars")], "hovered": true, "is_group": false,
+    }));
+    let text = reply["text"].as_str().unwrap_or("");
+    assert!(text.contains('…'), "{text}");
+    assert!(!text.contains('$'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::lower_bounds_and_budget_overruns_are_marked
+#[test]
+fn port_cost_overlay_plain_row_at_the_same_level_has_no_marks() {
+    let reply = segments(json!({
+        "row": row(4, 25.0), "settings": {}, "adjust": [display_adjust("level_dollars")], "hovered": true, "is_group": false,
+    }));
+    assert_eq!(reply["text"], json!("▰▰▰▰▰ █ $25.0"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::nothing_is_drawn_when_not_even_one_segment_fits
+#[test]
+fn port_cost_overlay_short_segment_fits_the_free_cells() {
+    let reply = draw(6, None, None, 3, 6, &[("$1", "red")]);
+    assert_eq!(reply["start"], json!(4));
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::options_compose_in_a_fixed_order_and_dollars_supersede_the_bare_glyph
+#[test]
+fn port_cost_overlay_sparkline_alone_draws_its_string() {
+    let mut spiking = row(3, 12.0);
+    spiking["spark"] = json!("▁▃█");
+    let reply = segments(json!({
+        "row": spiking, "settings": {}, "adjust": [display_adjust("sparkline")], "hovered": true, "is_group": false,
+    }));
+    assert_eq!(reply["text"], json!("▁▃█"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::quota_rows_draw_percent_and_unavailable_rows_draw_nothing
+#[test]
+fn port_cost_overlay_zero_quota_row_draws_zero_percent() {
+    let reply = segments(json!({
+        "row": row(0, 0.0), "settings": { "metric": "quota" },
+        "adjust": [display_adjust("level_dollars"), visibility_adjust("level_dollars")],
+        "hovered": false, "is_group": false,
+    }));
+    let texts = reply["texts"].as_array().cloned().unwrap_or_default();
+    assert!(texts.contains(&json!("0.0%")), "{texts:?}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::title_suffix_follows_its_visibility_and_needs_agents
+#[test]
+fn port_cost_overlay_single_agent_still_shows_the_header_total() {
+    let reply = client(
+        "overlay.title-suffix",
+        json!({
+            "overlay": { "agent_count": 1, "total_amount": 52.34, "settings": { "header_total": { "enabled": true, "visibility": "always" } } },
+            "hovered": false,
+        }),
+    );
+    assert!(reply.as_str().unwrap_or("").contains('Σ'), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_overlay.rs::visibility_is_decided_per_option
+#[test]
+fn port_cost_overlay_hover_only_meter_is_absent_from_the_idle_text() {
+    let idle = segments(json!({
+        "row": row(1, 2.0), "settings": {},
+        "adjust": [display_adjust("level_dollars"), visibility_adjust("level_dollars")],
+        "hovered": false, "is_group": false,
+    }));
+    let text = idle["text"].as_str().unwrap_or("");
+    assert!(text.contains("$2.00"), "{text}");
+    assert!(!text.contains('▰'), "{text}");
+}

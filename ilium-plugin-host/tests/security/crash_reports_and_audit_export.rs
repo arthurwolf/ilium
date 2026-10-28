@@ -75,3 +75,57 @@ fn sec_450_the_enterprise_guide_states_the_remote_sink_failure_rule() {
         ],
     );
 }
+
+/// REQ: SEC-445
+#[test]
+fn sec_445_the_kernel_host_requirements_repeat_the_core_dump_default() {
+    assert_page_has(
+        "reference-requirements-kernel-host.md",
+        &["A core dump MAY be enabled only by an administrator"],
+    );
+}
+
+/// REQ: SEC-446
+#[test]
+fn sec_446_the_client_crash_record_holds_only_the_plugin_id_and_error_code() {
+    assert_page_has(
+        "reference-persistence-and-restart.md",
+        &["The client crash record MUST contain only the plugin id, error code"],
+    );
+}
+
+/// REQ: SEC-447
+#[test]
+fn sec_447_the_crash_report_folder_is_0700_and_each_file_0600() {
+    assert_page_has(
+        "reference-audit-log.md",
+        &["The folder has mode 0700 and each file mode 0600 ([SEC-447])."],
+    );
+}
+
+/// REQ: SEC-448
+#[test]
+fn sec_448_forwarded_seq_and_chain_hash_let_a_collector_detect_gaps() {
+    assert_page_has(
+        "guide-enterprise-deployment.md",
+        &["so a collector can detect a missing or reordered record without reading the local file"],
+    );
+}
+
+/// REQ: SEC-449
+#[test]
+fn sec_449_the_exported_audit_file_is_verified_offline_against_its_anchor() {
+    assert_page_has(
+        "guide-enterprise-deployment.md",
+        &["MUST verify an exported file offline against that anchor"],
+    );
+}
+
+/// REQ: SEC-450
+#[test]
+fn sec_450_a_failing_remote_sink_caps_the_memory_buffer_at_10000_records() {
+    assert_page_has(
+        "guide-enterprise-deployment.md",
+        &["MUST NOT drop records silently or buffer more than 10,000 records in memory"],
+    );
+}

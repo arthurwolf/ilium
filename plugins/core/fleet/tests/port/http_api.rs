@@ -168,3 +168,92 @@ fn http_api_disconnect_during_worktree_add_never_commits_a_pane() {
     host.settle();
     assert!(created_panes(&host).is_empty());
 }
+
+/// REQ: PORT:ilium-server/src/http_api.rs::project_name_lookup_finds_nested_directories
+#[test]
+fn http_api_nested_project_lookup_reports_the_resolved_project_path() {
+    let mut host = server_host();
+    host.fs().write("/home/me/dev/ilium/.keep", b"");
+    post(&mut host, 1, &agent("ilium"));
+    for request in host.pending_requests() {
+        host.complete(
+            request,
+            Outcome::OkNode(ilium_plugin_sdk::types::NodeId(42)),
+        );
+    }
+    host.settle();
+    let (status, body) = reply(&host, 1);
+    let value: Value = serde_json::from_slice(&body).expect("JSON body");
+    assert_eq!(status, 201);
+    assert_eq!(value["project_path"], json!("/home/me/dev/ilium"));
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::project_name_lookup_stops_at_depth_two
+#[test]
+fn http_api_project_one_level_below_the_root_still_resolves() {
+    let mut host = server_host();
+    host.fs().write("/home/me/dev/ilium/.keep", b"");
+    post(&mut host, 1, &agent("ilium"));
+    assert_eq!(created_panes(&host).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::lookup_deduplicates_session_directory_and_preserves_ambiguity_and_stale_cwd
+#[test]
+fn http_api_full_path_bypasses_name_ambiguity() {
+    let mut host = server_host();
+    host.fs().write("/home/me/dev/a/ilium/.keep", b"");
+    host.fs().write("/home/me/dev/b/ilium/.keep", b"");
+    post(&mut host, 1, &agent("/home/me/dev/a/ilium"));
+    assert_eq!(created_panes(&host).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::incomplete_project_scan_refuses_instead_of_returning_a_unique_prefix
+#[test]
+fn http_api_exact_name_wins_when_a_longer_sibling_also_exists() {
+    let mut host = server_host();
+    host.fs().write("/home/me/dev/ai/ilium/.keep", b"");
+    host.fs().write("/home/me/dev/ai/ilium-extra/.keep", b"");
+    post(&mut host, 1, &agent("ilium"));
+    assert_eq!(created_panes(&host).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_http.rs::http_workspace_uses_server_path_and_preserves_legacy_request
+#[test]
+fn http_api_workspace_request_without_base_sends_no_base_to_the_service() {
+    let mut host = server_host();
+    host.stub_service(
+        "ilium.core.worktrees/create",
+        "create",
+        r#"{"path":"/home/me/dev/app.worktrees/agent-x"}"#,
+    );
+    let mut body = agent("/home/me/dev/app");
+    body["workspace"] = json!({"branch": "agent/y"});
+    post(&mut host, 1, &body);
+    let calls = host.service_calls();
+    assert_eq!(calls.len(), 1);
+    let request: Value = serde_json::from_str(&calls[0].2).expect("JSON");
+    assert_eq!(request["branch"].as_str(), Some("agent/y"));
+    assert!(request["base"].is_null());
+}
+
+/// REQ: PORT:ilium-server/tests/workspace_http.rs::disconnect_during_worktree_add_never_commits_a_pane
+#[test]
+fn http_api_failed_worktree_add_creates_no_pane() {
+    use ilium_plugin_sdk::types::{ErrorCode, PluginError};
+    let mut host = server_host();
+    let mut body = agent("/home/me/dev/app");
+    body["workspace"] = json!({"branch": "agent/x"});
+    post(&mut host, 1, &body);
+    for request in host.pending_requests() {
+        host.complete(
+            request,
+            Outcome::Failed(PluginError {
+                code: ErrorCode::Io,
+                message: "worktree add failed".to_string(),
+                retry_after_ms: None,
+            }),
+        );
+    }
+    host.settle();
+    assert!(created_panes(&host).is_empty());
+}

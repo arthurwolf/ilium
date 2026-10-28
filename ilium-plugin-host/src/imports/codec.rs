@@ -1,55 +1,359 @@
-//! Host implementation of `ilium:host/codec` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/codec` (reference-wit.md section 5.10).
 //!
-//! Written once by the skeleton lane from the generated `HostCodec` trait; hand-owned afterwards.
+//! Pure functions on byte buffers: no grant, no state. Every call is bounded by the input cap, the
+//! caller's `max-output` / `max-pixels` budget and the host-wide ceilings below.
 
 use ilium_plugin_api::generated::host::codec::{
     Compression, DecodedImage, HostCodec, ImageInfo, RasterText,
 };
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use sha2::{Digest, Sha256};
+use std::io::{Cursor, Read, Write};
+
+/// Largest input accepted by `inflate`, `deflate`, `image-info` and `decode-image`: 16 MiB.
+const MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+/// Host ceiling for `inflate`'s `max-output`: 64 MiB.
+const MAX_INFLATE_OUTPUT_BYTES: u32 = 67_108_864;
+/// Host ceiling for `decode-image`'s `max-pixels` and for a rasterized text image.
+const MAX_DECODE_PIXELS: u32 = 67_108_864;
+/// Highest deflate level.
+const MAX_DEFLATE_LEVEL: u8 = 9;
+/// Largest text `rasterize-text` accepts: 64 KiB.
+const MAX_RASTER_TEXT_BYTES: usize = 65_536;
+/// Accepted `size-px` range of `rasterize-text`.
+const RASTER_SIZE_RANGE: std::ops::RangeInclusive<u16> = 1..=512;
+/// Accepted `max-width-px` range of `rasterize-text`.
+const RASTER_WIDTH_RANGE: std::ops::RangeInclusive<u32> = 1..=16_384;
+/// Glyph grid of the built-in bitmap font.
+const GLYPH_COLUMNS: usize = 5;
+const GLYPH_ROWS: usize = 7;
+/// Cell advance (glyph plus one blank column) and line height in unscaled pixels.
+const CELL_ADVANCE: u32 = 6;
+const LINE_HEIGHT: u32 = 8;
+
+/// Built-in 5x7 column font for U+0020..=U+005F; bit 0 of a column byte is the top row.
+/// Lower-case letters reuse the upper-case glyphs; other characters draw as a hollow box.
+const FONT_5X7: [[u8; GLYPH_COLUMNS]; 64] = [
+    [0x00, 0x00, 0x00, 0x00, 0x00], [0x00, 0x00, 0x5F, 0x00, 0x00],
+    [0x00, 0x07, 0x00, 0x07, 0x00], [0x14, 0x7F, 0x14, 0x7F, 0x14],
+    [0x24, 0x2A, 0x7F, 0x2A, 0x12], [0x23, 0x13, 0x08, 0x64, 0x62],
+    [0x36, 0x49, 0x55, 0x22, 0x50], [0x00, 0x05, 0x03, 0x00, 0x00],
+    [0x00, 0x1C, 0x22, 0x41, 0x00], [0x00, 0x41, 0x22, 0x1C, 0x00],
+    [0x14, 0x08, 0x3E, 0x08, 0x14], [0x08, 0x08, 0x3E, 0x08, 0x08],
+    [0x00, 0x50, 0x30, 0x00, 0x00], [0x08, 0x08, 0x08, 0x08, 0x08],
+    [0x00, 0x60, 0x60, 0x00, 0x00], [0x20, 0x10, 0x08, 0x04, 0x02],
+    [0x3E, 0x51, 0x49, 0x45, 0x3E], [0x00, 0x42, 0x7F, 0x40, 0x00],
+    [0x42, 0x61, 0x51, 0x49, 0x46], [0x21, 0x41, 0x45, 0x4B, 0x31],
+    [0x18, 0x14, 0x12, 0x7F, 0x10], [0x27, 0x45, 0x45, 0x45, 0x39],
+    [0x3C, 0x4A, 0x49, 0x49, 0x30], [0x01, 0x71, 0x09, 0x05, 0x03],
+    [0x36, 0x49, 0x49, 0x49, 0x36], [0x06, 0x49, 0x49, 0x29, 0x1E],
+    [0x00, 0x36, 0x36, 0x00, 0x00], [0x00, 0x56, 0x36, 0x00, 0x00],
+    [0x08, 0x14, 0x22, 0x41, 0x00], [0x14, 0x14, 0x14, 0x14, 0x14],
+    [0x00, 0x41, 0x22, 0x14, 0x08], [0x02, 0x01, 0x51, 0x09, 0x06],
+    [0x32, 0x49, 0x79, 0x41, 0x3E], [0x7E, 0x11, 0x11, 0x11, 0x7E],
+    [0x7F, 0x49, 0x49, 0x49, 0x36], [0x3E, 0x41, 0x41, 0x41, 0x22],
+    [0x7F, 0x41, 0x41, 0x22, 0x1C], [0x7F, 0x49, 0x49, 0x49, 0x41],
+    [0x7F, 0x09, 0x09, 0x09, 0x01], [0x3E, 0x41, 0x49, 0x49, 0x7A],
+    [0x7F, 0x08, 0x08, 0x08, 0x7F], [0x00, 0x41, 0x7F, 0x41, 0x00],
+    [0x20, 0x40, 0x41, 0x3F, 0x01], [0x7F, 0x08, 0x14, 0x22, 0x41],
+    [0x7F, 0x40, 0x40, 0x40, 0x40], [0x7F, 0x02, 0x0C, 0x02, 0x7F],
+    [0x7F, 0x04, 0x08, 0x10, 0x7F], [0x3E, 0x41, 0x41, 0x41, 0x3E],
+    [0x7F, 0x09, 0x09, 0x09, 0x06], [0x3E, 0x41, 0x51, 0x21, 0x5E],
+    [0x7F, 0x09, 0x19, 0x29, 0x46], [0x46, 0x49, 0x49, 0x49, 0x31],
+    [0x01, 0x01, 0x7F, 0x01, 0x01], [0x3F, 0x40, 0x40, 0x40, 0x3F],
+    [0x1F, 0x20, 0x40, 0x20, 0x1F], [0x3F, 0x40, 0x38, 0x40, 0x3F],
+    [0x63, 0x14, 0x08, 0x14, 0x63], [0x07, 0x08, 0x70, 0x08, 0x07],
+    [0x61, 0x51, 0x49, 0x45, 0x43], [0x00, 0x7F, 0x41, 0x41, 0x00],
+    [0x02, 0x04, 0x08, 0x10, 0x20], [0x00, 0x41, 0x41, 0x7F, 0x00],
+    [0x04, 0x02, 0x01, 0x02, 0x04], [0x40, 0x40, 0x40, 0x40, 0x40],
+];
+/// Glyph drawn for characters outside the built-in font.
+const MISSING_GLYPH: [u8; GLYPH_COLUMNS] = [0x7F, 0x41, 0x41, 0x41, 0x7F];
 
 /// Host side of the `codec` interface.
 #[derive(Debug)]
 pub struct CodecImport;
 
+fn invalid(message: &str) -> PluginError {
+    PluginError::new(ErrorCode::InvalidArgument, message)
+}
+
+fn check_input_size(len: usize) -> Result<(), PluginError> {
+    if len > MAX_INPUT_BYTES {
+        return Err(invalid("input is larger than 16 MiB"));
+    }
+    Ok(())
+}
+
+/// Reads at most `max_output + 1` bytes so an over-budget stream is detected without unbounded growth.
+fn read_bounded<R: Read>(mut reader: R, max_output: u32) -> Result<Vec<u8>, PluginError> {
+    let mut output = Vec::new();
+    let limit = u64::from(max_output) + 1;
+    reader
+        .by_ref()
+        .take(limit)
+        .read_to_end(&mut output)
+        .map_err(|error| invalid(&format!("corrupt compressed data: {error}")))?;
+    if output.len() as u64 > u64::from(max_output) {
+        return Err(PluginError::new(
+            ErrorCode::QuotaExceeded,
+            "decompressed output is larger than max-output",
+        ));
+    }
+    Ok(output)
+}
+
+fn image_error(error: &image::ImageError) -> PluginError {
+    match error {
+        image::ImageError::Unsupported(_) => {
+            PluginError::new(ErrorCode::Unsupported, "unsupported image format")
+        }
+        other => invalid(&format!("corrupt image data: {other}")),
+    }
+}
+
+fn guess_format(data: &[u8]) -> Result<image::ImageFormat, PluginError> {
+    image::guess_format(data)
+        .map_err(|_| PluginError::new(ErrorCode::Unsupported, "unknown image format"))
+}
+
 impl HostCodec for CodecImport {
     fn inflate(
         &mut self,
-        _format: Compression,
-        _data: Vec<u8>,
-        _max_output: u32,
+        format: Compression,
+        data: Vec<u8>,
+        max_output: u32,
     ) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("host::imports::codec::inflate")
+        check_input_size(data.len())?;
+        if max_output > MAX_INFLATE_OUTPUT_BYTES {
+            return Err(invalid("max-output is above the 64 MiB host ceiling"));
+        }
+        let cursor = Cursor::new(data);
+        match format {
+            Compression::Zlib => read_bounded(flate2::read::ZlibDecoder::new(cursor), max_output),
+            Compression::Gzip => read_bounded(flate2::read::GzDecoder::new(cursor), max_output),
+            Compression::DeflateRaw => {
+                read_bounded(flate2::read::DeflateDecoder::new(cursor), max_output)
+            }
+        }
     }
 
     fn deflate(
         &mut self,
-        _format: Compression,
-        _data: Vec<u8>,
-        _level: u8,
+        format: Compression,
+        data: Vec<u8>,
+        level: u8,
     ) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("host::imports::codec::deflate")
+        check_input_size(data.len())?;
+        if level > MAX_DEFLATE_LEVEL {
+            return Err(invalid("level must be 0 to 9"));
+        }
+        let level = flate2::Compression::new(u32::from(level));
+        let failed = |error: std::io::Error| invalid(&format!("deflate failed: {error}"));
+        match format {
+            Compression::Zlib => {
+                let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), level);
+                encoder.write_all(&data).map_err(failed)?;
+                encoder.finish().map_err(failed)
+            }
+            Compression::Gzip => {
+                let mut encoder = flate2::write::GzEncoder::new(Vec::new(), level);
+                encoder.write_all(&data).map_err(failed)?;
+                encoder.finish().map_err(failed)
+            }
+            Compression::DeflateRaw => {
+                let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), level);
+                encoder.write_all(&data).map_err(failed)?;
+                encoder.finish().map_err(failed)
+            }
+        }
     }
 
-    fn image_info(&mut self, _data: Vec<u8>) -> Result<ImageInfo, PluginError> {
-        unimplemented!("host::imports::codec::image_info")
+    fn image_info(&mut self, data: Vec<u8>) -> Result<ImageInfo, PluginError> {
+        check_input_size(data.len())?;
+        let format = guess_format(&data)?;
+        let reader = image::ImageReader::with_format(Cursor::new(&data), format);
+        let (width, height) = reader.into_dimensions().map_err(|e| image_error(&e))?;
+        let frames = if format == image::ImageFormat::Gif {
+            use image::AnimationDecoder;
+            let decoder = image::codecs::gif::GifDecoder::new(Cursor::new(&data))
+                .map_err(|e| image_error(&e))?;
+            let count = decoder.into_frames().take_while(Result::is_ok).count();
+            u32::try_from(count).unwrap_or(u32::MAX).max(1)
+        } else {
+            1
+        };
+        Ok(ImageInfo {
+            width,
+            height,
+            frames,
+        })
     }
 
     fn decode_image(
         &mut self,
-        _data: Vec<u8>,
-        _frame: u32,
-        _max_pixels: u32,
+        data: Vec<u8>,
+        frame: u32,
+        max_pixels: u32,
     ) -> Result<DecodedImage, PluginError> {
-        unimplemented!("host::imports::codec::decode_image")
+        check_input_size(data.len())?;
+        if max_pixels > MAX_DECODE_PIXELS {
+            return Err(invalid("max-pixels is above the 67,108,864 host ceiling"));
+        }
+        let format = guess_format(&data)?;
+        let (width, height) = image::ImageReader::with_format(Cursor::new(&data), format)
+            .into_dimensions()
+            .map_err(|e| image_error(&e))?;
+        if u64::from(width) * u64::from(height) > u64::from(max_pixels) {
+            return Err(PluginError::new(
+                ErrorCode::QuotaExceeded,
+                "image has more pixels than max-pixels",
+            ));
+        }
+        let buffer = if format == image::ImageFormat::Gif {
+            use image::AnimationDecoder;
+            let decoder = image::codecs::gif::GifDecoder::new(Cursor::new(&data))
+                .map_err(|e| image_error(&e))?;
+            let index = usize::try_from(frame).map_err(|_| invalid("frame is out of range"))?;
+            match decoder.into_frames().nth(index) {
+                Some(Ok(decoded)) => decoded.into_buffer(),
+                Some(Err(error)) => return Err(image_error(&error)),
+                None => return Err(invalid("frame is out of range")),
+            }
+        } else {
+            if frame != 0 {
+                return Err(invalid("frame is out of range"));
+            }
+            image::ImageReader::with_format(Cursor::new(&data), format)
+                .decode()
+                .map_err(|e| image_error(&e))?
+                .to_rgba8()
+        };
+        Ok(DecodedImage {
+            width: buffer.width(),
+            height: buffer.height(),
+            rgba: buffer.into_raw(),
+        })
     }
 
-    fn sha256(&mut self, _data: Vec<u8>) -> Vec<u8> {
-        unimplemented!("host::imports::codec::sha256")
+    fn sha256(&mut self, data: Vec<u8>) -> Vec<u8> {
+        Sha256::digest(&data).to_vec()
     }
 
-    fn rasterize_text(&mut self, _request: RasterText) -> Result<DecodedImage, PluginError> {
-        unimplemented!("host::imports::codec::rasterize_text")
+    fn rasterize_text(&mut self, request: RasterText) -> Result<DecodedImage, PluginError> {
+        if request.text.len() > MAX_RASTER_TEXT_BYTES {
+            return Err(invalid("text is larger than 64 KiB"));
+        }
+        if !RASTER_SIZE_RANGE.contains(&request.size_px) {
+            return Err(invalid("size-px must be 1 to 512"));
+        }
+        if !RASTER_WIDTH_RANGE.contains(&request.max_width_px) {
+            return Err(invalid("max-width-px must be 1 to 16384"));
+        }
+        let scale = (u32::from(request.size_px) / LINE_HEIGHT).max(1);
+        let cell_width = CELL_ADVANCE * scale;
+        let line_height = LINE_HEIGHT * scale;
+        let columns_per_line = ((request.max_width_px / cell_width) as usize).max(1);
+        let lines = wrap_text(&request.text, columns_per_line);
+        let widest = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+        let width = (widest as u32 * cell_width)
+            .min(request.max_width_px)
+            .max(1);
+        let height = (lines.len() as u32 * line_height).max(line_height);
+        if u64::from(width) * u64::from(height) > u64::from(MAX_DECODE_PIXELS) {
+            return Err(PluginError::new(
+                ErrorCode::QuotaExceeded,
+                "rasterized text would exceed the pixel budget",
+            ));
+        }
+        let mut rgba = vec![0u8; width as usize * height as usize * 4];
+        // White ink: RGB is always 255, the alpha channel carries the ink tone.
+        for pixel in rgba.chunks_exact_mut(4) {
+            pixel[..3].copy_from_slice(&[255, 255, 255]);
+        }
+        for (line_index, line) in lines.iter().enumerate() {
+            for (column_index, character) in line.chars().enumerate() {
+                let glyph = glyph_for(character);
+                let origin_x = column_index as u32 * cell_width;
+                let origin_y = line_index as u32 * line_height;
+                draw_glyph(&mut rgba, width, height, glyph, origin_x, origin_y, scale);
+            }
+        }
+        Ok(DecodedImage { width, height, rgba })
     }
+}
+
+fn glyph_for(character: char) -> &'static [u8; GLYPH_COLUMNS] {
+    let upper = character.to_ascii_uppercase();
+    let code = upper as u32;
+    if (0x20..=0x5F).contains(&code) {
+        &FONT_5X7[(code - 0x20) as usize]
+    } else {
+        &MISSING_GLYPH
+    }
+}
+
+fn draw_glyph(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    glyph: &[u8; GLYPH_COLUMNS],
+    origin_x: u32,
+    origin_y: u32,
+    scale: u32,
+) {
+    for (column, bits) in glyph.iter().enumerate() {
+        for row in 0..GLYPH_ROWS {
+            if bits >> row & 1 == 0 {
+                continue;
+            }
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    let x = origin_x + column as u32 * scale + dx;
+                    let y = origin_y + row as u32 * scale + dy;
+                    if x < width && y < height {
+                        let offset = (y as usize * width as usize + x as usize) * 4;
+                        rgba[offset + 3] = 255;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Splits text into lines of at most `columns` characters, breaking at spaces where possible.
+fn wrap_text(text: &str, columns: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        let mut current_len = 0usize;
+        for word in paragraph.split(' ') {
+            let mut word_chars: Vec<char> = word.chars().collect();
+            // A word longer than a whole line is broken at the line width.
+            while word_chars.len() > columns {
+                if current_len > 0 {
+                    lines.push(std::mem::take(&mut current));
+                    current_len = 0;
+                }
+                let rest = word_chars.split_off(columns);
+                lines.push(word_chars.iter().collect());
+                word_chars = rest;
+            }
+            let needed = word_chars.len() + usize::from(current_len > 0);
+            if current_len > 0 && current_len + needed > columns {
+                lines.push(std::mem::take(&mut current));
+                current_len = 0;
+            }
+            if current_len > 0 {
+                current.push(' ');
+                current_len += 1;
+            }
+            current.extend(word_chars.iter());
+            current_len += word_chars.len();
+        }
+        lines.push(current);
+    }
+    lines
 }
 
 #[cfg(test)]

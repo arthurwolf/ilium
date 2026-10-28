@@ -350,6 +350,13 @@ impl ImportsFixtureBuilder {
     }
 }
 
+/// Reports a production hook the rig needs but the production host does not expose yet. The
+/// test that reaches it fails at this line with the missing hook named, instead of passing on a
+/// value the rig made up.
+fn blocked(hook: &str) -> ! {
+    panic!("rig blocked: the production host does not expose {hook} yet")
+}
+
 /// The restricted import set of a job instance (WIT:ilium:host/jobs.*).
 pub struct JobInstance {
     jobs_import: JobsImport,
@@ -387,12 +394,12 @@ impl JobInstance {
 
     /// Cancels the job from the host.
     pub fn cancel_from_host(&mut self) {
-        unimplemented!("host::testing::imports_fixture::JobInstance::cancel_from_host")
+        blocked("a cancel hook on the job instance")
     }
 
     /// The progress values reported, clamped to 0..=100 with NaN dropped.
     pub fn reported_progress(&self) -> Vec<f32> {
-        unimplemented!("host::testing::imports_fixture::JobInstance::reported_progress")
+        blocked("a progress recorder on the job instance")
     }
 }
 
@@ -519,7 +526,7 @@ impl ImportsFixture {
 
     /// Sets the wall clock.
     pub fn set_wall_clock_unix_millis(&mut self, _millis: u64) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::set_wall_clock_unix_millis")
+        blocked("a settable wall clock in the harness")
     }
 
     /// Keeps async requests pending.
@@ -562,22 +569,22 @@ impl ImportsFixture {
 
     /// The settings target last opened.
     pub fn opened_settings_target(&self) -> Option<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::opened_settings_target")
+        blocked("the settings UI open-target record")
     }
 
     /// The values of a choice row.
     pub fn choice_values(&self, _key: &str) -> Vec<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::choice_values")
+        blocked("the settings UI choice model")
     }
 
     /// The item ids of a choice row.
     pub fn choice_item_ids(&self, _key: &str) -> Vec<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::choice_item_ids")
+        blocked("the settings UI choice model")
     }
 
     /// Whether a choice row shows a value as unavailable.
     pub fn choice_shows_unavailable(&self, _key: &str, _value: &str) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::choice_shows_unavailable")
+        blocked("the settings UI choice model")
     }
 
     /// The stored value of a setting.
@@ -594,52 +601,52 @@ impl ImportsFixture {
 
     /// The note of a settings row.
     pub fn row_note(&self, _key: &str) -> Option<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::row_note")
+        blocked("the settings UI row model")
     }
 
     /// Whether a settings row currently shows the `Saving…` marker.
     pub fn row_saving(&self, _key: &str) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::row_saving")
+        blocked("the settings UI row model")
     }
 
     /// The text of a live info row.
     pub fn info_text(&self, _key: &str) -> Option<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::info_text")
+        blocked("the settings UI info model")
     }
 
     /// The spans of a rich info row.
     pub fn info_spans(&self, _key: &str) -> Vec<RichSpan> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::info_spans")
+        blocked("the settings UI info model")
     }
 
     /// The state of a settings row.
     pub fn row_state(&self, _key: &str) -> RowState {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::row_state")
+        blocked("the settings UI row model")
     }
 
     /// The state of one item of a list row.
     pub fn item_state(&self, _key: &str, _index: u32) -> Option<RowState> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::item_state")
+        blocked("the settings UI row model")
     }
 
     /// The segments of a meter row.
     pub fn meter_segments(&self, _id: &str) -> Vec<MeterSegment> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::meter_segments")
+        blocked("the settings UI meter model")
     }
 
     /// The warning codes raised while loading settings.
     pub fn load_warning_codes(&self) -> Vec<String> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::load_warning_codes")
+        blocked("the load warning record")
     }
 
     /// Plugin sections drawn in a settings tab.
     pub fn drawn_plugin_sections(&self, _tab: &str) -> usize {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::drawn_plugin_sections")
+        blocked("the plugin section draw record")
     }
 
     /// Plugin tabs drawn.
     pub fn drawn_plugin_tabs(&self) -> usize {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::drawn_plugin_tabs")
+        blocked("the plugin tab draw record")
     }
 
     /// The steps of the last save.
@@ -716,19 +723,17 @@ impl ImportsFixture {
 
     /// The next job traps.
     pub fn make_next_job_trap(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::make_next_job_trap")
+        blocked("a fault injection hook in the job runner")
     }
 
     /// The next job never returns.
     pub fn make_next_job_run_forever(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::make_next_job_run_forever")
+        blocked("a fault injection hook in the job runner")
     }
 
     /// The next job exceeds its memory limit.
     pub fn make_next_job_exceed_memory(&mut self) {
-        unimplemented!(
-            "host::testing::imports_fixture::ImportsFixture::make_next_job_exceed_memory"
-        )
+        blocked("a fault injection hook in the job runner")
     }
 
     /// The next settings-validate call traps.
@@ -755,17 +760,17 @@ impl ImportsFixture {
 
     /// The user chooses paths in the picker.
     pub fn picker_choose(&mut self, _paths: Vec<FsPath>) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::picker_choose")
+        blocked("the file picker of the settings UI")
     }
 
     /// The user cancels the picker.
     pub fn picker_cancel(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::picker_cancel")
+        blocked("the file picker of the settings UI")
     }
 
     /// Waits for an event of a watch.
     pub fn wait_fs_event(&mut self, _watch: WatchId, _timeout: Duration) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_fs_event")
+        blocked("a watch event queue on the fs import")
     }
 
     /// Waits for chunks of a stream.
@@ -775,7 +780,7 @@ impl ImportsFixture {
         _count: usize,
         _timeout: Duration,
     ) -> Vec<Vec<u8>> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_stream_chunks")
+        blocked("a chunk queue on the stream import")
     }
 
     /// Waits for output of a child.
@@ -785,12 +790,12 @@ impl ImportsFixture {
         _expected: &[u8],
         _timeout: Duration,
     ) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_child_output")
+        blocked("the child output queue of the process import")
     }
 
     /// Waits for a child to exit.
     pub fn wait_child_exit(&mut self, _child: ChildHandle, _timeout: Duration) -> bool {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_child_exit")
+        blocked("the child exit record of the process import")
     }
 
     /// Adds a terminal pane.
@@ -874,19 +879,17 @@ impl ImportsFixture {
 
     /// Makes the on-disk data version of a bucket newer.
     pub fn make_bucket_data_version_newer(&mut self, _bucket: Bucket) {
-        unimplemented!(
-            "host::testing::imports_fixture::ImportsFixture::make_bucket_data_version_newer"
-        )
+        blocked("a bucket data-version writer")
     }
 
     /// The code of the last refused infallible import call.
     pub fn last_import_error_code(&self) -> Option<ErrorCode> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::last_import_error_code")
+        blocked("the last refused import error record")
     }
 
     /// Sets the agent signature of a node.
     pub fn set_agent(&mut self, _node: NodeId, _signature: &str) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::set_agent")
+        blocked("an agent signature setter on nodes")
     }
 
     /// Locks a node.
@@ -907,7 +910,7 @@ impl ImportsFixture {
 
     /// Reads node metadata as a second installed plugin.
     pub fn other_plugin_metadata(&mut self, _node: NodeId) -> Option<Vec<u8>> {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::other_plugin_metadata")
+        blocked("a second installed plugin's node metadata")
     }
 }
 

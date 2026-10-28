@@ -389,3 +389,28 @@ pub fn utc_timestamp(now: std::time::SystemTime) -> Result<String> {
     let clock = seconds % 86400;
     Ok(format!("{year:04}-{:02}-{:02} {:02}:{:02}:{:02}",month+1,days+1,clock/3600,(clock%3600)/60,clock%60))
 }
+
+/// What the host did with a restored `trust.json` whose keyed MAC could not be verified (HST-959).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoredStoreOutcome {
+    /// The kept copy, `trust.json.tampered-<YYYYMMDD-HHmmss>`.
+    pub kept_as: String,
+    /// `trust.store-tampered` for T2 and T3 plugins; T1 plugins are never refused by it.
+    pub refused_code: Option<&'static str>,
+    /// The instruction shown to the user.
+    pub message: String,
+}
+
+/// Handles a restored trust store on a machine where the MAC cannot be verified. `stamp` is the
+/// UTC time as `YYYYMMDD-HHmmss`.
+pub fn restored_store_without_mac(tier: ilium_plugin_api::Tier, stamp: &str) -> RestoredStoreOutcome {
+    let refused_code = match tier {
+        ilium_plugin_api::Tier::T1 => None,
+        _ => Some("trust.store-tampered"),
+    };
+    RestoredStoreOutcome {
+        kept_as: format!("trust.json.tampered-{stamp}"),
+        refused_code,
+        message: "Re-establish each publisher with `ilium plugin trust add <publisher.pub>`".to_owned(),
+    }
+}

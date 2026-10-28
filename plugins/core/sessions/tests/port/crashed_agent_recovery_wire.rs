@@ -36,3 +36,24 @@ fn port_unavailable_agent_wire_preserves_identity_cause_and_exact_prompt_uncerta
         );
     }
 }
+
+/// REQ: PORT:ilium-ipc/tests/crashed_agent_recovery_wire.rs::unavailable_agent_wire_preserves_identity_cause_and_exact_prompt_uncertainty
+#[test]
+fn port_the_resume_command_carries_the_session_and_no_unexpanded_token() {
+    for (name, template) in [("codex", codex_template()), ("claude", claude_template())] {
+        let mut host = activated_server();
+        let pane = add_agent(&mut host, "stopped agent", name);
+        verify_agent(
+            &mut host,
+            pane,
+            signature(name, Some(template)),
+            SESSION_ID,
+        );
+        let submitted = restore_panes(&mut host, &[pane]);
+        let commands = replace_commands(&submitted);
+        assert_eq!(commands.len(), 1, "{name}");
+        let parts = &commands[0].0.command;
+        assert!(parts.iter().any(|part| part.contains(SESSION_ID)), "{name}");
+        assert!(parts.iter().all(|part| !part.contains("{session}")), "{name}");
+    }
+}

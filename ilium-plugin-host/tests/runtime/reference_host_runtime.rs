@@ -1841,3 +1841,16 @@ fn hst_089_a_second_overflow_after_restart_is_contained_too() {
     fail_once(&mut host);
     assert_eq!(host.failures().len(), 2);
 }
+
+/// REQ: HST-056
+#[test]
+fn hst_056_component_can_be_instantiated_again_after_a_drop() {
+    assert!(!runtime_settings().concurrency_support);
+    for _ in 0..2 {
+        let host = host_with(QuietGuest);
+        host.deliver(one_event());
+        let report = host.pump(8);
+        assert_eq!(report.traps, 0);
+        drop(host);
+    }
+}

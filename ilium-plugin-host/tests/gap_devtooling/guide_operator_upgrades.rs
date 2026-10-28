@@ -40,3 +40,24 @@ fn operator_upgrade_order_is_backup_then_host_then_plugins_and_rollback_restores
         "rollback restores the data files byte for byte"
     );
 }
+
+/// REQ: DEV-992
+#[test]
+fn preflight_lists_every_installed_plugin_without_starting_any_plugin() {
+    let rig = MigrationRig::new();
+    rig.install(&PluginSpec::new("example.agent-tools", "1.0.0").data_version(1));
+    let preflight = rig.cli(&["preflight", "--target", "2.0.0"]);
+    assert_eq!(preflight.exit_code, 0, "{:?}", preflight.stdout_jsonl);
+    assert!(
+        preflight
+            .stdout_jsonl
+            .iter()
+            .any(|row| row.to_string().contains("example.agent-tools")),
+        "every installed plugin is listed: {:?}",
+        preflight.stdout_jsonl
+    );
+    assert!(
+        rig.log_codes().iter().all(|code| code != "plugin.started"),
+        "preflight must not start a plugin"
+    );
+}

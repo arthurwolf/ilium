@@ -798,3 +798,21 @@ fn rnd_015_render_within_deadline_does_not_trap() {
     rig.advance_ms(100);
     assert_eq!(rig.last_trap(), None);
 }
+
+/// REQ: HST-266
+#[test]
+fn hst_266_hundred_decoration_changes_keep_p99_within_5_ms() {
+    let mut rig = rig_t2();
+    let mut slow_changes = 0;
+    for index in 0..100 {
+        let node_name = format!("n{index}");
+        let started = rig.now_ms();
+        rig.server_contribute("decoration", &node_name, "x").unwrap();
+        rig.sync_mirror();
+        if rig.now_ms() - started > 5 {
+            slow_changes += 1;
+        }
+    }
+    assert!(slow_changes <= 1, "{slow_changes} of 100 changes exceeded 5 ms");
+    assert_eq!(rig.client_mirror_len("decoration"), 100);
+}

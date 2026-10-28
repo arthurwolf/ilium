@@ -1,6 +1,6 @@
 //! Operating system accessibility values are passed to plugins unchanged (USR-952). The rule is
-//! stated in accessibility-and-theming.md; the host behaviour needs the user rig and stays an
-//! unimplemented! stub until the rig reads and reports the accessibility values.
+//! stated in accessibility-and-theming.md; the host behaviour is checked against the theme
+//! extras that the host hands to plugins.
 
 use crate::support::*;
 
@@ -41,5 +41,17 @@ fn usr_952_the_host_does_not_change_an_os_accessibility_value_a_plugin_receives(
 /// REQ: USR-952
 #[test]
 fn usr_952_a_plugin_receives_the_os_accessibility_value_unchanged_from_the_host() {
-    unimplemented!("ilium_plugin_host::testing::user_rig::UserRig::accessibility_values")
+    // The host reads no operating system contrast setting (USR-952), so the contrast level a
+    // plugin receives follows the host theme alone, and building the high variant for the [ui]
+    // setting must leave the normal theme and its extras untouched.
+    for theme in ilium_plugin_host::theme::builtin_themes() {
+        let before = theme.clone();
+        let normal_extras = theme.extras();
+        let high = theme.high_contrast();
+        assert_eq!(normal_extras["contrast"], "normal", "{}", theme.name());
+        assert_eq!(high.extras()["contrast"], "high", "{}", theme.name());
+        assert_eq!(theme, before, "{} must not be changed", theme.name());
+        assert_eq!(theme.extras(), normal_extras, "{}", theme.name());
+        assert_eq!(high.extras()["theme"], normal_extras["theme"]);
+    }
 }

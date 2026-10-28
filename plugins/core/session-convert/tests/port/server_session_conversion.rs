@@ -66,3 +66,17 @@ fn port_session_conversion_server_a_failed_stop_is_reported_to_the_client() {
     let reply = answer_terminate(&mut host, &start, Outcome::Failed(error));
     assert!(failed_payload(&reply).is_some(), "{reply:?}");
 }
+
+/// REQ: PORT:ilium-server/tests/session_conversion.rs::terminate_keeps_the_pane_and_replace_swaps_it_in_place
+#[test]
+fn port_session_conversion_server_the_replacement_resumes_the_target_agent() {
+    let (mut host, pane) = server_with_pane("codex", true);
+    let start = host.deliver_one(start_message(pane, "claude"));
+    answer_terminate(&mut host, &start, Outcome::Ok);
+    let request = host.jobs().list().first().expect("job").request;
+    host.jobs().finish(request, Ok(job_output(3, 3)));
+    host.settle();
+    let panes = created(&host.submitted());
+    assert_eq!(panes.len(), 1, "{panes:?}");
+    assert_eq!(panes[0].2.first().map(String::as_str), Some("claude"));
+}

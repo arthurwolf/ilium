@@ -230,3 +230,31 @@ mod tests {
         assert_eq!(effective_niceness(10, effective_niceness(10, 0)), 10);
     }
 }
+
+/// Pins the calling thread to the lowest-numbered core it is allowed to run on and returns that
+/// core, or `None` when the platform offers no pinning or the call was refused. Benchmarks use it
+/// so a run measures one core (reference-host-budgets.md HST-300); it never fails the caller.
+#[cfg(target_os = "linux")]
+pub fn pin_current_thread_to_first_allowed_core() -> Option<usize> {
+    // SAFETY: `cpu_set_t` is plain integers, so all-zero is a valid empty set; both calls read or
+    // write only that set, and pid 0 means the calling thread on Linux.
+    unsafe {
+        let mut allowed: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut allowed) != 0 {
+            return None;
+        }
+        let core = (0..libc::CPU_SETSIZE as usize).find(|&core| libc::CPU_ISSET(core, &allowed))?;
+        let mut only_core: libc::cpu_set_t = std::mem::zeroed();
+        libc::CPU_SET(core, &mut only_core);
+        if libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &only_core) != 0 {
+            return None;
+        }
+        Some(core)
+    }
+}
+
+/// Other platforms have no portable pinning call; the run stays unpinned.
+#[cfg(not(target_os = "linux"))]
+pub fn pin_current_thread_to_first_allowed_core() -> Option<usize> {
+    None
+}

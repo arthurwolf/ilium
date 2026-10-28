@@ -477,3 +477,100 @@ fn search_009_without_the_embed_grant_the_search_still_answers_by_text() {
     assert!(hits.iter().any(|hit| hit["kind"] == "terminal"), "{hits:?}");
     assert!(hits.iter().all(|hit| hit["kind"] != "meaning"));
 }
+
+/// REQ: F-009, PORT:ilium-client/src/search_ui.rs::local_search_is_case_insensitive_and_keeps_the_line_target
+#[test]
+fn port_search_ui_match_on_the_first_line_keeps_line_zero() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "top.md", b"Needle first\nsecond\n");
+    let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["line"], 0);
+}
+
+/// REQ: F-009, PORT:ilium-client/src/search_ui.rs::terminal_search_ignores_ansi_and_preserves_a_raw_jump_offset
+#[test]
+fn port_search_ui_colour_code_before_a_match_is_not_context() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "colour.txt", b"\x1b[31mred\x1b[0m tail");
+    let hits = file_hits(&ask_with_scan(&mut host, 1, "red"));
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["before"], "");
+}
+
+/// REQ: F-009, PORT:ilium-client/src/search_ui.rs::stripping_collapses_a_crlf_pair_into_a_single_newline
+#[test]
+fn port_search_ui_each_crlf_pair_becomes_one_space_in_the_context() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "lines.txt", b"a\r\nb\r\nneedle");
+    let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
+    assert_eq!(hits[0]["before"], "a b ");
+}
+
+/// REQ: F-009, PORT:ilium-client/src/search_ui.rs::stripping_keeps_text_that_precedes_an_invalid_utf8_byte
+#[test]
+fn port_search_ui_match_after_an_invalid_utf8_byte_keeps_its_text() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "after.txt", b"x \xff needle");
+    let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["matched"], "needle");
+}
+
+/// REQ: F-009, PORT:ilium-client/src/search_ui.rs::result_from_source_collapses_embedded_newlines_in_context_text
+#[test]
+fn port_search_ui_newline_after_a_match_becomes_a_space() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "after.md", b"needle\nnext");
+    let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
+    assert_eq!(hits[0]["after"], " next");
+}
+
+/// REQ: F-009, PORT:ilium-client/src/app.rs::workspace_search_finds_terminal_history_and_activates_its_exact_location
+#[test]
+fn port_app_a_terminal_screen_without_the_query_gives_no_hit() {
+    let mut host = activated_server();
+    add_terminal(&mut host, "shell", "WORKSPACE_SEARCH_NEEDLE only");
+    let hits = ask(&mut host, 2, "absent-from-every-pane");
+    assert!(hits.is_empty(), "{hits:?}");
+}
+
+/// REQ: PORT:ilium-client/src/search_workers.rs::another_frontend_cannot_submit_using_the_reserved_cpu_slot
+#[test]
+fn port_search_workers_another_client_with_other_text_gets_no_needle_hit() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "note.md", b"needle");
+    host.deliver(vec![query_event(1, 1, "needle"), query_event(2, 1, "absent")]);
+    host.settle();
+    drive_jobs(&mut host);
+    let answers = result_messages(&host.submitted());
+    let for_second: Vec<Value> = answers
+        .iter()
+        .filter(|(client, _)| *client == Some(2))
+        .flat_map(|(_, payload)| payload["hits"].as_array().cloned().unwrap_or_default())
+        .collect();
+    assert!(for_second.is_empty(), "{for_second:?}");
+}
+
+/// REQ: F-009, PORT:ilium-client/src/search_workers.rs::displayed_results_release_finite_input_credit_and_keep_measured_storage
+#[test]
+fn port_search_workers_repeated_query_returns_the_same_line() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "note.md", b"a\nb\nc\nd\ne\nf\ng\nneedle\n");
+    let first = file_hits(&ask_with_scan(&mut host, 1, "needle"));
+    let second = file_hits(&ask_with_scan(&mut host, 2, "needle"));
+    assert_eq!(second.len(), 1, "{second:?}");
+    assert_eq!(second[0]["line"], first[0]["line"]);
+}
+
+/// REQ: F-009, PORT:ilium-client/src/search_workers.rs::oversize_capture_is_rejected_before_any_job_is_published
+#[test]
+fn port_search_workers_oversize_file_alone_gives_no_hit_and_no_failure() {
+    let mut host = activated_server();
+    let mut big = b"needle ".to_vec();
+    big.resize(9 * 1024 * 1024, b'x');
+    write_project_file(&mut host, "only-big.bin", &big);
+    let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
+    assert!(hits.is_empty(), "{hits:?}");
+    assert!(host.failures().is_empty());
+}

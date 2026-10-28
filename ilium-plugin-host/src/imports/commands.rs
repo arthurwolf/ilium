@@ -3,8 +3,20 @@
 //! Written once by the skeleton lane from the generated `HostCommands` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::commands::HostCommands;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
+
+/// Largest `arguments-json` accepted by `invoke`: 64 KiB.
+const MAX_ARGUMENTS_JSON_BYTES: usize = 64 * 1024;
+
+/// This import holds no command registry of its own: the registry is wired in by the dispatcher,
+/// so every command id is unknown here.
+fn unknown_command(command: &str) -> PluginError {
+    PluginError::new(
+        ErrorCode::NotFound,
+        format!("no contributed command \"{command}\" is registered"),
+    )
+}
 
 /// Host side of the `commands` interface.
 #[derive(Debug)]
@@ -13,19 +25,28 @@ pub struct CommandsImport;
 impl HostCommands for CommandsImport {
     fn set_state(
         &mut self,
-        _command: String,
+        command: String,
         _enabled: bool,
         _checked: Option<bool>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::commands::set_state")
+        Err(unknown_command(&command))
     }
 
     fn invoke(
         &mut self,
-        _command: String,
-        _arguments_json: String,
+        command: String,
+        arguments_json: String,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::commands::invoke")
+        let arguments_ok = arguments_json.len() <= MAX_ARGUMENTS_JSON_BYTES
+            && serde_json::from_str::<serde_json::Value>(&arguments_json)
+                .is_ok_and(|value| value.is_object());
+        if !arguments_ok {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "arguments-json must be one JSON object of at most 64 KiB",
+            ));
+        }
+        Err(unknown_command(&command))
     }
 }
 

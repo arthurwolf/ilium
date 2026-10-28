@@ -2,6 +2,10 @@
 //! the machine-wide CPU bucket (HST-128, HST-953) and the rule that the ceilings never lower the
 //! low-disk reserve (HST-954).
 
+use ilium_plugin_host::host_capacity::{
+    MachineCeilings, MachineWriteVerdict, FREE_SPACE_RESERVE_BYTES, MACHINE_DISK_CEILING_BYTES,
+};
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-host-aggregate-limits.md";
@@ -19,7 +23,11 @@ fn hst_126_the_limits_table_sets_the_machine_disk_ceiling_at_8192_mib() {
 /// REQ: HST-126
 #[test]
 fn hst_126_a_write_within_the_plugin_quota_but_past_the_machine_ceiling_is_refused() {
-    unimplemented!("ilium_plugin_host::host_capacity::machine_disk_ceiling")
+    let mib = 1024 * 1024;
+    let mut machine = MachineCeilings::new(MACHINE_DISK_CEILING_BYTES - 10 * mib, u64::MAX / 2);
+    assert_eq!(machine.write(10 * mib), MachineWriteVerdict::Accepted);
+    assert_eq!(machine.write(1), MachineWriteVerdict::HostDiskCeiling);
+    assert_eq!(machine.used_bytes(), MACHINE_DISK_CEILING_BYTES);
 }
 
 /// REQ: HST-127
@@ -53,7 +61,11 @@ fn hst_128_the_cpu_bucket_holds_and_refills_4000_ms_per_second() {
 /// REQ: HST-128
 #[test]
 fn hst_128_the_machine_bucket_applies_in_addition_to_the_per_side_group() {
-    unimplemented!("ilium_plugin_host::host_capacity::machine_cpu_bucket")
+    let mut machine = MachineCeilings::new(0, u64::MAX / 2);
+    assert_eq!(machine.charge_cpu(4_000, 0), Ok(()));
+    let retry_after_ms = machine.charge_cpu(1_000, 0).expect_err("an empty bucket refuses");
+    assert_eq!(retry_after_ms, 250, "1000 ms at 4000 ms per second");
+    assert_eq!(machine.charge_cpu(1_000, 250), Ok(()), "refilled after the wait");
 }
 
 /// REQ: HST-953
@@ -89,5 +101,11 @@ fn hst_954_the_machine_ceilings_do_not_lower_the_free_space_reserve() {
 /// REQ: HST-954
 #[test]
 fn hst_954_the_machine_ceilings_never_skip_the_low_disk_steps() {
-    unimplemented!("ilium_plugin_host::host_capacity::machine_ceilings_with_low_disk_steps")
+    let mib = 1024 * 1024;
+    let mut machine = MachineCeilings::new(0, FREE_SPACE_RESERVE_BYTES + mib);
+    assert_eq!(machine.write(2 * mib), MachineWriteVerdict::StorageFull);
+    assert_eq!(machine.low_disk_steps_run(), 1, "the low-disk step ran");
+    let mut at_ceiling = MachineCeilings::new(MACHINE_DISK_CEILING_BYTES, FREE_SPACE_RESERVE_BYTES - 1);
+    assert_eq!(at_ceiling.write(1), MachineWriteVerdict::StorageFull);
+    assert_eq!(at_ceiling.low_disk_steps_run(), 1, "the ceiling must not skip the step");
 }

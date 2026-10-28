@@ -32,3 +32,21 @@ fn port_072_enter_on_the_branch_prefix_opens_an_editor_and_escape_returns_to_the
         Some(json!("agent/"))
     );
 }
+
+/// REQ: F-007, PORT:ilium-client/src/keys.rs::git_text_setting_opens_prompt_and_returns_to_git_tab
+#[test]
+fn port_072_a_submitted_branch_prefix_is_stored_on_the_git_tab() {
+    let mut host = client_host();
+    let page = ViewTarget::SettingsPage("git".to_string());
+    host.send_action(
+        page,
+        "branch_prefix",
+        ilium_plugin_sdk::types::ActionKind::Submitted,
+        ilium_plugin_sdk::types::ActionValue::Text("feat/".to_string()),
+    );
+    host.settle();
+    assert_eq!(
+        host.kernel_settings().get("git", "branch_prefix"),
+        Some(json!("feat/"))
+    );
+}

@@ -297,3 +297,148 @@ fn port_cost_tracker_spend_points_feed_the_burn_rate_and_sparkline_window() {
     assert!((cells.iter().filter_map(Value::as_f64).sum::<f64>() - 1.5).abs() < 1e-9);
     assert!(cells[0].as_f64().unwrap_or(0.0) > 0.0 && cells[3].as_f64().unwrap_or(0.0) > 0.0);
 }
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::a_reported_total_wins_when_larger_and_clears_the_lower_bound
+#[test]
+fn port_cost_tracker_priced_total_wins_over_a_smaller_reported_total() {
+    let stats = json!({ "usage": [usage("claude-haiku-4-5", 1_000_000, 0)], "reported_usd": 0.5 });
+    let cost = pane_cost(stats, json!({}), 0);
+    assert!(near(&cost["usd"], 1.0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::budget_calibration_flags_agents_over_budget
+#[test]
+fn port_cost_tracker_budget_calibration_leaves_an_agent_under_budget_unflagged() {
+    let settings = json!({ "calibration": "budget", "budget_usd": 2.0 });
+    let panes = json!({ "first": { "usage": [usage("claude-haiku-4-5", 1_000_000, 0)] } });
+    let reply = overlay(settings, panes);
+    assert_eq!(reply["rows"]["first"]["is_over_budget"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::changing_the_metric_recomputes_panes_that_were_already_derived
+#[test]
+fn port_cost_tracker_switching_back_to_dollars_drops_the_quota_amount() {
+    let store = json!({ "first": quota_stats(&[(0, 9.0)], "primary") });
+    let ticks = json!([
+        { "settings": { "calibration": "fixed_bands", "metric": "quota" }, "store": store.clone() },
+        { "settings": { "calibration": "fixed_bands", "metric": "dollars" }, "store": store },
+    ]);
+    let reply = client(
+        "tracker.settle",
+        json!({ "ticks": ticks, "agents": ["first"] }),
+    );
+    let overlays = reply["overlays"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlays[1]["changed"], json!(true));
+    assert_eq!(overlays[1]["rows"]["first"]["amount"], json!(0.0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::disabled_settings_track_nothing
+#[test]
+fn port_cost_tracker_disabled_meter_ignores_priced_usage() {
+    let reply = client(
+        "tracker.settle",
+        json!({ "ticks": [{ "settings": { "meter": { "enabled": false } }, "store": { "first": { "usage": [usage("claude-haiku-4-5", 1_000_000, 0)] } } }], "agents": ["first"] }),
+    );
+    assert_eq!(reply["overlays"][0]["changed"], json!(false));
+    assert!(reply["overlays"][0]["pane_cost"]["first"].is_null());
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::invalidated_transcript_cache_removes_previously_derived_costs
+#[test]
+fn port_cost_tracker_quota_pane_cost_reports_quota_availability() {
+    let reply = client(
+        "tracker.settle",
+        json!({ "ticks": [{ "settings": quota_settings(), "store": { "first": quota_stats(&[(0, 9.0)], "primary") } }], "agents": ["first"] }),
+    );
+    assert_eq!(reply["overlays"][0]["pane_cost"]["first"]["has_quota"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::overlay_rolls_group_totals_up_and_keeps_loading_agents_unrated
+#[test]
+fn port_cost_tracker_group_row_is_absent_when_group_totals_are_off() {
+    let reply = overlay(
+        json!({ "calibration": "fixed_bands" }),
+        json!({ "first": { "usage": [usage("claude-haiku-4-5", 6_000_000, 0)] } }),
+    );
+    assert!(reply["rows"]["project"].is_null());
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::prices_models_and_marks_unknown_ones_as_a_lower_bound
+#[test]
+fn port_cost_tracker_fully_priced_pane_is_not_a_lower_bound() {
+    let stats = json!({ "usage": [usage("claude-haiku-4-5", 1_000_000, 0)] });
+    let cost = pane_cost(stats, json!({}), 0);
+    assert_eq!(cost["is_lower_bound"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::quota_budget_is_a_share_of_the_window
+#[test]
+fn port_cost_tracker_quota_under_the_window_share_is_not_over_budget() {
+    let mut settings = quota_settings();
+    settings["calibration"] = json!("budget");
+    settings["quota_budget_percent"] = json!(5.0);
+    let reply = overlay(
+        settings,
+        json!({ "first": quota_stats(&[(0, 4.0)], "primary") }),
+    );
+    assert_eq!(reply["rows"]["first"]["is_over_budget"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::quota_metric_sums_the_chosen_window_and_drives_burn_and_sparkline
+#[test]
+fn port_cost_tracker_quota_burn_is_zero_when_the_last_quarter_hour_is_empty() {
+    let now = 1_000 * MINUTE;
+    let stats = quota_stats(&[(now - 50 * MINUTE, 1.5)], "primary");
+    let cost = pane_cost(stats, quota_settings(), now);
+    assert!(near(&cost["quota_burn_per_hour"], 0.0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::quota_overlay_rates_codex_agents_and_leaves_claude_agents_unavailable
+#[test]
+fn port_cost_tracker_codex_agent_with_quota_is_available() {
+    let mut settings = quota_settings();
+    settings["group_totals"] = json!({ "enabled": true });
+    let panes = json!({ "first": quota_stats(&[(0, 9.0)], "primary") });
+    let reply = overlay(settings, panes);
+    assert_eq!(reply["rows"]["first"]["is_unavailable"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::quota_spike_needs_the_quota_floor_not_the_dollar_one
+#[test]
+fn port_cost_tracker_empty_quota_history_never_spikes() {
+    let now = 1_000 * MINUTE;
+    let stats = json!({ "usage": [], "quota": [] });
+    let mut settings = quota_settings();
+    settings["sparkline_window_minutes"] = json!(360);
+    assert_eq!(pane_cost(stats, settings, now)["is_spike"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::refresh_planning_respects_cadence_and_the_worker_cap
+#[test]
+fn port_cost_tracker_no_panes_plans_no_refreshes() {
+    let reply = client(
+        "tracker.plan-refreshes",
+        json!({ "panes": [], "script": [{ "running_workers": 0, "at_secs": 0 }] }),
+    );
+    assert_eq!(reply["plans"][0], json!([]));
+}
+
+/// REQ: PORT:ilium-client/src/cost_tracker.rs::spend_points_feed_the_burn_rate_and_sparkline_window
+#[test]
+fn port_cost_tracker_spend_older_than_the_sparkline_window_is_left_out() {
+    let now = 1_000 * MINUTE;
+    let stats = json!({
+        "usage": [usage("claude-haiku-4-5", 1_500_000, 0)],
+        "spend": [
+            { "minute_ms": now - 5 * MINUTE, "model": "claude-haiku-4-5", "input": 1_000_000 },
+            { "minute_ms": now - 50 * MINUTE, "model": "claude-haiku-4-5", "input": 500_000 },
+        ],
+    });
+    let cost = pane_cost(
+        stats,
+        json!({ "sparkline_window_minutes": 10, "sparkline_cells": 4 }),
+        now,
+    );
+    let cells = cost["spark_cells"].as_array().cloned().unwrap_or_default();
+    assert!((cells.iter().filter_map(Value::as_f64).sum::<f64>() - 1.0).abs() < 1e-9);
+}

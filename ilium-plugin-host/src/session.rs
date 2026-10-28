@@ -24,14 +24,40 @@ pub struct SessionLimits {
 impl Default for SessionLimits {
     /// The documented defaults.
     fn default() -> SessionLimits {
-        unimplemented!("host::session::SessionLimits::default")
+        SessionLimits {
+            session_memory_mib: 1_024,
+            session_helpers: 16,
+            session_processes: 16,
+            session_http_streams: 64,
+            session_decorations: 65_536,
+            session_pending_requests: 4_096,
+            session_key_grabs: 32,
+            // Assumption: the manual gives no number for virtual children per session.
+            session_children: 256,
+        }
     }
 }
 
 impl SessionLimits {
     /// The defaults overridden by the user's `(key, value)` settings; higher values are clamped.
-    pub fn from_user(_settings: &[(&str, u64)]) -> SessionLimits {
-        unimplemented!("host::session::SessionLimits::from_user")
+    pub fn from_user(settings: &[(&str, u64)]) -> SessionLimits {
+        let mut limits = SessionLimits::default();
+        for (key, value) in settings {
+            // Zero means "not set"; values above the default are clamped to it (HST-406, LIF-143).
+            if *value == 0 {
+                continue;
+            }
+            let field = match *key {
+                "session_memory_mib" => &mut limits.session_memory_mib,
+                "session_helpers" => &mut limits.session_helpers,
+                "session_processes" => &mut limits.session_processes,
+                "session_http_streams" => &mut limits.session_http_streams,
+                "session_decorations" => &mut limits.session_decorations,
+                _ => continue,
+            };
+            *field = (*field).min(*value);
+        }
+        limits
     }
 }
 

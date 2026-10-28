@@ -119,3 +119,57 @@ fn broadcast_tally_counts_skips_apart_from_recipients() {
     assert_eq!(totals["queued"], 0);
     assert_eq!(totals["failed"], 0);
 }
+
+/// REQ: PORT:ilium/src/broadcast.rs::message_words_join_and_stdin_and_line_endings_normalise
+#[test]
+fn broadcast_stdin_trailing_newlines_are_dropped_but_inner_blank_lines_kept() {
+    let (mut host, _, _) = fleet();
+    run_cli(&mut host, &["broadcast", "-"], b"first\n\nsecond\n\n\n");
+    let inputs = sent_inputs(&host);
+    assert!(!inputs.is_empty());
+    assert!(inputs.iter().all(|s| s.text == "first\n\nsecond"));
+}
+
+/// REQ: PORT:ilium/src/broadcast.rs::a_message_or_file_is_required_and_selection_flags_parse
+#[test]
+fn broadcast_dry_run_with_selection_flags_sends_nothing() {
+    let (mut host, _, _) = fleet();
+    let (_, _, exit) = run_cli(
+        &mut host,
+        &[
+            "broadcast",
+            "--dry-run",
+            "--agent",
+            "codex",
+            "--state",
+            "idle,working",
+            "hello",
+        ],
+        b"",
+    );
+    assert_ne!(exit, Some(2), "the selection flags must parse");
+    assert!(sent_inputs(&host).is_empty());
+}
+
+/// REQ: PORT:ilium/src/broadcast.rs::when_idle_queues_only_for_busy_agents
+#[test]
+fn broadcast_when_idle_never_sends_immediately_to_the_busy_agent() {
+    let (mut host, working, _) = fleet();
+    run_cli(&mut host, &["broadcast", "--when-idle", "hello"], b"");
+    assert!(sent_panes(&host).iter().all(|pane| pane.0 != working));
+}
+
+/// REQ: PORT:ilium/src/broadcast.rs::tally_counts_skips_apart_from_recipients
+#[test]
+fn broadcast_tally_recipients_exclude_only_skipped_results() {
+    let (mut host, _, _) = fleet();
+    let (stdout, _, _) = run_cli(&mut host, &["broadcast", "hello"], b"");
+    let all = records(&stdout);
+    let results = of_type(&all, "result");
+    let non_skipped = results
+        .iter()
+        .filter(|r| r["outcome"].as_str() != Some("skipped"))
+        .count();
+    let totals = summary(&all);
+    assert_eq!(totals["recipients"].as_u64(), Some(non_skipped as u64));
+}

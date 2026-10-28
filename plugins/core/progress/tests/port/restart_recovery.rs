@@ -42,3 +42,18 @@ pub fn feed(host: &mut FakeHost, command: &str, outputs: &[String]) {
         expect_probe(host, command, output);
     }
 }
+
+/// REQ: PORT:ilium-server/tests/progress_restart_recovery.rs::monitor_survives_server_restart_and_keeps_observing
+#[test]
+fn port_059_the_restored_monitor_keeps_the_job_identity_of_its_last_report() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "Working"), &[]);
+    let state = host
+        .deactivate(DeactivationReason::Shutdown)
+        .expect("state");
+    host.restart_with(state);
+    host.settle();
+    let record = status(&mut host, pane);
+    assert_eq!(record["monitors"][0]["report"]["job_id"], JOB);
+    assert_eq!(record["monitor_count"], 1);
+}

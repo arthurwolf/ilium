@@ -2,6 +2,9 @@
 //! contents (HST-960), cross-bucket consistency (HST-961), archive modes and location (HST-962) and
 //! the data-version check on restore (HST-963).
 
+use ilium_plugin_api::Tier;
+use ilium_plugin_host::trust::restored_store_without_mac;
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-plugin-files.md";
@@ -23,7 +26,13 @@ fn hst_959_a_restored_trust_json_is_not_trusted_on_its_own() {
 /// REQ: HST-959
 #[test]
 fn hst_959_without_a_verifiable_mac_t2_and_t3_plugins_are_refused_as_store_tampered() {
-    unimplemented!("ilium_plugin_host::trust::restored_store_without_mac")
+    for tier in [Tier::T2, Tier::T3] {
+        let outcome = restored_store_without_mac(tier, "20300102-030405");
+        assert_eq!(outcome.refused_code, Some("trust.store-tampered"));
+        assert_eq!(outcome.kept_as, "trust.json.tampered-20300102-030405");
+        assert!(outcome.message.contains("ilium plugin trust add"));
+    }
+    assert_eq!(restored_store_without_mac(Tier::T1, "20300102-030405").refused_code, None);
 }
 
 /// REQ: HST-960

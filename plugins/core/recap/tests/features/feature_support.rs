@@ -4,7 +4,7 @@
 
 use ilium_plugin_core_recap::RecapClient;
 use ilium_plugin_sdk::testing::{manual, FakeHost, TreeNode};
-use ilium_plugin_sdk::types::NodeClass;
+use ilium_plugin_sdk::types::{NodeClass, RequestRef};
 use serde_json::Value;
 
 use crate::common::manifest_path;
@@ -135,36 +135,89 @@ pub struct ScreenRequest {
     pub visible_only: bool,
 }
 
-/// Host hooks only the feature tests use. Implemented for `FakeHost` with skeleton bodies.
+/// Host hooks only the feature tests use. Implemented for `FakeHost`.
 pub trait RecapFeatureHostExt {
     /// Answers the next client request of `kind` with `reply_json`; `None` when none is pending.
-    fn answer_client_request(&mut self, _kind: &str, _reply_json: &str) -> Option<String> {
-        unimplemented!("recap.answer-client-request")
-    }
+    fn answer_client_request(&mut self, kind: &str, reply_json: &str) -> Option<String>;
     /// Leaves every client request unanswered so timeouts apply.
-    fn leave_client_requests_unanswered(&mut self) {
-        unimplemented!("recap.leave-client-requests-unanswered")
-    }
+    fn leave_client_requests_unanswered(&mut self);
     /// Cancels the job currently running.
-    fn cancel_current_job(&mut self) {
-        unimplemented!("recap.cancel-current-job")
-    }
+    fn cancel_current_job(&mut self);
     /// Scripts the text of the next inference answer.
-    fn set_inference_answer(&mut self, _answer: String) {
-        unimplemented!("recap.set-inference-answer")
-    }
+    fn set_inference_answer(&mut self, answer: String);
     /// Wait budgets (ms) of the inference calls made.
-    fn inference_wait_ms(&self) -> Vec<u64> {
-        unimplemented!("recap.inference-wait-ms")
-    }
+    fn inference_wait_ms(&mut self) -> Vec<u64>;
     /// Progress values the job reported.
-    fn reported_progress(&self) -> Vec<f64> {
-        unimplemented!("recap.reported-progress")
-    }
+    fn reported_progress(&mut self) -> Vec<f64>;
     /// Screen read requests, in order.
-    fn screen_requests(&self) -> Vec<ScreenRequest> {
-        unimplemented!("recap.screen-requests")
-    }
+    fn screen_requests(&mut self) -> Vec<ScreenRequest>;
 }
 
-impl RecapFeatureHostExt for FakeHost {}
+impl RecapFeatureHostExt for FakeHost {
+    fn answer_client_request(&mut self, kind: &str, reply_json: &str) -> Option<String> {
+        let answered: Vec<_> = self
+            .client_requests()
+            .responses()
+            .into_iter()
+            .map(|response| response.call)
+            .collect();
+        let pending = self.client_requests().sent().into_iter().find(|sent| {
+            let call = match &sent.request {
+                RequestRef::Submission(correlation) => *correlation,
+                RequestRef::Call(id) => id.0,
+            };
+            sent.kind == kind && !answered.contains(&call)
+        })?;
+        self.client_requests()
+            .answer(pending.request, Ok(reply_json.to_string()));
+        self.settle();
+        Some(reply_json.to_string())
+    }
+
+    /// The fake client never answers on its own; this makes the test fail if an answer exists already.
+    fn leave_client_requests_unanswered(&mut self) {
+        let answers = self.client_requests().responses().len();
+        assert_eq!(answers, 0, "a client request was answered although the test left them open");
+    }
+
+    fn cancel_current_job(&mut self) {
+        self.jobs().request_cancel();
+    }
+
+    fn set_inference_answer(&mut self, answer: String) {
+        self.inference().reply_text(&answer);
+    }
+
+    /// The request record carries no wait budget; the plugin reports the budgets it passed.
+    fn inference_wait_ms(&mut self) -> Vec<u64> {
+        crate::host_ext::harness_call(self, "reads", serde_json::json!({}))["inference_wait_ms"]
+            .as_array()
+            .map(|waits| waits.iter().filter_map(serde_json::Value::as_u64).collect())
+            .unwrap_or_default()
+    }
+
+    fn reported_progress(&mut self) -> Vec<f64> {
+        self.jobs()
+            .reported_progress()
+            .into_iter()
+            .map(f64::from)
+            .collect()
+    }
+
+    fn screen_requests(&mut self) -> Vec<ScreenRequest> {
+        crate::host_ext::harness_call(self, "reads", serde_json::json!({}))["screen_requests"]
+            .as_array()
+            .map(|requests| {
+                requests
+                    .iter()
+                    .map(|request| ScreenRequest {
+                        pane: request["pane"].as_u64().unwrap_or_default(),
+                        rows: u16::try_from(request["rows"].as_u64().unwrap_or_default())
+                            .unwrap_or(u16::MAX),
+                        visible_only: request["visible_only"].as_bool().unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}

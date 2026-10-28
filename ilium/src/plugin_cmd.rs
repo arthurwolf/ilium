@@ -1,8 +1,15 @@
 //! `ilium plugin ...` forwarding and the plugin start-mode switches (reference-cli.md).
 //! Skeleton: not wired into clap yet, so `ilium --help` and the existing CLI tests stay unchanged.
 
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use ilium_plugin_api::Platform;
 use ilium_plugin_host::cli::CliEnv;
 use ilium_plugin_host::lifecycle::StartMode;
+use ilium_plugin_host::registry_client::{FetchError, Fetcher};
 
 /// The environment variable that starts only core plugins.
 pub const SAFE_PLUGINS_ENV: &str = "ILIUM_SAFE_PLUGINS";
@@ -12,26 +19,101 @@ pub const NO_PLUGINS_ENV: &str = "ILIUM_NO_PLUGINS";
 /// Decides the start mode from the flags and environment values (`--no-plugins` beats
 /// `--safe-plugins`; a variable counts as set when it is non-empty and not `0`).
 pub fn parse_start_mode(
-    _safe_plugins_flag: bool,
-    _no_plugins_flag: bool,
-    _safe_plugins_env: Option<&str>,
-    _no_plugins_env: Option<&str>,
+    safe_plugins_flag: bool,
+    no_plugins_flag: bool,
+    safe_plugins_env: Option<&str>,
+    no_plugins_env: Option<&str>,
 ) -> StartMode {
-    unimplemented!("cli::plugin_cmd::parse_start_mode")
+    fn is_set(value: Option<&str>) -> bool {
+        value.is_some_and(|text| !text.is_empty() && text != "0")
+    }
+    if no_plugins_flag || is_set(no_plugins_env) {
+        StartMode::NoPlugins
+    } else if safe_plugins_flag || is_set(safe_plugins_env) {
+        StartMode::SafePlugins
+    } else {
+        StartMode::Normal
+    }
+}
+
+/// Fetcher used until an HTTP client is wired in: every request reports the network as
+/// unreachable, so registry commands fall back to the offline cache.
+struct UnreachableFetcher;
+
+impl Fetcher for UnreachableFetcher {
+    fn get(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
+        Err(FetchError::Unreachable)
+    }
+}
+
+fn current_platform() -> Platform {
+    if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else if cfg!(target_os = "macos") {
+        Platform::MacOs
+    } else {
+        Platform::Linux
+    }
 }
 
 /// The real environment for a command: directories, working directory, clock and fetcher.
 pub fn real_cli_env() -> CliEnv {
-    unimplemented!("cli::plugin_cmd::real_cli_env")
+    let project_dirs = directories::ProjectDirs::from("", "", "ilium");
+    let fallback = std::env::temp_dir().join("ilium");
+    let config_dir = project_dirs
+        .as_ref()
+        .map_or_else(|| fallback.join("config"), |dirs| dirs.config_dir().to_path_buf());
+    let data_dir = project_dirs
+        .as_ref()
+        .map_or_else(|| fallback.join("data"), |dirs| dirs.data_dir().to_path_buf());
+    let state_dir = project_dirs.as_ref().map_or_else(
+        || fallback.join("state"),
+        |dirs| {
+            dirs.state_dir()
+                .unwrap_or_else(|| dirs.data_local_dir())
+                .to_path_buf()
+        },
+    );
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let is_ci = std::env::var("CI").is_ok_and(|value| !value.is_empty() && value != "0");
+    let mut environment = CliEnv::new(
+        data_dir,
+        state_dir,
+        config_dir,
+        cwd,
+        SystemTime::now(),
+        is_ci,
+        Arc::new(UnreachableFetcher),
+    );
+    environment.platform = current_platform();
+    for (name, value) in std::env::vars() {
+        if name.starts_with("ILIUM_") {
+            environment.env.insert(name, value);
+        }
+    }
+    environment
 }
 
 /// Runs `ilium plugin <args...>`, prints JSONL to stdout and text to stderr, returns the exit code.
 pub fn run_plugin_command(args: &[String]) -> i32 {
     let output = ilium_plugin_host::cli::run(args, &real_cli_env());
-    unimplemented!(
-        "cli::plugin_cmd::run_plugin_command: print output ({})",
-        output.exit_code
-    )
+    let mut stdout = std::io::stdout().lock();
+    let printed = if output.stdout_raw.is_empty() {
+        stdout.write_all(output.stdout_text.as_bytes())
+    } else {
+        stdout.write_all(output.stdout_raw.as_bytes())
+    };
+    let flushed = printed.and_then(|()| stdout.flush());
+    if let Err(error) = flushed {
+        tracing::warn!("ilium plugin: writing stdout failed: {error}");
+    }
+    if !output.stderr.is_empty() {
+        let mut stderr = std::io::stderr().lock();
+        if let Err(error) = stderr.write_all(output.stderr.as_bytes()) {
+            tracing::warn!("ilium plugin: writing stderr failed: {error}");
+        }
+    }
+    output.exit_code
 }
 
 #[cfg(test)]

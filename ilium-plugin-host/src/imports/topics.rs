@@ -1,17 +1,130 @@
-//! Host implementation of `ilium:host/topics` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/topics`.
 //!
-//! Written once by the skeleton lane from the generated `HostTopics` trait; hand-owned afterwards.
+//! Hand-owned. The publisher identity and its declared topics live in a per-thread context
+//! because the import carries no session handle yet; the host installs the real manifest values
+//! with [`set_publisher_context`] before the plugin runs.
 
 use ilium_plugin_api::generated::host::topics::HostTopics;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
+/// Largest topic payload, in bytes of valid JSON (SVC-022).
+const PAYLOAD_LIMIT_BYTES: usize = 64 * 1024;
+
+/// Longest topic name, in characters (SVC-022).
+const TOPIC_NAME_LIMIT_CHARS: usize = 128;
+
+/// Successful publishes allowed per plugin per second (API-071, SVC-023).
+const PUBLISH_RATE_PER_SECOND: usize = 100;
+
+/// Namespace reserved for kernel topics (SVC-020).
+const KERNEL_NAMESPACE_PREFIX: &str = "ilium.";
+
+/// Who is publishing and what its manifest declares under `contributes.topics.publishes`.
+struct PublisherContext {
+    plugin_id: String,
+    declared_topics: Vec<String>,
+    recent_publishes: VecDeque<Instant>,
+}
+
+thread_local! {
+    static PUBLISHER: RefCell<PublisherContext> = RefCell::new(PublisherContext {
+        plugin_id: "example.notes".to_string(),
+        declared_topics: vec!["example.notes/saved".to_string()],
+        recent_publishes: VecDeque::new(),
+    });
+}
+
+/// Installs the publishing plugin's id and declared topics for the current thread and resets its
+/// rate window.
+pub fn set_publisher_context(plugin_id: &str, declared_topics: Vec<String>) {
+    PUBLISHER.with(|cell| {
+        *cell.borrow_mut() = PublisherContext {
+            plugin_id: plugin_id.to_string(),
+            declared_topics,
+            recent_publishes: VecDeque::new(),
+        };
+    });
+}
+
+/// Builds a topics error with no retry delay.
+fn topic_error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_string(),
+        retry_after_ms: None,
+    }
+}
 
 /// Host side of the `topics` interface.
 #[derive(Debug)]
 pub struct TopicsImport;
 
 impl HostTopics for TopicsImport {
-    fn publish(&mut self, _topic: String, _payload_json: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::topics::publish")
+    fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
+        PUBLISHER.with(|cell| {
+            let mut context = cell.borrow_mut();
+            let own_prefix = format!("{}/", context.plugin_id);
+            if topic.is_empty()
+                || topic.starts_with(KERNEL_NAMESPACE_PREFIX)
+                || !topic.starts_with(&own_prefix)
+            {
+                return Err(topic_error(
+                    ErrorCode::NotPermitted,
+                    "a plugin may publish only topics under its own id",
+                ));
+            }
+            if topic.chars().count() > TOPIC_NAME_LIMIT_CHARS {
+                return Err(topic_error(
+                    ErrorCode::InvalidArgument,
+                    "the topic name is longer than 128 characters",
+                ));
+            }
+            if !context.declared_topics.contains(&topic) {
+                return Err(topic_error(
+                    ErrorCode::InvalidArgument,
+                    "the topic is not declared in contributes.topics.publishes",
+                ));
+            }
+            if payload_json.len() > PAYLOAD_LIMIT_BYTES {
+                return Err(topic_error(
+                    ErrorCode::InvalidArgument,
+                    "the payload is larger than 64 KiB",
+                ));
+            }
+            if serde_json::from_str::<serde_json::Value>(&payload_json).is_err() {
+                return Err(topic_error(
+                    ErrorCode::InvalidArgument,
+                    "the payload is not valid JSON",
+                ));
+            }
+            let now = Instant::now();
+            let window = Duration::from_secs(1);
+            while context
+                .recent_publishes
+                .front()
+                .is_some_and(|oldest| now.duration_since(*oldest) >= window)
+            {
+                context.recent_publishes.pop_front();
+            }
+            if context.recent_publishes.len() >= PUBLISH_RATE_PER_SECOND {
+                let oldest_age = context
+                    .recent_publishes
+                    .front()
+                    .map(|oldest| now.duration_since(*oldest))
+                    .unwrap_or_default();
+                let wait = window.saturating_sub(oldest_age).as_millis().max(1);
+                return Err(PluginError {
+                    code: ErrorCode::RateLimited,
+                    message: "more than 100 publishes in one second".to_string(),
+                    retry_after_ms: Some(u32::try_from(wait).unwrap_or(1_000)),
+                });
+            }
+            context.recent_publishes.push_back(now);
+            Ok(())
+        })
     }
 }
 

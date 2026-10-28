@@ -85,3 +85,36 @@ fn abi_078_host_rollback_leaves_plugin_state_and_refused_plugin_loads_again() {
         "the plugin refused after the upgrade must load again unchanged after the rollback"
     );
 }
+
+/// REQ: ABI-077
+#[test]
+fn abi_077_listing_gives_the_refusal_code_and_declared_api_of_a_refused_plugin() {
+    let older_api = ApiVersion {
+        major: CURRENT.major,
+        minor: CURRENT.minor.saturating_sub(1),
+        patch: 0,
+    };
+    let install_set = vec![installed(
+        "refused-minor",
+        older_api,
+        Some("abi.minor-unsupported"),
+    )];
+    let rows = refusal_listing(&install_set);
+    assert_eq!(rows.len(), 1, "one refused plugin must give one listing row");
+    assert_eq!(rows[0].plugin, "refused-minor");
+    assert_eq!(rows[0].code, "abi.minor-unsupported");
+    assert_eq!(rows[0].declared_api.to_string(), older_api.to_string());
+}
+
+/// REQ: ABI-078
+#[test]
+fn abi_078_upgrading_the_host_alone_changes_no_plugin_file_grant_or_setting() {
+    let mut installation = Installation::sample_mixed();
+    let before = installation.snapshot();
+    installation.upgrade_host(CURRENT);
+    assert_eq!(
+        installation.snapshot(),
+        before,
+        "an upgrade by itself must not rewrite plugin files, grants or stored settings"
+    );
+}

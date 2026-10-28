@@ -130,3 +130,96 @@ fn rwrk_cancellation_completes_even_when_the_ui_event_queue_is_full() {
         "no job stays active after cancellation"
     );
 }
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::progress_overflow_never_rewrites_a_committed_success_into_failure
+#[test]
+fn rwrk_progress_overflow_keeps_a_failure_unchanged_when_the_queue_did_not_overflow() {
+    let host = client_host();
+    assert_eq!(
+        host.worker_annotate_progress_overflow(Err("compaction cancelled".to_string()), false),
+        Err("compaction cancelled".to_string())
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::payload_too_large_asks_for_a_smaller_chunk
+#[test]
+fn rwrk_payload_too_large_is_context_too_long_whatever_the_message() {
+    let host = client_host();
+    assert_eq!(
+        host.worker_classify_inference_error(json!({"http": {"status": 413, "message": ""}})),
+        "context-too-long"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::bad_request_about_context_length_asks_for_a_smaller_chunk
+#[test]
+fn rwrk_bad_request_saying_the_prompt_is_too_long_asks_for_a_smaller_chunk() {
+    let host = client_host();
+    assert_eq!(
+        host.worker_classify_inference_error(
+            json!({"http": {"status": 400, "message": "prompt is too long"}})
+        ),
+        "context-too-long"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::other_failures_stay_plain_failures
+#[test]
+fn rwrk_server_error_stays_a_plain_failure() {
+    let host = client_host();
+    assert_eq!(
+        host.worker_classify_inference_error(json!({"http": {"status": 500, "message": "internal"}})),
+        "failed"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::pause_wait_returns_when_cancelled
+#[test]
+fn rwrk_cancelled_pause_wait_sends_no_interrupt() {
+    let host = client_host();
+    let outcome = host.worker_await_pause(
+        "claude",
+        "/nonexistent/transcript.jsonl",
+        Duration::from_secs(60),
+        Duration::from_secs(60),
+        true,
+    );
+    assert_eq!(outcome.interrupts, 0);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::pause_wait_requests_one_interrupt_then_gives_up
+#[test]
+fn rwrk_pause_wait_never_sends_more_than_one_interrupt() {
+    let host = client_host();
+    let outcome = host.worker_await_pause(
+        "claude",
+        "/nonexistent/transcript.jsonl",
+        Duration::ZERO,
+        Duration::from_millis(600),
+        true,
+    );
+    assert!(outcome.interrupts <= 1);
+    assert!(outcome.result.is_err());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::pause_probe_admission_covers_tail_parsing_peak
+#[test]
+fn rwrk_pause_probe_admission_is_bounded() {
+    let host = client_host();
+    assert!(host.worker_pause_probe_cost_input_bytes() <= 1024 * 1024 * 1024);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::cancellation_completes_even_when_the_ui_event_queue_is_full
+#[test]
+fn rwrk_repeated_cancel_is_harmless() {
+    let mut host = client_host();
+    host.worker_fill_event_queue();
+    host.worker_start_pause_job(
+        "claude",
+        "/nonexistent/remote-compaction-transcript",
+        Duration::ZERO,
+    );
+    host.worker_cancel();
+    host.worker_cancel();
+    assert!(host.worker_cancel_observed(Duration::from_secs(2)));
+}

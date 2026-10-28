@@ -103,3 +103,33 @@ fn port_icon_cycle_status_icon_controls_step_both_ways_wrap_through_the_suggesti
         r####"{"index": 0, "picker_open": true}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::icon_arrows_cycle_the_full_catalog_in_both_directions
+#[test]
+fn port_icon_cycle_arrow_step_with_picker_open_moves_exactly_one_entry() {
+    check(
+        "icon-picker.cycle",
+        r####"{"from": "first", "step": 1, "picker_open": true}"####,
+        r####"{"lands_on": "second", "picker_open": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/mouse.rs::assignment_pointer_preserves_label_and_reverses_value_then_opens_full_catalog
+#[test]
+fn port_icon_cycle_right_click_on_the_label_keeps_the_glyph_and_closed_picker() {
+    check(
+        "icon-picker.pointer",
+        r####"{"part": "label", "button": "right", "start_index": 2}"####,
+        r####"{"index": 2, "picker_open": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/mouse.rs::status_icon_controls_step_in_both_directions_and_open_the_catalog
+#[test]
+fn port_icon_cycle_status_next_control_steps_forward_from_the_first_suggestion() {
+    check(
+        "icon-picker.status-controls",
+        r####"{"control": "next", "button": "left", "start_index": 0}"####,
+        r####"{"index": 1}"####,
+    );
+}

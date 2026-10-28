@@ -8,27 +8,36 @@ const RECLAIM_NOTICE_DAYS: u64 = 90;
 
 /// Whether a namespace is dormant at `now_day` (days since epoch).
 fn namespace_is_dormant(
-    _last_publish_day: u64,
-    _last_install_day: u64,
-    _maintained_statement_day: Option<u64>,
-    _now_day: u64,
+    last_publish_day: u64,
+    last_install_day: u64,
+    maintained_statement_day: Option<u64>,
+    now_day: u64,
 ) -> bool {
-    unimplemented!("dormant namespace detection")
+    // A maintained statement counts as activity: it restarts the 730-day clock.
+    let last_activity = last_publish_day
+        .max(last_install_day)
+        .max(maintained_statement_day.unwrap_or(0));
+    now_day.saturating_sub(last_activity) >= DORMANT_AFTER_DAYS
 }
 
 /// Whether a dormant namespace may be reassigned.
 fn namespace_may_be_reclaimed(
-    _dormant_days: u64,
-    _days_since_notice: Option<u64>,
-    _owner_replied: bool,
-    _versions_installed: bool,
+    dormant_days: u64,
+    days_since_notice: Option<u64>,
+    owner_replied: bool,
+    versions_installed: bool,
 ) -> bool {
-    unimplemented!("dormant namespace reclaim")
+    dormant_days >= DORMANT_AFTER_DAYS
+        && days_since_notice.is_some_and(|days| days >= RECLAIM_NOTICE_DAYS)
+        && !owner_replied
+        && !versions_installed
 }
 
 /// The client notice for a dormant namespace.
-fn dormant_notice(_last_publish: &str) -> String {
-    unimplemented!("dormant namespace notice")
+fn dormant_notice(last_publish: &str) -> String {
+    format!(
+        "This is a dormant namespace: its last publish was on {last_publish}. Installed versions keep working."
+    )
 }
 
 /// REQ: PKG-655
@@ -93,4 +102,22 @@ fn reclaim_requires_notice_wait_and_no_installs() {
 fn client_shows_dormant_notice_with_last_publish_date() {
     let notice = dormant_notice("2027-03-01");
     assert!(notice.contains("dormant namespace") && notice.contains("2027-03-01"));
+}
+
+/// REQ: PKG-656
+#[test]
+fn reclaim_is_refused_one_day_before_the_dormancy_threshold() {
+    assert!(!namespace_may_be_reclaimed(
+        DORMANT_AFTER_DAYS - 1,
+        Some(RECLAIM_NOTICE_DAYS),
+        false,
+        false
+    ));
+}
+
+/// REQ: PKG-657
+#[test]
+fn dormant_notice_never_says_the_namespace_is_blocked() {
+    let notice = dormant_notice("2027-03-01");
+    assert!(!notice.to_lowercase().contains("block"), "{notice}");
 }

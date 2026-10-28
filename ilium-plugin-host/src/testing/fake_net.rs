@@ -16,6 +16,11 @@ pub struct FakeResponse {
 }
 
 impl FakeResponse {
+    /// The declared size when set, else the length of the buffered body.
+    pub fn declared_or_buffered_size(&self) -> u64 {
+        self.size.unwrap_or(self.body.len() as u64)
+    }
+
     /// A 200 response with this body.
     pub fn ok(body: Vec<u8>) -> FakeResponse {
         FakeResponse {
@@ -169,6 +174,23 @@ impl FakeNet {
     /// Host names resolved so far, in order.
     pub fn resolutions(&self) -> Vec<String> {
         self.state().resolutions.clone()
+    }
+
+    /// The response served for an exact URL, if any.
+    pub fn response_for(&self, url: &str) -> Option<FakeResponse> {
+        self.state().responses.get(url).cloned()
+    }
+
+    /// Resolves a host name the way a client would, recording the lookup; the second and later
+    /// answers of a rebinding name differ from the first.
+    pub fn resolve(&self, host: &str) -> Vec<String> {
+        let mut state = self.state();
+        let seen_before = state.resolutions.iter().any(|resolved| resolved == host);
+        state.resolutions.push(host.to_owned());
+        if let Some((first, then)) = state.dns_rebinding.get(host) {
+            return if seen_before { then.clone() } else { first.clone() };
+        }
+        state.dns.get(host).cloned().unwrap_or_default()
     }
 
     /// How often a host name was resolved.

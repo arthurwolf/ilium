@@ -1174,3 +1174,35 @@ proptest! {
         prop_assert!(!has_log(&world, "extension.disabled"));
     }
 }
+
+/// REQ: HST-474
+#[test]
+fn hst_474_two_client_handlers_run_and_no_server_handler_is_listed() {
+    let mut world = ExtWorld::new();
+    let owner = owner_manifest_on(OWNER, "client", vec![hook_point("p", "observe")]);
+    assert_eq!(diag_code(&world.install(Tier::T3, owner, Vec::new())), "ok");
+    for name in ["com.example.cli", "com.example.cli2"] {
+        let client = contributor_manifest_on(
+            name,
+            "client",
+            vec![ext_handler(POINT, "x", 50, "h")],
+        );
+        assert_eq!(
+            diag_code(&world.install(Tier::T3, client, vec![("h".to_owned(), pass(1))])),
+            "ok"
+        );
+    }
+    let (outcome, _) = run_chain(&mut world, PAYLOAD);
+    assert!(matches!(outcome, Some(Outcome::Ok)));
+    assert_eq!(run_order(&world), vec!["com.example.cli", "com.example.cli2"]);
+}
+
+/// REQ: WIT:ilium:host/extensions.take-reply
+#[test]
+fn take_reply_for_an_unknown_request_id_is_none() {
+    let mut world = hook_world(
+        "transform",
+        vec![contrib("a", 1, replace(1, r#"{"text":"b","n":1}"#))],
+    );
+    assert!(world.take_reply(OWNER, RequestId(999_999)).is_none());
+}

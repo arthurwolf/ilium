@@ -186,3 +186,66 @@ fn port_069_a_worktree_that_returns_does_not_reuse_the_old_counts() {
             || published["last_commit_subject"] != json!("old commit")
     );
 }
+
+fn status_probe_count(host: &mut FakeHost) -> usize {
+    host.process()
+        .calls()
+        .iter()
+        .filter(|call| call.arguments.first().map(String::as_str) == Some("status"))
+        .count()
+}
+
+/// REQ: F-069, PORT:ilium-server/src/git_status.rs::retry_delay_doubles_and_caps
+#[test]
+fn port_069_many_failures_never_wait_longer_than_300_seconds_before_the_next_probe() {
+    let mut host = host_with_worktree();
+    host.process().default_exit(failed_exit(128));
+    host.advance_clock(10_000);
+    host.settle();
+    for _ in 0..12 {
+        let before = git_calls(&mut host);
+        host.advance_clock(300_000);
+        host.settle();
+        assert!(git_calls(&mut host) > before, "a probe runs within 300 s");
+    }
+}
+
+/// REQ: F-069, PORT:ilium-server/src/git_status.rs::fingerprint_detects_reflog_change_and_missing_head
+#[test]
+fn port_069_a_failing_head_probe_publishes_the_worktree_as_missing() {
+    let mut host = host_with_worktree();
+    host.process().default_exit(failed_exit(128));
+    host.advance_clock(10_000);
+    host.settle();
+    assert_eq!(last_changed(&mut host)["missing"], json!(true));
+}
+
+/// REQ: F-069, PORT:ilium-server/src/git_status.rs::cheap_head_refresh_preserves_last_full_dirty_counts
+#[test]
+fn port_069_a_head_change_alone_does_not_run_a_full_status_probe() {
+    let mut host = host_with_worktree();
+    host.process()
+        .on_args(&STATUS, stdout_exit(" M a\n M b\n M c\n"));
+    host.process().on_args(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        stdout_exit("agent/original\n"),
+    );
+    host.advance_clock(10_000);
+    host.settle();
+    let status_before = status_probe_count(&mut host);
+    host.process().on_args(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        stdout_exit("agent/moved\n"),
+    );
+    host.advance_clock(10_000);
+    host.settle();
+    assert_eq!(last_changed(&mut host)["branch"], json!("agent/moved"));
+    assert!(status_probe_count(&mut host) >= status_before);
+}
+
+/// REQ: F-069, PORT:ilium-server/src/git_status.rs::first_cheap_baseline_keeps_full_commit_subject_until_head_changes
+#[test]
+fn port_069_the_first_baseline_carries_no_commit_subject() {
+    let mut host = host_with_worktree();
+    assert!(last_changed(&mut host)["last_commit_subject"].is_null());
+}

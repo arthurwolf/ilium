@@ -42,3 +42,37 @@ fn api_087_host_writes_no_sdk_deprecation_record() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: API-085
+#[test]
+fn api_085_rust_sdk_ships_successor_in_the_marking_release() {
+    let page = manual_page("rust-sdk");
+    for phrase in [
+        "keeps its signature and behaviour until the removal minor ([API-083]), and ships its successor in the marking release ([API-085])",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: API-086
+#[test]
+fn api_086_removal_never_happens_in_a_patch_release() {
+    let page = manual_page("rust-sdk");
+    for phrase in [
+        "Removal happens only in the minor named in the mark, never in a patch",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: API-087
+#[test]
+fn api_087_only_wit_features_have_a_load_time_deprecated_record() {
+    let page = manual_page("reference-sdk-deprecation");
+    for phrase in [
+        "Only the `deprecated` record of",
+        "for WIT features exists at load time.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

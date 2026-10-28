@@ -71,3 +71,61 @@ fn port_value_icon_responsive_chrome_has_exact_forward_reverse_and_catalog_hits(
         r####"{"previous": "previous-choice", "next": "next-choice", "open": "open-choices", "value_left": "next-choice", "value_right": "previous-choice", "label": null}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/value_icon.rs::both_layouts_are_complete_and_reopened_picker_is_rejected
+#[test]
+fn port_value_icon_both_layouts_are_complete_and_reopened_picker_is_rejected_for_single_mode() {
+    check(
+        Place::Client,
+        "icon-picker.layout",
+        r####"{"modes": ["single"], "query": "", "selected_entry": 0}"####,
+        r####"{"complete": true, "reopen_rejected": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_icon.rs::icon_assignment_rows_render_exact_chrome_with_authored_glyphs_and_scroll
+#[test]
+fn port_value_icon_icon_assignment_rows_render_exact_chrome_with_authored_glyphs_and_scroll_clamped(
+) {
+    check(
+        Place::Client,
+        "icon-picker.rows",
+        r####"{"widths": [30], "scroll": [9]}"####,
+        r####"{"scroll_clamped": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_icon.rs::matching_search_reply_reaches_retained_picker_and_stale_revision_is_ignored
+#[test]
+fn port_value_icon_matching_search_reply_reaches_retained_picker_and_stale_revision_is_ignored_when_superseded(
+) {
+    check(
+        Place::Client,
+        "icon-picker.search",
+        r####"{"query": "rocket", "superseded_by": "planet"}"####,
+        r####"{"stale_ignored": true, "query": "planet", "status": ["searching", "browse"]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_icon.rs::real_settings_renderer_paints_layout_chrome_at_hit_geometry
+#[test]
+fn port_value_icon_real_settings_renderer_paints_layout_chrome_at_hit_geometry_clicks_painted_cells(
+) {
+    check(
+        Place::Client,
+        "icon-picker.rows",
+        r####"{"widths": [40, 80, 140], "click_painted_chrome": true}"####,
+        r####"{"click_hits_painted_chrome": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_icon.rs::responsive_chrome_has_exact_forward_reverse_and_catalog_hits
+#[test]
+fn port_value_icon_responsive_chrome_has_exact_forward_reverse_and_catalog_hits_at_narrow_width() {
+    check(
+        Place::Client,
+        "icon-picker.hits",
+        r####"{"width": 12}"####,
+        r####"{"catalog_hit_at_narrow_width": true}"####,
+    );
+}

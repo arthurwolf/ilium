@@ -435,3 +435,294 @@ fn port_fs_21_atomic_replacement_preserves_existing_file_permissions() {
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     assert_eq!(host.fs().mode(claude_file()), Some(0o640));
 }
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::install_reports_managed_and_replaces_old_copy
+#[test]
+fn port_fs_01b_status_moves_from_not_set_up_to_set_up_on_install() {
+    let mut host = server_host();
+    put(&mut host, claude_file(), "# Existing\n");
+    assert_eq!(
+        status_ok(&mut host, "progress", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    assert_eq!(status_ok(&mut host, "progress", CLAUDE_GLOBAL), "set-up");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::install_repairs_duplicate_managed_blocks_to_one_current_copy
+#[test]
+fn port_fs_02b_repeated_install_after_repair_is_byte_identical() {
+    let mut host = server_host();
+    let block =
+        "<!-- ilium-agent-feature: progress -->\nold\n<!-- /ilium-agent-feature: progress -->\n";
+    put(&mut host, claude_file(), &format!("{block}\n{block}"));
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    let first = claude_text(&mut host);
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("second install");
+    assert_eq!(claude_text(&mut host), first);
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::stale_managed_progress_copy_is_detected_and_replaced_in_place
+#[test]
+fn port_fs_03b_stale_codex_copy_does_not_make_the_claude_target_set_up() {
+    let mut host = server_host();
+    put(
+        &mut host,
+        codex_file(),
+        "<!-- ilium-agent-feature: progress -->\nold wording\n<!-- /ilium-agent-feature: progress -->\n",
+    );
+    assert_eq!(
+        status_ok(&mut host, "progress", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
+    assert_eq!(
+        status_ok(&mut host, "progress", CODEX_GLOBAL),
+        "update-required"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::progress_instruction_never_mentions_goals_pausing_or_resuming
+#[test]
+fn port_fs_04b_installing_progress_does_not_write_the_chatroom_block() {
+    let mut host = server_host();
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    let text = claude_text(&mut host);
+    assert!(!text.contains(CHATROOM_OPEN), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::progress_instruction_teaches_result_handling
+#[test]
+fn port_fs_05b_progress_instruction_names_the_clear_command_for_finished_monitors() {
+    let instruction = installed_progress_text();
+    assert!(instruction.contains("ilium progress clear"), "{instruction}");
+    assert!(instruction.contains("`job_id`"), "{instruction}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::every_provider_target_gets_the_same_progress_text
+#[test]
+fn port_fs_06b_installing_one_provider_leaves_the_other_untouched() {
+    let mut host = server_host();
+    install(&mut host, "progress", CODEX_GLOBAL).expect("codex");
+    assert_eq!(
+        status_ok(&mut host, "progress", CODEX_GLOBAL),
+        "set-up"
+    );
+    assert_eq!(
+        status_ok(&mut host, "progress", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::an_agents_file_symlinked_to_claude_stays_one_stable_shared_file
+#[test]
+fn port_fs_07b_the_agents_link_reads_the_same_text_as_the_claude_file() {
+    let mut host = project_host();
+    put(&mut host, project_claude_file(), "Keep this.\n");
+    host.fs()
+        .symlink(project_agents_file(), project_claude_file());
+    install(&mut host, "progress", CLAUDE_PROJECT).expect("install");
+    assert_eq!(
+        text_of(&mut host, project_agents_file()),
+        text_of(&mut host, project_claude_file())
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::uninstall_preserves_unmanaged_text
+#[test]
+fn port_fs_08b_removing_an_absent_block_is_a_no_op() {
+    let mut host = server_host();
+    put(&mut host, claude_file(), "Keep this.\n");
+    remove(&mut host, "chatroom", CLAUDE_GLOBAL).expect("remove is a no-op");
+    assert_eq!(claude_text(&mut host), "Keep this.\n");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::obsolete_unmanaged_instruction_does_not_satisfy_the_current_contract
+#[test]
+fn port_fs_09b_install_keeps_the_obsolete_unmanaged_line_beside_the_new_block() {
+    let mut host = server_host();
+    let obsolete = "Use ilium progress with an absolute-path command and clear it when finished.\n";
+    put(&mut host, claude_file(), obsolete);
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    let text = claude_text(&mut host);
+    assert!(text.contains(obsolete), "{text}");
+    assert_eq!(status_ok(&mut host, "progress", CLAUDE_GLOBAL), "set-up");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::detects_complete_current_unmanaged_instruction_without_claiming_ownership
+#[test]
+fn port_fs_10b_install_over_detected_unmanaged_text_adds_a_managed_block() {
+    let mut host = server_host();
+    let unmanaged = "The agent MUST NOT poll; Ilium is the sole recurring poller.\n";
+    put(&mut host, codex_file(), unmanaged);
+    install(&mut host, "progress", CODEX_GLOBAL).expect("install");
+    let text = text_of(&mut host, codex_file());
+    assert!(text.contains(unmanaged), "{text}");
+    assert!(block_of(&text, "progress").contains("--wait"));
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::detection_is_order_independent_but_requires_two_feature_specific_signals
+#[test]
+fn port_fs_11b_one_chatroom_signal_alone_is_not_enough() {
+    let mut host = server_host();
+    put(&mut host, claude_file(), "Use `ilium chat send` for updates.\n");
+    assert_eq!(
+        status_ok(&mut host, "chatroom", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::legacy_ilium_chatroom_block_is_managed_and_replaced
+#[test]
+fn port_fs_12b_legacy_chatroom_block_reads_as_set_up_after_replacement() {
+    let mut host = server_host();
+    put(
+        &mut host,
+        claude_file(),
+        "# Existing\n\n## Ilium Chatroom\n\n<!-- ilium-chatroom-guidance: v1 -->\n\nOld guidance.\n",
+    );
+    install(&mut host, "chatroom", CLAUDE_GLOBAL).expect("install");
+    assert_eq!(status_ok(&mut host, "chatroom", CLAUDE_GLOBAL), "set-up");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::replacing_legacy_chatroom_block_preserves_unheaded_user_text_after_it
+#[test]
+fn port_fs_13b_repeated_chatroom_install_keeps_the_user_note_unchanged() {
+    let mut host = server_host();
+    put(
+        &mut host,
+        claude_file(),
+        "# Existing\n\n## Ilium Chatroom\n\n<!-- ilium-chatroom-guidance: v1 -->\n\nOld guidance.\n\nKeep this unheaded user note.\n",
+    );
+    install(&mut host, "chatroom", CLAUDE_GLOBAL).expect("first install");
+    let first = claude_text(&mut host);
+    install(&mut host, "chatroom", CLAUDE_GLOBAL).expect("second install");
+    assert_eq!(claude_text(&mut host), first);
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::malformed_managed_marker_is_refused_without_changing_user_text
+#[test]
+fn port_fs_14b_malformed_marker_is_refused_in_the_codex_file_too() {
+    let mut host = server_host();
+    let original = "<!-- ilium-agent-feature: progress -->\nOld guidance.\n\n# Personal notes\nKeep this text.\n";
+    put(&mut host, codex_file(), original);
+    refused(&mut host, "progress", CODEX_GLOBAL);
+    assert_eq!(text_of(&mut host, codex_file()), original);
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::empty_managed_block_is_stale_and_repairable
+#[test]
+fn port_fs_15b_repaired_empty_block_carries_the_current_wait_instruction() {
+    let mut host = server_host();
+    put(
+        &mut host,
+        claude_file(),
+        "<!-- ilium-agent-feature: progress -->\n<!-- /ilium-agent-feature: progress -->\n",
+    );
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    let block = block_of(&claude_text(&mut host), "progress");
+    assert!(block.contains("ilium progress wait <monitor_id>"), "{block}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::future_managed_version_is_preserved_until_explicit_refresh
+#[test]
+fn port_fs_16b_installing_into_the_claude_file_leaves_the_newer_codex_copy_alone() {
+    let mut host = server_host();
+    let newer = concat!(
+        "<!-- ilium-agent-feature: progress version=99 -->\n",
+        "Future wording.\n",
+        "<!-- /ilium-agent-feature: progress -->\n",
+    );
+    put(&mut host, codex_file(), newer);
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("claude install");
+    assert_eq!(text_of(&mut host, codex_file()), newer);
+    assert_eq!(status_ok(&mut host, "progress", CODEX_GLOBAL), "newer");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::unsupported_version_syntax_is_refused_without_changing_the_file
+#[test]
+fn port_fs_17b_remove_refuses_unsupported_version_syntax_without_changing_the_file() {
+    let mut host = server_host();
+    let original = concat!(
+        "Keep this.\n",
+        "<!-- ilium-agent-feature: progress version=next -->\n",
+        "Owned-looking but ambiguous.\n",
+        "<!-- /ilium-agent-feature: progress -->\n",
+    );
+    put(&mut host, codex_file(), original);
+    assert_eq!(
+        remove(&mut host, "progress", CODEX_GLOBAL)
+            .expect_err("remove")
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(text_of(&mut host, codex_file()), original);
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::atomic_publish_refuses_a_concurrent_content_change
+#[test]
+fn port_fs_18b_retry_after_a_conflict_keeps_the_newer_user_contents() {
+    let mut host = server_host();
+    put(&mut host, codex_file(), "old contents\n");
+    host.fs()
+        .race_next_write(codex_file(), b"new user contents\n");
+    assert_eq!(
+        install(&mut host, "progress", CODEX_GLOBAL)
+            .expect_err("conflict")
+            .code,
+        ErrorCode::Conflict
+    );
+    install(&mut host, "progress", CODEX_GLOBAL).expect("retry");
+    let text = text_of(&mut host, codex_file());
+    assert!(text.starts_with("new user contents\n"), "{text}");
+    assert!(text.contains("ilium-agent-feature: progress"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::overlapping_feature_markers_are_refused_without_changing_user_text
+#[test]
+fn port_fs_19b_progress_status_is_refused_for_overlapping_markers_too() {
+    let mut host = server_host();
+    let original = concat!(
+        "<!-- ilium-agent-feature: chatroom -->\n",
+        "Read CHATROOM.md and use `ilium chat send`.\n",
+        "<!-- ilium-agent-feature: progress -->\n",
+        "Use `ilium progress set` and `ilium progress clear`.\n",
+        "<!-- /ilium-agent-feature: chatroom -->\n",
+        "<!-- /ilium-agent-feature: progress -->\n",
+    );
+    put(&mut host, claude_file(), original);
+    assert_eq!(
+        status_of(&mut host, "progress", CLAUDE_GLOBAL)
+            .expect_err("status")
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(claude_text(&mut host), original);
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::installing_through_a_symlink_preserves_the_symlink
+#[test]
+fn port_fs_20b_the_project_agents_path_reports_set_up_after_install_through_the_link() {
+    let mut host = project_host();
+    let actual = ilium_plugin_sdk::types::FsPath {
+        scope: "project".to_string(),
+        path: "actual.md".to_string(),
+    };
+    put(&mut host, actual.clone(), "Keep this.\n");
+    host.fs().symlink(project_claude_file(), actual);
+    install(&mut host, "progress", CLAUDE_PROJECT).expect("install");
+    assert_eq!(
+        status_ok(&mut host, "progress", CLAUDE_PROJECT),
+        "set-up"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_feature_setup.rs::atomic_replacement_preserves_existing_file_permissions
+#[test]
+fn port_fs_21b_permissions_survive_a_second_install() {
+    let mut host = server_host();
+    put(&mut host, claude_file(), "Keep this.\n");
+    host.fs().set_mode(claude_file(), 0o640);
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("second install");
+    assert_eq!(host.fs().mode(claude_file()), Some(0o640));
+}

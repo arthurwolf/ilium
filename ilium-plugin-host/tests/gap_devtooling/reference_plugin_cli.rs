@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::common::*;
 use crate::{
     add_slow_test_fixture, bench_with_deadline_exceeded, dev_data_folders, dev_once,
-    dev_watcher_poll_interval_when_native_unavailable, manual_page, new_rust_project,
+    dev_watcher_poll_interval_when_native_unavailable, file_sha256, manual_page, new_rust_project,
     next_sdk_minor, pack_interrupted_by, package_component_limit_bytes,
     project_pinned_sdk_behind_cli, rows_with, sdk_current_version, seed_dev_data, snapshot, utf8,
     with_code, zip_entries,
@@ -714,4 +714,269 @@ fn git_commit_all(dir: &Path) {
             .expect("run git in the test project");
         assert!(status.success(), "git {step:?} succeeds");
     }
+}
+
+/// REQ: DEV-900
+#[test]
+fn clean_keeps_the_cargo_lock_file_and_reports_only_removed_paths() {
+    let (_root, env, dir) = new_rust_project();
+    assert_eq!(
+        run_in_project(&env, "build", &[]).exit_code,
+        0,
+        "build first"
+    );
+    write_text(&dir, "Cargo.lock", "locked dependency marker\n");
+    let cleaned = run_in_project(&env, "clean", &[]);
+    assert_eq!(cleaned.exit_code, 0, "{:?}", cleaned.stdout_jsonl);
+    assert!(dir.join("Cargo.lock").is_file(), "lock files are kept");
+    for artifact in records_of(&cleaned, "artifact") {
+        let path = artifact["path"].as_str().expect("artifact path");
+        assert!(!path.contains("Cargo.lock"), "a lock file is not removed: {path}");
+        assert!(!path.starts_with("src"), "src/ is never removed: {path}");
+    }
+}
+
+/// REQ: DEV-901
+#[test]
+fn successful_build_releases_the_dist_lock_so_the_next_command_is_not_blocked() {
+    let (_root, env, dir) = new_rust_project();
+    let built = run_in_project(&env, "build", &[]);
+    assert_eq!(built.exit_code, 0, "{:?}", built.stdout_jsonl);
+    assert!(
+        !dir.join("dist").join(".lock").exists(),
+        "dist/.lock is removed when the command ends"
+    );
+    let again = run_in_project(&env, "build", &[]);
+    assert_eq!(
+        again.exit_code, 0,
+        "a second build is not blocked: {:?}",
+        again.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-902
+#[test]
+fn manifest_path_is_accepted_by_clean_and_removes_the_dist_of_that_project() {
+    let (_root, env, dir) = new_rust_project();
+    assert_eq!(
+        run_in_project(&env, "build", &[]).exit_code,
+        0,
+        "build first"
+    );
+    assert!(dir.join("dist").is_dir(), "build made dist/");
+    let manifest = dir.join("manifest.json");
+    let cleaned = run(
+        &env,
+        &["clean", "--manifest-path", utf8(&manifest), "--json"],
+    );
+    assert_eq!(cleaned.exit_code, 0, "{:?}", cleaned.stdout_jsonl);
+    assert!(
+        !dir.join("dist").exists(),
+        "clean with --manifest-path cleans the project that file belongs to"
+    );
+    for artifact in records_of(&cleaned, "artifact") {
+        let path = artifact["path"].as_str().expect("artifact path");
+        assert!(!Path::new(path).is_absolute(), "relative path: {path}");
+    }
+}
+
+/// REQ: DEV-906
+#[test]
+fn version_in_text_mode_prints_one_line_containing_the_cli_version() {
+    let root = scratch();
+    let cli_env = env(root.path());
+    let json_out = run(&cli_env, &["--version", "--json"]);
+    let cli_version = records_of(&json_out, "version")[0]["cli_version"]
+        .as_str()
+        .expect("cli_version is a string")
+        .to_owned();
+    let text_out = run(&cli_env, &["--version"]);
+    assert_eq!(text_out.exit_code, 0, "{:?}", text_out.stderr);
+    assert_eq!(
+        text_out.stdout_text.lines().count(),
+        1,
+        "one text line: {:?}",
+        text_out.stdout_text
+    );
+    assert!(
+        text_out.stdout_text.contains(&cli_version),
+        "the text line names the CLI version {cli_version}: {:?}",
+        text_out.stdout_text
+    );
+}
+
+/// REQ: DEV-911
+#[test]
+fn max_component_bytes_in_the_project_config_lowers_the_size_budget() {
+    let (_root, env, dir) = new_rust_project();
+    assert_eq!(
+        run_in_project(&env, "build", &[]).exit_code,
+        0,
+        "build first"
+    );
+    write_text(
+        &dir,
+        "ilium-plugin.toml",
+        "[build]\nmax_component_bytes = 1024\n",
+    );
+    let out = run_in_project(&env, "check", &[]);
+    assert!(
+        !with_code(&out, "size.component-over-budget").is_empty(),
+        "a component over the lowered 1 KiB budget is reported: {:?}",
+        out.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-913
+#[test]
+fn check_deps_does_not_flag_a_project_exactly_two_minors_behind() {
+    let (_root, env, _dir) = new_rust_project();
+    let two_behind_env = project_pinned_sdk_behind_cli(&env, 2);
+    let out = run_in_project(&two_behind_env, "check", &["--deps"]);
+    assert!(
+        with_code(&out, "deps.sdk-outdated").is_empty(),
+        "two minors is not more than two: {:?}",
+        out.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-914
+#[test]
+fn file_watcher_polls_every_500_ms_when_native_events_are_unavailable() {
+    let (_root, env, _dir) = new_rust_project();
+    assert_eq!(
+        dev_watcher_poll_interval_when_native_unavailable(&env),
+        500,
+        "the polling fallback interval is 500 ms"
+    );
+}
+
+/// REQ: DEV-916
+#[test]
+fn interrupt_during_pack_leaves_an_existing_package_byte_identical() {
+    let (_root, env, dir) = new_rust_project();
+    assert_eq!(
+        run_in_project(&env, "build", &[]).exit_code,
+        0,
+        "build first"
+    );
+    assert_eq!(
+        run_in_project(&env, "pack", &[]).exit_code,
+        0,
+        "pack a package first"
+    );
+    let before = snapshot(&dir.join("dist"));
+    let interrupted = pack_interrupted_by(&env, "pack", "SIGINT");
+    assert_eq!(
+        interrupted.exit_code, 130,
+        "{:?}",
+        interrupted.stdout_jsonl
+    );
+    let after = snapshot(&dir.join("dist"));
+    assert_eq!(
+        after, before,
+        "an interrupted pack leaves the existing dist/ bytes unchanged"
+    );
+}
+
+/// REQ: DEV-922
+#[test]
+fn bench_exits_0_when_every_export_is_within_its_deadline() {
+    let (_root, env, _dir) = new_rust_project();
+    assert_eq!(
+        run_in_project(&env, "build", &[]).exit_code,
+        0,
+        "build first"
+    );
+    let out = run_in_project(&env, "bench", &[]);
+    assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
+    assert!(
+        !records_of(&out, "timing").is_empty(),
+        "timing records are printed"
+    );
+}
+
+/// REQ: DEV-931
+#[test]
+fn dev_without_reset_data_keeps_data_from_the_previous_run_across_runs() {
+    let (_root, env, _dir) = new_rust_project();
+    seed_dev_data(&env);
+    let folders = dev_data_folders(&env);
+    assert!(!folders.is_empty(), "the seeded data folders exist");
+    let again = dev_once(&env, &[]);
+    assert_eq!(again.exit_code, 0, "{:?}", again.stdout_jsonl);
+    for folder in &folders {
+        assert!(
+            folder.is_dir(),
+            "kept without --reset-data: {}",
+            folder.display()
+        );
+    }
+}
+
+/// REQ: DEV-939
+#[test]
+fn diff_of_identical_packages_prints_no_change_records() {
+    let root = scratch();
+    let env = env(root.path());
+    let old_path = write_package_file(
+        root.path(),
+        "old.iliumpkg",
+        &signed_package(&good_server_component()),
+    );
+    let same = run(
+        &env,
+        &["diff", old_path.as_str(), old_path.as_str(), "--json"],
+    );
+    assert_eq!(same.exit_code, 0, "{:?}", same.stdout_jsonl);
+    assert!(
+        records_of(&same, "diff").is_empty(),
+        "identical packages have no added, removed or changed item: {:?}",
+        same.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-940
+#[test]
+fn pack_without_the_sbom_flag_writes_no_sbom_file() {
+    let (_root, env, dir) = new_rust_project();
+    assert_eq!(
+        run_in_project(&env, "build", &[]).exit_code,
+        0,
+        "build first"
+    );
+    let packed = run_in_project(&env, "pack", &[]);
+    assert_eq!(packed.exit_code, 0, "{:?}", packed.stdout_jsonl);
+    let manifest: Value =
+        serde_json::from_str(&read_text(&dir, "manifest.json")).expect("manifest is JSON");
+    let id = manifest["id"].as_str().expect("manifest id");
+    let version = manifest["version"].as_str().expect("manifest version");
+    let sbom = dir.join("dist").join(format!("{id}-{version}.sbom.json"));
+    assert!(!sbom.exists(), "no SBOM without --sbom: {}", sbom.display());
+    assert!(
+        records_of(&packed, "artifact")
+            .iter()
+            .all(|record| record["kind"] != "sbom"),
+        "no sbom artifact record without --sbom"
+    );
+}
+
+/// REQ: DEV-941
+#[test]
+fn doctor_bundle_records_the_sha256_of_the_lock_file() {
+    let (root, env, dir) = new_rust_project();
+    write_text(&dir, "Cargo.lock", "locked-dependency-marker-789\n");
+    let bundle = root.path().join("lock-bundle.zip");
+    let _out = run_in_project(&env, "doctor", &["--bundle", utf8(&bundle)]);
+    assert!(bundle.is_file(), "the bundle is written");
+    let lock_hash = file_sha256(&dir.join("Cargo.lock"));
+    let all_text = zip_entries(&bundle)
+        .iter()
+        .map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        all_text.contains(&lock_hash),
+        "the bundle carries the lock file SHA-256 {lock_hash}"
+    );
 }

@@ -1,14 +1,25 @@
-//! Host implementation of `ilium:host/services` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/services`.
 //!
-//! Written once by the skeleton lane from the generated `HostServices` trait; hand-owned afterwards.
+//! This import carries no grant context: a call or reply needs the `services.use` or
+//! `services.provide` grant (SVC-001), and the import has no way to prove either, so both are
+//! refused with `not-permitted`. Replies to calls that were never accepted do not exist, so
+//! `take-reply` always reports none (SVC-010).
 
 use ilium_plugin_api::generated::host::services::HostServices;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
 
 /// Host side of the `services` interface.
 #[derive(Debug)]
 pub struct ServicesImport;
+
+fn not_permitted(grant: &str) -> PluginError {
+    PluginError {
+        code: ErrorCode::NotPermitted,
+        message: format!("the {grant} grant is required"),
+        retry_after_ms: None,
+    }
+}
 
 impl HostServices for ServicesImport {
     fn call(
@@ -17,11 +28,11 @@ impl HostServices for ServicesImport {
         _method: String,
         _payload_json: String,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::services::call")
+        Err(not_permitted("services.use"))
     }
 
     fn take_reply(&mut self, _request: RequestId) -> Option<String> {
-        unimplemented!("host::imports::services::take_reply")
+        None
     }
 
     fn reply(
@@ -29,7 +40,7 @@ impl HostServices for ServicesImport {
         _call: u64,
         _outcome: Result<String, PluginError>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::services::reply")
+        Err(not_permitted("services.provide"))
     }
 }
 

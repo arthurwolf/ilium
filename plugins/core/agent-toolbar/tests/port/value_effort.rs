@@ -60,3 +60,49 @@ fn port_value_effort_stale_effort_or_changed_provider_is_refused_without_command
         r####"{"refused": true, "command": null}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/value_effort.rs::all_native_efforts_and_reverse_order_are_preserved
+#[test]
+fn port_value_effort_all_native_efforts_and_reverse_order_are_preserved_without_duplicates() {
+    check(
+        Place::Client,
+        "effort.options",
+        r####"{}"####,
+        r####"{"count": 7, "duplicates": 0}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_effort.rs::choice_routes_exact_command_and_ultracode_without_submitting_user_prompt
+#[test]
+fn port_value_effort_choice_routes_exact_command_and_ultracode_without_submitting_user_prompt_when_already_active(
+) {
+    check(
+        Place::Client,
+        "effort.choose",
+        r####"{"choose": "Max", "already_active": true}"####,
+        r####"{"command_sent": false, "submit_terminal_text": null}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_effort.rs::refused_command_keeps_original_effort_and_catalog_for_retry
+#[test]
+fn port_value_effort_refused_command_keeps_original_effort_and_catalog_for_retry_offers_retry() {
+    check(
+        Place::Client,
+        "effort.choose",
+        r####"{"choose": "Max", "command_refused": true}"####,
+        r####"{"retry_available": true, "effort": "auto"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_effort.rs::stale_effort_or_changed_provider_is_refused_without_command
+#[test]
+fn port_value_effort_stale_effort_or_changed_provider_is_refused_without_command_for_stale_effort()
+{
+    check(
+        Place::Client,
+        "effort.choose",
+        r####"{"choose": "Max", "stale": true, "stale_or_provider": "claude"}"####,
+        r####"{"refused": true, "command": null, "reason": "stale-effort"}"####,
+    );
+}

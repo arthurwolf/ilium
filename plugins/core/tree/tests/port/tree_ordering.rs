@@ -94,3 +94,62 @@ fn port_tree_ordering_direct_children_of_a_top_level_node_get_keys() {
         vec![nested, shell]
     );
 }
+
+/// REQ: PORT:ilium-client/src/tree_ordering.rs::manual_and_age_modes_preserve_or_reverse_creation_order
+#[test]
+fn nodes_with_equal_titles_get_equal_keys_whatever_their_creation_order() {
+    let mut host = server_host();
+    let group = add_node(&mut host, None, "work", NodeClass::Container);
+    let older = add_node(&mut host, Some(group), "same", NodeClass::Pane);
+    let newer = add_node(&mut host, Some(group), "same", NodeClass::Pane);
+    host.settle();
+    let submitted = host.submitted();
+    let keys = order_keys(&submitted);
+    let key_of = |id: u64| {
+        keys.iter()
+            .rev()
+            .find(|(node, _)| node.0 == id)
+            .and_then(|(_, key)| *key)
+    };
+    assert!(key_of(older).is_some());
+    assert_eq!(key_of(older), key_of(newer));
+    assert_eq!(
+        sorted_by_key(&submitted, &[newer, older]),
+        vec![older, newer]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/tree_ordering.rs::name_modes_apply_inside_each_group_but_never_reorder_split_members
+#[test]
+fn titles_sharing_their_first_four_bytes_keep_manual_order() {
+    let mut host = server_host();
+    let group = add_node(&mut host, None, "work", NodeClass::Container);
+    let longer = add_node(&mut host, Some(group), "alphanumeric", NodeClass::Pane);
+    let shorter = add_node(&mut host, Some(group), "alphabet", NodeClass::Pane);
+    host.settle();
+    let submitted = host.submitted();
+    assert_eq!(
+        sorted_by_key(&submitted, &[shorter, longer]),
+        vec![longer, shorter]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/tree_ordering.rs::type_mode_groups_every_visible_node_kind_then_orders_names
+#[test]
+fn node_class_does_not_change_the_sort_key_of_a_title() {
+    let mut host = server_host();
+    let group = add_node(&mut host, None, "work", NodeClass::Container);
+    let folder = add_node(&mut host, Some(group), "notes", NodeClass::Folder);
+    let pane = add_node(&mut host, Some(group), "notes", NodeClass::Pane);
+    host.settle();
+    let submitted = host.submitted();
+    let keys = order_keys(&submitted);
+    let key_of = |id: u64| {
+        keys.iter()
+            .rev()
+            .find(|(node, _)| node.0 == id)
+            .and_then(|(_, key)| *key)
+    };
+    assert!(key_of(folder).is_some());
+    assert_eq!(key_of(folder), key_of(pane));
+}

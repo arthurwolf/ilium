@@ -1,9 +1,20 @@
 //! Dedup keys for keyed submissions (rust-sdk.md "Values, submissions and outcomes").
 
 /// Joins the parts into a dedup key of at most 128 bytes that the host de-duplicates for 10 minutes.
-pub fn key_for(_parts: &[&str]) -> String {
-    unimplemented!("rust-sdk.dedup-key")
+pub fn key_for(parts: &[&str]) -> String {
+    let mut key = parts.join(":");
+    if key.len() > MAX_DEDUP_KEY_BYTES {
+        let mut end = MAX_DEDUP_KEY_BYTES;
+        while !key.is_char_boundary(end) {
+            end -= 1;
+        }
+        key.truncate(end);
+    }
+    key
 }
+
+/// Longest dedup key in bytes (reference-wit.md section 4.12).
+pub const MAX_DEDUP_KEY_BYTES: usize = 128;
 
 #[cfg(test)]
 mod spec_tests {

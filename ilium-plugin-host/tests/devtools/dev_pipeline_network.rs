@@ -94,3 +94,20 @@ fn offline_environment_variable_fails_network_install_before_any_connection() {
         "no connection is attempted"
     );
 }
+
+/// REQ: DEV-894
+#[test]
+fn check_with_json_reports_no_network_error_and_connects_to_nothing() {
+    let root = scratch();
+    let recorder = Arc::new(RecordingFetcher::default());
+    let env = recording_env(root.path(), recorder.clone());
+    let dir = project_dir(&env);
+    project_with(&dir, |_| {});
+    let output = run_in_project(&env, "check", &["--json"]);
+    assert!(error_code(&output).map_or(true, |code| !code.starts_with("net.")));
+    assert!(
+        requested(&recorder).is_empty(),
+        "check connects to nothing: {:?}",
+        requested(&recorder)
+    );
+}

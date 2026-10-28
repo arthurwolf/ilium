@@ -1,6 +1,6 @@
 //! Crash records of helper failures: USR-227..229 of reference-requirements-user-admin.md
-//! (core-plugin-diagnostics.md, "Crash records"). Each test calls an unimplemented! stub
-//! until the host writes records.
+//! (core-plugin-diagnostics.md, "Crash records"). Each test drives the real record
+//! functions and the boot harness.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};

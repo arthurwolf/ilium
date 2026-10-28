@@ -375,3 +375,148 @@ fn usr_348_privacy_table_rows_match_the_retention_constants_in_the_code() {
     let backup_row = row_with("backup");
     assert!(backup_row.contains("newest"), "backup row: {backup_row}");
 }
+
+/// REQ: USR-348
+#[test]
+fn usr_348_retention_table_has_three_cells_and_a_deleting_command_in_every_row() {
+    let page = manual_page("user-privacy");
+    let header_index = page
+        .lines()
+        .position(|line| line == "| What | Default retention | Deleted by |")
+        .expect("the retention table header must exist on the privacy page");
+    let rows: Vec<&str> = page
+        .lines()
+        .skip(header_index + 2)
+        .take_while(|line| line.starts_with('|'))
+        .collect();
+    assert!(
+        rows.len() >= 10,
+        "the retention table lost rows: {} found",
+        rows.len()
+    );
+    for row in rows {
+        // A row `| a | b | c |` splits into five parts: two empty edges and three cells.
+        let parts: Vec<&str> = row.split('|').map(str::trim).collect();
+        assert_eq!(parts.len(), 5, "a retention row must have three cells: {row}");
+        assert!(
+            !parts[3].is_empty(),
+            "a retention row leaves its deleting column empty: {row}"
+        );
+    }
+}
+
+/// REQ: USR-322
+#[test]
+fn usr_322_data_report_changes_no_file_in_the_plugin_data_folder() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    rig.plant_data(NOTES, 1);
+    let before = rig.file_digests(&rig.data_dir(NOTES));
+    let output = rig.cli(&["data-report", NOTES]);
+    assert_eq!(output.exit_code, 0, "data-report failed: {}", output.stderr);
+    assert_eq!(
+        rig.file_digests(&rig.data_dir(NOTES)),
+        before,
+        "the report must only read the plugin data"
+    );
+}
+
+/// REQ: USR-324
+#[test]
+fn usr_324_successful_export_leaves_the_source_files_unchanged() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_data(NOTES, 1);
+    let before = rig.file_digests(&rig.data_dir(NOTES));
+    let target = rig.scratch_dir().join("export-ok-324");
+    let output = rig.cli(&["export-data", &target.to_string_lossy()]);
+    assert_eq!(output.exit_code, 0, "export failed: {}", output.stderr);
+    assert_eq!(
+        rig.file_digests(&rig.data_dir(NOTES)),
+        before,
+        "an export must not change the source files"
+    );
+}
+
+/// REQ: USR-326
+#[test]
+fn usr_326_erasing_one_plugin_keeps_the_data_of_another_plugin() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    install_ok(&rig, &pkg(OTHER, "1.0.0"));
+    rig.plant_data(NOTES, 1);
+    rig.plant_data(OTHER, 1);
+    let other_before = rig.file_digests(&rig.data_dir(OTHER));
+    let output = rig.cli(&["erase-data", NOTES, "--yes"]);
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    assert_eq!(
+        rig.file_digests(&rig.data_dir(OTHER)),
+        other_before,
+        "erasing one plugin must not touch another plugin's data"
+    );
+}
+
+/// REQ: USR-328
+#[test]
+fn usr_328_erase_after_a_plain_uninstall_still_removes_the_data() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_data(NOTES, 1);
+    let uninstalled = rig.cli(&["uninstall", NOTES, "--yes"]);
+    assert_eq!(uninstalled.exit_code, 0, "{}", uninstalled.stderr);
+    let erased = rig.cli(&["erase-data", NOTES, "--yes"]);
+    assert_eq!(erased.exit_code, 0, "erase after uninstall: {}", erased.stderr);
+    assert!(
+        !rig.data_dir(NOTES).exists(),
+        "erase must remove the data after a plain uninstall"
+    );
+}
+
+/// REQ: USR-329
+#[test]
+fn usr_329_declared_privacy_table_suppresses_the_missing_table_warning() {
+    let rig = crate::common::rig();
+    let with = pkg(NOTES, "1.0.0").grant("http:example.com").privacy_table(
+        &["page-titles"],
+        30,
+        "privacy@example.com",
+    );
+    install_ok(&rig, &with);
+    let review = rig.last_review().join("\n");
+    assert!(
+        !review.contains("This plugin does not describe what it collects"),
+        "a declared [privacy] table must not raise the missing-table warning: {review}"
+    );
+}
+
+/// REQ: USR-330
+#[test]
+fn usr_330_erasing_data_also_changes_the_plugin_identifier() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let before = rig.plugin_instance_id(NOTES);
+    let erased = rig.cli(&["erase-data", NOTES, "--yes"]);
+    assert_eq!(erased.exit_code, 0, "{}", erased.stderr);
+    assert_ne!(
+        rig.plugin_instance_id(NOTES),
+        before,
+        "erase must change the identifier"
+    );
+}
+
+/// REQ: USR-331
+#[test]
+fn usr_331_a_plugin_reading_its_own_settings_is_allowed_and_not_audited_as_denied() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_settings(NOTES, "theme", "dark");
+    let server = rig.start_server("s1");
+    let result = server.plugin_host_call(NOTES, "settings.read", &json!({ "plugin_id": NOTES }));
+    assert!(result.is_ok(), "reading its own settings must succeed");
+    let denials = rig
+        .audit_records("not-permitted")
+        .iter()
+        .filter(|record| record["event"] == "not-permitted")
+        .count();
+    assert_eq!(denials, 0, "an own-settings read must not be audited as denied");
+}

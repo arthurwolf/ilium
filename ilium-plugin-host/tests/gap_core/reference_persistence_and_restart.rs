@@ -79,3 +79,33 @@ fn cor_102_a_lock_held_by_a_live_process_refuses_the_takeover() {
         "reason must mention the lock: {refusal:?}"
     );
 }
+
+/// REQ: COR-100
+#[test]
+fn cor_100_a_second_server_on_a_different_session_of_the_project_is_not_refused() {
+    let rig = OpsRig::new();
+    let first = rig.start_server("s1");
+    let second = rig.start_server("s2");
+    assert_ne!(
+        second.owner_pid(),
+        first.owner_pid(),
+        "a different session must run its own server"
+    );
+}
+
+/// REQ: COR-101
+#[test]
+fn cor_101_sequential_writes_from_two_sessions_leave_the_last_written_value() {
+    let rig = OpsRig::new();
+    let _first = rig.start_server("s1");
+    let _second = rig.start_server("s2");
+    rig.write_setting(NOTES, SETTING_KEY, "dark");
+    rig.write_setting(NOTES, SETTING_KEY, "light");
+    let text = rig.config_text();
+    let parsed: toml::Table = text.parse().expect("the config file must parse");
+    assert_eq!(
+        parsed.get(SETTING_KEY).and_then(|value| value.as_str()),
+        Some("light"),
+        "the last writer must win for the file"
+    );
+}

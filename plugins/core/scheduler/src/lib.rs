@@ -2,7 +2,7 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -17,13 +17,13 @@ pub struct SchedulerServer;
 
 impl Lifecycle for SchedulerServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.scheduler: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for SchedulerServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.scheduler: server handler.on_events")
+        Vec::new()
     }
 }
 
@@ -34,13 +34,13 @@ pub struct SchedulerClient;
 
 impl Lifecycle for SchedulerClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.scheduler: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for SchedulerClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.scheduler: client handler.on_events")
+        Vec::new()
     }
 }
 

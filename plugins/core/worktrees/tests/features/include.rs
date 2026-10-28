@@ -317,3 +317,82 @@ proptest! {
         prop_assert_eq!(dest(&mut host, ".env"), None);
     }
 }
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::copies_selected_files_and_tracks_created_paths
+#[test]
+fn port_071_a_file_no_pattern_selects_is_not_copied() {
+    let mut host = seeded();
+    host.fs().seed(format!("{ROOT}/readme.md"), b"docs");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(dest(&mut host, "readme.md"), None);
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::missing_include_file_copies_nothing
+#[test]
+fn port_071_without_a_worktreeinclude_file_the_worktree_is_still_added_once() {
+    let mut host = server_host();
+    host.fs().seed(format!("{ROOT}/.env"), b"x");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(worktree_add_calls(&host.process().calls()).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::existing_destination_is_preserved_and_error_lists_prior_writes
+#[test]
+fn port_071_an_existing_destination_keeps_its_exact_bytes() {
+    let mut host = seeded();
+    host.fs().seed("/project.worktrees/fix-auth/.env", b"KEEP");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(dest(&mut host, ".env"), Some(b"KEEP".to_vec()));
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::selected_symlink_and_symlinked_destination_parent_are_rejected
+#[test]
+fn port_071_an_unselected_symlink_is_ignored_and_the_selected_file_is_copied() {
+    let mut host = seeded();
+    host.fs().symlink(format!("{ROOT}/other"), "/etc/passwd");
+    host.fs()
+        .seed(format!("{ROOT}/.worktreeinclude"), b".env\n");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(dest(&mut host, ".env"), Some(b"SECRET=1".to_vec()));
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::rollback_refuses_a_replaced_copied_file
+#[test]
+fn port_071_a_file_already_at_a_copy_path_survives_a_failed_creation() {
+    let mut host = seeded();
+    host.fs().seed(
+        format!("{ROOT}/.worktreeinclude"),
+        b".env\n/etc/shadow\n",
+    );
+    host.fs().seed("/project.worktrees/fix-auth/.env", b"KEEP");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(dest(&mut host, ".env"), Some(b"KEEP".to_vec()));
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::cancellation_before_discovery_writes_nothing
+#[test]
+fn port_071_the_include_file_itself_is_not_copied_by_a_cancelled_creation() {
+    let mut host = seeded();
+    host.deliver_one(new_agent_message(&json!({"branch": "fix-auth"})));
+    host.cancel_pending();
+    host.settle();
+    assert_eq!(dest(&mut host, ".worktreeinclude"), None);
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::byte_limit_rejects_selection_before_writing
+#[test]
+fn port_071_one_small_selected_file_is_copied_unchanged() {
+    let mut host = server_host();
+    host.fs().seed(format!("{ROOT}/.worktreeinclude"), b"one.txt\n");
+    host.fs().seed(format!("{ROOT}/one.txt"), b"1");
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(dest(&mut host, "one.txt"), Some(b"1".to_vec()));
+}
+
+/// REQ: PORT:ilium-server/src/worktree_include.rs::discovery_refuses_excess_source_entries_before_copying
+#[test]
+fn port_071_a_small_source_tree_within_the_entry_limit_is_copied() {
+    let mut host = seeded();
+    create_worktree(&mut host, &json!({"branch": "fix-auth"}));
+    assert_eq!(dest(&mut host, ".env"), Some(b"SECRET=1".to_vec()));
+}

@@ -2,6 +2,8 @@
 //! the 256-colour expectation and its fallback (HST-390), and the platform removal lifecycle
 //! (HST-391, HST-392).
 
+use ilium_plugin_host::render::{nearest_terminal_colour, TerminalPalette};
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-platform-support.md";
@@ -43,7 +45,15 @@ fn hst_390_the_client_expects_at_least_256_colours_from_the_outer_terminal() {
 /// REQ: HST-390
 #[test]
 fn hst_390_a_16_colour_terminal_still_starts_and_does_not_fail_the_plugin_call() {
-    unimplemented!("ilium_client::render::nearest_terminal_colour")
+    // Every rgb value maps to a valid index below 16 on a 16-colour terminal.
+    for (red, green, blue) in [(0, 0, 0), (250, 10, 10), (12, 200, 40), (90, 90, 250), (255, 255, 255)] {
+        assert!(nearest_terminal_colour(red, green, blue, TerminalPalette::Colours16) < 16);
+    }
+    assert_eq!(nearest_terminal_colour(255, 0, 0, TerminalPalette::Colours16), 9);
+    assert_eq!(nearest_terminal_colour(255, 255, 255, TerminalPalette::Colours16), 15);
+    // On 256 colours a cube colour beats the base palette when it is closer.
+    assert_eq!(nearest_terminal_colour(95, 135, 175, TerminalPalette::Colours256), 16 + 36 + 12 + 3);
+    assert_eq!(nearest_terminal_colour(0, 0, 0, TerminalPalette::Colours256), 0);
 }
 
 /// REQ: HST-391

@@ -60,3 +60,47 @@ fn port_goal_resume_link_rejects_longer_tokens() {
         r####"{"link": null}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/goal_resume_link.rs::finds_command_in_footer_with_exact_columns
+#[test]
+fn port_goal_resume_link_column_one_before_the_start_is_outside_the_link() {
+    check(
+        Place::Client,
+        "goal-resume.find",
+        r####"{"rows": 6, "columns": 60, "lines": {"2": "  gpt Paused · /goal resume · ok"}, "query_column": 14}"####,
+        r####"{"contains": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/goal_resume_link.rs::ignores_transcript_text_above_the_footer
+#[test]
+fn port_goal_resume_link_footer_link_is_found_even_when_transcript_has_the_text_above() {
+    check(
+        Place::Client,
+        "goal-resume.find",
+        r####"{"rows": 6, "columns": 60, "lines": {"0": "/goal resume", "2": "  gpt Paused · /goal resume · ok"}}"####,
+        r####"{"row": 2}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/goal_resume_link.rs::paints_blue_underline_and_hover_variant
+#[test]
+fn port_goal_resume_link_hover_paints_only_the_link_span() {
+    check(
+        Place::Client,
+        "goal-resume.paint",
+        r####"{"hover": true, "check": "outside_span"}"####,
+        r####"{"outside_span_painted": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/goal_resume_link.rs::rejects_longer_tokens
+#[test]
+fn port_goal_resume_link_accepts_the_exact_token_followed_by_a_word() {
+    check(
+        Place::Client,
+        "goal-resume.find",
+        r####"{"rows": 3, "columns": 40, "lines": {"0": "  /goal resume now"}}"####,
+        r####"{"row": 0}"####,
+    );
+}

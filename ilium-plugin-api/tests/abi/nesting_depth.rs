@@ -21,3 +21,11 @@ fn abi_062_the_refusal_carries_the_stable_depth_exceeded_code() {
     let code = check_nesting_depth(MAX_NESTING_DEPTH + 1).expect_err("a 33-level value is refused");
     assert_eq!(code.as_str(), "abi.depth-exceeded");
 }
+
+/// REQ: ABI-062
+#[test]
+fn abi_062_a_value_far_past_the_bound_is_refused_without_panicking() {
+    let code = check_nesting_depth(MAX_NESTING_DEPTH + 1_000)
+        .expect_err("a value 1000 levels past the bound is refused, not accepted or panicked");
+    assert_eq!(code.as_str(), "abi.depth-exceeded");
+}

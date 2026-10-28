@@ -763,3 +763,37 @@ fn doc_sec_315_page_states_64_kib_200_rules_and_the_regex_limits() {
         assert!(line.contains(needle), "{needle}");
     }
 }
+
+/// REQ: SEC-311
+#[test]
+fn sec_311_trusted_project_value_is_used_as_the_project_source() {
+    let mut world = ExtWorld::new();
+    world.open_project("/p/seven", true);
+    world.answer_trust(true);
+    world.set_project_value("com.example.cfg", "mode", json!("project"));
+    assert_eq!(world.get_setting("com.example.cfg", "mode").source, "project");
+}
+
+/// REQ: SEC-313
+#[test]
+fn sec_313_secret_row_stays_out_of_project_source_in_an_untrusted_project_too() {
+    let mut world = ExtWorld::new();
+    world.open_project("/p/eight", true);
+    world.answer_trust(false);
+    world.set_project_value_of_type("com.example.cfg", "token", "secret", json!("hunter2"));
+    assert_ne!(
+        world.get_setting("com.example.cfg", "token").source,
+        "project"
+    );
+}
+
+/// REQ: SEC-314
+#[test]
+fn sec_314_policy_allow_project_values_true_lets_a_trusted_value_through() {
+    let mut world = ExtWorld::new();
+    world.set_policy("[projects]\nallow_project_values = true\n");
+    world.open_project("/p/nine", true);
+    world.answer_trust(true);
+    world.set_project_value("com.example.cfg", "mode", json!("project"));
+    assert_eq!(world.get_setting("com.example.cfg", "mode").source, "project");
+}

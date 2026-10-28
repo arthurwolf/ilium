@@ -66,6 +66,37 @@ fn abi_100_invalid_by_construction_values_trap_once_and_log_the_type() {
     }
 }
 
+/// REQ: ABI-100
+#[test]
+fn abi_100_every_invalid_kind_traps_with_only_the_invalid_value_code() {
+    let kinds = [
+        InvalidValue::BoolByte,
+        InvalidValue::CharSurrogate,
+        InvalidValue::CharAboveMax,
+        InvalidValue::DiscriminantWithoutCase,
+        InvalidValue::OptionTagAboveOne,
+        InvalidValue::ResultTagAboveOne,
+        InvalidValue::FlagsUndefinedBit,
+    ];
+    for kind in kinds {
+        for direction in [Direction::PluginToHost, Direction::HostToPlugin] {
+            let outcome = lift_invalid(kind, direction);
+            assert_eq!(
+                outcome.trap_code.as_deref(),
+                Some("abi.invalid-value"),
+                "{kind:?} {direction:?}: the trap must carry the abi.invalid-value code"
+            );
+            assert!(
+                outcome
+                    .log_records
+                    .iter()
+                    .all(|record| record.code == "abi.invalid-value"),
+                "{kind:?} {direction:?}: no record other than abi.invalid-value may be logged"
+            );
+        }
+    }
+}
+
 /// REQ: ABI-101
 #[test]
 fn abi_101_nan_refused_outside_nan_documented_fields_and_never_sent_to_plugin() {
@@ -166,5 +197,59 @@ fn abi_114_slow_import_logged_with_name_and_duration_and_slow_call_returns_reque
     assert!(
         named_slow.request_id.is_some(),
         "a slow call named by the page must return a request-id"
+    );
+}
+
+/// REQ: ABI-081
+#[test]
+fn abi_081_a_payload_without_optional_members_still_parses_on_both_sides() {
+    let payload = r#"{"plugin":"fixture","api":"0.1.0"}"#;
+    assert!(
+        parse_host_payload_host(payload).is_ok(),
+        "the host must accept a payload that omits optional members"
+    );
+    assert!(
+        parse_host_payload_sdk(payload).is_ok(),
+        "the SDK must accept a payload that omits optional members"
+    );
+}
+
+/// REQ: ABI-101
+#[test]
+fn abi_101_a_finite_float_is_accepted_in_a_field_that_does_not_document_nan() {
+    assert!(
+        accept_plugin_float("percent", 0.5).is_ok(),
+        "a finite value in a non-NaN field must be accepted"
+    );
+}
+
+/// REQ: ABI-102
+#[test]
+fn abi_102_a_valid_realloc_pointer_does_not_trap() {
+    let valid = run_realloc_fixture(ReallocFixture::Valid);
+    assert!(
+        valid.trap_code.is_none(),
+        "a valid pointer from cabi_realloc must not trap the call"
+    );
+}
+
+/// REQ: ABI-105
+#[test]
+fn abi_105_exactly_the_limit_of_import_calls_all_succeed() {
+    let run = run_import_loop(100_000);
+    assert!(!run.trapped, "a call at exactly the limit must not trap");
+    assert!(
+        run.results.iter().all(|result| result.is_ok()),
+        "every one of the 100,000 import calls is within the limit"
+    );
+}
+
+/// REQ: ABI-114
+#[test]
+fn abi_114_a_slow_import_not_named_as_slow_returns_no_request_id() {
+    let unnamed = run_host_import("probe-import", 60, false);
+    assert!(
+        unnamed.request_id.is_none(),
+        "only an import the page names as slow may return a request-id"
     );
 }

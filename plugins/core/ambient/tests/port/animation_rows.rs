@@ -66,3 +66,58 @@ fn saved_scene_status_keeps_the_bar_compact_and_the_activity_log_in_help_twin() 
 fn voxel_world_seed_is_a_wide_number_over_the_original_text_control_twin() {
     places_hold();
 }
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::boat_information_is_exposed_as_full_text_prompt_values
+#[test]
+fn boat_information_is_exposed_as_full_text_prompt_values_renders_at_tiny_size() {
+    render_holds(10, 2);
+}
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::displayed_controls_retain_their_full_option_and_numeric_metadata
+#[test]
+fn displayed_controls_retain_their_full_option_and_numeric_metadata_accepts_empty_places() {
+    let mut host = activated_client();
+    assert!(host.settings().set("saved_places", json!({})).is_ok());
+    assert_eq!(host.settings().get("saved_places"), Some(json!({})));
+}
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::osm_location_row_displays_the_scene_selection_not_the_shared_observer
+#[test]
+fn osm_location_row_displays_the_scene_selection_not_the_shared_observer_rejects_longitude_past_180(
+) {
+    assert_eq!(
+        refused("observer", json!({ "lat": 0.0, "lon": 180.0001 })),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::overhaul_loop_duration_uses_a_logarithmic_track
+#[test]
+fn overhaul_loop_duration_uses_a_logarithmic_track_rejects_empty_place_name() {
+    assert_eq!(
+        refused("saved_places", json!({ "": "x" })),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::overhaul_ram_usage_is_visible_before_progress_details
+#[test]
+fn overhaul_ram_usage_is_visible_before_progress_details_holds_at_large_size() {
+    render_holds(200, 60);
+    preview_surface_holds(200, 60);
+}
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::saved_scene_status_keeps_the_bar_compact_and_the_activity_log_in_help
+#[test]
+fn saved_scene_status_keeps_the_bar_compact_and_the_activity_log_in_help_rejects_list_value() {
+    assert_eq!(
+        refused("saved_places", json!(["not", "a", "map"])),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: PORT:ilium-client/src/animation_rows.rs::voxel_world_seed_is_a_wide_number_over_the_original_text_control
+#[test]
+fn voxel_world_seed_is_a_wide_number_over_the_original_text_control_survives_scene_switches() {
+    named_values_survive_scene_switches();
+}

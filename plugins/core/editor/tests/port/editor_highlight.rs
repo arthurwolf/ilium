@@ -151,3 +151,82 @@ fn port_highlight_multiline_comment_keeps_sequential_syntax_across_lines() {
         "fn after the close regains the keyword colour"
     );
 }
+
+/// REQ: PORT:ilium-client/src/editor_highlight.rs::keyword_and_string_literal_get_different_colors, PORT:ilium-client/src/editor_highlight.rs::window_keyword_and_string_literal_get_different_colors
+#[test]
+fn port_highlight_two_keywords_share_one_colour() {
+    let no_numbers = [("show_line_numbers", json!(false))];
+    let first = colour_at(RUST_LINE, &no_numbers, 0, "fn");
+    let second = colour_at(RUST_LINE, &no_numbers, 0, "let");
+    assert_eq!(first.foreground, second.foreground);
+}
+
+/// REQ: PORT:ilium-client/src/editor_highlight.rs::line_number_gutter_shows_one_based_row_numbers, PORT:ilium-client/src/editor_highlight.rs::window_line_number_gutter_shows_one_based_row_numbers
+#[test]
+fn port_highlight_gutter_shows_two_digit_row_ten() {
+    let text = "x\n".repeat(10);
+    let mut host = host_for(&text, Some("rust"), &[("show_line_numbers", json!(true))]);
+    let screen = render_pane(&mut host, 40, 12);
+    assert!(screen.row(9).contains("10"), "{}", screen.row(9));
+}
+
+/// REQ: PORT:ilium-client/src/editor_highlight.rs::cursor_cell_is_reversed_and_current_line_is_underlined, PORT:ilium-client/src/editor_highlight.rs::window_cursor_cell_is_reversed_and_current_line_is_underlined
+#[test]
+fn port_highlight_underline_covers_the_whole_cursor_row() {
+    let mut host = host_for(
+        "one\ntwo\n",
+        Some("rust"),
+        &[("show_line_numbers", json!(false))],
+    );
+    let screen = render_pane(&mut host, 40, 6);
+    assert!(
+        screen.cell(0, 20).underline,
+        "empty cells of the cursor row must be underlined"
+    );
+    assert!(
+        !screen.cell(1, 20).underline,
+        "other rows must not be underlined"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/editor_highlight.rs::wrapping_keeps_syntax_highlighting_on_every_visual_row, PORT:ilium-client/src/editor_highlight.rs::window_wrapping_keeps_syntax_highlighting_on_every_visual_row
+#[test]
+fn port_highlight_string_colour_continues_onto_a_third_visual_row() {
+    let extra = [
+        ("show_line_numbers", json!(false)),
+        ("line_display", json!("wrap")),
+    ];
+    let mut host = host_for("let greeting = \"hello\";", Some("rust"), &extra);
+    let screen = render_pane(&mut host, 8, 6);
+    assert!(screen.row(2).starts_with("hello"), "{}", screen.row(2));
+    assert_eq!(
+        screen.cell(2, 0).foreground,
+        screen.cell(1, 7).foreground,
+        "the string continues in the same colour"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/editor_highlight.rs::wrapped_continuation_row_expands_a_tab_relative_to_its_own_start, PORT:ilium-client/src/editor_highlight.rs::window_wrapped_continuation_expands_tab_from_its_own_start
+#[test]
+fn port_highlight_first_wrapped_row_holds_the_unbroken_prefix() {
+    let extra = [
+        ("show_line_numbers", json!(false)),
+        ("line_display", json!("wrap")),
+    ];
+    let mut host = host_for("//abcdefgh12\tXYZ", Some("rust"), &extra);
+    let screen = render_pane(&mut host, 10, 6);
+    assert_eq!(screen.row(0), "//abcdefgh", "first visual row");
+}
+
+/// REQ: PORT:ilium-client/src/editor_highlight.rs::window_multiline_comment_keeps_sequential_syntax_across_physical_lines
+#[test]
+fn port_highlight_closing_delimiter_row_keeps_the_comment_colour() {
+    let text = "/* opening\ninside block comment\n*/ fn main() { let s = \"hi\"; }";
+    let mut host = host_for(text, Some("rust"), &[("show_line_numbers", json!(false))]);
+    let screen = render_pane(&mut host, 64, 6);
+    assert_eq!(
+        screen.cell(2, 0).foreground,
+        screen.cell(0, 0).foreground,
+        "the closing delimiter is comment text"
+    );
+}

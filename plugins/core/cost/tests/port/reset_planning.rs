@@ -399,3 +399,234 @@ fn port_reset_planning_retry_after_and_poll_deadline_preserve_hourly_floor() {
     );
     assert_eq!(deadline(json!(7200))["delay_secs"], json!(7200));
 }
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::active_watch_survives_legacy_fallback_and_clears_on_primary_null
+#[test]
+fn port_reset_planning_active_watch_is_never_reported_as_a_scheduled_reset() {
+    let watch = json!({ "expires_at": "2026-09-29T04:00:00Z" });
+    let events = json!([
+        { "provider": "codex", "ok": { "scheduled": null, "active_watch": watch.clone() }, "source_warning": null },
+    ]);
+    let reply = apply(events, json!({}), json!({}));
+    let steps = reply["steps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(steps[0]["codex"]["scheduled"], Value::Null);
+    assert_eq!(steps[0]["codex"]["active_watch"], watch);
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::claude_history_and_banked_grant_have_no_schedule
+#[test]
+fn port_reset_planning_claude_banked_grant_alone_yields_no_schedule() {
+    let mut feed = claude_feed();
+    feed["providers"]["claude"]["events"] = json!([{ "kind": "banked_grant" }]);
+    assert_eq!(parse_claude(feed), json!({ "ok": null }));
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::claude_stale_detector_or_new_schedule_contract_is_not_healthy_none
+#[test]
+fn port_reset_planning_claude_feed_without_detector_metadata_is_rejected() {
+    let mut feed = claude_feed();
+    if let Some(object) = feed.as_object_mut() {
+        object.remove("meta");
+    }
+    assert!(is_err(&parse_claude(feed)));
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_active_watch_is_a_separate_possible_reset_window
+#[test]
+fn port_reset_planning_codex_scheduled_reset_and_active_watch_coexist_as_separate_fields() {
+    let expires_at = "2026-09-29T04:00:00Z";
+    let status = parse_codex(
+        v1_with_watch(pending(), json!({ "expires_at": expires_at })),
+        NOW,
+        0,
+    );
+    assert!(!status["ok"]["scheduled"].is_null());
+    assert_eq!(
+        status["ok"]["active_watch"]["expires_at"],
+        json!(expires_at)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_active_watch_may_be_missing_or_null
+#[test]
+fn port_reset_planning_codex_pending_event_without_watch_still_schedules() {
+    let status = parse_codex(v1(pending()), NOW, 0);
+    assert!(!status["ok"]["scheduled"].is_null());
+    assert_eq!(status["ok"]["active_watch"], Value::Null);
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_expired_active_watch_is_not_reported_as_a_future_watch
+#[test]
+fn port_reset_planning_codex_watch_one_second_ahead_is_still_reported() {
+    let expires_at = "2026-09-27T04:00:01Z";
+    let status = parse_codex(
+        v1_with_watch(Value::Null, json!({ "expires_at": expires_at })),
+        NOW,
+        0,
+    );
+    assert_eq!(
+        status["ok"]["active_watch"]["expires_at"],
+        json!(expires_at)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_explicit_target_offset_and_due_are_not_completion
+#[test]
+fn port_reset_planning_codex_countdown_before_explicit_target_is_not_yet_due() {
+    let mut event = pending();
+    event["scheduled_for"] = json!("2026-09-28T00:00:00Z");
+    let scheduled = parse_scheduled(v1(event));
+    let text = countdown(scheduled["ok"].clone(), "exact", "2026-09-27T22:00:00Z");
+    let text = text.as_str().unwrap_or("");
+    assert!(text.starts_with("Codex reset in "), "{text}");
+    assert!(!text.contains("awaiting"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_observed_source_uses_status_page_without_url
+#[test]
+fn port_reset_planning_codex_tweet_source_keeps_its_own_url() {
+    let scheduled = parse_scheduled(v1(pending()));
+    assert_eq!(
+        scheduled["ok"]["source_url"],
+        json!("https://x.com/thsottiaux/status/1")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_scheduled_without_time_is_not_a_countdown
+#[test]
+fn port_reset_planning_codex_scheduled_without_time_stays_tbd_in_compact_style() {
+    let scheduled = parse_scheduled(v1(pending()));
+    let text = countdown(scheduled["ok"].clone(), "compact", NOW);
+    let text = text.as_str().unwrap_or("");
+    assert!(text.contains("TBD"), "{text}");
+    assert!(!text.contains("reset in"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::codex_v1_rejects_unknown_type_missing_target_and_stale_metadata
+#[test]
+fn port_reset_planning_codex_v2_schema_is_rejected_before_any_event() {
+    let mut feed = v1(Value::Null);
+    feed["schema"] = json!("v2");
+    assert!(is_err(&parse_codex(feed, NOW, 0)));
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::compact_watch_text_keeps_hours_when_the_window_is_more_than_a_day_away
+#[test]
+fn port_reset_planning_compact_watch_text_drops_days_inside_one_day() {
+    let reply = ask(
+        "compact-active-watch-text",
+        json!({ "provider": "codex", "watch": { "expires_at": "2026-09-27T20:00:00Z" }, "now": NOW }),
+    );
+    let text = reply.as_str().unwrap_or("");
+    assert!(text.contains("16h"), "{text}");
+    assert!(!text.contains('d'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::degraded_legacy_cannot_retract_or_roll_back_retained_announcement
+#[test]
+fn port_reset_planning_degraded_legacy_keeps_retained_announcement_time() {
+    let retained = parse_scheduled(v1(pending()))["ok"].clone();
+    let events = json!([
+        { "provider": "codex", "ok": { "scheduled": null, "active_watch": null }, "source_warning": "primary failed; legacy used" },
+    ]);
+    let reply = apply(
+        events,
+        json!({}),
+        json!({ "codex": { "scheduled": retained } }),
+    );
+    assert_eq!(
+        reply["steps"][0]["codex"]["scheduled"]["announced_at"],
+        json!("2026-09-26T10:00:00Z")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::disabled_provider_ignores_late_result
+#[test]
+fn port_reset_planning_disabled_provider_ignores_late_successful_watch() {
+    let events = json!([
+        { "provider": "codex", "ok": { "scheduled": null, "active_watch": { "expires_at": "2026-09-29T04:00:00Z" } }, "source_warning": null },
+    ]);
+    let reply = apply(events, json!({ "monitor_codex": false }), json!({}));
+    assert_eq!(reply["steps"][0]["codex"]["active_watch"], Value::Null);
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::exact_countdown_has_seconds_and_due_waits_for_confirmation
+#[test]
+fn port_reset_planning_exact_countdown_one_second_before_due_shows_seconds() {
+    let scheduled = json!({
+        "announced_at": "2026-09-27T00:00:00Z", "scheduled_for": "2026-09-28T04:07:32Z",
+        "source_url": "https://x.com/thsottiaux/status/1", "is_banked": false,
+    });
+    let text = countdown(scheduled, "exact", "2026-09-28T04:07:31Z");
+    let text = text.as_str().unwrap_or("");
+    assert!(text.starts_with("Codex reset in "), "{text}");
+    assert!(text.contains("1s"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::legacy_watch_does_not_schedule_and_banked_pending_has_unknown_time
+#[test]
+fn port_reset_planning_legacy_scheduled_reset_without_banked_type_is_not_banked() {
+    let legacy = |text: &str| ask("parse-codex-legacy", json!({ "feed": text }));
+    let scheduled = legacy(
+        r#"{"scheduled":{
+            "tweet_id":"2101352781219258527","text":"Friday",
+            "announced_at":"2026-09-19T16:48:38Z","scheduled_for":null,
+            "reset_type":"scheduled","tweet_url":"https://x.com/thsottiaux/status/2101352781219258527"
+        }}"#,
+    );
+    assert_eq!(scheduled["ok"]["is_banked"], json!(false));
+    assert_eq!(
+        countdown(scheduled["ok"].clone(), "exact", NOW),
+        json!("Codex reset scheduled · time TBD")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::primary_success_avoids_fallback_and_malformed_primary_uses_one_legacy_request
+#[test]
+fn port_reset_planning_healthy_primary_reports_no_source_warning() {
+    let healthy = ask(
+        "fetch-provider",
+        json!({ "provider": "codex", "now": NOW, "responses": { CODEX_STATUS_URL: v1(Value::Null).to_string() } }),
+    );
+    assert_eq!(healthy["source_warning"], Value::Null);
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::rate_limit_and_transport_failure_do_not_cascade
+#[test]
+fn port_reset_planning_server_error_without_retry_after_makes_one_request() {
+    let failed = ask(
+        "fetch-provider",
+        json!({ "provider": "codex", "now": NOW, "failure": { "http": { "url": CODEX_STATUS_URL, "status": 500, "retry_after_secs": null } } }),
+    );
+    assert!(is_err(&failed));
+    assert_eq!(failed["requests"], json!(1));
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::reset_fetch_runs_on_bounded_io_worker_and_drop_requests_cancellation
+#[test]
+fn port_reset_planning_reset_fetch_without_abort_completes_off_the_event_loop() {
+    let reply = ask(
+        "fetch-on-io-worker",
+        json!({ "io_threads": 1, "queue_slots": 1, "abort_after_start": false, "join_deadline_secs": 5 }),
+    );
+    assert_eq!(reply["started"], json!(true));
+    assert_eq!(reply["ran_on_event_loop_thread"], json!(false));
+    assert_eq!(reply["future_cancelled"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/reset_planning.rs::retry_after_and_poll_deadline_preserve_hourly_floor
+#[test]
+fn port_reset_planning_short_retry_after_cannot_shorten_the_hourly_floor() {
+    let deadline = |retry_after: Value| {
+        ask(
+            "next-poll-deadline",
+            json!({ "retry_after_secs": retry_after }),
+        )
+    };
+    let floor = deadline(Value::Null)["poll_interval_secs"].as_u64();
+    let short = deadline(json!(60))["delay_secs"].as_u64();
+    assert!(
+        short.is_some() && short >= floor,
+        "short={short:?} floor={floor:?}"
+    );
+}

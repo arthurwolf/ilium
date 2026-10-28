@@ -159,3 +159,73 @@ fn usr_262_import_data_writes_nothing_when_the_confirmation_is_declined() {
     let _ = rig.cli(&["import-data", folder_text.as_str()]);
     assert_eq!(rig.plugin_setting("com.example.shy", "theme"), None);
 }
+
+/// REQ: USR-245
+#[test]
+fn usr_245_export_data_file_contents_carry_the_plugin_id_setting_and_log_line() {
+    let mut rig = UserRig::new();
+    install_ok(&mut rig, &spec("com.example.content", "1.0.0", &["tree.read"]));
+    rig.set_plugin_setting("com.example.content", "theme", "dark");
+    rig.plugin_logs("com.example.content", "info", "a distinct log line");
+    let folder = rig.scratch_dir().join("content-export");
+    let output = rig.cli(&["export-data", folder.to_str().expect("utf-8 path")]);
+    assert_eq!(result_exit_code(&output), 0, "{:?}", error_codes(&output));
+    let mut combined = String::new();
+    for file in std::fs::read_dir(&folder).expect("export folder").flatten() {
+        combined.push_str(&std::fs::read_to_string(file.path()).unwrap_or_default());
+    }
+    assert!(combined.contains("com.example.content"));
+    assert!(combined.contains("dark"));
+    assert!(combined.contains("a distinct log line"));
+}
+
+/// REQ: USR-246
+#[test]
+fn usr_246_erase_data_declined_at_the_confirmation_keeps_the_plugin_data() {
+    let mut rig = UserRig::new();
+    install_ok(&mut rig, &spec("com.example.stay", "1.0.0", &["tree.read"]));
+    rig.set_plugin_setting("com.example.stay", "theme", "dark");
+    rig.plugin_logs("com.example.stay", "info", "stay line");
+    rig.attach_client(vec![DialogAnswer::ConfirmNo]);
+    let _ = rig.cli(&["erase-data", "com.example.stay"]);
+    assert!(!rig.confirmations_shown().is_empty());
+    assert_eq!(
+        rig.plugin_setting("com.example.stay", "theme").as_deref(),
+        Some("dark")
+    );
+    assert!(!rig.log_lines("com.example.stay").is_empty());
+}
+
+/// REQ: USR-247
+#[test]
+fn usr_247_export_with_networking_blocked_still_writes_files() {
+    let mut rig = UserRig::new();
+    install_ok(&mut rig, &spec("com.example.offline", "1.0.0", &["tree.read"]));
+    rig.set_plugin_setting("com.example.offline", "theme", "dark");
+    rig.deny_network();
+    let folder = rig.scratch_dir().join("offline-files-export");
+    let export = rig.cli(&["export-data", folder.to_str().expect("utf-8 path")]);
+    assert_eq!(result_exit_code(&export), 0, "{:?}", error_codes(&export));
+    let written = std::fs::read_dir(&folder)
+        .expect("export folder")
+        .flatten()
+        .count();
+    assert!(written > 0, "export wrote no files while networking was blocked");
+    assert!(rig.network_requests().is_empty());
+}
+
+/// REQ: USR-248
+#[test]
+fn usr_248_kept_audit_records_survive_until_the_retention_period_ends() {
+    let mut rig = UserRig::new();
+    rig.write_system_policy("version = 1\n[audit]\nkeep_days = 30\n");
+    install_ok(&mut rig, &spec("com.example.keepaud", "1.0.0", &[]));
+    rig.attach_client(vec![DialogAnswer::ConfirmYes]);
+    let _ = rig.cli(&["erase-data", "com.example.keepaud"]);
+    let live = rig.audit_dir().join("audit.jsonl");
+    rig.advance_ms(29 * 86_400_000);
+    rig.start_server();
+    assert!(std::fs::read_to_string(&live)
+        .unwrap_or_default()
+        .contains("com.example.keepaud"));
+}

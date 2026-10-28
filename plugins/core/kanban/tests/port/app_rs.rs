@@ -64,6 +64,23 @@ fn port_app_markdown_editor_yields_a_board_on_the_same_file_without_rewriting_it
     assert_eq!(board_file(&mut host), SAMPLE_BOARD);
 }
 
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::existing_markdown_creates_populated_boards_from_tree_and_dialog
+#[test]
+fn port_app_existing_markdown_board_requests_no_seed_input_and_keeps_the_tasks() {
+    let mut host = client_host_with(Some(SAMPLE_BOARD));
+    let pane = open_editor(&mut host, "docs/plan.md", "markdown");
+    let submissions = invoke(&mut host, pane);
+    let board_spec = submissions
+        .iter()
+        .find_map(|submission| match &submission.intent {
+            Intent::CreatePane(spec) if spec.content_kind == BOARD_KIND => Some(spec),
+            _ => None,
+        })
+        .expect("a board pane is requested for the existing file");
+    assert_eq!(board_spec.initial_input, None);
+    assert_eq!(board_file(&mut host), SAMPLE_BOARD);
+}
+
 /// REQ: PORT:ilium-client/src/app.rs::create_board_tree_action_is_hidden_for_non_markdown_editors
 #[test]
 fn port_app_non_markdown_editor_gets_no_board() {
@@ -168,5 +185,28 @@ fn port_app_a_cancelled_creation_keeps_the_completed_file_and_opens_nothing_late
         boards(&later),
         0,
         "no delayed open appears after the cancellation"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::kanban_layout_settings_persist_with_bounded_adjustments
+#[test]
+fn port_app_refused_column_width_values_never_reach_the_settings_write() {
+    let mut host = client_host_with(None);
+    host.settings()
+        .set("column_width", json!(61))
+        .expect_err("61 is above the maximum of 60");
+    host.settings()
+        .set("column_width", json!(11))
+        .expect_err("11 is below the minimum of 12");
+    let column_width_writes: Vec<serde_json::Value> = host
+        .settings()
+        .writes()
+        .into_iter()
+        .filter(|(key, _)| key.as_str() == "column_width")
+        .map(|(_, value)| value)
+        .collect();
+    assert!(
+        column_width_writes.is_empty(),
+        "refused values were written: {column_width_writes:?}"
     );
 }

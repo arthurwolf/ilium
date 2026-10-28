@@ -25,3 +25,14 @@ fn burst_of_fifty_writes_within_100_ms_owes_exactly_one_rebuild() {
     );
     assert_eq!(debouncer.due(1_000), 0, "the burst owes no second rebuild");
 }
+
+/// REQ: DEV-880
+#[test]
+fn a_single_write_owes_one_rebuild_and_a_later_write_owes_another() {
+    let mut debouncer = Debouncer::new(DEBOUNCE);
+    debouncer.change(0);
+    assert_eq!(debouncer.due(300), 1, "one rebuild 300 ms after the write");
+    debouncer.change(500);
+    assert_eq!(debouncer.due(800), 1, "a later write owes its own rebuild");
+    assert_eq!(debouncer.due(1_500), 0, "no further rebuild is owed");
+}

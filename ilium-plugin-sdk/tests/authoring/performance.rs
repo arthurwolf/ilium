@@ -1,5 +1,5 @@
 //! Rule statements of the performance page as the manual states them (doc-lint tests).
-use crate::support::assert_rule;
+use crate::support::{assert_page_line, assert_rule};
 
 /// REQ: AUT-101
 #[test]
@@ -40,4 +40,22 @@ fn doc_aut_104_own_timing_read_from_monotonic_millis() {
 #[test]
 fn doc_aut_105_comparison_timings_from_release_build() {
     assert_rule("AUT-105", "MUST", &["MUST come from a release build"]);
+}
+
+/// REQ: AUT-103
+#[test]
+fn doc_aut_103_bucket_rule_points_to_the_lease_recipe() {
+    assert_page_line(
+        "AUT-103",
+        &["The recipe with the lease and the time limit is in the"],
+    );
+}
+
+/// REQ: AUT-105
+#[test]
+fn doc_aut_105_debug_build_is_named_as_slower_than_release() {
+    assert_page_line(
+        "AUT-105",
+        &["A debug build (`ilium plugin build --debug`) is slower than a release build."],
+    );
 }

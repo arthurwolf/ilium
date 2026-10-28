@@ -84,3 +84,28 @@ fn port_chrome_drops_minimap_when_too_narrow() {
         screen.row(1)
     );
 }
+
+/// REQ: PORT:ilium-client/src/editor_chrome.rs::reserves_toolbar_row_and_minimap_column
+#[test]
+fn port_chrome_toolbar_row_stays_reserved_with_the_minimap_off() {
+    let mut host = active_host(&[
+        ("show_minimap", json!(false)),
+        ("show_line_numbers", json!(false)),
+    ]);
+    open_file(&mut host, 1, "a.rs", Some("rust"), "fn main() {}\n");
+    let screen = render_pane(&mut host, 40, 20);
+    assert!(!screen.row(0).trim().is_empty(), "toolbar occupies row 0");
+    assert!(screen.row(1).starts_with("fn main"), "{}", screen.row(1));
+}
+
+/// REQ: PORT:ilium-client/src/editor_chrome.rs::drops_minimap_when_disabled
+#[test]
+fn port_chrome_disabled_minimap_draws_no_glyphs_at_a_wide_width() {
+    assert_eq!(minimap_cells(80, false), 0);
+}
+
+/// REQ: PORT:ilium-client/src/editor_chrome.rs::drops_minimap_when_too_narrow
+#[test]
+fn port_chrome_no_minimap_glyphs_remain_at_eight_columns() {
+    assert_eq!(minimap_cells(8, true), 0);
+}

@@ -3,7 +3,7 @@
 use ilium_plugin_api::conformance::{
     corpus_manifest, corpus_report, coverage_report, may_claim_conformance,
 };
-use ilium_plugin_api::version::CURRENT;
+use ilium_plugin_api::version::{ApiVersion, CURRENT};
 use std::collections::BTreeSet;
 
 fn host_conformance_page() -> String {
@@ -60,6 +60,28 @@ fn abi_074_every_corpus_case_states_input_expected_result_and_matrix_row() {
     }
 }
 
+/// REQ: ABI-074
+#[test]
+fn abi_074_blank_or_whitespace_only_case_fields_count_as_unstated() {
+    for case in corpus_manifest().cases {
+        assert!(
+            !case.input.trim().is_empty(),
+            "case {} has a whitespace-only input, which states nothing",
+            case.id
+        );
+        assert!(
+            !case.expected.trim().is_empty(),
+            "case {} has a whitespace-only expected result",
+            case.id
+        );
+        assert!(
+            !case.matrix_row.trim().is_empty(),
+            "case {} has a whitespace-only matrix row",
+            case.id
+        );
+    }
+}
+
 /// REQ: ABI-075
 #[test]
 fn abi_075_conformance_claim_needs_all_cases_passing_and_matching_corpus_version() {
@@ -101,5 +123,40 @@ fn abi_120_coverage_report_lists_uncovered_pairs_and_fails_release_when_non_empt
             .iter()
             .any(|case| case.id.contains("revoked")),
         "the corpus must include a revoked-grant case"
+    );
+}
+
+/// REQ: ABI-073
+#[test]
+fn abi_073_case_ids_are_the_same_on_every_read_of_the_corpus() {
+    let first: Vec<String> = corpus_manifest().cases.into_iter().map(|case| case.id).collect();
+    let second: Vec<String> = corpus_manifest().cases.into_iter().map(|case| case.id).collect();
+    assert_eq!(first, second, "a case id must stay the same across corpus reads");
+}
+
+/// REQ: ABI-075
+#[test]
+fn abi_075_no_conformance_claim_for_an_api_version_the_corpus_does_not_check() {
+    let next_minor = ApiVersion {
+        major: CURRENT.major,
+        minor: CURRENT.minor + 1,
+        patch: 0,
+    };
+    assert!(
+        !may_claim_conformance(next_minor),
+        "a corpus for {} must not support a conformance claim for {}",
+        CURRENT,
+        next_minor
+    );
+}
+
+/// REQ: ABI-120
+#[test]
+fn abi_120_release_gate_fails_exactly_when_a_coverage_pair_is_uncovered() {
+    let report = coverage_report();
+    assert_eq!(
+        report.fails_release(),
+        !report.uncovered_pairs().is_empty(),
+        "the release gate must fail exactly when uncovered pairs remain"
     );
 }

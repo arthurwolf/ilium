@@ -1,5 +1,21 @@
 //! Fake command line (reference-test-harness.md DEV-473).
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use ilium_plugin_sdk_core::generated::types::{CliInvokedEvent, Event};
+
+use super::tree::Outbox;
+
+/// What a running invocation has produced so far; shared with the host.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct InvocationOutput {
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) exit_code: Option<u8>,
+}
+
 /// The result of one invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
@@ -7,60 +23,97 @@ pub struct Invocation {
     pub name: String,
     /// Arguments after the name.
     pub arguments: Vec<String>,
+    id: u64,
+    output: Rc<RefCell<InvocationOutput>>,
 }
 
 impl Invocation {
     /// Standard output the plugin wrote.
     pub fn stdout(&self) -> String {
-        unimplemented!("DEV-473")
+        self.output.borrow().stdout.clone()
     }
 
     /// Standard error the plugin wrote.
     pub fn stderr(&self) -> String {
-        unimplemented!("DEV-473")
+        self.output.borrow().stderr.clone()
     }
 
     /// Exit code the plugin set.
     pub fn exit_code(&self) -> Option<u8> {
-        unimplemented!("DEV-473")
+        self.output.borrow().exit_code
     }
 }
 
 /// Handle on the fake command line of a host.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FakeCli {
-    _private: (),
+    next_id: u64,
+    env: BTreeMap<String, String>,
+    cwd: String,
+    outputs: BTreeMap<u64, Rc<RefCell<InvocationOutput>>>,
+    outbox: Outbox,
 }
 
 impl FakeCli {
+    /// A command line that publishes events into `outbox`.
+    pub(crate) fn with_outbox(outbox: Outbox) -> FakeCli {
+        FakeCli {
+            outbox,
+            ..FakeCli::default()
+        }
+    }
+
     /// Delivers `cli-invoked` with these arguments and stdin.
-    pub fn invoke(&mut self, _args: &[&str], _stdin: &[u8]) -> Invocation {
-        unimplemented!("DEV-473")
+    pub fn invoke(&mut self, args: &[&str], _stdin: &[u8]) -> Invocation {
+        self.next_id += 1;
+        let id = self.next_id;
+        let name = args.first().map(|word| word.to_string()).unwrap_or_default();
+        let arguments: Vec<String> = args.iter().skip(1).map(|word| word.to_string()).collect();
+        let output = Rc::new(RefCell::new(InvocationOutput::default()));
+        self.outputs.insert(id, Rc::clone(&output));
+        self.outbox
+            .borrow_mut()
+            .push(Event::CliInvoked(CliInvokedEvent {
+                invocation: id,
+                name: name.clone(),
+                argv: arguments.clone(),
+                cwd: self.cwd.clone(),
+            }));
+        Invocation {
+            name,
+            arguments,
+            id,
+            output,
+        }
     }
 
     /// The current output and exit code of an earlier invocation (lane hook, see manual_gaps_fakes.md; DEV-473).
-    pub fn refresh(&self, _invocation: &Invocation) -> Invocation {
-        unimplemented!("DEV-473")
+    pub fn refresh(&self, invocation: &Invocation) -> Invocation {
+        invocation.clone()
     }
 
     /// Delivers the cancel of a running invocation, as Ctrl-C would (lane hook, see manual_gaps_fakes.md; DEV-473).
-    pub fn cancel(&mut self, _invocation: &Invocation) {
-        unimplemented!("DEV-473")
+    pub fn cancel(&mut self, invocation: &Invocation) {
+        if self.outputs.contains_key(&invocation.id) {
+            self.outbox
+                .borrow_mut()
+                .push(Event::CliCancelled(invocation.id));
+        }
     }
 
     /// Sets an environment variable seen by later invocations (lane hook, see manual_gaps_fakes.md; DEV-473).
-    pub fn set_env(&mut self, _key: &str, _value: &str) {
-        unimplemented!("DEV-473")
+    pub fn set_env(&mut self, key: &str, value: &str) {
+        self.env.insert(key.to_string(), value.to_string());
     }
 
     /// Removes an environment variable for later invocations (lane hook, see manual_gaps_fakes.md; DEV-473).
-    pub fn unset_env(&mut self, _key: &str) {
-        unimplemented!("DEV-473")
+    pub fn unset_env(&mut self, key: &str) {
+        self.env.remove(key);
     }
 
     /// Sets the working directory of later invocations, in `"scope:path"` shorthand (lane hook, see manual_gaps_fakes.md).
-    pub fn set_cwd(&mut self, _path: &str) {
-        unimplemented!("DEV-473")
+    pub fn set_cwd(&mut self, path: &str) {
+        self.cwd = path.to_string();
     }
 }
 
@@ -70,7 +123,7 @@ mod spec_tests {
 
     /// A fake command line with no invocations yet, as a host hands it out.
     fn fresh_cli() -> FakeCli {
-        FakeCli { _private: () }
+        FakeCli::default()
     }
 
     /// REQ: DEV-473

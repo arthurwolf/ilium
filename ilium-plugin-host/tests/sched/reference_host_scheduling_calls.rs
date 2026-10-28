@@ -740,3 +740,16 @@ fn soft_deadline_traps_at_the_full_hundred_millisecond_grace_boundary() {
         BreachVerdict::SoftTrap
     );
 }
+
+/// REQ: DEV-836
+#[test]
+fn dev_836_command_batch_of_40_ms_is_inside_its_50_ms_deadline() {
+    let kernel = kernel_with_nodes(1);
+    let guest = ScriptedGuest::new(Shared::new())
+        .sleeping(40)
+        .submitting(vec![play_sound_submission(1)]);
+    let handle = build_with(HostHarness::new().kernel(kernel.clone()), guest);
+    handle.deliver(vec![command_invoked()]);
+    handle.pump(16);
+    assert_eq!(kernel.applied_intents().len(), 1);
+}

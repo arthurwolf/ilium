@@ -220,3 +220,55 @@ fn dev_849_matrix_has_one_row_per_replaceable_core_page_and_each_row_matches_its
         }
     }
 }
+
+/// REQ: DEV-846
+#[test]
+fn dev_846_a_complete_replacement_for_every_row_installs() {
+    for row in matrix_rows() {
+        let mut world = ExtWorld::with_core_plugins();
+        let manifest = world.replacement_manifest(
+            &replacement_id(&row.plugin),
+            &row.plugin,
+            ReplacementShape::default(),
+        );
+        let result = world.install(Tier::T1, manifest, Vec::new());
+        assert_eq!(diag_code(&result), "ok", "{} complete replacement", row.plugin);
+    }
+}
+
+/// REQ: DEV-847
+#[test]
+fn dev_847_snapshot_section_stays_stored_after_a_replacement_cycle() {
+    const SCHEDULER: &str = "ilium.core.scheduler";
+    const SCHEDULER_SECTION: &str = "ilium.core.scheduler";
+
+    let mut world = ExtWorld::with_core_plugins();
+    world.register_snapshot_section(SCHEDULER, SCHEDULER_SECTION, KIB64 as u64);
+    world.set_snapshot_reply(
+        SCHEDULER,
+        SCHEDULER_SECTION,
+        r#"{"scheduled_input":[],"prompt_queue":[]}"#,
+    );
+    world.take_snapshot();
+    let replacement = replacement_id(SCHEDULER);
+    world.set_enabled(SCHEDULER, false);
+    let manifest = world.replacement_manifest(&replacement, SCHEDULER, ReplacementShape::default());
+    world
+        .install(Tier::T1, manifest, Vec::new())
+        .expect("a complete replacement installs");
+    world.set_enabled(&replacement, true);
+    world.set_enabled(&replacement, false);
+    world.set_enabled(SCHEDULER, true);
+    assert!(
+        world.stored_snapshot_section(SCHEDULER_SECTION).is_some(),
+        "the snapshot section named in the row was removed"
+    );
+}
+
+/// REQ: DEV-849
+#[test]
+fn dev_849_every_matrix_row_names_at_least_one_surface_item() {
+    let rows = matrix_rows();
+    assert!(!rows.is_empty(), "the matrix has no rows");
+    assert!(rows.iter().all(|row| !row.surface.is_empty()));
+}

@@ -7,13 +7,39 @@ use ilium_plugin_api::generated::types::errors::PluginError;
 use ilium_plugin_api::generated::types::ids::RequestId;
 use ilium_plugin_api::generated::types::intents::Submission;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use ilium_plugin_api::generated::types::errors::ErrorCode;
+
+/// Longest dedup key, in characters.
+const DEDUP_KEY_MAX_CHARS: usize = 128;
+
+/// Process-wide request id counter; ids start at 1 so zero never names a request.
+static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+/// True for the characters a dedup key may hold: A-Z a-z 0-9 . _ : / -.
+fn is_dedup_key_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '/' | '-')
+}
+
 /// Host side of the `intents-host` interface.
 #[derive(Debug)]
 pub struct IntentsHostImport;
 
 impl HostIntentsHost for IntentsHostImport {
-    fn submit(&mut self, _submission: Submission) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::intents_host::submit")
+    fn submit(&mut self, submission: Submission) -> Result<RequestId, PluginError> {
+        if let Some(key) = &submission.dedup_key {
+            let length = key.chars().count();
+            if length == 0 || length > DEDUP_KEY_MAX_CHARS || !key.chars().all(is_dedup_key_char) {
+                return Err(PluginError {
+                    code: ErrorCode::InvalidArgument,
+                    message: "dedup key must be 1 to 128 characters of A-Z a-z 0-9 . _ : / -"
+                        .to_owned(),
+                    retry_after_ms: None,
+                });
+            }
+        }
+        Ok(RequestId(NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)))
     }
 }
 

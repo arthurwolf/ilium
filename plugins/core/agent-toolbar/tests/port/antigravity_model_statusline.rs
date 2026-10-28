@@ -193,3 +193,168 @@ fn port_antigravity_model_statusline_statusline_payload_retains_only_project_con
         r####"{"keys": ["project", "conversation", "model"]}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::conversation_ids_cannot_escape_the_observation_directory
+#[test]
+fn port_antigravity_model_statusline_well_formed_conversation_id_is_accepted() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"conversation_id": "12345678-abcd-ef01-2345-6789abcdef01"}"####,
+        r####"{"valid": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::disable_restores_dropped_fields_when_statusline_off_keeps_extra_metadata
+#[test]
+fn port_antigravity_model_statusline_statusline_off_without_saved_state_leaves_no_state_file() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_off_without_saved_state_leaves_settings_file_untouched"}"####,
+        r####"{"ok": true, "state_file_present": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::disable_restores_enabled_saved_statusline_after_cli_normalizes_it
+#[test]
+fn port_antigravity_model_statusline_restore_removes_the_state_file_after_cli_normalization() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "disable_restores_enabled_saved_statusline_after_cli_normalizes_it"}"####,
+        r####"{"state_file_present": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::disable_restores_saved_fields_after_statusline_off_drops_them
+#[test]
+fn port_antigravity_model_statusline_restore_brings_back_saved_stack_with_default() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "disable_restores_saved_fields_after_statusline_off_drops_them"}"####,
+        r####"{"stack_with_default": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::disable_restores_saved_statusline_json_after_live_command_switch
+#[test]
+fn port_antigravity_model_statusline_restore_after_live_switch_drops_the_bridge_command() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "disable_restores_saved_statusline_json_after_live_command_switch"}"####,
+        r####"{"ok": true, "installed_command_present": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::disabling_capture_preserves_statusline_changes_made_by_the_user
+#[test]
+fn port_antigravity_model_statusline_user_command_edit_survives_capture_being_disabled() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "disabling_capture_preserves_statusline_changes_made_by_the_user"}"####,
+        r####"{"command_after_disable": "user-change"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::live_statusline_actions_preserve_enabled_prior_commands_without_reactivating_disabled_ones
+#[test]
+fn port_antigravity_model_statusline_live_actions_do_not_reactivate_a_disabled_prior_command() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "live_statusline_actions_preserve_enabled_prior_commands_without_reactivating_disabled_ones"}"####,
+        r####"{"reactivated_disabled": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::observations_are_scoped_to_conversation_and_project
+#[test]
+fn port_antigravity_model_statusline_observation_is_not_visible_to_another_conversation() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"model": "Gemini 3.5 Flash (High)", "case": "observations_are_scoped_to_conversation_and_project", "query": "other_conversation"}"####,
+        r####"{"model": null}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::old_observation_is_rejected_after_model_icons_are_disabled_and_reenabled
+#[test]
+fn port_antigravity_model_statusline_fresh_observation_is_accepted_in_the_new_enabled_period() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "old_observation_is_rejected_after_model_icons_are_disabled_and_reenabled"}"####,
+        r####"{"fresh_model": "gemini-3-flash"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::statusline_configuration_chains_and_restores_an_existing_command
+#[test]
+fn port_antigravity_model_statusline_installed_line_keeps_stack_with_default_and_runs_the_bridge() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_configuration_chains_and_restores_an_existing_command"}"####,
+        r####"{"installed_command_contains": "__antigravity-model-statusline", "stack_with_default": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::statusline_configuration_restores_previously_disabled_command_byte_for_byte
+#[test]
+fn port_antigravity_model_statusline_restore_keeps_a_previously_disabled_command_disabled() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_configuration_restores_previously_disabled_command_byte_for_byte"}"####,
+        r####"{"restored_enabled": false, "extra_preserved": "preserved"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::statusline_configuration_stacks_with_default_and_removes_its_own_key
+#[test]
+fn port_antigravity_model_statusline_restore_removes_the_bridge_key_it_added() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_configuration_stacks_with_default_and_removes_its_own_key"}"####,
+        r####"{"own_key_present": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::statusline_helper_does_not_capture_a_model_while_setting_is_disabled
+#[test]
+fn port_antigravity_model_statusline_helper_captures_a_model_while_setting_is_enabled() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_helper_does_not_capture_a_model_while_setting_is_disabled", "setting": "enabled"}"####,
+        r####"{"captured": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::statusline_payload_rejects_conflicting_session_aliases
+#[test]
+fn port_antigravity_model_statusline_payload_accepts_identical_session_aliases() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_payload_rejects_conflicting_session_aliases", "aliases": "identical"}"####,
+        r####"{"rejected": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/antigravity_model_statusline.rs::statusline_payload_retains_only_project_conversation_and_model
+#[test]
+fn port_antigravity_model_statusline_payload_drops_fields_beyond_the_three_retained_ones() {
+    check(
+        Place::Server,
+        "statusline.antigravity.case",
+        r####"{"case": "statusline_payload_retains_only_project_conversation_and_model", "extra_fields": ["cost"]}"####,
+        r####"{"dropped": ["cost"]}"####,
+    );
+}

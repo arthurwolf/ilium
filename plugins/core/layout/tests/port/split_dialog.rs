@@ -18,3 +18,14 @@ fn port_001_split_orientation_dialog_can_skip_the_optional_member_picker() {
     assert!(splits[0].panes.is_empty(), "no members were picked");
     assert_eq!(splits[0].direction, SplitDirection::Vertical);
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::split_orientation_dialog_can_skip_the_optional_member_picker
+#[test]
+fn port_001_second_settling_again_after_skipping_the_picker_creates_no_extra_split() {
+    let mut host = activated_server();
+    let group = host.tree().add_group("work");
+    host.deliver_one(message_from_client("split-empty-vertical", id_bytes(group)));
+    host.settle();
+    host.settle();
+    assert_eq!(create_splits(&host.submitted()).len(), 1);
+}

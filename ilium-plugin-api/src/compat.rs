@@ -84,24 +84,61 @@ pub struct MatrixCell {
     pub job_name: String,
 }
 
+fn window_minors() -> std::ops::RangeInclusive<u16> {
+    let window = crate::version::host_window();
+    window.start().minor..=window.end().minor
+}
+
+/// The result stated for a pair (reference-abi-evolution.md sections 4 and 8): a plugin built for
+/// the host's minor or the one before loads; a newer SDK on an older host is refused with
+/// `package.api-unsupported`.
+fn stated_result(host_minor: u16, sdk_minor: u16) -> ExpectedResult {
+    if sdk_minor > host_minor {
+        ExpectedResult::Refused("package.api-unsupported".to_owned())
+    } else {
+        ExpectedResult::Loads
+    }
+}
+
 /// ABI-064: every cell of the matrix.
 pub fn matrix_cells() -> Vec<MatrixCell> {
-    unimplemented!("api::compat::matrix_cells")
+    let mut cells = Vec::new();
+    for host_minor in window_minors() {
+        for sdk_minor in window_minors() {
+            cells.push(MatrixCell {
+                host_minor,
+                sdk_minor,
+                expected: stated_result(host_minor, sdk_minor),
+                job_name: format!("abi-matrix-host-0.{host_minor}-sdk-0.{sdk_minor}"),
+            });
+        }
+    }
+    cells
 }
 
 /// ABI-065: what a host of `host_minor` really does with a plugin built with `sdk_minor`.
-pub fn observed_result(_host_minor: u16, _sdk_minor: u16) -> ExpectedResult {
-    unimplemented!("api::compat::observed_result")
+///
+/// The host accepts exactly the minors of its window: its own and the previous one.
+pub fn observed_result(host_minor: u16, sdk_minor: u16) -> ExpectedResult {
+    let oldest_accepted = host_minor.saturating_sub(1);
+    if (oldest_accepted..=host_minor).contains(&sdk_minor) {
+        ExpectedResult::Loads
+    } else {
+        ExpectedResult::Refused("package.api-unsupported".to_owned())
+    }
 }
 
 /// ABI-064: the names of the CI jobs that run the matrix.
 pub fn ci_matrix_jobs() -> Vec<String> {
-    unimplemented!("api::compat::ci_matrix_jobs")
+    matrix_cells().into_iter().map(|cell| cell.job_name).collect()
 }
 
 /// ABI-066: the cells inside the window whose observed result differs from the stated one.
 pub fn matrix_mismatches() -> Vec<MatrixCell> {
-    unimplemented!("api::compat::matrix_mismatches")
+    matrix_cells()
+        .into_iter()
+        .filter(|cell| observed_result(cell.host_minor, cell.sdk_minor) != cell.expected)
+        .collect()
 }
 
 #[cfg(test)]

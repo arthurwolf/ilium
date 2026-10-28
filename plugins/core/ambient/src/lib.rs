@@ -1,14 +1,15 @@
 //! Core plugin `ilium.core.ambient` (manual page core-plugin-ambient.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! Client side of the Animations tab. The scene, palette, dither and display controls persist
+//! through kernel settings and the look service, which need SDK host calls that are not
+//! implemented yet; until then the client activates cleanly, accepts events and draws the gallery
+//! heading only.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::generated::types::layout::Area;
-use ilium_plugin_sdk::generated::types::ui::UiTree;
-use ilium_plugin_sdk::generated::types::ui::ViewTarget;
+use ilium_plugin_sdk::types::{
+    Alignment, Area, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, ViewTarget, Widget,
+};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
@@ -20,19 +21,47 @@ pub struct AmbientClient;
 
 impl Lifecycle for AmbientClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.ambient: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for AmbientClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.ambient: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for AmbientClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.ambient: client views.render")
+        gallery_tree()
+    }
+}
+
+/// The gallery panel: a single paragraph naming the tab until the scene list can be read.
+fn gallery_tree() -> UiTree {
+    let spec = ParagraphSpec {
+        lines: vec![vec![Span {
+            text: "Animations".to_string(),
+            style: Style::default(),
+        }]],
+        rich: None,
+        wrap: Some(false),
+        alignment: Alignment::Left,
+        style: Style::default(),
+        scrollable: false,
+    };
+    UiTree {
+        version: 1,
+        nodes: vec![UiNode {
+            key: None,
+            widget: Widget::Paragraph(spec),
+            children: Vec::new(),
+            flags: NodeFlags::default(),
+            tooltip: None,
+            tab_index: None,
+            disabled_reason: None,
+        }],
+        root: 0,
     }
 }
 

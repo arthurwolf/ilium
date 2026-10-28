@@ -286,3 +286,15 @@ proptest! {
         }
     }
 }
+
+/// REQ: DEV-611
+#[test]
+fn dev_611_advancing_fake_time_by_a_thousand_days_takes_no_real_time() {
+    let started = Instant::now();
+    let mut host = host();
+    host.advance_clock(1_000 * 24 * 60 * MINUTE_MS);
+    assert!(
+        started.elapsed() < BOUND,
+        "fake time must not be waited out in real time"
+    );
+}

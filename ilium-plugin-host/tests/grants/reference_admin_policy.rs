@@ -425,23 +425,61 @@ fn sec_115_a_grant_without_a_deny_rule_is_not_refused() {
 /// REQ: SEC-115
 #[test]
 fn sec_115_a_version_denied_refusal_carries_its_code() {
-    unimplemented!("ilium_plugin_api::codes::policy::VERSION_DENIED")
+    let engine = system_policy(
+        "version = 1\n[packages]\nblocked_versions = [\"example.notes@2.0.0\"]\n",
+    );
+    assert_eq!(
+        engine.check_install_version("example.notes", "2.0.0"),
+        refused(codes::policy::VERSION_DENIED),
+        "a blocked exact version is refused with policy.version-denied"
+    );
 }
 
 /// REQ: SEC-115
 #[test]
 fn sec_115_a_version_outside_the_allowed_range_is_not_refused_as_version_denied() {
-    unimplemented!("ilium_plugin_api::codes::policy::VERSION_DENIED")
+    let engine = system_policy(
+        "version = 1\n[packages]\nblocked_versions = [\"example.notes@2.0.0\"]\n",
+    );
+    assert_eq!(
+        engine.check_install_version("example.notes", "2.0.1"),
+        PolicyVerdict::Allow,
+        "another version of the same id is not blocked"
+    );
+    assert_eq!(
+        engine.check_install_version("example.other", "2.0.0"),
+        PolicyVerdict::Allow,
+        "the same version of another id is not blocked"
+    );
 }
 
 /// REQ: SEC-115
 #[test]
 fn sec_115_a_version_pinned_refusal_carries_its_code() {
-    unimplemented!("ilium_plugin_api::codes::policy::VERSION_PINNED")
+    let engine = system_policy(
+        "version = 1\n[packages.pinned_versions]\n\"example.notes\" = \"1.4.2\"\n",
+    );
+    assert_eq!(
+        engine.check_install_version("example.notes", "2.0.1"),
+        refused(codes::policy::VERSION_PINNED),
+        "a version other than the pin is refused with policy.version-pinned"
+    );
 }
 
 /// REQ: SEC-115
 #[test]
 fn sec_115_the_pinned_version_itself_is_not_refused_as_version_pinned() {
-    unimplemented!("ilium_plugin_api::codes::policy::VERSION_PINNED")
+    let engine = system_policy(
+        "version = 1\n[packages.pinned_versions]\n\"example.notes\" = \"1.4.2\"\n",
+    );
+    assert_eq!(
+        engine.check_install_version("example.notes", "1.4.2"),
+        PolicyVerdict::Allow,
+        "the pinned version installs"
+    );
+    assert_eq!(
+        engine.check_install_version("example.other", "9.9.9"),
+        PolicyVerdict::Allow,
+        "a pin on one id does not constrain another"
+    );
 }

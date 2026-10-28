@@ -1,12 +1,35 @@
 //! Support bundle contract rules (USR-104 to USR-106, USR-953). The governing-value table of
 //! core-plugin-diagnostics.md is the only source of the bundle's command, entries and retention.
-//! Documentation rules read the manual page; behaviour rules call unimplemented! stubs until the
-//! bundle writer and the held-bundle cleanup exist (see API_GAPS.md).
+//! Documentation rules read the manual page; behaviour rules drive the plugin command line and the
+//! user rig, and fail until the bundle writer and the held-bundle cleanup exist (see API_GAPS.md).
 
 use crate::support::*;
 
 fn states(page: &str, fact: &str) {
     assert!(page.contains(fact), "the page must state: {fact}");
+}
+
+/// The entry names of a zip archive, read from its central directory.
+fn zip_entry_names(bytes: &[u8]) -> Vec<String> {
+    const CENTRAL_HEADER: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
+    let mut names = Vec::new();
+    let mut at = 0;
+    while at + 46 <= bytes.len() {
+        if bytes[at..at + 4] != CENTRAL_HEADER {
+            at += 1;
+            continue;
+        }
+        let name_length = usize::from(u16::from_le_bytes([bytes[at + 28], bytes[at + 29]]));
+        let extra_length = usize::from(u16::from_le_bytes([bytes[at + 30], bytes[at + 31]]));
+        let comment_length = usize::from(u16::from_le_bytes([bytes[at + 32], bytes[at + 33]]));
+        let name_end = at + 46 + name_length;
+        if name_end > bytes.len() {
+            break;
+        }
+        names.push(String::from_utf8_lossy(&bytes[at + 46..name_end]).into_owned());
+        at = name_end + extra_length + comment_length;
+    }
+    names
 }
 
 /// REQ: USR-104
@@ -40,7 +63,24 @@ fn usr_104_bundle_commands_that_are_superseded_are_not_a_second_format() {
 /// REQ: USR-104
 #[test]
 fn usr_104_the_cli_dispatch_has_no_bundle_command_other_than_support_bundle() {
-    unimplemented!("ilium_plugin_host::cli::run: `plugin bundle` must be an unknown command")
+    let mut rig = UserRig::new();
+    for superseded in [
+        vec!["bundle", "com.example.writer", "--out", "x.zip"],
+        vec!["diagnostics", "--out", "x.zip"],
+    ] {
+        let output = rig.cli(&superseded);
+        assert_eq!(
+            error_codes(&output),
+            vec!["usage.command-unknown".to_string()],
+            "{superseded:?} must be an unknown command"
+        );
+    }
+    let output = rig.cli(&["support-bundle", "com.example.writer", "--out", "x.zip"]);
+    assert!(
+        !error_codes(&output).contains(&"usage.command-unknown".to_string()),
+        "support-bundle must be a known command: {:?}",
+        error_codes(&output)
+    );
 }
 
 /// REQ: USR-105
@@ -71,7 +111,23 @@ fn usr_105_a_bundle_never_carries_manifest_or_other_plugins_health_or_state_name
 /// REQ: USR-105
 #[test]
 fn usr_105_a_written_bundle_holds_exactly_the_four_entries_and_no_manifest() {
-    unimplemented!("ilium_plugin_host::testing::user_rig::UserRig::support_bundle_entries")
+    let mut rig = UserRig::new();
+    install_ok(
+        &mut rig,
+        &spec("com.example.writer", "1.0.0", &["tree.read"]),
+    );
+    let file = rig.scratch_dir().join("bundle.zip");
+    let file_text = file.to_string_lossy().into_owned();
+    let output = rig.cli(&["support-bundle", "com.example.writer", "--out", &file_text]);
+    assert_eq!(result_exit_code(&output), 0, "{:?}", error_codes(&output));
+    let mut entries = zip_entry_names(&std::fs::read(&file).expect("bundle written"));
+    entries.sort();
+    assert_eq!(
+        entries,
+        vec!["crashes.txt", "log.txt", "stats.txt", "summary.txt"],
+        "a bundle holds exactly the four entries of USR-221"
+    );
+    assert!(!entries.iter().any(|name| name.contains("manifest")));
 }
 
 /// REQ: USR-106
@@ -97,7 +153,22 @@ fn usr_106_a_file_written_by_support_bundle_out_is_never_touched_by_ilium_again(
 /// REQ: USR-106
 #[test]
 fn usr_106_the_out_file_survives_the_next_start_and_held_bundles_are_cleaned() {
-    unimplemented!("ilium_plugin_host::testing::user_rig::UserRig::held_bundles")
+    let mut rig = UserRig::new();
+    install_ok(&mut rig, &spec("com.example.writer", "1.0.0", &[]));
+    let held_folder = rig.state_dir().join("support-bundles");
+    std::fs::create_dir_all(&held_folder).expect("held folder");
+    let old_held = held_folder.join("old.zip");
+    let new_held = held_folder.join("new.zip");
+    let user_file = rig.scratch_dir().join("mine.zip");
+    for path in [&old_held, &new_held, &user_file] {
+        std::fs::write(path, b"PK").expect("write bundle");
+    }
+    rig.age_file(&old_held, 15);
+    rig.age_file(&user_file, 400);
+    rig.restart_server();
+    assert!(!old_held.exists(), "a held bundle 14 days or older is deleted at start");
+    assert!(new_held.exists(), "a younger held bundle is kept");
+    assert!(user_file.exists(), "a file written by --out is never touched");
 }
 
 /// REQ: USR-953

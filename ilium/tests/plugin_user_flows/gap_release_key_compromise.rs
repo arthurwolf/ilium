@@ -30,3 +30,27 @@ fn sec_432_no_input_accepts_release_key_or_retirement_statement() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: SEC-431
+#[test]
+fn sec_431_plugins_keep_loading_exactly_as_before_a_key_compromise() {
+    let page = manual_page("reference-release-key-compromise");
+    for phrase in [
+        "A user acts on a compromise only through a new release.",
+        "The user does not edit the blocklist",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: SEC-432
+#[test]
+fn sec_432_a_new_release_key_is_only_accepted_from_a_new_binary() {
+    let page = manual_page("reference-release-key-compromise");
+    for phrase in [
+        "A new release key found in any file other than a new release binary",
+        "| Not accepted ([SEC-426]) |",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

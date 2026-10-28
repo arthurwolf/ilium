@@ -1,10 +1,36 @@
-//! Host implementation of `ilium:host/journal` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/journal`.
 //!
-//! Written once by the skeleton lane from the generated `HostJournal` trait; hand-owned afterwards.
+//! One process-wide bounded in-memory journal. Writes are limited to 20 per second per event
+//! kind (the import has no plugin identity yet) and payloads to 4 KiB.
 
 use ilium_plugin_api::generated::host::journal::{HostJournal, JournalEntry};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{EpochMs, NodeId};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+const PAYLOAD_LIMIT_BYTES: usize = 4 * 1024;
+const READ_CAP_ENTRIES: usize = 1_000;
+const RETAINED_ENTRIES: usize = 10_000;
+const RATE_PER_WINDOW: u32 = 20;
+const RATE_WINDOW_MILLIS: u64 = 1_000;
+
+#[derive(Default)]
+struct JournalState {
+    entries: VecDeque<JournalEntry>,
+    /// Per kind: window start and number of accepted writes in it.
+    windows: HashMap<String, (Instant, u32)>,
+}
+
+static JOURNAL: Mutex<Option<JournalState>> = Mutex::new(None);
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
 
 /// Host side of the `journal` interface.
 #[derive(Debug)]
@@ -13,15 +39,63 @@ pub struct JournalImport;
 impl HostJournal for JournalImport {
     fn log_event(
         &mut self,
-        _pane: Option<NodeId>,
-        _kind: String,
-        _payload_json: String,
+        pane: Option<NodeId>,
+        kind: String,
+        payload_json: String,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::journal::log_event")
+        if payload_json.len() > PAYLOAD_LIMIT_BYTES {
+            return Err(PluginError {
+                code: ErrorCode::InvalidArgument,
+                message: "payload-json exceeds 4 KiB".to_string(),
+                retry_after_ms: None,
+            });
+        }
+        let mut guard = JOURNAL.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = guard.get_or_insert_with(JournalState::default);
+        let now = Instant::now();
+        let window = state.windows.entry(kind.clone()).or_insert((now, 0));
+        let elapsed_millis = u64::try_from(now.duration_since(window.0).as_millis()).unwrap_or(u64::MAX);
+        if elapsed_millis >= RATE_WINDOW_MILLIS {
+            *window = (now, 0);
+        }
+        if window.1 >= RATE_PER_WINDOW {
+            let wait = RATE_WINDOW_MILLIS.saturating_sub(elapsed_millis).max(1);
+            return Err(PluginError {
+                code: ErrorCode::RateLimited,
+                message: "journal.log-event is limited to 20 calls per second".to_string(),
+                retry_after_ms: Some(u32::try_from(wait).unwrap_or(u32::MAX)),
+            });
+        }
+        window.1 += 1;
+        if state.entries.len() >= RETAINED_ENTRIES {
+            state.entries.pop_front();
+        }
+        state.entries.push_back(JournalEntry {
+            at: EpochMs(now_millis()),
+            pane,
+            source: "plugin".to_string(),
+            kind,
+            payload_json,
+        });
+        Ok(())
     }
 
-    fn read(&mut self, _pane: Option<NodeId>, _since: EpochMs, _limit: u32) -> Vec<JournalEntry> {
-        unimplemented!("host::imports::journal::read")
+    fn read(&mut self, pane: Option<NodeId>, since: EpochMs, limit: u32) -> Vec<JournalEntry> {
+        let wanted = (limit as usize).min(READ_CAP_ENTRIES);
+        let guard = JOURNAL.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(state) = guard.as_ref() else {
+            return Vec::new();
+        };
+        let mut newest_first: Vec<JournalEntry> = state
+            .entries
+            .iter()
+            .rev()
+            .filter(|entry| entry.at.0 >= since.0 && (pane.is_none() || entry.pane == pane))
+            .take(wanted)
+            .cloned()
+            .collect();
+        newest_first.reverse();
+        newest_first
     }
 }
 

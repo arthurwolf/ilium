@@ -40,3 +40,21 @@ fn doctor_fails_with_toolchain_too_old_naming_the_found_version() {
         "the error names the found version: {error}"
     );
 }
+
+/// REQ: DEV-883
+#[test]
+fn doctor_too_old_error_names_one_of_the_checked_tools() {
+    let root = scratch();
+    let env = env(root.path()).with_probe(Arc::new(OldToolsProbe));
+    let output = run_in_project(&env, "doctor", &[]);
+    let error = records_of(&output, "error")
+        .into_iter()
+        .next()
+        .expect("an error record")
+        .to_string();
+    let tools = ["rustc", "cargo", "wasm-tools", "node", "bun"];
+    assert!(
+        tools.iter().any(|tool| error.contains(*tool)),
+        "the error names the tool: {error}"
+    );
+}

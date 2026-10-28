@@ -460,3 +460,170 @@ fn port_internal_the_server_side_keeps_working_after_the_client_side_is_rebuilt(
     assert_eq!(scan(&["src/lib.rs"]), before);
     assert!(server.failures().is_empty());
 }
+
+// ---- second tests for IDs that had one test: a different observable each ----
+
+/// REQ: PORT:ilium-client/src/paste_cursor.rs::interrupted_replay_failure_retains_full_paste_and_reports_consumed_prefix
+#[test]
+fn port_internal_a_failed_copy_is_never_reported_as_copied() {
+    let mut host = open_picker(&["partial paste"]);
+    host.clipboard().fail_next_write("Io");
+    let out = pick(&mut host, 1);
+    assert!(status_contains(&out, "Copy failed"), "{out:?}");
+    assert!(!status_contains(&out, "Copied"), "{out:?}");
+}
+
+/// REQ: PORT:ilium-client/src/paste_cursor.rs::replay_chunk_respects_the_interactive_turn_key_ceiling
+#[test]
+fn port_internal_a_ten_thousand_character_candidate_reports_its_full_length() {
+    let long = "y".repeat(10_000);
+    let mut host = open_picker(&[long.as_str()]);
+    let out = pick(&mut host, 1);
+    assert!(status_contains(&out, "Copied 10000 characters"), "{out:?}");
+}
+
+/// REQ: PORT:ilium-client/src/paste_cursor.rs::retirement_refusal_preserves_the_untouched_original_paste
+#[test]
+fn port_internal_a_refused_copy_can_be_retried_with_the_same_candidate() {
+    let mut host = open_picker(&["untouched"]);
+    host.clipboard().fail_next_write("Denied");
+    pick(&mut host, 1);
+    let retry = pick(&mut host, 1);
+    assert!(status_contains(&retry, "Copied 9 characters"), "{retry:?}");
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("untouched"));
+}
+
+/// REQ: PORT:ilium-client/src/paste_cursor.rs::unicode_prefix_and_crlf_are_complete_at_each_yield_boundary
+#[test]
+fn port_internal_unicode_candidate_status_counts_characters_not_bytes() {
+    let mut host = open_picker(&["雪é\u{1f600}"]);
+    let out = pick(&mut host, 1);
+    assert!(status_contains(&out, "Copied 3 characters"), "{out:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_selection.rs::blocked_cpu_selected_copy_reserves_global_fifo_before_read_and_later_write
+#[test]
+fn port_internal_a_later_pick_overwrites_an_earlier_copy_in_order() {
+    let mut host = picker_with(2);
+    pick(&mut host, 2);
+    let out = pick(&mut host, 1);
+    assert!(status_contains(&out, "Copied 11 characters"), "{out:?}");
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("candidate-1"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_selection.rs::cancelled_unprepared_copy_explicitly_fails_slot_before_following_read
+#[test]
+fn port_internal_a_pick_after_cancel_copies_nothing() {
+    let mut host = picker_with(2);
+    host.deliver_one(key("Escape"));
+    let out = pick(&mut host, 1);
+    assert!(!status_contains(&out, "Copied"), "{out:?}");
+    assert_eq!(host.clipboard().last_text(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_selection.rs::closed_bank_returns_original_and_explicit_slot_error_without_copy_claim
+#[test]
+fn port_internal_a_closed_clipboard_leaves_the_clipboard_empty() {
+    let mut host = open_picker(&["kept"]);
+    host.clipboard().fail_next_write("Closed");
+    pick(&mut host, 1);
+    assert_eq!(host.clipboard().last_text(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_selection.rs::earlier_cleanup_error_keeps_original_deadline_custody_and_native_slot_failure
+#[test]
+fn port_internal_a_copy_failure_is_handled_inside_the_plugin_not_as_a_host_failure() {
+    let mut host = open_picker(&["handled"]);
+    host.clipboard().fail_next_write("Io");
+    pick(&mut host, 1);
+    host.settle();
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_selection.rs::ninth_global_slot_refusal_preserves_identical_original_and_all_eight_failures_ack_in_order
+#[test]
+fn port_internal_the_ninth_candidate_copies_normally_after_eight_failures() {
+    let mut host = picker_with(9);
+    for number in 1..=8usize {
+        host.clipboard().fail_next_write("Io");
+        pick(&mut host, number);
+    }
+    let out = pick(&mut host, 9);
+    assert!(status_contains(&out, "Copied 11 characters"), "{out:?}");
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("candidate-9"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::full_receiver_preserves_order_in_owned_mailbox_without_blocking_callback
+#[test]
+fn port_internal_model_lines_are_pickable_in_their_reply_order() {
+    let (mut host, pane) = model_host(&["one", "two", "three"]);
+    host.inference().reply_text("one\ntwo\nthree");
+    ask(&mut host, pane);
+    let out = pick(&mut host, 2);
+    assert!(status_contains(&out, "Copied 3 characters"), "{out:?}");
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("two"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::full_terminal_delivery_queue_returns_new_original_without_starting_it
+#[test]
+fn port_internal_a_request_made_while_busy_starts_exactly_one_model_call() {
+    let (mut host, pane) = model_host(&["one"]);
+    host.inference().reply_text("one");
+    host.deliver_one(palette_command("smart-copy", Some(pane)));
+    host.deliver_one(palette_command("smart-copy", Some(pane)));
+    host.settle();
+    assert_eq!(host.inference().requests().len(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::invoked_usage_empty_prefix_failure_and_panic_streams_never_replay
+#[test]
+fn port_internal_a_failed_model_call_offers_no_candidates_to_pick() {
+    let (mut host, pane) = model_host(&["one"]);
+    host.inference().fail_next("Io");
+    ask(&mut host, pane);
+    let out = pick(&mut host, 1);
+    assert!(!status_contains(&out, "Copied"), "{out:?}");
+    assert_eq!(host.clipboard().last_text(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::oversized_physical_capture_returns_original_before_provider_execution
+#[test]
+fn port_internal_an_oversized_screen_never_reaches_the_model() {
+    let huge = "w".repeat(200_000);
+    let (mut host, pane) = model_host(&[huge.as_str()]);
+    host.inference().reply_text("w");
+    ask(&mut host, pane);
+    assert!(host.inference().requests().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::progress_coalesces_but_semantic_overflow_cannot_claim_finished
+#[test]
+fn port_internal_a_candidate_beyond_the_three_shown_cannot_be_copied() {
+    let (mut host, pane) = model_host(&["a", "b", "c", "d", "e"]);
+    host.inference().reply_text("a\nb\nc\nd\ne");
+    ask(&mut host, pane);
+    pick(&mut host, 4);
+    assert_eq!(host.clipboard().last_text(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::refused_host_probe_arms_a_date_without_self_retry_or_provider_call
+#[test]
+fn port_internal_a_denied_model_call_stays_refused_after_more_settling() {
+    let (mut host, pane) = model_host(&["one"]);
+    host.inference().fail_next("Denied");
+    ask(&mut host, pane);
+    host.settle();
+    host.settle();
+    assert_eq!(host.inference().requests().len(), 1);
+    assert_eq!(host.clipboard().last_text(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_workers.rs::unsafe_host_namespace_error_is_terminal_before_stream_invocation
+#[test]
+fn port_internal_a_namespace_failure_copies_nothing_on_a_later_pick() {
+    let (mut host, pane) = model_host(&["one"]);
+    host.inference().fail_next("Namespace");
+    ask(&mut host, pane);
+    let out = pick(&mut host, 1);
+    assert!(!status_contains(&out, "Copied"), "{out:?}");
+}

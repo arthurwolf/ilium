@@ -2,7 +2,7 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -20,19 +20,19 @@ pub struct CompactionServer;
 
 impl Lifecycle for CompactionServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.compaction: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for CompactionServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.compaction: server handler.on_events")
+        Vec::new()
     }
 }
 
 impl JobRunner for CompactionServer {
     fn run(&mut self, _kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("ilium.core.compaction: server job-runner.run")
+        Err(PluginError::invalid_argument(format!("unknown job kind: {_kind}")))
     }
 }
 
@@ -43,19 +43,23 @@ pub struct CompactionClient;
 
 impl Lifecycle for CompactionClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.compaction: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for CompactionClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.compaction: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for CompactionClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.compaction: client views.render")
+        UiTree {
+            version: 1,
+            nodes: Vec::new(),
+            root: 0,
+        }
     }
 }
 

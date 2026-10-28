@@ -19,6 +19,19 @@ fn port_actual_saved_world_route_emits_selected_pack_frames_and_preserves_inputs
     assert!(!lit.is_empty(), "waves draws something at 1500 ms");
 }
 
+/// REQ: PORT:ilium/tests/semantic_animation_tui.rs::actual_saved_world_route_emits_selected_pack_frames_and_preserves_inputs
+#[test]
+fn port_actual_saved_world_route_frame_keeps_requested_size() {
+    for id in MANIFEST_SCENES {
+        let frame = fake_scene(id, 80, 24).frame(braille_frame(80, 24, 1500));
+        assert_eq!(
+            (frame.columns, frame.rows),
+            (80, 24),
+            "{id}: frame keeps the requested size"
+        );
+    }
+}
+
 /// REQ: PORT:ilium/tests/semantic_animation_tui.rs::project_paris_and_entry_carpet_render_through_actual_recommendation_transport
 #[test]
 fn port_project_paris_and_entry_carpet_render_through_actual_recommendation_transport() {
@@ -49,5 +62,24 @@ fn port_project_paris_and_entry_carpet_render_through_actual_recommendation_tran
     assert!(
         scenes_page().to_lowercase().contains("carpet"),
         "the manual page covers this feature"
+    );
+}
+
+/// REQ: PORT:ilium/tests/semantic_animation_tui.rs::project_paris_and_entry_carpet_render_through_actual_recommendation_transport
+#[test]
+fn port_project_paris_and_entry_carpet_unlisted_scene_is_absent_from_catalog() {
+    let mut session = session_with_plugin();
+    let scenes = catalog_scenes(&mut session);
+    let listed: Vec<String> = scenes
+        .iter()
+        .map(|s| s["id"].as_str().expect("id").to_string())
+        .collect();
+    assert!(
+        !listed.iter().any(|x| x == "no-such-carpet-scene"),
+        "a scene id that was never registered is not listed"
+    );
+    assert!(
+        scenes_page().contains("http:lichess.org"),
+        "the manual page names the grant the Lichess TV carpet scene needs"
     );
 }

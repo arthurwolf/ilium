@@ -88,3 +88,59 @@ fn port_checkbox_brackets_without_space_or_x_are_rejected() {
     inert("- [y] a", 3);
     inert("- [  ] a", 3);
 }
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::unchecked_dash_item
+#[test]
+fn port_checkbox_closing_bracket_of_an_unchecked_item_is_inert() {
+    inert("- [ ] buy milk", 4);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::checked_dash_item
+#[test]
+fn port_checkbox_opening_bracket_of_a_checked_item_is_inert() {
+    inert("- [x] buy milk", 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::checked_uppercase_x
+#[test]
+fn port_checkbox_closing_bracket_of_an_uppercase_checked_item_is_inert() {
+    inert("- [X] buy milk", 4);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::indented_item
+#[test]
+fn port_checkbox_opening_bracket_of_an_indented_item_is_inert() {
+    inert("  - [ ] nested", 4);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::star_and_plus_markers
+#[test]
+fn port_checkbox_brackets_of_star_and_plus_items_are_inert_at_the_edges() {
+    inert("* [ ] a", 2);
+    inert("+ [x] a", 4);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::ordered_marker
+#[test]
+fn port_checkbox_brackets_of_ordered_items_are_inert_at_the_edges() {
+    inert("1. [ ] a", 3);
+    inert("12) [x] a", 6);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::plain_list_item_has_no_checkbox
+#[test]
+fn port_checkbox_bracket_mid_sentence_in_a_list_item_is_not_a_checkbox() {
+    inert("- just [ ] text", 8);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::non_list_line_is_not_a_checkbox
+#[test]
+fn port_checkbox_bracket_at_the_start_of_a_paragraph_is_not_a_checkbox() {
+    inert("[ ] not a list item", 1);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/checkbox.rs::brackets_without_space_or_x_are_rejected
+#[test]
+fn port_checkbox_other_marker_characters_inside_brackets_are_rejected() {
+    inert("- [?] a", 3);
+}

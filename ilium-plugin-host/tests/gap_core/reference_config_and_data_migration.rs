@@ -59,3 +59,33 @@ fn cor_096_a_failed_migration_keeps_the_old_bytes_and_the_next_start_retries_it(
     );
     retried.shutdown();
 }
+
+/// REQ: COR-096
+#[test]
+fn cor_096_a_successful_migration_replaces_the_old_bytes_and_stamps_the_new_version() {
+    let rig = OpsRig::new();
+    let old_bytes = br#"{"layout":"v1"}"#.to_vec();
+    install_ok(&rig, &PackageSpec::new(NOTES, "1.0.0").data_version(1));
+    let first = rig.start_server("s1");
+    first.write_data_file(NOTES, SECTION, &old_bytes);
+    first.kill_sigkill();
+
+    install_ok(
+        &rig,
+        &PackageSpec::new(NOTES, "2.0.0")
+            .data_version(2)
+            .migrator_both(),
+    );
+    let migrated = rig.start_server("s2");
+    assert_eq!(
+        rig.bucket_stamp(NOTES),
+        Some(2),
+        "a successful migration must stamp version 2"
+    );
+    assert_ne!(
+        migrated.read_data_file(NOTES, SECTION).as_deref(),
+        Some(old_bytes.as_slice()),
+        "the stored bytes must be replaced by the migration result"
+    );
+    migrated.shutdown();
+}

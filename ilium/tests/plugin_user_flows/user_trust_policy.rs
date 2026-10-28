@@ -18,3 +18,17 @@ fn usr_253_a_trusted_key_does_not_override_a_policy_denial() {
     let shown = format!("{row:?} {}", rig.notices().join(" "));
     assert!(shown.contains("Blocked by your administrator"), "{shown}");
 }
+
+/// REQ: USR-253
+#[test]
+fn usr_253_a_trusted_key_still_runs_a_plugin_the_policy_does_not_deny() {
+    let mut rig = UserRig::new();
+    let key = KeyPair::generate("Example Publisher");
+    rig.trust(&key);
+    rig.write_system_policy("version = 1\n[plugins]\ndeny_ids = [\"com.example.denied\"]\n");
+    let package = spec("com.example.allowed", "1.0.0", &[]).signed_with(&key);
+    let install = rig.install_file(&package, &["--yes"]);
+    assert_eq!(result_exit_code(&install), 0, "{:?}", error_codes(&install));
+    rig.start_server();
+    assert!(rig.instance_starts("com.example.allowed") > 0);
+}

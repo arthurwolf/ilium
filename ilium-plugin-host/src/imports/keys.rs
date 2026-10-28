@@ -1,22 +1,78 @@
-//! Host implementation of `ilium:host/keys` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/keys`.
 //!
-//! Written once by the skeleton lane from the generated `HostKeys` trait; hand-owned afterwards.
+//! Tracks grabs in one process-wide table capped at the session limit of 32 grabs.
 
 use ilium_plugin_api::generated::host::keys::{GrabSpec, HostKeys};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::GrabId;
+use std::collections::HashMap;
+use std::sync::{Mutex, PoisonError};
+
+/// Session-wide cap on key grabs (api-host, API-070).
+const SESSION_KEY_GRAB_CAP: usize = 32;
+
+/// Chords the kernel keeps for itself; plugins cannot grab them.
+const RESERVED_CHORDS: [&str; 2] = ["ctrl+shift+escape", "ctrl+alt+escape"];
+
+#[derive(Default)]
+struct GrabTable {
+    next_id: u64,
+    grabs: HashMap<u64, Vec<String>>,
+}
+
+static GRABS: Mutex<Option<GrabTable>> = Mutex::new(None);
+
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_string(),
+        retry_after_ms: None,
+    }
+}
 
 /// Host side of the `keys` interface.
 #[derive(Debug)]
 pub struct KeysImport;
 
 impl HostKeys for KeysImport {
-    fn grab(&mut self, _spec: GrabSpec) -> Result<GrabId, PluginError> {
-        unimplemented!("host::imports::keys::grab")
+    fn grab(&mut self, spec: GrabSpec) -> Result<GrabId, PluginError> {
+        if spec.chords.is_empty() || spec.chords.iter().any(|chord| chord.is_empty()) {
+            return Err(refuse(ErrorCode::InvalidArgument, "grab names no chord"));
+        }
+        if spec
+            .chords
+            .iter()
+            .any(|chord| RESERVED_CHORDS.contains(&chord.as_str()))
+        {
+            return Err(refuse(ErrorCode::Conflict, "chord is reserved by the kernel"));
+        }
+        let mut guard = GRABS.lock().unwrap_or_else(PoisonError::into_inner);
+        let table = guard.get_or_insert_with(GrabTable::default);
+        if table.grabs.len() >= SESSION_KEY_GRAB_CAP {
+            return Err(refuse(
+                ErrorCode::QuotaExceeded,
+                "key grab limit reached",
+            ));
+        }
+        let already_held = table
+            .grabs
+            .values()
+            .flatten()
+            .any(|held| spec.chords.contains(held));
+        if already_held {
+            return Err(refuse(ErrorCode::Conflict, "chord is already grabbed"));
+        }
+        table.next_id += 1;
+        let id = table.next_id;
+        table.grabs.insert(id, spec.chords);
+        Ok(GrabId(id))
     }
 
-    fn release(&mut self, _grab: GrabId) {
-        unimplemented!("host::imports::keys::release")
+    fn release(&mut self, grab: GrabId) {
+        let mut guard = GRABS.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(table) = guard.as_mut() {
+            table.grabs.remove(&grab.0);
+        }
     }
 }
 

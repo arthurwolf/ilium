@@ -159,3 +159,156 @@ fn port_transcript_context_textual_value_keeps_bare_scalar_items_inside_an_array
         r####"{"text": "raw string\n42\ntrue"}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::antigravity_missing_history_file_returns_empty_instead_of_erroring
+#[test]
+fn port_transcript_context_antigravity_missing_history_file_returns_empty_instead_of_erroring_with_other_history(
+) {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "antigravity", "conversation": "c1", "history": [{"conversationId": "other", "text": "elsewhere"}]}"####,
+        r####"{"entries": [], "error": null}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::antigravity_reads_matching_user_history
+#[test]
+fn port_transcript_context_antigravity_reads_matching_user_history_ignores_foreign_conversations() {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "antigravity", "conversation": "wanted", "history": [{"conversationId": "other", "text": "only foreign"}]}"####,
+        r####"{"entries": []}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::claude_extracts_user_assistant_and_tool_entries_in_order
+#[test]
+fn port_transcript_context_claude_extracts_user_assistant_and_tool_entries_in_order_skips_thinking_only(
+) {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "claude", "case": "assistant thinking block and tool_use input only"}"####,
+        r####"{"entries": []}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::codex_event_notifications_do_not_establish_a_user_task
+#[test]
+fn port_transcript_context_codex_event_notifications_do_not_establish_a_user_task_keeps_real_user_turns(
+) {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "codex", "case": "Ilium progress monitor 42 reports completion; then a plain user turn fix the build"}"####,
+        r####"{"entries": [{"kind": "user", "content": "fix the build"}]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::codex_extracts_clean_messages_and_textual_tool_outputs
+#[test]
+fn port_transcript_context_codex_extracts_clean_messages_and_textual_tool_outputs_drops_non_textual_output(
+) {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "codex", "case": "user turn then a tool output carrying only an image payload"}"####,
+        r####"{"entries": [{"kind": "user", "content": "write tests"}]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::codex_response_item_user_turns_supersede_sparse_goal_events
+#[test]
+fn port_transcript_context_codex_response_item_user_turns_supersede_sparse_goal_events_filters_internal_items(
+) {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "codex", "case": "only AGENTS.md and codex_internal_context user items"}"####,
+        r####"{"entries": []}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::each_entry_kind_keeps_its_own_recent_window
+#[test]
+fn port_transcript_context_each_entry_kind_keeps_its_own_recent_window_when_heavily_pushed() {
+    check(
+        Place::Client,
+        "transcript.window",
+        r####"{"per_kind_pushed": 40, "kinds": ["user", "assistant", "tool"], "recent": 15, "earliest": 3}"####,
+        r####"{"retained": 54, "dropped": 66}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::earliest_entries_survive_being_evicted_from_the_recent_window
+#[test]
+fn port_transcript_context_earliest_entries_survive_being_evicted_from_the_recent_window_when_under_capacity(
+) {
+    check(
+        Place::Client,
+        "transcript.window",
+        r####"{"user_entries": 3, "recent": 15, "earliest": 3}"####,
+        r####"{"pinned_first": [0, 1, 2], "evicted": [], "kept_last": 2, "chronological": true, "gap_marker": null}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::malformed_lines_are_skipped_without_hiding_later_entries
+#[test]
+fn port_transcript_context_malformed_lines_are_skipped_without_hiding_later_entries_when_all_malformed(
+) {
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "claude", "case": "only malformed lines and no valid entry"}"####,
+        r####"{"entries": [], "skipped_malformed": true}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::no_gap_marker_appears_when_nothing_was_evicted
+#[test]
+fn port_transcript_context_no_gap_marker_appears_when_nothing_was_evicted_at_exact_capacity() {
+    check(
+        Place::Client,
+        "transcript.window",
+        r####"{"user_entries": 18, "recent": 15, "earliest": 3}"####,
+        r####"{"gap_marker": null, "evicted": []}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::other_agent_class_never_touches_the_filesystem
+#[test]
+fn port_transcript_context_other_agent_class_never_touches_the_filesystem_with_existing_transcript()
+{
+    check(
+        Place::Client,
+        "transcript.entries",
+        r####"{"agent": "other", "conversation": "x", "case": "a transcript file exists on disk"}"####,
+        r####"{"entries": [], "filesystem_reads": 0}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::textual_value_falls_back_to_content_when_text_is_blank
+#[test]
+fn port_transcript_context_textual_value_falls_back_to_content_when_text_is_blank_and_content_blank(
+) {
+    check(
+        Place::Client,
+        "transcript.textual-value",
+        r####"{"item": {"text": " ", "content": "  "}}"####,
+        r####"{"text": ""}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/transcript_context.rs::textual_value_keeps_bare_scalar_items_inside_an_array
+#[test]
+fn port_transcript_context_textual_value_keeps_bare_scalar_items_inside_an_array_with_object_items()
+{
+    check(
+        Place::Client,
+        "transcript.textual-value",
+        r####"{"item": [{"text": "alpha"}, "beta"]}"####,
+        r####"{"text": "alpha\nbeta"}"####,
+    );
+}

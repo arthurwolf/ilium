@@ -157,3 +157,18 @@ fn port_009_text_trigger_revision_exhaustion_refuses_change_without_event() {
     assert_eq!(filter_ids(&host, pane), [rule_id(0)]);
     assert_eq!(host.output_filters().len(), before.len());
 }
+
+/// REQ: PORT:ilium-server/src/text_trigger_config.rs::regex_validation_uses_a_real_cpu_worker_and_acceptance_keeps_its_storage
+#[test]
+fn port_010_a_refused_pattern_leaves_the_installed_filters_untouched() {
+    let mut host = server_host();
+    let pane = add_agent_pane(&mut host, "claude");
+    set_rules(&mut host, &["go"], &["yes"]);
+    assert_eq!(
+        settings_error(&mut host, "patterns", json!(["(bad"])),
+        ErrorCode::InvalidArgument
+    );
+    host.settle();
+    assert_eq!(filter_regexes(&host, pane), ["go"]);
+    assert_eq!(host.settings().get("patterns"), Some(json!(["go"])));
+}

@@ -115,3 +115,15 @@ fn template_drift_warns_once_per_changed_file_without_modifying_the_project() {
     }
     assert_eq!(snapshot(&dir), before, "the drift check modifies nothing");
 }
+
+/// REQ: DEV-937
+#[test]
+fn template_drift_reports_nothing_when_no_template_file_changed() {
+    let (_root, env, _dir) = new_rust_project();
+    let out = run_in_project(&env, "check", &["--template-drift"]);
+    assert!(
+        with_code(&out, "template.drift").is_empty(),
+        "no template file changed, so no drift warning: {:?}",
+        out.stdout_jsonl
+    );
+}

@@ -4,25 +4,39 @@ use ilium_plugin_sdk_core::generated::host::{HttpRequest, HttpResponse, StreamRe
 use ilium_plugin_sdk_core::types::StreamId;
 
 /// Handle on the fake HTTP client of a host; the fixture key `http` fills it.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FakeHttp {
-    _private: (),
+    entries: Vec<(String, String, HttpResponse)>,
+    calls: Vec<HttpRequest>,
+    streams: Vec<(StreamId, StreamRequest)>,
 }
 
 impl FakeHttp {
     /// Registers the response for requests with this method and URL.
-    pub fn expect(&mut self, _method: &str, _url: &str, _response: HttpResponse) {
-        unimplemented!("DEV-462")
+    pub fn expect(&mut self, method: &str, url: &str, response: HttpResponse) {
+        self.entries
+            .push((method.to_ascii_uppercase(), url.to_string(), response));
     }
 
     /// Every request made, in order.
     pub fn calls(&self) -> Vec<HttpRequest> {
-        unimplemented!("DEV-462")
+        self.calls.clone()
     }
 
     /// Every stream the plugin opened with `open-stream`, in order (lane hook, see manual_gaps_fakes.md; DEV-462).
     pub fn streams(&self) -> Vec<(StreamId, StreamRequest)> {
-        unimplemented!("DEV-462")
+        self.streams.clone()
+    }
+
+    /// Answers a request from the registered entries and records it; `None` when unregistered.
+    pub(crate) fn respond(&mut self, request: &HttpRequest) -> Option<HttpResponse> {
+        self.calls.push(request.clone());
+        let method = request.method.to_ascii_uppercase();
+        self.entries
+            .iter()
+            .rev()
+            .find(|(entry_method, url, _)| *entry_method == method && *url == request.url)
+            .map(|(_, _, response)| response.clone())
     }
 }
 

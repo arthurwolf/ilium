@@ -13,12 +13,56 @@ pub struct CoreStub {
 
 /// The table of core stubs, parsed from the "Core stubs" table of the harness page.
 pub fn table() -> Vec<CoreStub> {
-    unimplemented!("harness.core-stubs-table")
+    STUB_ROWS
+        .iter()
+        .map(|(name, points, services)| CoreStub {
+            name: (*name).to_string(),
+            extension_points: points.iter().map(|point| (*point).to_string()).collect(),
+            services: services.iter().map(|service| (*service).to_string()).collect(),
+        })
+        .collect()
 }
 
+/// One row: name, extension points, services.
+type StubRow = (&'static str, &'static [&'static str], &'static [&'static str]);
+
+/// The "Core stubs" table of the harness page, in manual order.
+const STUB_ROWS: &[StubRow] = &[
+    ("ilium.core.tree", &["before-move", "before-close", "node-sorts"], &["bookmarks"]),
+    ("ilium.core.layout", &["layout-presets", "before-split"], &["presets"]),
+    ("ilium.core.terminal", &["before-send-input", "open-link", "link-actions"], &["transfer"]),
+    ("ilium.core.smart-copy", &["recognisers", "after-copy"], &[]),
+    ("ilium.core.editor", &["before-save", "file-openers", "line-badges"], &["buffers"]),
+    ("ilium.core.kanban", &["card-actions", "card-moved"], &["boards"]),
+    ("ilium.core.agent-detect", &["activity-rules", "classify"], &["state"]),
+    ("ilium.core.agent-toolbar", &["toolbar-actions", "banner-segments"], &["last-prompt"]),
+    ("ilium.core.fleet", &["selectors", "before-broadcast"], &["broadcast", "panes"]),
+    ("ilium.core.cost", &["price-sources", "quota-sources"], &["usage"]),
+    ("ilium.core.titles", &["before-apply-title", "title-styles"], &["suggest"]),
+    ("ilium.core.inference", &["before-request", "after-response", "provider-profiles"], &["complete"]),
+    ("ilium.core.notifications", &["before-notify", "channels"], &["notify"]),
+    ("ilium.core.voice", &["transcript", "voice-intents"], &["say"]),
+    ("ilium.core.scheduler", &["schedule-sources", "before-send-scheduled"], &["queue"]),
+    ("ilium.core.text-triggers", &["rule-packs", "before-fire"], &["test-rule"]),
+    ("ilium.core.progress", &["footer-segments", "probe-kinds"], &["report"]),
+    ("ilium.core.chatroom", &["before-post", "message-renderers"], &["post", "tail"]),
+    ("ilium.core.worktrees", &["before-create", "post-create-steps", "before-remove"], &["create"]),
+    ("ilium.core.sessions", &["snapshot-sections", "before-restore"], &["snapshots"]),
+    ("ilium.core.compaction", &["techniques", "before-compact"], &["compact"]),
+    ("ilium.core.settings", &["config-importers", "onboarding-steps"], &["get", "set"]),
+    ("ilium.core.keys-and-help", &["key-hints", "help-sources"], &["bindings"]),
+    ("ilium.core.search", &["sources", "rank"], &["query"]),
+    ("ilium.core.ambient", &["palettes", "style-presets"], &["look"]),
+    ("ilium.core.scenes", &["scene-packs", "scene-data-sources"], &["catalog"]),
+    ("ilium.core.recap", &["fact-sources", "before-recap"], &["recap"]),
+    ("ilium.core.session-convert", &["formats", "after-convert"], &["convert"]),
+    ("ilium.core.agent-setup", &["instruction-blocks", "targets", "before-install"], &["install"]),
+    ("ilium.core.diagnostics", &["log-sinks", "report-sections"], &["report"]),
+];
+
 /// Looks up one stub by name; `None` for an unknown name (then `install_core` fails with `harness.core-unknown`).
-pub fn find(_name: &str) -> Option<CoreStub> {
-    unimplemented!("harness.core-stubs-table")
+pub fn find(name: &str) -> Option<CoreStub> {
+    table().into_iter().find(|stub| stub.name == name)
 }
 
 #[cfg(test)]

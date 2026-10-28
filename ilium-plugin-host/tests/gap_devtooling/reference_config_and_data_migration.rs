@@ -39,3 +39,22 @@ fn stored_settings_survive_an_upgrade_and_an_older_host_refuses_newer_data() {
         "the setting is still registered after the upgrade"
     );
 }
+
+/// REQ: DEV-986
+#[test]
+fn stored_setting_stays_readable_under_its_key_after_the_upgrade() {
+    let rig = MigrationRig::new();
+    rig.install(&PluginSpec::new(PLUGIN_ID, "1.0.0").data_version(1));
+    let server = rig.server("upgrade", "/projects/a", "default");
+    server.write_setting("settings", "example.agent-tools.retention_days", "30");
+    let upgraded = rig.update(&PluginSpec::new(PLUGIN_ID, "1.1.0").data_version(2), &[]);
+    assert_eq!(upgraded.exit_code, 0, "{:?}", upgraded.stdout_jsonl);
+    assert_eq!(
+        server.storage(PLUGIN_ID).get(
+            ilium_plugin_host::testing::migration::Bucket::Global,
+            "retention_days"
+        ),
+        Some(b"30".to_vec()),
+        "the value survives under its key"
+    );
+}

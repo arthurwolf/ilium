@@ -515,3 +515,273 @@ fn ui_confirmation_scrollbar_has_its_own_column_without_covering_actions() {
         );
     }
 }
+
+/// REQ: PORT:ilium-client/src/compaction_ui/modal.rs::confirmation_scrollbar_has_its_own_column_without_covering_actions
+#[test]
+fn ui_confirmation_scrollbar_track_has_a_height_at_every_size() {
+    let mut host = opened();
+    host.set_report("fixture-codex-complete");
+    keys(&mut host, &["a"]);
+    for (columns, rows) in [(80u16, 14u16), (100, 20), (60, 12), (160, 50)] {
+        let layout = host.confirmation_layout(panel(), columns, rows);
+        assert!(layout.scrollbar_height > 0, "{columns}x{rows}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::wrap_text_wraps_by_cells_and_splits_long_words
+#[test]
+fn ui_wrap_text_keeps_a_string_that_fits_on_one_line() {
+    let host = opened();
+    assert_eq!(host.wrap_text("abcdefghij", 10), vec!["abcdefghij"]);
+    assert_eq!(host.wrap_text("ab", 10), vec!["ab"]);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::truncate_to_marks_a_cut_with_an_ellipsis
+#[test]
+fn ui_truncate_to_one_cell_keeps_only_the_ellipsis() {
+    let host = opened();
+    assert_eq!(host.truncate_to("abcdefghij", 1), "…");
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::bars_fill_in_proportion_and_clamp
+#[test]
+fn ui_bar_parts_always_add_up_to_the_width() {
+    let host = opened();
+    let (filled, empty) = host.bar_parts(0.25, 8);
+    assert_eq!(filled.chars().count(), 2);
+    assert_eq!(filled.chars().count() + empty.chars().count(), 8);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::table_columns_drop_least_important_first_and_keep_rank_zero
+#[test]
+fn ui_table_keeps_rank_zero_even_at_zero_width() {
+    let host = opened();
+    let columns = [("A", 10, 0), ("B", 10, 1), ("C", 10, 2), ("D", 10, 3)];
+    assert!(host
+        .kept_columns(&columns, 0)
+        .iter()
+        .any(|column| *column == "A"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_idle_page_only_offers_a_scan_and_shows_the_current_setting
+#[test]
+fn ui_the_idle_page_has_no_cancel_button() {
+    let mut host = opened();
+    let text = screen_text(&mut host, 120, 40);
+    assert!(!text.contains("Cancel"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_progress_page_shows_phase_bar_counts_elapsed_file_and_cancel_at_every_width
+#[test]
+fn ui_the_progress_page_shows_a_changed_phase_name() {
+    let mut host = opened();
+    host.set_progress("Parsing", 10, 100, "rollout-2026-10-05");
+    assert!(squeezed(&screen_text(&mut host, 120, 40)).contains("Parsing"));
+    host.set_progress("Counting", 0, 100, "f");
+    assert!(squeezed(&screen_text(&mut host, 120, 40)).contains("Counting"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_bar_follows_the_byte_fraction
+#[test]
+fn ui_the_percent_follows_a_quarter_fraction() {
+    let mut host = opened();
+    host.set_progress("Reading", 250, 1000, "f");
+    assert!(screen_text(&mut host, 100, 30).contains("25.0%"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_report_starts_with_the_recommendation_card_and_its_apply_button
+#[test]
+fn ui_the_recommendation_card_comes_before_the_comparison() {
+    let (_, text) = page(120);
+    let card = text.find("RECOMMENDATION").expect("card");
+    let comparison = text.find("COMPARISON").expect("comparison");
+    assert!(card < comparison);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_card_explains_the_pick_rule_and_a_grid_limited_optimum
+#[test]
+fn ui_the_widened_note_is_absent_from_a_complete_report() {
+    let mut host = opened();
+    host.set_report("fixture-codex-complete");
+    assert!(!squeezed(&screen_text(&mut host, 128, 200)).contains("widened once"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_extrapolated_alternative_is_a_secondary_button_with_support_and_warning
+#[test]
+fn ui_no_extrapolated_button_without_a_recommendation() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = squeezed(&screen_text(&mut host, 120, 60));
+    assert!(!text.contains("Apply simulated optimum"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::a_long_apply_button_wraps_into_one_clickable_block
+#[test]
+fn ui_the_apply_button_is_clickable_when_it_fits_on_one_line() {
+    let mut host = opened();
+    host.set_report("fixture-codex-long-headline");
+    let screen = host.render(panel(), 200, 200);
+    let (row, column) = screen.find("Apply to Codex").expect("button text");
+    assert!(host.click(panel(), column, row));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::every_section_is_present_in_order
+#[test]
+fn ui_a_report_without_sessions_has_no_comparison_or_simulation() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = screen_text(&mut host, 120, 60);
+    assert!(!text.contains("COMPARISON") && !text.contains("SIMULATION"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_comparison_shows_default_current_and_recommended
+#[test]
+fn ui_the_comparison_still_shows_recommended_at_80_columns() {
+    let (_, text) = page(80);
+    assert!(text.contains("COMPARISON") && text.contains("Recommended"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::a_missing_current_setting_is_shown_as_not_set_in_the_comparison
+#[test]
+fn ui_a_missing_current_setting_keeps_the_apply_button() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-current-setting");
+    let text = squeezed(&screen_text(&mut host, 140, 200));
+    assert!(text.contains("Apply to Codex"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::statistics_cost_mix_fixed_prefix_regimes_and_warnings_have_their_figures
+#[test]
+fn ui_no_statistics_figures_without_sessions() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = screen_text(&mut host, 140, 60);
+    assert!(!text.contains("5,678"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_per_model_table_carries_the_visible_cannot_apply_per_model_message
+#[test]
+fn ui_no_per_model_message_without_sessions() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = squeezed(&screen_text(&mut host, 100, 60));
+    assert!(!text.contains("cannot be applied per model"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_simulation_table_marks_pick_best_default_and_current
+#[test]
+fn ui_no_pick_best_row_without_sessions() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = screen_text(&mut host, 160, 60);
+    assert!(!text.contains("pick best"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_simulation_chart_plots_the_cost_curve_with_markers
+#[test]
+fn ui_no_cost_chart_without_sessions() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = squeezed(&screen_text(&mut host, 120, 60));
+    assert!(!text.contains("Extra cost over the best trigger"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::rework_sensitivity_lists_the_three_multipliers
+#[test]
+fn ui_no_rework_multipliers_without_sessions() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = screen_text(&mut host, 120, 60);
+    assert!(!text.contains("0.5x"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::a_failed_or_cancelled_scan_keeps_the_previous_report_with_a_note
+#[test]
+fn ui_a_cancelled_scan_still_shows_the_previous_recommendation() {
+    let mut host = opened();
+    host.set_report("fixture-codex-complete");
+    host.set_scan_cancelled();
+    assert!(squeezed(&screen_text(&mut host, 120, 200)).contains("RECOMMENDATION"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::a_report_without_a_recommendation_offers_rescan_but_no_apply
+#[test]
+fn ui_a_report_without_a_recommendation_has_no_confidence_line() {
+    let mut host = opened();
+    host.set_report("fixture-codex-no-sessions");
+    let text = screen_text(&mut host, 120, 60);
+    assert!(!text.contains("Confidence"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::notes_and_the_revert_button_follow_the_panel
+#[test]
+fn ui_the_revert_button_shows_the_recorded_previous_value() {
+    let mut host = opened();
+    host.set_report("fixture-codex-complete");
+    host.set_revert_record(100_000, 150_000);
+    let text = squeezed(&screen_text(&mut host, 120, 200));
+    assert!(text.contains("Revert model_auto_compact_token_limit to 100,000"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::header_buttons_select_the_agent_and_the_selected_one_is_filled
+#[test]
+fn ui_clicking_codex_fills_the_codex_button_again() {
+    let mut host = opened();
+    let (row, column) = host
+        .render(panel(), 120, 40)
+        .find(" Claude Code ")
+        .expect("button");
+    host.click(panel(), column + 1, row);
+    let (row, column) = host
+        .render(panel(), 120, 40)
+        .find(" Codex ")
+        .expect("button");
+    host.click(panel(), column + 1, row);
+    assert!(host.button_is_filled(panel(), "Codex"));
+    assert!(!host.button_is_filled(panel(), "Claude Code"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::body_clicks_follow_the_scroll_offset_and_ignore_text
+#[test]
+fn ui_scrolling_back_up_restores_the_button_hit_target() {
+    let mut host = opened();
+    host.set_report("fixture-codex-complete");
+    keys(&mut host, &["Down", "Down", "Down"]);
+    keys(&mut host, &["Up", "Up", "Up"]);
+    let screen = host.render(panel(), 120, 30);
+    let (row, column) = screen.find("Apply to Codex").expect("button");
+    assert!(host.click(panel(), column, row));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::scan_buttons_are_reachable_by_click_on_the_idle_and_progress_pages
+#[test]
+fn ui_the_scan_button_is_visible_at_a_narrow_width() {
+    let mut host = opened();
+    assert!(host.render(panel(), 60, 30).find("Scan sessions").is_some());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::scroll_bounds_and_help_anchors_follow_the_page
+#[test]
+fn ui_scrolling_up_from_the_top_stays_at_zero() {
+    let mut host = opened();
+    host.set_report("fixture-codex-complete");
+    keys(&mut host, &["Up", "Up", "Up"]);
+    assert_eq!(host.scroll_offset(panel()), 0);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::every_help_topic_of_the_tab_exists_and_the_set_is_complete
+#[test]
+fn ui_the_tab_declares_at_least_one_help_topic() {
+    let host = opened();
+    let declared = host.declared_help_topics();
+    assert!(!declared.is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_ui/tests.rs::the_tab_renders_in_the_settings_screen_at_80_and_160_columns
+#[test]
+fn ui_the_codex_tab_does_not_show_the_claude_title() {
+    let mut host = client_host();
+    host.open_settings_tab("optimization");
+    let text = host.render_settings(80, 40).text();
+    assert!(!text.contains("COMPACTION OPTIMIZER - CLAUDE"));
+}

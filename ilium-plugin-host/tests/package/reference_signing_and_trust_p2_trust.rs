@@ -1339,3 +1339,53 @@ fn pkg_258_with_the_rotation_imported_the_same_update_goes_through() {
         "package.publisher-key-changed"
     ));
 }
+
+/// REQ: PKG-233
+#[test]
+fn doc_pkg_233_bundled_check_compares_embedded_bytes_with_the_release_table() {
+    let text = page("reference-signing-and-trust.md");
+    assert!(text.contains("compares the embedded bytes with the table"));
+}
+
+/// REQ: PKG-244
+#[test]
+fn pkg_244_install_by_a_compromised_revoked_key_exits_nonzero() {
+    let fixture = trusted_fixture();
+    run_cli(
+        &fixture,
+        &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"],
+    );
+    let out = install(&fixture, &vector_signed(), &[]);
+    assert_ne!(out.exit_code, 0, "{}", all_text(&out));
+}
+
+/// REQ: PKG-249
+#[test]
+fn pkg_249_component_byte_changed_is_caught_at_stage_five() {
+    let bytes = patch_data(&vector_signed(), "server.wasm", 12, 0x7F, true);
+    let report = check(&bytes);
+    assert_eq!(report.last_stage, 5);
+}
+
+/// REQ: PKG-256
+#[test]
+fn pkg_256_publisher_name_mismatch_is_refused_without_a_revocation_code() {
+    let fixture = cli_fixture();
+    write_trust(&fixture, &trust_json(&[entry(0, "example", "Other Labs")]));
+    let out = install(&fixture, &vector_signed(), &[]);
+    assert_ne!(out.exit_code, 0, "{}", all_text(&out));
+    assert!(!has(&out, "trust.key-revoked"), "{}", all_text(&out));
+}
+
+/// REQ: PKG-257
+#[test]
+fn pkg_257_compromised_key_refusal_is_not_reported_as_a_publisher_mismatch() {
+    let fixture = cli_fixture();
+    let mut e = entry(0, "example", "Example Labs");
+    e.status = "revoked";
+    e.revoked = Some(("compromised", "2026-10-12 10:05:00"));
+    write_trust(&fixture, &trust_json(&[e]));
+    let out = install(&fixture, &vector_signed(), &[]);
+    assert_ne!(out.exit_code, 0, "{}", all_text(&out));
+    assert!(!has(&out, "manifest.publisher-mismatch"), "{}", all_text(&out));
+}

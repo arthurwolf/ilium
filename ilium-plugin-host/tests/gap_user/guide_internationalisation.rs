@@ -273,3 +273,108 @@ fn usr_317_plugin_cannot_override_host_permission_wording_or_consent_prompts() {
         "the host catalogue text must be shown"
     );
 }
+
+/// REQ: USR-317
+#[test]
+fn usr_317_plugin_catalogue_override_of_a_second_permission_is_ignored_too() {
+    let rig = rig();
+    let spec = pkg(NOTES, "1.0.0")
+        .grant("fs.write")
+        .catalogue("en", &[("host.perm.fs.write", "Nothing to see here")]);
+    install_ok(&rig, &spec);
+    let review = rig.last_review().join("\n");
+    assert!(
+        !review.contains("Nothing to see here"),
+        "a plugin overrode the host wording of fs.write: {review}"
+    );
+    let host_text = rig.english_text("host.perm.fs.write");
+    assert!(
+        review.contains(&host_text),
+        "the host catalogue text for fs.write must be shown: {review}"
+    );
+}
+
+/// REQ: USR-310
+#[test]
+fn usr_310_invalid_utf8_catalogue_is_refused_naming_the_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("nl.json");
+    fs::write(&path, [b'{', 0xff, 0xfe, b'}']).expect("write");
+    let error = match load_plugin_catalogue(&path) {
+        Ok(_) => panic!("invalid UTF-8 must be refused"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("i18n.catalogue-invalid"), "{error}");
+    assert!(
+        error.contains("nl.json"),
+        "the error must name the file: {error}"
+    );
+}
+
+/// REQ: USR-311
+#[test]
+fn usr_311_lc_messages_beats_lang_when_lc_all_is_absent() {
+    let messages_first = choose_ui_language(
+        &LangEnv::from_pairs(&[("LC_MESSAGES", "fr_FR.UTF-8"), ("LANG", "it_IT.UTF-8")]),
+        None,
+    );
+    assert_eq!(messages_first.tag, "fr", "LC_MESSAGES must win over LANG");
+    let lang_only = choose_ui_language(&LangEnv::from_pairs(&[("LANG", "it_IT.UTF-8")]), None);
+    assert_eq!(lang_only.tag, "it", "LANG is the last locale variable tried");
+}
+
+/// REQ: USR-312
+#[test]
+fn usr_312_tag_without_any_table_shows_english_text() {
+    let lookup = Lookup::from_entries(&[("en", &[("a.msg", "English a")][..])]);
+    assert_eq!(
+        lookup.text("sv", "a.msg"),
+        "English a",
+        "a language tag with no table at all shows English"
+    );
+}
+
+/// REQ: USR-313
+#[test]
+fn usr_313_russian_plural_rule_puts_21_in_one_and_11_in_many() {
+    assert_eq!(plural_category("ru", 21), PluralCategory::One);
+    assert_eq!(plural_category("ru", 11), PluralCategory::Many);
+}
+
+/// REQ: USR-314
+#[test]
+fn usr_314_log_timestamp_has_fixed_separator_positions_in_every_language() {
+    let stamp = 1_792_670_400_000_u64;
+    for language in ["de", "en", "ja"] {
+        let text = format_log_time(stamp, language);
+        let bytes = text.as_bytes();
+        assert_eq!(
+            (bytes[4], bytes[7], bytes[10], bytes[13], bytes[16]),
+            (b'-', b'-', b' ', b':', b':'),
+            "YYYY-MM-DD HH:mm:ss expected for {language}, got {text}"
+        );
+    }
+}
+
+/// REQ: USR-315
+#[test]
+fn usr_315_truncated_wide_text_stays_inside_the_box_and_keeps_whole_glyphs() {
+    let fitted = fit_to_box("漢字テキスト漢字テキスト", 5);
+    assert!(terminal_width(&fitted) <= 5, "overflow: {fitted}");
+    assert!(fitted.ends_with('\u{2026}'), "no ellipsis: {fitted}");
+    assert!(
+        fitted
+            .chars()
+            .all(|glyph| glyph == '\u{2026}' || "漢字テキスト".contains(glyph)),
+        "a glyph was altered: {fitted}"
+    );
+}
+
+/// REQ: USR-316
+#[test]
+fn usr_316_a_view_that_fits_at_en_xa_passes_lint() {
+    let rig = rig();
+    let path = rig.write_package(&pkg(NOTES, "1.0.0"));
+    let lint = rig.cli(&["lint", &path.to_string_lossy()]);
+    assert_eq!(lint.exit_code, 0, "a fitting view must lint clean: {}", lint.stdout_raw);
+}

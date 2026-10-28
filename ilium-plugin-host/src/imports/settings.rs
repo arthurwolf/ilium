@@ -1,82 +1,176 @@
-//! Host implementation of `ilium:host/settings` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/settings`.
 //!
-//! Written once by the skeleton lane from the generated `HostSettings` trait; hand-owned afterwards.
+//! This import has no loaded schema, so no row key is declared: every row call validates its
+//! arguments first (`invalid-argument`) and then reports an undeclared row as `not-found`, and
+//! a merge patch may only be empty. Other plugins are not installed here, so reading or
+//! writing one is `not-found`.
 
 use ilium_plugin_api::generated::host::settings::{
     ChoiceOption, HostSettings, ItemState, SettingsRef,
 };
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::PluginId;
 use ilium_plugin_api::generated::types::text::RichText;
 use ilium_plugin_api::generated::types::ui::{CatalogItem, MeterSegment, RowState};
+
+/// Largest merge patch, in bytes.
+const PATCH_LIMIT_BYTES: usize = 256 * 1024;
+/// Longest info text, in characters.
+const INFO_TEXT_LIMIT_CHARS: usize = 120;
+/// Longest row note, in characters.
+const ROW_NOTE_LIMIT_CHARS: usize = 120;
+/// Longest row state message, in characters.
+const ROW_STATE_MESSAGE_LIMIT_CHARS: usize = 80;
+/// Most options of a dynamic choice row.
+const CHOICE_OPTIONS_MAX: usize = 64;
+/// Most segments of a meter.
+const METER_SEGMENTS_MAX: usize = 8;
 
 /// Host side of the `settings` interface.
 #[derive(Debug)]
 pub struct SettingsImport;
 
+fn error(code: ErrorCode, message: impl Into<String>) -> PluginError {
+    PluginError {
+        code,
+        message: message.into(),
+        retry_after_ms: None,
+    }
+}
+
+fn invalid(message: &str) -> PluginError {
+    error(ErrorCode::InvalidArgument, message)
+}
+
+/// The error for a row key that no schema declares.
+fn undeclared_row(key: &str) -> PluginError {
+    let shown: String = key.chars().take(64).collect();
+    error(
+        ErrorCode::NotFound,
+        format!("the settings schema declares no row `{shown}`"),
+    )
+}
+
+fn check_chars(text: &str, limit: usize, what: &str) -> Result<(), PluginError> {
+    if text.chars().count() > limit {
+        return Err(invalid(&format!("{what} is longer than {limit} characters")));
+    }
+    Ok(())
+}
+
+/// Parses a merge patch: one JSON object of at most 256 KiB.
+fn parse_patch(patch: &str) -> Result<serde_json::Map<String, serde_json::Value>, PluginError> {
+    if patch.len() > PATCH_LIMIT_BYTES {
+        return Err(invalid("the patch is larger than 256 KiB"));
+    }
+    match serde_json::from_str::<serde_json::Value>(patch) {
+        Ok(serde_json::Value::Object(map)) => Ok(map),
+        Ok(_) => Err(invalid("the patch must be one JSON object")),
+        Err(_) => Err(invalid("the patch is not valid JSON")),
+    }
+}
+
+/// Applies a patch against the (empty) schema: only an empty patch has no undeclared key.
+fn apply_patch(patch: &str) -> Result<(), PluginError> {
+    let map = parse_patch(patch)?;
+    if let Some(key) = map.keys().next() {
+        let shown: String = key.chars().take(64).collect();
+        return Err(invalid(&format!("the schema does not declare `{shown}`")));
+    }
+    Ok(())
+}
+
 impl HostSettings for SettingsImport {
     fn get_json(&mut self) -> String {
-        unimplemented!("host::imports::settings::get_json")
+        "{}".to_owned()
     }
 
-    fn set_json(&mut self, _patch: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_json")
+    fn set_json(&mut self, patch: String) -> Result<(), PluginError> {
+        apply_patch(&patch)
     }
 
-    fn set_info(&mut self, _key: String, _text: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_info")
+    fn set_info(&mut self, key: String, text: String) -> Result<(), PluginError> {
+        check_chars(&text, INFO_TEXT_LIMIT_CHARS, "the info text")?;
+        Err(undeclared_row(&key))
     }
 
     fn set_choices(
         &mut self,
-        _key: String,
-        _options: Vec<ChoiceOption>,
+        key: String,
+        options: Vec<ChoiceOption>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_choices")
+        if options.is_empty() || options.len() > CHOICE_OPTIONS_MAX {
+            return Err(invalid("a dynamic choice row takes 1 to 64 options"));
+        }
+        Err(undeclared_row(&key))
     }
 
-    fn set_row_note(&mut self, _key: String, _note: Option<String>) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_row_note")
+    fn set_row_note(&mut self, key: String, note: Option<String>) -> Result<(), PluginError> {
+        if let Some(note) = note {
+            check_chars(&note, ROW_NOTE_LIMIT_CHARS, "the row note")?;
+        }
+        Err(undeclared_row(&key))
     }
 
-    fn set_row_state(&mut self, _key: String, _state: RowState) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_row_state")
+    fn set_row_state(&mut self, key: String, state: RowState) -> Result<(), PluginError> {
+        if let Some(message) = state.message {
+            check_chars(&message, ROW_STATE_MESSAGE_LIMIT_CHARS, "the row state message")?;
+        }
+        Err(undeclared_row(&key))
     }
 
-    fn set_item_states(&mut self, _key: String, _items: Vec<ItemState>) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_item_states")
+    fn set_item_states(&mut self, key: String, items: Vec<ItemState>) -> Result<(), PluginError> {
+        for item in items {
+            if let Some(message) = item.state.message {
+                check_chars(&message, ROW_STATE_MESSAGE_LIMIT_CHARS, "the item state message")?;
+            }
+        }
+        Err(undeclared_row(&key))
     }
 
     fn set_choice_items(
         &mut self,
-        _key: String,
-        _items: Vec<CatalogItem>,
+        key: String,
+        items: Vec<CatalogItem>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_choice_items")
+        if items.is_empty() {
+            return Err(invalid("a catalog row takes at least one item"));
+        }
+        Err(undeclared_row(&key))
     }
 
-    fn set_info_rich(&mut self, _key: String, _text: RichText) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_info_rich")
+    fn set_info_rich(&mut self, key: String, _text: RichText) -> Result<(), PluginError> {
+        Err(undeclared_row(&key))
     }
 
-    fn set_meter(&mut self, _id: String, _segments: Vec<MeterSegment>) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_meter")
+    fn set_meter(&mut self, id: String, segments: Vec<MeterSegment>) -> Result<(), PluginError> {
+        if segments.len() > METER_SEGMENTS_MAX {
+            return Err(invalid("a meter takes at most 8 segments"));
+        }
+        Err(undeclared_row(&id))
     }
 
     fn open(&mut self, _target: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::open")
+        Ok(())
     }
 
     fn list_settings(&mut self) -> Vec<SettingsRef> {
-        unimplemented!("host::imports::settings::list_settings")
+        Vec::new()
     }
 
-    fn get_plugin_json(&mut self, _plugin: PluginId) -> Result<String, PluginError> {
-        unimplemented!("host::imports::settings::get_plugin_json")
+    fn get_plugin_json(&mut self, plugin: PluginId) -> Result<String, PluginError> {
+        Err(error(
+            ErrorCode::NotFound,
+            format!("plugin `{}` is not installed", plugin.0),
+        ))
     }
 
-    fn set_plugin_json(&mut self, _plugin: PluginId, _patch: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::settings::set_plugin_json")
+    fn set_plugin_json(&mut self, plugin: PluginId, patch: String) -> Result<(), PluginError> {
+        parse_patch(&patch)?;
+        Err(error(
+            ErrorCode::NotFound,
+            format!("plugin `{}` is not installed", plugin.0),
+        ))
     }
 }
 

@@ -2,51 +2,119 @@
 //!
 //! Written once by the skeleton lane from the generated `HostMedia` trait; hand-owned afterwards.
 
+use std::convert::Infallible;
+
 use ilium_plugin_api::generated::host::media::{HostMedia, VideoInfo};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::paths::FsPath;
 
 /// Host side of the `media` interface.
 #[derive(Debug)]
 pub struct MediaImport;
 
+const ACCEPTED_EXTENSIONS: &[&str] = &[
+    "mp4", "mkv", "avi", "mov", "webm", "m4v", "mpg", "mpeg", "wmv", "flv", "ts",
+];
+const ACCEPTED_MIME_TYPES: &[&str] = &[
+    "video/mp4",
+    "video/x-matroska",
+    "video/x-msvideo",
+    "video/quicktime",
+    "video/webm",
+    "video/mpeg",
+    "video/x-ms-wmv",
+    "video/x-flv",
+    "video/mp2t",
+];
+/// Largest in-memory clip, in bytes.
+const MAX_CLIP_BYTES: usize = 16 * 1024 * 1024;
+const MAX_FRAME_WIDTH: u32 = 3_840;
+const MAX_FRAME_HEIGHT: u32 = 2_160;
+
+fn check_path(path: &FsPath) -> Result<Infallible, PluginError> {
+    if path.path.is_empty() {
+        return Err(PluginError::new(ErrorCode::InvalidArgument, "empty video path"));
+    }
+    let extension = path
+        .path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !ACCEPTED_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(PluginError::new(
+            ErrorCode::Unsupported,
+            format!("video extension `{extension}` is not accepted"),
+        ));
+    }
+    // No file scope is attached to this import, so no file can be found.
+    Err(PluginError::new(
+        ErrorCode::NotFound,
+        format!("video `{}` was not found", path.path),
+    ))
+}
+
+fn unknown_video(video: u64) -> PluginError {
+    PluginError::new(ErrorCode::NotFound, format!("video {video} is unknown or closed"))
+}
+
 impl HostMedia for MediaImport {
-    fn open_video(&mut self, _path: FsPath) -> Result<(u64, VideoInfo), PluginError> {
-        unimplemented!("host::imports::media::open_video")
+    fn open_video(&mut self, path: FsPath) -> Result<(u64, VideoInfo), PluginError> {
+        check_path(&path).map(|never| match never {})
     }
 
     fn open_video_bytes(
         &mut self,
-        _bytes: Vec<u8>,
-        _mime: String,
+        bytes: Vec<u8>,
+        mime: String,
     ) -> Result<(u64, VideoInfo), PluginError> {
-        unimplemented!("host::imports::media::open_video_bytes")
+        if bytes.is_empty() || bytes.len() > MAX_CLIP_BYTES {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "video bytes must be between 1 byte and 16 MiB",
+            ));
+        }
+        if !ACCEPTED_MIME_TYPES.contains(&mime.as_str()) {
+            return Err(PluginError::new(
+                ErrorCode::Unsupported,
+                format!("mime type `{mime}` is not accepted"),
+            ));
+        }
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "no video decoder is attached to this host",
+        ))
     }
 
     fn open_video_range(
         &mut self,
-        _path: FsPath,
+        path: FsPath,
         _start_millis: u64,
         _end_millis: Option<u64>,
     ) -> Result<(u64, VideoInfo), PluginError> {
-        unimplemented!("host::imports::media::open_video_range")
+        check_path(&path).map(|never| match never {})
     }
 
     fn next_frame(
         &mut self,
-        _video: u64,
-        _width: u32,
-        _height: u32,
+        video: u64,
+        width: u32,
+        height: u32,
     ) -> Result<Option<Vec<u8>>, PluginError> {
-        unimplemented!("host::imports::media::next_frame")
+        if width == 0 || height == 0 || width > MAX_FRAME_WIDTH || height > MAX_FRAME_HEIGHT {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "frame size must be 1..=3840 by 1..=2160",
+            ));
+        }
+        Err(unknown_video(video))
     }
 
-    fn seek(&mut self, _video: u64, _millis: u64) -> Result<(), PluginError> {
-        unimplemented!("host::imports::media::seek")
+    fn seek(&mut self, video: u64, _millis: u64) -> Result<(), PluginError> {
+        Err(unknown_video(video))
     }
 
     fn close_video(&mut self, _video: u64) {
-        unimplemented!("host::imports::media::close_video")
+        // No video is ever open on this import, so closing any id is a silent no-op.
     }
 }
 

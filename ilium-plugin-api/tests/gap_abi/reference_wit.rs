@@ -50,12 +50,44 @@ fn abi_068_each_table_limit_refused_before_host_logic_without_truncation() {
 
 /// REQ: ABI-069
 #[test]
+fn abi_069_one_past_the_table_limit_is_refused_so_the_limit_is_the_enforced_one() {
+    for key in LimitKey::ALL {
+        let limit = ilium_plugin_api::limits::default_of(key);
+        assert!(
+            admit_length(key, limit + 1).result.is_err(),
+            "{key:?}: a length one past the table limit must be refused, or the table no longer states the enforced limit"
+        );
+    }
+}
+
+/// REQ: ABI-069
+#[test]
 fn abi_069_release_notes_list_every_limit_change_within_a_major() {
     let page = wit_page();
     assert!(
         page.contains("[ABI-069] A limit in the table MUST NOT be raised or lowered within the same ABI major without a minor release that lists the change in its notes."),
         "reference-wit.md must state the ABI-069 MUST text"
     );
+}
+
+/// REQ: ABI-106
+#[test]
+fn abi_106_every_import_table_lists_each_code_once_and_at_least_one() {
+    for table in import_code_tables() {
+        assert!(
+            !table.codes.is_empty(),
+            "import {} has an empty code table, so every code it returns would be refused",
+            table.import
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for code in &table.codes {
+            assert!(
+                seen.insert(code),
+                "import {} lists code {code} more than once",
+                table.import
+            );
+        }
+    }
 }
 
 /// REQ: ABI-106
@@ -250,5 +282,120 @@ fn abi_117_epoch_ms_whole_non_decreasing_and_backwards_clock_reported() {
     assert!(
         clock.events().iter().any(|event| event == "clock-changed"),
         "a backwards wall clock must be reported by clock-changed"
+    );
+}
+
+/// REQ: ABI-068
+#[test]
+fn abi_068_a_value_exactly_at_its_limit_reaches_host_logic() {
+    for key in LimitKey::ALL {
+        let limit = ilium_plugin_api::limits::default_of(key);
+        let at_limit = admit_length(key, limit);
+        assert!(
+            at_limit.host_logic_reached,
+            "{key:?}: a value at its limit is accepted, so host logic must receive it"
+        );
+    }
+}
+
+/// REQ: ABI-107
+#[test]
+fn abi_107_with_every_check_failing_the_first_in_the_fixed_order_is_reported() {
+    let order = ImportCheck::ORDER;
+    let all_failing: Vec<ImportCheck> = order.to_vec();
+    assert_eq!(
+        first_failing_check(&all_failing),
+        Some(order[0]),
+        "with every check failing, the first check in the fixed order must be reported"
+    );
+    let none: Vec<ImportCheck> = Vec::new();
+    assert_eq!(
+        first_failing_check(&none),
+        None,
+        "with no failing check there is nothing to report"
+    );
+}
+
+/// REQ: ABI-108
+#[test]
+fn abi_108_the_read_only_import_set_is_not_empty() {
+    assert!(
+        !read_only_imports().is_empty(),
+        "the reference must name at least one read-only import"
+    );
+}
+
+/// REQ: ABI-109
+#[test]
+fn abi_109_a_closed_id_stays_stale_after_another_close_and_the_live_id_is_unaffected() {
+    let mut table = IdTable::new();
+    let closed_timer = table.open("timer");
+    let live_timer = table.open("timer");
+    table.close(closed_timer).expect("first close must succeed");
+    table.close(closed_timer).expect("second close must be ok");
+    let stale = table
+        .use_id(closed_timer)
+        .expect_err("a closed id must stay refused");
+    assert_eq!(stale.code, ErrorCode::NotFound);
+    assert!(
+        table.use_id(live_timer).is_ok(),
+        "the live timer must still be usable"
+    );
+}
+
+/// REQ: ABI-110
+#[test]
+fn abi_110_dropping_one_handle_frees_a_slot_under_the_limit() {
+    let mut table = HandleTable::new();
+    let mut created = Vec::new();
+    for _ in 0..4_096 {
+        created.push(
+            table
+                .create("child")
+                .expect("handles up to the limit must be created"),
+        );
+    }
+    let _ = table.drop_handle(created[0]);
+    assert!(
+        table.create("child").is_ok(),
+        "the limit counts live handles, so a new handle must fit after a drop"
+    );
+}
+
+/// REQ: ABI-111
+#[test]
+fn abi_111_a_clean_deactivation_logs_no_leaked_handle() {
+    let mut clean = PluginInstance::with_handles(3);
+    clean.deactivate();
+    assert!(
+        clean
+            .logs()
+            .into_iter()
+            .all(|record| record.code != "abi.handle-leaked"),
+        "a plugin that releases all its handles must not produce a leak record"
+    );
+}
+
+/// REQ: ABI-112
+#[test]
+fn abi_112_some_list_import_declares_a_stable_order() {
+    assert!(
+        list_imports()
+            .iter()
+            .any(|import| matches!(import.order, ListOrder::Stable)),
+        "the reference must declare at least one list import with a stable order"
+    );
+}
+
+/// REQ: ABI-117
+#[test]
+fn abi_117_a_backwards_wall_clock_does_not_move_epoch_ms_backwards() {
+    let mut clock = EpochClock::new(FakeWallClock::new(1_000));
+    let before = clock.sample();
+    clock.set_wall_backwards(500);
+    let after = clock.sample();
+    assert!(
+        after >= before,
+        "epoch-ms must not decrease when the wall clock steps back: {before} then {after}"
     );
 }

@@ -1038,3 +1038,12 @@ fn dev_278_other_templates_do_not_write_extending_md() {
     let (_root, _env, dir) = make("server", "rust");
     assert!(!tree_of(&dir).contains(&"docs/EXTENDING.md".to_owned()));
 }
+
+/// REQ: DEV-273
+#[test]
+fn dev_273_fresh_project_test_run_prints_no_error_record() {
+    let (_root, env, dir) = make("server", "rust");
+    run(&env, &["build", dir.to_str().unwrap(), "--json"]);
+    let tested = run(&env, &["test", dir.to_str().unwrap(), "--json"]);
+    assert!(records_of(&tested, "error").is_empty(), "{:?}", tested.stdout_jsonl);
+}

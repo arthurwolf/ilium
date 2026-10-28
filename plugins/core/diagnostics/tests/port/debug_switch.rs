@@ -64,3 +64,49 @@ fn port_028_nine_rapid_switch_changes_are_each_handled_and_the_last_one_wins_wit
         Some(json!(true))
     );
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::debug_logging_toggle_persists_and_requests_live_reconciliation
+#[test]
+fn port_002_a_change_on_another_kernel_tab_is_not_a_debug_switch_change() {
+    let mut host = server_host();
+    host.kernel_settings()
+        .set("debug", "file_logging_enabled", json!(true))
+        .expect("seed");
+    let event = Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "general".to_string(),
+        keys: vec!["file_logging_enabled".to_string()],
+    });
+    assert_eq!(host.deliver_one(event).len(), 0);
+}
+
+/// REQ: PORT:ilium-client/src/debug_logging.rs::logging_transition_child
+#[test]
+fn port_028_a_change_to_another_debug_key_does_not_trigger_a_logging_transition() {
+    let mut host = server_host();
+    host.kernel_settings()
+        .set("debug", "file_logging_enabled", json!(true))
+        .expect("seed");
+    let event = Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "debug".to_string(),
+        keys: vec!["other_debug_key".to_string()],
+    });
+    assert_eq!(host.deliver_one(event).len(), 0);
+}
+
+/// REQ: PORT:ilium-client/src/debug_logging.rs::ordered_transitions_are_bounded_and_server_sync_never_becomes_client_origin
+#[test]
+fn port_028_an_empty_key_list_is_a_no_op_that_keeps_the_value() {
+    let mut host = server_host();
+    host.kernel_settings()
+        .set("debug", "file_logging_enabled", json!(true))
+        .expect("seed");
+    let event = Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "debug".to_string(),
+        keys: vec![],
+    });
+    assert_eq!(host.deliver_one(event).len(), 0);
+    assert_eq!(
+        host.kernel_settings().get("debug", "file_logging_enabled"),
+        Some(json!(true))
+    );
+}

@@ -66,3 +66,25 @@ fn lif_727_auto_update_skips_each_excluded_case_and_logs_one_line_per_applied_up
         "one update.auto line per applied update"
     );
 }
+
+/// REQ: LIF-727
+#[test]
+fn lif_727_a_plain_patch_waits_for_the_safe_point_before_it_applies() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.enable_auto_update();
+    rig.set_registry_candidate(&pkg(NOTES, "1.0.1"));
+    let server = rig.start_server("default");
+    rig.trigger_auto_update();
+    assert_eq!(
+        list_row(&rig, NOTES)["version"],
+        "1.0.0",
+        "the patch is not applied before the safe point runs"
+    );
+    server.apply_pending();
+    assert_eq!(
+        list_row(&rig, NOTES)["version"],
+        "1.0.1",
+        "the patch applies at the safe point"
+    );
+}

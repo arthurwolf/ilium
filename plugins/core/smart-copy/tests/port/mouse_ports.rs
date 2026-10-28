@@ -40,3 +40,21 @@ fn port_ui_the_picker_view_renders_at_narrow_widths() {
     }
     let _ = (PointerKind::Down, pointer(0, PointerKind::Down, 0, 0));
 }
+
+/// REQ: PORT:ilium-client/src/mouse.rs::smart_copy_release_is_not_lost_to_stale_tree_drag
+#[test]
+fn port_mouse_a_release_after_a_drag_still_lets_the_pick_copy() {
+    let mut host = open_picker(&["released"]);
+    host.deliver_one(pointer(0, PointerKind::Drag, 0, 0));
+    host.deliver_one(pointer(0, PointerKind::Up, 0, 0));
+    let out = host.deliver_one(key("1"));
+    assert!(status_contains(&out, "Copied 8 characters"), "{out:?}");
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::smart_copy_preview_fits_narrow_screens
+#[test]
+fn port_mouse_the_picker_keeps_both_candidates_visible_at_forty_columns() {
+    let mut host = open_picker(&["first", "second"]);
+    let text = host.render(picker_target(), 40, 9).text();
+    assert!(text.contains("first") && text.contains("second"), "{text}");
+}

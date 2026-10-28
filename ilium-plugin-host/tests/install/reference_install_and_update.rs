@@ -2735,3 +2735,18 @@ fn pkg_300_stale_candidate_cannot_create_an_action_after_auto_updates_are_disabl
     metered.os_metered = true;
     assert_eq!(decide(&metered, &plain_candidate()), AutoAction::None);
 }
+
+/// REQ: PKG-296
+#[test]
+fn pkg_296_plain_uninstall_also_leaves_the_trust_store_untouched() {
+    let fx = Fx::new();
+    let trust_path = fx.dir.path().join("trust.json");
+    std::fs::write(&trust_path, b"{\"format\":\"ilium-trust/1\",\"keys\":[]}\n").expect("write");
+    let before = std::fs::read(&trust_path).expect("read");
+    assert_eq!(fx.install(&Spec::new("example.a", "1.0.0")).exit_code, 0);
+    let env = env_with(&fx, &[("ILIUM_TRUST_STORE", &trust_path.to_string_lossy())]);
+    let owned = vec!["uninstall".to_owned(), "example.a".to_owned()];
+    let out = ilium_plugin_host::cli::run(&owned, &fx.env_in(&fx.cwd, env));
+    assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
+    assert_eq!(std::fs::read(&trust_path).expect("read"), before);
+}

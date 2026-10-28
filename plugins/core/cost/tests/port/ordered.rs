@@ -31,3 +31,13 @@ fn port_ordered_original_configuration_cost_refuses_seventh_write_locally_before
     assert_eq!(reply["pending_after_refusals"], json!(6));
     let _: &Value = &reply;
 }
+
+/// REQ: PORT:ilium-client/src/filesystem/ordered.rs::original_configuration_cost_refuses_seventh_write_locally_before_capture
+#[test]
+fn port_ordered_refused_seventh_write_keeps_retained_bytes_at_sixty_mib() {
+    let reply = client(
+        "filesystem.ordered-config-writes",
+        json!({ "enqueue": 7, "retained_limit_bytes": 64 * MIB }),
+    );
+    assert_eq!(reply["retained_after_refusal"], json!(60 * MIB), "{reply}");
+}

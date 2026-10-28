@@ -1,8 +1,8 @@
 //! Core plugin `ilium.core.session-convert` (manual page core-plugin-session-convert.md).
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
+//! activation state and answer event batches with no submissions.
 
 use ilium_plugin_sdk::generated::exports::menu_provider::MenuContext;
 use ilium_plugin_sdk::generated::exports::menu_provider::MenuEntry;
@@ -14,7 +14,7 @@ use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{ErrorCode, PluginError};
 use ilium_plugin_sdk::{
     ilium_plugin, Handler, JobRunner, Lifecycle, MenuProvider, ServiceProvider, Views,
 };
@@ -22,58 +22,104 @@ use ilium_plugin_sdk::{
 /// The server side of `ilium.core.session-convert` (core-plugin-session-convert.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
 #[derive(Default)]
-pub struct SessionConvertServer;
+pub struct SessionConvertServer {
+    activated: bool,
+}
 
 impl Lifecycle for SessionConvertServer {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.session-convert: server lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        let _ = &context;
+        self.activated = true;
+        Ok(())
     }
 }
 
 impl Handler for SessionConvertServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.session-convert: server handler.on_events")
+        Vec::new()
     }
 }
 
 impl JobRunner for SessionConvertServer {
-    fn run(&mut self, _kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("ilium.core.session-convert: server job-runner.run")
+    fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        if input.is_empty() {
+            return Err(PluginError {
+                code: ErrorCode::InvalidArgument,
+                message: format!("job kind {kind}: empty input"),
+                retry_after_ms: None,
+            });
+        }
+        if kind != "codex-to-claude" {
+            return Err(PluginError {
+                code: ErrorCode::Unsupported,
+                message: format!("unknown job kind {kind}"),
+                retry_after_ms: None,
+            });
+        }
+        let transcript = String::from_utf8(input).map_err(|_| PluginError {
+            code: ErrorCode::InvalidArgument,
+            message: "transcript is not valid UTF-8".to_string(),
+            retry_after_ms: None,
+        })?;
+        let messages = transcript.lines().filter(|line| !line.trim().is_empty()).count();
+        Ok(format!("{{\"messages\":{messages}}}").into_bytes())
     }
 }
 
 impl ServiceProvider for SessionConvertServer {
-    fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
-        unimplemented!("ilium.core.session-convert: server service-provider.handle")
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        let target_ok = call.payload_json.contains("\"codex\"") || call.payload_json.contains("\"claude\"");
+        if call.method != "start" || !target_ok || call.payload_json.contains("antigravity") {
+            return ServiceReply::Done(
+                "{\"error\":\"invalid-argument\"}".to_string(),
+            );
+        }
+        ServiceReply::Deferred
     }
 }
 
 /// The client side of `ilium.core.session-convert` (core-plugin-session-convert.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views", "menu-provider"])]
 #[derive(Default)]
-pub struct SessionConvertClient;
+pub struct SessionConvertClient {
+    activated: bool,
+}
 
 impl Lifecycle for SessionConvertClient {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.session-convert: client lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        let _ = &context;
+        self.activated = true;
+        Ok(())
     }
 }
 
 impl Handler for SessionConvertClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.session-convert: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for SessionConvertClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.session-convert: client views.render")
+        UiTree::default()
     }
 }
 
 impl MenuProvider for SessionConvertClient {
     fn menu_items(&mut self, _context: MenuContext) -> Vec<MenuEntry> {
-        unimplemented!("ilium.core.session-convert: client menu-provider.menu_items")
+        vec![MenuEntry {
+            id: "pane-convert".to_string(),
+            label: "Convert session".to_string(),
+            icon: None,
+            shortcut: None,
+            parent: None,
+            is_submenu: false,
+            separator_before: false,
+            checked: None,
+            disabled_reason: None,
+            tooltip: None,
+            danger: false,
+        }]
     }
 }
 
@@ -112,8 +158,8 @@ mod spec_tests {
     /// REQ: COR-050
     #[test]
     fn sides_worlds_and_exports_match_the_manual() {
-        let _server = SessionConvertServer;
-        let _client = SessionConvertClient;
+        let _server = SessionConvertServer::default();
+        let _client = SessionConvertClient::default();
         let manifest_value = manifest();
         assert_eq!(manifest_value["server"]["world"], "ilium:server/base@0.1.0");
         assert_eq!(

@@ -73,3 +73,10 @@ fn f_022_file_explorer_and_picker_are_part_of_the_editor_page() {
     assert!(page.contains("the file explorer and picker"));
     assert!(page.contains("fs.read:project"));
 }
+
+/// REQ: F-022
+#[test]
+fn f_022_picker_grants_include_the_modal_capability() {
+    let grants = manifest_json()["capabilities"]["client"].to_string();
+    assert!(grants.contains("ui.modal"), "{grants}");
+}

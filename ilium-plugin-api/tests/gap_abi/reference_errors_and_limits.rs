@@ -50,3 +50,30 @@ fn abi_082_reworded_message_tail_keeps_corpus_passing() {
         "reference-errors-and-limits.md must state the ABI-082 MUST text"
     );
 }
+
+/// REQ: ABI-082
+#[test]
+fn abi_082_sdks_are_told_not_to_branch_on_message_text() {
+    let page = errors_and_limits_page();
+    assert!(
+        page.lines().any(|line| {
+            line.contains("[ABI-082]") && line.contains("the SDKs MUST NOT branch on message text")
+        }),
+        "the ABI-082 requirement must forbid SDKs from branching on message text"
+    );
+}
+
+/// REQ: ABI-063
+#[test]
+fn abi_063_oversize_decode_is_refused_before_host_logic_runs_from_either_origin() {
+    for key in LimitKey::ALL {
+        let oversize_length = ilium_plugin_api::limits::default_of(key) + 1;
+        for origin in [ValueOrigin::PluginReturn, ValueOrigin::HostEvent] {
+            let admission = admit_decoded(origin, key, oversize_length);
+            assert!(
+                !admission.host_logic_reached,
+                "{key:?} from {origin:?}: decoding work must stop before host logic reads the value"
+            );
+        }
+    }
+}

@@ -25,3 +25,17 @@ fn port_one_writer_fence_survives_release_and_scene_rebuild() {
     }
     assert!(!fake_scene("clock", 40, 10).wants_occupancy());
 }
+
+/// REQ: PORT:ilium-client/src/background_animation/host.rs::one_writer_fence_survives_release_and_scene_rebuild
+#[test]
+fn port_one_writer_fence_survives_release_and_scene_rebuild_second_lit_cells_stay_inside_new_surface() {
+    let mut wide = fake_scene("waves", 48, 24);
+    let screen = wide.frame(braille_frame(48, 24, 0));
+    assert_eq!((screen.columns, screen.rows), (48, 24));
+    for (row, column) in lit_cells(&screen) {
+        assert!(
+            row < screen.rows && column < screen.columns,
+            "lit cell {row},{column} lies inside the new surface"
+        );
+    }
+}

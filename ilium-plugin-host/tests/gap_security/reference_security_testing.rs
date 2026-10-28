@@ -98,3 +98,60 @@ fn sec_733_hostile_suite_has_one_fixture_per_attack_class_with_jsonl_pass_fail()
         "every fixture must emit a pass/fail JSONL line"
     );
 }
+
+/// REQ: SEC-704
+#[test]
+fn sec_704_release_check_passes_when_no_advisory_is_open() {
+    assert_manual_says(
+        "reference-security-testing",
+        "the release checklist MUST fail when the advisory id has no fixture",
+    );
+    let rig = rig();
+    let output = rig.cli(&["release", "check", "--advisories"]);
+    assert_eq!(output.exit_code, 0, "no advisory means no missing fixture");
+    assert!(
+        !error_codes(&output)
+            .iter()
+            .any(|code| code == "release.fixture-missing"),
+        "no fixture-missing refusal without advisories"
+    );
+}
+
+/// REQ: SEC-705
+#[test]
+fn sec_705_each_fuzz_target_source_file_exists_beside_its_corpus() {
+    assert_manual_says(
+        "reference-security-testing",
+        "The project MUST fuzz the manifest parser",
+    );
+    let fuzz_root = repo_root().join("ilium-plugin-host/fuzz");
+    for target in [
+        "manifest_parser",
+        "package_archive_reader",
+        "signature_metadata_parser",
+        "dispatcher_channel_decoder",
+    ] {
+        let source = fuzz_root.join("fuzz_targets").join(format!("{target}.rs"));
+        assert!(
+            source.is_file(),
+            "a fuzz target for {target} must exist at {}",
+            source.display()
+        );
+    }
+}
+
+/// REQ: SEC-733
+#[test]
+fn sec_733_hostile_run_emits_at_least_one_jsonl_line_per_listed_fixture() {
+    assert_manual_says(
+        "reference-security-testing",
+        "each fixture MUST be run on every release candidate with a pass/fail line in JSONL",
+    );
+    let rig = rig();
+    let listing = rig.cli(&["release", "hostile-suite", "--list"]);
+    let run = rig.cli(&["release", "hostile-suite", "--run", "--format", "jsonl"]);
+    assert!(
+        run.stdout_jsonl.len() >= listing.stdout_jsonl.len(),
+        "each listed fixture produces a result line"
+    );
+}

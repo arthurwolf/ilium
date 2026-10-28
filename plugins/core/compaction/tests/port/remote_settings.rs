@@ -403,3 +403,148 @@ fn rset_every_technique_has_a_description_and_provenance() {
         );
     }
 }
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::defaults_match_the_specification
+#[test]
+fn rset_defaults_survive_sanitizing_unchanged() {
+    let host = host();
+    let defaults = host.remote_settings_defaults();
+    assert_eq!(sanitize(&host, defaults.clone()), defaults);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::sanitize_clamps_every_range_and_bounds_the_prompt
+#[test]
+fn rset_sanitize_keeps_a_prompt_inside_the_bound_unchanged() {
+    let host = host();
+    let cleaned = sanitize(&host, json!({"custom_prompt": "Keep the plan."}));
+    assert_eq!(cleaned["custom_prompt"], "Keep the plan.");
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::a_multibyte_prompt_is_cut_on_a_character_boundary_inside_the_transport_bound
+#[test]
+fn rset_short_multibyte_prompt_is_kept_whole() {
+    let host = host();
+    let prompt = "\u{e9}t\u{e9} \u{1F980}";
+    let cleaned = sanitize(&host, json!({"custom_prompt": prompt}));
+    assert_eq!(cleaned["custom_prompt"], prompt);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::an_escape_heavy_prompt_still_fits_the_configuration_transport
+#[test]
+fn rset_control_characters_never_reach_the_stored_prompt() {
+    let host = host();
+    let cleaned = sanitize(&host, json!({"custom_prompt": "a\u{1}b"}));
+    assert!(!cleaned["custom_prompt"]
+        .as_str()
+        .unwrap()
+        .contains('\u{1}'));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::toggles_flip_and_report_the_change
+#[test]
+fn rset_toggle_leaves_the_other_flags_alone() {
+    let mut host = host();
+    assert!(host.remote_settings_adjust("enabled", 0));
+    assert_eq!(host.remote_settings_current()["automatic"], false);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::threshold_steps_by_one_and_stops_at_its_limits
+#[test]
+fn rset_threshold_five_steps_down_from_the_default() {
+    let mut host = host();
+    for _ in 0..5 {
+        assert!(host.remote_settings_adjust("threshold", -1));
+    }
+    assert_eq!(host.remote_settings_current()["threshold_percent"], 60);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::numeric_rows_walk_their_ladders_and_stop_at_the_ends
+#[test]
+fn rset_zero_delta_changes_no_numeric_row() {
+    let mut host = host();
+    let before = host.remote_settings_current();
+    assert!(!host.remote_settings_adjust("cooldown", 0));
+    assert_eq!(host.remote_settings_current(), before);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::an_off_ladder_value_snaps_in_the_requested_direction
+#[test]
+fn rset_off_ladder_value_below_the_ladder_snaps_to_its_bottom() {
+    let mut host = host();
+    host.remote_settings_set(json!({"tail_tokens": 2_500}));
+    assert!(host.remote_settings_adjust("tail_tokens", -1));
+    assert_eq!(host.remote_settings_current()["tail_tokens"], 2_000);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::technique_rows_cycle_through_every_technique_independently
+#[test]
+fn rset_technique_row_step_leaves_other_agents_untouched() {
+    let mut host = host();
+    let before = host.remote_settings_current();
+    assert!(host.remote_settings_adjust("technique:codex", 1));
+    let after = host.remote_settings_current();
+    assert_eq!(after["claude_technique"], before["claude_technique"]);
+    assert_ne!(after["codex_technique"], before["codex_technique"]);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::technique_for_routes_each_agent_class_to_its_row
+#[test]
+fn rset_technique_for_uses_the_claude_default() {
+    let host = host();
+    let defaults = host.remote_settings_defaults();
+    assert_eq!(
+        host.remote_settings_technique_for(&defaults, "claude"),
+        "claude-code"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::the_banner_row_dismisses_once_and_never_returns
+#[test]
+fn rset_dismissing_the_banner_removes_exactly_one_row() {
+    let mut host = host();
+    let before = host.remote_settings_row_ids().len();
+    host.remote_settings_adjust("privacy_banner", 0);
+    assert_eq!(host.remote_settings_row_ids().len(), before - 1);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::rows_cover_every_help_topic_exactly_once
+#[test]
+fn rset_every_help_id_uses_the_rcomp_prefix() {
+    let mut host = host();
+    host.remote_settings_adjust("privacy_banner", 0);
+    assert!(host
+        .remote_settings_help_ids()
+        .iter()
+        .all(|id| id.starts_with("RCOMP-")));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::display_only_rows_and_the_prompt_row_do_not_change_settings
+#[test]
+fn rset_display_rows_are_listed_in_the_settings_model() {
+    let host = host();
+    let rows = host.remote_settings_row_ids();
+    assert!(rows.iter().any(|row| row == "model"));
+    assert!(rows.iter().any(|row| row == "custom_prompt"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::options_for_maps_every_field_per_agent
+#[test]
+fn rset_options_for_other_agents_use_the_other_row() {
+    let host = host();
+    let defaults = host.remote_settings_defaults();
+    assert_eq!(
+        host.remote_settings_options_for(&defaults, "other")["technique"],
+        "claude-code"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::every_technique_has_a_description_and_provenance
+#[test]
+fn rset_technique_ids_are_unique() {
+    let host = host();
+    let mut ids = host.technique_ids();
+    let count = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), count);
+}

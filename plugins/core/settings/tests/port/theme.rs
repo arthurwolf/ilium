@@ -138,3 +138,27 @@ fn port_092_the_two_schemes_render_the_muted_accent_differently() {
         light.render(tab("user-interface"), 100, 30)
     );
 }
+
+/// REQ: PORT:ilium-client/src/theme.rs::default_theme_is_the_dark_preset, F-092
+#[test]
+fn port_092_choosing_dark_explicitly_renders_the_same_page_as_the_default() {
+    let mut default_host = client_host();
+    let default_screen = default_host.render(tab("user-interface"), 100, 30);
+    let mut explicit = client_host();
+    choose(&mut explicit, "user-interface", "ui.color_scheme", "dark");
+    assert_eq!(
+        default_screen,
+        explicit.render(tab("user-interface"), 100, 30)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/theme.rs::for_scheme_selects_the_matching_preset, F-092
+#[test]
+fn port_092_switching_light_then_back_to_dark_restores_the_default_page() {
+    let mut default_host = client_host();
+    let default_screen = default_host.render(tab("user-interface"), 100, 30);
+    let mut host = client_host();
+    choose(&mut host, "user-interface", "ui.color_scheme", "light");
+    choose(&mut host, "user-interface", "ui.color_scheme", "dark");
+    assert_eq!(host.render(tab("user-interface"), 100, 30), default_screen);
+}

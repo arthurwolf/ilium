@@ -180,3 +180,17 @@ fn port_090_a_refused_engine_budget_write_is_not_applied_and_the_draft_stays_vis
     let text = tab_text(&mut host, "terminal", 100, 40);
     assert!(text.contains("257"), "the dialog keeps the draft: {text}");
 }
+
+/// REQ: PORT:ilium-client/src/filesystem/terminal_pool_number_tests.rs::terminal_pool_number_dialog_queue_refusal_is_unsaved_and_does_not_apply_locally
+#[test]
+fn port_090_a_refused_engine_budget_write_is_never_the_stored_value() {
+    const BUDGET: &str = "terminal.engine_memory_budget_mib";
+    let mut host = client_host();
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Busy, "write queue closed"),
+    );
+    type_number(&mut host, "terminal", BUDGET, 257.0);
+    let _ = tab_text(&mut host, "terminal", 100, 40);
+    assert_ne!(value_of(&mut host, BUDGET), Some(json!(257)));
+}

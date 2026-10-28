@@ -77,3 +77,18 @@ fn usr_244_a_replayed_grant_the_policy_forbids_is_left_off_and_reported() {
     let shown = format!("{:?} {}", output.stdout_jsonl, rig.notices().join(" "));
     assert!(shown.contains("Blocked by your administrator"), "{shown}");
 }
+
+/// REQ: USR-244
+#[test]
+fn usr_244_replay_never_raises_a_grant_above_the_lockfile_record() {
+    let mut rig = UserRig::new();
+    rig.open_project("lock-no-raise");
+    install_ok(&mut rig, &spec("com.example.clip", "1.0.0", &[]));
+    assert_eq!(result_exit_code(&rig.cli(&["lock"])), 0);
+    let output = rig.cli(&["sync", "--locked"]);
+    assert_eq!(result_exit_code(&output), 0, "{:?}", error_codes(&output));
+    let entries = rig.grant_entries("com.example.clip");
+    assert!(entries
+        .iter()
+        .all(|entry| !(entry.grant == "clipboard.read" && entry.state == "granted")));
+}

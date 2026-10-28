@@ -29,3 +29,14 @@ fn port_same_cached_render_can_acknowledge_two_distinct_terminal_draws() {
         "the manual page covers this feature"
     );
 }
+
+/// REQ: PORT:ilium-client/src/background_animation/mod.rs::same_cached_render_can_acknowledge_two_distinct_terminal_draws
+#[test]
+fn port_same_cached_render_can_acknowledge_two_distinct_terminal_draws_second_clock_runs_at_manifest_cap() {
+    let clock_fps = fake_scene("clock", 40, 10).frames_per_second();
+    assert_eq!(
+        u64::from(clock_fps),
+        scene_entry("clock")["frame_rate_cap"].as_u64().unwrap(),
+        "the clock runs at exactly its manifest frame rate cap"
+    );
+}

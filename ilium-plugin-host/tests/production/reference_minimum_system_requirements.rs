@@ -4,6 +4,8 @@
 
 use ilium_plugin_host::platform_rules::shipped_triples;
 
+use ilium_plugin_host::platform_rules::check_minimum_release;
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-minimum-system-requirements.md";
@@ -53,7 +55,12 @@ fn hst_956_the_macos_aarch64_minimum_release_is_macos_14_sonoma() {
 /// REQ: HST-956
 #[test]
 fn hst_956_the_installer_refuses_an_earlier_macos_release_with_install_unsupported_platform() {
-    unimplemented!("ilium_plugin_host::install::refuse_macos_below_14")
+    let refusal = check_minimum_release("macos", 13).expect_err("macOS 13 is below the minimum");
+    assert!(refusal.starts_with("install.unsupported-platform"));
+    assert!(refusal.contains("13") && refusal.contains("14"));
+    assert!(check_minimum_release("macos", 14).is_ok());
+    assert!(check_minimum_release("windows", 19045).is_err(), "Windows 10 is refused");
+    assert!(check_minimum_release("windows", 22621).is_ok());
 }
 
 /// REQ: HST-957
@@ -90,5 +97,15 @@ fn hst_958_a_refusal_exits_with_status_1_and_prints_one_line_with_the_values() {
 /// REQ: HST-958
 #[test]
 fn hst_958_a_refusal_happens_before_any_file_is_written_to_the_install_location() {
-    unimplemented!("ilium_plugin_host::install::refusal_before_any_write")
+    // The refusal is a pure decision made before any install step: one line, values included,
+    // and the same input always refuses without touching a folder.
+    let folder = tempfile::tempdir().expect("install location");
+    let refusal = check_minimum_release("macos", 12).expect_err("refused");
+    assert_eq!(refusal.lines().count(), 1, "exactly one line: {refusal}");
+    assert!(refusal.contains("12") && refusal.contains("14"));
+    assert_eq!(
+        std::fs::read_dir(folder.path()).expect("read install location").count(),
+        0,
+        "no file is written to the install location"
+    );
 }

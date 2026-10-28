@@ -57,3 +57,41 @@ fn port_menu_is_offered_for_a_terminal_pane_regardless_of_mouse_tracking() {
         .collect();
     assert_eq!(ids, ["copy", "copy-path", "smart-copy", "transfer"]);
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::right_click_menu_offers_copy_selection_only_when_the_pane_has_one
+#[test]
+fn port_menu_an_explicitly_empty_selection_still_disables_copy() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    host.terminal().set_selection(
+        pane,
+        Selection {
+            first_row: 0,
+            first_column: 0,
+            last_row: 0,
+            last_column: 0,
+            text: String::new(),
+        },
+    );
+    let entries = host.menu_items(context(pane));
+    assert_eq!(
+        entries[0].disabled_reason.as_deref(),
+        Some("nothing selected")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::right_click_opens_the_terminal_menu_even_when_the_agent_tracks_the_mouse
+#[test]
+fn port_menu_the_terminal_menu_shows_user_facing_labels() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "agent");
+    let labels: Vec<String> = host
+        .menu_items(context(pane))
+        .into_iter()
+        .map(|entry| entry.label.to_string())
+        .collect();
+    assert_eq!(
+        labels,
+        ["Copy", "Copy path", "Smart Copy", "Transfer screen"]
+    );
+}

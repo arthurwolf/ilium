@@ -61,3 +61,47 @@ fn port_claude_model_statusline_stored_model_observations_remain_bounded_as_sess
         r####"{"bounded_at": "MAX_OBSERVATIONS", "unrelated_preserved": true, "newest_kept": true}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/claude_model_statusline.rs::project_statusline_setting_chains_user_command_and_restores_only_owned_value
+#[test]
+fn port_claude_model_statusline_chained_user_command_still_runs_while_enabled() {
+    check(
+        Place::Server,
+        "statusline.claude.configure",
+        r####"{"case": "project_statusline_setting_chains_user_command_and_restores_only_owned_value", "phase": "enabled"}"####,
+        r####"{"chained_command": "my-statusline"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/claude_model_statusline.rs::stale_model_observation_from_a_previous_activation_is_ignored
+#[test]
+fn port_claude_model_statusline_observation_from_the_current_activation_is_accepted() {
+    check(
+        Place::Server,
+        "statusline.claude.observe",
+        r####"{"case": "stale_model_observation_from_a_previous_activation_is_ignored", "generation": "current-activation"}"####,
+        r####"{"model": "claude-opus-4-1"}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/claude_model_statusline.rs::statusline_input_retains_only_session_project_and_model
+#[test]
+fn port_claude_model_statusline_input_without_a_session_id_is_rejected() {
+    check(
+        Place::Server,
+        "statusline.claude.input",
+        r####"{"omit": "session_id"}"####,
+        r####"{"accepted": false}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/claude_model_statusline.rs::stored_model_observations_remain_bounded_as_sessions_accumulate
+#[test]
+fn port_claude_model_statusline_rewriting_one_session_keeps_a_single_stored_record() {
+    check(
+        Place::Server,
+        "statusline.claude.store",
+        r####"{"rewrite_same_session": true}"####,
+        r####"{"stored_count": 1}"####,
+    );
+}

@@ -3,7 +3,7 @@
 //!
 //! These rows are checked by `ilium_plugin_api::manifest::validate_json`, the same function
 //! `ilium plugin check` and the installer run (SET-001..SET-064). They fail red while the
-//! skeleton body is `unimplemented!()`.
+//! validator does not enforce a row.
 
 use ilium_plugin_api::Tier;
 use proptest::prelude::*;

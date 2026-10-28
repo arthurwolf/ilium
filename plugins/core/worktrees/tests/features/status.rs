@@ -386,3 +386,31 @@ fn feature_072_golden_git_tab_at_40_80_and_120_columns() {
         );
     }
 }
+
+/// REQ: F-069, PORT:ilium-client/src/tree_ui.rs::worktree_branch_line_is_dim_aligned_and_elides_the_middle
+#[test]
+fn port_069_a_branch_that_fits_is_shown_whole_without_an_ellipsis() {
+    let mut host = client_host();
+    publish(&mut host, "/work/ilium.worktrees/fix-auth", "clean");
+    let row = branch_rows(&mut host, 40).remove(0);
+    assert!(row.contains("🌿 fix-auth"), "{row}");
+    assert!(!row.contains('…'), "{row}");
+}
+
+/// REQ: F-069, PORT:ilium-client/src/tree_ui.rs::worktree_branch_line_uses_the_live_checkout_branch
+#[test]
+fn port_069_a_switched_branch_replaces_the_row_of_the_same_worktree() {
+    let mut host = client_host();
+    let path = "/work/ilium.worktrees/agent-original";
+    for branch in ["agent/original", "agent/switched"] {
+        host.deliver_one(Event::TopicPublished(TopicPublishedEvent {
+            topic: TOPIC_CHANGED.to_string(),
+            from: PluginId(PLUGIN_ID.to_string()),
+            payload_json: json!({"path": path, "state": "clean", "branch": branch}).to_string(),
+        }));
+        host.settle();
+    }
+    let rows = branch_rows(&mut host, 80);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].contains("🌿 agent/switched"), "{}", rows[0]);
+}

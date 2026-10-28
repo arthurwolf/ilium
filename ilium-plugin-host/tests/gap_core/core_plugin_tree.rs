@@ -32,3 +32,19 @@ fn cor_216_replacing_the_tree_plugin_closes_no_pane_restarts_no_pty_and_keeps_th
         "no PTY may restart"
     );
 }
+
+/// REQ: COR-216
+#[test]
+fn cor_216_tree_has_nodes_before_and_after_the_switch_so_equality_is_not_vacuous() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s2");
+    server.open_pane("main");
+    let tree_before = server.tree_nodes();
+    assert!(!tree_before.is_empty(), "the tree must hold nodes to compare");
+    rig.install_replacement_of_core(
+        &PackageSpec::new(REPLACEMENT, "1.0.0").replaces_core(TREE),
+        TREE,
+    );
+    server.enable(REPLACEMENT);
+    assert_eq!(server.tree_nodes().len(), tree_before.len());
+}

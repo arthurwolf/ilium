@@ -2,17 +2,17 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
-use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{Alignment, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, Widget};
+use ilium_plugin_sdk::types::{ErrorCode, PluginError};
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, ServiceProvider, Views};
 
 /// The server side of `ilium.core.search` (core-plugin-search.md, world `ilium:server/base@0.1.0`).
@@ -22,27 +22,34 @@ pub struct SearchServer;
 
 impl Lifecycle for SearchServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.search: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for SearchServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.search: server handler.on_events")
+        Vec::new()
     }
 }
 
 impl JobRunner for SearchServer {
-    fn run(&mut self, _kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("ilium.core.search: server job-runner.run")
+    fn run(&mut self, kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        Err(PluginError {
+            code: ErrorCode::Unsupported,
+            message: format!("ilium.core.search: unknown job kind {kind}"),
+            retry_after_ms: None,
+        })
     }
 }
 
 /// Service `ilium.core.search/query` (core-plugin-search.md "Services"): `query` answers with
 /// `Done` JSON `{ "hits": [...] }`.
 impl ServiceProvider for SearchServer {
-    fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
-        unimplemented!("ilium.core.search: server service-provider.handle")
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        {
+            let _ = &call;
+            ServiceReply::Done(r#"{"error":"unsupported method"}"#.to_string())
+        }
     }
 }
 
@@ -53,19 +60,41 @@ pub struct SearchClient;
 
 impl Lifecycle for SearchClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.search: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for SearchClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.search: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for SearchClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.search: client views.render")
+        UiTree {
+            version: 1,
+            nodes: vec![UiNode {
+                key: None,
+                widget: Widget::Paragraph(ParagraphSpec {
+                    lines: vec![vec![Span {
+                        text: "Search".to_string(),
+                        style: Style::default(),
+                    }]],
+                    rich: None,
+                    wrap: Some(false),
+                    alignment: Alignment::Left,
+                    style: Style::default(),
+                    scrollable: false,
+                }),
+                children: Vec::new(),
+                flags: NodeFlags::default(),
+                tooltip: None,
+                tab_index: None,
+                disabled_reason: None,
+            }],
+            root: 0,
+        }
     }
 }
 #[cfg(test)]

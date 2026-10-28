@@ -160,3 +160,67 @@ fn ci_recipe_uploads_required_artifacts_on_every_run_and_never_the_signing_key()
         "no upload line uploads publisher.key"
     );
 }
+
+/// REQ: DEV-896
+#[test]
+fn publish_succeeds_with_no_vulnerability_diagnostic_when_the_locked_set_is_clean() {
+    let (_root, env, _dir) = new_rust_project();
+    let out = run_in_project(&env, "publish", &["--fail-severity", "high"]);
+    assert_eq!(
+        out.exit_code, 0,
+        "a clean dependency set must publish: {:?}",
+        out.stdout_jsonl
+    );
+    assert!(
+        with_code(&out, "lint.dependency-vulnerable").is_empty(),
+        "a clean dependency set has no vulnerability diagnostic"
+    );
+}
+
+/// REQ: DEV-932
+#[test]
+fn ci_recipe_keys_the_rust_target_cache_on_the_lock_hash_and_the_toolchain() {
+    let page = manual_page("guide-ci-recipes");
+    let target_lines: Vec<&str> = page
+        .lines()
+        .filter(|line| line.contains("target/"))
+        .collect();
+    assert!(!target_lines.is_empty(), "the recipe caches target/");
+    assert!(
+        target_lines
+            .iter()
+            .any(|line| line.contains("Cargo.lock") && line.contains("toolchain")),
+        "target/ is keyed on the Cargo.lock hash and the toolchain version: {target_lines:?}"
+    );
+}
+
+/// REQ: DEV-933
+#[test]
+fn conformance_passes_on_the_oldest_and_newest_host_contract_of_the_manifest() {
+    let (_root, env, _dir) = new_rust_project();
+    let (oldest, newest) = manifest_requires_range_bounds(&env);
+    for version in [oldest, newest] {
+        let out = run_in_project(&env, "conformance", &["--host-contract", version.as_str()]);
+        assert_eq!(
+            out.exit_code, 0,
+            "conformance runs on the contract {version}: {:?}",
+            out.stdout_jsonl
+        );
+    }
+}
+
+/// REQ: DEV-934
+#[test]
+fn ci_recipe_upload_step_names_the_coverage_file_when_produced() {
+    let page = manual_page("guide-ci-recipes");
+    let upload_lines: Vec<&str> = page
+        .lines()
+        .filter(|line| line.to_lowercase().contains("upload"))
+        .collect();
+    assert!(
+        upload_lines
+            .iter()
+            .any(|line| line.contains("dist/coverage.json")),
+        "the upload step names dist/coverage.json"
+    );
+}

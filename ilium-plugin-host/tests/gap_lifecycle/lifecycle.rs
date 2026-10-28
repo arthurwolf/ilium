@@ -147,3 +147,77 @@ fn lif_729_essential_core_plugin_restarts_after_5_s_and_shows_notice_after_10_fa
         "a persistent notice is shown after 10 failures in one window"
     );
 }
+
+/// REQ: LIF-702
+#[test]
+fn lif_702_enabling_a_retired_plugin_is_refused_after_a_backward_clock_jump() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_end_of_life(NOTES, "2026-01-01");
+    let server = rig.start_server("default");
+    server.shutdown();
+    let _restarted = rig.start_server("default");
+    rig.jump_wall_clock(-40 * 86_400);
+    let enable = rig.cli(&["plugin", "enable", NOTES]);
+    assert_ne!(
+        enable.exit_code, 0,
+        "a retired plugin cannot be enabled again"
+    );
+}
+
+/// REQ: LIF-704
+#[test]
+fn lif_704_pin_and_unpin_commands_both_succeed_on_an_abandoned_plugin() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let _server = rig.start_server("default");
+    rig.plant_abandonment_notice(NOTES, days(0));
+    let pin = rig.cli(&["plugin", "pin", NOTES]);
+    assert_eq!(pin.exit_code, 0, "pin is accepted for an abandoned plugin");
+    let unpin = rig.cli(&["plugin", "unpin", NOTES]);
+    assert_eq!(unpin.exit_code, 0, "unpin is accepted after a pin");
+}
+
+/// REQ: LIF-721
+#[test]
+fn lif_721_a_restarted_server_starts_with_no_failures_counted() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    server.fail(NOTES, Side::Server);
+    server.fail(NOTES, Side::Server);
+    server.shutdown();
+    let restarted = rig.start_server("default");
+    assert_eq!(
+        restarted.failure_count(NOTES, Side::Server),
+        0,
+        "the failure windows of the previous run are not carried over"
+    );
+}
+
+/// REQ: LIF-723
+#[test]
+fn lif_723_leaving_safe_mode_activates_an_enabled_plugin_that_does_not_trap() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let _safe = rig.start_server_safe_mode("default", "third-party");
+    let normal = rig.start_server("default");
+    assert!(
+        normal.active_version(NOTES).is_some(),
+        "leaving safe mode activates the enabled plugin"
+    );
+}
+
+/// REQ: LIF-729
+#[test]
+fn lif_729_the_first_failure_of_a_core_plugin_does_not_use_the_5_second_restart() {
+    let rig = rig();
+    rig.install_bundled(&pkg(CORE, "1.0.0"));
+    let server = rig.start_server("default");
+    server.fail(CORE, Side::Server);
+    assert_ne!(
+        server.restart_delay_ms(CORE, Side::Server),
+        Some(5_000),
+        "only the third and later failures use the 5 s restart"
+    );
+}

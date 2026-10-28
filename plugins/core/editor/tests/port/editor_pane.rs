@@ -132,3 +132,120 @@ fn port_pane_wrapping_adds_visual_rows_and_keeps_buffer_text_and_wrap_mode() {
     let lines = read_lines(&mut editor, 1, 0, 5);
     assert_eq!(lines.get("lines"), Some(&json!([long])), "{lines}");
 }
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::empty_buffer_has_no_path_and_is_not_dirty
+#[test]
+fn port_pane_empty_buffer_reads_back_as_one_empty_line() {
+    let mut editor = direct("{}");
+    direct_open(&mut editor, 1, None, 1);
+    let lines = read_lines(&mut editor, 1, 0, 1);
+    assert_eq!(lines.get("lines"), Some(&json!([""])), "{lines}");
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::heading_rendering_switches_between_graphics_and_plain_text
+#[test]
+fn port_pane_heading_toggled_back_restores_the_original_rendering() {
+    let mut host = plain_host(
+        "n.md",
+        Some("markdown"),
+        "# Title\n",
+        &[("markdown_rendered_by_default", json!(true))],
+    );
+    let before = render_pane(&mut host, 60, 8);
+    host.send_action(
+        ViewTarget::Pane(NodeId(7)),
+        "pixel-headers",
+        ilium_plugin_sdk::generated::types::ActionKind::Toggled,
+        ilium_plugin_sdk::generated::types::ActionValue::Flag(false),
+    );
+    host.send_action(
+        ViewTarget::Pane(NodeId(7)),
+        "pixel-headers",
+        ilium_plugin_sdk::generated::types::ActionKind::Toggled,
+        ilium_plugin_sdk::generated::types::ActionValue::Flag(true),
+    );
+    let restored = render_pane(&mut host, 60, 8);
+    assert_eq!(before.text(), restored.text());
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::input_returns_and_tracks_modification
+#[test]
+fn port_pane_typed_character_appears_on_the_first_text_row() {
+    let mut host = plain_host("a.txt", None, "", &[]);
+    host.key(ViewTarget::Pane(NodeId(7)), "x");
+    let screen = render_pane(&mut host, 40, 6);
+    assert!(screen.row(1).contains('x'), "{}", screen.row(1));
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::load_errors_on_directory_path
+#[test]
+fn port_pane_failed_read_leaves_no_buffer_behind() {
+    let mut editor = direct("{}");
+    let reply = done_json(call_buffers(
+        &mut editor,
+        "read",
+        json!({"buffer": 99, "first-line": 0, "count": 1}),
+    ));
+    assert!(reply.get("error").is_some(), "{reply}");
+    let listed = done_json(call_buffers(&mut editor, "list", json!({})));
+    assert_eq!(
+        listed
+            .get("buffers")
+            .and_then(|buffers| buffers.as_array())
+            .map(|buffers| buffers.len()),
+        Some(0),
+        "{listed}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::load_missing_file_starts_empty_but_remembers_path
+#[test]
+fn port_pane_missing_file_keeps_its_name_after_the_first_edit() {
+    let mut host = plain_host("new/file.txt", None, "", &[]);
+    host.key(ViewTarget::Pane(NodeId(7)), "q");
+    let screen = render_pane(&mut host, 40, 6);
+    assert!(screen.text().contains("file.txt"), "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::replace_contents_preserves_wrap_mode
+#[test]
+fn port_pane_wrap_keeps_the_remainder_of_a_long_line_on_a_third_row() {
+    let mut host = plain_host(
+        "a.txt",
+        None,
+        "abcdefghij\n",
+        &[
+            ("line_display", json!("wrap")),
+            ("show_line_numbers", json!(false)),
+        ],
+    );
+    let wrapped = render_pane(&mut host, 4, 6);
+    assert_eq!(wrapped.row(3), "ij", "{}", wrapped.text());
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::save_then_load_round_trips_contents
+#[test]
+fn port_pane_second_line_reads_back_on_its_own() {
+    let mut editor = direct("{}");
+    direct_open(&mut editor, 1, None, 1);
+    crate::support::seed_text(&mut editor, 1, "hello\nworld");
+    let lines = read_lines(&mut editor, 1, 1, 1);
+    assert_eq!(lines.get("lines"), Some(&json!(["world"])), "{lines}");
+}
+
+/// REQ: PORT:ilium-client/src/editor_pane.rs::wrapping_tracks_visual_rows_without_changing_the_buffer
+#[test]
+fn port_pane_wide_enough_for_the_line_adds_no_wrapped_row() {
+    let mut host = plain_host(
+        "a.txt",
+        None,
+        "abcdefghij\n",
+        &[
+            ("line_display", json!("wrap")),
+            ("show_line_numbers", json!(false)),
+        ],
+    );
+    let wide = render_pane(&mut host, 10, 6);
+    assert_eq!(wide.row(1), "abcdefghij", "{}", wide.text());
+    assert!(wide.row(2).trim().is_empty(), "{}", wide.text());
+}

@@ -54,3 +54,39 @@ fn port_ui_scheduled_reset_status_segment_is_not_a_scheduler_surface() {
         "{remaining}"
     );
 }
+
+/// REQ: PORT:ilium-client/src/ui.rs::scheduled_input_dialog_renders_all_aerated_controls
+#[test]
+fn port_ui_scheduled_input_dialog_shows_escape_hint() {
+    let (mut session, _pane) = schedule_dialog("release shell");
+    assert!(
+        draw(&mut session, SCHEDULE_VIEW, 100, 30)
+            .text()
+            .contains("Esc cancel"),
+        "the schedule dialog names its cancel key"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::queue_prompt_long_draft_keeps_edited_tail_visible
+#[test]
+fn port_ui_queue_prompt_dialog_shows_enqueue_hint() {
+    let (mut session, _pane) = queue_dialog("agent");
+    let text = draw(&mut session, QUEUE_VIEW, 120, 40).text();
+    assert!(text.contains("Ctrl+Enter enqueue"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::scheduled_reset_uses_a_right_aligned_orange_and_light_blue_status_segment
+#[test]
+fn port_ui_scheduled_default_countdown_is_just_under_thirty_seconds() {
+    let (mut session, pane) = schedule_dialog("shell");
+    commit_schedule(&mut session);
+    let reply = call_queue(
+        &mut session,
+        serde_json::json!({"method": "pending", "pane": pane.0}),
+    )
+    .expect("pending answers");
+    let remaining = reply["schedules"][0]["remaining_ms"]
+        .as_u64()
+        .expect("remaining_ms");
+    assert!(remaining > 25_000 && remaining <= 30_000, "{remaining}");
+}

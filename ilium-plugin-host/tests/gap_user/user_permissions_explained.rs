@@ -60,3 +60,34 @@ fn usr_260_missing_message_falls_back_to_english_and_broken_catalogue_gives_engl
         "the recovery page must fall back to English when its catalogue is broken"
     );
 }
+
+/// REQ: USR-259
+#[test]
+fn usr_259_review_dialog_shows_wording_not_the_raw_message_id() {
+    let rig = rig();
+    rig.load_catalogue(
+        "xx-TEST",
+        &[("host.perm.fs.read", "Test wording for reading files")],
+    );
+    rig.set_ui_language("xx-TEST");
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    let review = rig.last_review().join("\n");
+    assert!(
+        !review.contains("host.perm.fs.read"),
+        "a message id must never be shown to the user: {review}"
+    );
+}
+
+/// REQ: USR-260
+#[test]
+fn usr_260_broken_catalogue_still_gives_english_in_the_install_review() {
+    let rig = rig();
+    rig.load_catalogue_raw("de", b"{ this is not json");
+    rig.set_ui_language("de");
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    let english = rig.english_text("host.perm.fs.read");
+    assert!(
+        rig.last_review().join("\n").contains(&english),
+        "a broken catalogue must fall back to English in the review dialog"
+    );
+}

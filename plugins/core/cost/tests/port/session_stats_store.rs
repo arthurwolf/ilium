@@ -205,3 +205,135 @@ fn port_session_stats_store_unresolved_replacement_drops_inflight_cache_and_all_
     assert_eq!(reply["drain_changed"], json!(false));
     assert_eq!(reply["entry_exists"], json!(false));
 }
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::a_missing_transcript_reports_unavailable
+#[test]
+fn port_session_stats_store_a_missing_transcript_exposes_no_stats_or_path() {
+    let reply = scenario(
+        "a-missing-transcript-exposes-no-stats-or-path",
+        json!({ "transcript": "missing" }),
+    );
+    assert_eq!(reply["stats"], Value::Null);
+    assert_eq!(reply["transcript_path"], Value::Null);
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::a_pass_reads_the_transcript_and_a_second_pass_is_throttled
+#[test]
+fn port_session_stats_store_a_second_pass_after_the_interval_is_accepted() {
+    let reply = scenario(
+        "a-second-pass-after-the-interval-is-accepted",
+        json!({ "transcript": { "prompts": 1, "output_tokens": 9 }, "second_request_after_secs": 3600 }),
+    );
+    assert_eq!(reply["second_request_accepted"], json!(true));
+    assert_eq!(reply["final_state"], json!("ready"));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::claude_subagent_files_count_toward_the_session_and_are_read_incrementally
+#[test]
+fn port_session_stats_store_subagent_files_without_growth_add_no_output() {
+    let reply = scenario(
+        "subagent-files-without-growth-add-no-output",
+        json!({ "layout": "<session>/subagents/workflows/wf_1/agent-a1.jsonl", "initial_output": 0, "appended_output": 0, "main_output": 9 }),
+    );
+    assert_eq!(reply["output_after_growth"], json!(9));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::claude_subagent_inventory_streams_more_than_4096_transcripts
+#[test]
+fn port_session_stats_store_empty_subagent_folder_streams_zero_files() {
+    let reply = scenario(
+        "empty-subagent-folder-streams-zero-files",
+        json!({ "subagent_files": 0 }),
+    );
+    assert_eq!(reply["seen"], json!(0));
+    assert_eq!(reply["errors"], json!(0));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::claude_subagent_offsets_use_the_memory_budget_not_a_4096_file_cutoff
+#[test]
+fn port_session_stats_store_offsets_retain_bytes_for_a_single_subagent_file() {
+    let reply = scenario(
+        "offsets-retain-bytes-for-a-single-subagent-file",
+        json!({ "files": 1 }),
+    );
+    assert!(reply["retained_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::codex_session_lookup_succeeds_after_more_than_4096_unrelated_files
+#[test]
+fn port_session_stats_store_codex_lookup_without_a_matching_session_is_unavailable() {
+    let reply = scenario(
+        "codex-lookup-without-a-matching-session-is-unavailable",
+        json!({ "unrelated_files": 4200, "agent": "codex", "matching_session": false }),
+    );
+    assert_eq!(reply["state"], json!("unavailable"));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::queued_cancelled_pass_keeps_its_slot_until_real_worker_receipt
+#[test]
+fn port_session_stats_store_a_pass_without_a_queue_slot_is_refused_at_once() {
+    let reply = scenario(
+        "a-pass-without-a-queue-slot-is-refused-at-once",
+        json!({ "io_threads": 1, "queue_slots": 0, "block_worker": true }),
+    );
+    assert_eq!(reply["request_accepted"], json!(false));
+    assert_eq!(reply["entry_exists"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::returning_to_same_identity_rejects_worker_from_earlier_generation
+#[test]
+fn port_session_stats_store_live_identity_accepts_its_own_worker_events() {
+    let reply = scenario(
+        "live-identity-accepts-its-own-worker-events",
+        json!({ "identity_cycle": ["a"], "late_events": ["progress"] }),
+    );
+    assert_eq!(reply["late_applied"], json!([true]));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::same_historical_transcript_keeps_exact_cached_snapshot
+#[test]
+fn port_session_stats_store_changed_context_replaces_the_snapshot() {
+    let reply = scenario(
+        "changed-context-replaces-the-snapshot",
+        json!({ "reconcile_with_same_context": false }),
+    );
+    assert_eq!(reply["reconcile_changed"], json!(true));
+    assert_eq!(reply["snapshot_same_arc"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::same_session_string_in_another_owner_must_not_reuse_prior_stats
+#[test]
+fn port_session_stats_store_same_owner_and_session_reuses_prior_stats() {
+    let reply = scenario(
+        "same-owner-and-session-reuses-prior-stats",
+        json!({ "session_id": "same", "replacement_owner": "same" }),
+    );
+    assert_ne!(reply["matching_entry"], Value::Null);
+    assert_eq!(reply["old_snapshot_visible"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::twelve_installed_statistics_release_the_single_finite_job_slot
+#[test]
+fn port_session_stats_store_installed_statistics_never_run_more_than_one_job_at_a_time() {
+    let reply = scenario(
+        "installed-statistics-never-run-more-than-one-job-at-a-time",
+        json!({ "panes": 12, "queue_slots": 1, "resident_mib_per_thread": 1 }),
+    );
+    assert_eq!(reply["entries"], json!(12));
+    assert!(reply["max_concurrent_jobs"]
+        .as_u64()
+        .is_some_and(|jobs| jobs <= 1));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_store.rs::unresolved_replacement_drops_inflight_cache_and_all_late_result_kinds
+#[test]
+fn port_session_stats_store_resolved_replacement_keeps_its_inflight_entry() {
+    let reply = scenario(
+        "resolved-replacement-keeps-its-inflight-entry",
+        json!({ "reconcile_with": "same", "late_events": ["progress"] }),
+    );
+    assert_eq!(reply["reconcile_changed"], json!(false));
+    assert_eq!(reply["entry_exists"], json!(true));
+}

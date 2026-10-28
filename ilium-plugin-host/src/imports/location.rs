@@ -10,7 +10,9 @@ pub struct LocationImport;
 
 impl HostLocation for LocationImport {
     fn current(&mut self) -> Option<(f64, f64)> {
-        unimplemented!("host::imports::location::current")
+        // No observer position is attached to this import, and a position is never fabricated
+        // (USR-061): report that none exists.
+        None
     }
 }
 

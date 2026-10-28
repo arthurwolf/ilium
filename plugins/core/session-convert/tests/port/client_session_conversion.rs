@@ -415,3 +415,157 @@ fn port_session_conversion_the_replacement_is_created_before_the_old_pane_is_clo
         .collect();
     assert_eq!(order, ["create", "close"]);
 }
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::a_pane_without_a_resolved_session_is_not_convertible
+#[test]
+fn port_session_conversion_an_unresolved_codex_pane_offers_only_the_disabled_entry() {
+    let mut host = client_host();
+    let pane = add_agent_pane(&mut host, "codex", "codex");
+    let entries = menu(&mut host, Some(pane));
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "to-claude");
+    assert_eq!(
+        entries[0].disabled_reason.as_deref(),
+        Some("no verified session")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::escape_closes_a_failed_dialog_and_unfreezes_the_pane
+#[test]
+fn port_session_conversion_escape_on_a_failed_dialog_that_can_resume_still_never_resumes() {
+    let mut client = claude_dialog();
+    server_says(
+        &mut client,
+        "failed",
+        json!({"message": "transcript unreadable", "carried": 0, "left_out": 0, "can_resume": true}),
+    );
+    let submissions = press(&mut client, "Esc");
+    assert!(
+        messages(&submissions).iter().all(|m| m.1 != "resume"),
+        "{submissions:?}"
+    );
+    assert!(intents(&submissions).contains(&Intent::CloseView(panel())));
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::escape_while_converting_requests_cancellation
+#[test]
+fn port_session_conversion_cancel_for_a_pane_with_no_running_conversion_cancels_nothing() {
+    let (mut server, pane) = server_with_pane("codex", true);
+    server.deliver_one(client_message("cancel", pane));
+    assert!(server.jobs().cancelled().is_empty());
+    assert!(server.jobs().list().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::failure_after_the_stop_offers_resuming_the_original_session
+#[test]
+fn port_session_conversion_failed_dialog_that_can_resume_shows_the_resume_button() {
+    let mut client = claude_dialog();
+    server_says(
+        &mut client,
+        "failed",
+        json!({"message": "transcript unreadable", "carried": 0, "left_out": 0, "can_resume": true}),
+    );
+    assert!(client
+        .render(panel(), 48, 14)
+        .text()
+        .contains("Resume original"));
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::failure_is_terminal_and_logged
+#[test]
+fn port_session_conversion_failure_shows_the_carried_and_left_out_counts() {
+    let mut host = claude_dialog();
+    server_says(
+        &mut host,
+        "failed",
+        json!({"message": "verify failed", "carried": 212, "left_out": 57, "can_resume": false}),
+    );
+    let screen = host.render(panel(), 48, 16).text();
+    assert!(screen.contains("212"), "{screen}");
+    assert!(screen.contains("57"), "{screen}");
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::log_is_bounded
+#[test]
+fn port_session_conversion_log_drops_the_oldest_line_once_full() {
+    let mut host = claude_dialog();
+    for index in 0..550 {
+        server_says(
+            &mut host,
+            "progress",
+            json!({"percent": 1, "message": format!("line {index}")}),
+        );
+    }
+    let rows = rows(&mut host, 12);
+    assert!(
+        !rows.iter().any(|row| row.contains("line 0")),
+        "the oldest line must have been dropped: {rows:?}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::no_second_conversion_is_offered_while_one_is_active
+#[test]
+fn port_session_conversion_a_running_conversion_leaves_its_entry_visible_but_disabled() {
+    let mut host = client_host();
+    let pane = pane_with_session(&mut host, "claude");
+    host.deliver_one(convert_click("to-codex", pane));
+    let entries = menu(&mut host, Some(pane));
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "to-codex");
+    assert!(entries[0].disabled_reason.is_some());
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::only_the_opposite_builtin_provider_is_offered
+#[test]
+fn port_session_conversion_the_offered_entry_of_a_claude_pane_is_enabled() {
+    let mut host = client_host();
+    let claude = pane_with_session(&mut host, "claude");
+    let entries = menu(&mut host, Some(claude));
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].disabled_reason.is_none(), "{entries:?}");
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::progress_never_moves_backwards_or_past_one
+#[test]
+fn port_session_conversion_reaching_one_hundred_percent_keeps_the_dialog_open() {
+    let mut host = claude_dialog();
+    let before = host.submitted().len();
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 100, "message": "done"}),
+    );
+    assert_eq!(percent_shown(&mut host), 100);
+    let submissions = host.submitted()[before..].to_vec();
+    assert!(!intents(&submissions)
+        .iter()
+        .any(|intent| matches!(intent, Intent::CloseView(_))));
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::step_events_populate_the_step_list_and_log
+#[test]
+fn port_session_conversion_consecutive_progress_lines_stack_in_the_log() {
+    let mut host = claude_dialog();
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 10, "message": "read 12 lines"}),
+    );
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 20, "message": "read 40 lines"}),
+    );
+    let rows = rows(&mut host, 12);
+    assert!(rows[8].contains("read 12 lines"), "{}", rows[8]);
+    assert!(rows[9].contains("read 40 lines"), "{}", rows[9]);
+}
+
+/// REQ: PORT:ilium-client/src/session_conversion.rs::the_replacement_takes_focus_when_the_old_pane_had_it
+#[test]
+fn port_session_conversion_the_replacement_is_a_terminal_pane() {
+    let (_host, _pane, submissions) = converted_codex_to_claude();
+    let panes = created(&submissions);
+    assert_eq!(panes.len(), 1, "{panes:?}");
+    assert_eq!(panes[0].1, "ilium.terminal");
+}

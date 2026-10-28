@@ -55,3 +55,73 @@ fn settings_054_volume_above_100_is_refused_and_other_settings_stay() {
         Some(json!(73))
     );
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::pause_media_while_active_toggle_persists_and_does_not_reconnect_voice
+#[test]
+fn settings_050_pause_media_round_trip_keeps_voice_running_without_a_new_capture() {
+    let mut host = enabled_client("push_to_talk");
+    let captures_before = host.audio().captures().len();
+    configure(&mut host, "pause_media_while_active", json!(false));
+    configure(&mut host, "pause_media_while_active", json!(true));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "pause_media_while_active"),
+        Some(json!(true))
+    );
+    assert_eq!(host.audio().captures().len(), captures_before);
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(true))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::terminal_submission_confirmation_is_opt_in_and_does_not_reconnect_voice
+#[test]
+fn settings_050_terminal_confirmation_switched_off_again_is_stored_and_voice_stays_on() {
+    let mut host = enabled_client("push_to_talk");
+    let captures_before = host.audio().captures().len();
+    configure(&mut host, "confirm_terminal_submissions", json!(true));
+    configure(&mut host, "confirm_terminal_submissions", json!(false));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "confirm_terminal_submissions"),
+        Some(json!(false))
+    );
+    assert_eq!(host.audio().captures().len(), captures_before);
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(true))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/mouse.rs::bottom_right_voice_control_toggles_before_full_screen_mode_dispatch
+#[test]
+fn settings_050_second_toggle_command_turns_voice_back_off() {
+    let mut host = client_host();
+    host.deliver_one(command_invoked("voice.toggle"));
+    host.settle();
+    host.deliver_one(command_invoked("voice.toggle"));
+    host.settle();
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(false))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_voice.rs::exact_volume_failure_retry_keeps_native_bounds_and_unrelated_voice_settings
+#[test]
+fn settings_054_volume_bounds_0_and_100_are_both_accepted() {
+    let mut host = client_host();
+    configure(&mut host, "output_volume_percent", json!(0));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "output_volume_percent"),
+        Some(json!(0))
+    );
+    configure(&mut host, "output_volume_percent", json!(100));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "output_volume_percent"),
+        Some(json!(100))
+    );
+}

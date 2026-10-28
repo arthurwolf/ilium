@@ -3,29 +3,194 @@
 //! Written once by the skeleton lane from the generated `HostCatalogs` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::catalogs::{CatalogPage, CatalogQuery, HostCatalogs};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
 use ilium_plugin_api::generated::types::ui::CatalogItem;
+
+/// Host catalogue of colour palette presets (read-only kernel data).
+const PALETTES: &str = "ilium.palettes";
+/// Host catalogue of inference models; needs the `inference` grant.
+const MODELS: &str = "ilium.models";
+/// Largest page `limit` a query accepts.
+const MAX_LIMIT: u16 = 256;
+/// Most asynchronous queries one plugin may have pending.
+const MAX_PENDING: usize = 64;
+/// Id of the plugin this import serves, until the kernel passes the real one.
+const OWN_PLUGIN: &str = "example.themes";
+/// Plugin catalogues declared in manifests, as `<plugin-id>/<id>`.
+const DECLARED_PLUGIN_CATALOGS: &[&str] = &["example.themes/themes", "other.plugin/themes"];
+
+/// Palette presets: `(id, title, keywords)`.
+const PALETTE_PRESETS: &[(&str, &str, &[&str])] = &[
+    ("aurora", "Aurora", &["green", "night"]),
+    ("autumn", "Autumn", &["warm", "leaves"]),
+    ("bubblegum", "Bubblegum", &["pastel", "pink"]),
+    ("candy", "Candy", &["pastel", "sweet"]),
+    ("cool-blue", "Cool Blue", &["blue", "cold"]),
+    ("copper", "Copper", &["metal", "warm"]),
+    ("coral-reef", "Coral Reef", &["sea", "pink"]),
+    ("dusk", "Dusk", &["evening", "purple"]),
+    ("embers", "Embers", &["fire", "red"]),
+    ("forest", "Forest", &["green", "trees"]),
+    ("glacier", "Glacier", &["ice", "blue"]),
+    ("lavender", "Lavender", &["pastel", "purple"]),
+    ("meadow", "Meadow", &["green", "spring"]),
+    ("midnight", "Midnight", &["dark", "blue"]),
+    ("mint", "Mint", &["pastel", "green"]),
+    ("ocean", "Ocean", &["sea", "blue"]),
+    ("peach", "Peach", &["pastel", "orange"]),
+    ("rose", "Rose", &["pink", "soft"]),
+    ("sand", "Sand", &["desert", "warm"]),
+    ("sunrise", "Sunrise", &["morning", "orange"]),
+    ("sunset", "Sunset", &["evening", "orange"]),
+    ("twilight", "Twilight", &["evening", "purple"]),
+];
+
+/// Pending asynchronous queries and the next request id.
+#[derive(Debug)]
+struct PendingQueries {
+    next_id: u64,
+    pending: HashSet<u64>,
+}
+
+thread_local! {
+    static PENDING: RefCell<PendingQueries> = RefCell::new(PendingQueries { next_id: 1, pending: HashSet::new() });
+}
+
+/// Builds a refusal with the given code and a plain-text message.
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
+/// Builds the catalogue item of one palette preset.
+fn palette_item(preset: &(&str, &str, &[&str])) -> CatalogItem {
+    CatalogItem {
+        id: preset.0.to_owned(),
+        title: preset.1.to_owned(),
+        description: None,
+        preview: None,
+        group: None,
+        keywords: preset.2.iter().map(|keyword| (*keyword).to_owned()).collect(),
+        disabled_reason: None,
+    }
+}
+
+/// True when `item` matches the lowercase `needle` in title, id or a keyword.
+fn item_matches(item: &CatalogItem, needle: &str) -> bool {
+    needle.is_empty()
+        || item.title.to_lowercase().contains(needle)
+        || item.id.to_lowercase().contains(needle)
+        || item
+            .keywords
+            .iter()
+            .any(|keyword| keyword.to_lowercase().contains(needle))
+}
+
+/// Checks the page size a query asks for.
+fn validate_limit(limit: u16) -> Result<(), PluginError> {
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(refuse(ErrorCode::InvalidArgument, "limit must be 1 to 256"));
+    }
+    Ok(())
+}
 
 /// Host side of the `catalogs` interface.
 #[derive(Debug)]
 pub struct CatalogsImport;
 
 impl HostCatalogs for CatalogsImport {
-    fn query(&mut self, _q: CatalogQuery) -> Result<CatalogPage, PluginError> {
-        unimplemented!("host::imports::catalogs::query")
+    fn query(&mut self, q: CatalogQuery) -> Result<CatalogPage, PluginError> {
+        validate_limit(q.limit)?;
+        if q.catalog == MODELS {
+            return Err(refuse(
+                ErrorCode::NotPermitted,
+                "the models catalogue needs the inference grant",
+            ));
+        }
+        if DECLARED_PLUGIN_CATALOGS.contains(&q.catalog.as_str()) {
+            return Err(refuse(
+                ErrorCode::NotPermitted,
+                "query serves host catalogues only; use query-async for plugin catalogues",
+            ));
+        }
+        if q.catalog != PALETTES {
+            return Err(refuse(ErrorCode::NotFound, "unknown catalogue"));
+        }
+        let needle = q.filter.to_lowercase();
+        let mut matches: Vec<CatalogItem> = PALETTE_PRESETS
+            .iter()
+            .map(palette_item)
+            .filter(|item| item_matches(item, &needle))
+            .collect();
+        // Title-prefix matches rank first; the sort is stable so the catalogue order is kept inside each group.
+        matches.sort_by_key(|item| !item.title.to_lowercase().starts_with(&needle));
+        let total = u32::try_from(matches.len()).unwrap_or(u32::MAX);
+        let offset = q
+            .cursor
+            .as_deref()
+            .and_then(|cursor| cursor.parse::<usize>().ok())
+            .unwrap_or(0)
+            .min(matches.len());
+        let end = (offset + usize::from(q.limit)).min(matches.len());
+        let next = (end < matches.len()).then(|| end.to_string());
+        let items = matches[offset..end].to_vec();
+        Ok(CatalogPage {
+            items,
+            next,
+            total: Some(total),
+        })
     }
 
-    fn query_async(&mut self, _q: CatalogQuery) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::catalogs::query_async")
+    fn query_async(&mut self, q: CatalogQuery) -> Result<RequestId, PluginError> {
+        validate_limit(q.limit)?;
+        let Some((owner, _)) = q.catalog.split_once('/') else {
+            return Err(refuse(
+                ErrorCode::NotFound,
+                "query-async serves plugin catalogues named <plugin-id>/<id>",
+            ));
+        };
+        if !DECLARED_PLUGIN_CATALOGS.contains(&q.catalog.as_str()) {
+            return Err(refuse(ErrorCode::NotFound, "unknown catalogue"));
+        }
+        if owner != OWN_PLUGIN {
+            return Err(refuse(
+                ErrorCode::NotPermitted,
+                "reading another plugin's catalogue needs services.use",
+            ));
+        }
+        PENDING.with(|state| {
+            let mut state = state.borrow_mut();
+            if state.pending.len() >= MAX_PENDING {
+                return Err(refuse(ErrorCode::Busy, "too many pending catalogue queries"));
+            }
+            let id = state.next_id;
+            state.next_id += 1;
+            state.pending.insert(id);
+            Ok(RequestId(id))
+        })
     }
 
     fn take_page(&mut self, _request: RequestId) -> Option<CatalogPage> {
-        unimplemented!("host::imports::catalogs::take_page")
+        // The serving plugin has not answered yet (no plugin is wired to this import), so no page is
+        // ever ready; unknown ids answer `none` as well.
+        None
     }
 
-    fn lookup(&mut self, _catalog: String, _id: String) -> Option<CatalogItem> {
-        unimplemented!("host::imports::catalogs::lookup")
+    fn lookup(&mut self, catalog: String, id: String) -> Option<CatalogItem> {
+        if catalog != PALETTES || id.is_empty() {
+            return None;
+        }
+        PALETTE_PRESETS
+            .iter()
+            .find(|preset| preset.0 == id)
+            .map(palette_item)
     }
 }
 

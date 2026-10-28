@@ -1,10 +1,53 @@
-//! Host implementation of `ilium:host/timers` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/timers`.
 //!
-//! Written once by the skeleton lane from the generated `HostTimers` trait; hand-owned afterwards.
+//! Hand-owned. Held timer bookkeeping lives per thread, because the import carries no session
+//! handle yet: one plugin instance runs on one thread, so the thread is the plugin's quota scope.
+//! Delivery of fired timers belongs to the scheduler, not to this import.
 
 use ilium_plugin_api::generated::host::timers::HostTimers;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{EpochMs, TimerId};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Smallest `after-millis` and `repeat-millis` the host accepts (API-062).
+const MINIMUM_INTERVAL_MILLIS: u32 = 50;
+
+/// Held ordinary timers, and separately held durable timers, per plugin (API-061).
+const HELD_TIMER_LIMIT: usize = 64;
+
+/// A durable timer may be armed up to this far in the past before it is refused (API-060).
+const PAST_TOLERANCE_MILLIS: u64 = 1_000;
+
+/// Per-thread timer bookkeeping.
+#[derive(Default)]
+struct TimerState {
+    next_id: u64,
+    held: HashSet<u64>,
+    durable: HashMap<String, u64>,
+}
+
+thread_local! {
+    static TIMER_STATE: RefCell<TimerState> = RefCell::new(TimerState::default());
+}
+
+/// Builds a timers error with no retry delay.
+fn timer_error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_string(),
+        retry_after_ms: None,
+    }
+}
+
+/// Current wall-clock time in Unix milliseconds.
+fn now_unix_millis() -> u64 {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+}
 
 /// Host side of the `timers` interface.
 #[derive(Debug)]
@@ -13,22 +56,74 @@ pub struct TimersImport;
 impl HostTimers for TimersImport {
     fn set(
         &mut self,
-        _after_millis: u32,
-        _repeat_millis: Option<u32>,
+        after_millis: u32,
+        repeat_millis: Option<u32>,
     ) -> Result<TimerId, PluginError> {
-        unimplemented!("host::imports::timers::set")
+        if after_millis < MINIMUM_INTERVAL_MILLIS {
+            return Err(timer_error(
+                ErrorCode::InvalidArgument,
+                "after-millis is below the 50 ms minimum",
+            ));
+        }
+        if repeat_millis.is_some_and(|repeat| repeat < MINIMUM_INTERVAL_MILLIS) {
+            return Err(timer_error(
+                ErrorCode::InvalidArgument,
+                "repeat-millis is below the 50 ms minimum",
+            ));
+        }
+        TIMER_STATE.with(|cell| {
+            let mut state = cell.borrow_mut();
+            if state.held.len() >= HELD_TIMER_LIMIT {
+                return Err(timer_error(
+                    ErrorCode::QuotaExceeded,
+                    "the plugin already holds 64 timers",
+                ));
+            }
+            state.next_id += 1;
+            let id = state.next_id;
+            state.held.insert(id);
+            Ok(TimerId(id))
+        })
     }
 
-    fn cancel(&mut self, _timer: TimerId) {
-        unimplemented!("host::imports::timers::cancel")
+    fn cancel(&mut self, timer: TimerId) {
+        TIMER_STATE.with(|cell| {
+            cell.borrow_mut().held.remove(&timer.0);
+        });
     }
 
-    fn at(&mut self, _epoch: EpochMs, _name: String) -> Result<TimerId, PluginError> {
-        unimplemented!("host::imports::timers::at")
+    fn at(&mut self, epoch: EpochMs, name: String) -> Result<TimerId, PluginError> {
+        if name.is_empty() {
+            return Err(timer_error(
+                ErrorCode::InvalidArgument,
+                "a durable timer needs a name",
+            ));
+        }
+        if epoch.0 == 0 || epoch.0.saturating_add(PAST_TOLERANCE_MILLIS) < now_unix_millis() {
+            return Err(timer_error(
+                ErrorCode::InvalidArgument,
+                "the epoch is more than one second in the past",
+            ));
+        }
+        TIMER_STATE.with(|cell| {
+            let mut state = cell.borrow_mut();
+            if !state.durable.contains_key(&name) && state.durable.len() >= HELD_TIMER_LIMIT {
+                return Err(timer_error(
+                    ErrorCode::QuotaExceeded,
+                    "the plugin already holds 64 durable timers",
+                ));
+            }
+            state.next_id += 1;
+            let id = state.next_id;
+            state.durable.insert(name, epoch.0);
+            Ok(TimerId(id))
+        })
     }
 
-    fn cancel_durable(&mut self, _name: String) {
-        unimplemented!("host::imports::timers::cancel_durable")
+    fn cancel_durable(&mut self, name: String) {
+        TIMER_STATE.with(|cell| {
+            cell.borrow_mut().durable.remove(&name);
+        });
     }
 }
 

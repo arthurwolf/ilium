@@ -147,3 +147,82 @@ fn package_still_declaring_item_at_remove_in_version_is_refused_naming_the_item(
         "the refusal names the item"
     );
 }
+
+/// REQ: DEV-886
+#[test]
+fn a_deprecated_item_called_twice_in_one_session_logs_one_warn_line_for_its_caller() {
+    let root = scratch();
+    let env = deprecated_item_env(root.path());
+    let session = deprecated_item_session(&env);
+    session.call_deprecated_item();
+    session.call_deprecated_item();
+    assert_eq!(
+        session.warn_log_lines().len(),
+        1,
+        "one warn line per session per caller"
+    );
+}
+
+/// REQ: DEV-969
+#[test]
+fn every_deprecations_row_names_the_version_it_was_deprecated_in() {
+    let root = scratch();
+    let env = deprecated_fixture_env(root.path());
+    let listed = run(&env, &["deprecations", "--json"]);
+    assert_eq!(listed.exit_code, 0, "{:?}", listed.stdout_jsonl);
+    for row in rows_with(&listed, "kind") {
+        assert!(
+            row["since"].is_string(),
+            "every row names its since version: {row}"
+        );
+    }
+}
+
+/// REQ: DEV-970
+#[test]
+fn deprecated_message_of_exactly_280_bytes_is_accepted() {
+    let message = "a".repeat(280);
+    let (_root, env) = lint_env_with(|manifest| {
+        manifest["deprecated"] =
+            json!({ "message": message, "since": "1.0.0", "remove_in": "2.0.0" });
+    });
+    let out = run_in_project(&env, "check", &[]);
+    assert!(
+        with_code(&out, "manifest.deprecated-invalid").is_empty(),
+        "a 280-byte message is within the limit: {:?}",
+        out.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-971
+#[test]
+fn deprecation_message_is_shown_at_first_call_and_not_again_in_the_same_session() {
+    let root = scratch();
+    let env = deprecated_item_env(root.path());
+    let session = deprecated_item_session(&env);
+    let first = session.call_deprecated_item();
+    let second = session.call_deprecated_item();
+    assert_eq!(
+        with_code(&first, "deprecated").len(),
+        1,
+        "the message is shown at first use"
+    );
+    assert!(
+        with_code(&second, "deprecated").is_empty(),
+        "the message is not shown again in the same session"
+    );
+}
+
+/// REQ: DEV-972
+#[test]
+fn package_whose_item_is_deprecated_but_before_remove_in_still_installs() {
+    let root = scratch();
+    let env = env(root.path());
+    let package_path = package_declaring_expired_item(&env, "legacy-tool", "1.9.0");
+    let out = run(&env, &["install", package_path.as_str(), "--json"]);
+    assert_eq!(
+        out.exit_code, 0,
+        "a deprecated item before remove_in still loads: {:?}",
+        out.stdout_jsonl
+    );
+}

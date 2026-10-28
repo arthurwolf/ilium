@@ -155,3 +155,65 @@ fn port_media_wrapped_paragraph_fits_the_width_and_keeps_every_word() {
         screen.text()
     );
 }
+
+/// REQ: PORT:ilium-client/src/markdown/render.rs::local_image_paints_its_color_into_the_buffer
+#[test]
+fn port_media_a_red_image_paints_red_not_the_blue_test_colour() {
+    let mut host = image_host(&solid_bmp(20, 8, [255, 0, 0]));
+    let screen = render_pane(&mut host, 40, 12);
+    let red = Color::Rgb(0xFF0000);
+    let painted = (0..screen.rows).any(|row| {
+        (0..screen.columns).any(|column| screen.cell(row, column).background == red)
+    });
+    assert!(painted, "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/markdown/raster.rs::rasterizes_nonempty_header_to_nonzero_image
+#[test]
+fn port_media_heading_title_is_drawn_exactly_once() {
+    let mut host = plain_host(
+        "n.md",
+        Some("markdown"),
+        "# Title\n",
+        &[("markdown_rendered_by_default", json!(true))],
+    );
+    let screen = render_pane(&mut host, 40, 8);
+    assert_eq!(screen.text().matches("Title").count(), 1, "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/markdown/raster.rs::smaller_tiers_produce_smaller_font_size
+#[test]
+fn port_media_heading_hash_markers_are_not_drawn() {
+    assert!(!rendered_screen("## Sub\n").text().contains("##"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/render.rs::heading_rasterizes_to_a_protocol_block
+#[test]
+fn port_media_heading_level_marker_is_not_drawn_as_text() {
+    assert!(!rendered_screen("# Title\n").text().contains('#'));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/render.rs::heading_to_body_spacing_survives_rasterization
+#[test]
+fn port_media_body_comes_after_the_heading_row() {
+    let screen = rendered_screen("# Heading\n\nbody\n");
+    assert!(row_of(&screen, "Heading") < row_of(&screen, "body"), "{}", screen.text());
+}
+
+/// REQ: PORT:ilium-client/src/markdown/render.rs::prepared_wrapping_paints_exactly_the_original_ratatui_layout
+#[test]
+fn port_media_wrapped_words_continue_on_lower_rows_in_order() {
+    let mut host = plain_host(
+        "w.md",
+        Some("markdown"),
+        "one two three four\n",
+        &[
+            ("markdown_rendered_by_default", json!(true)),
+            ("line_display", json!("wrap")),
+        ],
+    );
+    let screen = render_pane(&mut host, 8, 12);
+    let (first_row, _) = screen.find("one").expect("one");
+    let (last_row, _) = screen.find("four").expect("four");
+    assert!(last_row > first_row, "{}", screen.text());
+}

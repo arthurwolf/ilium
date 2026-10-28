@@ -38,3 +38,25 @@ fn port_completed_agent_action_reserves_the_full_bottom_inner_row_for_the_close_
         r####"{"terminal_area": [11, 5, 38, 9], "button_area": [11, 14, 38, 1]}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/completed_agent_action.rs::omits_the_action_when_the_pane_has_no_inner_cells
+#[test]
+fn port_completed_agent_action_single_inner_row_still_gets_the_close_button() {
+    check(
+        Place::Client,
+        "layout.completed-action",
+        r####"{"outer": [10, 4, 40, 12], "content": [11, 5, 38, 1]}"####,
+        r####"{"button_area": [11, 5, 38, 1]}"####,
+    );
+}
+
+/// REQ: PORT:ilium-client/src/completed_agent_action.rs::reserves_the_full_bottom_inner_row_for_the_close_action
+#[test]
+fn port_completed_agent_action_one_column_inner_area_keeps_a_one_cell_button() {
+    check(
+        Place::Client,
+        "layout.completed-action",
+        r####"{"outer": [10, 4, 40, 12], "content": [11, 5, 1, 10]}"####,
+        r####"{"button_area": [11, 14, 1, 1]}"####,
+    );
+}

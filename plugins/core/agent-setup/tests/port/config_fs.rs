@@ -688,3 +688,404 @@ fn port_cw_49_the_distinct_refusals_have_distinct_messages() {
     let distinct: std::collections::BTreeSet<&String> = messages.iter().collect();
     assert_eq!(distinct.len(), messages.len(), "{messages:?}");
 }
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::read_current_reports_value_absence_and_fingerprint
+#[test]
+fn port_cw_19b_fingerprint_changes_when_the_file_content_changes() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 300000}\n")]);
+    let before = read_current(&mut host, CLAUDE_SETTING).expect("before")["fingerprint"]["sha256"]
+        .clone();
+    put(
+        &mut host,
+        claude_settings_file(),
+        "{\"autoCompactWindow\": 300001}\n",
+    );
+    let after = read_current(&mut host, CLAUDE_SETTING).expect("after")["fingerprint"]["sha256"]
+        .clone();
+    assert_ne!(before, after);
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::read_current_distinguishes_missing_not_regular_too_large_and_unparsable
+#[test]
+fn port_cw_20b_an_object_without_the_key_is_readable_with_no_value() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}")]);
+    let current = read_current(&mut host, CLAUDE_SETTING).expect("readable");
+    assert!(current["value"].is_null());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::plan_rejects_out_of_range_values
+#[test]
+fn port_cw_21b_refused_plans_leave_the_file_and_record_untouched() {
+    let original = "{\"autoCompactWindow\": 567000}";
+    let mut host = host_with(&[(CLAUDE_SETTING, original)]);
+    assert_eq!(
+        code_of(plan(&mut host, CLAUDE_SETTING, 0)),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(read(&mut host, CLAUDE_SETTING), original);
+    assert!(load_record(&mut host, CLAUDE_SETTING).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::plan_diff_names_file_key_and_old_and_new_values
+#[test]
+fn port_cw_22b_plan_reports_the_value_it_would_write() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("claude plan");
+    assert_eq!(planned["new_value"], json!(250_000));
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::plan_warns_when_the_environment_shadows_the_claude_file_value
+#[test]
+fn port_cw_23b_without_an_environment_variable_there_is_no_shadow_warning() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}"), (CODEX_SETTING, "")]);
+    assert_eq!(
+        plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan")["warnings"],
+        json!([])
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::plan_warns_about_project_level_override_files
+#[test]
+fn port_cw_24b_without_project_files_there_is_no_override_warning() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}"), (CODEX_SETTING, "")]);
+    host.open_project("ilium");
+    host.settle();
+    assert_eq!(
+        plan(&mut host, CLAUDE_SETTING, 250_000).expect("claude plan")["warnings"],
+        json!([])
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::plan_warns_about_codex_profiles_that_set_the_key
+#[test]
+fn port_cw_25b_a_profile_that_is_not_selected_is_reported_as_such() {
+    let mut host = host_with(&[(
+        CODEX_SETTING,
+        "profile = \"fast\"\n\n[profiles.fast]\nmodel = \"x\"\n\n[profiles.slow]\nmodel_auto_compact_token_limit = 50000\n",
+    )]);
+    let planned = plan(&mut host, CODEX_SETTING, 250_000).expect("plan");
+    let warnings = planned["warnings"].as_array().expect("warnings");
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["profile"], json!("slow"));
+    assert_eq!(warnings[0]["is_selected"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::plan_flags_an_unchanged_value
+#[test]
+fn port_cw_26b_a_different_value_is_not_flagged_as_unchanged() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 250000}")]);
+    let planned = plan(&mut host, CLAUDE_SETTING, 300_000).expect("plan");
+    let kinds: Vec<&Value> = planned["warnings"]
+        .as_array()
+        .expect("warnings")
+        .iter()
+        .map(|w| &w["kind"])
+        .collect();
+    assert!(!kinds.contains(&&json!("value-unchanged")), "{kinds:?}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_updates_an_existing_json_value_and_reverts_it
+#[test]
+fn port_cw_27b_the_updated_json_keeps_its_other_keys() {
+    let original = "{\n  \"theme\": \"dark\",\n  \"autoCompactWindow\": 567000\n}\n";
+    let mut host = host_with(&[(CLAUDE_SETTING, original)]);
+    apply_value(&mut host, CLAUDE_SETTING, 250_000);
+    assert!(read(&mut host, CLAUDE_SETTING).contains("\"theme\": \"dark\""));
+    assert_eq!(
+        read_current(&mut host, CLAUDE_SETTING).expect("read")["value"],
+        json!(250_000)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_inserts_an_absent_key_and_revert_removes_it_byte_exactly
+#[test]
+fn port_cw_28b_reverting_an_inserted_key_clears_the_record() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}")]);
+    let receipt = apply_value(&mut host, CLAUDE_SETTING, 250_000);
+    revert_record(&mut host, &receipt["record"]).expect("revert");
+    assert!(load_record(&mut host, CLAUDE_SETTING).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_changes_codex_values_inside_the_top_level_region_only
+#[test]
+fn port_cw_29b_reapplying_codex_keeps_a_single_top_level_key() {
+    let mut host = host_with(&[(CODEX_SETTING, CODEX_SAMPLE)]);
+    apply_value(&mut host, CODEX_SETTING, 123_456);
+    apply_value(&mut host, CODEX_SETTING, 200_000);
+    let text = read(&mut host, CODEX_SETTING);
+    assert_eq!(
+        text.matches("model_auto_compact_token_limit = 200000")
+            .count(),
+        1
+    );
+    assert_eq!(text.matches("model_auto_compact_token_limit").count(), 2);
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_with_an_unchanged_value_writes_nothing_and_keeps_no_record
+#[test]
+fn port_cw_30b_an_unchanged_apply_leaves_the_value_in_place() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 250000}")]);
+    apply_value(&mut host, CLAUDE_SETTING, 250_000);
+    assert_eq!(
+        read_current(&mut host, CLAUDE_SETTING).expect("read")["value"],
+        json!(250_000)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_refuses_a_file_changed_between_plan_and_apply
+#[test]
+fn port_cw_31b_a_fresh_plan_after_a_conflict_applies() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    put(
+        &mut host,
+        claude_settings_file(),
+        "{\"autoCompactWindow\": 567000, \"added\": \"by the agent\"}",
+    );
+    assert_eq!(
+        code_of(apply_plan(&mut host, &planned)),
+        ErrorCode::Conflict
+    );
+    let fresh = plan(&mut host, CLAUDE_SETTING, 250_000).expect("fresh plan");
+    apply_plan(&mut host, &fresh).expect("apply the fresh plan");
+    assert_eq!(
+        read_current(&mut host, CLAUDE_SETTING).expect("read")["value"],
+        json!(250_000)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_refuses_a_codex_file_changed_between_plan_and_apply
+#[test]
+fn port_cw_32b_a_refused_codex_apply_stores_no_record() {
+    let mut host = host_with(&[(CODEX_SETTING, "a = 1\n")]);
+    let planned = plan(&mut host, CODEX_SETTING, 250_000).expect("plan");
+    put(&mut host, codex_config_file(), "a = 2\n");
+    assert_eq!(
+        code_of(apply_plan(&mut host, &planned)),
+        ErrorCode::Conflict
+    );
+    assert!(load_record(&mut host, CODEX_SETTING).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::a_concurrent_write_after_the_temporary_file_is_caught_by_the_final_check
+#[test]
+fn port_cw_33b_a_fresh_plan_after_the_race_applies_cleanly() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    host.fs().race_next_write(
+        claude_settings_file(),
+        "{\"autoCompactWindow\": 567000, \"x\": 1}".as_bytes(),
+    );
+    assert_eq!(
+        code_of(apply_plan(&mut host, &planned)),
+        ErrorCode::Conflict
+    );
+    let fresh = plan(&mut host, CLAUDE_SETTING, 250_000).expect("fresh plan");
+    apply_plan(&mut host, &fresh).expect("apply");
+    assert_eq!(
+        read_current(&mut host, CLAUDE_SETTING).expect("read")["value"],
+        json!(250_000)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::a_failing_record_store_aborts_before_the_file_is_touched
+#[test]
+fn port_cw_34b_a_failed_record_store_leaves_no_record_behind() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    host.inject_failure(
+        "storage.write",
+        PluginError {
+            code: ErrorCode::Io,
+            message: "record store blocked".to_string(),
+            retry_after_ms: None,
+        },
+    );
+    assert_eq!(code_of(apply_plan(&mut host, &planned)), ErrorCode::Io);
+    assert!(load_record(&mut host, CLAUDE_SETTING).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_validates_the_value_again_even_for_a_hand_built_plan
+#[test]
+fn port_cw_35b_a_hand_built_value_above_the_upper_bound_is_refused() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}")]);
+    let mut planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    planned["new_value"] = json!(1_000_001);
+    assert_eq!(
+        code_of(apply_plan(&mut host, &planned)),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(read(&mut host, CLAUDE_SETTING), "{}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::revert_refuses_when_the_file_no_longer_holds_the_written_value
+#[test]
+fn port_cw_36b_a_revert_of_a_removed_file_creates_nothing() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    let receipt = apply_value(&mut host, CLAUDE_SETTING, 250_000);
+    host.fs().remove(claude_settings_file());
+    assert_eq!(
+        code_of(revert_record(&mut host, &receipt["record"])),
+        ErrorCode::NotFound
+    );
+    assert!(get(&mut host, claude_settings_file()).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::revert_twice_reports_stale_instead_of_changing_the_file_again
+#[test]
+fn port_cw_37b_a_successful_revert_clears_the_record() {
+    let mut host = host_with(&[(CODEX_SETTING, "a = 1\n")]);
+    let receipt = apply_value(&mut host, CODEX_SETTING, 250_000);
+    revert_record(&mut host, &receipt["record"]).expect("first revert");
+    assert!(load_record(&mut host, CODEX_SETTING).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::revert_rejects_a_record_that_names_an_unrelated_file
+#[test]
+fn port_cw_38b_a_refused_foreign_record_is_not_stored() {
+    let mut host = server_host();
+    put(
+        &mut host,
+        scoped("agent-config:claude", "notes.txt"),
+        "{\"autoCompactWindow\": 250000}",
+    );
+    let record = json!({
+        "target": CLAUDE_SETTING,
+        "path": "notes.txt",
+        "previous_value": null,
+        "written_value": 250_000,
+        "applied_at": "2026-10-05 12:00:00",
+    });
+    assert_eq!(
+        code_of(revert_record(&mut host, &record)),
+        ErrorCode::InvalidArgument
+    );
+    assert!(load_record(&mut host, CLAUDE_SETTING).is_none());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::a_second_apply_records_the_value_it_replaced
+#[test]
+fn port_cw_39b_a_second_record_is_stamped_with_when_it_was_applied() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    apply_value(&mut host, CLAUDE_SETTING, 300_000);
+    let second = apply_value(&mut host, CLAUDE_SETTING, 200_000);
+    assert!(second["record"]["applied_at"]
+        .as_str()
+        .is_some_and(|stamp| !stamp.is_empty()));
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::a_failed_second_apply_keeps_the_first_applys_revert_record
+#[test]
+fn port_cw_40b_a_refused_second_apply_leaves_the_concurrent_text() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    apply_value(&mut host, CLAUDE_SETTING, 300_000);
+    let planned = plan(&mut host, CLAUDE_SETTING, 200_000).expect("plan");
+    let concurrent = "{\"autoCompactWindow\": 300000, \"x\": 1}";
+    host.fs()
+        .race_next_write(claude_settings_file(), concurrent.as_bytes());
+    assert_eq!(
+        code_of(apply_plan(&mut host, &planned)),
+        ErrorCode::Conflict
+    );
+    assert_eq!(read(&mut host, CLAUDE_SETTING), concurrent);
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::records_round_trip_through_json_and_belong_to_one_target
+#[test]
+fn port_cw_41b_a_codex_revert_restores_the_original_text() {
+    let mut host = host_with(&[(CODEX_SETTING, "a = 1\n")]);
+    let receipt = apply_value(&mut host, CODEX_SETTING, 250_000);
+    revert_record(&mut host, &receipt["record"]).expect("revert");
+    assert_eq!(read(&mut host, CODEX_SETTING), "a = 1\n");
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_writes_through_a_symlink_and_keeps_it_a_symlink
+#[test]
+fn port_cw_42b_reverting_through_the_symlink_restores_the_real_file() {
+    let mut host = server_host();
+    let real = scoped("agent-config:claude", "dotfiles/settings.json");
+    put(&mut host, real.clone(), "{\"autoCompactWindow\": 567000}\n");
+    host.fs().symlink(claude_settings_file(), real.clone());
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    let receipt = apply_plan(&mut host, &planned).expect("apply");
+    revert_record(&mut host, &receipt["record"]).expect("revert");
+    assert_eq!(
+        get(&mut host, real).as_deref(),
+        Some("{\"autoCompactWindow\": 567000}\n")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_refuses_when_the_symlink_is_retargeted_after_planning
+#[test]
+fn port_cw_43b_the_plan_names_the_file_behind_the_symlink() {
+    let mut host = server_host();
+    let first = scoped("agent-config:claude", "first.json");
+    put(&mut host, first.clone(), "{\"autoCompactWindow\": 567000}");
+    host.fs().symlink(claude_settings_file(), first);
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    assert_eq!(planned["path"], json!("first.json"));
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_and_revert_preserve_file_permissions
+#[test]
+fn port_cw_44b_the_mode_survives_the_apply_before_any_revert() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}")]);
+    host.fs().set_mode(claude_settings_file(), 0o640u32);
+    apply_value(&mut host, CLAUDE_SETTING, 250_000);
+    assert_eq!(host.fs().mode(claude_settings_file()), Some(0o640u32));
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::lock_contention_is_reported_without_touching_the_file
+#[test]
+fn port_cw_45b_a_lock_free_apply_stores_the_record() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{\"autoCompactWindow\": 567000}")]);
+    let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
+    let held = host.fs().hold_lock(claude_settings_file(), true);
+    assert_eq!(code_of(apply_plan(&mut host, &planned)), ErrorCode::Busy);
+    held.release();
+    apply_plan(&mut host, &planned).expect("apply after the lock is free");
+    assert!(load_record(&mut host, CLAUDE_SETTING).is_some());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::revert_also_waits_for_the_lock_and_then_gives_up
+#[test]
+fn port_cw_46b_a_busy_revert_keeps_the_record_for_later() {
+    let mut host = host_with(&[(CLAUDE_SETTING, "{}")]);
+    let receipt = apply_value(&mut host, CLAUDE_SETTING, 250_000);
+    let held = host.fs().hold_lock(claude_settings_file(), true);
+    assert_eq!(
+        code_of(revert_record(&mut host, &receipt["record"])),
+        ErrorCode::Busy
+    );
+    held.release();
+    assert!(load_record(&mut host, CLAUDE_SETTING).is_some());
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::apply_refuses_a_file_that_stopped_being_valid
+#[test]
+fn port_cw_47b_a_codex_file_that_no_longer_parses_is_an_invalid_argument() {
+    let mut host = host_with(&[(CODEX_SETTING, "a = \n")]);
+    assert_eq!(
+        code_of(read_current(&mut host, CODEX_SETTING)),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::a_missing_file_is_never_created
+#[test]
+fn port_cw_48b_reading_a_missing_settings_file_reports_not_found() {
+    let mut host = server_host();
+    assert_eq!(
+        code_of(read_current(&mut host, CLAUDE_SETTING)),
+        ErrorCode::NotFound
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_config_writer.rs::the_nine_distinct_error_variants_have_distinct_messages
+#[test]
+fn port_cw_49b_a_missing_file_refusal_carries_a_message() {
+    let mut host = server_host();
+    let missing = read_current(&mut host, CLAUDE_SETTING).expect_err("missing");
+    assert_eq!(missing.code, ErrorCode::NotFound);
+    assert!(!missing.message.is_empty());
+}

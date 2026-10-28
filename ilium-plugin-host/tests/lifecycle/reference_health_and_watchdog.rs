@@ -399,3 +399,24 @@ fn lif_138_healthy_plugins_are_left_out_of_the_section() {
     let section = report.split("Plugins").nth(1).expect("a Plugins section");
     assert!(!section.contains(B));
 }
+
+/// REQ: LIF-127
+#[test]
+fn lif_127_deadline_interrupts_pure_computation_at_the_deadline_not_later() {
+    let mut host = one_plugin();
+    let result = host.run_call(A, 50, 500, 0, 0);
+    assert!(result.trapped);
+    assert_eq!(result.elapsed_ms, 50);
+}
+
+/// REQ: LIF-136
+#[test]
+fn lif_136_metrics_count_again_from_zero_after_a_server_restart() {
+    let mut host = one_plugin();
+    host.run_call(A, 50, 10, 0, 0);
+    host.run_call(A, 50, 10, 0, 0);
+    host.restart_server();
+    assert_eq!(host.metric_buckets(A, Side::Server), 0);
+    host.run_call(A, 50, 10, 0, 0);
+    assert_eq!(host.metric_buckets(A, Side::Server), 1);
+}

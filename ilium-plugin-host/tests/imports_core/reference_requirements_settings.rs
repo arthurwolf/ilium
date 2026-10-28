@@ -855,3 +855,15 @@ proptest! {
         prop_assert_eq!(stored(&mut fixture)["count"].clone(), json!(5));
     }
 }
+
+/// REQ: SET-032
+#[test]
+fn set_032_saving_marker_is_still_shown_just_before_the_600_ms_debounce_ends() {
+    let mut fixture = settings_fixture(Tier::T2);
+    fixture.user_edit("label", "\"abc\"", UserInput::Typed);
+    fixture.advance(Duration::from_millis(599));
+    assert!(
+        fixture.row_saving("label"),
+        "the Saving marker must stay until the debounce has run its full 600 ms"
+    );
+}

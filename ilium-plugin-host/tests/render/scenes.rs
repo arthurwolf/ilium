@@ -773,3 +773,39 @@ fn wit_fonts_font_rasterize_invalid_scalar_returns_invalid_argument() {
     let font = Font::new("mono").unwrap();
     assert_eq!(font.rasterize_code(0xD800).unwrap_err(), "invalid-argument");
 }
+
+/// REQ: WIT:ilium:anim/surface.frame-surface.clear-glyphs
+#[test]
+fn surface_clear_glyphs_leaves_pixel_rows_untouched() {
+    let mut s = SurfaceRig::new(16, 4, "gray8");
+    s.write_rows(0, &[7u8; 16]).unwrap();
+    s.write_glyphs(20).unwrap();
+    s.clear_glyphs();
+    assert_eq!(s.row_bytes(0), vec![7u8; 16]);
+    assert_eq!(s.glyph_count(), 0);
+}
+
+/// REQ: WIT:ilium:anim/surface.frame-surface.size
+#[test]
+fn surface_size_is_unchanged_by_writing_and_presenting() {
+    let mut s = SurfaceRig::new(13, 7, "rgb8");
+    s.write_rows(0, &[1u8; 13 * 3]).unwrap();
+    s.present().unwrap();
+    assert_eq!(s.size(), (13, 7));
+}
+
+/// REQ: WIT:ilium:exports/renderer.scene-renderer.frames-per-second
+#[test]
+fn wit_renderer_frames_per_second_is_read_once_not_per_frame() {
+    let mut rig = SceneRig::new(30);
+    rig.run_frames(10);
+    assert_eq!(rig.query_count("frames-per-second"), 1);
+}
+
+/// REQ: WIT:ilium:exports/renderer.scene-renderer.status
+#[test]
+fn wit_renderer_status_is_hidden_when_the_scene_sets_none() {
+    let mut rig = SceneRig::new(30);
+    rig.run_frames(1);
+    assert_eq!(rig.shown_status(), None);
+}

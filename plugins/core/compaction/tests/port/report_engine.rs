@@ -713,3 +713,348 @@ fn report_the_model_text_is_set_even_when_nothing_can_be_replayed() {
     assert!(report["recommendation"].is_null());
     assert!(text(&report["rework_model_text"]).contains("research prior"));
 }
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_claude_corpus_yields_a_complete_report
+#[test]
+fn report_a_claude_corpus_two_percent_band_rows_are_inside_the_five_percent_band() {
+    let report = build(spec("claude", 8));
+    let rows = report["simulation"].as_array().unwrap();
+    assert!(rows.iter().any(|r| r["within_2_percent"] == true));
+    assert!(rows
+        .iter()
+        .filter(|r| r["within_2_percent"] == true)
+        .all(|r| r["within_5_percent"] == true));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::the_current_setting_becomes_a_third_comparison_row
+#[test]
+fn report_without_a_current_setting_there_is_no_current_row() {
+    let report = build(spec("claude", 8));
+    assert_eq!(report["comparison"].as_array().unwrap().len(), 2);
+    assert!(card(&report)["current_vs_recommended"].is_null());
+    assert!(report["simulation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["is_current"] != true));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_codex_corpus_uses_the_codex_semantics
+#[test]
+fn report_codex_corpus_marks_exactly_one_cli_default_row() {
+    let report = build(spec("codex", 8));
+    let rows = report["simulation"].as_array().unwrap();
+    assert!(rows
+        .iter()
+        .any(|r| r["is_cli_default"] == true && r["trigger_tokens"] == 232_560));
+    assert_eq!(
+        rows.iter().filter(|r| r["is_cli_default"] == true).count(),
+        1
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::an_empty_corpus_is_a_clear_no_sessions_result
+#[test]
+fn report_empty_corpus_counts_zero_main_sessions_for_each_agent() {
+    for agent in ["claude", "codex"] {
+        let report = build(spec(agent, 0));
+        assert_eq!(report["corpus"]["main_sessions"], 0);
+        assert!(report["cost_mix"]["total_usd"].is_null());
+    }
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::small_sessions_report_statistics_but_nothing_to_replay
+#[test]
+fn report_small_sessions_still_report_the_cache_read_share() {
+    let report = build(process(
+        "claude",
+        3,
+        json!({"turns": 20, "trigger": 10_000_000}),
+    ));
+    assert!(report["cost_mix"]["cache_read_share"].as_f64().is_some());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::scan_warnings_truncation_and_subagents_reach_the_report
+#[test]
+fn report_a_skipped_file_warning_is_listed_exactly_once() {
+    let report = build(json!({
+        "agent": "claude", "sessions": 6, "subagent_sessions": 1,
+        "scan": {"sessions_dropped_for_cap": 12, "warnings": ["Skipped /synthetic/a.jsonl: gone"]}
+    }));
+    let skipped = warnings(&report)
+        .iter()
+        .filter(|w| w.contains("Skipped /synthetic/a.jsonl"))
+        .count();
+    assert_eq!(skipped, 1);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::unpriced_models_are_named_in_a_warning
+#[test]
+fn report_unpriced_model_is_named_in_the_plain_text() {
+    let report = build(with(
+        spec("codex", 6),
+        "model_override",
+        json!("gpt-mystery-model"),
+    ));
+    assert!(text(&report["plain_text"]).contains("No price for gpt-mystery-model"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::priced_models_produce_dollar_figures
+#[test]
+fn report_priced_simulation_rows_have_non_negative_dollar_costs() {
+    let report = build(spec("claude", 6));
+    assert!(report["simulation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["cost_usd"].as_f64().unwrap() >= 0.0));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::price_weights_map_the_table_rates
+#[test]
+fn report_one_hour_cache_write_is_twice_the_input_price() {
+    let host = server_host();
+    let weights = host
+        .price_weights("claude-sonnet-5-5")
+        .expect("a priced model");
+    assert_eq!(
+        weights["cache_write_1h"].as_f64(),
+        Some(2.0 * weights["input"].as_f64().unwrap())
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::grids_cover_the_documented_ranges
+#[test]
+fn report_default_grids_are_strictly_ascending() {
+    let host = server_host();
+    let claude = host.default_grid("claude");
+    assert!(claude.windows(2).all(|pair| pair[0] < pair[1]));
+    let codex = host.default_grid("codex");
+    assert!(codex.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::stated_codex_windows_set_the_cap
+#[test]
+fn report_a_200k_codex_window_caps_the_setting_at_ninety_percent() {
+    let report = build(with(
+        spec("codex", 3),
+        "context_window_tokens",
+        json!(200_000),
+    ));
+    assert_eq!(report["semantics"]["allowed_setting_range"][1], 180_000);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::formatting_helpers_are_compact_and_stable
+#[test]
+fn report_percent_and_thousands_helpers_format_whole_values() {
+    let host = server_host();
+    assert_eq!(host.format_value("format_percent", 1.0), "100.0%");
+    assert_eq!(host.format_value("group_thousands", 999.0), "999");
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_plausible_current_setting_re_measures_the_claude_offset
+#[test]
+fn report_a_plausible_current_setting_is_the_current_comparison_row() {
+    let report = build(with(
+        spec("claude", 8),
+        "settings",
+        json!({"current_setting_value": 183_000}),
+    ));
+    assert_eq!(report["comparison"][1]["kind"], "CurrentSetting");
+    assert_eq!(report["comparison"][1]["setting_value"], 183_000);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::an_implausible_current_setting_keeps_the_default_mapping
+#[test]
+fn report_an_implausible_current_setting_warns_about_the_researched_default() {
+    let report = build(with(
+        spec("claude", 8),
+        "settings",
+        json!({"current_setting_value": 900_000}),
+    ));
+    assert!(has_warning(&report, "uses the researched default"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_plausible_codex_limit_re_measures_the_realized_ratio
+#[test]
+fn report_a_plausible_codex_limit_is_the_current_comparison_row() {
+    let report = build(with(
+        spec("codex", 8),
+        "settings",
+        json!({"current_setting_value": 150_000}),
+    ));
+    assert_eq!(report["comparison"][1]["kind"], "CurrentSetting");
+    assert_eq!(report["comparison"][1]["setting_value"], 150_000);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::plain_argmin_is_extrapolated_when_no_candidate_has_support
+#[test]
+fn report_plain_argmin_pick_has_no_observed_support() {
+    let report = build(process(
+        "codex",
+        8,
+        json!({"trigger": 240_000, "turns": 200}),
+    ));
+    assert_eq!(
+        card(&report)["observed_support_fraction"].as_f64(),
+        Some(0.0)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::compactions_inside_the_two_percent_band_give_the_band_rule
+#[test]
+fn report_band_pick_has_a_positive_observed_support_fraction() {
+    let report = build(process("codex", 8, json!({"trigger": 150_000})));
+    assert!(card(&report)["observed_support_fraction"].as_f64().unwrap() > 0.0);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_supported_optimum_reports_the_cheaper_unsupported_argmin
+#[test]
+fn report_the_cheaper_unsupported_argmin_has_no_observed_support() {
+    let report = build(process(
+        "codex",
+        8,
+        json!({"trigger": 195_000, "turns": 200}),
+    ));
+    let cheaper = card(&report)["unsupported_argmin_tokens"].as_u64().unwrap();
+    let row = report["simulation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["trigger_tokens"].as_u64() == Some(cheaper))
+        .expect("the cheaper trigger is simulated");
+    assert_eq!(row["observed_support"].as_f64(), Some(0.0));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_claude_corpus_compacting_at_567k_has_support_only_far_above_the_cheap_region
+#[test]
+fn report_a_supported_optimum_is_not_extrapolated() {
+    let report = build(process(
+        "claude",
+        6,
+        json!({"turns": 400, "trigger": 567_000}),
+    ));
+    assert_eq!(card(&report)["extrapolated"], false);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::support_counts_main_sessions_only
+#[test]
+fn report_subagent_sessions_are_counted_separately_in_the_corpus() {
+    let report = build(json!({
+        "agent": "codex", "sessions": 8, "process": {"trigger": 240_000, "turns": 200},
+        "subagent_sessions": 4, "subagent_process": {"trigger": 150_000}
+    }));
+    assert_eq!(report["corpus"]["subagent_sessions"], 4);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::an_optimum_at_the_grid_floor_widens_the_grid_once
+#[test]
+fn report_the_grid_widening_warning_appears_exactly_once() {
+    let report = build(process(
+        "codex",
+        8,
+        json!({"trigger": 150_000, "post_fresh": 2_000, "post_cache_read": 15_000, "growth": 3_000}),
+    ));
+    assert_eq!(
+        warnings(&report)
+            .iter()
+            .filter(|w| w.contains("widened"))
+            .count(),
+        1
+    );
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::claude_widening_stops_at_the_lowest_setting_the_agent_accepts
+#[test]
+fn report_a_claude_widened_pick_uses_the_auto_compact_window_key() {
+    let report = build(process(
+        "claude",
+        8,
+        json!({"trigger": 150_000, "post_fresh": 2_000, "post_cache_read": 15_000}),
+    ));
+    assert_eq!(card(&report)["setting_key"], "autoCompactWindow");
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_normal_optimum_does_not_widen_the_grid
+#[test]
+fn report_a_normal_grid_has_no_duplicate_triggers() {
+    let report = build(spec("codex", 8));
+    let mut triggers = triggers(&report);
+    let total = triggers.len();
+    triggers.sort_unstable();
+    triggers.dedup();
+    assert_eq!(triggers.len(), total);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::widening_triggers_cover_floor_ceiling_and_limits
+#[test]
+fn report_claude_ceiling_widening_triggers_are_strictly_ascending() {
+    let host = server_host();
+    let claude_grid = host.default_grid("claude");
+    let ceiling = host.widening_triggers("claude", &claude_grid, 600_000);
+    assert!(ceiling.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::the_claude_567k_corpus_offers_an_extrapolated_alternative
+#[test]
+fn report_the_extrapolated_alternative_trigger_is_below_the_supported_pick() {
+    let report = build(process(
+        "claude",
+        6,
+        json!({"turns": 400, "trigger": 567_000}),
+    ));
+    let pick = card(&report);
+    let alt = &pick["extrapolated_alternative"];
+    assert!(alt["trigger_tokens"].as_u64().unwrap() < pick["trigger_tokens"].as_u64().unwrap());
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_codex_supported_optimum_maps_its_alternative_through_the_semantics
+#[test]
+fn report_the_codex_alternative_saves_less_than_everything() {
+    let report = build(process(
+        "codex",
+        8,
+        json!({"trigger": 195_000, "turns": 200}),
+    ));
+    let alt = &card(&report)["extrapolated_alternative"];
+    assert!(alt["relative_saving"].as_f64().unwrap() < 1.0);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::the_band_pick_without_a_cheaper_unsupported_trigger_has_no_alternative
+#[test]
+fn report_the_band_pick_plain_text_has_no_cheaper_unsupported_line() {
+    let report = build(process("codex", 8, json!({"trigger": 150_000})));
+    assert!(!text(&report["plain_text"]).contains("Cheaper but unsupported: "));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::the_plain_argmin_pick_has_no_alternative
+#[test]
+fn report_the_plain_argmin_plain_text_has_no_alternative_line() {
+    let report = build(process(
+        "codex",
+        8,
+        json!({"trigger": 240_000, "turns": 200}),
+    ));
+    assert!(!text(&report["plain_text"]).contains("Alternative:"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_small_corpus_reports_the_research_prior_as_its_rework_model
+#[test]
+fn report_a_small_corpus_still_lists_the_rework_sensitivity_rows() {
+    let report = build(spec("claude", 6));
+    assert_eq!(report["rework"].as_array().unwrap().len(), 3);
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::a_corpus_with_enough_compactions_measures_its_rework
+#[test]
+fn report_a_measured_rework_model_appears_in_the_plain_text() {
+    let report = build(spec("claude", 60));
+    assert!(text(&report["plain_text"]).contains("measured from"));
+}
+
+/// REQ: PORT:ilium-client/src/compaction_report/tests.rs::the_model_text_is_set_even_when_nothing_can_be_replayed
+#[test]
+fn report_the_rework_model_text_is_a_non_empty_string_without_sessions() {
+    let report = build(spec("codex", 0));
+    assert!(!text(&report["rework_model_text"]).is_empty());
+}

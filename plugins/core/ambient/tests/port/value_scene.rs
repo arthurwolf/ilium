@@ -40,3 +40,41 @@ fn typed_numbers_keep_intermediates_and_reject_bounds_before_domain_clamping_twi
     );
     assert_eq!(host.settings().get("observer"), Some(ok));
 }
+
+/// REQ: PORT:ilium-client/src/value_scene.rs::changed_option_identity_is_rejected_instead_of_using_stale_index
+#[test]
+fn changed_option_identity_is_rejected_instead_of_using_stale_index_second_check() {
+    assert_eq!(refused("scene", json!("STARS")), ErrorCode::InvalidArgument);
+}
+
+/// REQ: PORT:ilium-client/src/value_scene.rs::direct_choice_revalidates_live_disabled_state
+#[test]
+fn direct_choice_revalidates_live_disabled_state_second_check() {
+    let mut host = activated_client();
+    assert!(host.settings().set("scene", json!("pipes")).is_err());
+    assert_eq!(host.settings().get("scene"), Some(json!("stars")));
+}
+
+/// REQ: PORT:ilium-client/src/value_scene.rs::full_list_keeps_disabled_choices_in_original_order
+#[test]
+fn full_list_keeps_disabled_choices_in_original_order_second_check() {
+    let options = manifest_row("scene")["options"].as_array().expect("options").clone();
+    let values: Vec<_> = options.iter().map(|option| option["value"].clone()).collect();
+    assert_eq!(values, vec![json!("stars"), json!("clouds")]);
+}
+
+/// REQ: PORT:ilium-client/src/value_scene.rs::numeric_entry_does_not_apply_to_boolean_or_text_controls
+#[test]
+fn numeric_entry_does_not_apply_to_boolean_or_text_controls_second_check() {
+    assert_eq!(refused("semantic", json!(1)), ErrorCode::InvalidArgument);
+    assert_eq!(refused("scene", json!(1)), ErrorCode::InvalidArgument);
+}
+
+/// REQ: PORT:ilium-client/src/value_scene.rs::typed_numbers_keep_intermediates_and_reject_bounds_before_domain_clamping
+#[test]
+fn typed_numbers_keep_intermediates_and_reject_bounds_before_domain_clamping_second_check() {
+    assert_eq!(
+        refused("observer", json!({ "lat": 0.0, "lon": -180.0001 })),
+        ErrorCode::InvalidArgument
+    );
+}

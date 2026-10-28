@@ -41,3 +41,30 @@ fn sec_444_the_sandbox_page_states_that_a_missing_openat2_is_degraded_not_unavai
         ],
     );
 }
+
+/// REQ: SEC-442
+#[test]
+fn sec_442_each_sandbox_prerequisite_is_checked_separately_at_start() {
+    assert_page_has(
+        "reference-sandbox.md",
+        &["MUST check at server start, once per start, each prerequisite of [SEC-055] separately"],
+    );
+}
+
+/// REQ: SEC-443
+#[test]
+fn sec_443_doctor_prints_one_check_line_per_prerequisite() {
+    assert_page_has(
+        "reference-sandbox.md",
+        &["MUST print one JSONL `check` line per prerequisite with `name`, `ok`"],
+    );
+}
+
+/// REQ: SEC-444
+#[test]
+fn sec_444_missing_openat2_is_reported_as_degraded_not_unavailable() {
+    assert_page_has(
+        "reference-sandbox.md",
+        &["`doctor` reports `openat2` as `ok: false, degraded: true`"],
+    );
+}

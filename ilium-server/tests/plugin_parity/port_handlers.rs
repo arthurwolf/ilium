@@ -59,3 +59,42 @@ fn port_001_bookmark_intent_is_accepted_and_marks_the_tree_for_persistence() {
         );
     });
 }
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::bookmark_request_broadcasts_the_authoritative_tree_and_marks_it_for_persistence
+#[test]
+fn port_001_clearing_a_bookmark_removes_the_flag_from_the_snapshot() {
+    in_both_modes(|kernel| {
+        let root = project(kernel, "api");
+        let work = group(kernel, Some(root), "work");
+        let set = apply(
+            kernel,
+            Intent::SetBookmarked(SetBookmarkedSpec {
+                node: work,
+                bookmarked: true,
+            }),
+        );
+        assert_eq!(set, Outcome::Ok);
+        kernel.advance_clock_ms(750);
+        kernel.settle();
+
+        let cleared = apply(
+            kernel,
+            Intent::SetBookmarked(SetBookmarkedSpec {
+                node: work,
+                bookmarked: false,
+            }),
+        );
+        assert_eq!(cleared, Outcome::Ok);
+        kernel.advance_clock_ms(750);
+        kernel.settle();
+
+        let text = kernel
+            .read_project_file(".ilium/sessions/default.json")
+            .expect("snapshot file");
+        let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON snapshot");
+        assert!(
+            !holds_bookmark_flag(&json),
+            "snapshot still records a bookmark: {json}"
+        );
+    });
+}

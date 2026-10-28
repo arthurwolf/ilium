@@ -2,6 +2,8 @@
 //! retention and access (HST-971, HST-972), the restore drill (HST-973, HST-974), the recovery
 //! targets (HST-975, HST-976) and the deletion and export rules (HST-977, HST-978).
 
+use ilium_plugin_host::testing::ops::{OpsRig, PackageSpec};
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "guide-backup-and-restore.md";
@@ -144,7 +146,22 @@ fn hst_976_a_one_gib_plugin_restore_completes_within_15_minutes() {
 /// REQ: HST-976
 #[test]
 fn hst_976_the_fifteen_minute_restore_is_timed_on_the_reference_machine() {
-    unimplemented!("ilium_plugin_host::cli::restore_timing_on_reference_machine")
+    const PLUGIN: &str = "com.example.notes";
+    let ops = OpsRig::new();
+    let package = ops.write_package(&PackageSpec::new(PLUGIN, "1.0.0"));
+    let installed = ops.cli(&["install", &package.to_string_lossy(), "--yes", "--allow-unsigned"]);
+    assert_eq!(installed.exit_code, 0, "{:?}", installed.stderr);
+    std::fs::create_dir_all(ops.data_dir(PLUGIN)).expect("data folder");
+    // 16 MiB stands in for the 1 GiB bound; the budget is scaled down in proportion.
+    std::fs::write(ops.data_dir(PLUGIN).join("blob.bin"), vec![7u8; 16 * 1024 * 1024]).expect("data");
+    let archive = ops.state_dir().join("timing.ilium-data");
+    let archive_text = archive.to_string_lossy().into_owned();
+    assert_eq!(ops.cli(&["plugin", "export", PLUGIN, "--out", &archive_text]).exit_code, 0);
+    let started = std::time::Instant::now();
+    let restored = ops.cli(&["plugin", "import", PLUGIN, "--from", &archive_text, "--yes"]);
+    assert_eq!(restored.exit_code, 0, "{:?}", restored.stderr);
+    let budget = std::time::Duration::from_secs(15 * 60) / 64;
+    assert!(started.elapsed() < budget, "restore took {:?}", started.elapsed());
 }
 
 /// REQ: HST-977
@@ -160,7 +177,22 @@ fn hst_977_purging_plugin_data_keeps_a_whole_host_archive_or_export() {
 /// REQ: HST-977
 #[test]
 fn hst_977_an_export_still_exists_after_the_plugin_is_purged() {
-    unimplemented!("ilium_plugin_host::cli::uninstall_purge_keeps_exports")
+    const PLUGIN: &str = "com.example.notes";
+    let ops = OpsRig::new();
+    let package = ops.write_package(&PackageSpec::new(PLUGIN, "1.0.0"));
+    let installed = ops.cli(&["install", &package.to_string_lossy(), "--yes", "--allow-unsigned"]);
+    assert_eq!(installed.exit_code, 0, "{:?}", installed.stderr);
+    std::fs::create_dir_all(ops.data_dir(PLUGIN)).expect("data folder");
+    std::fs::write(ops.data_dir(PLUGIN).join("note.txt"), b"kept").expect("data");
+    let export = std::env::temp_dir().join(format!("hst977-{}.ilium-data", std::process::id()));
+    let export_text = export.to_string_lossy().into_owned();
+    assert_eq!(ops.cli(&["plugin", "export", PLUGIN, "--out", &export_text]).exit_code, 0);
+    let before = std::fs::read(&export).expect("export");
+    let purged = ops.cli(&["uninstall", PLUGIN, "--purge", "--yes"]);
+    assert_eq!(purged.exit_code, 0, "{:?}", purged.stderr);
+    assert!(!ops.data_dir(PLUGIN).exists(), "the purge removes the plugin data");
+    assert_eq!(std::fs::read(&export).expect("export survives"), before);
+    std::fs::remove_file(&export).expect("remove own export");
 }
 
 /// REQ: HST-978

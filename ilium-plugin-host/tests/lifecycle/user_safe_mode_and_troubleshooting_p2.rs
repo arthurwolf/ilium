@@ -153,3 +153,46 @@ fn lif_187_a_fault_outside_every_plugin_ends_with_not_a_plugin() {
     assert_eq!(record["reason"], "not-a-plugin", "{record}");
     assert!(record["found"].is_null(), "{record}");
 }
+
+/// REQ: LIF-187
+#[test]
+fn lif_187_not_a_plugin_record_names_no_plugin_when_every_half_is_good() {
+    let mut host = host_with(4);
+    host.cli(&["plugin", "bisect", "start"]);
+    let mut last = None;
+    for _ in 0..40 {
+        let out = host.cli(&["plugin", "bisect", "good"]);
+        let record = out
+            .stdout_jsonl
+            .iter()
+            .find(|line| line["type"] == "bisect")
+            .cloned();
+        let finished = record
+            .as_ref()
+            .is_some_and(|line| line["reason"] == "not-a-plugin");
+        last = record;
+        if finished {
+            break;
+        }
+    }
+    let record = last.expect("a bisect record");
+    assert_eq!(record["reason"], "not-a-plugin", "{record}");
+    assert!(record["found"].is_null(), "{record}");
+    assert!(!record.to_string().contains("com.test.p"), "{record}");
+}
+
+/// REQ: LIF-294
+#[test]
+fn lif_294_a_stop_before_five_minutes_keeps_the_crash_marks() {
+    let mut host = LifeHost::new();
+    host.install(PluginSpec::new(A).sides(&[Side::Server]).startup());
+    for _ in 0..3 {
+        host.crash_during_start();
+    }
+    host.start_after_crashes();
+    host.start(StartMode::Normal);
+    host.advance_ms(299_000);
+    host.shutdown();
+    host.start_after_crashes();
+    assert!(matches!(host.safe_mode(), SafeMode::ThirdParty));
+}

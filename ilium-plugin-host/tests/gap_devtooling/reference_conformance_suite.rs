@@ -94,3 +94,65 @@ fn conformance_results_do_not_depend_on_home_timezone_locale_or_extra_environmen
         "the case results are the same on any machine"
     );
 }
+
+/// REQ: DEV-923
+#[test]
+fn conformance_report_lists_a_non_empty_cases_array() {
+    let (root, env, _dir) = new_rust_project();
+    let path = root.path().join("cases.json");
+    let out = run_in_project(&env, "conformance", &["--report", utf8(&path)]);
+    assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
+    let report: Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("report")).expect("report is JSON");
+    assert!(
+        report["cases"]
+            .as_array()
+            .is_some_and(|cases| !cases.is_empty()),
+        "the report lists the cases that ran: {report}"
+    );
+}
+
+/// REQ: DEV-924
+#[test]
+fn pinning_the_embedded_suite_version_writes_the_same_report_as_the_default_run() {
+    let (root, env, _dir) = new_rust_project();
+    let embedded = embedded_suite_version(&env);
+    let default_path = root.path().join("default.json");
+    let pinned_path = root.path().join("pinned.json");
+    let default_run = run_in_project(&env, "conformance", &["--report", utf8(&default_path)]);
+    assert_eq!(default_run.exit_code, 0, "{:?}", default_run.stdout_jsonl);
+    let pinned_run = run_in_project(
+        &env,
+        "conformance",
+        &[
+            "--report",
+            utf8(&pinned_path),
+            "--suite-version",
+            embedded.as_str(),
+        ],
+    );
+    assert_eq!(pinned_run.exit_code, 0, "{:?}", pinned_run.stdout_jsonl);
+    assert_eq!(
+        std::fs::read(&default_path).expect("default report"),
+        std::fs::read(&pinned_path).expect("pinned report"),
+        "the embedded catalogue is the default suite"
+    );
+}
+
+/// REQ: DEV-925
+#[test]
+fn the_home_directory_of_the_run_does_not_appear_in_the_conformance_report() {
+    let (root, _base_env, _dir) = new_rust_project();
+    let mut noisy_env = env(root.path());
+    noisy_env
+        .env
+        .insert("HOME".to_owned(), "/home/another-user".to_owned());
+    let noisy_path = root.path().join("home-noisy.json");
+    let noisy = run_in_project(&noisy_env, "conformance", &["--report", utf8(&noisy_path)]);
+    assert_eq!(noisy.exit_code, 0, "{:?}", noisy.stdout_jsonl);
+    let text = std::fs::read_to_string(&noisy_path).expect("report text");
+    assert!(
+        !text.contains("/home/another-user"),
+        "the report must not contain the HOME directory of the run"
+    );
+}

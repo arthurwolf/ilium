@@ -20,6 +20,22 @@ pub fn check_sandbox(platform: Platform, tier: Tier) -> Result<(), Diagnostic> {
     ))
 }
 
+/// Minimum operating-system release the installer accepts (reference-minimum-system-requirements,
+/// HST-956..958): macOS 14 and Windows 11 22H2 (build 22621). Linux has no release floor here.
+pub fn check_minimum_release(os: &str, detected_release: u32) -> Result<(), String> {
+    let minimum = match os {
+        "macos" => 14,
+        "windows" => 22621,
+        _ => return Ok(()),
+    };
+    if detected_release >= minimum {
+        return Ok(());
+    }
+    Err(format!(
+        "install.unsupported-platform: detected {os} {detected_release}, minimum {minimum}"
+    ))
+}
+
 /// Normalises a plugin-supplied path to the platform's form.
 pub fn normalize_plugin_path(platform: Platform, path: &str) -> String {
     match platform {

@@ -100,3 +100,36 @@ fn port_022_context_menu_keyboard_opens_the_order_submenu_and_applies_the_select
         Some(serde_json::json!("type"))
     );
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::indent_with_no_preceding_sibling_group_is_a_no_op
+#[test]
+fn indent_of_a_pane_preceded_only_by_panes_is_a_no_op() {
+    let mut host = server_host();
+    let top = add_node(&mut host, None, "top", NodeClass::Container);
+    add_node(&mut host, Some(top), "first pane", NodeClass::Pane);
+    let second = add_node(&mut host, Some(top), "second pane", NodeClass::Pane);
+    host.settle();
+    let submissions = host.deliver_one(command("ilium.core.tree/indent", second));
+    host.settle();
+    assert_eq!(moves(&submissions), Vec::<MoveNodeSpec>::new());
+}
+
+/// REQ: F-006, PORT:ilium-client/src/keys.rs::context_menu_keyboard_opens_order_submenu_and_applies_selection
+#[test]
+fn opening_the_context_menu_submits_nothing_and_does_not_change_the_order() {
+    let mut host = client_host();
+    let node = add_node(&mut host, None, "work", NodeClass::Container);
+    let opened = host.deliver_one(Event::UiAction(UiAction {
+        view: ViewTarget::Panel("tree".to_string()),
+        key: format!("row-{node}"),
+        action_id: String::new(),
+        kind: ActionKind::ContextRequested,
+        value: None,
+    }));
+    host.settle();
+    assert_eq!(opened, Vec::new(), "opening the menu submits nothing");
+    assert_ne!(
+        host.settings().get("tree_order"),
+        Some(serde_json::json!("type"))
+    );
+}

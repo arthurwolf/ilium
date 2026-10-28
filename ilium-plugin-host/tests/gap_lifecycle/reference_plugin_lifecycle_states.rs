@@ -292,3 +292,174 @@ fn lif_724_subscriber_overflow_drops_oldest_and_delivers_one_resync() {
         "the queue never holds more than 256 events plus the resync"
     );
 }
+
+/// REQ: LIF-700
+#[test]
+fn lif_700_retired_record_in_installed_json_carries_retired_at_and_reason() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "with `retired_at` and `retired_reason` of `end-of-life` or `abandoned`",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_end_of_life(NOTES, "2026-01-01");
+    let _server = rig.start_server("default");
+    let record = installed_json(&rig)["plugins"][NOTES].clone();
+    assert_eq!(record["state"], "retired", "installed.json stores retired");
+    assert!(
+        !record["retired_at"].is_null(),
+        "retired_at is recorded in installed.json"
+    );
+    assert_eq!(record["retired_reason"], "end-of-life");
+}
+
+/// REQ: LIF-701
+#[test]
+fn lif_701_retirement_is_applied_once_and_later_passes_do_not_repeat_it() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "It MUST send `deactivate` to each live instance once",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    rig.plant_end_of_life(NOTES, "2026-01-01");
+    rig.jump_wall_clock(40 * 86_400);
+    server.apply_pending();
+    rig.jump_wall_clock(10 * 86_400);
+    server.apply_pending();
+    assert_eq!(
+        server.deactivations(NOTES).len(),
+        1,
+        "a later pass does not deactivate the retired plugin again"
+    );
+    assert_eq!(log_count(&server, "plugin.retired"), 1);
+}
+
+/// REQ: LIF-703
+#[test]
+fn lif_703_enable_of_a_retired_plugin_without_accept_risk_is_refused_with_plugin_retired() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "and MUST return `not-permitted` with `plugin.retired` for `plugins.set-enabled` from a plugin",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_end_of_life(NOTES, "2026-01-01");
+    let server = rig.start_server("default");
+    server.apply_pending();
+    let refused = rig.cli(&["plugin", "enable", NOTES]);
+    assert!(
+        error_codes(&refused).contains(&"plugin.retired".to_string()),
+        "enable of a retired plugin names plugin.retired"
+    );
+    assert_eq!(
+        list_row(&rig, NOTES)["state"],
+        "retired",
+        "the refused enable leaves the plugin retired"
+    );
+}
+
+/// REQ: LIF-706
+#[test]
+fn lif_706_takedown_of_a_plugin_that_ignores_stop_is_blocked_within_the_deadline() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "and MUST NOT wait longer than the deactivate deadline",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").deactivate_hangs());
+    let server = rig.start_server("default");
+    let started = rig.virtual_elapsed();
+    rig.registry_takedown(NOTES, "1.0.0");
+    server.apply_pending();
+    assert_eq!(
+        server.inactive_reason(NOTES).as_deref(),
+        Some("blocked"),
+        "a plugin that never returns from deactivate is still blocked"
+    );
+    assert!(
+        rig.virtual_elapsed() - started < secs(10),
+        "the takedown does not wait past the deactivate deadline"
+    );
+}
+
+/// REQ: LIF-718
+#[test]
+fn lif_718_install_of_the_same_id_during_held_uninstall_returns_uninstalling() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "`enable`, `disable`, `update`, `rollback` and `install` of the same id MUST return `install.uninstalling` (exit 4)",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.hold_uninstall(NOTES);
+    let output = install(&rig, &pkg(NOTES, "1.2.0"));
+    assert_eq!(output.exit_code, 4, "install during uninstall exits 4");
+    assert!(error_codes(&output).contains(&"install.uninstalling".to_string()));
+    assert_eq!(list_row(&rig, NOTES)["state"], "uninstall-pending");
+}
+
+/// REQ: LIF-719
+#[test]
+fn lif_719_new_calls_are_refused_while_disabled() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "the host MUST stop accepting new calls at once",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    server.disable(NOTES);
+    let refused = server.call_plugin(NOTES, "plugins.list");
+    assert!(
+        refused.is_err(),
+        "a call to a disabled plugin is refused at once"
+    );
+}
+
+/// REQ: LIF-720
+#[test]
+fn lif_720_project_overlay_resolves_when_no_session_overlay_is_set() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "and the effective enabled value MUST resolve narrowest-first (session, project, global)",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_enabled_levels(NOTES, "s2", None, Some(false), Some(true));
+    let info = rig.cli(&["plugin", "info", NOTES, "--json", "--session", "s2"]);
+    assert_eq!(
+        info.stdout_jsonl[0]["enabled"], false,
+        "with no session overlay the project overlay wins over the global value"
+    );
+}
+
+/// REQ: LIF-724
+#[test]
+fn lif_724_queue_under_the_limit_delivers_events_in_order_with_no_resync() {
+    assert_manual_says(
+        "reference-plugin-lifecycle-states",
+        "Ordering per plugin id MUST be preserved.",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    let subscriber = server.attach_client("subscriber");
+    subscriber.block_delivery();
+    server.disable(NOTES);
+    server.enable(NOTES);
+    subscriber.resume_delivery();
+    let messages = server.received_messages();
+    assert!(
+        !messages.iter().any(|m| m.contains("plugin-state-resync")),
+        "no resync is sent below the queue limit"
+    );
+    let events: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("plugin-state-changed") && m.contains(NOTES))
+        .collect();
+    assert_eq!(events.len(), 2, "both changes are delivered");
+    assert!(events[0].contains("disabled"), "the disable comes first");
+    assert!(events[1].contains("enabled"), "the enable comes second");
+}

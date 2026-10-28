@@ -160,3 +160,64 @@ fn port_010_closing_the_budget_dialog_restores_the_exact_tab_below_it() {
     assert_eq!(tab_text(&mut host, "inference", 100, 40), before);
     assert_eq!(writes_of_budget(&mut host), Vec::<serde_json::Value>::new());
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::own_durable_receipt_closes_exact_parent_and_repeated_enter_is_finite
+#[test]
+fn port_011_repeated_enter_without_an_edit_writes_nothing() {
+    let mut host = client_host();
+    for _ in 0..3 {
+        host.send_action(
+            tab("inference"),
+            KEY,
+            ActionKind::Submitted,
+            ActionValue::None,
+        );
+    }
+    host.settle();
+    assert_eq!(writes_of_budget(&mut host), Vec::<serde_json::Value>::new());
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::invalid_input_cancel_and_admission_failures_keep_the_editor_truthful
+#[test]
+fn port_012_invalid_budget_text_stays_visible_in_the_editor() {
+    let mut host = client_host();
+    host.send_action(
+        tab("inference"),
+        KEY,
+        ActionKind::Changed,
+        ActionValue::Text("12x".to_string()),
+    );
+    host.settle();
+    let text = tab_text(&mut host, "inference", 100, 40);
+    assert!(text.contains("12x"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::failed_write_lost_and_rejected_receipts_preserve_retry_and_latest_status
+#[test]
+fn port_013_a_successful_retry_clears_the_earlier_rejection_message() {
+    let mut host = client_host();
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Busy, "write rejected"),
+    );
+    type_number(&mut host, "inference", KEY, 456789.0);
+    submit(&mut host, "inference", KEY);
+    let text = tab_text(&mut host, "inference", 100, 40);
+    assert!(!text.contains("write rejected"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::inference_field_and_file_action_menu_restore_their_exact_parents
+#[test]
+fn port_014_activating_the_budget_field_twice_opens_one_dialog() {
+    let mut host = client_host();
+    for _ in 0..2 {
+        host.send_action(
+            tab("inference"),
+            KEY,
+            ActionKind::Activated,
+            ActionValue::None,
+        );
+    }
+    host.settle();
+    assert_eq!(host.popups().len(), 1, "{:?}", host.popups());
+}

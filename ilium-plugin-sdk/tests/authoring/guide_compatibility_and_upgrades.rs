@@ -1,5 +1,5 @@
 //! Rule statements of the guide-compatibility-and-upgrades page as the manual states them (doc-lint tests).
-use crate::support::assert_rule;
+use crate::support::{assert_page_line, assert_rule};
 
 /// REQ: AUT-201
 #[test]
@@ -150,4 +150,58 @@ fn doc_aut_214_stable_public_names_kept_across_releases() {
 #[test]
 fn doc_aut_215_update_not_detected_from_reason_or_restore() {
     assert_rule("AUT-215", "MUST NOT", &["`upgrade`", "`ilium plugin dev`"]);
+}
+
+/// REQ: AUT-203
+#[test]
+fn doc_aut_203_old_name_keeps_working_until_it_is_removed() {
+    assert_page_line("AUT-203", &["before it is removed"]);
+}
+
+/// REQ: AUT-204
+#[test]
+fn doc_aut_204_old_command_is_hidden_only_once_the_new_one_exists() {
+    assert_page_line("AUT-204", &["once the new one exists"]);
+}
+
+/// REQ: AUT-208
+#[test]
+fn doc_aut_208_rollback_loses_nothing_when_old_keys_are_kept() {
+    assert_page_line("AUT-208", &["A user who rolls back then loses nothing."]);
+}
+
+/// REQ: AUT-209
+#[test]
+fn doc_aut_209_publish_before_the_host_drops_the_minor() {
+    assert_page_line(
+        "AUT-209",
+        &["so that users never hold a plugin outside the window"],
+    );
+}
+
+/// REQ: AUT-211
+#[test]
+fn doc_aut_211_tester_prerelease_cannot_pass_for_a_release() {
+    assert_page_line("AUT-211", &["so that it cannot be taken for a release"]);
+}
+
+/// REQ: AUT-212
+#[test]
+fn doc_aut_212_requires_range_window_matches_the_support_window() {
+    assert_page_line(
+        "AUT-212",
+        &["the same window in which `requires` and prereleases are supported"],
+    );
+}
+
+/// REQ: AUT-213
+#[test]
+fn doc_aut_213_incompatible_payload_change_is_named_as_such() {
+    assert_page_line("AUT-213", &["changes the payload incompatibly"]);
+}
+
+/// REQ: AUT-214
+#[test]
+fn doc_aut_214_stable_public_names_are_kept_across_releases() {
+    assert_page_line("AUT-214", &["across its own releases"]);
 }

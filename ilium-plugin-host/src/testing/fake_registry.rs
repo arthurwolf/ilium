@@ -14,10 +14,41 @@ pub struct FakeRegistry {
     versions: BTreeMap<(String, String), Value>,
     packages: BTreeMap<String, Vec<u8>>,
     summaries: BTreeMap<String, Value>,
+    /// Review records by (plugin id, version): the SHA-256 of the package that was reviewed (PKG-680 a).
+    reviews: BTreeMap<(String, String), String>,
+    requires_level_b: bool,
 }
 impl FakeRegistry {
     pub fn new(base_url: &str) -> Self {
-        Self { base_url: base_url.trim_end_matches('/').into(), versions: BTreeMap::new(), packages: BTreeMap::new(), summaries: BTreeMap::new() }
+        Self { base_url: base_url.trim_end_matches('/').into(), versions: BTreeMap::new(), packages: BTreeMap::new(), summaries: BTreeMap::new(), reviews: BTreeMap::new(), requires_level_b: false }
+    }
+    /// Makes this registry require level B inputs at publish time (PKG-681).
+    pub fn require_level_b(&mut self) { self.requires_level_b = true; }
+    /// Records a review for the exact package stored under (`plugin_id`, `version`) (PKG-680 a).
+    pub fn record_review(&mut self, plugin_id: &str, version: &str) -> Result<(), Diagnostic> {
+        let identity = (plugin_id.to_owned(), version.to_owned());
+        let sha = self.versions.get(&identity).and_then(|row| row["sha256"].as_str()).map(str::to_owned)
+            .ok_or_else(|| refusal("registry.not-found", "no such version to review"))?;
+        self.reviews.insert(identity, sha);
+        Ok(())
+    }
+    /// Withdraws the review record of a version (PKG-683).
+    pub fn withdraw_review(&mut self, plugin_id: &str, version: &str) {
+        self.reviews.remove(&(plugin_id.to_owned(), version.to_owned()));
+    }
+    /// Replaces the stored bytes of a version under the same number, as a re-upload with another hash (PKG-683).
+    pub fn reupload(&mut self, plugin_id: &str, version: &str, package: Vec<u8>) {
+        let identity = (plugin_id.to_owned(), version.to_owned());
+        if let Some(row) = self.versions.get_mut(&identity) {
+            let digest = hash(&package);
+            row["url"] = json!(format!("blobs/{digest}.iliumpkg"));
+            row["sha256"] = json!(digest);
+            row["length"] = json!(package.len());
+            let inputs = level_inputs(&package);
+            row["sbom"] = json!(inputs.0);
+            row["license_notice"] = json!(inputs.1);
+            self.packages.insert(format!("blobs/{digest}.iliumpkg"), package);
+        }
     }
     pub fn publish(&mut self, package: Vec<u8>, channel: &str) {
         if let Err(diagnostic) = self.try_publish(package, channel) { panic!("fake registry rejected package: {diagnostic:?}"); }
@@ -30,6 +61,15 @@ impl FakeRegistry {
             return Err(refusal("registry.version-invalid", "registry releases require stable/beta channels, no build metadata, and prereleases only on beta"));
         }
         let identity = (manifest.id.clone(), manifest.version.clone());
+        let has_sbom = archive.entries.iter().any(|entry| entry.path == "sbom.json" && entry.bytes.len() <= 4 * 1024 * 1024);
+        let has_notice = archive.entries.iter().any(|entry| entry.path == "LICENSE" || entry.path == "NOTICE");
+        let license_valid = manifest.license.as_deref().is_some_and(spdx_expression_is_valid);
+        if self.requires_level_b {
+            let detail = if !has_sbom { Some("sbom-missing") } else if !license_valid { Some("license-invalid") } else if !has_notice { Some("license-notice-missing") } else { None };
+            if let Some(detail) = detail {
+                return Err(refusal("registry.policy", &format!("level B requires sbom.json, a valid SPDX license and a LICENSE or NOTICE file: {detail}")));
+            }
+        }
         if self.versions.contains_key(&identity) { return Err(refusal("registry.version-exists", "published versions are immutable and belong to one channel")); }
         let digest = hash(&package);
         let publisher_id = archive.signature.as_ref().map(|s| s.publisher_id.as_str()).unwrap_or("");
@@ -38,7 +78,8 @@ impl FakeRegistry {
             "key_id":archive.signature.as_ref().map(|s| s.key_id.as_str()).unwrap_or(""),
             "countersigned":false,"host":manifest.requires.as_ref().and_then(|r| r.host.as_deref()).unwrap_or("*"),
             "platforms":["linux","macos","windows"],"categories":manifest.categories,
-            "license":manifest.license,"published":"2030-01-01 12:00:00","yanked":null,"deprecated":null});
+            "license":manifest.license,"published":"2030-01-01 12:00:00","yanked":null,"deprecated":null,
+            "review_level":"A","sbom":has_sbom,"license_notice":has_notice,"license_valid":license_valid});
         self.summaries.insert(manifest.id.clone(), json!({"id":manifest.id,"name":manifest.name,
             "description":manifest.description,"publisher_id":publisher_id,"publisher":manifest.publisher,
             "categories":manifest.categories,"keywords":manifest.keywords,"latest_stable":null,"latest_beta":null,
@@ -47,6 +88,14 @@ impl FakeRegistry {
         self.packages.insert(format!("blobs/{digest}.iliumpkg"), package);
         Ok(())
     }
+    /// The version row with `review_level` derived from the review of that exact version and package hash (PKG-683).
+    fn with_derived_level(&self, identity: &(String, String), row: &Value) -> Value {
+        let reviewed = self.reviews.get(identity).is_some_and(|sha| Some(sha.as_str()) == row["sha256"].as_str());
+        let complete = row["sbom"] == json!(true) && row["license_notice"] == json!(true) && row["license_valid"] == json!(true);
+        let mut row = row.clone();
+        row["review_level"] = json!(if reviewed && complete { "B" } else { "A" });
+        row
+    }
     /// Signed metadata and byte-exact blobs. Expiry is fixed for deterministic fixtures.
     /// Tests must explicitly trust `root.json`; this builder does not alter host trust.
     pub fn documents(&self) -> Vec<(String, Vec<u8>)> {
@@ -54,7 +103,7 @@ impl FakeRegistry {
         let revision = self.versions.len() as u64 + 1;
         let mut summaries = Vec::new();
         for (id, summary) in &self.summaries {
-            let versions: Vec<_> = self.versions.iter().filter(|((owner,_),_)| owner == id).map(|(_,row)| row.clone()).collect();
+            let versions: Vec<_> = self.versions.iter().filter(|((owner,_),_)| owner == id).map(|(identity,row)| self.with_derived_level(identity, row)).collect();
             let mut summary = summary.clone();
             for channel in ["stable", "beta"] {
                 let latest = versions.iter().filter(|row| row["channel"] == channel).filter_map(|row| row["version"].as_str()).filter_map(|v| semver::Version::parse(v).ok()).max();
@@ -77,6 +126,34 @@ impl FakeRegistry {
         documents.insert("root.json".into(), envelope(json!({"type":"root","spec":"ilium-registry/1","version":1,"expires":"2099-01-01 00:00:00","keys":keys,"roles":{"root":role,"timestamp":role,"snapshot":role,"targets":role}})));
         documents.into_iter().map(|(path,bytes)| (format!("{}/{path}",self.base_url), bytes)).collect()
     }
+}
+/// (has sbom.json within 4 MiB, has LICENSE or NOTICE) of a package; unreadable packages have neither.
+fn level_inputs(package: &[u8]) -> (bool, bool) {
+    match crate::package::read_package(package) {
+        Ok(archive) => (
+            archive.entries.iter().any(|entry| entry.path == "sbom.json" && entry.bytes.len() <= 4 * 1024 * 1024),
+            archive.entries.iter().any(|entry| entry.path == "LICENSE" || entry.path == "NOTICE"),
+        ),
+        Err(_) => (false, false),
+    }
+}
+/// A structural SPDX expression check: ids joined by AND, OR or WITH, with optional parentheses.
+fn spdx_expression_is_valid(text: &str) -> bool {
+    let spaced = text.replace('(', " ( ").replace(')', " ) ");
+    let mut tokens = spaced.split_whitespace().peekable();
+    if tokens.peek().is_none() { return false; }
+    let mut expect_id = true;
+    let mut depth = 0i32;
+    for token in tokens {
+        match token {
+            "(" if expect_id => depth += 1,
+            ")" if !expect_id => { depth -= 1; if depth < 0 { return false; } }
+            "AND" | "OR" | "WITH" if !expect_id => expect_id = true,
+            id if expect_id && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) && id != "(" && id != ")" => expect_id = false,
+            _ => return false,
+        }
+    }
+    !expect_id && depth == 0
 }
 fn hash(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
 fn refusal(code: &'static str, message: &str) -> Diagnostic { Diagnostic::error(Code::from_static(code), "", message) }

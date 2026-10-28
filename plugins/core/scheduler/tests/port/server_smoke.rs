@@ -31,3 +31,20 @@ fn port_smoke_scheduled_input_executes_after_client_detaches_and_clears_its_coun
         "the countdown is cleared after the send"
     );
 }
+
+/// REQ: PORT:ilium-server/tests/smoke.rs::scheduled_input_executes_after_client_detaches_and_clears_its_countdown
+#[test]
+fn port_smoke_new_schedule_replaces_the_pending_one() {
+    let mut session = session();
+    let pane = terminal_pane(&mut session, "scheduled");
+    schedule(&mut session, pane, 0, 0, 5, "old payload", true).expect("armed");
+    schedule(&mut session, pane, 0, 0, 1, "new payload", true).expect("replaced");
+    assert_eq!(sent_after(&mut session, 1_000), 1);
+    assert_eq!(
+        sent_after(&mut session, 10_000),
+        1,
+        "the replaced schedule never fires"
+    );
+    let sent = sends(&server(&mut session).submitted());
+    assert_eq!(sent[0].0.text, "new payload");
+}

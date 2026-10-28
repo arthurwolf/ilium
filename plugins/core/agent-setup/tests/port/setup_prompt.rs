@@ -136,3 +136,80 @@ fn port_sp_06_hit_test_tracks_each_visible_control_row() {
         "a click outside every row hits nothing"
     );
 }
+
+/// REQ: PORT:ilium-client/src/setup_prompt.rs::missing_features_start_selected_and_existing_features_cannot_toggle
+#[test]
+fn port_sp_01b_cancelling_the_missing_feature_dialog_writes_nothing() {
+    let mut host = host_with_progress_missing();
+    host.press_row(SURFACE, &row("progress"));
+    host.press_popup_button("Cancel");
+    host.settle();
+    assert_eq!(get(&mut host, claude_file()), None);
+    assert_eq!(
+        status_ok(&mut host, "progress", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/setup_prompt.rs::focus_skips_already_configured_feature_rows
+#[test]
+fn port_sp_02b_focus_always_rests_on_some_row_while_stepping() {
+    let mut host = host_with_progress_missing();
+    for key in ["down", "down", "up", "up"] {
+        host.key_on_tab(SURFACE, key);
+        assert!(
+            host.focused_row_id(SURFACE).is_some(),
+            "no row focused after {key}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/setup_prompt.rs::unavailable_mouse_feature_row_is_inert
+#[test]
+fn port_sp_03b_clicking_the_missing_progress_row_opens_its_dialog() {
+    let mut host = host_with_progress_missing();
+    let screen = host.render_kernel_tab(SURFACE, 100, 30);
+    let rendered = screen.lines();
+    let line = rendered
+        .iter()
+        .position(|line| line.contains("Progress"))
+        .expect("progress row is visible");
+    host.click_kernel_tab(SURFACE, 2, u16::try_from(line).expect("row index"));
+    assert!(host.render_popup(80).contains("Install Progress block"));
+}
+
+/// REQ: PORT:ilium-client/src/setup_prompt.rs::apply_reports_only_selected_missing_features
+#[test]
+fn port_sp_04b_after_apply_the_progress_row_reads_as_set_up() {
+    let mut host = project_host();
+    host.press_row(SURFACE, &row("progress"));
+    host.press_popup_button("Install");
+    host.settle();
+    assert_eq!(status_ok(&mut host, "progress", CLAUDE_GLOBAL), "set-up");
+}
+
+/// REQ: PORT:ilium-client/src/setup_prompt.rs::keyboard_shortcuts_return_non_mutating_decisions
+#[test]
+fn port_sp_05b_escape_leaves_the_progress_feature_not_set_up() {
+    let mut host = project_host();
+    host.press_row(SURFACE, &row("progress"));
+    host.key_on_popup("escape");
+    host.settle();
+    assert_eq!(
+        status_ok(&mut host, "progress", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/setup_prompt.rs::hit_test_tracks_each_visible_control_row
+#[test]
+fn port_sp_06b_cancel_returns_focus_to_the_clicked_progress_row() {
+    let mut host = project_host();
+    host.press_row(SURFACE, &row("progress"));
+    host.press_popup_button("Cancel");
+    host.settle();
+    assert_eq!(
+        host.focused_row_id(SURFACE).as_deref(),
+        Some(row("progress").as_str())
+    );
+}

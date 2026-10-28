@@ -5,6 +5,45 @@
 use ilium_plugin_api::generated::host::http_api::HostHttpApi;
 use ilium_plugin_api::generated::types::errors::PluginError;
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+/// Longest response body `respond` accepts: 8 MiB.
+const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Hop-by-hop header names a response may not carry (compared case-insensitively).
+const HOP_BY_HOP_HEADERS: [&str; 8] = [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+
+thread_local! {
+    /// Route calls the router delivered and the plugin has not yet answered.
+    static OPEN_CALLS: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
+}
+
+/// Registers `call` as an open request awaiting exactly one `respond` (called by the route dispatcher).
+pub fn open_http_api_call(call: u64) {
+    OPEN_CALLS.with(|open| {
+        open.borrow_mut().insert(call);
+    });
+}
+
+/// Builds an `invalid-argument` error with `message`.
+fn invalid_argument(message: &str) -> PluginError {
+    PluginError {
+        code: ilium_plugin_api::generated::types::errors::ErrorCode::InvalidArgument,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
 /// Host side of the `http-api` interface.
 #[derive(Debug)]
 pub struct HttpApiImport;
@@ -12,12 +51,35 @@ pub struct HttpApiImport;
 impl HostHttpApi for HttpApiImport {
     fn respond(
         &mut self,
-        _call: u64,
-        _status: u16,
-        _headers: Vec<(String, String)>,
-        _body: Vec<u8>,
+        call: u64,
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::http_api::respond")
+        if !(100..=599).contains(&status) {
+            return Err(invalid_argument("response status must be 100 to 599"));
+        }
+        if body.len() > MAX_RESPONSE_BODY_BYTES {
+            return Err(invalid_argument("response body exceeds 8 MiB"));
+        }
+        let hop_by_hop = headers.iter().any(|(name, _)| {
+            HOP_BY_HOP_HEADERS
+                .iter()
+                .any(|forbidden| name.eq_ignore_ascii_case(forbidden))
+        });
+        if hop_by_hop {
+            return Err(invalid_argument("hop-by-hop response headers are refused"));
+        }
+        let was_open = OPEN_CALLS.with(|open| open.borrow_mut().remove(&call));
+        if was_open {
+            Ok(())
+        } else {
+            Err(PluginError {
+                code: ilium_plugin_api::generated::types::errors::ErrorCode::NotFound,
+                message: "no open request has this call id".to_owned(),
+                retry_after_ms: None,
+            })
+        }
     }
 }
 

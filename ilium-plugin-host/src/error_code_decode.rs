@@ -17,6 +17,27 @@ pub enum DecodedErrorCode {
 }
 
 /// Decodes one wire error code string. Unknown text never fails the decode.
-pub fn decode_error_code(_text: &str) -> DecodedErrorCode {
-    unimplemented!("ilium_plugin_host::error_code_decode::decode_error_code")
+pub fn decode_error_code(text: &str) -> DecodedErrorCode {
+    use ErrorCode::*;
+    let known = [
+        NotPermitted,
+        NotFound,
+        InvalidArgument,
+        Conflict,
+        QuotaExceeded,
+        RateLimited,
+        Busy,
+        TimedOut,
+        Cancelled,
+        Unsupported,
+        PaneNotReady,
+        Revoked,
+        Io,
+        Network,
+        Internal,
+    ];
+    match known.into_iter().find(|code| code.as_str() == text) {
+        Some(code) => DecodedErrorCode::Known(code),
+        None => DecodedErrorCode::Unknown(text.to_owned()),
+    }
 }

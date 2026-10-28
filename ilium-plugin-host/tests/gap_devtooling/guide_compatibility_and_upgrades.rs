@@ -46,3 +46,19 @@ fn sdk_declares_minimum_rust_and_bun_and_previous_minimum_still_builds_for_two_m
         "after a raise the previous minimum {previous} still builds for two minor releases"
     );
 }
+
+/// REQ: DEV-897
+#[test]
+fn support_matrix_publishes_the_same_minimum_toolchains_as_the_sdk_metadata() {
+    let metadata = sdk_package_metadata();
+    let matrix = manual_page("reference-toolchain-support-matrix");
+    for key in ["minimum_rust", "minimum_bun"] {
+        let minimum = metadata[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} is declared: {metadata}"));
+        assert!(
+            matrix.contains(minimum),
+            "the support matrix lists {key} {minimum}"
+        );
+    }
+}

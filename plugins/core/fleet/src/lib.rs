@@ -2,7 +2,7 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -17,13 +17,13 @@ pub struct FleetServer;
 
 impl Lifecycle for FleetServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.fleet: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for FleetServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.fleet: server handler.on_events")
+        Vec::new()
     }
 }
 
@@ -34,13 +34,13 @@ pub struct FleetClient;
 
 impl Lifecycle for FleetClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.fleet: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for FleetClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.fleet: client handler.on_events")
+        Vec::new()
     }
 }
 

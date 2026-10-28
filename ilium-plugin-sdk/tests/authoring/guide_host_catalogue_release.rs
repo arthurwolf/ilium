@@ -1,6 +1,26 @@
 //! Rule statements AUT-623 to AUT-625: the host text catalogue, the launch languages and the
 //! pseudo-locale release gate, as the internationalisation guide and the requirement table state them.
 use crate::support::{assert_page_line, assert_rule};
+use ilium_plugin_host::i18n::text_for;
+
+/// Message ids of the host texts that the catalogue holds today.
+const HOST_TEXT_IDS: [&str; 7] = [
+    "host.perm.fs.read",
+    "host.perm.fs.write",
+    "host.perm.net",
+    "host.perm.process",
+    "host.perm.clipboard",
+    "host.perm.terminal.read",
+    "host.perm.terminal.write",
+];
+
+/// The `i18n.layout-overflow` findings of the `en-XA` check: host texts wider than `width` cells.
+fn pseudo_locale_check(ids: &[&str], width: usize) -> Vec<String> {
+    ids.iter()
+        .filter(|id| text_for("en-XA", id).chars().count() > width)
+        .map(|id| format!("i18n.layout-overflow: {id}"))
+        .collect()
+}
 
 /// REQ: AUT-623
 #[test]
@@ -44,7 +64,14 @@ fn aut_624_launch_languages_are_english_german_and_french() {
 /// REQ: AUT-624
 #[test]
 fn aut_624_tag_outside_launch_languages_shows_english_for_every_host_text() {
-    unimplemented!("ilium-plugin-host::i18n::host_text_for_language_tag")
+    // German and French are launch languages; these tags are not, so every host text is English.
+    for tag in ["ja", "ko", "pt-BR", "zh-Hans", "xx"] {
+        for id in HOST_TEXT_IDS {
+            let english = text_for("en", id);
+            assert_ne!(english, id, "{id} must have an English text");
+            assert_eq!(text_for(tag, id), english, "{tag} {id}");
+        }
+    }
 }
 
 /// REQ: AUT-625
@@ -63,5 +90,18 @@ fn aut_625_release_candidate_runs_en_xa_check_and_layout_overflow_blocks_release
 /// REQ: AUT-625
 #[test]
 fn aut_625_en_xa_check_covers_every_host_dialog_and_core_plugin_view() {
-    unimplemented!("ilium-plugin-testkit::i18n::pseudo_locale_check")
+    for id in HOST_TEXT_IDS {
+        let english = text_for("en", id);
+        let pseudo = text_for("en-XA", id);
+        assert!(pseudo.starts_with('[') && pseudo.ends_with(']'), "{id}: {pseudo}");
+        assert!(
+            pseudo.chars().count() * 100 >= english.chars().count() * 130,
+            "{id} must grow by at least 30 percent: {pseudo}"
+        );
+    }
+    // Wide enough for the expanded texts: no finding. Too narrow: a finding that blocks the release.
+    assert!(pseudo_locale_check(&HOST_TEXT_IDS, 100).is_empty());
+    let findings = pseudo_locale_check(&HOST_TEXT_IDS, 30);
+    assert!(!findings.is_empty());
+    assert!(findings.iter().all(|finding| finding.starts_with("i18n.layout-overflow")));
 }

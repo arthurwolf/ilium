@@ -127,7 +127,7 @@ fn tab_037_the_hint_line_names_enter_and_r() {
 /// REQ: F-037
 #[test]
 fn tab_037_the_tab_is_a_check_list_with_row_ids_of_the_form_block_bar_target() {
-    let host = project_host();
+    let mut host = project_host();
     let ids = host.kernel_tab_row_ids(SURFACE);
     assert!(
         ids.contains(&format!("progress|{CLAUDE_GLOBAL}")),

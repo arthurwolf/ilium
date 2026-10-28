@@ -34,3 +34,15 @@ fn port_galactic_empires_uses_live_host_and_project_settings() {
         "the manual page covers this feature"
     );
 }
+
+/// REQ: PORT:ilium-client/src/background_animation/galactic_empires_tests.rs::galactic_empires_uses_live_host_and_project_settings
+#[test]
+fn port_galactic_empires_uses_live_host_and_project_settings_second_loop_moves_between_frames() {
+    let mut scene = fake_scene("waves", 24, 12);
+    let early = scene.frame(braille_frame(24, 12, 0));
+    let later = scene.frame(braille_frame(24, 12, 2000));
+    assert!(
+        equal_share(&early, &later) < 1.0,
+        "a waves loop changes between frames two seconds apart"
+    );
+}

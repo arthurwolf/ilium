@@ -163,3 +163,61 @@ fn port_030_running_indicator_keys_are_accepted_and_unknown_keys_refused() {
         Some(json!("title_accent"))
     );
 }
+
+/// REQ: PORT:ilium-detect/src/lib.rs::quoted_question_dialog_above_live_work_stays_working
+#[test]
+fn port_026_alt_spinner_status_after_summary_stays_working() {
+    let screen = "✻ Cogitated for 29s · done 8:27 AM\n✻ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)\n❯";
+    assert_eq!(activity("claude", screen), AgentActivity::Working);
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::new_background_wait_after_completed_turn_remains_waiting
+#[test]
+fn port_026_alt_new_wait_after_settling_summary_remains_busy() {
+    let screen = format!("✻ Cogitated for 3m 11s · 1 shell still running\n{NEW_WAIT}");
+    assert!(is_busy(&activity("claude", &screen)));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::bottom_question_dialog_still_outranks_working_and_waiting
+#[test]
+fn port_026_alt_confirmation_after_completed_summary_awaits_approval() {
+    let screen = format!("{OLD_WAIT}\n{DONE}\nContinue, yes or no?");
+    assert_eq!(activity("claude", &screen), AgentActivity::AwaitingApproval);
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::visible_confirmation_remains_detectable_after_completion
+#[test]
+fn port_026_alt_confirmation_before_completed_summary_awaits_approval() {
+    let screen = format!("Continue, yes or no?\n{DONE}");
+    assert_eq!(activity("claude", &screen), AgentActivity::AwaitingApproval);
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::approval_predicates_still_receive_the_complete_screen
+#[test]
+fn port_026_alt_approval_after_wait_and_summary_awaits_approval() {
+    let screen = format!("{OLD_WAIT}\n{DONE}\nContinue, yes or no?");
+    assert_eq!(activity("claude", &screen), AgentActivity::AwaitingApproval);
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::current_still_running_suffix_survives_the_completion_boundary
+#[test]
+fn port_026_alt_shell_still_running_suffix_after_wait_is_busy() {
+    let screen = format!("{OLD_WAIT}\n✻ Cogitated for 3m 11s · 1 shell still running");
+    assert!(is_busy(&activity("claude", &screen)));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::still_running_suffix_without_a_done_clock_remains_settling
+#[test]
+fn port_026_alt_monitor_suffix_with_done_clock_after_wait_is_busy() {
+    let screen = format!(
+        "{OLD_WAIT}\n✻ Cooked for 3m 6s · done 7:00 PM · 1 monitor still running\n\n{COMPOSER}"
+    );
+    assert!(is_busy(&activity("claude", &screen)));
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::new_wait_after_a_settling_summary_keeps_mid_turn_wait_precedence
+#[test]
+fn port_026_alt_new_wait_below_completed_summary_is_busy() {
+    let screen = format!("✻ Cooked for 12s · done 4:57 PM\n{OLD_WAIT}");
+    assert!(is_busy(&activity("claude", &screen)));
+}

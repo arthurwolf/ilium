@@ -101,3 +101,76 @@ fn port_session_conversion_wire_an_antigravity_pane_gets_no_menu_entry() {
     let pane = pane_with_session(&mut host, "antigravity");
     assert!(menu(&mut host, Some(pane)).is_empty());
 }
+
+/// REQ: PORT:ilium-ipc/tests/session_conversion_wire.rs::antigravity_statusline_actions_round_trip_after_the_existing_request_tail
+#[test]
+fn port_session_conversion_wire_resume_on_an_antigravity_pane_replaces_nothing() {
+    let (mut host, pane) = server_with_pane("antigravity", true);
+    let submissions = host.deliver_one(client_message("resume", pane));
+    assert!(replaced(&submissions).is_empty(), "{submissions:?}");
+}
+
+/// REQ: PORT:ilium-ipc/tests/session_conversion_wire.rs::antigravity_statusline_completion_round_trips_at_the_append_only_event_tail
+#[test]
+fn port_session_conversion_wire_an_antigravity_entry_click_submits_nothing() {
+    let mut host = client_host();
+    let pane = pane_with_session(&mut host, "antigravity");
+    assert!(host.deliver_one(convert_click("to-codex", pane)).is_empty());
+}
+
+/// REQ: PORT:ilium-ipc/tests/session_conversion_wire.rs::new_variants_do_not_shift_the_previous_last_variant
+#[test]
+fn port_session_conversion_wire_a_start_does_not_replace_or_unfreeze_before_the_stop_is_answered() {
+    let (mut host, pane) = server_with_pane("claude", true);
+    let submissions = host.deliver_one(start_message(pane, "codex"));
+    assert!(replaced(&submissions).is_empty(), "{submissions:?}");
+    assert!(unfrozen(&submissions).is_empty(), "{submissions:?}");
+}
+
+/// REQ: PORT:ilium-ipc/tests/session_conversion_wire.rs::pane_process_terminated_round_trips_success_and_failure
+#[test]
+fn port_session_conversion_wire_a_refused_stop_reports_that_resuming_is_not_offered() {
+    let (mut host, pane) = server_with_pane("codex", true);
+    let start = host.deliver_one(start_message(pane, "claude"));
+    let reply = answer_terminate(
+        &mut host,
+        &start,
+        Outcome::Failed(ilium_plugin_sdk::types::PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::Busy,
+            message: "process tree still alive".into(),
+            retry_after_ms: None,
+        }),
+    );
+    assert_eq!(
+        failed_payload(&reply).expect("failed message")["can_resume"],
+        false
+    );
+}
+
+/// REQ: PORT:ilium-ipc/tests/session_conversion_wire.rs::terminate_and_replace_requests_round_trip_with_stable_names
+#[test]
+fn port_session_conversion_wire_a_failed_job_creates_no_replacement_pane() {
+    let (mut host, pane) = server_with_pane("codex", true);
+    let start = host.deliver_one(start_message(pane, "claude"));
+    answer_terminate(&mut host, &start, Outcome::Ok);
+    let request = host.jobs().list().first().expect("job").request;
+    host.jobs().finish(
+        request,
+        Err(ilium_plugin_sdk::types::PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::Io,
+            message: "x".into(),
+            retry_after_ms: None,
+        }),
+    );
+    host.settle();
+    assert!(created(&host.submitted()).is_empty());
+}
+
+/// REQ: PORT:ilium-ipc/tests/session_conversion_wire.rs::unfreeze_request_round_trips_at_the_append_only_request_tail
+#[test]
+fn port_session_conversion_wire_closing_the_dialog_does_not_stop_the_agent() {
+    let (mut host, pane) = server_with_pane("claude", true);
+    host.deliver_one(start_message(pane, "codex"));
+    let closed_by_user = host.deliver_one(client_message("close", pane));
+    assert!(terminated(&closed_by_user).is_empty(), "{closed_by_user:?}");
+}

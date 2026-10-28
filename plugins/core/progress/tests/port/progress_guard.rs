@@ -90,3 +90,52 @@ fn port_060_the_same_command_outside_a_pane_is_allowed() {
     let run = guard(&mut host, None, &bash("cargo test", Some(600_000), false));
     assert!(!denied(&run), "{}", run.stdout);
 }
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::long_foreground_command_in_a_pane_is_refused
+#[test]
+fn port_060_a_foreground_command_just_over_180_seconds_is_refused_in_a_pane() {
+    let (mut host, pane) = host_with_pane();
+    let run = guard(
+        &mut host,
+        Some(pane),
+        &bash("cargo test", Some(180_001), false),
+    );
+    assert!(denied(&run), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::progress_waits_background_and_short_commands_are_allowed
+#[test]
+fn port_060_a_background_long_command_in_a_pane_gets_a_reminder_and_no_refusal() {
+    let (mut host, pane) = host_with_pane();
+    let run = guard(
+        &mut host,
+        Some(pane),
+        &bash("npm run dev", Some(600_000), true),
+    );
+    assert!(!denied(&run), "{}", run.stdout);
+    assert!(run.stdout.contains("ilium progress set --command"), "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::refusal_is_a_claude_code_deny_decision
+#[test]
+fn port_060_the_refusal_is_one_json_line_on_stdout() {
+    let (mut host, pane) = host_with_pane();
+    let run = guard(
+        &mut host,
+        Some(pane),
+        &bash("cargo test", Some(600_000), false),
+    );
+    assert_eq!(run.stdout.trim().lines().count(), 1, "{}", run.stdout);
+}
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::same_command_outside_a_pane_is_allowed
+#[test]
+fn port_060_a_background_command_outside_a_pane_prints_no_reminder() {
+    let (mut host, _pane) = host_with_pane();
+    let run = guard(
+        &mut host,
+        None,
+        &bash("npm run dev", Some(600_000), true),
+    );
+    assert!(run.stdout.trim().is_empty(), "{}", run.stdout);
+}

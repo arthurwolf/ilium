@@ -350,3 +350,180 @@ fn port_cost_model_window_formatting_is_compact() {
     assert_eq!(window(2160), json!("1 d 12 h"));
     assert_eq!(window(43_200), json!("30 d"));
 }
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::amounts_format_in_the_unit_of_their_metric
+#[test]
+fn port_cost_model_amounts_format_rates_with_two_decimals_in_dollars() {
+    assert_eq!(
+        s("format-rate", json!({ "metric": "dollars", "value": 0.5 })),
+        json!("$0.50/h")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::budget_and_burn_calibrations_use_their_own_basis
+#[test]
+fn port_cost_model_budget_fill_is_zero_without_spend() {
+    assert!(near(
+        &s("budget-fill", json!({ "total": 0.0, "budget": 10.0 })),
+        0.0
+    ));
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::burn_rate_and_spike_detection
+#[test]
+fn port_cost_model_burn_rate_without_points_is_zero() {
+    let now: i64 = 1_000 * 60_000;
+    let burn = s(
+        "burn_usd_per_hour",
+        json!({ "points": points(&[]), "now_ms": now, "window_ms": 10 * 60_000 }),
+    );
+    assert!(near(&burn, 0.0), "{burn}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::cache_reads_cost_a_fraction_of_fresh_input
+#[test]
+fn port_cost_model_fresh_input_cost_is_linear_in_tokens() {
+    let fresh = s(
+        "price-cost",
+        json!({ "model": "claude-sonnet-5-5", "tokens": tokens(2_000_000, 0, 0, 0) }),
+    );
+    assert!(near(&fresh, 4.0), "{fresh}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::dollar_and_token_formatting_is_compact
+#[test]
+fn port_cost_model_small_dollar_amounts_keep_two_decimals() {
+    assert_eq!(usd(0.5, false), json!("$0.50"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::history_calibration_uses_percentiles_once_enough_sessions_exist
+#[test]
+fn port_cost_model_ready_history_cuts_are_ascending() {
+    let history: Vec<f64> = (1..=20).map(f64::from).collect();
+    let calibrated = calibrate("own_history", &[], Some(&history));
+    let cuts = calibrated["cuts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(cuts.len(), 4, "{calibrated}");
+    assert!(
+        cuts.windows(2)
+            .all(|pair| pair[0].as_f64() <= pair[1].as_f64()),
+        "{cuts:?}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::longest_prefix_wins_and_dated_snapshots_match_their_family
+#[test]
+fn port_cost_model_sonnet_family_matches_its_built_in_input_price() {
+    assert!(near(&lookup(json!({}), "claude-sonnet-5-5")["input"], 2.0));
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::meter_fills_one_cell_per_level_and_empty_without_data
+#[test]
+fn port_cost_model_meter_level_three_fills_four_cells() {
+    assert_eq!(s("level-meter", json!({ "level": 3 })), json!("▰▰▰▰▱"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::overrides_beat_built_in_prices
+#[test]
+fn port_cost_model_override_cache_read_price_is_used() {
+    assert!(near(
+        &lookup(
+            json!({ "GPT-Reserve": { "input": 1.0, "output": 2.0, "cache_read": 0.1, "cache_write": 0.0 } }),
+            "gpt-reserve"
+        )["cache_read"],
+        0.1
+    ));
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::peer_calibration_scales_with_the_median_open_agent
+#[test]
+fn port_cost_model_peer_calibration_cuts_are_strictly_ascending() {
+    let calibrated = calibrate("peer_relative", &[2.0, 4.0, 6.0, 0.0], None);
+    let cuts = calibrated["cuts"].as_array().cloned().unwrap_or_default();
+    assert!(
+        cuts.windows(2)
+            .all(|pair| pair[0].as_f64() < pair[1].as_f64()),
+        "{cuts:?}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::percent_rank_counts_sessions_at_or_below
+#[test]
+fn port_cost_model_percent_rank_of_the_smallest_session_is_a_quarter() {
+    assert_eq!(
+        s(
+            "percent-rank",
+            json!({ "sorted": [1.0, 2.0, 3.0, 4.0], "value": 1.0 })
+        ),
+        json!(25.0)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::percentile_interpolates
+#[test]
+fn port_cost_model_percentile_interpolates_between_neighbours() {
+    let value = s(
+        "percentile",
+        json!({ "sorted": [1.0, 2.0, 3.0, 4.0, 5.0], "fraction": 0.125 }),
+    );
+    assert!(near(&value, 1.5), "{value}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::scale_counts_reached_cuts
+#[test]
+fn port_cost_model_scale_level_between_two_cuts_counts_the_lower_ones() {
+    assert_eq!(level(&json!([1.0, 5.0, 20.0, 50.0]), 6.0), json!(2));
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::sparkline_scales_to_the_series_peak
+#[test]
+fn port_cost_model_sparkline_of_zero_then_peak_uses_lowest_and_highest_glyphs() {
+    assert_eq!(
+        s("sparkline-glyphs", json!({ "values": [0.0, 8.0] })),
+        json!("▁█")
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::spend_cells_bucket_the_window_and_ignore_outside_points
+#[test]
+fn port_cost_model_single_cell_sums_every_point_inside_the_window() {
+    let hour: i64 = 3_600_000;
+    let now = 10 * hour;
+    let list = points(&[
+        (now - 30 * 60_000, 1.0),
+        (now - 5 * 60_000, 2.0),
+        (now - 5 * hour, 99.0),
+    ]);
+    assert_eq!(
+        s(
+            "spend-cells",
+            json!({ "points": list, "now_ms": now, "window_ms": hour, "cells": 1 })
+        ),
+        json!([3.0])
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::typed_windows_parse_units_and_reject_nonsense
+#[test]
+fn port_cost_model_hours_with_a_space_parse_to_minutes() {
+    assert_eq!(
+        s("parse-window-minutes", json!({ "text": "2 h" })),
+        json!(120)
+    );
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::unpriced_models_make_the_estimate_a_lower_bound
+#[test]
+fn port_cost_model_fully_priced_estimate_is_not_a_lower_bound() {
+    let models = json!([
+        { "model": "claude-haiku-4-5", "calls": 1, "tokens": tokens(1_000_000, 0, 0, 0) },
+    ]);
+    let estimate = s("price-estimate", json!({ "models": models }));
+    assert_eq!(estimate["unpriced_tokens"], json!(0), "{estimate}");
+    assert_eq!(estimate["is_lower_bound"], json!(false), "{estimate}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_model.rs::window_formatting_is_compact
+#[test]
+fn port_cost_model_whole_hour_window_drops_the_minutes() {
+    assert_eq!(s("format-window", json!({ "minutes": 60 })), json!("1 h"));
+}

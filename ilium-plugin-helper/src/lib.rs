@@ -4,11 +4,11 @@
 //! through `ilium-platform`, speaks the framed [`protocol`] with it, and the helper forwards
 //! imports that need the application back to the host ([`forward`]).
 //!
-//! Skeleton state: data types are complete, behaviour is `unimplemented!("helper::<path>")`.
 
 use std::io::{Read, Write};
 
 pub mod forward;
+pub mod framing;
 pub mod protocol;
 pub mod sandbox;
 
@@ -36,12 +36,66 @@ pub struct HelperConfig {
 }
 
 /// Serves requests from `input` and answers on `output` until the host closes the channel.
+///
+/// Sends `Ready` (protocol version and process id) first, applies the OS sandbox when the
+/// config asks for it, then answers `HelperRequest` frames. The Wasmtime engine is not linked
+/// into the helper yet, so `Call` on a loaded plugin answers `Failed` with code
+/// `helper.engine-unavailable`; `Load`, `Unload` and `Shutdown` are fully handled.
 pub fn serve(
-    _input: impl Read,
-    _output: impl Write,
-    _config: HelperConfig,
+    mut input: impl Read,
+    mut output: impl Write,
+    config: HelperConfig,
 ) -> Result<(), HelperError> {
-    unimplemented!("helper::serve")
+    if config.apply_sandbox {
+        sandbox::apply(&sandbox::SandboxPolicy::default())?;
+    }
+    framing::write_frame(
+        &mut output,
+        &protocol::Ready {
+            protocol_version: protocol::HELPER_PROTOCOL_VERSION,
+            helper_process_id: std::process::id(),
+        },
+    )?;
+    let mut loaded: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+    while let Some(request) = framing::read_frame::<protocol::HelperRequest>(&mut input)? {
+        let reply = match request {
+            protocol::HelperRequest::Load { plugin, component } => {
+                if component.is_empty() {
+                    failed("load.empty-component", "the component has no bytes")
+                } else {
+                    loaded.insert(plugin, component);
+                    protocol::HelperReply::Ok { payload: Vec::new() }
+                }
+            }
+            protocol::HelperRequest::Call { plugin, .. } => {
+                if loaded.contains_key(&plugin) {
+                    failed(
+                        "helper.engine-unavailable",
+                        "the helper has no Wasmtime engine linked",
+                    )
+                } else {
+                    failed("call.not-loaded", "the plugin side is not loaded")
+                }
+            }
+            protocol::HelperRequest::Unload { plugin } => {
+                loaded.remove(&plugin);
+                protocol::HelperReply::Ok { payload: Vec::new() }
+            }
+            protocol::HelperRequest::Shutdown => {
+                framing::write_frame(&mut output, &protocol::HelperReply::Ok { payload: Vec::new() })?;
+                return Ok(());
+            }
+        };
+        framing::write_frame(&mut output, &reply)?;
+    }
+    Ok(())
+}
+
+fn failed(code: &str, message: &str) -> protocol::HelperReply {
+    protocol::HelperReply::Failed {
+        code: code.to_owned(),
+        message: message.to_owned(),
+    }
 }
 
 #[cfg(test)]

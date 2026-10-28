@@ -227,3 +227,53 @@ fn port_003_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     .expect_err("no third export");
     assert_eq!(missing.code, ErrorCode::NotFound);
 }
+
+/// REQ: PORT:ilium-server/tests/debug_logging_process.rs::detached_server_process_logs_major_ipc_actions_and_errors
+#[test]
+fn port_001_refused_attach_is_recorded_at_error_level() {
+    let mut session = session();
+    enable(&mut session);
+    let refused = request_line(
+        &mut session,
+        "attach",
+        json!({ "session": "wrong-session", "ok": false, "error": "session mismatch: wrong-session" }),
+    );
+    assert_eq!(refused["level"], "error", "{refused}");
+}
+
+/// REQ: PORT:ilium-server/tests/smoke.rs::successful_resize_records_its_typed_client_cause_in_the_debug_journal
+#[test]
+fn port_002_host_terminal_resize_is_not_flagged_as_a_tree_animation_resize() {
+    let mut session = session();
+    enable(&mut session);
+    agent_debug(
+        &mut session,
+        "append",
+        json!({ "pane": 6, "at": 1, "source": "pty", "kind": "pane-resized", "summary": "Pane resized to 80x24", "resize_cause": "host-terminal" }),
+    )
+    .expect("append resize");
+    let listed = agent_debug(&mut session, "entries", json!({ "pane": 6 })).expect("entries");
+    assert_eq!(listed["entries"][0]["resize_cause"], "host-terminal");
+    assert_eq!(listed["entries"][0]["is_tree_panel_animation_resize"], false);
+}
+
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::agent_debug_log_filters_panel_resizes_and_saves_the_active_view
+#[test]
+fn port_003_a_later_save_does_not_rewrite_an_earlier_export() {
+    let mut session = session();
+    agent_debug(&mut session, "make_directory", json!({ "path": "exports" })).expect("mkdir");
+    agent_debug(
+        &mut session,
+        "save_log",
+        json!({ "pane": 9, "pane_name": "Codex", "path": "exports/first.log", "entries": history(), "hide_tree_animation": true }),
+    )
+    .expect("first save");
+    let before = exported(&mut session, "exports/first.log");
+    agent_debug(
+        &mut session,
+        "save_log",
+        json!({ "pane": 9, "pane_name": "Codex", "path": "exports/second.log", "entries": history(), "hide_tree_animation": false }),
+    )
+    .expect("second save");
+    assert_eq!(exported(&mut session, "exports/first.log"), before);
+}

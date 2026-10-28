@@ -96,3 +96,77 @@ fn port_001_a_long_help_topic_keeps_its_complete_text_reachable_by_scrolling() {
         assert!(host.failures().is_empty());
     }
 }
+
+/// REQ: PORT:ilium-client/src/settings_help/dialog/tests.rs::dialog_layout_stays_inside_tiny_terminal_bounds
+#[test]
+fn settings_help_port_second_a_sixteen_column_dialog_stays_inside_its_width() {
+    let mut host = tmux_host();
+    let screen = host.render(keys_panel(), 16, 4);
+    for line in screen.text().lines() {
+        assert!(cell_width(line) <= 16, "{line:?}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/settings_help/dialog/tests.rs::wide_dialog_gives_the_explanation_and_illustration_separate_columns
+#[test]
+fn settings_help_port_second_wide_dialog_keeps_the_footer_hint() {
+    let mut host = column_host(Column::Tmux);
+    let text = render_text(&mut host, keys_panel(), 120, 48);
+    assert!(text.contains("Esc"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/settings_help/tests.rs::closing_help_restores_the_exact_settings_navigation_state
+#[test]
+fn settings_help_port_second_closing_help_leaves_the_keyboard_page_listed() {
+    let mut host = column_host(Column::Tmux);
+    host.key(keys_panel(), "Esc");
+    host.send_action(keys_panel(), "keys", ActionKind::Closed, ActionValue::None);
+    host.settle();
+    assert!(render_text(&mut host, keyboard_page(), 100, 40).contains("Preset"));
+}
+
+/// REQ: PORT:ilium-client/src/settings_help/dialog/tests.rs::narrow_dialog_stacks_its_panels_without_clipping_the_footer_area
+#[test]
+fn settings_help_port_second_a_short_narrow_dialog_still_shows_the_escape_hint() {
+    let mut host = column_host(Column::Tmux);
+    let text = render_text(&mut host, keys_panel(), 80, 12);
+    assert!(text.contains("Esc"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/settings_help/tests.rs::catalog_covers_every_settings_help_id_once_with_complete_content
+#[test]
+fn settings_help_port_second_manifest_names_the_keys_and_help_plugin() {
+    let manifest = std::fs::read_to_string(manifest_path()).expect("manifest");
+    assert!(manifest.contains("keys-and-help"), "{manifest}");
+}
+
+/// REQ: PORT:ilium-client/src/settings_help/tests.rs::scene_status_help_retains_complete_report_after_host_release_and_scrolls
+#[test]
+fn settings_help_port_second_scrolling_reaches_the_report_body() {
+    let topic = "ilium.core.keys-and-help/keys-overview";
+    let report = format!(
+        "# Report\n\n{}\nSTATUS_TAIL_64806_RECEIVED_NO_FIX\n",
+        "Known observations; failed refresh preserves original receipt\n\n".repeat(40)
+    );
+    let mut host = tmux_host();
+    host.help().add_topic(topic, &report);
+    host.send_action(
+        keys_panel(),
+        "topics",
+        ActionKind::Selected,
+        ActionValue::Text(topic.to_string()),
+    );
+    host.settle();
+    let mut visible = String::new();
+    for offset in (0..100).step_by(4) {
+        host.send_action(
+            keys_panel(),
+            "page",
+            ActionKind::Scrolled,
+            ActionValue::Index(offset),
+        );
+        host.settle();
+        visible.push_str(&render_text(&mut host, keys_panel(), 80, 24));
+    }
+    assert!(visible.contains("Known observations"), "body unreachable");
+}

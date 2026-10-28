@@ -1,8 +1,16 @@
-//! Host implementation of `ilium:host/keymap` (skeleton: every body is a stub).
-//!
-//! Written once by the skeleton lane from the generated `HostKeymap` trait; hand-owned afterwards.
+//! Host implementation of `ilium:host/keymap`.
 
 use ilium_plugin_api::generated::host::keymap::{Binding, HostKeymap};
+
+/// Default kernel bindings: command, chords, context.
+const DEFAULT_BINDINGS: [(&str, &[&str], &str); 6] = [
+    ("pane.new", &["ctrl+shift+n"], "global"),
+    ("pane.close", &["ctrl+shift+w"], "global"),
+    ("pane.focus-next", &["alt+right", "alt+down"], "global"),
+    ("pane.focus-previous", &["alt+left", "alt+up"], "global"),
+    ("help.open", &["f1"], "global"),
+    ("settings.open", &["ctrl+,"], "global"),
+];
 
 /// Host side of the `keymap` interface.
 #[derive(Debug)]
@@ -10,11 +18,43 @@ pub struct KeymapImport;
 
 impl HostKeymap for KeymapImport {
     fn bindings(&mut self) -> Vec<Binding> {
-        unimplemented!("host::imports::keymap::bindings")
+        DEFAULT_BINDINGS
+            .iter()
+            .map(|(command, chords, context)| Binding {
+                command: (*command).to_string(),
+                chords: chords.iter().map(|chord| (*chord).to_string()).collect(),
+                context: (*context).to_string(),
+                is_default: true,
+            })
+            .collect()
     }
 
-    fn chord_label(&mut self, _chord: String) -> String {
-        unimplemented!("host::imports::keymap::chord_label")
+    fn chord_label(&mut self, chord: String) -> String {
+        chord
+            .split('+')
+            .map(label_part)
+            .collect::<Vec<_>>()
+            .join("+")
+    }
+}
+
+/// Display text of one chord part (modifier or key).
+fn label_part(part: &str) -> String {
+    match part {
+        "up" => "\u{2191}".to_string(),
+        "down" => "\u{2193}".to_string(),
+        "left" => "\u{2190}".to_string(),
+        "right" => "\u{2192}".to_string(),
+        "page-up" => "Pg\u{2191}".to_string(),
+        "page-down" => "Pg\u{2193}".to_string(),
+        "plus" => "+".to_string(),
+        _ => {
+            let mut characters = part.chars();
+            match characters.next() {
+                Some(first) => first.to_uppercase().chain(characters).collect(),
+                None => String::new(),
+            }
+        }
     }
 }
 

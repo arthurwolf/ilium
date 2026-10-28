@@ -1,7 +1,9 @@
 #![cfg(feature = "testing")]
 //! Test-support builders for package specs that the lifecycle-ops rig (`testing::ops`) does not
-//! offer yet: a deprecation notice (LIF-319, LIF-320) and a settings schema (LIF-321). Every body
-//! is a skeleton stub; the implementation lands with the rig.
+//! offer yet: a deprecation notice (LIF-319, LIF-320) and a settings schema (LIF-321). The rig's
+//! fields are private, so both are carried as tagged content markers that the package builder
+//! writes into the manifest (`lifecycle:deprecated:<reason>|<end-of-life>` and
+//! `lifecycle:setting-schema:<json>`).
 
 use crate::testing::ops::PackageSpec;
 
@@ -16,15 +18,11 @@ pub trait PackageSpecLifecycleExt: Sized {
 }
 
 impl PackageSpecLifecycleExt for PackageSpec {
-    fn deprecated(self, _reason: &str, _end_of_life: &str) -> Self {
-        unimplemented!(
-            "ilium_plugin_host::lifecycle_ops_support::PackageSpecLifecycleExt::deprecated"
-        )
+    fn deprecated(self, reason: &str, end_of_life: &str) -> Self {
+        self.content_marker(&format!("lifecycle:deprecated:{reason}|{end_of_life}"))
     }
 
-    fn with_setting_schema(self, _schema_json: &str) -> Self {
-        unimplemented!(
-            "ilium_plugin_host::lifecycle_ops_support::PackageSpecLifecycleExt::with_setting_schema"
-        )
+    fn with_setting_schema(self, schema_json: &str) -> Self {
+        self.content_marker(&format!("lifecycle:setting-schema:{schema_json}"))
     }
 }

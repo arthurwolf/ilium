@@ -6,33 +6,130 @@ use ilium_plugin_api::generated::host::inference::{Completion, CompletionRequest
 use ilium_plugin_api::generated::types::errors::PluginError;
 use ilium_plugin_api::generated::types::ids::RequestId;
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use ilium_plugin_api::generated::types::errors::ErrorCode;
+
+/// Limit on all message contents together: 4 MiB.
+const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+/// Limit on the JSON schema text: 64 KiB.
+const MAX_JSON_SCHEMA_BYTES: usize = 64 * 1024;
+/// Pending requests (completions and model listings) one plugin may hold.
+const PENDING_REQUEST_LIMIT: usize = 64;
+
+/// State of one inference request.
+#[derive(Debug)]
+enum Held {
+    /// Accepted, the provider has not answered yet.
+    PendingCompletion,
+    /// Model list requested, not answered yet.
+    PendingModels,
+    /// Answered, waiting for one `take-completion`.
+    Completed(Completion),
+    /// Model list answered, waiting for one `take-models`.
+    ModelsListed(Vec<String>),
+}
+
+#[derive(Debug, Default)]
+struct InferenceState {
+    next_request: u64,
+    held: HashMap<u64, Held>,
+}
+
+thread_local! {
+    /// Per-thread because `InferenceImport` is a stateless handle.
+    static INFERENCE_STATE: RefCell<InferenceState> = RefCell::new(InferenceState::default());
+}
+
+fn error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
+
+/// Records a new pending entry, or `busy` at the 64-request limit.
+fn hold_pending(entry: Held) -> Result<RequestId, PluginError> {
+    INFERENCE_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.held.len() >= PENDING_REQUEST_LIMIT {
+            return Err(error(ErrorCode::Busy, "64 inference requests are already pending"));
+        }
+        state.next_request += 1;
+        let id = state.next_request;
+        state.held.insert(id, entry);
+        Ok(RequestId(id))
+    })
+}
+
 /// Host side of the `inference` interface.
 #[derive(Debug)]
 pub struct InferenceImport;
 
 impl HostInference for InferenceImport {
-    fn complete(&mut self, _request: CompletionRequest) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::inference::complete")
+    fn complete(&mut self, request: CompletionRequest) -> Result<RequestId, PluginError> {
+        if request.messages.is_empty() {
+            return Err(error(ErrorCode::InvalidArgument, "messages must not be empty"));
+        }
+        let total_bytes: usize = request.messages.iter().map(|message| message.content.len()).sum();
+        if total_bytes > MAX_MESSAGE_BYTES {
+            return Err(error(ErrorCode::InvalidArgument, "messages exceed 4 MiB"));
+        }
+        if let Some(schema) = &request.json_schema {
+            if schema.len() > MAX_JSON_SCHEMA_BYTES {
+                return Err(error(ErrorCode::InvalidArgument, "json schema exceeds 64 KiB"));
+            }
+            if serde_json::from_str::<serde_json::Value>(schema).is_err() {
+                return Err(error(ErrorCode::InvalidArgument, "json schema is not valid JSON"));
+            }
+        }
+        hold_pending(Held::PendingCompletion)
     }
 
-    fn take_completion(&mut self, _request: RequestId) -> Option<Completion> {
-        unimplemented!("host::imports::inference::take_completion")
+    fn take_completion(&mut self, request: RequestId) -> Option<Completion> {
+        INFERENCE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            match state.held.get(&request.0) {
+                Some(Held::Completed(_)) => match state.held.remove(&request.0) {
+                    Some(Held::Completed(completion)) => Some(completion),
+                    _ => None,
+                },
+                _ => None,
+            }
+        })
     }
 
     fn models(&mut self) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::inference::models")
+        hold_pending(Held::PendingModels)
     }
 
-    fn take_models(&mut self, _request: RequestId) -> Option<Vec<String>> {
-        unimplemented!("host::imports::inference::take_models")
+    fn take_models(&mut self, request: RequestId) -> Option<Vec<String>> {
+        INFERENCE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            match state.held.get(&request.0) {
+                Some(Held::ModelsListed(_)) => match state.held.remove(&request.0) {
+                    Some(Held::ModelsListed(models)) => Some(models),
+                    _ => None,
+                },
+                _ => None,
+            }
+        })
     }
 
+    /// No provider call is open on a bare import, so a well-formed reply names an unknown call.
     fn provider_reply(
         &mut self,
         _call: u64,
-        _outcome: Result<Completion, PluginError>,
+        outcome: Result<Completion, PluginError>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::inference::provider_reply")
+        if let Ok(completion) = &outcome {
+            if completion.text.len() > MAX_MESSAGE_BYTES {
+                return Err(error(ErrorCode::InvalidArgument, "reply text exceeds 4 MiB"));
+            }
+        }
+        Err(error(ErrorCode::NotFound, "no open provider call has this id"))
     }
 }
 

@@ -30,3 +30,18 @@ fn doc_abi_076_runbook_gives_triage_pin_roll_back_and_bulk_report_in_order() {
         "runbook steps out of order: {positions:?}"
     );
 }
+
+/// REQ: ABI-076
+#[test]
+fn doc_abi_076_runbook_names_the_refusal_code_that_starts_it() {
+    let page = manual_page("reference-abi-major-versions.md");
+    let section = page
+        .split("## Operator procedure for ABI incompatibility")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("reference-abi-major-versions.md has the operator procedure section");
+    assert!(
+        section.contains("package.api-unsupported"),
+        "the runbook must name the refusal code that starts it"
+    );
+}

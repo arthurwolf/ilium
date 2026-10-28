@@ -69,3 +69,34 @@ fn port_openstreetmap_shared_palette_and_density_reuse_map_and_zero_brightness_c
         "the manual page covers this feature"
     );
 }
+
+/// REQ: PORT:ilium-client/src/background_animation/openstreetmap_tests.rs::openstreetmap_attribution_reaches_client_glyphs_and_leaves_with_the_scene
+#[test]
+fn port_openstreetmap_attribution_reaches_client_glyphs_and_leaves_with_the_scene_second_stars_want_the_pointer() {
+    assert!(
+        fake_scene("stars-overhead", 40, 10).wants_pointer(),
+        "the stars scene names the star under the pointer, so it asks for the pointer"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/openstreetmap_tests.rs::openstreetmap_exposes_world_map_and_address_location_picker
+#[test]
+fn port_openstreetmap_exposes_world_map_and_address_location_picker_second_tone_scene_leaves_colour_to_host() {
+    assert!(
+        !fake_scene("waves", 40, 10).uses_cell_colors(),
+        "a tone-only scene writes no cell colours; the host colours its tones"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/openstreetmap_tests.rs::openstreetmap_shared_palette_and_density_reuse_map_and_zero_brightness_clears_dots
+#[test]
+fn port_openstreetmap_shared_palette_and_density_reuse_map_and_zero_brightness_clears_dots_second_observer_position_changes_the_sky() {
+    let mut here = fake_scene_at("stars-overhead", 40, 10, 48.85, 2.35);
+    let mut there = fake_scene_at("stars-overhead", 40, 10, -33.87, 151.21);
+    let paris = here.frame(braille_frame(40, 10, 0));
+    let sydney = there.frame(braille_frame(40, 10, 0));
+    assert!(
+        equal_share(&paris, &sydney) < 1.0,
+        "two observer positions show different stars above the horizon"
+    );
+}

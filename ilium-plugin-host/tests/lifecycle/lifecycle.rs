@@ -1041,3 +1041,64 @@ fn lif_059_slow_plugin_does_not_hold_the_first_frame_past_a_second() {
     let frame = host.first_frame_ms("c");
     assert!((1000..=1100).contains(&frame), "{frame}");
 }
+
+/// REQ: LIF-035
+#[test]
+fn lif_035_a_job_trap_schedules_no_restart() {
+    let mut host = one_plugin();
+    host.fail(A, Side::Server, SERVER, FailureKind::JobTrap);
+    assert_eq!(
+        restart_in_ms(&host, A),
+        None,
+        "a failed job must not start the restart window"
+    );
+}
+
+/// REQ: LIF-039
+#[test]
+fn lif_039_disabling_cancels_the_pending_restart_timer_at_once() {
+    let mut host = one_plugin();
+    trap(&mut host, A);
+    assert!(restart_in_ms(&host, A).is_some(), "a restart must be pending");
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    assert_eq!(
+        restart_in_ms(&host, A),
+        None,
+        "the timer must be cancelled by the disable"
+    );
+}
+
+/// REQ: LIF-040
+#[test]
+fn lif_040_an_update_cancels_the_pending_restart_timer() {
+    let mut host = one_plugin();
+    trap(&mut host, A);
+    host.update(A, "2.0.0");
+    assert_eq!(
+        restart_in_ms(&host, A),
+        None,
+        "the update must cancel the old timer"
+    );
+}
+
+/// REQ: LIF-041
+#[test]
+fn lif_041_revoke_during_restart_does_not_reset_the_timer() {
+    let mut host = LifeHost::new();
+    host.install(
+        PluginSpec::new(A)
+            .grants(&["fs.read", "net.http"])
+            .startup(),
+    );
+    host.start(StartMode::Normal);
+    trap(&mut host, A);
+    host.advance_ms(500);
+    host.revoke(A, "net.http");
+    assert_eq!(
+        restart_in_ms(&host, A),
+        Some(500),
+        "the revoke must keep the original timer, not restart its delay"
+    );
+}

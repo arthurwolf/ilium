@@ -2,10 +2,14 @@
 //! reference-host-architecture.md).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use ilium_plugin_api::Side;
-use ilium_plugin_api::generated::host::plugins::{PluginInfo, SideState};
+use ilium_plugin_api::generated::host::plugins::{
+    HealthState, InstanceState, PackageState, PluginInfo, SideState,
+};
+use ilium_plugin_api::{Code, Diagnostic};
 use ilium_plugin_api::ids::PluginId;
 
 use crate::error::HostError;
@@ -39,39 +43,171 @@ pub struct ShutdownReport {
     pub forced: Vec<String>,
 }
 
+/// What the manager records about one plugin it has been told to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PluginEntry {
+    enabled: bool,
+    running: bool,
+}
+
+/// The process-wide table of plugins the manager owns. `LifecycleManager` is a unit value (the
+/// test rigs construct it without arguments), so its state lives here.
+fn plugin_table() -> &'static Mutex<BTreeMap<String, PluginEntry>> {
+    static TABLE: OnceLock<Mutex<BTreeMap<String, PluginEntry>>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Runs `action` on the table; a poisoned lock is recovered because entries are plain values.
+fn with_table<T>(action: impl FnOnce(&mut BTreeMap<String, PluginEntry>) -> T) -> T {
+    let mut guard = match plugin_table().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    action(&mut guard)
+}
+
+fn is_core_plugin(plugin_id: &str) -> bool {
+    plugin_id.starts_with("ilium.core.")
+}
+
 /// Owns the instances of all plugins (reference-runtime-model.md).
 #[derive(Debug)]
 pub struct LifecycleManager;
 
 impl LifecycleManager {
     /// Starts plugins in dependency order, core first (reference-host-architecture.md).
-    pub fn start(&self, _mode: StartMode) -> StartReport {
-        unimplemented!("host::lifecycle::LifecycleManager::start")
+    pub fn start(&self, mode: StartMode) -> StartReport {
+        with_table(|table| {
+            let mut ids: Vec<String> = table
+                .iter()
+                .filter(|(_, entry)| entry.enabled)
+                .map(|(id, _)| id.clone())
+                .collect();
+            // Core plugins first; the sort is stable so ids stay alphabetical within a group.
+            ids.sort_by_key(|id| !is_core_plugin(id));
+            let mut started = Vec::new();
+            for id in ids {
+                let allowed = match mode {
+                    StartMode::Normal => true,
+                    StartMode::SafePlugins => is_core_plugin(&id),
+                    StartMode::NoPlugins => false,
+                };
+                if allowed {
+                    if let Some(entry) = table.get_mut(&id) {
+                        entry.running = true;
+                    }
+                    started.push(id);
+                }
+            }
+            StartReport {
+                started,
+                failed: Vec::new(),
+            }
+        })
     }
 
     /// Deactivates everything within the budget, reverse of start order.
     pub fn shutdown(&self, _budget: Duration) -> ShutdownReport {
-        unimplemented!("host::lifecycle::LifecycleManager::shutdown")
+        with_table(|table| {
+            let mut running: Vec<String> = table
+                .iter()
+                .filter(|(_, entry)| entry.running)
+                .map(|(id, _)| id.clone())
+                .collect();
+            // Reverse of start order: third-party plugins stop before core plugins.
+            running.sort_by_key(|id| is_core_plugin(id));
+            for id in &running {
+                if let Some(entry) = table.get_mut(id) {
+                    entry.running = false;
+                }
+            }
+            ShutdownReport {
+                deactivated: running,
+                forced: Vec::new(),
+            }
+        })
     }
 
     /// Enables a plugin and starts it.
-    pub fn enable(&self, _plugin: &PluginId) -> Result<(), HostError> {
-        unimplemented!("host::lifecycle::LifecycleManager::enable")
+    pub fn enable(&self, plugin: &PluginId) -> Result<(), HostError> {
+        with_table(|table| {
+            table.insert(
+                plugin.0.clone(),
+                PluginEntry {
+                    enabled: true,
+                    running: true,
+                },
+            );
+        });
+        Ok(())
     }
 
     /// Disables a plugin and stops it.
-    pub fn disable(&self, _plugin: &PluginId) -> Result<(), HostError> {
-        unimplemented!("host::lifecycle::LifecycleManager::disable")
+    pub fn disable(&self, plugin: &PluginId) -> Result<(), HostError> {
+        with_table(|table| match table.get_mut(&plugin.0) {
+            Some(entry) => {
+                entry.enabled = false;
+                entry.running = false;
+                Ok(())
+            }
+            None => Err(HostError::Diagnostic(Diagnostic::error(
+                Code::from_static(ilium_plugin_api::codes::plugin::NOT_FOUND),
+                "/plugin",
+                format!("plugin {} is not known to the lifecycle manager", plugin.0),
+            ))),
+        })
     }
 
     /// The state of one side of a plugin.
-    pub fn state_of(&self, _plugin: &PluginId, _side: Side) -> SideState {
-        unimplemented!("host::lifecycle::LifecycleManager::state_of")
+    pub fn state_of(&self, plugin: &PluginId, side: Side) -> SideState {
+        let state = with_table(|table| match table.get(&plugin.0) {
+            Some(entry) if entry.running => InstanceState::Active,
+            Some(_) => InstanceState::Stopped,
+            None => InstanceState::Inactive,
+        });
+        SideState {
+            side: side.as_str().to_owned(),
+            scope: "server".to_owned(),
+            state,
+            failures_in_window: 0,
+            last_error_code: None,
+            restart_at_unix_ms: None,
+        }
     }
 
     /// The `plugin-info` record of a plugin.
-    pub fn plugin_info(&self, _plugin: &PluginId) -> Option<PluginInfo> {
-        unimplemented!("host::lifecycle::LifecycleManager::plugin_info")
+    pub fn plugin_info(&self, plugin: &PluginId) -> Option<PluginInfo> {
+        let entry = with_table(|table| table.get(&plugin.0).copied())?;
+        let core = is_core_plugin(&plugin.0);
+        Some(PluginInfo {
+            id: plugin.clone(),
+            name: plugin.0.clone(),
+            version: "0.0.0".to_owned(),
+            tier: if core { "core" } else { "third-party" }.to_owned(),
+            enabled: entry.enabled,
+            failed: false,
+            state: if entry.enabled {
+                PackageState::InstalledEnabled
+            } else {
+                PackageState::InstalledDisabledByUser
+            },
+            side_states: vec![self.state_of(plugin, Side::Server)],
+            scope: "global".to_owned(),
+            disabled_reason: None,
+            health: if entry.running {
+                HealthState::Healthy
+            } else {
+                HealthState::Disabled
+            },
+            publisher: String::new(),
+            publisher_key: None,
+            source: String::new(),
+            channel: String::new(),
+            pinned: false,
+            update_available: None,
+            deprecated: false,
+            yanked: false,
+        })
     }
 }
 
@@ -291,6 +427,114 @@ pub fn shutdown_order(
     let mut ordered = start_order(nodes)?;
     ordered.reverse();
     Ok(ordered)
+}
+
+/// Seconds of the window in which three start crashes step the guard (LIF-978).
+pub const CRASH_LOOP_WINDOW_SECONDS: u64 = 300;
+/// Start crashes within the window that step the guard one level (LIF-978 to LIF-980).
+pub const CRASH_LOOP_THRESHOLD: usize = 3;
+
+/// What the crash-loop guard decides for the next start (LIF-978 to LIF-981).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardDecision {
+    /// Start at this safe-mode level.
+    Start(SafeMode),
+    /// The guard is exhausted: exit non-zero with `crash-loop.exhausted`, no automatic restart.
+    Exhausted,
+}
+
+/// The start-crash marks the crash-loop guard reads (LIF-186). Marks only clear under LIF-294;
+/// a change of level never clears them.
+#[derive(Debug, Clone, Default)]
+pub struct CrashLoopGuard {
+    /// (seconds since the epoch, level the crashed start ran in).
+    marks: Vec<(u64, SafeMode)>,
+}
+
+impl CrashLoopGuard {
+    /// Records a crash during start that ran in `level` at `now_seconds`.
+    pub fn record_crash(&mut self, now_seconds: u64, level: SafeMode) {
+        self.marks.push((now_seconds, level));
+    }
+
+    /// Clears every mark (the LIF-294 reset).
+    pub fn clear(&mut self) {
+        self.marks.clear();
+    }
+
+    /// How many marks of `level` lie within the window before `now_seconds`.
+    pub fn marks_in_window(&self, now_seconds: u64, level: SafeMode) -> usize {
+        self.marks
+            .iter()
+            .filter(|(at, mark_level)| {
+                *mark_level == level && now_seconds.saturating_sub(*at) <= CRASH_LOOP_WINDOW_SECONDS
+            })
+            .count()
+    }
+
+    /// The level of the next start, given the level the previous start ran in. Three crashes in
+    /// five minutes move `third-party` to `all-optional`, `all-optional` to `--no-plugins`, and
+    /// three under `--no-plugins` exhaust the guard; later starts stay on `--no-plugins` until the
+    /// marks clear.
+    pub fn decide(&self, now_seconds: u64, running: SafeMode) -> GuardDecision {
+        let mut level = running;
+        loop {
+            if self.marks_in_window(now_seconds, level) < CRASH_LOOP_THRESHOLD {
+                return GuardDecision::Start(level);
+            }
+            level = match level {
+                SafeMode::Off | SafeMode::ThirdParty => SafeMode::AllOptional,
+                SafeMode::AllOptional => SafeMode::NoPlugins,
+                SafeMode::NoPlugins => return GuardDecision::Exhausted,
+            };
+        }
+    }
+
+    /// The footer banner text for a start level (LIF-981).
+    pub fn footer(level: SafeMode) -> Option<&'static str> {
+        match level {
+            SafeMode::Off => None,
+            SafeMode::ThirdParty => Some("Safe mode: third-party plugins are off."),
+            SafeMode::AllOptional => Some("Safe mode: all optional plugins are off."),
+            SafeMode::NoPlugins => Some("Safe mode: --no-plugins, kernel only."),
+        }
+    }
+}
+
+/// Failures the host counts before it stops a plugin side: five within 24 hours (HST-950).
+pub const FAILURE_STOP_COUNT: usize = 5;
+/// The sliding window of the failure stop, in seconds (HST-950).
+pub const FAILURE_WINDOW_SECONDS: u64 = 24 * 3600;
+
+/// Wall-clock times of counted failures of one plugin side, as stored in `installed.json`
+/// (HST-950..952).
+#[derive(Debug, Clone, Default)]
+pub struct FailureLedger {
+    times: Vec<u64>,
+}
+
+impl FailureLedger {
+    pub fn record(&mut self, now_seconds: u64) {
+        self.times.push(now_seconds);
+    }
+
+    /// Failures still inside the sliding window at `now_seconds`.
+    pub fn in_window(&self, now_seconds: u64) -> usize {
+        self.times
+            .iter()
+            .filter(|at| now_seconds.saturating_sub(**at) < FAILURE_WINDOW_SECONDS)
+            .count()
+    }
+
+    /// True when the side must move to `stopped-by-failure`.
+    pub fn must_stop(&self, now_seconds: u64) -> bool {
+        self.in_window(now_seconds) >= FAILURE_STOP_COUNT
+    }
+
+    /// Enabling, `reset-failures` and an update clear the times (HST-952).
+    pub fn clear(&mut self) {
+        self.times.clear();
+    }
 }
 
 #[cfg(test)]

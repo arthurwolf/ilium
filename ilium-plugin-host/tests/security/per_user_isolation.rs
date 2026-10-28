@@ -40,3 +40,30 @@ fn sec_456_the_threat_model_states_that_helpers_cannot_see_other_users_and_peer_
         ],
     );
 }
+
+/// REQ: SEC-454
+#[test]
+fn sec_454_per_user_paths_are_all_0700_owned_by_that_user() {
+    assert_page_has(
+        "reference-threat-model.md",
+        &["all with mode 0700 owned by that user"],
+    );
+}
+
+/// REQ: SEC-455
+#[test]
+fn sec_455_no_module_cache_or_secret_is_shared_even_for_identical_plugins() {
+    assert_page_has(
+        "reference-threat-model.md",
+        &["even when the plugin and its hash are identical"],
+    );
+}
+
+/// REQ: SEC-456
+#[test]
+fn sec_456_a_helper_cannot_see_other_users_through_the_sandbox() {
+    assert_page_has(
+        "reference-threat-model.md",
+        &["through the sandbox ([SEC-055])"],
+    );
+}

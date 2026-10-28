@@ -1,5 +1,5 @@
 //! Rule statements of the guide-quality-checklist page as the manual states them (doc-lint tests).
-use crate::support::assert_rule;
+use crate::support::{assert_page_line, assert_rule, table_row};
 
 /// REQ: AUT-401
 #[test]
@@ -96,5 +96,28 @@ fn doc_aut_410_colour_not_the_only_carrier_of_meaning_quality() {
         "AUT-410",
         "MUST NOT",
         &["MUST NOT use colour as the only carrier of meaning"],
+    );
+}
+
+/// REQ: AUT-401
+#[test]
+fn doc_aut_401_release_check_row_names_the_verifying_commands() {
+    assert!(table_row("AUT-401")
+        .contains("Run `ilium plugin check` or `lint` and read the finding"));
+}
+
+/// REQ: AUT-402
+#[test]
+fn doc_aut_402_suppression_check_row_names_the_verifying_commands() {
+    assert!(table_row("AUT-402")
+        .contains("Run `ilium plugin check` or `lint` and read the finding"));
+}
+
+/// REQ: AUT-406
+#[test]
+fn doc_aut_406_measured_use_is_taken_on_the_documented_fixture_set() {
+    assert_page_line(
+        "AUT-406",
+        &["on the fixture data set named in the README"],
     );
 }

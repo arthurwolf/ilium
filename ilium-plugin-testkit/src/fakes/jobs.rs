@@ -1,6 +1,11 @@
 //! Fake jobs (reference-test-harness.md "Fake tree, panes, agents and jobs").
 
+use ilium_plugin_sdk_core::generated::types::{
+    Event, JobProgressEvent, Outcome, RequestId, RequestRef, RequestResult,
+};
 use ilium_plugin_sdk_core::types::PluginError;
+
+use super::tree::Outbox;
 
 /// A job the plugin started (DEV-472).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,40 +19,90 @@ pub struct JobRecord {
 }
 
 /// Handle on the fake job service of a host.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FakeJobs {
-    _private: (),
+    jobs: Vec<JobRecord>,
+    cancelled: Vec<u64>,
+    progress: Vec<f32>,
+    cancel_requested: bool,
+    outbox: Outbox,
 }
 
 impl FakeJobs {
+    /// Jobs that publish events into `outbox`.
+    pub(crate) fn with_outbox(outbox: Outbox) -> FakeJobs {
+        FakeJobs {
+            outbox,
+            ..FakeJobs::default()
+        }
+    }
+
+    /// Records a job the plugin started.
+    pub(crate) fn record(&mut self, request: u64, kind: &str, input: &[u8]) {
+        self.jobs.push(JobRecord {
+            request,
+            kind: kind.to_string(),
+            input: input.to_vec(),
+        });
+    }
+
+    /// Records that the plugin cancelled a job.
+    pub(crate) fn record_cancel(&mut self, request: u64) {
+        self.cancelled.push(request);
+    }
+
+    /// Records progress the plugin reported.
+    pub(crate) fn record_progress(&mut self, percent: f32) {
+        self.progress.push(percent);
+    }
+
+    /// True once after `request_cancel`.
+    pub(crate) fn take_cancel_request(&mut self) -> bool {
+        std::mem::take(&mut self.cancel_requested)
+    }
+
     /// Jobs the plugin started.
     pub fn list(&self) -> Vec<JobRecord> {
-        unimplemented!("DEV-472")
+        self.jobs.clone()
     }
 
     /// Delivers one `request-completed` event for the job.
-    pub fn finish(&mut self, _request: u64, _result: Result<Vec<u8>, PluginError>) {
-        unimplemented!("DEV-472")
+    pub fn finish(&mut self, request: u64, result: Result<Vec<u8>, PluginError>) {
+        let outcome = match result {
+            Ok(_) => Outcome::Ok,
+            Err(error) => Outcome::Failed(error),
+        };
+        self.outbox
+            .borrow_mut()
+            .push(Event::RequestCompleted(RequestResult {
+                request: RequestRef::Call(RequestId(request)),
+                outcome,
+            }));
     }
 
     /// Delivers `job-progress`.
-    pub fn progress(&mut self, _request: u64, _percent: f32, _message: &str) {
-        unimplemented!("DEV-472")
+    pub fn progress(&mut self, request: u64, percent: f32, _message: &str) {
+        self.outbox
+            .borrow_mut()
+            .push(Event::JobProgress(JobProgressEvent {
+                job: RequestId(request),
+                percent,
+            }));
     }
 
     /// Request numbers of the jobs the plugin cancelled, in order (lane hook, see manual_gaps_fakes.md; DEV-472).
     pub fn cancelled(&self) -> Vec<u64> {
-        unimplemented!("DEV-472")
+        self.cancelled.clone()
     }
 
     /// Percent values the plugin reported through `jobs.progress`, in order (lane hook, see manual_gaps_fakes.md).
     pub fn reported_progress(&self) -> Vec<f32> {
-        unimplemented!("DEV-472")
+        self.progress.clone()
     }
 
     /// Makes the next job run see a cancel request (lane hook, see manual_gaps_fakes.md; DEV-472).
     pub fn request_cancel(&mut self) {
-        unimplemented!("DEV-472")
+        self.cancel_requested = true;
     }
 }
 

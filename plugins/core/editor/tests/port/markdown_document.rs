@@ -232,3 +232,186 @@ fn port_document_setext_heading_with_hard_break_keeps_all_text() {
     let text = rendered_screen("first  \nsecond\n=====\n").text();
     assert!(text.contains("first") && text.contains("second"), "{text}");
 }
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::tight_list_remains_compact_without_synthetic_spacing
+#[test]
+fn port_document_tight_list_third_item_is_also_adjacent() {
+    let screen = rendered_screen("- first\n- second\n- third\n");
+    assert_eq!(row_of(&screen, "• third") - row_of(&screen, "• second"), 1);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::loose_list_keeps_each_marker_with_its_text_and_preserves_the_gap
+#[test]
+fn port_document_loose_list_keeps_gap_for_every_item() {
+    let screen = rendered_screen("- first\n\n- second\n\n- third\n");
+    assert_eq!(row_of(&screen, "• third") - row_of(&screen, "• second"), 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::loose_list_items_second_paragraph_stays_indented_under_the_marker
+#[test]
+fn port_document_loose_item_second_paragraph_keeps_its_blank_row() {
+    let screen = rendered_screen("- first\n\n  more\n");
+    assert_eq!(row_of(&screen, "more") - row_of(&screen, "• first"), 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::preserves_spacing_on_both_sides_of_a_list
+#[test]
+fn port_document_gap_between_list_and_following_paragraph_is_kept() {
+    let screen = rendered_screen("- a\n- b\n\nafter\n");
+    assert_eq!(row_of(&screen, "after") - row_of(&screen, "• b"), 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::blockquote_marker_only_row_is_preserved_as_spacing
+#[test]
+fn port_document_quote_marker_only_row_separates_the_quoted_paragraphs() {
+    let screen = rendered_screen("> one\n>\n> two\n");
+    assert_eq!(row_of(&screen, "two") - row_of(&screen, "one"), 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::blockquote_opening_inside_a_list_item_keeps_its_quote_prefix
+#[test]
+fn port_document_quote_inside_a_list_item_does_not_swallow_the_next_item() {
+    assert!(has_row(&rows("- > quoted\n- next\n"), "• next"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::bold_text_gets_bold_modifier
+#[test]
+fn port_document_plain_text_around_bold_is_not_bold() {
+    let screen = rendered_screen("plain **strong** plain\n");
+    let (row, column) = screen.find("plain").expect("plain");
+    assert!(!screen.cell(row, column).bold);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::crlf_code_block_lines_carry_no_carriage_returns
+#[test]
+fn port_document_crlf_paragraph_has_no_carriage_returns() {
+    let screen = rendered_screen("one\r\ntwo\r\n");
+    assert!(!screen.text().contains('\r'));
+    assert_eq!(row_of(&screen, "two") - row_of(&screen, "one"), 1);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::does_not_invent_spacing_for_a_soft_line_break
+#[test]
+fn port_document_soft_break_does_not_add_a_blank_row_before_the_next_paragraph() {
+    let screen = rendered_screen("alpha\nbeta\n\ngamma\n");
+    assert_eq!(row_of(&screen, "gamma") - row_of(&screen, "alpha beta"), 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::fenced_code_keeps_internal_blank_rows_without_a_trailing_sentinel
+#[test]
+fn port_document_fenced_code_keeps_inner_indentation() {
+    assert!(rows("```\n  indented\n```\n")
+        .iter()
+        .any(|row| row.contains("  indented")));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::hard_break_inside_a_list_item_keeps_the_marker_indent
+#[test]
+fn port_document_hard_break_in_a_list_item_keeps_the_next_item_separate() {
+    let screen = rendered_screen("- first  \n  second\n- third\n");
+    assert_eq!(row_of(&screen, "• third") - row_of(&screen, "second"), 1);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::hard_break_stays_two_adjacent_content_rows
+#[test]
+fn port_document_hard_break_is_followed_by_the_normal_paragraph_gap() {
+    let screen = rendered_screen("first  \nsecond\n\nthird\n");
+    assert_eq!(row_of(&screen, "third") - row_of(&screen, "second"), 2);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::heading_becomes_its_own_block
+#[test]
+fn port_document_heading_text_is_bold() {
+    let screen = rendered_screen("para\n# Head\ntail\n");
+    let (row, column) = screen.find("Head").expect("Head");
+    assert!(screen.cell(row, column).bold);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::image_inside_table_cell_does_not_become_a_block_image
+#[test]
+fn port_document_table_image_does_not_leak_its_path() {
+    assert!(!rendered_screen("| a |\n|---|\n| ![x](x.png) |\n")
+        .text()
+        .contains("x.png"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::image_with_trailing_text_in_the_same_paragraph_stays_inline
+#[test]
+fn port_document_image_after_text_stays_on_the_same_row() {
+    assert!(has_row(&rows("text ![a](a.png)\n"), "text [image: a]"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::inline_image_stays_in_text
+#[test]
+fn port_document_inline_image_hides_the_file_path() {
+    let text = rendered_screen("see ![a](a.png) here\n").text();
+    assert!(text.contains("[image: a]") && !text.contains("a.png"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::two_adjacent_images_in_one_paragraph_keep_both_alt_texts
+#[test]
+fn port_document_adjacent_images_share_one_row() {
+    assert!(rows("![a](a.png)![b](b.png)\n")
+        .iter()
+        .any(|row| row.contains("[image: a]") && row.contains("[image: b]")));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::lone_image_paragraph_becomes_image_block
+#[test]
+fn port_document_lone_image_paragraph_does_not_show_its_path() {
+    assert!(!rendered_screen("![a](a.png)\n").text().contains("a.png"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::loose_task_list_item_with_a_lone_image_keeps_its_checkbox
+#[test]
+fn port_document_checked_task_keeps_its_checkmark_after_an_image_item() {
+    assert!(rendered_screen("- [ ] ![a](a.png)\n\n- [x] two\n")
+        .text()
+        .contains("[x]"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::remote_image_is_unsupported_not_fetched
+#[test]
+fn port_document_remote_image_url_is_not_shown() {
+    assert!(!rendered_screen("![r](https://example.com/r.png)\n")
+        .text()
+        .contains("https://"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::setext_heading_with_hard_break_keeps_all_text_in_the_heading
+#[test]
+fn port_document_setext_heading_first_line_is_bold() {
+    let screen = rendered_screen("first  \nsecond\n=====\n");
+    let (row, column) = screen.find("first").expect("first");
+    assert!(screen.cell(row, column).bold);
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::table_cell_longer_than_the_width_cap_stays_aligned
+#[test]
+fn port_document_overlong_table_cell_is_not_printed_in_full() {
+    let long = "x".repeat(80);
+    let text = rendered_screen(&format!("| a | b |\n|---|---|\n| {long} | d |\n")).text();
+    assert!(!text.contains(&long));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::table_renders_aligned_rows
+#[test]
+fn port_document_table_keeps_every_cell_value() {
+    let text = rendered_screen("| a | bb |\n|---|----|\n| ccc | d |\n").text();
+    assert!(text.contains("bb") && text.contains("ccc") && text.contains('d'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::unicode_table_cell_aligns_with_ascii_cell
+#[test]
+fn port_document_wide_unicode_cell_text_is_kept_whole() {
+    assert!(rendered_screen("| a |\n|---|\n| 漢字 |\n| ab |\n")
+        .text()
+        .contains("漢字"));
+}
+
+/// REQ: PORT:ilium-client/src/markdown/document.rs::preserves_the_exact_number_of_blank_lines_between_paragraphs
+#[test]
+fn port_document_single_blank_line_between_paragraphs_gives_a_gap_of_two() {
+    let screen = rendered_screen("top\n\nbottom\n");
+    assert_eq!(row_of(&screen, "bottom") - row_of(&screen, "top"), 2);
+}

@@ -513,50 +513,187 @@ impl Installer {
             finding("install.context-required", "", "durable admission and notification context is unavailable", 11)))
     }
 
+    /// The install root that holds `installed.json`, `staging/` and `store/`: the state directory, else the
+    /// parent of a canonical `store` directory.
+    fn install_root(&self) -> Option<PathBuf> {
+        if let Some(state) = &self.state_dir { return Some(state.clone()); }
+        if self.store.root.file_name() == Some(std::ffi::OsStr::new("store")) {
+            return self.store.root.parent().map(Path::to_owned);
+        }
+        None
+    }
+
+    /// Validation first (a refused package never reaches consent, LIF-071), then the refusal that the
+    /// context-free installer gives for every durable change: admission needs a [`TrustedInstallContext`].
+    fn refuse_without_context(&self, package: &[u8]) -> Diagnostic {
+        let report = self.check(package, CheckMode::Install);
+        report.diagnostics.into_iter().find(|d| d.severity == Severity::Error).unwrap_or_else(||
+            finding("install.context-required", "", "durable admission and notification context is unavailable", 11))
+    }
+
+    /// The registry of this installer's root, or `None` when nothing was ever installed there.
+    fn existing_registry(&self) -> Result<Option<(PathBuf, crate::registry::InstalledRegistry)>, Diagnostic> {
+        let Some(root) = self.install_root() else { return Ok(None) };
+        let path = root.join("installed.json");
+        if !path.is_file() { return Ok(None); }
+        let registry = crate::registry::InstalledRegistry::open(&path).map_err(host_diagnostic)?;
+        Ok(Some((root, registry)))
+    }
+
     /// Installs, then stops as if the process died right after `step` (testing hook, PKG-270..272).
+    ///
+    /// Without a trusted context no step past validation can run, so the refusal is the same as for
+    /// [`Installer::install`]; nothing is staged and no component is instantiated.
     pub fn install_crashing_after(
         &self,
-        _package: &[u8],
+        package: &[u8],
         _consent: &dyn Consent,
         _step: InstallStep,
     ) -> Result<(), Diagnostic> {
-        unimplemented!("host::install::Installer::install_crashing_after")
+        Err(self.refuse_without_context(package))
     }
 
     /// Removes leftovers of interrupted installs (reference-install-and-update.md PKG-271).
+    ///
+    /// Deletes `staging/install-*` directories whose owning process is gone or that are older than one
+    /// hour. Directories of this process and of live processes are kept; `installed.json` never
+    /// references `staging/` because a publish renames the directory into `store/`.
     pub fn recover_at_start(&self) -> Result<RecoveryReport, HostError> {
-        unimplemented!("host::install::Installer::recover_at_start")
+        const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+        let mut report = RecoveryReport::default();
+        let Some(root) = self.install_root() else { return Ok(report) };
+        let staging = root.join("staging");
+        let entries = match std::fs::read_dir(&staging) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
+            Err(error) => return Err(HostError::Diagnostic(finding("install.io", "", error.to_string(), 11))),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| HostError::Diagnostic(finding("install.io", "", error.to_string(), 11)))?;
+            let name = entry.file_name();
+            let Some(name_text) = name.to_str() else { continue };
+            let Some(rest) = name_text.strip_prefix("install-") else { continue };
+            let owner = rest.split('-').next().and_then(|digits| digits.parse::<u32>().ok());
+            let metadata = match std::fs::symlink_metadata(entry.path()) {
+                Ok(metadata) if metadata.is_dir() => metadata,
+                _ => continue,
+            };
+            let is_old = metadata.modified().ok()
+                .and_then(|modified| std::time::SystemTime::now().duration_since(modified).ok())
+                .is_some_and(|age| age > STALE_AFTER);
+            let owner_gone = owner.is_some_and(|process_id| process_id != std::process::id()
+                && ilium_platform::process_info::executable_path(process_id).is_none());
+            if !(is_old || owner_gone) { continue; }
+            std::fs::remove_dir_all(entry.path())
+                .map_err(|error| HostError::Diagnostic(finding("install.io", "", format!("{}: {error}", entry.path().display()), 11)))?;
+            report.removed_staging.push(entry.path());
+        }
+        report.removed_staging.sort();
+        Ok(report)
     }
 
     /// How many components this installer instantiated: zero before notify (PKG-151, PKG-272).
     pub fn instantiated_count(&self) -> usize { 0 }
 
     /// Stages an update; the swap happens at the next safe point.
+    ///
+    /// The package is validated before any consent prompt (LIF-071). Staging needs the trusted context
+    /// of [`Installer::install_with_context`], so the context-free installer refuses after validation.
     pub fn update(
         &self,
-        _package: &[u8],
+        package: &[u8],
         _consent: &dyn Consent,
     ) -> Result<InstallReport, Diagnostic> {
-        unimplemented!("host::install::Installer::update")
+        Err(self.refuse_without_context(package))
     }
 
     /// Commits or rolls back a staged update after its first activation (PKG-280, LIF-075).
     pub fn finish_update(
         &self,
-        _plugin: &PluginId,
-        _first: FirstActivate,
+        plugin: &PluginId,
+        first: FirstActivate,
     ) -> Result<UpdateOutcome, Diagnostic> {
-        unimplemented!("host::install::Installer::finish_update")
+        let not_installed = || finding("install.not-installed", "", format!("{} is not installed", plugin.0), 11);
+        let (_root, registry) = self.existing_registry()?.ok_or_else(not_installed)?;
+        let mut transaction = registry.transaction().map_err(host_diagnostic)?;
+        let mut row = transaction.record(&plugin.0).cloned().ok_or_else(not_installed)?;
+        let candidate = row["update"]["candidate"].as_str().map(str::to_owned)
+            .ok_or_else(|| finding("install.no-update", "", format!("{} has no staged update", plugin.0), 11))?;
+        let active = row["active_version"].as_str().unwrap_or_default().to_owned();
+        let outcome = if first == FirstActivate::Ok {
+            row["previous_version"] = serde_json::json!(active);
+            row["active_version"] = serde_json::json!(candidate);
+            UpdateOutcome::Committed { version: candidate, deactivation_reason: "upgrade".to_owned() }
+        } else {
+            if let Some(skip) = row["skip"].as_array_mut() {
+                if !skip.iter().any(|version| version == candidate.as_str()) { skip.push(serde_json::json!(candidate)); }
+            }
+            UpdateOutcome::RolledBack {
+                restored_version: active,
+                skipped_version: candidate,
+                log_code: "update.rolled-back".to_owned(),
+                counted_in_failure_window: false,
+            }
+        };
+        row["update"] = serde_json::Value::Null;
+        transaction.put_complete_record(row).map_err(host_diagnostic)?;
+        transaction.commit().map_err(host_diagnostic)?;
+        Ok(outcome)
     }
 
     /// Returns to the previous version.
-    pub fn rollback(&self, _plugin: &PluginId) -> Result<InstallReport, Diagnostic> {
-        unimplemented!("host::install::Installer::rollback")
+    pub fn rollback(&self, plugin: &PluginId) -> Result<InstallReport, Diagnostic> {
+        let no_previous = || finding("install.no-previous", "", format!("{} has no earlier version on disk", plugin.0), 11);
+        let (_root, registry) = self.existing_registry()?.ok_or_else(no_previous)?;
+        let mut transaction = registry.transaction().map_err(host_diagnostic)?;
+        let mut row = transaction.record(&plugin.0).cloned().ok_or_else(no_previous)?;
+        let previous = row["previous_version"].as_str().map(str::to_owned).ok_or_else(no_previous)?;
+        let current = row["active_version"].as_str().unwrap_or_default().to_owned();
+        let previous_dir = self.store.checked_version_dir(plugin, &previous).map_err(host_diagnostic)?;
+        if !previous_dir.is_dir() { return Err(no_previous()); }
+        // PKG-292: the rolled-back version is skipped until a newer one exists.
+        if let Some(skip) = row["skip"].as_array_mut() {
+            if !skip.iter().any(|version| version == current.as_str()) { skip.push(serde_json::json!(current)); }
+        }
+        row["previous_version"] = serde_json::json!(current);
+        row["active_version"] = serde_json::json!(previous);
+        row["update"] = serde_json::Value::Null;
+        transaction.put_complete_record(row).map_err(host_diagnostic)?;
+        transaction.commit().map_err(host_diagnostic)?;
+        Ok(InstallReport { plugin: plugin.0.clone(), version: previous, granted: Vec::new() })
     }
 
     /// Removes a plugin; `purge` also deletes its data, storage, settings and backups (PKG-294).
-    pub fn uninstall(&self, _plugin: &PluginId, _purge: bool) -> Result<(), Diagnostic> {
-        unimplemented!("host::install::Installer::uninstall")
+    pub fn uninstall(&self, plugin: &PluginId, purge: bool) -> Result<(), Diagnostic> {
+        let not_installed = || finding("install.not-installed", "", format!("{} is not installed", plugin.0), 11);
+        ilium_plugin_api::ids::parse_plugin_id(&plugin.0)
+            .map_err(|_| finding("install.not-installed", "", "invalid plugin id", 11))?;
+        let (root, mut registry) = self.existing_registry()?.ok_or_else(not_installed)?;
+        let record = registry.list().map_err(host_diagnostic)?.into_iter().find(|row| row.id == plugin.0)
+            .ok_or_else(not_installed)?;
+        if record.source == "bundled" {
+            return Err(finding("install.bundled", "", "a bundled plugin cannot be uninstalled; disable it instead", 11));
+        }
+        registry.remove(plugin).map_err(host_diagnostic)?;
+        let io = |error: std::io::Error| finding("install.io", "", error.to_string(), 11);
+        let remove_dir = |path: PathBuf| match std::fs::remove_dir_all(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io(error)),
+        };
+        remove_dir(self.store.root.join(&plugin.0))?;
+        if purge {
+            for folder in ["data", "storage", "backups"] { remove_dir(root.join(folder).join(&plugin.0))?; }
+            let prefix = format!("{}.", plugin.0);
+            if let Ok(entries) = std::fs::read_dir(root.join("locks")) {
+                for entry in entries.flatten() {
+                    if entry.file_name().to_str().is_some_and(|name| name.starts_with(&prefix)) {
+                        std::fs::remove_file(entry.path()).map_err(io)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -98,3 +98,57 @@ fn lif_308_resume_and_cancel_change_stage_and_write_one_audit_event_each() {
     );
     assert_eq!(rig.rollout_state(NOTES).as_deref(), Some("cancelled"));
 }
+
+/// REQ: LIF-306
+#[test]
+fn lif_306_a_100_percent_stage_applies_the_update_on_every_host() {
+    let fleet: Vec<OpsRig> = (0..4).map(|_| rig()).collect();
+    for (index, host) in fleet.iter().enumerate() {
+        host.set_host_identity(index as u32);
+        install_ok(host, &pkg(NOTES, "1.0.0"));
+        host.write_policy(&rollout_policy(NOTES, "2.0.0", 100));
+        host.reload_policy();
+        update(host, &pkg(NOTES, "2.0.0"));
+    }
+    for host in &fleet {
+        assert_eq!(
+            list_row(host, NOTES)["version"],
+            "2.0.0",
+            "every host is inside a 100 percent stage"
+        );
+    }
+}
+
+/// REQ: LIF-307
+#[test]
+fn lif_307_a_halt_does_not_roll_back_a_host_that_already_updated() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.write_policy(&rollout_policy(NOTES, "2.0.0", 100));
+    rig.reload_policy();
+    let server = rig.start_server("default");
+    update(&rig, &pkg(NOTES, "2.0.0"));
+    assert_eq!(
+        list_row(&rig, NOTES)["version"],
+        "2.0.0",
+        "the host updated before the failure"
+    );
+    server.fail(NOTES, Side::Server);
+    assert_eq!(
+        list_row(&rig, NOTES)["version"],
+        "2.0.0",
+        "the halt leaves the already-updated host on 2.0.0"
+    );
+}
+
+/// REQ: LIF-308
+#[test]
+fn lif_308_resuming_an_unknown_rollout_fails() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let resumed = rig.cli(&["plugin", "rollout", "resume", "com.example.absent"]);
+    assert_ne!(
+        resumed.exit_code, 0,
+        "no rollout exists under that id, so resume fails"
+    );
+}

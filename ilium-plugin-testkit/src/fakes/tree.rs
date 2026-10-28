@@ -1,6 +1,14 @@
 //! Fake tree, panes and agents (reference-test-harness.md "Fake tree, panes, agents and jobs").
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use ilium_plugin_sdk_core::generated::types::{AgentActivityEvent, Event, NodeId};
 use ilium_plugin_sdk_core::types::{AgentActivity, AgentView, NodeClass};
+
+/// Events the fakes produce for the plugin; the host drains it on deliver and settle.
+pub(crate) type Outbox = Rc<RefCell<Vec<Event>>>;
 
 /// A tree node as tests and fixtures see it; ids start at 1 (DEV-471).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -19,96 +27,235 @@ pub struct TreeNode {
     pub agent: Option<AgentView>,
 }
 
+/// Extra per-node data the lane hooks store.
+#[derive(Debug, Clone, Default)]
+struct NodeExtras {
+    screen: Option<Vec<String>>,
+    screen_unavailable: bool,
+    session: Option<(String, Vec<String>)>,
+    directory: Option<String>,
+    metadata: Option<Vec<u8>>,
+    locked: bool,
+    worktree: bool,
+}
+
 /// Handle on the fake tree of a host.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FakeTree {
-    _private: (),
+    nodes: BTreeMap<u64, TreeNode>,
+    extras: BTreeMap<u64, NodeExtras>,
+    revisions: BTreeMap<u64, u64>,
+    last_id: u64,
+    outbox: Outbox,
 }
 
 impl FakeTree {
+    /// A tree that publishes events into `outbox`.
+    pub(crate) fn with_outbox(outbox: Outbox) -> FakeTree {
+        FakeTree {
+            outbox,
+            ..FakeTree::default()
+        }
+    }
+
+    /// Ids of every node in pre-order (roots by ascending id, children by ascending id).
+    pub(crate) fn preorder_ids(&self) -> Vec<u64> {
+        fn walk(tree: &FakeTree, parent: Option<u64>, out: &mut Vec<u64>) {
+            for (id, node) in &tree.nodes {
+                if node.parent == parent {
+                    out.push(*id);
+                    walk(tree, Some(*id), out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, None, &mut out);
+        out
+    }
+
+    /// Inserts a node under its own id without queuing an event; later ids continue after the highest.
+    pub(crate) fn insert_with_id(&mut self, node: TreeNode) {
+        self.last_id = self.last_id.max(node.id);
+        self.nodes.insert(node.id, node);
+    }
+
+    /// Inserts a node without queuing an event (fixtures load the tree before activation).
+    pub(crate) fn insert_quiet(&mut self, node: TreeNode) -> u64 {
+        self.last_id += 1;
+        let id = self.last_id;
+        self.nodes.insert(id, TreeNode { id, ..node });
+        id
+    }
+
+    fn emit(&self, event: Event) {
+        self.outbox.borrow_mut().push(event);
+    }
+
     /// Adds a node, delivers `tree-changed` and returns the new id.
-    pub fn add(&mut self, _node: TreeNode) -> u64 {
-        unimplemented!("DEV-470")
+    pub fn add(&mut self, node: TreeNode) -> u64 {
+        let id = self.insert_quiet(node);
+        self.emit(Event::TreeChanged(vec![NodeId(id)]));
+        id
     }
 
     /// Renames a node and delivers `tree-changed`.
-    pub fn rename(&mut self, _id: u64, _name: &str) {
-        unimplemented!("DEV-470")
+    pub fn rename(&mut self, id: u64, name: &str) {
+        if let Some(node) = self.nodes.get_mut(&id) {
+            node.name = name.to_string();
+            self.emit(Event::TreeChanged(vec![NodeId(id)]));
+        }
     }
 
     /// Delivers `agent-activity-changed` with `revision` plus 1.
-    pub fn set_activity(&mut self, _id: u64, _activity: AgentActivity) {
-        unimplemented!("DEV-470")
+    pub fn set_activity(&mut self, id: u64, activity: AgentActivity) {
+        let Some(node) = self.nodes.get_mut(&id) else {
+            return;
+        };
+        let previous = node
+            .agent
+            .as_ref()
+            .map_or(AgentActivity::None, |agent| agent.activity);
+        match node.agent.as_mut() {
+            Some(agent) => agent.activity = activity,
+            None => {
+                node.agent = Some(AgentView {
+                    signature: String::new(),
+                    activity,
+                    objective: None,
+                    goal: None,
+                });
+            }
+        }
+        let revision = self.revisions.entry(id).or_insert(0);
+        *revision += 1;
+        let revision = *revision;
+        self.emit(Event::AgentActivityChanged(AgentActivityEvent {
+            node: NodeId(id),
+            previous,
+            current: activity,
+            revision,
+        }));
     }
 
     /// Removes a node and its children and delivers `node-removed`.
-    pub fn remove(&mut self, _id: u64) {
-        unimplemented!("DEV-470")
+    pub fn remove(&mut self, id: u64) {
+        if !self.nodes.contains_key(&id) {
+            return;
+        }
+        let mut doomed = vec![id];
+        let mut index = 0;
+        while index < doomed.len() {
+            let parent = doomed[index];
+            doomed.extend(
+                self.nodes
+                    .values()
+                    .filter(|node| node.parent == Some(parent))
+                    .map(|node| node.id),
+            );
+            index += 1;
+        }
+        for removed in doomed {
+            self.nodes.remove(&removed);
+            self.extras.remove(&removed);
+            self.emit(Event::NodeRemoved(NodeId(removed)));
+        }
     }
 
     /// Reads a node.
-    pub fn get(&self, _id: u64) -> Option<TreeNode> {
-        unimplemented!("DEV-470")
+    pub fn get(&self, id: u64) -> Option<TreeNode> {
+        self.nodes.get(&id).cloned()
     }
 
     /// Moves a node under another parent and delivers `tree-changed` (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn move_node(&mut self, _id: u64, _new_parent: u64) {
-        unimplemented!("DEV-470")
+    pub fn move_node(&mut self, id: u64, new_parent: u64) {
+        if id == new_parent || !self.nodes.contains_key(&new_parent) {
+            return;
+        }
+        if let Some(node) = self.nodes.get_mut(&id) {
+            node.parent = Some(new_parent);
+            self.emit(Event::TreeChanged(vec![NodeId(id), NodeId(new_parent)]));
+        }
     }
 
     /// Adds a group node under the root and returns its id (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn add_group(&mut self, _name: &str) -> u64 {
-        unimplemented!("DEV-470")
+    pub fn add_group(&mut self, name: &str) -> u64 {
+        self.add(TreeNode {
+            id: 0,
+            parent: None,
+            name: name.to_string(),
+            class: NodeClass::Container,
+            content_kind: None,
+            agent: None,
+        })
     }
 
     /// Adds a pane running an agent of `signature` (`"claude"`, `"codex"`) and returns its id (lane hook, see manual_gaps_fakes.md).
-    pub fn add_agent_pane(&mut self, _name: &str, _signature: &str) -> u64 {
-        unimplemented!("DEV-470")
+    pub fn add_agent_pane(&mut self, name: &str, signature: &str) -> u64 {
+        self.add(TreeNode {
+            id: 0,
+            parent: None,
+            name: name.to_string(),
+            class: NodeClass::Pane,
+            content_kind: Some("ilium.terminal".to_string()),
+            agent: Some(AgentView {
+                signature: signature.to_string(),
+                activity: AgentActivity::Idle,
+                objective: None,
+                goal: None,
+            }),
+        })
     }
 
     /// The rows `terminal.read-screen` returns for a pane (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn set_screen(&mut self, _id: u64, _rows: Vec<String>) {
-        unimplemented!("DEV-470")
+    pub fn set_screen(&mut self, id: u64, rows: Vec<String>) {
+        let extras = self.extras.entry(id).or_default();
+        extras.screen = Some(rows);
+        extras.screen_unavailable = false;
     }
 
     /// `terminal.read-screen` answers `None` for the pane (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn set_screen_unavailable(&mut self, _id: u64) {
-        unimplemented!("DEV-470")
+    pub fn set_screen_unavailable(&mut self, id: u64) {
+        let extras = self.extras.entry(id).or_default();
+        extras.screen = None;
+        extras.screen_unavailable = true;
     }
 
     /// The verified agent session of a pane and its transcript lines (lane hook, see manual_gaps_fakes.md).
-    pub fn set_agent_session(&mut self, _id: u64, _session_id: &str, _transcript: Vec<String>) {
-        unimplemented!("DEV-470")
+    pub fn set_agent_session(&mut self, id: u64, session_id: &str, transcript: Vec<String>) {
+        self.extras.entry(id).or_default().session = Some((session_id.to_string(), transcript));
     }
 
     /// Records a goal on an agent pane; `status` is active, paused, blocked, done or unknown (lane hook, see manual_gaps_fakes.md).
-    pub fn set_agent_goal(&mut self, _id: u64, _objective: &str, _status: &str) {
-        unimplemented!("DEV-470")
+    pub fn set_agent_goal(&mut self, id: u64, objective: &str, status: &str) {
+        if let Some(agent) = self.nodes.get_mut(&id).and_then(|node| node.agent.as_mut()) {
+            agent.objective = Some(objective.to_string());
+            agent.goal = Some(status.to_string());
+        }
     }
 
     /// The working directory of a pane, in `"scope:path"` shorthand (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn set_pane_directory(&mut self, _id: u64, _directory: &str) {
-        unimplemented!("DEV-470")
+    pub fn set_pane_directory(&mut self, id: u64, directory: &str) {
+        self.extras.entry(id).or_default().directory = Some(directory.to_string());
     }
 
     /// The plugin metadata bytes stored on a node (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn metadata(&self, _id: u64) -> Option<Vec<u8>> {
-        unimplemented!("DEV-470")
+    pub fn metadata(&self, id: u64) -> Option<Vec<u8>> {
+        self.extras.get(&id).and_then(|extras| extras.metadata.clone())
     }
 
     /// Stores plugin metadata bytes on a node (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn set_metadata(&mut self, _id: u64, _bytes: Vec<u8>) {
-        unimplemented!("DEV-470")
+    pub fn set_metadata(&mut self, id: u64, bytes: Vec<u8>) {
+        self.extras.entry(id).or_default().metadata = Some(bytes);
     }
 
     /// Locks or unlocks a node against structural edits (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn set_locked(&mut self, _id: u64, _locked: bool) {
-        unimplemented!("DEV-470")
+    pub fn set_locked(&mut self, id: u64, locked: bool) {
+        self.extras.entry(id).or_default().locked = locked;
     }
 
     /// Marks a pane as living in a Git worktree (lane hook, see manual_gaps_fakes.md; DEV-470).
-    pub fn set_worktree(&mut self, _id: u64, _worktree: bool) {
-        unimplemented!("DEV-470")
+    pub fn set_worktree(&mut self, id: u64, worktree: bool) {
+        self.extras.entry(id).or_default().worktree = worktree;
     }
 }
 

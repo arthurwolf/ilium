@@ -339,3 +339,57 @@ fn pkg_182_changed_manifest_without_the_crc_repair_stops_at_stage_1() {
     let bytes = patch_data(&signed, "manifest.json", 20, b'Z', false);
     assert_eq!(check_codes(&bytes), only("package.crc-mismatch"));
 }
+
+/// REQ: PKG-161
+#[test]
+fn pkg_161_capital_server_alone_is_refused_only_as_unexpected() {
+    let mut entries = vec![
+        Z::new("Server.wasm", &vector_component()),
+        Z::new("manifest.json", &vector_manifest()),
+    ];
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.entry-unexpected")
+    );
+}
+
+/// REQ: PKG-163
+#[test]
+fn pkg_163_overlapping_header_is_caught_at_stage_one() {
+    let mut entries = vector_entries_z();
+    entries[1].offset = Some(5);
+    let report = check(&build(&entries, &Tail::default()));
+    assert_eq!(report.last_stage, 1);
+}
+
+/// REQ: PKG-173
+#[test]
+fn pkg_173_directory_entry_with_a_file_inside_adds_no_path_error() {
+    let entries = sorted({
+        let mut v = vector_entries_z();
+        v.push(Z::new("assets/", b""));
+        v.push(Z::new("assets/logo.png", b"x"));
+        v
+    });
+    let codes = stage1_codes(&build(&entries, &Tail::default()));
+    assert!(codes.contains(&"package.entry-directory".to_string()));
+    assert!(!codes.contains(&"package.path-invalid".to_string()));
+}
+
+/// REQ: PKG-179
+#[test]
+fn pkg_179_rebuilt_five_byte_payload_fails_on_the_section_not_on_integrity() {
+    let bytes = package_with_component(&component_with(&[api_section(&[0, 0, 0, 1, 0])]));
+    let codes = check_codes(&bytes);
+    assert!(codes.contains(&"package.api-section-invalid".to_string()));
+    assert!(!codes.contains(&"package.crc-mismatch".to_string()));
+    assert!(!codes.contains(&"manifest.file-hash".to_string()));
+}
+
+/// REQ: PKG-181
+#[test]
+fn pkg_181_changed_component_byte_without_crc_repair_is_a_crc_mismatch() {
+    let bytes = patch_data(&vector_unsigned(), "server.wasm", 33, 0x01, false);
+    assert_eq!(check_codes(&bytes), only("package.crc-mismatch"));
+}

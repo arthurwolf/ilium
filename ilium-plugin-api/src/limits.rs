@@ -344,7 +344,9 @@ pub fn clamp(requested: &Limits, tier: Tier) -> Result<BTreeMap<LimitKey, u64>, 
 
 /// ABI-068: the refusal code of the table row for `key`.
 pub fn row_refusal_code(_key: LimitKey) -> &'static str {
-    unimplemented!("api::limits::row_refusal_code")
+    // Every row of the size table is refused with the one ABI code for a decoded value over its
+    // limit (reference-errors-and-limits.md, ABI-063).
+    "abi.limit-exceeded"
 }
 
 #[cfg(test)]

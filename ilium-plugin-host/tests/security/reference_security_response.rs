@@ -88,6 +88,18 @@ fn sec_323_the_supported_versions_are_the_latest_minor_and_the_one_before() {
     assert!(text.contains("latest minor") || text.contains("Supported versions"));
 }
 
+/// REQ: SEC-323
+#[test]
+fn sec_323_the_release_process_applies_the_two_minor_rule_even_after_the_end_date() {
+    assert_page_has(
+        "release-process.md",
+        &[
+            "The latest minor and the one before it always receive security fixes",
+            "Applies even after the end date",
+        ],
+    );
+}
+
 /// REQ: SEC-324
 #[test]
 fn sec_324_the_scale_has_four_levels_with_the_documented_examples() {

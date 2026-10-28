@@ -206,3 +206,111 @@ fn port_002_scheduled_input_keyboard_edits_toggles_and_submits_the_form() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].0, plain_spec(pane, "x", Delivery::Typed));
 }
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::validates_text_only_text_and_enter_and_enter_only
+#[test]
+fn port_scheduled_input_default_thirty_seconds_fires_at_the_boundary() {
+    let (mut session, pane) = schedule_dialog("shell");
+    set_text(&mut session, SCHEDULE_VIEW, "payload", "boundary");
+    set_flag(&mut session, SCHEDULE_VIEW, "send-enter", false);
+    commit_schedule(&mut session);
+    assert_eq!(sent_after(&mut session, 29_999), 0, "not one millisecond early");
+    assert_eq!(sent_after(&mut session, 1), 1);
+    let sent = sends(&server(&mut session).submitted());
+    assert_eq!(sent[0].0, plain_spec(pane, "boundary", Delivery::Typed));
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::rejects_zero_invalid_clock_fields_and_empty_payload
+#[test]
+fn port_scheduled_input_refused_zero_delay_is_armed_after_correction() {
+    let (mut session, pane) = schedule_dialog("shell");
+    set_text(&mut session, SCHEDULE_VIEW, "payload", "fixed");
+    set_text(&mut session, SCHEDULE_VIEW, "hours", "0");
+    set_text(&mut session, SCHEDULE_VIEW, "minutes", "0");
+    set_text(&mut session, SCHEDULE_VIEW, "seconds", "0");
+    commit_schedule(&mut session);
+    assert!(schedule_dialog_open(&mut session), "a zero delay is refused");
+    assert_eq!(sent_after(&mut session, 3_600_000), 0);
+    set_text(&mut session, SCHEDULE_VIEW, "hours", "1");
+    commit_schedule(&mut session);
+    assert!(!schedule_dialog_open(&mut session), "the corrected form closes");
+    assert_eq!(sent_after(&mut session, 3_599_999), 0);
+    assert_eq!(sent_after(&mut session, 1), 1);
+    let sent = sends(&server(&mut session).submitted());
+    assert_eq!(sent[0].0, plain_spec(pane, "fixed", Delivery::Submitted));
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::numeric_input_filters_letters_and_duration_uses_checked_units
+#[test]
+fn port_scheduled_input_letters_typed_into_minutes_are_dropped() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    press(&mut session, SCHEDULE_VIEW, "tab");
+    press(&mut session, SCHEDULE_VIEW, "q");
+    press(&mut session, SCHEDULE_VIEW, "7");
+    let row = form_row(&mut session, SCHEDULE_VIEW, "Minutes");
+    assert!(row.contains('7') && !row.contains('q'), "{row}");
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::dialog_layout_is_aerated_and_clamped_to_small_screens
+#[test]
+fn port_scheduled_input_send_enter_row_sits_below_payload() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    let screen = draw(&mut session, SCHEDULE_VIEW, 100, 30);
+    let payload_row = screen.find("Payload").expect("Payload label").0;
+    let enter_row = screen.find("Send Enter").expect("Send Enter label").0;
+    assert!(payload_row < enter_row, "payload {payload_row}, enter {enter_row}");
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::clock_steps_saturate_and_empty_is_zero
+#[test]
+fn port_scheduled_input_seconds_step_up_from_the_default_thirty() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    press(&mut session, SCHEDULE_VIEW, "tab");
+    press(&mut session, SCHEDULE_VIEW, "tab");
+    press(&mut session, SCHEDULE_VIEW, "right");
+    let row = form_row(&mut session, SCHEDULE_VIEW, "Seconds");
+    assert!(row.trim_end().ends_with("31 │"), "{row}");
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::star_keeps_invalid_draft_and_step_rejects_it
+#[test]
+fn port_scheduled_input_step_down_also_keeps_invalid_draft() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    set_text(&mut session, SCHEDULE_VIEW, "hours", "bad");
+    press(&mut session, SCHEDULE_VIEW, "left");
+    assert!(
+        form_row(&mut session, SCHEDULE_VIEW, "Hours").contains("bad"),
+        "a downward step keeps the invalid draft"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::aggregate_overflow_does_not_mutate_any_draft
+#[test]
+fn port_scheduled_input_empty_hours_steps_to_one() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    press(&mut session, SCHEDULE_VIEW, "right");
+    let row = form_row(&mut session, SCHEDULE_VIEW, "Hours");
+    assert!(row.trim_end().ends_with("1 │"), "{row}");
+}
+
+/// REQ: PORT:ilium-client/src/scheduled_input.rs::numeric_fields_share_inner_row_and_preserve_empty_keyboard_draft
+#[test]
+fn port_scheduled_input_empty_numeric_rows_keep_their_leaders() {
+    let (mut session, _pane) = schedule_dialog("shell");
+    let row = form_row(&mut session, SCHEDULE_VIEW, "Minutes");
+    assert!(row.contains('…'), "an empty numeric row still has leaders: {row}");
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::scheduled_input_keyboard_edits_toggles_and_submits_the_form
+#[test]
+fn port_scheduled_input_space_twice_restores_send_enter() {
+    let (mut session, pane) = schedule_dialog("shell");
+    set_text(&mut session, SCHEDULE_VIEW, "payload", "x");
+    press(&mut session, SCHEDULE_VIEW, "tab");
+    press(&mut session, SCHEDULE_VIEW, "space");
+    press(&mut session, SCHEDULE_VIEW, "space");
+    commit_schedule(&mut session);
+    assert_eq!(sent_after(&mut session, 30_000), 1);
+    let sent = sends(&server(&mut session).submitted());
+    assert_eq!(sent[0].0, plain_spec(pane, "x", Delivery::Submitted));
+}

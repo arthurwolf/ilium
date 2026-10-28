@@ -413,3 +413,37 @@ fn dev_498_a_host_that_never_activated_is_inactive() {
         assert_eq!(host.lifecycle_state(), InstanceState::Inactive);
     });
 }
+
+/// REQ: DEV-485
+#[test]
+fn dev_485_restart_runs_at_one_second_of_fake_time_not_before() {
+    with_clean_env(|| {
+        let mut host = active();
+        fail_at(&mut host, 0);
+        host.advance_clock(999);
+        host.settle();
+        assert_eq!(
+            spy().activations.len(),
+            1,
+            "no restart before one second of fake time"
+        );
+        host.advance_clock(1);
+        host.settle();
+        assert_eq!(spy().activations.len(), 2, "the restart runs at one second");
+    });
+}
+
+/// REQ: DEV-496
+#[test]
+fn dev_496_crash_stays_armed_until_the_next_journal_append() {
+    with_clean_env(|| {
+        let mut host = active();
+        host.crash_after_journal_write();
+        assert!(
+            host.failures().is_empty(),
+            "nothing crashes before the next journal append"
+        );
+        host.deliver(client_batch(1));
+        assert_eq!(host.failures().len(), 1);
+    });
+}

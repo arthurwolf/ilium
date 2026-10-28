@@ -403,3 +403,32 @@ fn dev_838_second_job_run_does_not_see_state_of_the_first() {
     assert!(is_ok(&complete(&mut fixture, second)));
     assert_eq!(fixture.jobs().take_output(second), Some(Vec::new()));
 }
+
+/// REQ: WIT:ilium:host/jobs.is-cancelled
+#[test]
+fn jobs_is_cancelled_stays_false_while_progress_is_reported() {
+    let mut fixture = echo_fixture();
+    let mut instance = fixture.job_instance(KIND, b"");
+    instance.jobs().report_progress(50.0);
+    assert!(
+        !instance.jobs().is_cancelled(),
+        "reporting progress must not cancel the job"
+    );
+}
+
+/// REQ: DEV-837
+#[test]
+fn dev_837_no_result_is_readable_before_the_slow_job_completes() {
+    let mut fixture = job_fixture(Box::new(|_kind, input| {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Ok(input.to_vec())
+    }));
+    let job = expect_ok(fixture.jobs().start(KIND.to_owned(), b"input".to_vec()));
+    assert_eq!(
+        fixture.jobs().take_output(job),
+        None,
+        "the result must not be readable before the job completes"
+    );
+    assert!(is_ok(&complete(&mut fixture, job)));
+    assert_eq!(fixture.jobs().take_output(job), Some(b"input".to_vec()));
+}

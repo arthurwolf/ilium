@@ -2,6 +2,8 @@
 //! gone and whose shell owns the terminal) must never be treated as a live, addressable agent.
 //! In the plugin world the observable consequence is what the Sessions plugin submits for it.
 
+use ilium_plugin_sdk::types::PaneLifecycleState;
+
 use crate::common::*;
 
 /// REQ: PORT:ilium-core/src/agent_recovery.rs::historical_working_identity_does_not_authorize_a_live_agent
@@ -54,4 +56,45 @@ fn port_exit_labels_distinguish_observed_status_from_unknown_cause() {
         replace_commands(&restore_panes(&mut verified, &[pane])).len(),
         1
     );
+}
+
+/// REQ: PORT:ilium-core/src/agent_recovery.rs::historical_working_identity_does_not_authorize_a_live_agent
+#[test]
+fn port_a_restored_shell_pane_is_still_frozen_until_it_runs() {
+    let mut host = activated_server();
+    let pane = add_shell(&mut host, "former agent");
+    register_signature(&mut host, signature("codex", Some(codex_template())));
+    let submitted = restore_panes(&mut host, &[pane]);
+    let frozen = freezes(&submitted);
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].0.pane.0, pane);
+}
+
+/// REQ: PORT:ilium-core/src/agent_recovery.rs::unavailable_projection_does_not_present_a_historical_goal_or_turn_as_live
+#[test]
+fn port_an_unavailable_agent_pane_is_frozen_and_thaws_when_it_runs() {
+    let mut host = activated_server();
+    let pane = add_agent(&mut host, "unavailable", "claude");
+    register_signature(&mut host, signature("claude", Some(claude_template())));
+    let submitted = restore_panes(&mut host, &[pane]);
+    assert_eq!(freezes(&submitted).len(), 1);
+    let thaw = unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Running)]));
+    assert_eq!(thaw.len(), 1);
+}
+
+/// REQ: PORT:ilium-core/src/agent_recovery.rs::exit_labels_distinguish_observed_status_from_unknown_cause
+#[test]
+fn port_each_verified_agent_pane_resumes_only_its_own_pane() {
+    let mut host = activated_server();
+    let first = add_agent(&mut host, "first", "codex");
+    verify_agent(
+        &mut host,
+        first,
+        signature("codex", Some(codex_template())),
+        SESSION_ID,
+    );
+    let second = add_agent(&mut host, "second", "codex");
+    let commands = replace_commands(&restore_panes(&mut host, &[first, second]));
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0.pane.0, first);
 }

@@ -178,3 +178,122 @@ fn f_032_agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history
         .text();
     assert!(screen.contains("Detected Codex"), "{screen}");
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::client_owned_agent_events_are_suppressed_when_both_debug_sinks_are_disabled
+#[test]
+fn f_032_menu_sink_alone_forwards_client_owned_agent_events() {
+    let mut session = session();
+    let reply = record(&mut session, true, false);
+    assert_eq!(reply["forwarded"], true);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::file_logging_alone_forwards_client_owned_agent_events
+#[test]
+fn f_032_forwarded_event_keeps_its_summary_text() {
+    let mut session = session();
+    let reply = record(&mut session, false, true);
+    assert_eq!(reply["summary"], "Automatic-work trigger evaluated");
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::opening_debug_log_fetches_retained_history_before_using_incremental_replay
+#[test]
+fn f_032_open_for_another_pane_keeps_its_replay_cursor_separate() {
+    let mut session = session();
+    let reply = agent_debug(
+        &mut session,
+        "open",
+        json!({ "pane": 8, "through_sequence": 41, "has_loaded_retained_history": true }),
+    )
+    .expect("open");
+    assert_eq!(reply["request"], json!({ "pane": 8, "after_sequence": 41 }));
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_replay
+#[test]
+fn f_032_save_prompt_offers_no_path_before_full_replay() {
+    let mut session = session();
+    let outcome = agent_debug(
+        &mut session,
+        "save_prompt",
+        json!({ "pane": 7, "pane_name": "Codex: payment audit", "has_loaded_retained_history": false }),
+    );
+    assert!(
+        outcome.map_or(true, |prompt| prompt["path"].is_null()),
+        "no editable path before full replay"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_report
+#[test]
+fn f_032_saved_log_keeps_the_entry_summary_in_the_file() {
+    let mut session = session();
+    agent_debug(&mut session, "make_directory", json!({ "path": "exports" })).expect("mkdir");
+    agent_debug(&mut session, "save_log", json!({ "pane": 7, "pane_name": "Codex audit", "path": "exports/codex.log", "entries": [entry(1, "Detected Codex and classified it as working")] })).expect("save");
+    let text = agent_debug(
+        &mut session,
+        "read_file",
+        json!({ "path": "exports/codex.log" }),
+    )
+    .expect("read")["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        text.contains("Detected Codex and classified it as working"),
+        "{text}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::oldest_debug_log_anchor_can_page_toward_newer_events
+#[test]
+fn f_032_oldest_anchor_with_no_newer_steps_stays_at_the_oldest_event() {
+    let mut session = session();
+    let reply = agent_debug(
+        &mut session,
+        "scroll",
+        json!({ "from_newest": 28, "show_oldest": true, "newer": 0 }),
+    )
+    .expect("scroll");
+    assert_eq!(reply["position"], json!({ "from_oldest": 0 }));
+}
+
+/// REQ: PORT:ilium-client/src/render_cache.rs::debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicates
+#[test]
+fn f_032_stale_live_event_does_not_replace_a_snapshot_entry() {
+    let mut session = session();
+    agent_debug(&mut session, "mirror_snapshot", json!({ "pane": 7, "through_sequence": 3, "retained_from": 1, "dropped": 0, "entries": [entry(1, "first"), entry(3, "third")] })).expect("snapshot");
+    agent_debug(
+        &mut session,
+        "mirror_append",
+        json!({ "pane": 7, "entry": entry(1, "stale replay") }),
+    )
+    .expect("append");
+    let cache = agent_debug(&mut session, "mirror", json!({ "pane": 7 })).expect("mirror");
+    assert_eq!(cache["entries"][0]["summary"], "first");
+    assert_eq!(cache["through_sequence"], 3);
+}
+
+/// REQ: PORT:ilium-client/src/render_cache.rs::closing_a_pane_closes_its_nested_debug_save_flow_and_cache
+#[test]
+fn f_032_closing_one_pane_keeps_another_panes_debug_cache() {
+    let mut session = session();
+    agent_debug(&mut session, "mirror_snapshot", json!({ "pane": 8, "through_sequence": 0, "retained_from": 1, "dropped": 0, "entries": [] })).expect("snapshot");
+    agent_debug(&mut session, "pane_closed", json!({ "pane": 7 })).expect("closed");
+    assert!(agent_debug(&mut session, "mirror", json!({ "pane": 8 })).is_ok());
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history
+#[test]
+fn f_032_debug_mode_keeps_the_entry_visible_in_a_narrow_panel() {
+    let mut session = session();
+    agent_debug(&mut session, "mirror_snapshot", json!({ "pane": 7, "through_sequence": 1, "retained_from": 1, "dropped": 0, "entries": [entry(1, "Detected Codex")] })).expect("snapshot");
+    let screen = session
+        .client(PLUGIN_ID)
+        .render(
+            ilium_plugin_sdk::types::ViewTarget::Pane(ilium_plugin_sdk::types::NodeId(7)),
+            40,
+            12,
+        )
+        .text();
+    assert!(screen.contains("Detected Codex"), "{screen}");
+}

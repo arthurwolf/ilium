@@ -280,3 +280,38 @@ fn port_search_ui_few_results_draw_no_scrollbar() {
         "{with_many}"
     );
 }
+
+/// REQ: PORT:ilium-client/src/search_ui.rs::full_screen_render_shows_live_query_and_places_the_native_cursor
+#[test]
+fn port_search_ui_render_follows_each_keystroke_into_the_field() {
+    let mut host = client_showing("needle", json!([]));
+    host.deliver(vec![text_changed("needle2")]);
+    host.settle();
+    let text = host.render(panel(), 48, 18).text();
+    assert!(text.contains("needle2"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/search_ui.rs::full_screen_render_shows_object_metadata_and_highlighted_match
+#[test]
+fn port_search_ui_hit_without_a_last_command_shows_no_last_command_line() {
+    let hits = json!([{ "id": "4", "kind": "agent", "title": "Plain agent" }]);
+    let mut host = client_showing("needle", hits);
+    let text = host.render(panel(), 100, 28).text();
+    assert!(text.contains("Plain agent"), "{text}");
+    assert!(!text.contains("last command:"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/search_ui.rs::search_frames_and_page_sizes_use_the_same_inner_geometry
+#[test]
+fn port_search_ui_frames_stay_inside_small_and_large_areas() {
+    for (columns, rows) in [(16u16, 5u16), (60, 10), (200, 60)] {
+        let mut host = client_showing("deploy", grouped_hits());
+        let text = host.render(panel(), columns, rows).text();
+        assert!(text.lines().count() <= usize::from(rows), "{columns}x{rows}: {text}");
+        assert!(
+            text.lines()
+                .all(|line| line.chars().count() <= usize::from(columns)),
+            "{columns}x{rows}: {text}"
+        );
+    }
+}

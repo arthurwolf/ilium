@@ -282,3 +282,150 @@ fn hst_695_interrupted_download_resumes_three_times_then_fails_and_old_version_s
         "old version active and unchanged"
     );
 }
+
+/// REQ: HST-657
+#[test]
+fn hst_657_a_database_that_fails_the_integrity_check_is_emptied_on_start() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.write_storage(NOTES, "bucket", "key", b"value");
+    rig.corrupt_file(&rig.storage_db_path(NOTES), b"garbage bytes, not a database");
+    rig.start_server("default");
+    assert!(
+        rig.read_storage(NOTES, "bucket", "key").is_none(),
+        "a database failing the integrity check is handled as corruption and its bucket is emptied"
+    );
+}
+
+/// REQ: HST-659
+#[test]
+fn hst_659_a_damaged_installed_json_is_not_overwritten_by_a_second_start() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.corrupt_file(&rig.plugins_root().join("installed.json"), b"{ not json");
+    rig.start_server("default");
+    rig.start_server("default");
+    assert_eq!(
+        rig.read_file_text(&rig.plugins_root().join("installed.json")),
+        "{ not json",
+        "repeated starts keep the damaged file untouched until the user rebuilds"
+    );
+}
+
+/// REQ: HST-660
+#[test]
+fn hst_660_recovery_command_exits_zero_when_nothing_is_damaged() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let output = rig.cli(&["plugin", "recovery"]);
+    assert_eq!(
+        output.exit_code, 0,
+        "no unresolved items means exit 0, not 78"
+    );
+}
+
+/// REQ: HST-661
+#[test]
+fn hst_661_no_disk_pressure_step_is_logged_while_free_space_is_above_512_mib() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_free_bytes(600 * 1024 * 1024);
+    rig.advance_clock(Duration::from_secs(30));
+    assert_eq!(
+        rig.log_lines_with_code("disk.pressure.evict-caches").len(),
+        0,
+        "no eviction step while free space is above 512 MiB"
+    );
+}
+
+/// REQ: HST-662
+#[test]
+fn hst_662_plugin_without_the_events_host_grant_receives_no_disk_low_event() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_free_bytes(100 * 1024 * 1024);
+    rig.advance_clock(Duration::from_secs(10));
+    assert!(
+        rig.disk_low_events_received(NOTES).is_empty(),
+        "a plugin that does not hold events:host gets no host.disk-low event"
+    );
+}
+
+/// REQ: HST-663
+#[test]
+fn hst_663_a_write_refused_with_no_space_succeeds_on_retry_after_space_returns() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.fill_disk();
+    let refused = rig.plugin_storage_put(NOTES, "k", b"v");
+    assert!(refused.is_err(), "write refused while the disk is full");
+    rig.free_disk();
+    let retried = rig.plugin_storage_put(NOTES, "k", b"v");
+    assert!(
+        retried.is_ok(),
+        "the same write succeeds on retry without a host restart"
+    );
+}
+
+/// REQ: HST-664
+#[test]
+fn hst_664_writes_acknowledged_before_read_only_mode_are_still_readable_afterwards() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let _server = rig.start_server("default");
+    rig.write_storage(NOTES, "bucket", "key", b"value");
+    rig.make_data_read_only(NOTES);
+    rig.make_data_writable(NOTES);
+    assert_eq!(
+        rig.read_storage(NOTES, "bucket", "key"),
+        Some(b"value".to_vec()),
+        "a write acknowledged before read-only mode is not lost"
+    );
+}
+
+/// REQ: HST-693
+#[test]
+fn hst_693_a_failed_update_check_is_not_retried_again_straight_away() {
+    let rig = rig();
+    rig.block_network();
+    let _first = rig.cli(&["plugin", "update", "--check"]);
+    let attempts_after_first = rig.network_attempts();
+    let _second = rig.cli(&["plugin", "update", "--check"]);
+    assert_eq!(
+        rig.network_attempts(),
+        attempts_after_first,
+        "no second network attempt inside the 15-minute retry interval"
+    );
+}
+
+/// REQ: HST-694
+#[test]
+fn hst_694_a_revocation_list_at_most_7_days_old_gives_no_stale_warning_offline() {
+    let rig = rig();
+    rig.block_network();
+    rig.set_cached_revocation_age_days(3);
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let verify = rig.cli(&["plugin", "verify", NOTES]);
+    assert!(
+        !verify.stderr.contains("revocation.stale"),
+        "a 3-day-old revocation list produces no revocation.stale warning"
+    );
+}
+
+/// REQ: HST-695
+#[test]
+fn hst_695_a_partial_download_is_removed_after_24_hours() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.serve_download_interrupted_each_time(NOTES, "1.1.0");
+    let _output = rig.cli(&["plugin", "update", NOTES]);
+    assert!(
+        rig.partial_bytes(NOTES) > 0,
+        "an interrupted download leaves a partial file"
+    );
+    rig.advance_clock(Duration::from_secs(24 * 3600 + 1));
+    assert!(
+        rig.partial_download_marker(NOTES).is_none(),
+        "the partial file is removed once it is older than 24 hours"
+    );
+}

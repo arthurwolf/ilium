@@ -1,8 +1,9 @@
 //! Core plugin `ilium.core.agent-toolbar` (manual page core-plugin-agent-toolbar.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! One struct per side declared in `manifest.json`. The toolbar actions, the last-prompt banner and
+//! the model and context facts read the screen, the transcript and the settings through SDK host
+//! calls that are not implemented yet; until they are, both sides activate cleanly, accept events
+//! and submit nothing.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -17,13 +18,13 @@ pub struct AgentToolbarServer;
 
 impl Lifecycle for AgentToolbarServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.agent-toolbar: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for AgentToolbarServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.agent-toolbar: server handler.on_events")
+        Vec::new()
     }
 }
 
@@ -34,13 +35,13 @@ pub struct AgentToolbarClient;
 
 impl Lifecycle for AgentToolbarClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.agent-toolbar: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for AgentToolbarClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.agent-toolbar: client handler.on_events")
+        Vec::new()
     }
 }
 

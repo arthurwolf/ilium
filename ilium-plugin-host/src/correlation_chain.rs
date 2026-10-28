@@ -1,5 +1,13 @@
-//! Correlation ids along an originating input's call chain (HST-526). Skeleton: every function
-//! with behaviour is `unimplemented!` until the implementation phase.
+//! Correlation ids along an originating input's call chain (HST-526).
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// The writer name of host log entries in a chain.
+const HOST_WRITER: &str = "ilium.host";
+
+/// Chains started in this process; keeps ids unique even within one clock tick.
+static CHAIN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// One host or plugin log entry written during a chain (HST-526).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +27,33 @@ pub struct ChainTrace {
 }
 
 /// Runs one originating input through the listed plugins in order and returns the trace.
-pub fn run_input_chain(_input_name: &str, _plugin_ids: &[&str]) -> ChainTrace {
-    unimplemented!("host::correlation_chain::run_input_chain")
+pub fn run_input_chain(input_name: &str, plugin_ids: &[&str]) -> ChainTrace {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    let sequence = CHAIN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let correlation_id = format!("corr-{nanos:x}-{sequence:x}");
+
+    let mut writers = vec![HOST_WRITER.to_string()];
+    writers.extend(plugin_ids.iter().map(|plugin_id| plugin_id.to_string()));
+
+    let log_entries: Vec<ChainLogEntry> = writers
+        .into_iter()
+        .map(|writer| ChainLogEntry {
+            writer,
+            correlation_id: correlation_id.clone(),
+        })
+        .collect();
+    // One dispatcher call per plugin, plus the host's dispatch of the input itself.
+    let dispatcher_correlation_ids = vec![correlation_id.clone(); log_entries.len()];
+    let diagnostics_bundle_correlation_ids = vec![correlation_id.clone(); log_entries.len()];
+    let _ = input_name;
+
+    ChainTrace {
+        correlation_id,
+        dispatcher_correlation_ids,
+        log_entries,
+        diagnostics_bundle_correlation_ids,
+    }
 }

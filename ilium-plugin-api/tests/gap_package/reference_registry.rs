@@ -920,3 +920,62 @@ fn pkg_809_successful_publish_answers_201_fields_and_index_within_60_seconds() {
         "the release must appear in the signed index within 60 s",
     );
 }
+
+/// REQ: PKG-809
+#[test]
+fn pkg_809_publish_answer_has_a_lowercase_hex_sha256_and_a_numeric_length() {
+    let mut registry = Registry::at(REGISTRY_URL);
+    let receipt = registry
+        .publish(
+            PublishRequest::new("demo.plugin", "1.0.0", OWNER_KEY).with_package(sample_package()),
+        )
+        .expect("the owner's first publish of a version must succeed");
+    let body: Value =
+        serde_json::from_str(&receipt.response_body()).expect("the 201 body of a publish is JSON");
+    let sha256 = body["sha256"].as_str().expect("sha256 is a string");
+    assert_eq!(sha256.len(), 64, "sha256 is 64 hex characters");
+    assert!(
+        sha256
+            .chars()
+            .all(|character| character.is_ascii_digit() || matches!(character, 'a'..='f')),
+        "sha256 is lowercase hex, got {sha256}"
+    );
+    assert!(body["length"].is_u64(), "length is a whole number of bytes");
+}
+
+/// REQ: PKG-813
+#[test]
+fn pkg_813_reinstall_from_the_first_registry_keeps_that_source() {
+    let mut first = Registry::at("https://first.example");
+    publish_owned(&mut first, "demo.plugin", "1.0.0");
+    let mut second = Registry::at("https://second.example");
+    publish_owned(&mut second, "demo.plugin", "1.0.0");
+
+    let mut client = Client::new(vec![first.clone()]);
+    client
+        .install("demo.plugin", InstallOptions::new())
+        .expect("the first install comes from the first registry");
+    client.set_sources(vec![first.clone()]);
+
+    let again = client
+        .install("demo.plugin", InstallOptions::new())
+        .expect("the same source for an installed id is not a source change");
+    assert_eq!(again.source_url(), first.url());
+}
+
+/// REQ: PKG-817
+#[test]
+fn pkg_817_mirror_of_a_complete_closure_writes_the_closure() {
+    let mut upstream = Registry::at("https://upstream.example");
+    publish_owned(&mut upstream, "base.lib", "1.0.0");
+    let mut source = Registry::at("https://source.example").with_upstream(upstream);
+    publish_requiring(&mut source, "app.main", "1.0.0", &[("base.lib", "^1.0.0")]);
+
+    let mut target = MirrorTarget::empty();
+    mirror::mirror(&source, &["app.main"], &mut target)
+        .expect("a closure whose every id the source serves must mirror");
+    assert!(
+        !target.is_empty(),
+        "a complete closure must be written to the mirror"
+    );
+}

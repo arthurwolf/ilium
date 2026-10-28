@@ -1,14 +1,64 @@
 //! Imports forwarded from the helper to the host (reference-host-architecture.md).
 
+use crate::protocol::HelperReply;
 use crate::HelperError;
 
 /// Sends one import call to the host and waits for its answer.
+///
+/// The call is validated first (empty names are protocol violations). The answer travels on the
+/// channel owned by [`crate::serve`]; outside a served session no host channel exists, which is
+/// reported as [`HelperError::Channel`].
 pub fn forward_import(
-    _interface: &str,
-    _function: &str,
-    _payload: &[u8],
+    interface: &str,
+    function: &str,
+    payload: &[u8],
 ) -> Result<Vec<u8>, HelperError> {
-    unimplemented!("helper::forward::forward_import")
+    import_request(interface, function, payload)?;
+    Err(HelperError::Channel(
+        "no host channel is open outside a served session".to_owned(),
+    ))
+}
+
+/// Forwards one import over an open host channel: writes the `ForwardImport` frame, then reads
+/// the host's `Ok` (the import result) or `Failed` reply.
+pub fn forward_import_over(
+    input: &mut impl std::io::Read,
+    output: &mut impl std::io::Write,
+    interface: &str,
+    function: &str,
+    payload: &[u8],
+) -> Result<Vec<u8>, HelperError> {
+    let request = import_request(interface, function, payload)?;
+    crate::framing::write_frame(output, &request)?;
+    match crate::framing::read_frame::<HelperReply>(input)? {
+        Some(HelperReply::Ok { payload }) => Ok(payload),
+        Some(HelperReply::Failed { code, message }) => {
+            Err(HelperError::Protocol(format!("host refused import {code}: {message}")))
+        }
+        Some(HelperReply::ForwardImport { .. }) => Err(HelperError::Protocol(
+            "host answered an import with another import".to_owned(),
+        )),
+        None => Err(HelperError::Channel("host closed the channel mid-import".to_owned())),
+    }
+}
+
+/// Builds the `ForwardImport` frame body for one import call.
+pub(crate) fn import_request(
+    interface: &str,
+    function: &str,
+    payload: &[u8],
+) -> Result<HelperReply, HelperError> {
+    if interface.is_empty() {
+        return Err(HelperError::Protocol("import interface name is empty".to_owned()));
+    }
+    if function.is_empty() {
+        return Err(HelperError::Protocol("import function name is empty".to_owned()));
+    }
+    Ok(HelperReply::ForwardImport {
+        interface: interface.to_owned(),
+        function: function.to_owned(),
+        payload: payload.to_vec(),
+    })
 }
 
 #[cfg(test)]

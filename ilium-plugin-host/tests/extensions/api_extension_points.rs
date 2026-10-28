@@ -1334,3 +1334,14 @@ fn ext_045_observe_and_veto_points_without_reply_schema_install() {
     assert_eq!(diag_code(&install_owner(hook_point("p", "observe"))), "ok");
     assert_eq!(diag_code(&install_owner(hook_point("p", "veto"))), "ok");
 }
+
+/// REQ: SEC-288
+#[test]
+fn sec_288_equal_tier_and_priority_orders_by_plugin_id() {
+    let mut world = hook_world(
+        "observe",
+        vec![contrib("b", 10, pass(1)), contrib("a", 10, pass(1))],
+    );
+    let _ = run_chain(&mut world, r#"{"text":"a"}"#);
+    assert_eq!(run_order(&world), vec!["com.example.a", "com.example.b"]);
+}

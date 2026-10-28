@@ -47,3 +47,36 @@ fn hst_656_data_export_import_round_trips_every_bucket_and_refuses_newer_data_ve
         "a refused import changes nothing"
     );
 }
+
+/// REQ: HST-656
+#[test]
+fn hst_656_import_of_an_unchanged_export_restores_the_exported_value() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plugin_storage_put(NOTES, "note/b", b"bravo")
+        .expect("write accepted");
+    let dir = rig.path_in_scratch("roundtrip");
+    let exported = rig.cli(&[
+        "plugin",
+        "data",
+        "export",
+        NOTES,
+        dir.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(exported.exit_code, 0, "export succeeds");
+    rig.plugin_storage_put(NOTES, "note/b", b"changed")
+        .expect("write accepted");
+    let imported = rig.cli(&[
+        "plugin",
+        "data",
+        "import",
+        NOTES,
+        dir.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(imported.exit_code, 0, "import of the export succeeds");
+    assert_eq!(
+        rig.plugin_storage_get(NOTES, "note/b"),
+        Some(b"bravo".to_vec()),
+        "the exported value is restored"
+    );
+}

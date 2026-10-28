@@ -45,3 +45,15 @@ fn port_pty_terminal_context_menu_schedules_countdown_and_delivers_input() {
         plain_spec(pane, "scheduled-live-marker", Delivery::Submitted)
     );
 }
+
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::terminal_context_menu_schedules_countdown_and_delivers_input
+#[test]
+fn port_pty_schedule_dialog_closes_and_fires_exactly_once() {
+    let (mut session, _pane) = schedule_dialog("idle");
+    set_text(&mut session, SCHEDULE_VIEW, "seconds", "2");
+    set_text(&mut session, SCHEDULE_VIEW, "payload", "once only");
+    commit_schedule(&mut session);
+    assert!(!schedule_dialog_open(&mut session), "the dialog closes on commit");
+    assert_eq!(sent_after(&mut session, 2_000), 1);
+    assert_eq!(sent_after(&mut session, 10_000), 1, "the timer does not fire twice");
+}

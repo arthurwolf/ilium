@@ -617,3 +617,567 @@ fn port_090_a_closed_or_retargeted_editor_choice_changes_nothing() {
     assert!(is_unset(value_of(&mut host, "no.such.row")));
     assert!(host.failures().is_empty());
 }
+
+/// REQ: PORT:ilium-client/src/value_config.rs::invalid_panel_entry_preserves_every_field
+#[test]
+fn port_091_unfocused_and_minimum_width_refusals_name_their_key() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.left_panel_unfocused_width");
+    for (key, bad) in [
+        ("ui.left_panel_unfocused_width", 81i64),
+        ("ui.left_panel_minimum_terminal_width", 501i64),
+    ] {
+        let error = host
+            .settings()
+            .set(key, json!(bad))
+            .expect_err("out-of-range width refused");
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{key}={bad}");
+        assert!(error.message.contains(key), "{}", error.message);
+    }
+    assert_eq!(value_of(&mut host, "ui.left_panel_unfocused_width"), before);
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_config.rs::panel_direct_entry_uses_fresh_related_widths_and_keeps_other_policies
+#[test]
+fn port_091_typing_a_fixed_width_leaves_the_minimum_terminal_width_alone() {
+    let mut host = client_host();
+    let minimum = value_of(&mut host, "ui.left_panel_minimum_terminal_width");
+    type_number(&mut host, "user-interface", "ui.left_panel_fixed_width", 33.0);
+    assert_eq!(
+        value_of(&mut host, "ui.left_panel_fixed_width"),
+        Some(json!(33))
+    );
+    assert_eq!(
+        value_of(&mut host, "ui.left_panel_minimum_terminal_width"),
+        minimum
+    );
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_config.rs::numeric_configuration_preserves_intermediates_and_rejects_clamping
+#[test]
+fn port_091_a_fractional_width_is_refused_not_rounded_or_clamped() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.left_panel_fixed_width");
+    type_number(&mut host, "user-interface", "ui.left_panel_fixed_width", 15.5);
+    assert_eq!(
+        value_of(&mut host, "ui.left_panel_fixed_width"),
+        before,
+        "15.5 is neither rounded to 16 nor clamped"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_config.rs::scalar_inventory_accepts_own_limits_and_rejects_outside_values
+#[test]
+fn port_091_a_numeric_text_value_is_refused_by_an_integer_row() {
+    assert_refused("ui.last_prompt_max_lines", json!("12"));
+    assert_refused("ui.left_panel_fixed_width", json!("40"));
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::clipping_keeps_unicode_whole_and_single_line
+#[test]
+fn port_091_narrow_text_render_is_stable_and_never_wider_than_the_frame() {
+    let mut host = client_host();
+    assert_render_is_stable(&mut host, "user-interface", 12, 6);
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::disabled_actions_are_inert_for_mouse_and_keyboard
+#[test]
+fn port_091_mouse_clicks_on_a_read_only_tab_change_no_value() {
+    let mut host = client_host();
+    let keys = ["ui.color_scheme", "density", "ui.last_prompt_max_lines"];
+    let before: Vec<_> = keys.iter().map(|key| value_of(&mut host, key)).collect();
+    render_checked(&mut host, tab("about"), 80, 24);
+    for row in 0..24u16 {
+        for column in (0..80u16).step_by(8) {
+            let _ = host.click(tab("about"), column, row);
+        }
+    }
+    host.settle();
+    let after: Vec<_> = keys.iter().map(|key| value_of(&mut host, key)).collect();
+    assert_eq!(before, after, "clicks on a disabled tab are inert");
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::eighty_column_settings_keep_short_numbers_and_units_readable
+#[test]
+fn port_091_the_stored_line_count_is_drawn_at_eighty_columns() {
+    let mut host = client_host();
+    let lines = value_of(&mut host, "ui.last_prompt_max_lines")
+        .and_then(|value| value.as_i64())
+        .expect("the integer row has a value");
+    let text = render_checked(&mut host, tab("user-interface"), 80, 24).text();
+    assert!(text.contains(&lines.to_string()), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::empty_and_extreme_allocations_have_no_phantom_cells
+#[test]
+fn port_091_every_tab_renders_in_a_one_cell_allocation() {
+    let mut host = client_host();
+    assert_eq!(render_every_tab(&mut host, 1, 1).len(), TABS.len());
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::five_cells_keep_all_numeric_controls_visible
+#[test]
+fn port_091_a_five_column_numeric_row_still_draws_its_value() {
+    let mut host = client_host();
+    let lines = value_of(&mut host, "ui.last_prompt_max_lines")
+        .and_then(|value| value.as_i64())
+        .expect("the integer row has a value");
+    let text = render_checked(&mut host, tab("user-interface"), 5, 12).text();
+    assert!(text.contains(&lines.to_string()), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::keyboard_actions_require_focus_and_keep_their_distinct_meanings
+#[test]
+fn port_091_enter_and_escape_without_a_focused_row_submit_nothing() {
+    let mut host = client_host();
+    press(&mut host, "user-interface", &["Enter", "Esc"]);
+    assert!(host.submitted().is_empty());
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::labels_outer_spaces_and_non_left_buttons_do_not_fall_through
+#[test]
+fn port_091_clicking_a_label_never_changes_its_value() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "density");
+    let (row, column) = render_checked(&mut host, tab("user-interface"), 100, 40)
+        .find("Density")
+        .expect("the density label is drawn");
+    let _ = host.click(tab("user-interface"), column, row);
+    host.settle();
+    assert_eq!(value_of(&mut host, "density"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::long_label_and_wide_grapheme_share_the_bounded_row
+#[test]
+fn port_091_all_tabs_render_within_forty_by_twelve() {
+    let mut host = client_host();
+    assert_eq!(render_every_tab(&mut host, 40, 12).len(), TABS.len());
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::narrow_choice_borrows_blank_label_cells_without_changing_actions
+#[test]
+fn port_091_a_choice_still_saves_in_a_twenty_column_layout() {
+    let mut host = client_host();
+    render_checked(&mut host, tab("user-interface"), 20, 12);
+    choose(&mut host, "user-interface", "ui.color_scheme", "light");
+    assert_eq!(
+        value_of(&mut host, "ui.color_scheme"),
+        Some(json!("light"))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::narrow_layouts_paint_only_their_actual_targets
+#[test]
+fn port_091_a_ten_by_four_layout_renders_exactly_four_rows() {
+    let mut host = client_host();
+    let screen = render_checked(&mut host, tab("user-interface"), 10, 4);
+    assert_eq!(screen.rows, 4);
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::narrow_numbers_keep_step_and_entry_targets_visible
+#[test]
+fn port_091_a_narrow_number_row_keeps_plus_and_entry_star() {
+    let mut host = client_host();
+    let text = render_checked(&mut host, tab("user-interface"), 20, 6).text();
+    assert!(text.contains('+') && text.contains('*'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::number_buttons_use_ascii_glyphs_and_single_cell_targets
+#[test]
+fn port_091_number_steppers_draw_ascii_minus_and_plus() {
+    let mut host = client_host();
+    let text = render_checked(&mut host, tab("user-interface"), 80, 24).text();
+    assert!(text.contains('+') && text.contains('-'), "{text}");
+    assert!(!text.contains('\u{2212}'), "no unicode minus sign");
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::seven_cells_render_single_cell_numeric_step_targets
+#[test]
+fn port_091_a_seven_column_number_row_draws_its_plus_target() {
+    let mut host = client_host();
+    let text = render_checked(&mut host, tab("user-interface"), 7, 6).text();
+    assert!(text.contains('+'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/value_control.rs::short_numeric_values_keep_their_units_in_narrow_settings_rows
+#[test]
+fn port_091_a_short_number_is_drawn_in_a_thirty_column_row() {
+    let mut host = client_host();
+    let lines = value_of(&mut host, "ui.last_prompt_max_lines")
+        .and_then(|value| value.as_i64())
+        .expect("the integer row has a value");
+    let text = render_checked(&mut host, tab("user-interface"), 30, 12).text();
+    assert!(text.contains(&lines.to_string()), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog.rs::outside_left_click_cancels_without_submitting
+#[test]
+fn port_091_a_click_outside_the_confirm_popup_submits_nothing() {
+    let mut host = client_host();
+    let target = ViewTarget::Popup("confirm".to_string());
+    render_checked(&mut host, target.clone(), 40, 12);
+    let _ = host.click(target, 0, 0);
+    host.settle();
+    assert!(host.submitted().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog.rs::page_navigation_and_scrolling_reach_the_last_option
+#[test]
+fn port_091_scrolling_a_settings_page_past_its_end_changes_no_value() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "density");
+    scroll(&mut host, "user-interface", 100.0);
+    scroll(&mut host, "user-interface", -100.0);
+    assert_eq!(value_of(&mut host, "density"), before);
+    assert!(host.failures().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog.rs::narrow_or_empty_screens_never_create_hidden_targets
+#[test]
+fn port_091_a_click_on_a_two_by_two_popup_submits_nothing() {
+    let mut host = client_host();
+    let target = ViewTarget::Popup("confirm".to_string());
+    render_checked(&mut host, target.clone(), 2, 2);
+    let _ = host.click(target, 1, 1);
+    host.settle();
+    assert!(host.submitted().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog.rs::numeric_rejection_keeps_exact_draft_cursor_and_dialog
+#[test]
+fn port_091_a_draft_with_trailing_letters_is_refused_and_value_kept() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.last_prompt_max_lines");
+    host.send_action(
+        tab("user-interface"),
+        "ui.last_prompt_max_lines",
+        ActionKind::Changed,
+        ActionValue::Text("12abc".to_string()),
+    );
+    submit(&mut host, "user-interface", "ui.last_prompt_max_lines");
+    assert_eq!(value_of(&mut host, "ui.last_prompt_max_lines"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog.rs::paste_is_atomic_on_multiline_input_and_preserves_exact_single_line
+#[test]
+fn port_091_a_pasted_multiline_draft_is_dropped_then_a_single_line_saves() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.last_prompt_max_lines");
+    host.send_action(
+        tab("user-interface"),
+        "ui.last_prompt_max_lines",
+        ActionKind::Changed,
+        ActionValue::Text("7\n8".to_string()),
+    );
+    submit(&mut host, "user-interface", "ui.last_prompt_max_lines");
+    assert_eq!(value_of(&mut host, "ui.last_prompt_max_lines"), before);
+    host.send_action(
+        tab("user-interface"),
+        "ui.last_prompt_max_lines",
+        ActionKind::Changed,
+        ActionValue::Text("7".to_string()),
+    );
+    submit(&mut host, "user-interface", "ui.last_prompt_max_lines");
+    assert_eq!(
+        value_of(&mut host, "ui.last_prompt_max_lines"),
+        Some(json!(7))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog_host.rs::board_and_trigger_chrome_paints_the_exact_picker_and_arrow_targets
+#[test]
+fn port_091_the_kanban_board_tab_paints_the_same_frame_twice() {
+    let mut host = client_host();
+    assert_render_is_stable(&mut host, "kanban-board", 40, 12);
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog_host.rs::changed_parent_and_unknown_choice_are_rejected_without_mutation
+#[test]
+fn port_091_a_selection_from_another_parent_view_mutates_nothing() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.color_scheme");
+    host.send_action(
+        tab("kanban-board"),
+        "ui.color_scheme",
+        ActionKind::Selected,
+        ActionValue::Index(0),
+    );
+    host.settle();
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog_host.rs::full_delivery_list_keeps_current_and_updates_only_parent_choice
+#[test]
+fn port_091_a_choice_leaves_the_other_choice_rows_unchanged() {
+    let mut host = client_host();
+    let density = value_of(&mut host, "density");
+    choose(&mut host, "user-interface", "ui.motion_level", "off");
+    assert_eq!(value_of(&mut host, "ui.motion_level"), Some(json!("off")));
+    assert_eq!(value_of(&mut host, "density"), density);
+}
+
+/// REQ: PORT:ilium-client/src/value_dialog_host.rs::only_matching_receipt_releases_pending_exact_draft_for_retry
+#[test]
+fn port_091_a_failed_draft_is_released_when_a_newer_draft_is_typed() {
+    let mut host = client_host();
+    host.inject_failure("settings.set", PluginError::new(ErrorCode::Io, "disk full"));
+    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 8.0);
+    assert_eq!(
+        value_of(&mut host, "ui.last_prompt_max_lines"),
+        Some(json!(4))
+    );
+    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 9.0);
+    assert_eq!(
+        value_of(&mut host, "ui.last_prompt_max_lines"),
+        Some(json!(9))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_editor.rs::closed_retargeted_or_invalid_editor_choices_are_rejected
+#[test]
+fn port_091_a_closed_editor_choice_on_a_density_row_changes_nothing() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "density");
+    host.send_action(
+        tab("editor"),
+        "density",
+        ActionKind::Closed,
+        ActionValue::None,
+    );
+    host.settle();
+    assert_eq!(value_of(&mut host, "density"), before);
+    assert!(host.submitted().is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/value_number.rs::buttons_reject_invalid_contracts_and_values
+#[test]
+fn port_091_null_and_boolean_values_are_refused_by_a_number_row() {
+    assert_refused("ui.last_prompt_max_lines", json!(null));
+    assert_refused("ui.last_prompt_max_lines", json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/value_number.rs::decimal_entry_rejects_nonfinite_and_out_of_range_values
+#[test]
+fn port_091_an_out_of_range_number_reports_invalid_argument_with_its_key() {
+    let mut host = client_host();
+    let error = host
+        .settings()
+        .set("ui.last_prompt_max_lines", json!(21))
+        .expect_err("21 is above the maximum of 20");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(
+        error.message.contains("ui.last_prompt_max_lines"),
+        "{}",
+        error.message
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_number.rs::integer_buttons_do_not_overflow_at_storage_limits
+#[test]
+fn port_091_storage_limit_values_are_refused_on_the_panel_width_row() {
+    assert_refused("ui.left_panel_fixed_width", json!(i64::MIN));
+    assert_refused("ui.left_panel_fixed_width", json!(u64::MAX));
+}
+
+/// REQ: PORT:ilium-client/src/value_number.rs::integer_entry_accepts_exact_values_without_slider_quantization
+#[test]
+fn port_091_a_typed_integer_is_stored_exactly_and_not_snapped_to_a_step() {
+    let mut host = client_host();
+    type_number(&mut host, "user-interface", "ui.left_panel_fixed_width", 17.0);
+    assert_eq!(
+        value_of(&mut host, "ui.left_panel_fixed_width"),
+        Some(json!(17))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_number.rs::integer_entry_does_not_round_clamp_or_overflow
+#[test]
+fn port_091_a_typed_fraction_just_below_seven_is_not_rounded_up() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.last_prompt_max_lines");
+    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 6.9);
+    assert_eq!(value_of(&mut host, "ui.last_prompt_max_lines"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_number.rs::integer_buttons_move_monotonically_and_stop_at_bounds
+#[test]
+fn port_091_values_set_in_ascending_order_each_read_back_exactly() {
+    let mut host = client_host();
+    for value in 16..=20i64 {
+        host.settings()
+            .set("ui.left_panel_fixed_width", json!(value))
+            .expect("accepted");
+        assert_eq!(
+            host.settings().get("ui.left_panel_fixed_width"),
+            Some(json!(value))
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/value_plugin.rs::playback_catalog_lists_all_declared_modes_and_preserves_authored_settings
+#[test]
+fn port_091_motion_levels_switch_off_and_back_without_other_changes() {
+    let mut host = client_host();
+    let density = value_of(&mut host, "density");
+    choose(&mut host, "user-interface", "ui.motion_level", "off");
+    assert_eq!(value_of(&mut host, "ui.motion_level"), Some(json!("off")));
+    choose(&mut host, "user-interface", "ui.motion_level", "full");
+    assert_eq!(value_of(&mut host, "ui.motion_level"), Some(json!("full")));
+    assert_eq!(value_of(&mut host, "density"), density);
+}
+
+/// REQ: PORT:ilium-client/src/value_plugin.rs::plugin_fractional_entry_preserves_exact_values_and_native_schema_validation
+#[test]
+fn port_091_a_fractional_value_on_an_integer_schema_is_refused() {
+    assert_refused("ui.last_prompt_max_lines", json!(2.5));
+}
+
+/// REQ: PORT:ilium-client/src/value_plugin.rs::plugin_number_preserves_native_integer_validation_and_all_other_authored_fields
+#[test]
+fn port_091_a_saved_number_leaves_the_accent_colour_untouched() {
+    let mut host = client_host();
+    let accent = value_of(&mut host, "accent");
+    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 9.0);
+    assert_eq!(
+        value_of(&mut host, "ui.last_prompt_max_lines"),
+        Some(json!(9))
+    );
+    assert_eq!(value_of(&mut host, "accent"), accent);
+}
+
+/// REQ: PORT:ilium-client/src/value_plugin.rs::plugin_option_ids_are_native_values_and_retry_rebases_only_own_admitted_selection
+#[test]
+fn port_091_an_option_id_with_trailing_space_is_refused() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "density");
+    choose(&mut host, "user-interface", "density", "comfortable ");
+    assert_eq!(value_of(&mut host, "density"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_plugin.rs::schema_choice_and_number_paint_exact_shared_targets_with_native_bounds
+#[test]
+fn port_091_the_user_interface_tab_paints_the_same_frame_twice() {
+    let mut host = client_host();
+    assert_render_is_stable(&mut host, "user-interface", 100, 40);
+}
+
+/// REQ: PORT:ilium-client/src/value_plugin.rs::text_and_toggle_controls_keep_native_editors_without_fake_numeric_chrome
+#[test]
+fn port_091_a_toggle_off_is_saved_as_false() {
+    let mut host = client_host();
+    toggle(&mut host, "user-interface", "ui.use_stable_glyphs", false);
+    assert_eq!(
+        value_of(&mut host, "ui.use_stable_glyphs"),
+        Some(json!(false))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_settings.rs::direct_settings_number_preserves_exact_draft_after_failure_and_retries
+#[test]
+fn port_091_a_failed_direct_number_write_is_reported_as_a_failure() {
+    let mut host = client_host();
+    host.inject_failure("settings.set", PluginError::new(ErrorCode::Io, "disk full"));
+    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 12.0);
+    assert!(!host.failures().is_empty());
+    assert_eq!(
+        value_of(&mut host, "ui.last_prompt_max_lines"),
+        Some(json!(4))
+    );
+}
+
+/// REQ: PORT:ilium-client/src/value_settings.rs::every_numeric_settings_binding_renders_centered_value_and_live_pointer_targets
+#[test]
+fn port_091_every_tab_renders_at_eighty_by_twenty_four() {
+    let mut host = client_host();
+    assert_eq!(render_every_tab(&mut host, 80, 24).len(), TABS.len());
+}
+
+/// REQ: PORT:ilium-client/src/value_settings.rs::numeric_settings_validation_and_changed_parent_cannot_mutate_or_enqueue
+#[test]
+fn port_091_a_number_from_another_parent_tab_is_not_saved() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.last_prompt_max_lines");
+    host.send_action(
+        tab("kanban-board"),
+        "ui.last_prompt_max_lines",
+        ActionKind::Changed,
+        ActionValue::Number(7.0),
+    );
+    host.advance_clock(600);
+    host.settle();
+    assert_eq!(value_of(&mut host, "ui.last_prompt_max_lines"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::empty_model_catalog_explains_manual_entry_without_saving_placeholder
+#[test]
+fn port_091_an_empty_choice_value_is_never_saved_as_a_placeholder() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "density");
+    choose(&mut host, "user-interface", "density", "");
+    assert_eq!(value_of(&mut host, "density"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::every_settings_choice_retains_its_full_catalog_and_current_identity
+#[test]
+fn port_091_choosing_the_current_colour_scheme_keeps_it() {
+    let mut host = client_host();
+    let current = value_of(&mut host, "ui.color_scheme");
+    choose(&mut host, "user-interface", "ui.color_scheme", "dark");
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), current);
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("dark")));
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::git_session_and_modifier_catalogs_keep_authored_fields_and_persist_every_option
+#[test]
+fn port_091_the_git_tab_paints_the_same_frame_twice() {
+    let mut host = client_host();
+    assert_render_is_stable(&mut host, "git", 120, 40);
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::git_validation_and_closed_writer_do_not_apply_unsaved_choice
+#[test]
+fn port_091_a_closed_choice_with_a_text_value_is_not_applied() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.color_scheme");
+    host.send_action(
+        tab("user-interface"),
+        "ui.color_scheme",
+        ActionKind::Closed,
+        ActionValue::Text("light".to_string()),
+    );
+    host.settle();
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), before);
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::progress_style_catalog_retains_authored_frames_until_explicit_preset_and_persists
+#[test]
+fn port_091_the_animations_tab_paints_the_same_frame_twice() {
+    let mut host = client_host();
+    assert_render_is_stable(&mut host, "animations", 120, 40);
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::settings_choice_failure_keeps_dialog_and_retry_preserves_other_fields
+#[test]
+fn port_091_a_failed_density_write_leaves_the_colour_scheme_alone() {
+    let mut host = client_host();
+    let scheme = value_of(&mut host, "ui.color_scheme");
+    host.inject_failure("settings.set", PluginError::new(ErrorCode::Io, "disk full"));
+    choose(&mut host, "user-interface", "density", "compact");
+    assert_eq!(value_of(&mut host, "density"), Some(json!("comfortable")));
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), scheme);
+}
+
+/// REQ: PORT:ilium-client/src/value_settings_choice.rs::settings_choice_value_left_advances_right_reverses_and_plus_opens_catalog
+#[test]
+fn port_091_left_and_right_on_an_unfocused_tab_change_no_choice() {
+    let mut host = client_host();
+    let before = value_of(&mut host, "ui.color_scheme");
+    press(&mut host, "user-interface", &["Left", "Right"]);
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), before);
+    assert!(host.failures().is_empty());
+}

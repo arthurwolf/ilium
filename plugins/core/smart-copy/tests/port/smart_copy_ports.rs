@@ -194,3 +194,195 @@ fn port_copy_the_frozen_screen_ignores_later_output() {
     host.deliver_one(key("1"));
     assert_eq!(host.clipboard().last_text().as_deref(), Some("frozen text"));
 }
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::url_inside_a_line_is_picked_over_the_line_and_the_line_elsewhere
+#[test]
+fn port_copy_a_line_that_is_only_a_url_offers_the_url() {
+    assert_offers("https://example.com/y", &["https://example.com/y"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::smallest_overlapping_candidate_is_selected_first
+#[test]
+fn port_copy_picker_key_one_copies_the_first_offered_candidate() {
+    let mut host = open_picker(&["alpha", "alpha beta"]);
+    host.deliver_one(key("1"));
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("alpha"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::file_locations_and_qualified_names_nest_and_cycle
+#[test]
+fn port_copy_qualified_name_offers_its_module_prefix() {
+    assert_offers("use std::fmt::Display;", &["std::fmt"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::network_values_and_addresses_are_candidates
+#[test]
+fn port_copy_ip_and_host_port_addresses_are_offered_alone() {
+    assert_offers(
+        "bind 127.0.0.1 and host.local:3000",
+        &["127.0.0.1", "host.local:3000"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::existing_paths_are_labelled_and_implausible_ones_are_dropped
+#[test]
+fn port_copy_a_fraction_is_not_offered_as_a_path() {
+    assert!(!offers("ratio 3/4 done", "3/4"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::coloured_and_bold_runs_become_candidates
+#[test]
+fn port_copy_a_green_run_is_offered_as_one_candidate() {
+    assert_offers("\u{1b}[32mgreen ok\u{1b}[0m", &["green ok"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::cell_geometry_survives_wide_and_combining_characters
+#[test]
+fn port_copy_wide_glyph_path_stays_whole() {
+    assert_offers("日本語/main.rs", &["日本語/main.rs"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::inline_code_requires_an_exact_backtick_run
+#[test]
+fn port_copy_inline_code_span_with_flags_is_offered_without_backticks() {
+    assert_offers("use `ls -la` here", &["ls -la"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::table_cells_respect_backtick_runs_and_backslash_parity
+#[test]
+fn port_copy_table_cell_value_is_offered() {
+    assert_offers("| `key` | value |", &["value"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::ascii_frames_and_codex_output_rows_are_detected
+#[test]
+fn port_copy_ascii_table_row_cells_are_offered() {
+    assert_offers("| status | ready |", &["status", "ready"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::double_line_frames_and_short_tree_branches_are_detected
+#[test]
+fn port_copy_double_line_frame_content_is_offered() {
+    assert_offers("║ hello ║", &["hello"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scan_finds_terminal_frames_trees_lists_quotes_commands_and_diagnostics
+#[test]
+fn port_copy_shell_prompt_command_is_offered() {
+    assert_offers("$ cargo build", &["cargo build"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scan_seeds_sections_paragraphs_code_and_table_cells
+#[test]
+fn port_copy_section_heading_text_is_offered() {
+    let lines = scan(&["## Setup", "body"]);
+    assert!(lines.iter().any(|l| l == "Setup"), "{lines:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::bare_fences_after_markdown_headings_keep_visible_code
+#[test]
+fn port_copy_bare_fence_code_line_is_offered() {
+    let lines = scan(&["```", "fn main() {}", "```"]);
+    assert!(lines.iter().any(|l| l == "fn main() {}"), "{lines:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::claude_prompt_rows_are_isolated_from_following_prose
+#[test]
+fn port_copy_prompt_row_text_is_offered_on_its_own() {
+    let lines = scan(&["> ask about build", "Prose."]);
+    assert!(lines.iter().any(|l| l == "ask about build"), "{lines:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::partial_fences_and_candidate_volume_are_bounded
+#[test]
+fn port_copy_one_row_with_five_thousand_tokens_stays_bounded() {
+    let row: String = (0..5000).map(|n| format!("f{n}.rs ")).collect();
+    assert!(scan(&[row.as_str()]).len() <= 2048);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::clicks_accumulate_a_persistent_selection_and_toggle_off
+#[test]
+fn port_copy_a_number_outside_the_candidates_copies_nothing() {
+    let mut host = open_picker(&["one", "two"]);
+    host.deliver_one(key("9"));
+    assert_eq!(host.clipboard().last_text().as_deref(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::rejects_model_authored_or_out_of_bounds_references
+#[test]
+fn port_copy_model_line_that_is_not_on_screen_is_rejected() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    host.terminal().set_rows(pane, &["alpha beta"]);
+    host.inference().reply_text("never on screen");
+    host.deliver_one(palette_command("smart-copy", Some(pane)));
+    host.settle();
+    let lines = candidate_lines(&host.deliver_one(candidates_message(&[])));
+    assert!(!lines.iter().any(|l| l == "never on screen"), "{lines:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::resolves_word_ranges_to_frozen_source_text
+#[test]
+fn port_copy_word_inside_a_sentence_is_offered_as_its_own_token() {
+    assert!(offers("say hi_there ok", "hi_there"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::exact_model_repeats_are_dropped_but_distinct_overlaps_remain
+#[test]
+fn port_copy_exact_model_repeat_appears_at_most_once() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    host.terminal().set_rows(pane, &["gamma"]);
+    host.inference().reply_text("gamma\ngamma");
+    host.deliver_one(palette_command("smart-copy", Some(pane)));
+    host.settle();
+    let lines = candidate_lines(&host.deliver_one(candidates_message(&[])));
+    assert!(lines.iter().filter(|l| *l == "gamma").count() <= 1, "{lines:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::wide_line_repeat_is_deduplicated_and_model_labels_are_bounded
+#[test]
+fn port_copy_wide_repeated_row_still_offers_its_file_token() {
+    let row = format!("{} tail.rs", "w ".repeat(60));
+    let lines = scan(&[row.as_str(), row.as_str()]);
+    assert!(lines.iter().any(|l| l == "tail.rs"), "{lines:?}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::custom_instructions_keep_smart_copy_source_contract_and_literal_text
+#[test]
+fn port_copy_request_carries_the_screen_text_as_user_content() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    host.terminal().set_rows(pane, &["alpha beta"]);
+    host.inference().reply_text("alpha beta");
+    host.deliver_one(palette_command("smart-copy", Some(pane)));
+    host.settle();
+    let request = &host.inference().requests()[0];
+    let user: String = request
+        .1
+        .messages
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.content.as_str())
+        .collect();
+    assert!(user.contains("alpha beta"), "{user}");
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record
+#[test]
+fn port_copy_frozen_candidates_do_not_touch_the_clipboard_before_a_key() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    host.terminal().set_rows(pane, &["frozen text"]);
+    host.deliver_one(menu_command("smart-copy", pane, "smart-copy"));
+    host.deliver_one(candidates_message(&["frozen text"]));
+    assert_eq!(host.clipboard().last_text().as_deref(), None);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy.rs::pre_scanned_regions_do_not_flash_on_arrival
+#[test]
+fn port_copy_second_streamed_candidate_copies_its_own_text() {
+    let mut host = open_picker(&["alpha", "beta"]);
+    host.deliver_one(key("2"));
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("beta"));
+}

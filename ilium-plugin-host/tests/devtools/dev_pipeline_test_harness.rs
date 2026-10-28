@@ -55,3 +55,12 @@ fn two_test_runs_give_identical_output_and_the_printed_seed_replays_them() {
         "the printed seed reproduces the run"
     );
 }
+
+/// REQ: DEV-888
+#[test]
+fn two_test_runs_print_byte_identical_stderr() {
+    let (_root, env, _dir) = new_rust_project();
+    let first = run_in_project(&env, "test", &[]);
+    let second = run_in_project(&env, "test", &[]);
+    assert_eq!(first.stderr, second.stderr, "failure output is identical");
+}

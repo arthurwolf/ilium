@@ -73,3 +73,56 @@ fn pmisc_active_codex_reset_watch_keeps_a_compact_label_at_typical_terminal_widt
         "{line}"
     );
 }
+
+/// REQ: PORT:ilium-client/src/mouse.rs::compact_assignment_pointer_steps_both_directions_and_opens_catalog
+#[test]
+fn pmisc_compact_assignment_suggestions_are_distinct_and_selectable() {
+    let mut host = client_host();
+    host.set_screen_size(40, 24);
+    let suggestions = host.icon_assignment_suggestions();
+    let distinct: std::collections::BTreeSet<_> = suggestions.iter().collect();
+    assert!(suggestions.len() > 1, "more than one suggestion is offered");
+    assert_eq!(
+        distinct.len(),
+        suggestions.len(),
+        "no suggestion is offered twice"
+    );
+    host.icon_assignment_set(&suggestions[1]);
+    host.settle();
+    assert_eq!(host.icon_assignment_glyph(), suggestions[1]);
+}
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::selected_row_extends_through_its_blank_tail_in_compact_and_expanded_sidebars
+#[test]
+fn pmisc_selected_row_tail_reaches_the_edge_in_wider_sidebars_too() {
+    let mut host = client_host();
+    host.tree().add_group("selected group");
+    for width in [40u16, 120] {
+        let cell = host.sidebar_last_list_cell(width, 8, "selected group");
+        assert_eq!(
+            cell.background,
+            host.accent_background(),
+            "selection did not reach the right edge at width {width}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::toolbar_hit_testing_maps_each_compact_icon
+#[test]
+fn pmisc_toolbar_hit_testing_ignores_columns_beyond_the_toolbar() {
+    let host = client_host();
+    assert!(!host.toolbar_buttons(32, 12).is_empty());
+    assert_eq!(host.toolbar_action_at(32, 12, 32, 0), None);
+}
+
+/// REQ: PORT:ilium-client/src/ui.rs::active_codex_reset_watch_keeps_a_compact_label_at_typical_terminal_width
+#[test]
+fn pmisc_active_codex_reset_watch_line_respects_the_terminal_width() {
+    let mut host = client_host();
+    host.set_codex_reset_watch_expiry(Duration::from_secs(2 * 86_400 + 3_600 + 60), "human");
+    let line = host.status_bar_text(58);
+    assert!(
+        line.chars().count() <= 58,
+        "status line is wider than 58 columns: {line}"
+    );
+}

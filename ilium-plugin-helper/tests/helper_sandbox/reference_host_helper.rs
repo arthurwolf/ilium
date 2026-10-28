@@ -754,6 +754,19 @@ fn doc_hst_165_manual_states_refusal_code_no_failure_and_host_capacity() {
     );
 }
 
+/// REQ: HST-165
+#[test]
+fn doc_hst_165_aggregate_ceiling_does_not_skip_the_session_memory_refusal() {
+    assert_page_has(
+        "reference-host-aggregate-limits",
+        "It is refused with `session.memory-exceeded` and the reason `host-capacity`",
+    );
+    assert_page_has(
+        "reference-host-aggregate-limits",
+        "The aggregate ceiling did not skip the session check (HST-501).",
+    );
+}
+
 /// REQ: HST-166
 #[test]
 fn doc_hst_166_manual_states_session_helpers_cap_default_16_ceiling_32() {
@@ -897,4 +910,27 @@ fn hst_171_helper_exits_on_sigterm_even_while_the_guest_spins() {
 #[test]
 fn doc_hst_171_manual_states_sigterm_then_sigkill_after_2_s() {
     assert_page_has(PAGE, "the host sends SIGTERM and then SIGKILL after 2 s");
+}
+
+/// REQ: HST-166
+#[test]
+fn hst_166_the_seventeenth_live_helper_is_refused_with_helper_too_many_at_the_default_cap() {
+    let mut live: Vec<Helper> = Vec::new();
+    let mut refusal: Option<String> = None;
+    for _ in 0..17 {
+        let mut helper = Helper::spawn();
+        match helper.ready("plugin-a") {
+            Ok(()) => live.push(helper),
+            Err(message) => {
+                refusal = Some(message);
+                break;
+            }
+        }
+    }
+    assert_eq!(live.len(), 16, "the default session cap of helpers is 16");
+    let message = refusal.expect("a 17th live helper must be refused");
+    assert!(
+        message.contains("helper.too-many"),
+        "the refusal must carry helper.too-many, got {message}"
+    );
 }

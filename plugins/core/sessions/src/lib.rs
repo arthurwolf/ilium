@@ -1,8 +1,8 @@
 //! Core plugin `ilium.core.sessions` (manual page core-plugin-sessions.md).
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
+//! activation state and answer event batches with no submissions.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
@@ -13,34 +13,42 @@ use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
 /// The server side of `ilium.core.sessions` (core-plugin-sessions.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
 #[derive(Default)]
-pub struct SessionsServer;
+pub struct SessionsServer {
+    activated: bool,
+}
 
 impl Lifecycle for SessionsServer {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.sessions: server lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        let _ = &context;
+        self.activated = true;
+        Ok(())
     }
 }
 
 impl Handler for SessionsServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.sessions: server handler.on_events")
+        Vec::new()
     }
 }
 
 /// The client side of `ilium.core.sessions` (core-plugin-sessions.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = [])]
 #[derive(Default)]
-pub struct SessionsClient;
+pub struct SessionsClient {
+    activated: bool,
+}
 
 impl Lifecycle for SessionsClient {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.sessions: client lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        let _ = &context;
+        self.activated = true;
+        Ok(())
     }
 }
 
 impl Handler for SessionsClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.sessions: client handler.on_events")
+        Vec::new()
     }
 }
 

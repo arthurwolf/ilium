@@ -52,3 +52,32 @@ fn port_mouse_clicking_a_todo_line_submits_a_claude_pane_with_the_line_as_its_pr
         .expect("the prompt is handed over as initial input");
     assert!(prompt.contains("do_work();"), "{prompt}");
 }
+
+/// REQ: PORT:ilium-client/src/agent_from_line.rs::default_prompt_contains_line_file_and_one_based_line_number
+#[test]
+fn port_agent_from_line_prompt_names_the_third_line_as_line_three() {
+    let prompt = prompt_for("lib/util.rs", "a\nb\nTODO third();\n", 2);
+    assert!(prompt.contains("TODO third();"), "{prompt}");
+    assert!(prompt.contains("lib/util.rs"), "{prompt}");
+    assert!(prompt.contains("at line 3"), "{prompt}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_from_line.rs::default_prompt_preserves_source_text_without_template_or_html_interpretation
+#[test]
+fn port_agent_from_line_prompt_keeps_backticks_and_shell_text_unchanged() {
+    let line = "TODO `rm -rf $HOME` && echo '$(id)'";
+    let prompt = prompt_for("src/main.rs", &format!("{line}\n"), 0);
+    assert!(prompt.contains(line), "{prompt}");
+}
+
+/// REQ: PORT:ilium-client/src/mouse.rs::clicking_create_submits_the_dialog_prompt
+#[test]
+fn port_mouse_the_submitted_prompt_names_the_clicked_file() {
+    let mut host = plain_host("src/main.rs", Some("rust"), "TODO do_work();\n", &[]);
+    let submissions = host.deliver_one(click_event(0, 1));
+    let Intent::CreatePane(spec) = &submissions[0].intent else {
+        panic!("expected create-pane, got {:?}", submissions[0].intent)
+    };
+    let prompt = spec.initial_input.clone().expect("initial input");
+    assert!(prompt.contains("src/main.rs"), "{prompt}");
+}

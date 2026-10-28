@@ -805,3 +805,14 @@ fn wit_agent_take_transcript_second_take_is_none() {
     assert!(rig.host.agent().take_transcript(request).is_some());
     assert!(rig.host.agent().take_transcript(request).is_none());
 }
+
+/// REQ: WIT:ilium:primitives/agent.set-toolbar-state
+#[test]
+fn wit_agent_set_toolbar_state_unknown_button_id_is_not_found() {
+    let rig = agent_rig(ALL);
+    let result = rig
+        .host
+        .agent()
+        .set_toolbar_state("never-contributed".into(), None, true, None);
+    assert_eq!(error_of(result), Some(ErrorCode::NotFound));
+}

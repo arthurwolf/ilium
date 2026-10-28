@@ -3,7 +3,10 @@
 //! Written once by the skeleton lane from the generated `HostClipboard` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::clipboard::HostClipboard;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+
+/// Largest text `write-text` accepts, in UTF-8 bytes (api-clipboard, "Write limit").
+const WRITE_LIMIT_BYTES: usize = 1_048_576;
 
 /// Host side of the `clipboard` interface.
 #[derive(Debug)]
@@ -11,11 +14,39 @@ pub struct ClipboardImport;
 
 impl HostClipboard for ClipboardImport {
     fn read_text(&mut self) -> Option<String> {
-        unimplemented!("host::imports::clipboard::read_text")
+        // Reading needs the `clipboard.read` grant, which this stateless import never holds, so a
+        // read answers `none` exactly like a denied or empty clipboard.
+        None
     }
 
-    fn write_text(&mut self, _text: String) -> Result<(), PluginError> {
-        unimplemented!("host::imports::clipboard::write_text")
+    fn write_text(&mut self, text: String) -> Result<(), PluginError> {
+        if text.len() > WRITE_LIMIT_BYTES {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "clipboard text is larger than 1 MiB",
+            ));
+        }
+        // Control characters could inject terminal escape sequences when pasted; tab, line feed and
+        // carriage return are ordinary text.
+        let has_control = text
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\t' | '\n' | '\r'));
+        if has_control {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "clipboard text contains a control character",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Builds a refusal with the given code and a plain-text message.
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
     }
 }
 

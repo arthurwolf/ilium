@@ -13,5 +13,12 @@ pub struct LimitEntry {
 
 /// The effective limits as the host info reports them.
 pub fn limits_record() -> Vec<LimitEntry> {
-    unimplemented!("ilium_plugin_host::host_info::limits_record")
+    ilium_plugin_api::limits::LimitKey::ALL
+        .iter()
+        .map(|key| LimitEntry {
+            name: key.as_key().to_string(),
+            value: ilium_plugin_api::limits::default_of(*key),
+            source: "default".to_string(),
+        })
+        .collect()
 }

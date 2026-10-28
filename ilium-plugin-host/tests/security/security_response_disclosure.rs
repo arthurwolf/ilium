@@ -42,3 +42,30 @@ fn sec_441_the_response_page_states_reporter_credit_and_the_embargo_cap() {
         ],
     );
 }
+
+/// REQ: SEC-439
+#[test]
+fn sec_439_security_txt_is_published_at_the_well_known_path() {
+    assert_page_has(
+        "reference-security-response.md",
+        &["at the documentation site's `/.well-known/security.txt`"],
+    );
+}
+
+/// REQ: SEC-440
+#[test]
+fn sec_440_the_safe_harbor_covers_good_faith_reporters_from_legal_action() {
+    assert_page_has(
+        "reference-security-response.md",
+        &["the project MUST NOT start or support legal action against a reporter who acts in good faith"],
+    );
+}
+
+/// REQ: SEC-441
+#[test]
+fn sec_441_an_anonymous_reporter_is_never_named() {
+    assert_page_has(
+        "reference-security-response.md",
+        &["A reporter who asks for anonymity MUST NOT be named"],
+    );
+}

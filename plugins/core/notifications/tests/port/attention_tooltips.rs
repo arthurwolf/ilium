@@ -27,3 +27,20 @@ fn port_009_an_approval_prompt_is_marked_with_its_own_reason_and_not_a_stalled_g
         found[0].reason
     );
 }
+
+/// REQ: PORT:ilium-client/src/ui.rs::attention_mode_hides_tooltips_for_status_slots_without_a_glyph
+#[test]
+fn port_009_second_the_approval_reason_is_a_single_line_for_the_mark() {
+    let mut host = server_host();
+    let node = add_pane(&mut host, "codex-api", Some(AgentActivity::Working));
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        1,
+    );
+    let found = marks(&submissions);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(!found[0].reason.contains('\n'), "{:?}", found[0].reason);
+}

@@ -1,5 +1,5 @@
 //! Rule statements of the guide-porting-from-other-plugin-systems page as the manual states them (doc-lint tests, part 2).
-use crate::support::assert_rule;
+use crate::support::{assert_page_line, assert_rule};
 
 /// REQ: AUT-701 WARN
 #[test]
@@ -71,4 +71,55 @@ fn doc_aut_706_port_is_new_plugin_with_new_id_and_distinct_name() {
             "SHOULD NOT reuse the name of the original",
         ],
     );
+}
+
+/// REQ: AUT-701
+#[test]
+fn doc_aut_701_port_points_to_the_patterns_cookbook_for_messages() {
+    assert_page_line(
+        "AUT-701",
+        &["See [Patterns cookbook](/pages/guide-patterns-cookbook/) for the message pattern."],
+    );
+}
+
+/// REQ: AUT-702
+#[test]
+fn doc_aut_702_ungranted_import_is_reported_by_check() {
+    assert_page_line(
+        "AUT-702",
+        &["reports an import without a grant as `component.import-ungranted`"],
+    );
+}
+
+/// REQ: AUT-703
+#[test]
+fn doc_aut_703_no_eval_no_shared_state_no_blocking_wait() {
+    assert_page_line(
+        "AUT-703",
+        &["There is no `eval`, no global state shared between plugins and no synchronous block while a job runs."],
+    );
+}
+
+/// REQ: AUT-704
+#[test]
+fn doc_aut_704_tmux_wrapper_often_needs_a_process_run_grant() {
+    assert_page_line(
+        "AUT-704",
+        &["A tmux plugin that only wraps shell commands often becomes a plugin with a `process.run:<program>` grant."],
+    );
+}
+
+/// REQ: AUT-705
+#[test]
+fn doc_aut_705_write_goes_to_a_granted_scope_not_an_arbitrary_path() {
+    assert_page_line(
+        "AUT-705",
+        &["The plugin writes the file to a granted scope, not to an arbitrary path."],
+    );
+}
+
+/// REQ: AUT-706
+#[test]
+fn doc_aut_706_new_name_must_not_suggest_the_same_product() {
+    assert_page_line("AUT-706", &["suggests it is the same product"]);
 }

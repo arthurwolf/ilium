@@ -2,7 +2,7 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! Bodies follow the manual; behaviour beyond activation is driven by host events.
 
 use ilium_plugin_sdk::exports::ProviderCall;
 use ilium_plugin_sdk::generated::types::events::Event;
@@ -21,32 +21,36 @@ use ilium_plugin_sdk::{
 pub struct InferenceServer;
 
 impl Lifecycle for InferenceServer {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.inference: server lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        validate_settings(&context.settings_json)
     }
 }
 
 impl Handler for InferenceServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.inference: server handler.on_events")
+        Vec::new()
     }
 }
 
 /// The `inference-provider` export of the server (core-plugin-inference.md "Provider", reference-wit.md section 8.8).
 impl InferenceProvider for InferenceServer {
     fn complete(&mut self, _call: ProviderCall) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.inference: server inference-provider.complete")
+        Err(PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::Unsupported,
+            message: "no model is configured for this provider".to_string(),
+            retry_after_ms: None,
+        })
     }
 
     fn models(&mut self) -> Vec<String> {
-        unimplemented!("ilium.core.inference: server inference-provider.models")
+        Vec::new()
     }
 }
 
 /// The `catalog-provider` export of the server (core-plugin-inference.md "Model catalog", reference-wit.md section 8.10).
 impl CatalogProvider for InferenceServer {
     fn query_catalog(&mut self, _query: CatalogQuery) -> Result<CatalogPage, PluginError> {
-        unimplemented!("ilium.core.inference: server catalog-provider.query_catalog")
+        Ok(CatalogPage::default())
     }
 }
 
@@ -56,20 +60,53 @@ impl CatalogProvider for InferenceServer {
 pub struct InferenceClient;
 
 impl Lifecycle for InferenceClient {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.inference: client lifecycle.activate")
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        validate_settings(&context.settings_json)
     }
 }
 
 impl Handler for InferenceClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.inference: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for InferenceClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.inference: client views.render")
+        empty_tree()
+    }
+}
+
+/// Activation succeeds when the settings JSON is an object (an empty string means no settings).
+fn validate_settings(settings_json: &str) -> Result<(), PluginError> {
+    if settings_json.trim().is_empty() {
+        return Ok(());
+    }
+    match serde_json::from_str::<serde_json::Value>(settings_json) {
+        Ok(value) if value.is_object() => Ok(()),
+        _ => Err(PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::InvalidArgument,
+            message: "settings must be one JSON object".to_string(),
+            retry_after_ms: None,
+        }),
+    }
+}
+
+/// An empty, valid view tree: one root node that draws nothing.
+fn empty_tree() -> UiTree {
+    use ilium_plugin_sdk::types::{NodeFlags, UiNode, Widget};
+    UiTree {
+        version: 1,
+        nodes: vec![UiNode {
+            key: None,
+            widget: Widget::Clear,
+            children: Vec::new(),
+            flags: NodeFlags::default(),
+            tooltip: None,
+            tab_index: None,
+            disabled_reason: None,
+        }],
+        root: 0,
     }
 }
 

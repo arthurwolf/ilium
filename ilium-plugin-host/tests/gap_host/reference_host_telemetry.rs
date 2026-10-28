@@ -334,3 +334,224 @@ fn hst_647_timestamps_are_utc_in_storage_and_local_in_terminal_display() {
         "displayed in local time as YYYY-MM-DD HH:mm:ss"
     );
 }
+
+/// REQ: HST-607
+#[test]
+fn hst_607_every_emitted_code_also_matches_the_host_pattern() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let pattern = regex_like_host_code();
+    let emitted = rig.emitted_host_codes();
+    assert!(!emitted.is_empty(), "the host emits at least one condition code");
+    for code in &emitted {
+        assert!(
+            pattern(code),
+            "emitted code {code} must match ^host\\.[a-z0-9-]+(\\.[a-z0-9-]+)*$"
+        );
+    }
+}
+
+/// REQ: HST-608
+#[test]
+fn hst_608_redaction_also_applies_to_the_plugin_logs_command_output() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.emit_plugin_log(
+        NOTES,
+        "info",
+        "token ghp_0123456789abcdefghijklmnopqrstuvwxyz0123 used",
+    );
+    let shown = rig.cli(&["plugin", "logs", NOTES]);
+    assert_eq!(shown.exit_code, 0, "logs command succeeds");
+    assert!(
+        !shown.stdout_raw.contains("ghp_0123456789"),
+        "raw secret must not reach the logs command output"
+    );
+    assert!(
+        shown.stdout_raw.contains("[redacted]"),
+        "matched value shown as [redacted] in the command output"
+    );
+}
+
+/// REQ: HST-609
+#[test]
+fn hst_609_every_trace_line_is_one_complete_json_span() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_env("ILIUM_PLUGIN_TRACE", "1");
+    rig.call_plugin_export(NOTES, "init");
+    rig.call_plugin_export(NOTES, "init");
+    let trace_path = rig.state_dir().join("plugin-trace.jsonl");
+    let text = std::fs::read_to_string(&trace_path).expect("trace file exists");
+    let mut span_lines = 0;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: serde_json::Value =
+            serde_json::from_str(line).expect("each trace line is one complete JSON object");
+        assert!(value.is_object(), "each trace line is a JSON object");
+        span_lines += 1;
+    }
+    assert!(span_lines >= 2, "two calls leave at least two span lines");
+}
+
+/// REQ: HST-610
+#[test]
+fn hst_610_a_timed_out_call_also_emits_exactly_one_span() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").spins_forever());
+    rig.set_env("ILIUM_PLUGIN_TRACE", "1");
+    let outcome = rig.call_plugin(NOTES, "init");
+    assert!(outcome.is_err(), "a spinning export ends in an error, not a result");
+    let spans = rig.trace_spans();
+    let init_spans = spans.iter().filter(|span| span.export == "init").count();
+    assert_eq!(init_spans, 1, "a timed-out call emits exactly one span");
+}
+
+/// REQ: HST-612
+#[test]
+fn hst_612_every_metric_line_ends_in_a_numeric_sample_value() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.call_plugin_export(NOTES, "init");
+    let output = rig.cli(&["plugin", "metrics"]);
+    assert_eq!(output.exit_code, 0, "metrics command succeeds");
+    let mut sample_count = 0;
+    for line in output
+        .stdout_raw
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let value = line.rsplit(' ').next().unwrap_or("");
+        assert!(
+            value.parse::<f64>().is_ok(),
+            "sample value of {line} is a number"
+        );
+        sample_count += 1;
+    }
+    assert!(sample_count > 0, "at least one sample printed");
+}
+
+/// REQ: HST-613
+#[test]
+fn hst_613_the_64_series_cap_also_holds_on_the_client_side() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").client_side());
+    rig.call_many_exports(NOTES, 200);
+    assert!(
+        rig.metric_series_count(NOTES, Side::Client) <= 64,
+        "at most 64 series per plugin client side"
+    );
+}
+
+/// REQ: HST-614
+#[test]
+fn hst_614_a_single_call_is_counted_once_and_sits_in_one_bucket() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.call_plugin_export_times(NOTES, "init", 1);
+    assert_eq!(rig.calls_counter(NOTES, "init"), 1, "one call counted once");
+    assert_eq!(
+        rig.histogram_bucket_sum(NOTES, "init"),
+        1,
+        "that call sits in exactly one bucket"
+    );
+}
+
+/// REQ: HST-636
+#[test]
+fn hst_636_diagnostics_bundle_completes_within_10_seconds_for_64_plugins() {
+    let rig = rig();
+    rig.install_many(64);
+    let out = rig.path_in_scratch("bundle-64.tar");
+    let started = std::time::Instant::now();
+    let output = rig.cli(&[
+        "plugin",
+        "diagnostics",
+        "--out",
+        out.to_str().expect("utf-8 path"),
+    ]);
+    let elapsed = started.elapsed();
+    assert_eq!(output.exit_code, 0, "bundle written for 64 plugins");
+    assert!(
+        elapsed <= std::time::Duration::from_secs(10),
+        "bundle within 10 s, took {elapsed:?}"
+    );
+}
+
+/// REQ: HST-638
+#[test]
+fn hst_638_invalid_counter_names_are_refused_and_repeats_use_no_new_slot() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    assert!(
+        rig.plugin_count(NOTES, "Bad-Name", 1).is_err(),
+        "names must match ^[a-z][a-z0-9_]{{0,31}}$"
+    );
+    for index in 0..16 {
+        rig.plugin_count(NOTES, &format!("counter_{index}"), 1)
+            .expect("first 16 names accepted");
+    }
+    rig.plugin_count(NOTES, "counter_3", 1)
+        .expect("an existing name still accepts counts after the 16 slots are used");
+}
+
+/// REQ: HST-639
+#[test]
+fn hst_639_plugin_info_reads_without_calling_into_the_plugin() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let output = rig.cli(&["plugin", "info", NOTES]);
+    assert_eq!(output.exit_code, 0, "plugin info succeeds");
+    assert_eq!(
+        rig.plugin_export_calls_during_read(),
+        0,
+        "reading plugin info never calls into a plugin"
+    );
+}
+
+/// REQ: HST-642
+#[test]
+fn hst_642_a_call_23_hours_old_is_still_inside_the_24_hour_window() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.call_plugin_export(NOTES, "init");
+    rig.advance_clock(std::time::Duration::from_secs(23 * 3600));
+    assert_eq!(
+        rig.histogram_window_count(NOTES),
+        1,
+        "a call 23 hours old is still inside the window"
+    );
+}
+
+/// REQ: HST-643
+#[test]
+fn hst_643_a_queue_of_exactly_8192_records_drops_nothing() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.fill_writer_queue(8_192);
+    assert_eq!(
+        rig.observability_dropped(),
+        0,
+        "a full but not overflowing queue drops nothing"
+    );
+}
+
+/// REQ: HST-647
+#[test]
+fn hst_647_terminal_display_uses_the_local_format_yyyy_mm_dd_hh_mm_ss() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_local_timezone("Europe/Berlin");
+    rig.emit_plugin_log(NOTES, "info", "stamp");
+    let stored = rig.plugin_log_last_ts(NOTES);
+    let local = rig.local_display_timestamp_of(&stored);
+    assert_eq!(local.len(), 19, "YYYY-MM-DD HH:mm:ss is 19 characters");
+    let bytes = local.as_bytes();
+    assert!(
+        bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes[10] == b' '
+            && bytes[13] == b':'
+            && bytes[16] == b':',
+        "separators follow YYYY-MM-DD HH:mm:ss, got {local}"
+    );
+}

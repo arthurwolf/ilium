@@ -145,3 +145,114 @@ fn port_tokens_styled_runs_group_colour_bold_and_background() {
 fn port_tokens_grey_and_default_colours_are_not_styled_runs() {
     assert!(!offers("\u{1b}[90mgrey words\u{1b}[0m plain", "grey words"));
 }
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::code_identifiers_and_functions
+#[test]
+fn port_tokens_snake_and_constant_identifiers_are_offered() {
+    assert_offers(
+        "set snake_case_name and CONSTANT_NAME",
+        &["snake_case_name", "CONSTANT_NAME"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::dates_times_measurements_amounts_and_phones
+#[test]
+fn port_tokens_iso_date_and_clock_time_are_offered() {
+    assert_offers("deadline 2026-01-02 at 08:15", &["2026-01-02", "08:15"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::endpoints_addresses_and_emails
+#[test]
+fn port_tokens_host_port_and_email_endpoints_are_offered() {
+    assert_offers(
+        "db.internal:5432 ops@example.org",
+        &["db.internal:5432", "ops@example.org"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::file_locations_nest_path_and_file_name
+#[test]
+fn port_tokens_file_location_with_column_nests_path_and_file() {
+    assert_offers(
+        "error at lib/mod.rs:88:1",
+        &["lib/mod.rs:88:1", "lib/mod.rs"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::grey_and_default_colours_are_not_styled_runs
+#[test]
+fn port_tokens_default_foreground_colour_is_not_a_styled_run() {
+    assert!(!offers("\u{1b}[39mdefault fg\u{1b}[0m", "default fg"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::hashes_uuids_colors_and_assignments
+#[test]
+fn port_tokens_commit_hash_and_upper_case_colour_are_offered() {
+    assert_offers(
+        "commit 0a1b2c3d4e in #ABCDEF",
+        &["0a1b2c3d4e", "#ABCDEF"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::path_context_resolves_across_ancestors_and_source_directories
+#[test]
+fn port_tokens_parent_relative_path_is_offered_as_shown() {
+    assert_offers("see ../../x/y.txt", &["../../x/y.txt"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::paths_absolute_relative_home_and_bare
+#[test]
+fn port_tokens_home_config_path_is_offered_whole() {
+    assert_offers(
+        "open ~/.config/ilium/config.toml",
+        &["~/.config/ilium/config.toml"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::postal_addresses_single_multi_line_and_foreign
+#[test]
+fn port_tokens_foreign_postal_address_is_offered_whole() {
+    assert_offers(
+        "Hauptstraße 5, 10115 Berlin",
+        &["Hauptstraße 5, 10115 Berlin"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::qualified_names_split_into_nested_segments
+#[test]
+fn port_tokens_crate_path_offers_its_module_prefix() {
+    assert_offers("crate::module::item", &["crate::module"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::quotes_key_values_and_sentences_nest
+#[test]
+fn port_tokens_double_quoted_phrase_is_offered_without_quotes() {
+    assert_offers("\"hello world\"", &["hello world"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::styled_runs_group_colour_bold_and_background
+#[test]
+fn port_tokens_bold_underline_run_is_offered_as_one_token() {
+    assert_offers(
+        "\u{1b}[1;4mbold underline\u{1b}[0m",
+        &["bold underline"],
+    );
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::urls_nest_inside_lines_and_drop_trailing_punctuation
+#[test]
+fn port_tokens_url_inside_parentheses_is_offered_without_the_full_stop() {
+    assert_offers("ok (see https://a.test/p).", &["https://a.test/p"]);
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::urls_do_not_produce_path_tokens
+#[test]
+fn port_tokens_url_in_prose_does_not_yield_its_path_as_a_token() {
+    assert!(!offers("see https://x.test/docs/readme.md", "/docs/readme.md"));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_tokens.rs::version_is_not_found_inside_an_ip_address
+#[test]
+fn port_tokens_ip_address_yields_no_version_token() {
+    assert!(!offers("build 10.0.0.1", "0.0.1"));
+}

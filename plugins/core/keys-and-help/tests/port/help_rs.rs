@@ -126,3 +126,60 @@ fn help_port_renders_a_live_remapped_action_table() {
     assert!(text.contains("Ctrl+A z"), "{text}");
     assert!(!text.contains("Ctrl+A g"), "{text}");
 }
+
+/// REQ: PORT:ilium-client/src/help.rs::help_summary_truncation_respects_terminal_cells_and_marks_omissions
+#[test]
+fn help_port_second_wide_terminal_keeps_every_line_inside_its_columns() {
+    let mut host = help_host();
+    let screen = host.render(keys_panel(), 120, 40);
+    for line in screen.text().lines() {
+        assert!(cell_width(line) <= 120, "{line:?}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/help.rs::help_retains_an_escape_hint_when_the_fixed_footer_cannot_fit
+#[test]
+fn help_port_second_roomy_help_shows_the_escape_hint_as_well() {
+    let mut host = full_host();
+    let text = render_text(&mut host, keys_panel(), 80, 30);
+    assert!(text.contains("Esc"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/help.rs::help_renders_the_current_shortcut_base_in_rows_and_close_hint
+#[test]
+fn help_port_second_screen_base_is_named_in_the_help_rows() {
+    let mut host = column_host(Column::Screen);
+    let text = render_text(&mut host, keys_panel(), 140, 60);
+    assert!(text.contains("Ctrl+A ?"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/help.rs::help_always_shows_the_close_hint_at_the_baseline_terminal_size
+#[test]
+fn help_port_second_close_hint_names_the_double_press_on_the_baseline_size() {
+    let mut host = help_host();
+    let text = render_text(&mut host, keys_panel(), 80, 24);
+    assert!(text.contains("again"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/help.rs::help_keeps_the_close_hint_even_on_a_tiny_terminal
+#[test]
+fn help_port_second_close_hint_survives_a_narrow_tiny_terminal() {
+    for rows in 9..=14u16 {
+        let mut host = full_host();
+        let text = render_text(&mut host, keys_panel(), 40, rows);
+        assert!(text.contains("close"), "close word clipped at 40x{rows}: {text}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/help.rs::help_renders_a_live_remapped_action_table
+#[test]
+fn help_port_second_a_remapped_base_drops_the_old_base_from_the_help() {
+    let mut host = tmux_host();
+    set_tab(
+        &mut host,
+        serde_json::json!({"shortcut_base": "ctrl+a", "navigation_shortcut_base": "ctrl+b", "preset": "custom"}),
+        "shortcut_base",
+    );
+    let text = render_text(&mut host, keys_panel(), 140, 60);
+    assert!(!text.contains("press Ctrl+B ? again"), "{text}");
+}

@@ -4,13 +4,36 @@
 
 use ilium_plugin_api::generated::host::help::HostHelp;
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    /// Help topics the kernel published, keyed by global id `<plugin>/<local-id>` (or `ilium/<id>`).
+    /// Per thread because `HelpImport` is a stateless handle; the kernel fills it before guest calls.
+    static HELP_TOPICS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+/// Replaces the published help topics (global id to markdown text) visible to this thread's imports.
+pub fn publish_help_topics(topics: impl IntoIterator<Item = (String, String)>) {
+    HELP_TOPICS.with(|held| *held.borrow_mut() = topics.into_iter().collect());
+}
+
+/// True when `id` has the global form `<prefix>/<local>` with both parts non-empty.
+fn is_global_topic_id(id: &str) -> bool {
+    matches!(id.split_once('/'), Some((prefix, local)) if !prefix.is_empty() && !local.is_empty())
+}
+
 /// Host side of the `help` interface.
 #[derive(Debug)]
 pub struct HelpImport;
 
 impl HostHelp for HelpImport {
-    fn topic(&mut self, _id: String) -> Option<String> {
-        unimplemented!("host::imports::help::topic")
+    /// Unknown, malformed or local ids give `None`, never a failure (case-sensitive match).
+    fn topic(&mut self, id: String) -> Option<String> {
+        if !is_global_topic_id(&id) {
+            return None;
+        }
+        HELP_TOPICS.with(|held| held.borrow().get(&id).cloned())
     }
 }
 

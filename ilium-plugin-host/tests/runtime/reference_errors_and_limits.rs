@@ -1208,3 +1208,59 @@ fn api_002_error_code_enum_has_exactly_the_15_documented_cases() {
     assert_eq!(names[0], "not-permitted");
     assert_eq!(names[14], "internal");
 }
+
+/// REQ: API-012
+#[test]
+fn api_012_deadline_breach_in_render_is_recorded_as_trap_deadline() {
+    let host = host_with(QuietGuest);
+    host.set_render_result(Err(trap_with("trap.deadline")));
+    host.render_view("main");
+    assert_eq!(host.failures().len(), 1);
+    assert_eq!(code_of(&host.failures()[0]), "trap.deadline");
+}
+
+/// REQ: API-013
+#[test]
+fn api_013_memory_growth_trap_is_written_to_the_plugin_log() {
+    let mut host = host_with_fixture("memory-grow", Tier::T3);
+    fail_once(&mut host);
+    assert!(log_text(&host).contains("trap.memory"));
+}
+
+/// REQ: API-014
+#[test]
+fn api_014_panic_in_on_events_is_one_failure_not_a_silent_recovery() {
+    let mut host = host_with_fixture("panic-on-events", Tier::T3);
+    fail_once(&mut host);
+    assert_eq!(host.failures().len(), 1);
+    assert!(log_text(&host).contains("trap.panic"));
+}
+
+/// REQ: API-044
+#[test]
+fn api_044_a_failing_view_adds_one_failure_to_the_plugin() {
+    let host = host_with(QuietGuest);
+    host.set_render_result(Err(trap_with("trap.invalid-ui-tree")));
+    host.render_view("main");
+    assert_eq!(host.failure_count(), 1);
+}
+
+/// REQ: API-045
+#[test]
+fn api_045_scene_failure_is_counted_once_on_the_client_side() {
+    let host = HostHarness::new()
+        .both_sides()
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    host.fail_scene_frame();
+    assert_eq!(host.failure_count(), 1);
+}
+
+/// REQ: HST-405
+#[test]
+fn hst_405_every_default_is_within_the_t1_ceiling() {
+    for key in LimitKey::ALL {
+        assert!(default_of(key) <= ceiling(key, Tier::T1), "{key:?}");
+    }
+}

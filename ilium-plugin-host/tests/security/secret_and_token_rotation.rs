@@ -40,3 +40,33 @@ fn sec_453_the_plugin_files_page_states_the_secret_expiry_warning_and_secret_exp
         ],
     );
 }
+
+/// REQ: SEC-451
+#[test]
+fn sec_451_secret_rotation_needs_no_reinstall_or_disable() {
+    assert_page_has(
+        "reference-plugin-files.md",
+        &["replace a stored secret value without reinstalling or disabling the plugin"],
+    );
+}
+
+/// REQ: SEC-452
+#[test]
+fn sec_452_the_token_rotate_command_is_documented_for_http_and_locks() {
+    assert_page_has(
+        "reference-plugin-files.md",
+        &["`ilium plugin token rotate [--http|--lock <id>]`"],
+    );
+}
+
+/// REQ: SEC-453
+#[test]
+fn sec_453_an_expiring_secret_warns_14_days_ahead_and_is_then_not_delivered() {
+    assert_page_has(
+        "reference-plugin-files.md",
+        &[
+            "The Plugins screen MUST warn 14 days before it passes",
+            "after it passes the secret MUST NOT be delivered",
+        ],
+    );
+}

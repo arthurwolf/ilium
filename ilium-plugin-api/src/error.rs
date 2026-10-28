@@ -114,7 +114,41 @@ impl PluginError {
 
     /// The HTTP status that a registry answer with this error carries (PKG-810: `registry.size` is 413).
     pub fn http_status(&self) -> u16 {
-        unimplemented!("api::error::PluginError::http_status")
+        let code = self
+            .message
+            .split_once(": ")
+            .map(|(prefix, _)| prefix)
+            .filter(|prefix| prefix.contains('.') && !prefix.contains(' '));
+        match code {
+            Some("registry.size") => 413,
+            Some("registry.upload-timeout") => 408,
+            Some("registry.not-owner" | "registry.auth") => 403,
+            Some("registry.not-found" | "plugin.not-found") => 404,
+            Some("registry.version-exists" | "registry.version-order" | "registry.last-owner") => {
+                409
+            }
+            Some("registry.taken-down") => 410,
+            _ => match self.code {
+                ErrorCode::NotPermitted | ErrorCode::Revoked => 403,
+                ErrorCode::NotFound => 404,
+                ErrorCode::InvalidArgument => 400,
+                ErrorCode::Conflict => 409,
+                ErrorCode::QuotaExceeded => 413,
+                ErrorCode::RateLimited => 429,
+                ErrorCode::Busy | ErrorCode::PaneNotReady => 503,
+                ErrorCode::TimedOut => 408,
+                ErrorCode::Cancelled => 499,
+                ErrorCode::Unsupported => 501,
+                ErrorCode::Network => 502,
+                ErrorCode::Io | ErrorCode::Internal => 500,
+            },
+        }
+    }
+
+    /// An error whose message starts with the namespaced `code` (for example `registry.size`),
+    /// followed by `: ` and `message`; `base` is the `error-code` a plugin sees.
+    pub fn coded(code: &str, base: ErrorCode, message: impl std::fmt::Display) -> PluginError {
+        PluginError::new(base, format!("{code}: {message}"))
     }
 
     /// The namespaced code at the start of the message, if any (reference-errors-and-limits.md).

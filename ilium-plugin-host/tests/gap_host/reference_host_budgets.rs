@@ -128,3 +128,80 @@ fn hst_646_benchmark_json_lines_have_required_fields_and_compare_exits_1_on_a_fa
         "compare exits 1 when any pass is false"
     );
 }
+
+/// REQ: HST-622
+#[test]
+fn hst_622_forty_installed_plugins_are_all_listed_by_the_cli() {
+    let rig = rig();
+    rig.install_many(40);
+    let output = rig.cli(&["plugin", "list", "--json"]);
+    assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
+    assert!(
+        output.stdout_jsonl.len() >= 40,
+        "every installed plugin is listed: {}",
+        output.stdout_jsonl.len()
+    );
+}
+
+/// REQ: HST-623
+#[test]
+fn hst_623_startup_status_prints_json_records_after_an_activation() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.activate(NOTES);
+    let status = rig.cli(&["plugin", "status", NOTES, "--startup", "--json"]);
+    assert_eq!(status.exit_code, 0, "{:?}", status.stdout_jsonl);
+    assert!(
+        !status.stdout_jsonl.is_empty(),
+        "the startup status prints records"
+    );
+}
+
+/// REQ: HST-625
+#[test]
+fn hst_625_a_corrupt_cache_entry_does_not_stop_the_plugin_from_activating() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.corrupt_compile_cache_entry(NOTES);
+    rig.activate(NOTES);
+    assert!(
+        rig.active_version(NOTES).is_some(),
+        "the corrupt entry is recompiled and the plugin activates"
+    );
+}
+
+/// REQ: HST-626
+#[test]
+fn hst_626_compiled_cache_default_bound_is_512_mib() {
+    let rig = rig();
+    assert_eq!(
+        rig.compile_cache_limit_bytes(),
+        512 * 1024 * 1024,
+        "the default bound of the compiled-component cache"
+    );
+}
+
+/// REQ: HST-627
+#[test]
+fn hst_627_release_gate_passes_a_five_percent_median_regression() {
+    let rig = rig();
+    rig.write_baseline_medians(&[("B25", 1_000_000)]);
+    rig.write_current_medians(&[("B25", 1_050_000)], 5_000_000);
+    let output = rig.run_release_gate("wave-1", "benchmark-regression-fixture");
+    assert_eq!(
+        output.exit_code, 0,
+        "a 5 percent regression is under the 10 percent gate"
+    );
+}
+
+/// REQ: HST-646
+#[test]
+fn hst_646_every_benchmark_line_has_a_boolean_pass_field() {
+    let rig = rig();
+    let results = rig.run_benchmark_harness();
+    for line in results.lines() {
+        let value: serde_json::Value =
+            serde_json::from_str(line).expect("one JSON object per line");
+        assert!(value["pass"].is_boolean(), "pass is a boolean: {value}");
+    }
+}

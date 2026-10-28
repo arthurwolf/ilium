@@ -4,13 +4,90 @@
 pub const UPDATE_GOLDEN_ENV: &str = "ILIUM_PLUGIN_UPDATE_GOLDEN";
 
 /// Compares `actual` to the golden file after converting CRLF to LF; fails with a unified diff of at most 40 lines.
-pub fn assert_golden(_path: &str, _actual: &str) {
-    unimplemented!("DEV-500")
+pub fn assert_golden(path: &str, actual: &str) {
+    use crate::errors::codes;
+    let actual = actual.replace("\r\n", "\n");
+    let update_requested = std::env::var(UPDATE_GOLDEN_ENV)
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    if update_requested {
+        let in_ci = std::env::var("CI").map(|value| !value.is_empty()).unwrap_or(false);
+        if in_ci {
+            panic!("{}: golden update refused when CI is set ({path})", codes::GOLDEN_UPDATE_IN_CI);
+        }
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Err(error) = std::fs::create_dir_all(parent) {
+                    panic!("cannot create folder for golden file {path}: {error}");
+                }
+            }
+        }
+        if let Err(error) = std::fs::write(path, &actual) {
+            panic!("cannot write golden file {path}: {error}");
+        }
+        eprintln!("golden updated: {path}");
+        return;
+    }
+    let expected = match std::fs::read_to_string(path) {
+        Ok(text) => text.replace("\r\n", "\n"),
+        Err(_) => panic!("{}: golden file not found: {path}", codes::GOLDEN_MISSING),
+    };
+    if expected == actual {
+        return;
+    }
+    panic!("golden mismatch for {path}\n{}", limited_diff(&expected, &actual));
+}
+
+/// Unified-style diff showing at most 40 changed lines.
+fn limited_diff(expected: &str, actual: &str) -> String {
+    use similar::{ChangeTag, TextDiff};
+    const MAX_CHANGED_LINES: usize = 40;
+    let diff = TextDiff::from_lines(expected, actual);
+    let mut out = String::from("--- golden\n+++ actual\n");
+    let mut shown = 0usize;
+    let mut hidden = 0usize;
+    for change in diff.iter_all_changes() {
+        let marker = match change.tag() {
+            ChangeTag::Equal => continue,
+            ChangeTag::Delete => '-',
+            ChangeTag::Insert => '+',
+        };
+        if shown >= MAX_CHANGED_LINES {
+            hidden += 1;
+            continue;
+        }
+        shown += 1;
+        out.push(marker);
+        out.push_str(change.value().trim_end_matches('\n'));
+        out.push('\n');
+    }
+    if hidden > 0 {
+        out.push_str(&format!("... {hidden} more changed lines not shown\n"));
+    }
+    out
 }
 
 /// Compares the value, as pretty JSON with sorted keys and a trailing newline, to `tests/snapshots/<name>.json`.
-pub fn assert_snapshot(_name: &str, _value: &impl serde::Serialize) {
-    unimplemented!("DEV-504")
+pub fn assert_snapshot(name: &str, value: &impl serde::Serialize) {
+    let json = match serde_json::to_value(value) {
+        Ok(json) => json,
+        Err(error) => panic!("snapshot value is not serialisable: {error}"),
+    };
+    // serde_json without preserve_order keeps object keys sorted.
+    let mut text = match serde_json::to_string_pretty(&json) {
+        Ok(text) => text,
+        Err(error) => panic!("snapshot value is not serialisable: {error}"),
+    };
+    text.push('\n');
+    let path = std::path::Path::new("tests")
+        .join("snapshots")
+        .join(format!("{name}.json"));
+    let path = if path.exists() {
+        path
+    } else {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(&path)
+    };
+    assert_golden(&path.to_string_lossy(), &text);
 }
 
 #[cfg(test)]

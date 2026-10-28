@@ -122,3 +122,83 @@ fn hst_605_level_filter_runs_before_the_rate_limit() {
         "debug lines not stored"
     );
 }
+
+/// REQ: HST-600
+#[test]
+fn hst_600_each_plugin_id_has_its_own_log_file_set() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    install_ok(&rig, &pkg(super::common::OTHER, "1.0.0"));
+    rig.emit_plugin_log(NOTES, "info", "notes line");
+    rig.emit_plugin_log(super::common::OTHER, "info", "other line");
+    let notes_files = rig.plugin_log_files(NOTES);
+    let other_files = rig.plugin_log_files(super::common::OTHER);
+    assert!(!notes_files.is_empty(), "the first plugin has a log file");
+    assert!(!other_files.is_empty(), "the second plugin has a log file");
+    assert!(
+        notes_files.iter().all(|path| !other_files.contains(path)),
+        "no log file is shared between plugin ids"
+    );
+}
+
+/// REQ: HST-601
+#[test]
+fn hst_601_uninstall_without_purge_keeps_the_plugin_log_files() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.emit_plugin_log(NOTES, "info", "kept after uninstall");
+    let output = rig.cli(&["uninstall", NOTES, "--yes"]);
+    assert_eq!(output.exit_code, 0, "uninstall succeeds");
+    assert!(
+        !rig.plugin_log_files(NOTES).is_empty(),
+        "log files are kept until an uninstall with purge"
+    );
+}
+
+/// REQ: HST-602
+#[test]
+fn hst_602_log_lines_are_listed_in_timestamp_order() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.emit_plugin_log(NOTES, "info", "first");
+    rig.emit_plugin_log(NOTES, "info", "second");
+    let output = rig.cli(&["plugin", "logs", NOTES, "--json"]);
+    assert_eq!(output.exit_code, 0, "logs command succeeds");
+    let stamps: Vec<&str> = output
+        .stdout_jsonl
+        .iter()
+        .map(|line| line["ts"].as_str().expect("ts is a string"))
+        .collect();
+    assert!(stamps.len() >= 2, "both lines are listed: {stamps:?}");
+    assert!(
+        stamps.windows(2).all(|pair| pair[0] <= pair[1]),
+        "timestamps never go backwards: {stamps:?}"
+    );
+}
+
+/// REQ: HST-604
+#[test]
+fn hst_604_a_valid_utf8_message_is_not_counted_as_sanitised() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.emit_plugin_log(NOTES, "info", "plain ascii message");
+    assert_eq!(
+        rig.plugin_side_counter(NOTES, "log_sanitized"),
+        0,
+        "clean text is not counted in log_sanitized"
+    );
+}
+
+/// REQ: HST-605
+#[test]
+fn hst_605_info_lines_at_the_minimum_level_use_the_rate_budget() {
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.set_log_min_level("info");
+    rig.emit_plugin_log_lines(NOTES, "info", 10);
+    assert_eq!(
+        rig.plugin_rate_budget_used(NOTES),
+        10,
+        "ten info lines at the minimum level use ten budget slots"
+    );
+}

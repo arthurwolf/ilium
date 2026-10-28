@@ -1,13 +1,44 @@
 //! Single-threaded task executor for awaited host calls (rust-sdk.md "Awaiting host calls").
 
+use std::cell::RefCell;
 use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Waker};
 
 /// Starts a task on the instance executor; it advances when completions arrive.
-pub fn spawn<F>(_future: F)
+pub fn spawn<F>(future: F)
 where
     F: Future<Output = ()> + 'static,
 {
-    unimplemented!("rust-sdk.task-spawn")
+    let mut task: Task = Box::pin(future);
+    // A task runs until its first await; it is kept only while it still waits on a completion.
+    if task.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending() {
+        TASKS.with(|tasks| tasks.borrow_mut().push(task));
+    }
+}
+
+type Task = Pin<Box<dyn Future<Output = ()>>>;
+
+thread_local! {
+    /// The instance executor: tasks that wait on a host completion.
+    static TASKS: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Polls every waiting task once; called after a batch of completions arrived. Returns how many remain.
+pub fn advance() -> usize {
+    let mut waiting = TASKS.with(|tasks| std::mem::take(&mut *tasks.borrow_mut()));
+    waiting.retain_mut(|task| {
+        task.as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    });
+    TASKS.with(|tasks| {
+        let mut tasks = tasks.borrow_mut();
+        // Tasks spawned while polling were queued meanwhile; keep spawn order.
+        waiting.append(&mut tasks);
+        *tasks = waiting;
+        tasks.len()
+    })
 }
 
 #[cfg(test)]

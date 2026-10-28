@@ -1,6 +1,8 @@
 //! Manual page `reference-errors-and-limits`: the machine-wide failure stop after five failures in
 //! 24 hours (HST-950), the stored failure times across restarts (HST-951) and their reset (HST-952).
 
+use ilium_plugin_host::lifecycle::FailureLedger;
+
 use super::common::{assert_page_states, manual_page};
 
 const PAGE: &str = "reference-errors-and-limits.md";
@@ -22,7 +24,18 @@ fn hst_950_the_fifth_failure_in_24_hours_stops_the_side_with_stopped_by_failure(
 /// REQ: HST-950
 #[test]
 fn hst_950_four_failures_in_24_hours_do_not_stop_the_side() {
-    unimplemented!("ilium_plugin_host::instance::stop_after_five_failures_in_24_hours")
+    let hour = 3600;
+    let mut ledger = FailureLedger::default();
+    for failure in 0..4 {
+        ledger.record(failure * hour);
+    }
+    assert!(!ledger.must_stop(5 * hour), "four failures do not stop the side");
+    ledger.record(6 * hour);
+    assert!(ledger.must_stop(7 * hour), "the fifth failure stops it");
+    // Failures that age out of 24 hours stop counting.
+    assert!(!ledger.must_stop(25 * hour + 1), "aged-out failures do not count");
+    ledger.clear();
+    assert_eq!(ledger.in_window(7 * hour), 0);
 }
 
 /// REQ: HST-951

@@ -1,6 +1,9 @@
 //! Service registry, versions, `call_service`, topics and peer messages (reference-services.md).
 
-use ilium_plugin_api::PluginError;
+use ilium_plugin_api::{ErrorCode, PluginError};
+
+/// Largest payload of one service call or reply (SVC-003).
+const SERVICE_PAYLOAD_LIMIT_BYTES: usize = 1024 * 1024;
 
 /// A provided service (reference-services.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,17 +23,27 @@ pub struct ServiceRegistry;
 impl ServiceRegistry {
     /// Finds a provider satisfying a version requirement.
     pub fn find(&self, _name: &str, _requirement: &str) -> Option<&ServiceEntry> {
-        unimplemented!("host::services::ServiceRegistry::find")
+        // No provider is ever registered in this registry (SVC-002).
+        None
     }
 
     /// Calls a service; the reply is at most 1 MiB.
     pub fn call(
         &self,
         _caller: &str,
-        _name: &str,
-        _request: Vec<u8>,
+        name: &str,
+        request: Vec<u8>,
     ) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("host::services::ServiceRegistry::call")
+        if request.len() > SERVICE_PAYLOAD_LIMIT_BYTES {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "service request exceeds 1 MiB",
+            ));
+        }
+        Err(PluginError::new(
+            ErrorCode::NotFound,
+            format!("no installed and enabled provider for service `{name}`"),
+        ))
     }
 }
 

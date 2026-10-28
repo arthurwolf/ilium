@@ -59,3 +59,40 @@ fn port_unfreeze_preserves_worktree_ownership() {
     let thaw = unfreezes(&host.deliver(vec![lifecycle_event(other, PaneLifecycleState::Running)]));
     assert_eq!(thaw.len(), 2);
 }
+
+/// REQ: PORT:ilium-server/tests/frozen_session.rs::unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity
+#[test]
+fn port_a_frozen_pane_that_exits_instead_of_running_is_not_thawed() {
+    let mut host = activated_server();
+    let pane = add_agent(&mut host, "claude", "claude");
+    verify_agent(
+        &mut host,
+        pane,
+        signature("claude", Some(claude_template())),
+        SESSION_ID,
+    );
+    restore_panes(&mut host, &[pane]);
+    let thaw = unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Exited)]));
+    assert!(thaw.is_empty());
+}
+
+/// REQ: PORT:ilium-server/tests/frozen_session.rs::unfreeze_preserves_worktree_ownership
+#[test]
+fn port_a_repeated_running_report_does_not_thaw_the_panes_twice() {
+    let mut host = activated_server();
+    let pane = add_agent(&mut host, "worktree agent", "claude");
+    verify_agent(
+        &mut host,
+        pane,
+        signature("claude", Some(claude_template())),
+        SESSION_ID,
+    );
+    let other = add_shell(&mut host, "workspace");
+    restore_panes(&mut host, &[pane, other]);
+    let first = unfreezes(&host.deliver(vec![lifecycle_event(other, PaneLifecycleState::Running)]));
+    assert!(first.is_empty());
+    let thaw = unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Running)]));
+    assert_eq!(thaw.len(), 2);
+    let again = unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Running)]));
+    assert!(again.is_empty());
+}

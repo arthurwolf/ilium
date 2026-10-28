@@ -229,3 +229,135 @@ fn port_evidence_long_transcript_never_contains_a_partial_turn() {
         assert!(word.ends_with("padding-padding"), "partial turn {word}");
     }
 }
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::parses_goal_command_arguments_only_from_goal_records
+#[test]
+fn port_evidence_transcript_without_a_goal_command_has_no_goal_lines() {
+    assert!(goal_lines(&["user: hello"], &[]).is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::claude_goal_state_comes_from_met_flag_and_newer_goal_supersedes_active
+#[test]
+fn port_evidence_single_blocked_goal_is_reported_with_its_recorded_state() {
+    let lines = goal_lines(&["user: hello"], &[("only goal".to_string(), "blocked")]);
+    assert_eq!(lines, ["Goal blocked: only goal"]);
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::codex_goal_status_maps_recorded_phases
+#[test]
+fn port_evidence_active_goal_maps_to_the_active_phase_label() {
+    let lines = goal_lines(&["user: hello"], &[("objective c".to_string(), "active")]);
+    assert_eq!(lines, ["Goal active: objective c"]);
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::oversize_goal_list_keeps_first_and_newest_and_counts_omitted
+#[test]
+fn port_evidence_oversize_goal_list_drops_the_middle_goals() {
+    let goals: Vec<(String, &str)> = (0..40)
+        .map(|index| (format!("objective {index} {}", "x".repeat(400)), "active"))
+        .collect();
+    let lines = goal_lines(&["user: hello"], &goals);
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("objective 20 ")),
+        "{lines:?}"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::oversized_individual_goal_is_clipped_even_below_aggregate_budget
+#[test]
+fn port_evidence_clipped_goal_never_keeps_a_full_run_of_its_middle() {
+    let objective = format!(
+        "first {} last",
+        "x".repeat(GOAL_OBJECTIVE_CLIP_CHARACTERS + 100)
+    );
+    let lines = goal_lines(&["user: hello"], &[(objective, "active")]);
+    let kept = objective_of(&lines[0], "active");
+    assert!(!kept.contains(&"x".repeat(GOAL_OBJECTIVE_CLIP_CHARACTERS)));
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::two_oversized_goals_keep_first_and_newest
+#[test]
+fn port_evidence_two_oversized_goals_keep_their_tails() {
+    let first = format!("first {} first-tail", "x".repeat(GOAL_BUDGET_CHARACTERS));
+    let newest = format!("newest {} newest-tail", "y".repeat(GOAL_BUDGET_CHARACTERS));
+    let lines = goal_lines(&["user: hello"], &[(first, "paused"), (newest, "active")]);
+    assert!(objective_of(&lines[0], "paused").ends_with("first-tail"));
+    assert!(objective_of(&lines[1], "active").ends_with("newest-tail"));
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::clipping_markers_count_towards_the_aggregate_goal_budget
+#[test]
+fn port_evidence_clipped_newest_goal_says_how_much_was_omitted() {
+    let size = GOAL_OBJECTIVE_CLIP_CHARACTERS + 1;
+    let goals: Vec<(String, &str)> = vec![
+        ("a".repeat(size), "active"),
+        ("b".repeat(size), "active"),
+        ("c".repeat(size), "active"),
+        ("d".repeat(size), "active"),
+        ("z".repeat(GOAL_BUDGET_CHARACTERS - 4 * size - 1), "active"),
+    ];
+    let lines = goal_lines(&["user: hello"], &goals);
+    assert_eq!(lines.len(), 2);
+    assert!(objective_of(&lines[1], "active").contains("characters omitted"));
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::injected_notifications_are_not_prompts
+#[test]
+fn port_evidence_injected_notice_markup_never_reaches_the_evidence() {
+    let (mut host, _, _) = start_agent_run(&[
+        "user: <system-reminder>internal note</system-reminder>",
+        "user: real question about the parser",
+    ]);
+    let evidence = job_evidence(&mut host);
+    assert!(!evidence.contains("system-reminder"), "{evidence}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::prompts_are_bounded_and_secrets_are_redacted_before_leaving
+#[test]
+fn port_evidence_clipped_prompt_keeps_its_first_characters() {
+    let long = format!("user: {}", "p".repeat(900));
+    let (mut host, _, _) = start_agent_run(&[long.as_str()]);
+    let evidence = job_evidence(&mut host);
+    assert!(evidence.contains(&"p".repeat(100)), "{evidence}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::screen_tail_keeps_newest_lines_within_budget
+#[test]
+fn port_evidence_screen_tail_keeps_every_one_of_the_newest_rows() {
+    let screen: Vec<String> = (0..100).map(|index| format!("line {index:03}")).collect();
+    let refs: Vec<&str> = screen.iter().map(String::as_str).collect();
+    let (mut host, _, _) = start_shell_run(&refs);
+    let evidence = job_evidence(&mut host);
+    for index in 60..100 {
+        assert!(evidence.contains(&format!("line {index:03}")), "{index}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::screen_digest_redacts_and_reports_empty_screen_as_absent
+#[test]
+fn port_evidence_screen_digest_keeps_the_key_name_next_to_the_redaction() {
+    let (mut host, _, _) = start_shell_run(&["export GITHUB_TOKEN=supersecretvalue123", "$ ls"]);
+    let evidence = job_evidence(&mut host);
+    assert!(evidence.contains("GITHUB_TOKEN=[redacted]"), "{evidence}");
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::window_reader_reads_whole_small_file_and_skips_oversize_lines
+#[test]
+fn port_evidence_small_transcript_is_read_once_per_run() {
+    let (mut host, _, _) = start_agent_run(&["user: first"]);
+    assert_eq!(host.transcript_queries().len(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/recap/evidence.rs::window_reader_drops_partial_edge_lines_when_middle_is_skipped
+#[test]
+fn port_evidence_long_transcript_keeps_the_second_newest_turn() {
+    let turns: Vec<String> = (0..200)
+        .map(|index| format!("user: line-{index:04}-padding-padding"))
+        .collect();
+    let refs: Vec<&str> = turns.iter().map(String::as_str).collect();
+    let (mut host, _, _) = start_agent_run(&refs);
+    let evidence = job_evidence(&mut host);
+    assert!(evidence.contains("line-0198"), "{evidence}");
+}

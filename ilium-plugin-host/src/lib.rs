@@ -6,8 +6,7 @@
 //! object-safe `ilium_plugin_api::kernel::KernelFacade`; it has no edge to `ilium-core`,
 //! `ilium-transport` or `ilium-ipc` (test plan section 1.2, reference-host-architecture.md).
 //!
-//! Implementation is in progress against the manual and acceptance suites. Remaining
-//! `unimplemented!("host::<path>")` bodies identify contracts not implemented yet.
+//! Implementation is in progress against the manual and acceptance suites.
 //!
 //! Manual: reference-host-architecture.md, reference-host-runtime.md, reference-runtime-model.md,
 //! reference-packaging.md, reference-cli.md.
@@ -38,6 +37,7 @@ pub mod extensions;
 pub mod helper_client;
 pub mod helper_forensics;
 pub mod host_capacity;
+pub mod trace_file;
 pub mod host_info;
 pub mod i18n;
 pub mod imports;

@@ -29,3 +29,19 @@ fn port_app_01_fully_configured_targets_do_not_queue_setup_prompts() {
     );
     assert!(host.submitted().is_empty(), "no offer may be submitted");
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::fully_configured_targets_do_not_queue_setup_prompts
+#[test]
+fn port_app_02_a_target_missing_one_block_is_not_reported_as_set_up() {
+    let mut host = project_host();
+    for target in [CLAUDE_GLOBAL, CODEX_GLOBAL, CLAUDE_PROJECT, CODEX_PROJECT] {
+        install(&mut host, "chatroom", target).expect("install");
+    }
+    install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
+    host.settle();
+    assert_ne!(
+        status_ok(&mut host, "progress", CODEX_PROJECT),
+        "set-up",
+        "a target without every block is still pending"
+    );
+}

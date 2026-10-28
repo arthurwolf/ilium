@@ -3,7 +3,7 @@
 //! Written once by the skeleton lane from the generated `HostPlugins` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::plugins::{HostPlugins, PluginInfo};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::PluginId;
 
 /// Host side of the `plugins` interface.
@@ -12,16 +12,26 @@ pub struct PluginsImport;
 
 impl HostPlugins for PluginsImport {
     fn list(&mut self) -> Vec<PluginInfo> {
-        unimplemented!("host::imports::plugins::list")
+        // No installed-plugin registry is attached, so there is nothing to list.
+        Vec::new()
     }
 
     fn set_enabled(
         &mut self,
-        _plugin: PluginId,
+        plugin: PluginId,
         _enabled: bool,
-        _scope: String,
+        scope: String,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::plugins::set_enabled")
+        if !matches!(scope.as_str(), "global" | "project" | "session") {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                format!("unknown scope `{scope}`; expected global, project or session"),
+            ));
+        }
+        Err(PluginError::new(
+            ErrorCode::NotFound,
+            format!("plugin `{}` is not installed", plugin.0),
+        ))
     }
 }
 

@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use crate::common::assert_manual_says;
 use ilium_plugin_host::a11y::{render_view, A11yScreen, A11ySettings, CellStyle, Key};
 use ilium_plugin_host::theme::{builtin_themes, load_theme, Role};
 use ilium_plugin_host::view::validate_view;
@@ -261,4 +262,156 @@ fn usr_307_reduced_motion_caps_redraws_stops_decor_and_warns_once_about_redraw_o
         warnings, 1,
         "ui.motion-ignored must be logged once per session"
     );
+}
+
+/// REQ: USR-300
+#[test]
+fn usr_300_focused_button_under_no_color_has_a_text_marker_or_attribute() {
+    assert_manual_says("accessibility-and-theming", "survives `NO_COLOR`");
+    let settings = A11ySettings {
+        no_color: true,
+        ..Default::default()
+    };
+    let screen = A11yScreen::open(THREE_BUTTONS_VIEW, &settings);
+    let frame = screen.frame();
+    let focused_row = frame.row_containing("Alpha").expect("focused button row");
+    let focused_style = frame.style_of("Alpha");
+    assert!(
+        focused_row.contains('>') || focused_style.reverse || focused_style.bold,
+        "the focused button keeps a cue without colour: {focused_row}"
+    );
+}
+
+/// REQ: USR-301
+#[test]
+fn usr_301_low_contrast_refusal_names_the_theme_as_well_as_the_role() {
+    assert_manual_says(
+        "accessibility-and-theming",
+        "a theme that fails MUST be refused by the theme loader with `theme.low-contrast` naming the role",
+    );
+    let message = match load_theme(LOW_CONTRAST_THEME) {
+        Ok(_) => panic!("a low-contrast theme was accepted"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        message.contains("washed-out"),
+        "the refusal also names the refused theme: {message}"
+    );
+}
+
+/// REQ: USR-302
+#[test]
+fn usr_302_high_contrast_never_lowers_any_role_below_the_normal_theme() {
+    assert_manual_says(
+        "accessibility-and-theming",
+        "raises every role to at least 7:1",
+    );
+    for theme in builtin_themes() {
+        let high = theme.high_contrast();
+        for role in Role::ALL {
+            assert!(
+                high.contrast_ratio(role) >= theme.contrast_ratio(role),
+                "high contrast of {} must not lower role {role:?}",
+                theme.name()
+            );
+        }
+    }
+}
+
+/// REQ: USR-303
+#[test]
+fn usr_303_tab_from_the_last_widget_wraps_to_the_first() {
+    assert_manual_says("accessibility-and-theming", "Tab MUST never trap focus");
+    let mut screen = A11yScreen::open(THREE_BUTTONS_VIEW, &A11ySettings::default());
+    for _ in 0..3 {
+        screen.press(Key::Tab);
+    }
+    assert_eq!(
+        screen.focused_id(),
+        "a",
+        "after the last widget, Tab returns to the first"
+    );
+}
+
+/// REQ: USR-304
+#[test]
+fn usr_304_focus_indicator_moves_with_focus_and_stays_on_exactly_one_widget() {
+    assert_manual_says(
+        "accessibility-and-theming",
+        "exactly one widget per window MUST carry it",
+    );
+    let settings = A11ySettings {
+        no_color: true,
+        ..Default::default()
+    };
+    let mut screen = A11yScreen::open(THREE_BUTTONS_VIEW, &settings);
+    screen.press(Key::Tab);
+    assert_eq!(screen.focused_id(), "b");
+    assert_eq!(
+        screen.focus_indicator_count(),
+        1,
+        "the indicator moves with focus and stays on one widget"
+    );
+    let frame = screen.frame();
+    assert_ne!(
+        attribute_cue(&frame.style_of("Beta")),
+        attribute_cue(&frame.style_of("Alpha")),
+        "the newly focused widget shows the attribute cue"
+    );
+}
+
+/// REQ: USR-305
+#[test]
+fn usr_305_second_linear_line_carries_its_position_as_2_of_3() {
+    assert_manual_says(
+        "accessibility-and-theming",
+        "role words (button, checked, unchecked, selected, N of M)",
+    );
+    let settings = A11ySettings {
+        screen_reader: true,
+        ..Default::default()
+    };
+    let screen = A11yScreen::open(THREE_BUTTONS_VIEW, &settings);
+    let lines = screen.frame().rows();
+    assert!(
+        lines[1].contains("2 of 3"),
+        "the second element announces its position: {}",
+        lines[1]
+    );
+}
+
+/// REQ: USR-306
+#[test]
+fn usr_306_empty_label_on_a_non_focusable_label_is_not_refused() {
+    assert_manual_says(
+        "accessibility-and-theming",
+        "A widget kind that can be focused (button, toggle, input, list row) MUST carry a non-empty text label",
+    );
+    let decorative = r#"{"widgets":[{"id":"t","kind":"label","text":""}]}"#;
+    assert!(
+        validate_view(decorative).is_ok(),
+        "only focusable widgets need a label"
+    );
+}
+
+/// REQ: USR-307
+#[test]
+fn usr_307_timer_of_one_second_or_more_that_only_redraws_is_not_warned() {
+    assert_manual_says(
+        "accessibility-and-theming",
+        "a plugin timer below 1000 ms that triggers only redraws",
+    );
+    let settings = A11ySettings {
+        reduced_motion: true,
+        ..Default::default()
+    };
+    let slow = r#"{"widgets":[{"id":"t","kind":"label","text":"tick"}],"timer_ms":1500}"#;
+    let mut ticking = A11yScreen::open(slow, &settings);
+    ticking.advance(Duration::from_secs(4));
+    let warnings = ticking
+        .log_codes()
+        .iter()
+        .filter(|code| code.as_str() == "ui.motion-ignored")
+        .count();
+    assert_eq!(warnings, 0, "a 1500 ms timer is outside the warned range");
 }

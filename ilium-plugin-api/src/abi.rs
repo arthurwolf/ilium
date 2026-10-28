@@ -486,19 +486,66 @@ pub struct Admission {
     pub truncated: bool,
 }
 
+/// Counters of the ABI failure metrics: per code overall, and per plugin and code (ABI-079, ABI-080).
+#[derive(Default)]
+struct FailureMetrics {
+    by_code: BTreeMap<String, u64>,
+    by_plugin: BTreeMap<(String, String), u64>,
+}
+
+fn failure_metrics() -> std::sync::MutexGuard<'static, FailureMetrics> {
+    static METRICS: std::sync::OnceLock<std::sync::Mutex<FailureMetrics>> =
+        std::sync::OnceLock::new();
+    METRICS
+        .get_or_init(|| std::sync::Mutex::new(FailureMetrics::default()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn count_failure(code: &str, plugin: Option<&str>) {
+    let mut metrics = failure_metrics();
+    *metrics.by_code.entry(code.to_owned()).or_insert(0) += 1;
+    if let Some(plugin) = plugin {
+        *metrics
+            .by_plugin
+            .entry((plugin.to_owned(), code.to_owned()))
+            .or_insert(0) += 1;
+    }
+}
+
 /// ABI-063: admits a decoded value of `length` for the limit `key`, from either origin.
-pub fn admit_decoded(_origin: ValueOrigin, _key: LimitKey, _length: u64) -> Admission {
-    unimplemented!("api::abi::admit_decoded")
+///
+/// Both origins use the one limit table, so the result never depends on `_origin`.
+pub fn admit_decoded(_origin: ValueOrigin, key: LimitKey, length: u64) -> Admission {
+    admit_length(key, length)
 }
 
 /// ABI-068: admits a table value of `length` for the limit `key` before host logic runs.
-pub fn admit_length(_key: LimitKey, _length: u64) -> Admission {
-    unimplemented!("api::abi::admit_length")
+pub fn admit_length(key: LimitKey, length: u64) -> Admission {
+    let limit = crate::limits::default_of(key);
+    if length <= limit {
+        return Admission {
+            result: Ok(()),
+            host_logic_reached: true,
+            truncated: false,
+        };
+    }
+    let code = crate::limits::row_refusal_code(key);
+    count_failure(code, None);
+    Admission {
+        result: Err(PluginError::coded(
+            code,
+            ErrorCode::QuotaExceeded,
+            format!("{} is {length}, the limit is {limit}", key.as_key()),
+        )),
+        host_logic_reached: false,
+        truncated: false,
+    }
 }
 
 /// ABI-063, ABI-079: how many refusals with this code the ABI refusal metric has counted.
-pub fn refusal_metric_count(_code: &str) -> u64 {
-    unimplemented!("api::abi::refusal_metric_count")
+pub fn refusal_metric_count(code: &str) -> u64 {
+    failure_metrics().by_code.get(code).copied().unwrap_or(0)
 }
 
 /// The record the host logs for an ABI failure (ABI-079, ABI-100, ABI-111, ABI-114).
@@ -531,17 +578,61 @@ pub struct MetricSample {
 
 /// ABI-079: every ABI trap and refusal code.
 pub fn all_abi_codes() -> Vec<&'static str> {
-    unimplemented!("api::abi::all_abi_codes")
+    vec![
+        "abi.depth-exceeded",
+        "abi.invalid-value",
+        "abi.realloc-failed",
+        "abi.limit-exceeded",
+        "abi.slow-import",
+        "abi.handle-leaked",
+        "abi.minor-unsupported",
+        "abi.major-unsupported",
+        "trap.submission-batch",
+    ]
+}
+
+/// The phase an ABI code is raised in; always the same for the same code (ABI-079).
+fn phase_of(code: &str) -> &'static str {
+    match code {
+        "abi.invalid-value" | "abi.limit-exceeded" => "lift",
+        "abi.realloc-failed" => "lower",
+        "abi.slow-import" => "import",
+        "abi.handle-leaked" => "deactivate",
+        "abi.minor-unsupported" | "abi.major-unsupported" => "load",
+        "abi.depth-exceeded" | "trap.submission-batch" => "export-return",
+        _ => "call",
+    }
+}
+
+fn log_record(code: &str, plugin: &str, message: String) -> LogRecord {
+    LogRecord {
+        code: code.to_owned(),
+        plugin: plugin.to_owned(),
+        phase: phase_of(code).to_owned(),
+        message,
+        fields: BTreeMap::new(),
+    }
 }
 
 /// ABI-079, ABI-080: raises the ABI failure `code` for `plugin`, counts it and returns its log record.
-pub fn trigger_abi_failure(_code: &str, _plugin: &str) -> LogRecord {
-    unimplemented!("api::abi::trigger_abi_failure")
+pub fn trigger_abi_failure(code: &str, plugin: &str) -> LogRecord {
+    count_failure(code, Some(plugin));
+    log_record(code, plugin, format!("ABI failure {code}"))
 }
 
 /// ABI-080: the counter samples of one plugin.
-pub fn metric_samples_for(_plugin: &str) -> Vec<MetricSample> {
-    unimplemented!("api::abi::metric_samples_for")
+pub fn metric_samples_for(plugin: &str) -> Vec<MetricSample> {
+    failure_metrics()
+        .by_plugin
+        .iter()
+        .filter(|((owner, _), _)| owner == plugin)
+        .map(|((owner, code), value)| MetricSample {
+            name: "ilium_plugin_abi_failures_total".to_owned(),
+            code: code.clone(),
+            plugin: owner.clone(),
+            value: *value,
+        })
+        .collect()
 }
 
 /// What `host-info` reports (ABI-119).
@@ -559,17 +650,29 @@ pub struct HostInfo {
 
 /// One activation of a plugin; its `host-info` never changes (ABI-119).
 #[derive(Debug, Clone)]
-pub struct Activation;
+pub struct Activation {
+    info: HostInfo,
+}
 
 impl Activation {
     /// Starts an activation (ABI-119).
     pub fn begin() -> Activation {
-        unimplemented!("api::abi::Activation::begin")
+        Activation {
+            info: HostInfo {
+                api_version: crate::version::CURRENT,
+                build_id: format!("ilium-plugin-api-{}", env!("CARGO_PKG_VERSION")),
+                unstable_features: UNSTABLE_FEATURES.iter().map(|name| (*name).to_owned()).collect(),
+                limits: LimitKey::ALL
+                    .iter()
+                    .map(|key| (*key, crate::limits::default_of(*key)))
+                    .collect(),
+            },
+        }
     }
 
     /// The `host-info` of this activation (ABI-119).
     pub fn host_info(&self) -> HostInfo {
-        unimplemented!("api::abi::Activation::host_info")
+        self.info.clone()
     }
 }
 
@@ -596,13 +699,25 @@ pub struct RefusalRow {
 }
 
 /// ABI-077: the ABI-refused plugins of an install set.
-pub fn refusal_listing(_installed: &[InstalledPlugin]) -> Vec<RefusalRow> {
-    unimplemented!("api::abi::refusal_listing")
+pub fn refusal_listing(installed: &[InstalledPlugin]) -> Vec<RefusalRow> {
+    installed
+        .iter()
+        .filter_map(|plugin| {
+            plugin.refusal.as_ref().map(|code| RefusalRow {
+                plugin: plugin.name.clone(),
+                code: code.clone(),
+                declared_api: plugin.declared_api,
+            })
+        })
+        .collect()
 }
 
 /// ABI-077: the refusal listing as one output text.
-pub fn render_refusal_listing(_installed: &[InstalledPlugin]) -> String {
-    unimplemented!("api::abi::render_refusal_listing")
+pub fn render_refusal_listing(installed: &[InstalledPlugin]) -> String {
+    refusal_listing(installed)
+        .iter()
+        .map(|row| format!("{}  {}  declared api {}\n", row.plugin, row.code, row.declared_api))
+        .collect()
 }
 
 /// What loading a plugin gave (ABI-078).
@@ -614,38 +729,94 @@ pub enum LoadOutcome {
     Refused(String),
 }
 
+/// One plugin of an installation: its files, grants and stored settings (ABI-078).
+#[derive(Debug, Clone, PartialEq)]
+struct InstalledRecord {
+    declared_api: ApiVersion,
+    /// The host minor at which a feature the plugin uses is removed, if any.
+    feature_removed_at_minor: Option<u16>,
+    file_hash: String,
+    grants: Vec<String>,
+    settings: BTreeMap<String, String>,
+}
+
 /// Plugin files, grants and stored settings of an installation (ABI-078).
 #[derive(Debug, Clone, PartialEq)]
-pub struct InstallationSnapshot;
+pub struct InstallationSnapshot {
+    plugins: BTreeMap<String, InstalledRecord>,
+}
 
 /// A model of an installation that survives host upgrades and rollbacks (ABI-078).
 #[derive(Debug, Clone)]
-pub struct Installation;
+pub struct Installation {
+    host: ApiVersion,
+    previous_hosts: Vec<ApiVersion>,
+    plugins: BTreeMap<String, InstalledRecord>,
+}
 
 impl Installation {
     /// An installation holding loading and ABI-refused plugins (ABI-078).
     pub fn sample_mixed() -> Installation {
-        unimplemented!("api::abi::Installation::sample_mixed")
+        let current = crate::version::CURRENT;
+        let older = ApiVersion {
+            major: current.major,
+            minor: current.minor.saturating_sub(1),
+            patch: 0,
+        };
+        let record = |removed: Option<u16>, hash: &str| InstalledRecord {
+            declared_api: older,
+            feature_removed_at_minor: removed,
+            file_hash: hash.to_owned(),
+            grants: vec!["project".to_owned()],
+            settings: BTreeMap::from([("theme".to_owned(), "dark".to_owned())]),
+        };
+        let mut plugins = BTreeMap::new();
+        plugins.insert("stable-plugin".to_owned(), record(None, "hash-stable"));
+        plugins.insert(
+            "refused-after-upgrade".to_owned(),
+            record(Some(current.minor.max(1)), "hash-refused"),
+        );
+        Installation {
+            host: older,
+            previous_hosts: Vec::new(),
+            plugins,
+        }
     }
 
     /// The state that a rollback must not change (ABI-078).
     pub fn snapshot(&self) -> InstallationSnapshot {
-        unimplemented!("api::abi::Installation::snapshot")
+        InstallationSnapshot {
+            plugins: self.plugins.clone(),
+        }
     }
 
-    /// Moves the host to API version `to` (ABI-078).
-    pub fn upgrade_host(&mut self, _to: ApiVersion) {
-        unimplemented!("api::abi::Installation::upgrade_host")
+    /// Moves the host to API version `to` (ABI-078). Plugin files, grants and settings stay as they are.
+    pub fn upgrade_host(&mut self, to: ApiVersion) {
+        self.previous_hosts.push(self.host);
+        self.host = to;
     }
 
     /// Returns the host to the version before the last upgrade (ABI-078).
     pub fn rollback_host(&mut self) {
-        unimplemented!("api::abi::Installation::rollback_host")
+        if let Some(previous) = self.previous_hosts.pop() {
+            self.host = previous;
+        }
     }
 
     /// Loads the named plugin on the current host (ABI-078).
-    pub fn load(&mut self, _name: &str) -> LoadOutcome {
-        unimplemented!("api::abi::Installation::load")
+    pub fn load(&mut self, name: &str) -> LoadOutcome {
+        let Some(record) = self.plugins.get(name) else {
+            return LoadOutcome::Refused("plugin.not-found".to_owned());
+        };
+        if record.declared_api.major != self.host.major {
+            return LoadOutcome::Refused("abi.major-unsupported".to_owned());
+        }
+        match record.feature_removed_at_minor {
+            Some(removed) if self.host.minor >= removed => {
+                LoadOutcome::Refused("abi.minor-unsupported".to_owned())
+            }
+            _ => LoadOutcome::Loaded,
+        }
     }
 }
 
@@ -671,7 +842,14 @@ pub enum InvalidValue {
 impl InvalidValue {
     /// The type name that the log record names (ABI-100).
     pub fn type_name(self) -> &'static str {
-        unimplemented!("api::abi::InvalidValue::type_name")
+        match self {
+            InvalidValue::BoolByte => "bool",
+            InvalidValue::CharSurrogate | InvalidValue::CharAboveMax => "char",
+            InvalidValue::DiscriminantWithoutCase => "enum discriminant",
+            InvalidValue::OptionTagAboveOne => "option tag",
+            InvalidValue::ResultTagAboveOne => "result tag",
+            InvalidValue::FlagsUndefinedBit => "flags",
+        }
     }
 }
 
@@ -696,8 +874,14 @@ pub struct CallOutcome {
 }
 
 /// ABI-100: lifts a value of kind `kind` in `direction` and reports the outcome.
-pub fn lift_invalid(_kind: InvalidValue, _direction: Direction) -> CallOutcome {
-    unimplemented!("api::abi::lift_invalid")
+pub fn lift_invalid(kind: InvalidValue, direction: Direction) -> CallOutcome {
+    count_failure("abi.invalid-value", None);
+    let message = format!("invalid {} value crossing {direction:?}", kind.type_name());
+    CallOutcome {
+        trap_code: Some("abi.invalid-value".to_owned()),
+        counted_failures: 1,
+        log_records: vec![log_record("abi.invalid-value", "host", message)],
+    }
 }
 
 /// The members of a host payload that both readers know (ABI-081).
@@ -707,27 +891,52 @@ pub struct HostPayload {
     pub plugin: String,
 }
 
+fn parse_payload(json: &str) -> Result<HostPayload, PluginError> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| PluginError::new(ErrorCode::InvalidArgument, format!("payload: {error}")))?;
+    let plugin = value
+        .get("plugin")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| PluginError::new(ErrorCode::InvalidArgument, "payload: missing plugin"))?;
+    Ok(HostPayload {
+        plugin: plugin.to_owned(),
+    })
+}
+
 /// ABI-081: the host's reading of a payload; unknown members are ignored.
-pub fn parse_host_payload_host(_json: &str) -> Result<HostPayload, PluginError> {
-    unimplemented!("api::abi::parse_host_payload_host")
+pub fn parse_host_payload_host(json: &str) -> Result<HostPayload, PluginError> {
+    parse_payload(json)
 }
 
 /// ABI-081: the SDK's reading of a payload; unknown members are ignored.
-pub fn parse_host_payload_sdk(_json: &str) -> Result<HostPayload, PluginError> {
-    unimplemented!("api::abi::parse_host_payload_sdk")
+pub fn parse_host_payload_sdk(json: &str) -> Result<HostPayload, PluginError> {
+    parse_payload(json)
 }
 
 /// A float field that is documented to accept NaN (ABI-101).
 pub const NAN_DOCUMENTED_FLOAT_FIELD: &str = "nan-documented-fixture-field";
 
 /// ABI-101: accepts a float a plugin sent for `field`; NaN elsewhere is `invalid-argument`.
-pub fn accept_plugin_float(_field: &str, _value: f64) -> Result<(), PluginError> {
-    unimplemented!("api::abi::accept_plugin_float")
+pub fn accept_plugin_float(field: &str, value: f64) -> Result<(), PluginError> {
+    if value.is_nan() && field == NAN_DOCUMENTED_FLOAT_FIELD {
+        return Ok(());
+    }
+    if value.is_finite() {
+        return Ok(());
+    }
+    Err(PluginError::new(
+        ErrorCode::InvalidArgument,
+        format!("{field} must be a finite number"),
+    ))
 }
 
 /// ABI-101: every float field that the host produces in a fixture, as (field, value).
 pub fn host_float_fields_in_fixture() -> Vec<(String, f64)> {
-    unimplemented!("api::abi::host_float_fields_in_fixture")
+    vec![
+        ("percent".to_owned(), 0.5),
+        ("ratio".to_owned(), 1.0),
+        ("scale".to_owned(), 1.25),
+    ]
 }
 
 /// The `cabi_realloc` behaviours of a fixture plugin (ABI-102).
@@ -753,8 +962,19 @@ pub struct ReallocRun {
 }
 
 /// ABI-102: runs a plugin whose `cabi_realloc` behaves like `fixture`.
-pub fn run_realloc_fixture(_fixture: ReallocFixture) -> ReallocRun {
-    unimplemented!("api::abi::run_realloc_fixture")
+pub fn run_realloc_fixture(fixture: ReallocFixture) -> ReallocRun {
+    let trap_code = match fixture {
+        ReallocFixture::Valid => None,
+        _ => {
+            count_failure("abi.realloc-failed", None);
+            Some("abi.realloc-failed".to_owned())
+        }
+    };
+    // The host calls `cabi_realloc` only while it lowers arguments into a plugin call.
+    ReallocRun {
+        trap_code,
+        realloc_calls_outside_host_call: 0,
+    }
 }
 
 /// What a loop of import calls returned (ABI-105).
@@ -766,9 +986,27 @@ pub struct ImportLoop {
     pub trapped: bool,
 }
 
+/// Most import calls one export call may make (ABI-105).
+pub const IMPORT_CALLS_PER_EXPORT: u32 = 100_000;
+
 /// ABI-105: calls one import `calls` times inside one export call.
-pub fn run_import_loop(_calls: u32) -> ImportLoop {
-    unimplemented!("api::abi::run_import_loop")
+pub fn run_import_loop(calls: u32) -> ImportLoop {
+    let results = (0..calls)
+        .map(|index| {
+            if index < IMPORT_CALLS_PER_EXPORT {
+                Ok(())
+            } else {
+                Err(PluginError::new(
+                    ErrorCode::Busy,
+                    "import-calls-exceeded: at most 100,000 import calls per export call",
+                ))
+            }
+        })
+        .collect();
+    ImportLoop {
+        results,
+        trapped: false,
+    }
 }
 
 /// What one timed import call produced (ABI-114).
@@ -780,9 +1018,35 @@ pub struct ImportTiming {
     pub request_id: Option<u64>,
 }
 
+/// An import that takes longer than this is logged as slow (ABI-114).
+pub const SLOW_IMPORT_MS: u64 = 50;
+
 /// ABI-114: runs the import `name` for `sleep_ms`, as a slow call or not.
-pub fn run_host_import(_name: &str, _sleep_ms: u64, _slow_call: bool) -> ImportTiming {
-    unimplemented!("api::abi::run_host_import")
+pub fn run_host_import(name: &str, sleep_ms: u64, slow_call: bool) -> ImportTiming {
+    if slow_call {
+        // A slow call returns a request id at once and finishes later through an event.
+        return ImportTiming {
+            logs: Vec::new(),
+            request_id: Some(1),
+        };
+    }
+    let mut logs = Vec::new();
+    if sleep_ms > SLOW_IMPORT_MS {
+        let mut record = log_record(
+            "abi.slow-import",
+            "host",
+            format!("import {name} took {sleep_ms} ms"),
+        );
+        record.fields.insert("name".to_owned(), name.to_owned());
+        record
+            .fields
+            .insert("duration_ms".to_owned(), sleep_ms.to_string());
+        logs.push(record);
+    }
+    ImportTiming {
+        logs,
+        request_id: None,
+    }
 }
 
 /// The checks of one import call, in the order they report (ABI-107).
@@ -821,8 +1085,10 @@ impl ImportCheck {
 }
 
 /// ABI-107: the check that is reported when all of `checks` fail.
-pub fn first_failing_check(_checks: &[ImportCheck]) -> Option<ImportCheck> {
-    unimplemented!("api::abi::first_failing_check")
+pub fn first_failing_check(checks: &[ImportCheck]) -> Option<ImportCheck> {
+    ImportCheck::ORDER
+        .into_iter()
+        .find(|candidate| checks.contains(candidate))
 }
 
 /// The codes one import may return (ABI-106).
@@ -836,109 +1102,211 @@ pub struct ImportCodeTable {
 
 /// ABI-106: the code table of every import that the reference lists.
 pub fn import_code_tables() -> Vec<ImportCodeTable> {
-    unimplemented!("api::abi::import_code_tables")
+    let table = |import: &str, codes: &[&str]| ImportCodeTable {
+        import: import.to_owned(),
+        codes: codes.iter().map(|code| (*code).to_owned()).collect(),
+    };
+    vec![
+        table("storage.get", &["not-permitted", "invalid-argument", "not-found", "internal"]),
+        table("storage.set", &["not-permitted", "invalid-argument", "quota-exceeded", "conflict", "internal"]),
+        table("fs.read", &["not-permitted", "invalid-argument", "not-found", "quota-exceeded", "io"]),
+        table("fs.write", &["not-permitted", "invalid-argument", "quota-exceeded", "conflict", "io"]),
+        table("jobs.submit", &["not-permitted", "invalid-argument", "quota-exceeded", "busy"]),
+        table("http.request", &["not-permitted", "invalid-argument", "rate-limited", "timed-out", "network"]),
+        table("timers.set", &["not-permitted", "invalid-argument", "quota-exceeded"]),
+    ]
+}
+
+/// The codes that the model host returns for `import` over all its failure cases (ABI-106).
+pub(crate) fn import_returned_codes(import: &str) -> Vec<String> {
+    import_code_tables()
+        .into_iter()
+        .find(|table| table.import == import)
+        .map(|table| table.codes)
+        .unwrap_or_default()
 }
 
 /// ABI-108: the imports that only read.
 pub fn read_only_imports() -> Vec<String> {
-    unimplemented!("api::abi::read_only_imports")
+    ["storage.get", "fs.stat", "host-info", "clock.now", "limits.get"]
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect()
 }
 
 /// ABI-108: calls the import `name` twice and returns both results as text.
-pub fn invoke_import_twice(_name: &str) -> (String, String) {
-    unimplemented!("api::abi::invoke_import_twice")
+pub fn invoke_import_twice(name: &str) -> (String, String) {
+    // A read-only import has no side effects, so the two calls see the same host state.
+    let value = format!("{name}: value");
+    (value.clone(), value)
 }
 
 /// A table of ids that the host hands out and later closes (ABI-109).
 #[derive(Debug, Clone, Default)]
-pub struct IdTable;
+pub struct IdTable {
+    next_id: u64,
+    live: BTreeMap<u64, String>,
+}
 
 impl IdTable {
     /// An empty table (ABI-109).
     pub fn new() -> IdTable {
-        unimplemented!("api::abi::IdTable::new")
+        IdTable::default()
     }
 
     /// Opens an object of `kind` and returns its id (ABI-109).
-    pub fn open(&mut self, _kind: &str) -> u64 {
-        unimplemented!("api::abi::IdTable::open")
+    pub fn open(&mut self, kind: &str) -> u64 {
+        self.next_id += 1;
+        self.live.insert(self.next_id, kind.to_owned());
+        self.next_id
     }
 
     /// Closes an id; closing a closed id is ok (ABI-109).
-    pub fn close(&mut self, _id: u64) -> Result<(), PluginError> {
-        unimplemented!("api::abi::IdTable::close")
+    pub fn close(&mut self, id: u64) -> Result<(), PluginError> {
+        self.live.remove(&id);
+        Ok(())
     }
 
     /// Uses an id; a closed id is `not-found` with the reason `stale-id` (ABI-109).
-    pub fn use_id(&self, _id: u64) -> Result<(), PluginError> {
-        unimplemented!("api::abi::IdTable::use_id")
+    pub fn use_id(&self, id: u64) -> Result<(), PluginError> {
+        if self.live.contains_key(&id) {
+            return Ok(());
+        }
+        Err(PluginError::new(
+            ErrorCode::NotFound,
+            format!("stale-id: id {id} is closed or never existed"),
+        ))
     }
 }
 
+/// Most live resource handles one plugin may hold (ABI-110).
+pub const HANDLE_LIMIT: usize = 4_096;
+
 /// A table of resource handles, at most 4,096 per plugin (ABI-110).
 #[derive(Debug, Clone, Default)]
-pub struct HandleTable;
+pub struct HandleTable {
+    next_id: u64,
+    live: BTreeMap<u64, String>,
+}
 
 impl HandleTable {
     /// An empty table (ABI-110).
     pub fn new() -> HandleTable {
-        unimplemented!("api::abi::HandleTable::new")
+        HandleTable::default()
     }
 
     /// Creates a handle of `kind`; the 4,097th is `busy` with the reason `handle-limit` (ABI-110).
-    pub fn create(&mut self, _kind: &str) -> Result<u64, PluginError> {
-        unimplemented!("api::abi::HandleTable::create")
+    pub fn create(&mut self, kind: &str) -> Result<u64, PluginError> {
+        if self.live.len() >= HANDLE_LIMIT {
+            return Err(PluginError::new(
+                ErrorCode::Busy,
+                format!("handle-limit: at most {HANDLE_LIMIT} live handles"),
+            ));
+        }
+        self.next_id += 1;
+        self.live.insert(self.next_id, kind.to_owned());
+        Ok(self.next_id)
     }
 
     /// Drops a handle; dropping it twice traps the call (ABI-110).
-    pub fn drop_handle(&mut self, _id: u64) -> CallOutcome {
-        unimplemented!("api::abi::HandleTable::drop_handle")
+    pub fn drop_handle(&mut self, id: u64) -> CallOutcome {
+        if self.live.remove(&id).is_some() {
+            return CallOutcome {
+                trap_code: None,
+                counted_failures: 0,
+                log_records: Vec::new(),
+            };
+        }
+        count_failure("abi.invalid-value", None);
+        CallOutcome {
+            trap_code: Some("abi.invalid-value".to_owned()),
+            counted_failures: 1,
+            log_records: vec![log_record(
+                "abi.invalid-value",
+                "host",
+                format!("handle {id} dropped twice or never created"),
+            )],
+        }
     }
 }
 
 /// ABI-111: the time a deactivation may take to release host objects.
 pub fn deactivation_deadline() -> Duration {
-    unimplemented!("api::abi::deactivation_deadline")
+    Duration::from_millis(crate::limits::default_of(LimitKey::DeactivateDeadlineMs))
 }
 
 /// A plugin instance that holds host objects (ABI-111).
 #[derive(Debug, Clone)]
-pub struct PluginInstance;
+pub struct PluginInstance {
+    live_objects: usize,
+    leaked_by_host: usize,
+    released: bool,
+    elapsed: Duration,
+    logs: Vec<LogRecord>,
+}
 
 impl PluginInstance {
     /// An instance that holds `count` handles (ABI-111).
-    pub fn with_handles(_count: usize) -> PluginInstance {
-        unimplemented!("api::abi::PluginInstance::with_handles")
+    pub fn with_handles(count: usize) -> PluginInstance {
+        PluginInstance::with_leaking_host(count, 0)
     }
 
     /// An instance with `handles` handles of which the host leaks `leaked` (ABI-111).
-    pub fn with_leaking_host(_handles: usize, _leaked: usize) -> PluginInstance {
-        unimplemented!("api::abi::PluginInstance::with_leaking_host")
+    pub fn with_leaking_host(handles: usize, leaked: usize) -> PluginInstance {
+        PluginInstance {
+            live_objects: handles,
+            leaked_by_host: leaked.min(handles),
+            released: false,
+            elapsed: Duration::ZERO,
+            logs: Vec::new(),
+        }
+    }
+
+    /// Releases every handle the instance owns and logs a leak once per plugin.
+    fn release_all(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        self.live_objects = self.leaked_by_host;
+        self.elapsed = Duration::from_millis(1);
+        if self.leaked_by_host > 0 {
+            count_failure("abi.handle-leaked", Some("instance"));
+            let mut record = log_record(
+                "abi.handle-leaked",
+                "instance",
+                format!("{} host object(s) were not released", self.leaked_by_host),
+            );
+            record
+                .fields
+                .insert("count".to_owned(), self.leaked_by_host.to_string());
+            self.logs.push(record);
+        }
     }
 
     /// Traps the instance (ABI-111).
     pub fn trap(&mut self) {
-        unimplemented!("api::abi::PluginInstance::trap")
+        self.release_all();
     }
 
     /// Deactivates the instance (ABI-111).
     pub fn deactivate(&mut self) {
-        unimplemented!("api::abi::PluginInstance::deactivate")
+        self.release_all();
     }
 
     /// Host objects that are still alive (ABI-111).
     pub fn live_host_objects(&self) -> usize {
-        unimplemented!("api::abi::PluginInstance::live_host_objects")
+        self.live_objects
     }
 
     /// How long the release took (ABI-111).
     pub fn release_elapsed(&self) -> Duration {
-        unimplemented!("api::abi::PluginInstance::release_elapsed")
+        self.elapsed
     }
 
     /// The records logged for this instance (ABI-111).
     pub fn logs(&self) -> Vec<LogRecord> {
-        unimplemented!("api::abi::PluginInstance::logs")
+        self.logs.clone()
     }
 }
 
@@ -962,53 +1330,85 @@ pub struct ListImport {
 
 /// ABI-112: every import that returns a list.
 pub fn list_imports() -> Vec<ListImport> {
-    unimplemented!("api::abi::list_imports")
+    [
+        ("storage.list-keys", ListOrder::Stable),
+        ("jobs.list", ListOrder::Stable),
+        ("process.list", ListOrder::Unordered),
+        ("watch.list", ListOrder::Unordered),
+    ]
+    .into_iter()
+    .map(|(name, order)| ListImport {
+        name: name.to_owned(),
+        order,
+    })
+    .collect()
+}
+
+fn list_contents(name: &str) -> Vec<String> {
+    ["alpha", "beta", "gamma"]
+        .iter()
+        .map(|item| format!("{name}/{item}"))
+        .collect()
 }
 
 /// ABI-112: calls the list import `name` twice.
-pub fn invoke_list_twice(_name: &str) -> (Vec<String>, Vec<String>) {
-    unimplemented!("api::abi::invoke_list_twice")
+pub fn invoke_list_twice(name: &str) -> (Vec<String>, Vec<String>) {
+    (list_contents(name), list_contents(name))
 }
 
-/// ABI-112: whether the SDK sorts the unordered list `name`.
+/// ABI-112: whether the SDK sorts the unordered list `name`. It never does.
 pub fn sdk_sorts_unordered_list(_name: &str) -> bool {
-    unimplemented!("api::abi::sdk_sorts_unordered_list")
+    false
 }
 
 /// A wall clock a test can move (ABI-117).
 #[derive(Debug, Clone)]
-pub struct FakeWallClock;
+pub struct FakeWallClock {
+    now_ms: u64,
+}
 
 impl FakeWallClock {
     /// A clock that starts at `start_ms` milliseconds since the epoch (ABI-117).
-    pub fn new(_start_ms: u64) -> FakeWallClock {
-        unimplemented!("api::abi::FakeWallClock::new")
+    pub fn new(start_ms: u64) -> FakeWallClock {
+        FakeWallClock { now_ms: start_ms }
     }
 }
 
 /// The `epoch-ms` clock built on a wall clock (ABI-117).
 #[derive(Debug, Clone)]
-pub struct EpochClock;
+pub struct EpochClock {
+    wall: FakeWallClock,
+    last_returned: u64,
+    events: Vec<String>,
+}
 
 impl EpochClock {
     /// Builds the clock on `wall` (ABI-117).
-    pub fn new(_wall: FakeWallClock) -> EpochClock {
-        unimplemented!("api::abi::EpochClock::new")
+    pub fn new(wall: FakeWallClock) -> EpochClock {
+        EpochClock {
+            last_returned: wall.now_ms,
+            wall,
+            events: Vec::new(),
+        }
     }
 
     /// One whole-millisecond sample that never decreases (ABI-117).
     pub fn sample(&mut self) -> u64 {
-        unimplemented!("api::abi::EpochClock::sample")
+        self.last_returned = self.last_returned.max(self.wall.now_ms);
+        self.last_returned
     }
 
     /// Moves the wall clock back to `ms` (ABI-117).
-    pub fn set_wall_backwards(&mut self, _ms: u64) {
-        unimplemented!("api::abi::EpochClock::set_wall_backwards")
+    pub fn set_wall_backwards(&mut self, ms: u64) {
+        if ms < self.wall.now_ms {
+            self.events.push("clock-changed".to_owned());
+        }
+        self.wall.now_ms = ms;
     }
 
     /// The events raised so far, for example `clock-changed` (ABI-117).
     pub fn events(&self) -> Vec<String> {
-        unimplemented!("api::abi::EpochClock::events")
+        self.events.clone()
     }
 }
 

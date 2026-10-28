@@ -3,8 +3,41 @@
 //! Written once by the skeleton lane from the generated `HostClientRequests` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::client_requests::HostClientRequests;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{ClientId, RequestId};
+
+/// Longest `timeout-millis` a client request accepts.
+const MAX_TIMEOUT_MILLIS: u32 = 30_000;
+
+/// Request kinds the attached client declares in `client_requests`.
+const DECLARED_KINDS: &[&str] = &["terminal-size"];
+
+/// The one attached client known to this host until the kernel registry is wired in.
+const ATTACHED_CLIENT: u64 = 1;
+
+/// Answer state of one in-flight request.
+#[derive(Debug)]
+enum RequestState {
+    Pending,
+    Answered(String),
+}
+
+thread_local! {
+    /// In-flight requests by id, plus the next id to hand out.
+    static REQUESTS: RefCell<(u64, HashMap<u64, RequestState>)> = RefCell::new((1, HashMap::new()));
+}
+
+/// Builds a refusal with the given code and a plain-text message.
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
+}
 
 /// Host side of the `client-requests` interface.
 #[derive(Debug)]
@@ -13,24 +46,71 @@ pub struct ClientRequestsImport;
 impl HostClientRequests for ClientRequestsImport {
     fn request(
         &mut self,
-        _client: ClientId,
-        _kind: String,
+        client: ClientId,
+        kind: String,
         _payload_json: String,
-        _timeout_millis: u32,
+        timeout_millis: u32,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::client_requests::request")
+        if client.0 != ATTACHED_CLIENT {
+            return Err(refuse(ErrorCode::NotFound, "client is not attached"));
+        }
+        if !DECLARED_KINDS.contains(&kind.as_str()) {
+            return Err(refuse(
+                ErrorCode::NotFound,
+                "request kind is not declared in client_requests",
+            ));
+        }
+        if timeout_millis == 0 || timeout_millis > MAX_TIMEOUT_MILLIS {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "timeout-millis must be 1 to 30000",
+            ));
+        }
+        let id = REQUESTS.with(|requests| {
+            let mut requests = requests.borrow_mut();
+            let id = requests.0;
+            requests.0 += 1;
+            requests.1.insert(id, RequestState::Pending);
+            id
+        });
+        Ok(RequestId(id))
     }
 
-    fn take_answer(&mut self, _request: RequestId) -> Option<String> {
-        unimplemented!("host::imports::client_requests::take_answer")
+    fn take_answer(&mut self, request: RequestId) -> Option<String> {
+        REQUESTS.with(|requests| {
+            let mut requests = requests.borrow_mut();
+            if !matches!(requests.1.get(&request.0), Some(RequestState::Answered(_))) {
+                return None;
+            }
+            match requests.1.remove(&request.0) {
+                Some(RequestState::Answered(answer)) => Some(answer),
+                _ => None,
+            }
+        })
     }
 
     fn respond(
         &mut self,
-        _call: u64,
-        _outcome: Result<String, PluginError>,
+        call: u64,
+        outcome: Result<String, PluginError>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::client_requests::respond")
+        REQUESTS.with(|requests| {
+            let mut requests = requests.borrow_mut();
+            match requests.1.get(&call) {
+                Some(RequestState::Pending) => {}
+                _ => return Err(refuse(ErrorCode::NotFound, "no pending call with that id")),
+            }
+            match outcome {
+                Ok(answer) => {
+                    requests.1.insert(call, RequestState::Answered(answer));
+                }
+                // A failed call carries no answer; the requester sees the request end unanswered.
+                Err(_) => {
+                    requests.1.remove(&call);
+                }
+            }
+            Ok(())
+        })
     }
 }
 

@@ -344,3 +344,203 @@ fn rapp_the_prompt_row_opens_the_editor_on_the_stored_text() {
     host.settle();
     assert_eq!(saved(&mut host)["custom_prompt"], "Changed");
 }
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::toggles_and_selects_persist_immediately
+#[test]
+fn rapp_each_toggle_is_saved_as_soon_as_it_is_made() {
+    let mut host = dismissed_tab();
+    host.settings_adjust_row("enabled", 0);
+    assert!(!host.settings_save_pending());
+    host.settings_adjust_row("enabled", 0);
+    assert!(!host.settings_save_pending());
+    host.settle();
+    assert_eq!(saved(&mut host)["enabled"], host.settings_value("enabled"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::numeric_rows_wait_for_the_debounce_then_save_once
+#[test]
+fn rapp_a_further_numeric_change_restarts_the_debounce() {
+    let mut host = dismissed_tab();
+    host.settings_adjust_row("threshold", 1);
+    host.advance_clock(DEBOUNCE_MS - 100);
+    host.settings_adjust_row("threshold", 1);
+    host.advance_clock(DEBOUNCE_MS - 100);
+    host.settle();
+    assert_eq!(
+        saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65),
+        65,
+        "the second change restarted the wait"
+    );
+    host.advance_clock(100);
+    host.settle();
+    assert_eq!(saved(&mut host)["threshold_percent"], 67);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::an_immediate_save_carries_and_cancels_a_pending_numeric_change
+#[test]
+fn rapp_an_immediate_save_leaves_no_later_numeric_write() {
+    let mut host = dismissed_tab();
+    host.settings_adjust_row("keep_backups", 1);
+    host.settings_adjust_row("automatic", 0);
+    host.settle();
+    let writes = host.settings_write_count();
+    host.advance_clock(5_000);
+    host.settle();
+    assert_eq!(
+        host.settings_write_count(),
+        writes,
+        "the cancelled numeric save never runs"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::dismissing_the_banner_persists_forever_and_only_once
+#[test]
+fn rapp_the_banner_row_is_hidden_once_dismissed() {
+    let mut host = tab();
+    assert!(
+        host.settings_banner_visible(),
+        "the banner shows until dismissed"
+    );
+    host.settings_dismiss_banner();
+    host.settle();
+    assert!(!host.settings_banner_visible());
+    assert!(host.settings_banner_close_rect().is_none());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::the_custom_prompt_edits_persist_and_clear
+#[test]
+fn rapp_an_overlong_custom_prompt_is_kept_within_the_maximum_length() {
+    let mut host = dismissed_tab();
+    let limit = host.custom_prompt_max_chars();
+    host.settings_commit_prompt(&"k".repeat(limit + 1));
+    host.settle();
+    let stored = saved(&mut host)["custom_prompt"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        stored.chars().count() <= limit,
+        "stored {} characters",
+        stored.chars().count()
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::the_configuration_command_is_byte_accounted_even_at_the_largest_prompt
+#[test]
+fn rapp_the_largest_prompt_settings_pass_the_serialized_size_bound() {
+    let mut host = dismissed_tab();
+    let largest = "\u{1}".repeat(host.custom_prompt_max_chars());
+    host.settings_commit_prompt(&largest);
+    host.settle();
+    let loaded = saved(&mut host);
+    assert!(host.settings_serialized_bound_ok(&loaded));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::keyboard_closes_the_banner_for_good_and_ignores_stray_arrows
+#[test]
+fn rapp_keyboard_dismissal_moves_selection_normally_afterwards() {
+    let mut host = tab();
+    host.settings_key("x");
+    host.settle();
+    assert!(!host.settings_banner_visible());
+    host.settings_key("Down");
+    assert_eq!(host.settings_selected_row(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::keyboard_walks_the_rows_toggles_and_cycles_each_agent_technique
+#[test]
+fn rapp_escape_closes_the_technique_catalogue_without_changing_the_technique() {
+    let mut host = dismissed_tab();
+    let start = host.settings_value("technique:claude");
+    while host.settings_selected_row() < host.settings_row_index("technique:claude") {
+        host.settings_key("Down");
+    }
+    host.settings_key("Enter");
+    assert!(host.settings_dialog().is_some());
+    host.settings_dialog_key("Esc");
+    host.settle();
+    assert!(host.settings_dialog().is_none());
+    assert_eq!(host.settings_value("technique:claude"), start);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::keyboard_enter_on_the_prompt_row_opens_the_editor_and_delete_clears_the_text
+#[test]
+fn rapp_delete_on_the_prompt_row_does_not_open_the_editor() {
+    let mut host = dismissed_tab();
+    host.settings_commit_prompt("Keep API names.");
+    host.settle();
+    while host.settings_selected_row() < host.settings_row_index("custom_prompt") {
+        host.settings_key("Down");
+    }
+    host.settings_key("Delete");
+    host.settle();
+    assert!(host.prompt_editor_text().is_none());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::mouse_click_on_the_x_closes_the_banner_for_good_and_other_clicks_do_not
+#[test]
+fn rapp_clicking_the_x_removes_its_close_target() {
+    let mut host = tab();
+    assert!(host.settings_banner_close_rect().is_some());
+    let banner = host.settings_row_geometry("privacy_banner");
+    host.settings_click(banner.control_column + 1, banner.control_line);
+    host.settle();
+    assert!(host.settings_banner_close_rect().is_none());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::mouse_toggles_steps_and_cycles_technique_rows_from_the_control_halves
+#[test]
+fn rapp_clicking_the_technique_value_cycles_through_the_whole_catalogue() {
+    let mut host = dismissed_tab();
+    let start = host.settings_value("technique:claude");
+    let count = host.technique_ids().len();
+    for _ in 0..count {
+        let claude = host.settings_row_geometry("technique:claude");
+        host.settings_click(claude.value_column, claude.control_line);
+    }
+    assert_eq!(
+        host.settings_value("technique:claude"),
+        start,
+        "{count} clicks complete one cycle"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::numeric_star_accepts_direct_entry_and_persists_remote_compaction_value
+#[test]
+fn rapp_escape_in_direct_numeric_entry_keeps_the_threshold() {
+    let mut host = dismissed_tab();
+    let before = host.settings_value("threshold");
+    let threshold = host.settings_row_geometry("threshold");
+    host.settings_click(threshold.open_column, threshold.control_line);
+    assert!(host.settings_dialog().is_some());
+    host.settings_dialog_key("Esc");
+    host.settle();
+    assert!(host.settings_dialog().is_none());
+    assert_eq!(host.settings_value("threshold"), before);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::technique_plus_opens_full_catalog_and_pointer_selection_persists
+#[test]
+fn rapp_technique_catalogue_preselects_the_current_technique() {
+    let mut host = dismissed_tab();
+    let all = host.technique_ids();
+    let current = all.last().expect("catalogue is not empty").clone();
+    host.settings_set_value("technique:claude", json!(current.clone()));
+    let claude = host.settings_row_geometry("technique:claude");
+    host.settings_click(claude.open_column, claude.control_line);
+    let dialog = host.settings_dialog().expect("catalogue opens");
+    assert_eq!(dialog["selected_id"], json!(current));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_app.rs::the_prompt_row_opens_the_editor_on_the_stored_text
+#[test]
+fn rapp_escape_from_the_prompt_editor_keeps_the_stored_prompt() {
+    let mut host = tab();
+    host.settings_commit_prompt("Line one\nLine two");
+    host.settle();
+    host.settings_adjust_row("custom_prompt", 0);
+    host.settings_key("Esc");
+    host.settle();
+    assert!(host.prompt_editor_text().is_none());
+    assert_eq!(saved(&mut host)["custom_prompt"], "Line one\nLine two");
+}

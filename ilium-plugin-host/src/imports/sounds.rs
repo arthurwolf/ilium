@@ -1,8 +1,13 @@
-//! Host implementation of `ilium:host/sounds` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/sounds`.
 //!
-//! Written once by the skeleton lane from the generated `HostSounds` trait; hand-owned afterwards.
+//! The catalog lists the sound ids a plugin may pass to `sound.play`: the one sound Ilium ships
+//! inside the client (capability-sound-play.md, "Sound ids and files"). Plugin-contributed ids
+//! (`contributes.sounds`) are merged in by the registry that owns manifests, not by this import.
 
 use ilium_plugin_api::generated::host::sounds::HostSounds;
+
+/// The sound bundled inside the client binary.
+const BUNDLED_SOUND_ID: &str = "chirping";
 
 /// Host side of the `sounds` interface.
 #[derive(Debug)]
@@ -10,7 +15,7 @@ pub struct SoundsImport;
 
 impl HostSounds for SoundsImport {
     fn catalog(&mut self) -> Vec<String> {
-        unimplemented!("host::imports::sounds::catalog")
+        vec![BUNDLED_SOUND_ID.to_owned()]
     }
 }
 

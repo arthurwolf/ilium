@@ -543,3 +543,33 @@ fn sec_123_declined_trust_is_remembered_as_trust_declined() {
     trust.decline("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect("decline");
     assert_eq!(trust.state("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").as_str(), "trust.declined");
 }
+
+/// REQ: SEC-107
+#[test]
+fn sec_107_each_grant_gets_its_own_details_text() {
+    let rows = review_rows(&[grant("tree.read"), grant("sound.play")]);
+    assert_eq!(rows.len(), 2, "one row per grant");
+    assert_ne!(
+        rows[0].details, rows[1].details,
+        "each grant needs its own plain-language details"
+    );
+}
+
+/// REQ: SEC-111
+#[test]
+fn sec_111_three_not_now_answers_for_one_plugin_silence_its_prompt() {
+    let mut counter = DeclineCounter::default();
+    counter.record_decline("com.example.plugin", "fs.read:project");
+    counter.record_decline("com.example.plugin", "net.http");
+    counter.record_decline("com.example.plugin", "clipboard");
+    assert!(
+        counter.is_silenced("com.example.plugin", "fs.read:project"),
+        "three Not now answers for one plugin must stop its prompt"
+    );
+}
+
+/// REQ: SEC-121
+#[test]
+fn sec_121_review_dialog_also_names_ilium_as_its_source() {
+    assert_eq!(DialogKind::Review.source_label(), "Ilium");
+}

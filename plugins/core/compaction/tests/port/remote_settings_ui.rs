@@ -328,3 +328,122 @@ fn rsui_narrow_widths_never_panic_and_keep_the_banner_inside_the_page() {
         }
     }
 }
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::banner_text_names_the_configured_provider_and_model
+#[test]
+fn rsui_banner_text_omits_the_no_model_note_when_a_model_is_set() {
+    let host = tab();
+    let banner = host.settings_privacy_banner_text(
+        json!({"provider": "Anthropic", "model": "claude-test-model"}),
+    );
+    assert!(!banner.contains("(no model selected)"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::the_tab_shows_the_banner_until_it_is_dismissed
+#[test]
+fn rsui_banner_is_visible_before_any_dismissal() {
+    let host = tab();
+    assert!(host.settings_banner_visible());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::the_page_lists_every_section_row_and_technique_description
+#[test]
+fn rsui_page_keeps_its_title_at_narrow_width() {
+    let host = dismissed();
+    let page = host.settings_page_text(60);
+    assert!(!host.settings_section_headings().is_empty());
+    assert!(page.contains("Remote compaction"), "{page}");
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::technique_rows_show_provenance_for_each_technique
+#[test]
+fn rsui_custom_technique_row_names_its_own_instructions() {
+    let mut host = dismissed();
+    host.settings_set_value("technique:other", json!("custom"));
+    assert!(host.settings_page_text(120).contains("Your own instructions"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::custom_prompt_row_previews_the_text_and_its_length
+#[test]
+fn rsui_clearing_the_prompt_returns_to_not_set() {
+    let mut host = dismissed();
+    host.settings_commit_prompt("Keep the plan.");
+    host.settings_clear_prompt();
+    assert!(host.settings_page_text(120).contains("Not set"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::rendered_page_and_dialog_banner_draw_and_report_the_close_button
+#[test]
+fn rsui_close_button_is_published_while_the_banner_shows() {
+    let host = tab();
+    assert!(host.settings_banner_close_rect_at(110).is_some());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::clicks_resolve_to_toggles_steppers_the_banner_close_button_and_inert_text
+#[test]
+fn rsui_clicking_the_banner_close_button_dismisses_the_banner() {
+    let mut host = tab();
+    let banner = host.settings_row_geometry("privacy_banner");
+    host.settings_click(banner.control_column + 1, banner.control_line);
+    host.settle();
+    assert!(!host.settings_banner_visible());
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::rendered_remote_controls_use_shared_choice_and_centered_number_layouts
+#[test]
+fn rsui_threshold_control_paints_its_current_value() {
+    let host = dismissed();
+    assert!(host
+        .settings_painted_control("threshold", 110)
+        .contains("65%"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::settings_screen_paints_and_hits_remote_controls_in_the_same_geometry
+#[test]
+fn rsui_minus_glyph_sits_at_the_previous_column() {
+    let host = dismissed();
+    let geometry = host.settings_row_geometry("threshold");
+    assert_eq!(
+        host.settings_painted_glyph(geometry.previous_column, geometry.control_line),
+        '-'
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::scroll_follows_the_selection_and_the_page_scrolls_to_its_end
+#[test]
+fn rsui_a_tall_viewport_needs_no_scroll() {
+    let host = dismissed();
+    let last = host.settings_rows().len() - 1;
+    assert_eq!(host.settings_max_scroll(last, 1000), 0);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::every_row_has_a_help_anchor_on_its_first_line
+#[test]
+fn rsui_help_anchor_ids_are_unique() {
+    let host = tab();
+    let mut ids: Vec<String> = host
+        .settings_help_anchors()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    let count = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), count);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::a_pending_numeric_save_is_visible_in_the_title
+#[test]
+fn rsui_save_indicator_clears_once_the_write_settles() {
+    let mut host = dismissed();
+    host.settings_adjust_row("threshold", 1);
+    host.settle();
+    assert!(!host.settings_page_text(110).contains("saving\u{2026}"));
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::narrow_widths_never_panic_and_keep_the_banner_inside_the_page
+#[test]
+fn rsui_zero_width_page_renders_without_panicking() {
+    let host = tab();
+    let _ = host.settings_page_lines(0);
+}

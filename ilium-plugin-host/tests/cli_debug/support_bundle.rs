@@ -1,6 +1,6 @@
 //! `ilium plugin support-bundle` and what the bundle holds: DEV-831..833 of reference-plugin-cli.md,
 //! USR-221..225 and USR-229 of reference-requirements-user-admin.md (core-plugin-diagnostics.md,
-//! "Support bundle" and "Crash records"). Each test calls an unimplemented! stub until the command lands.
+//! "Support bundle" and "Crash records"). Each test drives the real command.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -257,4 +257,108 @@ fn usr_229_crash_records_are_listed_in_the_bundle_crashes_file() {
     bundle_run(&env, &out);
     let entries = bundle_entries(&out);
     assert!(entries["crashes.txt"].contains(&format_record(&record)));
+}
+
+/// REQ: DEV-831
+#[test]
+fn dev_831_successful_write_reports_no_error_record() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    let out = scratch.path().join("bundle-no-error.zip");
+    let output = bundle_run(&env, &out);
+    assert!(error_code(&output).is_none());
+    assert!(records_of(&output, "error").is_empty());
+}
+
+/// REQ: DEV-832
+#[test]
+fn dev_832_refused_overwrite_prints_no_support_bundle_record() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    let out = scratch.path().join("bundle-refused.zip");
+    std::fs::write(&out, b"keep").expect("write existing file");
+    let output = bundle_run(&env, &out);
+    assert!(records_of(&output, "support-bundle").is_empty());
+}
+
+/// REQ: DEV-833
+#[test]
+fn dev_833_trimmed_archive_still_holds_the_four_named_files() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    oversized_log(&env);
+    let out = scratch.path().join("bundle-trimmed.zip");
+    bundle_run(&env, &out);
+    let names: Vec<String> = bundle_entries(&out).into_keys().collect();
+    assert_eq!(
+        names,
+        ["crashes.txt", "log.txt", "stats.txt", "summary.txt"]
+    );
+}
+
+/// REQ: USR-221
+#[test]
+fn usr_221_two_bundles_hold_the_same_entry_names() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    let first = scratch.path().join("first.zip");
+    let second = scratch.path().join("second.zip");
+    bundle_run(&env, &first);
+    bundle_run(&env, &second);
+    let first_names: Vec<String> = bundle_entries(&first).into_keys().collect();
+    let second_names: Vec<String> = bundle_entries(&second).into_keys().collect();
+    assert_eq!(first_names, second_names);
+}
+
+/// REQ: USR-222
+#[test]
+fn usr_222_a_second_token_never_reaches_the_archive_or_stdout() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    write_log(
+        &env,
+        ID,
+        "",
+        &[log_line(
+            "2030-01-01T12:00:00Z",
+            "INFO",
+            "server",
+            ID,
+            "Authorization: Bearer SECRET_TOKEN_XYZ",
+        )],
+    );
+    let out = scratch.path().join("bundle-token.zip");
+    let output = bundle_run(&env, &out);
+    assert!(!output.stdout_raw.contains("SECRET_TOKEN_XYZ"));
+    assert!(!bundle_entries(&out)["log.txt"].contains("SECRET_TOKEN_XYZ"));
+}
+
+/// REQ: USR-223
+#[test]
+fn usr_223_no_archive_entry_is_named_after_data_or_trace() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    let out = scratch.path().join("bundle-names.zip");
+    bundle_run(&env, &out);
+    assert!(bundle_entries(&out)
+        .keys()
+        .all(|name| !name.contains("data") && !name.contains("trace")));
+}
+
+/// REQ: USR-224
+#[test]
+fn usr_224_small_log_is_kept_whole_and_not_trimmed() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), FakeBackend::new(ID));
+    write_log(
+        &env,
+        ID,
+        "",
+        &[log_line("2030-01-01T12:00:00Z", "INFO", "server", ID, "LINE-FIRST")],
+    );
+    let out = scratch.path().join("bundle-small.zip");
+    let output = bundle_run(&env, &out);
+    let records = records_of(&output, "support-bundle");
+    assert_eq!(records[0]["trimmed"].as_bool(), Some(false));
+    assert!(bundle_entries(&out)["log.txt"].contains("LINE-FIRST"));
 }

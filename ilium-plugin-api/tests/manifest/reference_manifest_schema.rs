@@ -236,6 +236,35 @@ fn pkg_565_exports_list_must_match_the_real_component() {
     assert_has(&error_codes(&found), "manifest.exports-mismatch");
 }
 
+/// REQ: PKG-565
+#[test]
+fn pkg_565_empty_exports_list_matches_a_component_without_exports() {
+    use ilium_plugin_api::manifest::{check_component, ComponentSummary};
+    let manifest =
+        ilium_plugin_api::manifest::parse_manifest(&client().to_string()).expect("parses");
+    let component = ComponentSummary {
+        exports: Vec::new(),
+        api_sections: vec![ilium_plugin_api::version::API_VERSION_BYTES.to_vec()],
+        ..ComponentSummary::default()
+    };
+    let found = check_component(
+        &manifest,
+        ilium_plugin_api::Side::Client,
+        &component,
+        &context_with(Tier::T3, CheckMode::Install),
+    );
+    assert_lacks(&error_codes(&found), "manifest.exports-mismatch");
+}
+
+/// REQ: PKG-566
+#[test]
+fn pkg_566_unknown_grant_is_refused_on_the_server_side_too() {
+    assert_has(
+        &errors(&server_with_grants(&["teleport.now"])),
+        "manifest.grant-unknown",
+    );
+}
+
 /// REQ: PKG-566
 #[test]
 fn pkg_566_grants_must_exist_follow_their_grammar_and_fit_their_side() {
@@ -641,4 +670,25 @@ fn pkg_577_a_retired_code_is_not_a_live_catalogue_entry() {
     for (old, _) in retired_codes() {
         assert!(!live.contains(&old), "{old} is both retired and live");
     }
+}
+
+/// REQ: PKG-573
+#[test]
+fn pkg_573_the_error_code_is_one_the_catalogue_lists() {
+    let found = error_diagnostics(&set(client(), "/id", json!("Bad")));
+    let first = &found[0];
+    assert!(
+        catalogue().iter().any(|row| row.code == first.code.as_str()),
+        "tools match the stable code, so every emitted code must be in the catalogue: {}",
+        first.code.as_str()
+    );
+}
+
+/// REQ: PKG-574
+#[test]
+fn pkg_574_a_clean_manifest_prints_no_error_whose_exit_code_could_win() {
+    assert!(
+        error_diagnostics(&client()).is_empty(),
+        "a clean manifest has no error record, so no exit code is taken from one"
+    );
 }

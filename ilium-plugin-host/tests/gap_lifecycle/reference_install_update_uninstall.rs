@@ -268,3 +268,167 @@ fn lif_726_install_refused_past_256_plugins_and_past_2_gib_per_plugin() {
         "a second 1.5 GiB version of one plugin exceeds the 2 GiB store cap"
     );
 }
+
+/// REQ: LIF-707
+#[test]
+fn lif_707_update_cancel_is_refused_with_update_in_progress_during_trial() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "It MUST refuse with `update.in-progress` (exit 1) once `update.state` is `migrating` or `trial`.",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    update(&rig, &pkg(NOTES, "2.0.0"));
+    let server = rig.start_server("default");
+    server.pause_at(UpdateStage::Trial);
+    let refused = rig.cli(&["plugin", "update-cancel", NOTES]);
+    assert_eq!(refused.exit_code, 1, "update-cancel during trial exits 1");
+    assert!(error_codes(&refused).contains(&"update.in-progress".to_string()));
+    assert!(
+        store_versions(&rig, NOTES).contains(&"2.0.0".to_string()),
+        "the candidate is kept while the trial runs"
+    );
+}
+
+/// REQ: LIF-708
+#[test]
+fn lif_708_update_to_c_replaces_update_staged_b_and_keeps_the_grant_request_of_c() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "An update to version C while B is `staged` or `update-staged` MUST replace B",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    update(&rig, &pkg(NOTES, "2.0.0").grant("net.http"));
+    assert_eq!(list_row(&rig, NOTES)["state"], "update-staged");
+    let replaced = update(&rig, &pkg(NOTES, "3.0.0"));
+    assert_eq!(
+        replaced.exit_code, 0,
+        "update to C replaces update-staged B"
+    );
+    assert!(!store_versions(&rig, NOTES).contains(&"2.0.0".to_string()));
+    assert!(store_versions(&rig, NOTES).contains(&"3.0.0".to_string()));
+    let server = rig.start_server("default");
+    server.pause_at(UpdateStage::Trial);
+    let busy = update(&rig, &pkg(NOTES, "4.0.0"));
+    assert_eq!(busy.exit_code, 4, "an update during trial returns exit 4");
+    assert!(error_codes(&busy).contains(&"install.update-busy".to_string()));
+}
+
+/// REQ: LIF-711
+#[test]
+fn lif_711_update_staged_candidate_is_still_staged_at_29_days_with_no_expiry_log() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "A package in `update-staged` MUST remain staged for at most 30 days",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    update(&rig, &pkg(NOTES, "2.0.0").grant("net.http"));
+    rig.jump_wall_clock(29 * 86_400);
+    let server = rig.start_server("default");
+    assert!(
+        store_versions(&rig, NOTES).contains(&"2.0.0".to_string()),
+        "the candidate is kept before the 30 day limit"
+    );
+    assert_eq!(list_row(&rig, NOTES)["state"], "update-staged");
+    assert_eq!(log_count(&server, "update.review-expired"), 0);
+}
+
+/// REQ: LIF-713
+#[test]
+fn lif_713_each_situation_returns_only_its_own_error_code() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "and no other code MUST be returned for these situations",
+    );
+    let first_install = rig();
+    install_ok(&first_install, &pkg(NOTES, "1.0.0"));
+    let no_previous = first_install.cli(&["rollback", NOTES]);
+    assert_eq!(
+        error_codes(&no_previous),
+        vec!["install.no-previous".to_string()],
+        "rollback without a previous version returns only install.no-previous"
+    );
+
+    let no_backup = rig();
+    install_ok(&no_backup, &pkg(NOTES, "1.0.0"));
+    update(&no_backup, &pkg(NOTES, "2.0.0"));
+    no_backup.delete_backups(NOTES);
+    let gone = no_backup.cli(&["rollback", NOTES, "--restore-backup"]);
+    assert_eq!(
+        error_codes(&gone),
+        vec!["rollback.no-backup".to_string()],
+        "a missing backup returns only rollback.no-backup"
+    );
+}
+
+/// REQ: LIF-716
+#[test]
+fn lif_716_refused_uninstall_leaves_the_store_and_the_installed_row_unchanged() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "`ilium plugin uninstall <id>` while an `ilium plugin dev` lease (LIF-229) shadows the id",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let _dev = rig.dev_start(&pkg(NOTES, "1.0.1"), &[]);
+    let refused = rig.cli(&["plugin", "uninstall", NOTES]);
+    assert_eq!(refused.exit_code, 4);
+    assert!(
+        rig.plugins_root().join("store").join(NOTES).exists(),
+        "the store is not touched by a refused uninstall"
+    );
+    assert_eq!(list_row(&rig, NOTES)["state"], "installed-enabled");
+}
+
+/// REQ: LIF-717
+#[test]
+fn lif_717_every_instance_is_gone_after_uninstall_completes() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "MUST NOT delete files until every instance of the id is gone",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").deactivate_hangs());
+    let servers: Vec<ServerHandle> = (0..4)
+        .map(|index| rig.start_server(&format!("session-{index}")))
+        .collect();
+    let output = rig.cli(&["plugin", "uninstall", NOTES]);
+    assert_eq!(output.exit_code, 0, "uninstall completes");
+    assert!(
+        servers
+            .iter()
+            .all(|server| server.active_version(NOTES).is_none()),
+        "no instance of the id is still active"
+    );
+    assert!(
+        list_rows(&rig).iter().all(|row| row["id"] != NOTES),
+        "the id is removed from the plugin list"
+    );
+}
+
+/// REQ: LIF-726
+#[test]
+fn lif_726_refused_257th_install_leaves_exactly_256_plugins_installed() {
+    assert_manual_says(
+        "reference-install-update-uninstall",
+        "The host MUST refuse an install that would make the number of installed plugins exceed 256",
+    );
+    let rig = rig();
+    for index in 0..256 {
+        install_ok(&rig, &pkg(&format!("com.example.p{index:03}"), "1.0.0"));
+    }
+    let too_many = install(&rig, &pkg("com.example.p256", "1.0.0"));
+    assert_eq!(too_many.exit_code, 1, "install.too-many exits 1");
+    assert_eq!(
+        list_rows(&rig).len(),
+        256,
+        "the refused plugin is not installed"
+    );
+    assert!(!rig
+        .plugins_root()
+        .join("store")
+        .join("com.example.p256")
+        .exists());
+}

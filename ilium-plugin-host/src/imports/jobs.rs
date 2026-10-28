@@ -1,42 +1,92 @@
-//! Host implementation of `ilium:host/jobs` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/jobs`.
 //!
-//! Written once by the skeleton lane from the generated `HostJobs` trait; hand-owned afterwards.
+//! No `contributes.jobs` registry is wired into the import yet, so every kind is undeclared and
+//! `start` refuses it; cancellation and progress state is kept so the guest-side calls stay total.
 
 use ilium_plugin_api::generated::host::jobs::HostJobs;
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, PoisonError};
+
+/// Default `job_io_mib` limit for a job's input and output: 16 MiB.
+const JOB_IO_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Requests that were cancelled; a cancelled job never yields output.
+static CANCELLED_REQUESTS: Mutex<Option<HashSet<u64>>> = Mutex::new(None);
+
+/// Last reported progress of the running job, as `f32` bits (0 to 100).
+static REPORTED_PROGRESS_BITS: AtomicU32 = AtomicU32::new(0);
+
+fn error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_string(),
+        retry_after_ms: None,
+    }
+}
 
 /// Host side of the `jobs` interface.
 #[derive(Debug)]
 pub struct JobsImport;
 
 impl HostJobs for JobsImport {
-    fn start(&mut self, _kind: String, _input: Vec<u8>) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::jobs::start")
+    fn start(&mut self, kind: String, input: Vec<u8>) -> Result<RequestId, PluginError> {
+        if kind.is_empty() {
+            return Err(error(ErrorCode::InvalidArgument, "job kind is empty"));
+        }
+        if input.len() > JOB_IO_LIMIT_BYTES {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "job input exceeds the job_io_mib limit",
+            ));
+        }
+        Err(error(
+            ErrorCode::InvalidArgument,
+            "job kind is not declared in contributes.jobs",
+        ))
     }
 
-    fn cancel(&mut self, _job: RequestId) {
-        unimplemented!("host::imports::jobs::cancel")
+    fn cancel(&mut self, job: RequestId) {
+        let mut guard = CANCELLED_REQUESTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        guard.get_or_insert_with(HashSet::new).insert(job.0);
     }
 
     fn take_output(&mut self, _job: RequestId) -> Option<Vec<u8>> {
-        unimplemented!("host::imports::jobs::take_output")
+        // No job ever runs, so no output exists; cancelled jobs never have output either.
+        None
     }
 
-    fn report_progress(&mut self, _percent: f32) {
-        unimplemented!("host::imports::jobs::report_progress")
+    fn report_progress(&mut self, percent: f32) {
+        let clamped = if percent.is_nan() {
+            0.0
+        } else {
+            percent.clamp(0.0, 100.0)
+        };
+        REPORTED_PROGRESS_BITS.store(clamped.to_bits(), Ordering::Relaxed);
     }
 
     fn is_cancelled(&mut self) -> bool {
-        unimplemented!("host::imports::jobs::is_cancelled")
+        // The calling job's cancel flag is not tracked per job yet; a plain call is not cancelled.
+        false
     }
 
     fn wait_request(
         &mut self,
-        _request: RequestId,
+        request: RequestId,
         _timeout_millis: u32,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::jobs::wait_request")
+        let guard = CANCELLED_REQUESTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if guard.as_ref().is_some_and(|set| set.contains(&request.0)) {
+            return Err(error(ErrorCode::Cancelled, "request was cancelled"));
+        }
+        // No request can complete, so the wait always runs into its timeout.
+        Err(error(ErrorCode::TimedOut, "request did not finish in time"))
     }
 }
 

@@ -300,3 +300,110 @@ fn port_917_the_ask_for_update_row_action_applies_to_project_rows_only() {
     assert_eq!(ask.len(), 1, "{actions:?}");
     assert_eq!(ask[0]["applies_to"], json!(["project"]));
 }
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::scope_is_recursive_and_filesystem_membership_is_component_safe_and_project_local
+#[test]
+fn port_911b_a_single_agent_scope_reaches_only_that_agent() {
+    let mut world = world();
+    let target = world.descendant;
+    scoped_ask(&mut world.host, target, Some("status"));
+    assert_eq!(recipients(&world.host), vec![world.descendant]);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::agent_message_filesystem_folder_status_update_reaches_agents_within_folder_path
+#[test]
+fn port_912b_a_folder_with_no_agents_inside_it_sends_nothing() {
+    let mut host = server_host();
+    let project = container(&mut host, "ask-for-update-empty-folder", None);
+    let group = container(&mut host, "agents", Some(project));
+    let folder = node(
+        &mut host,
+        "src",
+        Some(group),
+        NodeClass::Folder,
+        None,
+        false,
+    );
+    host.tree().set_pane_directory(folder, "project:src");
+    agent_in(&mut host, "outside-folder", group, "project:tests");
+    scoped_ask(&mut host, folder, None);
+    assert!(sent_inputs(&host).is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::enter_toggles_focused_recipient_and_submit_option
+#[test]
+fn port_913b_every_scoped_recipient_receives_the_same_text() {
+    let mut world = world();
+    let project = world.project;
+    scoped_ask(&mut world.host, project, Some("status"));
+    let inputs = sent_inputs(&world.host);
+    assert!(inputs.iter().all(|spec| spec.text == "status"));
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::agent_message_dialog_marks_moved_snapshot_recipient_unavailable
+#[test]
+fn port_914b_the_moved_agent_is_reached_through_its_new_scope() {
+    let mut host = server_host();
+    let project = container(&mut host, "message-moved-recipient-b", None);
+    let group = container(&mut host, "selected agents", Some(project));
+    let outside_group = container(&mut host, "other agents", Some(project));
+    agent_in(&mut host, "retained", group, "project:.");
+    let moved = agent_in(&mut host, "moved", group, "project:.");
+    host.tree().move_node(moved, outside_group);
+    host.settle();
+    scoped_ask(&mut host, outside_group, Some("hello moved agent"));
+    assert_eq!(recipients(&host), vec![moved]);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::folder_agent_message_menu_offers_status_and_send_to_all
+#[test]
+fn port_915b_a_blank_row_action_message_is_not_sent() {
+    let mut host = open_on_row(7);
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text("   ".to_string())),
+    ));
+    host.deliver_one(send_activation());
+    host.settle();
+    assert!(scoped_messages(&host).is_empty());
+}
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::queued_and_unavailable_rows_cannot_be_reselected
+#[test]
+fn port_916b_text_edited_after_a_queued_send_is_not_sent_again() {
+    let mut host = open_on_row(7);
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text("once".to_string())),
+    ));
+    host.deliver_one(send_activation());
+    host.settle();
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text("later".to_string())),
+    ));
+    host.deliver_one(send_activation());
+    host.settle();
+    assert_eq!(scoped_messages(&host).len(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::ask_for_update_row_action_is_offered_only_for_project_rows
+#[test]
+fn port_917b_the_ask_for_update_row_action_does_not_apply_to_folders() {
+    let manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest"))
+            .expect("manifest JSON");
+    let actions = manifest["contributes"]["row_actions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let ask = actions
+        .iter()
+        .find(|action| action["command"] == "ask-for-update")
+        .expect("ask-for-update row action");
+    let applies_to = ask["applies_to"].as_array().cloned().unwrap_or_default();
+    assert!(!applies_to.iter().any(|kind| kind == "folder"));
+}

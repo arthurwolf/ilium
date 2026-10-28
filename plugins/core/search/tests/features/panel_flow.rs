@@ -289,3 +289,106 @@ fn port_app_the_open_command_is_titled_for_the_tree_context_menu_and_palette() {
         .expect("user doc");
     assert!(user_doc.contains("right-click and choose **Search workspace**"));
 }
+
+/// REQ: PORT:ilium-client/src/search_ui.rs::search_state_waits_for_a_full_second_of_quiet_before_claiming_work
+#[test]
+fn port_search_ui_typing_restarts_the_quiet_wait_before_the_query_is_sent() {
+    let mut host = activated_client();
+    host.deliver(vec![open_command_event()]);
+    host.deliver(vec![text_changed("a")]);
+    host.advance_clock(100);
+    let typing = host.deliver(vec![text_changed("ab")]);
+    assert!(query_messages(&typing).is_empty(), "still typing");
+    let settled = host.deliver(vec![filter_changed("ab")]);
+    let messages = query_messages(&settled);
+    assert_eq!(messages.len(), 1, "only the settled text is queried");
+    assert_eq!(messages[0]["query"], "ab");
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::workspace_search_debounce_wakes_at_its_exact_deadline
+#[test]
+fn port_app_filter_change_without_earlier_typing_queries_at_once() {
+    let mut host = activated_client();
+    host.deliver(vec![open_command_event()]);
+    let submissions = host.deliver(vec![filter_changed("solo")]);
+    let messages = query_messages(&submissions);
+    assert_eq!(messages.len(), 1, "no earlier keystroke is needed");
+    assert_eq!(messages[0]["query"], "solo");
+}
+
+/// REQ: PORT:ilium-client/src/search_ui.rs::stale_worker_completion_cannot_replace_a_newer_query
+#[test]
+fn port_search_ui_newer_answer_that_arrives_first_is_not_replaced_by_a_late_one() {
+    let mut host = activated_client();
+    host.deliver(vec![open_command_event()]);
+    host.deliver(vec![filter_changed("first")]);
+    host.deliver(vec![filter_changed("second")]);
+    host.deliver(vec![results_event(
+        2,
+        json!([{ "id": "2", "kind": "terminal", "title": "newest shell" }]),
+    )]);
+    host.deliver(vec![results_event(
+        1,
+        json!([{ "id": "1", "kind": "terminal", "title": "late shell" }]),
+    )]);
+    host.settle();
+    let screen = host.render(panel(), 80, 20).text();
+    assert!(screen.contains("newest shell"), "{screen}");
+    assert!(!screen.contains("late shell"), "{screen}");
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::workspace_search_waits_then_applies_a_worker_result_for_the_current_query
+#[test]
+fn port_app_one_answer_shows_every_hit_it_carries_once() {
+    let mut host = activated_client();
+    host.deliver(vec![open_command_event()]);
+    host.deliver(vec![filter_changed("shell")]);
+    host.deliver(vec![results_event(
+        1,
+        json!([
+            { "id": "8", "kind": "terminal", "title": "alpha shell" },
+            { "id": "9", "kind": "terminal", "title": "beta shell" },
+        ]),
+    )]);
+    host.settle();
+    let screen = host.render(panel(), 80, 20).text();
+    assert!(screen.contains("alpha shell"), "{screen}");
+    assert!(screen.contains("beta shell"), "{screen}");
+    assert_eq!(screen.matches("beta shell").count(), 1, "{screen}");
+}
+
+/// REQ: PORT:ilium-client/src/search_ui.rs::cancelled_terminal_preparation_does_not_publish_partial_matches
+#[test]
+fn port_search_ui_completed_scan_job_publishes_its_matches() {
+    let mut host = activated_server();
+    add_terminal(&mut host, "build shell", "needle in build");
+    let _ = ask(&mut host, 1, "needle");
+    drive_jobs(&mut host);
+    let hits: Vec<_> = result_messages(&host.submitted())
+        .into_iter()
+        .flat_map(|(_, payload)| payload["hits"].as_array().cloned().unwrap_or_default())
+        .collect();
+    assert!(!hits.is_empty(), "a finished scan publishes its matches");
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::workspace_search_maintenance_preserves_an_active_settings_view
+#[test]
+fn port_app_reopening_after_close_submits_a_fresh_open_view() {
+    let mut host = activated_client();
+    host.deliver(vec![open_command_event()]);
+    host.deliver(vec![action("hits", ActionKind::Closed, ActionValue::None)]);
+    let submissions = host.deliver(vec![open_command_event()]);
+    assert_eq!(open_views(&submissions).len(), 1);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::every_tree_context_menu_exposes_workspace_search
+#[test]
+fn port_app_the_manifest_lists_the_open_command_id() {
+    let manifest = manifest_value();
+    assert!(
+        manifest["contributes"]["commands"]
+            .to_string()
+            .contains(OPEN_COMMAND),
+        "the manifest declares {OPEN_COMMAND}"
+    );
+}

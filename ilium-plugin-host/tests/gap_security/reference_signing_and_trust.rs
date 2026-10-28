@@ -89,3 +89,25 @@ fn sec_722_publish_with_an_expired_key_is_refused_and_the_cli_warns_from_60_days
         error_codes(&publish)
     );
 }
+
+/// REQ: SEC-721
+#[test]
+fn sec_721_untouched_trust_store_loads_the_plugin_and_keeps_no_tampered_copy() {
+    assert_manual_says(
+        "reference-signing-and-trust",
+        "The host MUST detect modification of the trust store and the grant file between reads",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0").signed("key-a"));
+    let server = rig.start_server("s1");
+    rig.advance(secs(3));
+    assert!(
+        rig.tampered_copies().is_empty(),
+        "an unmodified trust store leaves no .tampered- copy"
+    );
+    assert_eq!(
+        server.active_version(NOTES).as_deref(),
+        Some("1.0.0"),
+        "the signed plugin loads when the trust store is intact"
+    );
+}

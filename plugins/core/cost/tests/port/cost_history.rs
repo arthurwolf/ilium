@@ -164,3 +164,112 @@ fn port_cost_history_worker_delivers_a_result_and_then_honours_the_rescan_interv
     assert_eq!(reply["has_result"], json!(true));
     assert_eq!(reply["entries"], json!(1));
 }
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::a_stop_request_ends_the_scan_without_panicking
+#[test]
+fn port_cost_history_a_stop_request_yields_no_totals() {
+    let reply =
+        scan(json!({ "files": [claude("a", Some(5.0))], "window_days": 30, "cancelled": true }));
+    assert_eq!(reply["totals"].as_array().map_or(0, Vec::len), 0, "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::cancelled_scan_is_an_error_and_does_not_publish_partial_cache
+#[test]
+fn port_cost_history_cancelled_scan_publishes_no_partial_totals() {
+    let reply = scan(json!({
+        "files": [claude("synthetic-id", Some(4.0))],
+        "window_days": 30,
+        "cancelled": true,
+        "cache": { "path": "synthetic-cache.json", "bytes": "original-cache-bytes" },
+    }));
+    assert_eq!(reply["totals"].as_array().map_or(0, Vec::len), 0, "{reply}");
+    assert_eq!(reply["entries"], json!(0), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::claude_sessions_carry_no_quota
+#[test]
+fn port_cost_history_claude_sessions_carry_no_secondary_quota() {
+    let reply = scan(
+        json!({ "files": [claude("a", Some(3.0)), claude("b", Some(1.0))], "window_days": 30 }),
+    );
+    assert_eq!(reply["secondary"], json!([]));
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::codex_quota_use_is_the_rise_inside_one_window_period
+#[test]
+fn port_cost_history_codex_single_rising_window_reports_its_rise() {
+    let reply = scan(json!({
+        "files": [{ "agent": "codex", "name": "rise", "quota": [[20.0, 100], [24.0, 100], [31.5, 100]] }],
+        "window_days": 30,
+    }));
+    assert_eq!(reply["primary"], json!([11.5]));
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::last_line_extraction_handles_missing_and_partial_lines
+#[test]
+fn port_cost_history_last_line_extraction_prefers_the_last_complete_match() {
+    let reply = client(
+        "history.last-line-containing",
+        json!({ "text": "a\nneedle one\nneedle two\n", "needle": "needle" }),
+    );
+    assert_eq!(reply, json!("needle two"));
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::old_files_are_ignored
+#[test]
+fn port_cost_history_old_files_are_kept_inside_a_longer_window() {
+    let reply = scan(
+        json!({ "files": [claude("a", Some(5.0))], "window_days": 300, "now_offset_days": 200 }),
+    );
+    assert_eq!(reply["entries"], json!(1));
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::prices_codex_sessions_from_cumulative_tokens_and_the_last_model
+#[test]
+fn port_cost_history_unpriced_codex_session_still_counts_as_an_entry() {
+    let reply = scan(json!({
+        "files": [
+            { "agent": "codex", "name": "a", "model": "gpt-5.6-sol", "input": 2_000_000, "cached": 1_000_000, "output": 100_000 },
+            { "agent": "codex", "name": "b", "model": "gpt-reserve", "input": 10, "cached": 0, "output": 10 },
+        ],
+        "window_days": 30,
+    }));
+    assert_eq!(reply["entries"], json!(2), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::reads_the_last_reported_claude_total_and_skips_files_without_one
+#[test]
+fn port_cost_history_files_without_a_reported_total_yield_no_totals() {
+    let reply = scan(json!({ "files": [claude("b", None)], "window_days": 30 }));
+    assert_eq!(reply["totals"], json!([]));
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::refuses_calibration_when_a_configured_history_root_cannot_be_scanned
+#[test]
+fn port_cost_history_unscannable_root_reports_no_totals() {
+    let reply = scan(json!({ "files": [], "window_days": 30, "claude_projects_is_a_file": true }));
+    assert_eq!(reply["totals"].as_array().map_or(0, Vec::len), 0, "{reply}");
+    assert!(!error_of(&reply).is_empty(), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::unchanged_files_come_from_the_cache_and_changes_are_reparsed
+#[test]
+fn port_cost_history_changed_file_keeps_a_single_entry() {
+    let reply = scan(json!({
+        "files": [claude("a", Some(7.0))],
+        "window_days": 30,
+        "cache": { "path": "cache/history.json", "poison_reported_usd": 999.0 },
+        "files_changed": true,
+    }));
+    assert_eq!(reply["entries"], json!(1), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/cost_history.rs::worker_delivers_a_result_and_then_honours_the_rescan_interval
+#[test]
+fn port_cost_history_worker_result_carries_the_scanned_total() {
+    let reply = client(
+        "history.request-scans",
+        json!({ "files": [claude("a", Some(4.0))], "requests": [30, 30, 30, 60], "wait_for_result_after": 1 }),
+    );
+    assert_eq!(reply["totals"], json!([4.0]), "{reply}");
+}

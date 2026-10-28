@@ -154,3 +154,12 @@ fn dev_404_mode_is_component_when_the_test_mode_variable_says_component() {
     assert_eq!(state, InstanceState::Inactive);
     assert_eq!(mode, Mode::Component);
 }
+
+/// REQ: DEV-401
+#[test]
+fn dev_401_component_mode_reports_component() {
+    with_clean_env(|| {
+        let host = FakeHost::new().mode(Mode::Component);
+        assert_eq!(host.current_mode(), Mode::Component);
+    });
+}

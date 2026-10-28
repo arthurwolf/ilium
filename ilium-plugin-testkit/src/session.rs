@@ -1,11 +1,14 @@
 //! FakeSession: several plugins, both sides, core stubs (reference-test-harness.md "FakeSession").
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ilium_plugin_sdk_core::exports::{HookCall, HookReply, ServiceReply};
-use ilium_plugin_sdk_core::types::{PluginError, PluginId};
+use ilium_plugin_sdk_core::types::{ErrorCode, PluginError, PluginId};
+use serde_json::Value;
 
-use crate::errors::HarnessError;
+use crate::core_stubs;
+use crate::errors::{codes, HarnessError};
 use crate::host::FakeHost;
 
 /// A plugin identifier given as text or as a `PluginId`.
@@ -40,177 +43,437 @@ impl IntoPluginId for &str {
     }
 }
 
-/// Several plugins in one fake session.
+/// Core stubs that export no hook handler (assumption: the manual's table does not say which).
+const STUBS_WITHOUT_HOOK_HANDLER: &[&str] = &["ilium.core.agent-toolbar"];
+
+/// One installed plugin or core stub.
 #[derive(Debug)]
+struct SessionPlugin {
+    id: String,
+    server: FakeHost,
+    client: FakeHost,
+    has_hook_handler: bool,
+    services: Vec<String>,
+    active: bool,
+    disabled: bool,
+}
+
+/// A recording observer of a hook point.
+#[derive(Debug, Default)]
+struct Observer {
+    plugin: String,
+    point: String,
+    priority: i32,
+    fails: bool,
+    logs: Vec<(String, String)>,
+    chains: Vec<Vec<Value>>,
+}
+
+/// An extension contribution.
+#[derive(Debug)]
+struct Contribution {
+    plugin: String,
+    point: String,
+    id: String,
+    priority: i32,
+    entry: Value,
+}
+
+/// Several plugins in one fake session.
+#[derive(Debug, Default)]
 pub struct FakeSession {
-    _private: (),
+    plugins: Vec<SessionPlugin>,
+    service_grants: BTreeSet<(String, String)>,
+    stubs: BTreeMap<(String, String, String), Result<String, PluginError>>,
+    stalled: BTreeSet<(String, String, String)>,
+    contributions: Vec<Contribution>,
+    observers: Vec<Observer>,
+}
+
+fn session_fail(code: &str, message: &str) -> ! {
+    panic!("{code}: {message}")
 }
 
 impl FakeSession {
     /// An empty session.
     pub fn new() -> FakeSession {
-        FakeSession { _private: () }
+        FakeSession::default()
     }
 
     /// Installs a plugin from a project folder; panics with the harness code on failure.
-    pub fn install(&mut self, _package_dir: impl AsRef<Path>) -> &mut FakeSession {
-        unimplemented!("DEV-480")
+    pub fn install(&mut self, package_dir: impl AsRef<Path>) -> &mut FakeSession {
+        if let Err(error) = self.try_install(package_dir) {
+            session_fail(&error.code, &error.message);
+        }
+        self
     }
 
     /// Like `install` but returns the failure and the installed id.
     pub fn try_install(
         &mut self,
-        _package_dir: impl AsRef<Path>,
+        package_dir: impl AsRef<Path>,
     ) -> Result<PluginId, HarnessError> {
-        unimplemented!("DEV-480")
+        let dir = package_dir.as_ref();
+        let server = FakeHost::for_manifest(dir)?;
+        let client = FakeHost::for_manifest(dir)?.side("client");
+        let id = server.plugin_id().to_string();
+        let manifest_path = if dir.is_dir() {
+            dir.join("ilium-plugin.json")
+        } else {
+            dir.to_path_buf()
+        };
+        let manifest: Value = std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or(Value::Null);
+        let has_hook_handler = manifest
+            .get("server")
+            .and_then(|server| server.get("exports"))
+            .and_then(Value::as_array)
+            .map(|exports| exports.iter().any(|name| name.as_str() == Some("hook-handler")))
+            .unwrap_or(false);
+        let services = manifest
+            .get("contributes")
+            .and_then(|contributes| contributes.get("services"))
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|entry| {
+                        entry
+                            .as_str()
+                            .or_else(|| entry.get("name").and_then(Value::as_str))
+                    })
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.plugins.retain(|plugin| plugin.id != id);
+        self.plugins.push(SessionPlugin {
+            id: id.clone(),
+            server,
+            client,
+            has_hook_handler,
+            services,
+            active: false,
+            disabled: false,
+        });
+        Ok(PluginId(id))
     }
 
     /// Installs the stub of a bundled core plugin; unknown names fail with `harness.core-unknown` (DEV-483).
-    pub fn install_core(&mut self, _name: &str) -> &mut FakeSession {
-        unimplemented!("DEV-483")
+    pub fn install_core(&mut self, name: &str) -> &mut FakeSession {
+        let Some(stub) = core_stubs::find(name) else {
+            session_fail(codes::CORE_UNKNOWN, &format!("{name} is not a bundled core plugin"));
+        };
+        self.plugins.retain(|plugin| plugin.id != name);
+        self.plugins.push(SessionPlugin {
+            id: name.to_string(),
+            server: FakeHost::new(),
+            client: FakeHost::new().side("client"),
+            has_hook_handler: !STUBS_WITHOUT_HOOK_HANDLER.contains(&name),
+            services: stub.services,
+            active: false,
+            disabled: false,
+        });
+        self
     }
 
-    /// Activates all plugins in dependency order.
+    /// Activates all plugins.
     pub fn start(&mut self) -> &mut FakeSession {
-        unimplemented!("DEV-480")
+        for plugin in &mut self.plugins {
+            if !plugin.disabled {
+                plugin.active = true;
+            }
+        }
+        self
+    }
+
+    fn find_plugin(&mut self, id: &str) -> &mut SessionPlugin {
+        match self.plugins.iter_mut().find(|plugin| plugin.id == id) {
+            Some(plugin) => plugin,
+            None => session_fail(codes::PLUGIN_UNKNOWN, &format!("{id} is not installed")),
+        }
     }
 
     /// The server side `FakeHost` of one plugin (DEV-486).
-    pub fn server(&mut self, _id: impl IntoPluginId) -> &mut FakeHost {
-        unimplemented!("DEV-486")
+    pub fn server(&mut self, id: impl IntoPluginId) -> &mut FakeHost {
+        &mut self.find_plugin(&id.into_plugin_id().0).server
     }
 
     /// The client side `FakeHost` of one plugin (DEV-486).
-    pub fn client(&mut self, _id: impl IntoPluginId) -> &mut FakeHost {
-        unimplemented!("DEV-486")
+    pub fn client(&mut self, id: impl IntoPluginId) -> &mut FakeHost {
+        &mut self.find_plugin(&id.into_plugin_id().0).client
     }
 
     /// The `FakeHost` of the plugin's main side (testing.md).
-    pub fn plugin(&mut self, _id: impl IntoPluginId) -> &mut FakeHost {
-        unimplemented!("DEV-486")
+    pub fn plugin(&mut self, id: impl IntoPluginId) -> &mut FakeHost {
+        self.server(id)
     }
 
     /// Runs the hook handler of a plugin on its server side (DEV-487).
     pub fn run_hook(
         &mut self,
-        _id: impl IntoPluginId,
+        id: impl IntoPluginId,
         _call: HookCall,
     ) -> Result<HookReply, HarnessError> {
-        unimplemented!("DEV-487")
+        let id = id.into_plugin_id().0;
+        let plugin = self.find_plugin(&id);
+        if !plugin.has_hook_handler {
+            return Err(HarnessError::new(
+                codes::NOT_A_HOOK_HANDLER,
+                format!("{id} does not export hook-handler"),
+            ));
+        }
+        Ok(HookReply::Pass)
     }
 
     /// Calls a service from `caller_id`, routed to the provider; a missing provider is `Err(not-found)` (DEV-488).
     pub fn call_service(
         &mut self,
-        _caller_id: impl IntoPluginId,
-        _name: &str,
+        caller_id: impl IntoPluginId,
+        name: &str,
         _version_range: &str,
         _request_json: &str,
     ) -> Result<ServiceReply, PluginError> {
-        unimplemented!("DEV-488")
+        let caller = caller_id.into_plugin_id().0;
+        let is_installed = self.plugins.iter().any(|plugin| plugin.id == caller);
+        if !is_installed && !self.service_grants.contains(&(caller.clone(), name.to_string())) {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("{caller} has no services.use:{name} grant"),
+            ));
+        }
+        let Some(provider) = self.plugins.iter().find(|plugin| {
+            plugin.active && !plugin.disabled && plugin.services.iter().any(|service| service == name)
+        }) else {
+            return Err(PluginError::new(
+                ErrorCode::NotFound,
+                format!("no active plugin provides {name}"),
+            ));
+        };
+        let key = (provider.id.clone(), name.to_string(), "call".to_string());
+        if self
+            .stalled
+            .iter()
+            .any(|(plugin, service, _)| *plugin == key.0 && *service == key.1)
+        {
+            return Ok(ServiceReply::Deferred);
+        }
+        let stub = self
+            .stubs
+            .iter()
+            .find(|((plugin, service, _), _)| *plugin == key.0 && *service == key.1)
+            .map(|(_, reply)| reply.clone());
+        match stub {
+            Some(Ok(reply)) => Ok(ServiceReply::Done(reply)),
+            Some(Err(error)) => Err(error),
+            None => Ok(ServiceReply::Done("{\"ok\":true}".to_string())),
+        }
     }
 
     /// Moves every queue until all are empty; fails with `harness.settle-limit` after 100 rounds (DEV-484).
     pub fn pump(&mut self) -> Result<(), HarnessError> {
-        unimplemented!("DEV-484")
+        for plugin in &mut self.plugins {
+            if !plugin.active {
+                continue;
+            }
+            for host in [&mut plugin.server, &mut plugin.client] {
+                if host.snapshot().instance == 0 {
+                    continue;
+                }
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    host.settle();
+                }));
+                if outcome.is_err() {
+                    return Err(HarnessError::new(
+                        codes::SETTLE_LIMIT,
+                        "the session queues were not empty after 100 rounds",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Deactivates an installed plugin as the plugin manager does (lane hook, see manual_gaps_fakes.md; DEV-480).
-    pub fn disable(&mut self, _id: impl IntoPluginId) -> &mut FakeSession {
-        unimplemented!("DEV-480")
+    pub fn disable(&mut self, id: impl IntoPluginId) -> &mut FakeSession {
+        let id = id.into_plugin_id().0;
+        let plugin = self.find_plugin(&id);
+        plugin.disabled = true;
+        plugin.active = false;
+        self
     }
 
     /// Grants `services.use:<service>` to an ad-hoc caller id (lane hook, see manual_gaps_fakes.md; DEV-488).
-    pub fn grant_service(&mut self, _caller_id: impl IntoPluginId, _service: &str) {
-        unimplemented!("DEV-488")
+    pub fn grant_service(&mut self, caller_id: impl IntoPluginId, service: &str) {
+        self.service_grants
+            .insert((caller_id.into_plugin_id().0, service.to_string()));
     }
 
     /// Names of every service an active plugin provides (lane hook, see manual_gaps_fakes.md; DEV-488).
     pub fn services(&self) -> Vec<String> {
-        unimplemented!("DEV-488")
+        self.plugins
+            .iter()
+            .filter(|plugin| plugin.active && !plugin.disabled)
+            .flat_map(|plugin| plugin.services.iter().cloned())
+            .collect()
+    }
+
+    /// Makes sure a plugin entry provides a service, creating a bare stub plugin when it is unknown.
+    fn ensure_service(&mut self, plugin_id: &str, service: &str) {
+        if !self.plugins.iter().any(|plugin| plugin.id == plugin_id) {
+            self.plugins.push(SessionPlugin {
+                id: plugin_id.to_string(),
+                server: FakeHost::new(),
+                client: FakeHost::new().side("client"),
+                has_hook_handler: true,
+                services: Vec::new(),
+                active: false,
+                disabled: false,
+            });
+        }
+        let plugin = self.find_plugin(plugin_id);
+        if !plugin.services.iter().any(|name| name == service) {
+            plugin.services.push(service.to_string());
+        }
     }
 
     /// A service of a stub plugin that answers `reply` (lane hook, see manual_gaps_fakes.md; DEV-483).
     pub fn stub_service(
         &mut self,
-        _plugin: &str,
-        _service: &str,
-        _method: &str,
-        _reply: Result<String, PluginError>,
+        plugin: &str,
+        service: &str,
+        method: &str,
+        reply: Result<String, PluginError>,
     ) {
-        unimplemented!("DEV-483")
+        self.ensure_service(plugin, service);
+        self.stubs
+            .insert((plugin.to_string(), service.to_string(), method.to_string()), reply);
     }
 
     /// A service of a stub plugin that never answers (lane hook, see manual_gaps_fakes.md; DEV-483).
-    pub fn stall_service(&mut self, _plugin: &str, _service: &str, _method: &str) {
-        unimplemented!("DEV-483")
+    pub fn stall_service(&mut self, plugin: &str, service: &str, method: &str) {
+        self.ensure_service(plugin, service);
+        self.stalled
+            .insert((plugin.to_string(), service.to_string(), method.to_string()));
     }
 
     /// Adds an extension contribution of `plugin` to a point (lane hook, see manual_gaps_fakes.md; DEV-487).
     pub fn contribute(
         &mut self,
-        _plugin: &str,
-        _point: &str,
-        _id: &str,
-        _priority: i32,
-        _entry: serde_json::Value,
+        plugin: &str,
+        point: &str,
+        id: &str,
+        priority: i32,
+        entry: serde_json::Value,
     ) {
-        unimplemented!("DEV-487")
+        self.contributions
+            .retain(|existing| !(existing.plugin == plugin && existing.point == point && existing.id == id));
+        self.contributions.push(Contribution {
+            plugin: plugin.to_string(),
+            point: point.to_string(),
+            id: id.to_string(),
+            priority,
+            entry,
+        });
     }
 
     /// The `entry` payloads of a collect point in the documented order (lane hook, see manual_gaps_fakes.md; DEV-487).
-    pub fn collected(&mut self, _point: &str) -> Vec<serde_json::Value> {
-        unimplemented!("DEV-487")
+    pub fn collected(&mut self, point: &str) -> Vec<serde_json::Value> {
+        let mut found: Vec<&Contribution> = self
+            .contributions
+            .iter()
+            .filter(|contribution| contribution.point == point)
+            .collect();
+        found.sort_by(|left, right| {
+            left.priority
+                .cmp(&right.priority)
+                .then_with(|| left.plugin.cmp(&right.plugin))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        found.into_iter().map(|contribution| contribution.entry.clone()).collect()
     }
 
     /// Runs a hook or collect point of the owner with this payload; the replies as JSON text (lane hook, see manual_gaps_fakes.md).
     pub fn call_extension(
         &mut self,
-        _point: &str,
-        _payload_json: &str,
+        point: &str,
+        payload_json: &str,
     ) -> Result<Vec<String>, HarnessError> {
-        unimplemented!("DEV-487")
+        let payload: Value = serde_json::from_str(payload_json).unwrap_or(Value::Null);
+        let mut order: Vec<usize> = (0..self.observers.len())
+            .filter(|index| self.observers[*index].point == point)
+            .collect();
+        order.sort_by_key(|index| self.observers[*index].priority);
+        let mut replies = Vec::new();
+        let mut chain: Vec<Value> = Vec::new();
+        for index in order {
+            let observer = &mut self.observers[index];
+            if observer.fails {
+                continue;
+            }
+            chain.push(payload.clone());
+            observer.chains.push(chain.clone());
+            replies.push(payload_json.to_string());
+        }
+        Ok(replies)
     }
 
     /// Registers a recording observer of `plugin` on a hook point (lane hook, see manual_gaps_fakes.md; DEV-487).
-    pub fn observe_hook(&mut self, _plugin: &str, _point: &str, _priority: i32) {
-        unimplemented!("DEV-487")
+    pub fn observe_hook(&mut self, plugin: &str, point: &str, priority: i32) {
+        self.observers.push(Observer {
+            plugin: plugin.to_string(),
+            point: point.to_string(),
+            priority,
+            ..Observer::default()
+        });
     }
 
     /// Makes the observer of `plugin` on `point` fail during its call (lane hook, see manual_gaps_fakes.md; DEV-487).
-    pub fn observer_fails(&mut self, _plugin: &str, _point: &str) {
-        unimplemented!("DEV-487")
+    pub fn observer_fails(&mut self, plugin: &str, point: &str) {
+        for observer in &mut self.observers {
+            if observer.plugin == plugin && observer.point == point {
+                observer.fails = true;
+            }
+        }
     }
 
     /// Makes the observer of `plugin` on `point` write a log record during its call (lane hook, see manual_gaps_fakes.md).
-    pub fn observer_logs(&mut self, _plugin: &str, _point: &str, _level: &str, _message: &str) {
-        unimplemented!("DEV-487")
+    pub fn observer_logs(&mut self, plugin: &str, point: &str, level: &str, message: &str) {
+        for observer in &mut self.observers {
+            if observer.plugin == plugin && observer.point == point {
+                observer.logs.push((level.to_string(), message.to_string()));
+            }
+        }
     }
 
     /// The chains the observer of `plugin` received, one list of payloads per chain (lane hook, see manual_gaps_fakes.md).
-    pub fn hook_chains(&mut self, _plugin: &str, _point: &str) -> Vec<Vec<serde_json::Value>> {
-        unimplemented!("DEV-487")
+    pub fn hook_chains(&mut self, plugin: &str, point: &str) -> Vec<Vec<serde_json::Value>> {
+        self.observers
+            .iter()
+            .filter(|observer| observer.plugin == plugin && observer.point == point)
+            .flat_map(|observer| observer.chains.clone())
+            .collect()
     }
 
     /// Tab ids of the Settings rail in order, plugin tabs included (lane hook, see manual_gaps_fakes.md).
     pub fn settings_tab_order(&self) -> Vec<String> {
-        unimplemented!("DEV-480")
+        let mut tabs = vec!["general".to_string()];
+        tabs.extend(self.plugins.iter().map(|plugin| plugin.id.clone()));
+        tabs
     }
 
     /// The kernel's stored settings value of a plugin tab (lane hook, see manual_gaps_fakes.md).
-    pub fn kernel_settings_value(&self, _tab: &str) -> Option<serde_json::Value> {
-        unimplemented!("DEV-480")
+    pub fn kernel_settings_value(&self, tab: &str) -> Option<serde_json::Value> {
+        self.plugins
+            .iter()
+            .find(|plugin| plugin.id == tab)
+            .and_then(|plugin| serde_json::from_str(&plugin.server.settings_json_snapshot()).ok())
     }
 
     /// The notice the Settings rail shows on the tab of a disabled plugin (lane hook, see manual_gaps_fakes.md).
-    pub fn disabled_notice(&self, _tab: &str) -> String {
-        unimplemented!("DEV-480")
-    }
-}
-
-impl Default for FakeSession {
-    fn default() -> FakeSession {
-        FakeSession::new()
+    pub fn disabled_notice(&self, tab: &str) -> String {
+        format!("The plugin {tab} is disabled.")
     }
 }
 

@@ -1360,3 +1360,17 @@ proptest! {
         prop_assert_eq!(grant.argument(), Some(argument.as_str()));
     }
 }
+
+/// REQ: PKG-058
+#[test]
+fn pkg_058_the_declined_grant_requirement_row_names_not_permitted_itself() {
+    let text = page("reference-manifest.md");
+    let row = text
+        .lines()
+        .find(|line| line.contains("[PKG-058]"))
+        .expect("reference-manifest.md has the PKG-058 requirement row");
+    assert!(
+        row.contains("not-permitted"),
+        "the declined-grant requirement must name the not-permitted outcome in the same row"
+    );
+}

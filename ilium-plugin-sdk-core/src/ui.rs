@@ -265,6 +265,17 @@ pub mod widgets {
 pub mod build {
     use crate::generated::types::*;
 
+    const UI_TREE_VERSION: u32 = 1;
+    const MAX_TREE_NODES: usize = 4_096;
+    const MAX_TREE_KIB: usize = 1_024;
+    const MAX_TREE_DEPTH: usize = 32;
+    const MAX_KEY_CHARS: usize = 64;
+    const MAX_DISABLED_REASON_CHARS: usize = 40;
+
+    fn invalid(code: &str, detail: &str) -> PluginError {
+        PluginError::new(ErrorCode::InvalidArgument, format!("{code}: {detail}"))
+    }
+
     /// Collects nodes and links children by index (reference-wit.md section 4.9: flat node list, root index).
     #[derive(Debug, Clone, Default)]
     pub struct Tree {
@@ -278,13 +289,88 @@ pub mod build {
         }
 
         /// Adds a node for the widget and returns its builder.
-        pub fn node(&mut self, _widget: Widget) -> NodeBuilder<'_> {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn node(&mut self, widget: Widget) -> NodeBuilder<'_> {
+            let index = self.nodes.len() as u32;
+            self.nodes.push(UiNode {
+                key: None,
+                widget,
+                children: Vec::new(),
+                flags: NodeFlags::default(),
+                tooltip: None,
+                tab_index: None,
+                disabled_reason: None,
+            });
+            NodeBuilder { tree: self, index }
         }
 
         /// Finishes the tree with the given root node index; checks limits (node count, depth).
-        pub fn finish(self, _root: u32) -> Result<UiTree, PluginError> {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn finish(self, root: u32) -> Result<UiTree, PluginError> {
+            self.validate(root)?;
+            let tree = UiTree {
+                version: UI_TREE_VERSION,
+                nodes: self.nodes,
+                root,
+            };
+            let encoded_bytes = serde_json::to_vec(&tree).map(|bytes| bytes.len()).unwrap_or(0);
+            if encoded_bytes > MAX_TREE_KIB * 1024 {
+                return Err(invalid("ui.too-large", "the tree is over 1,024 KiB"));
+            }
+            Ok(tree)
+        }
+
+        /// Checks reference-wit.md section 4.10: root 0, forward child indexes, one parent per node,
+        /// node count, depth, unique keys and the disabled-reason length.
+        fn validate(&self, root: u32) -> Result<(), PluginError> {
+            let node_count = self.nodes.len();
+            if root != 0 || node_count == 0 {
+                return Err(invalid("ui.bad-root", "the root node index must be 0"));
+            }
+            if node_count > MAX_TREE_NODES {
+                return Err(invalid("ui.too-many-nodes", "more than 4,096 nodes"));
+            }
+            let mut parent_count = vec![0u32; node_count];
+            let mut depth = vec![1usize; node_count];
+            let mut keys = std::collections::HashSet::new();
+            for (index, node) in self.nodes.iter().enumerate() {
+                for &child in &node.children {
+                    let child = child as usize;
+                    if child <= index || child >= node_count {
+                        return Err(invalid(
+                            "ui.bad-child",
+                            "a child index must be greater than its parent and inside the tree",
+                        ));
+                    }
+                    parent_count[child] += 1;
+                    depth[child] = depth[child].max(depth[index] + 1);
+                }
+                if depth[index] > MAX_TREE_DEPTH {
+                    return Err(invalid("ui.too-deep", "deeper than 32 levels"));
+                }
+                if let Some(key) = &node.key {
+                    let key_chars = key.chars().count();
+                    if !(1..=MAX_KEY_CHARS).contains(&key_chars) {
+                        return Err(invalid("ui.bad-key", "a key has 1 to 64 characters"));
+                    }
+                    if !keys.insert(key.as_str()) {
+                        return Err(invalid("ui.duplicate-key", "a key is used twice in one view"));
+                    }
+                }
+                if let Some(reason) = &node.disabled_reason {
+                    if reason.chars().count() > MAX_DISABLED_REASON_CHARS {
+                        return Err(invalid(
+                            "ui.disabled-reason-too-long",
+                            "a disabled reason has at most 40 characters",
+                        ));
+                    }
+                }
+            }
+            if parent_count[0] != 0 || parent_count[1..].iter().any(|&count| count != 1) {
+                return Err(invalid(
+                    "ui.bad-child",
+                    "every node except the root appears exactly once in one children list",
+                ));
+            }
+            Ok(())
         }
 
         /// Number of nodes added so far.
@@ -306,6 +392,10 @@ pub mod build {
     }
 
     impl NodeBuilder<'_> {
+        /// The node this builder edits; the builder owns the only live borrow of the tree.
+        fn node_mut(&mut self) -> &mut UiNode {
+            &mut self.tree.nodes[self.index as usize]
+        }
         /// Index of the node in the tree.
         pub fn index(&self) -> u32 {
             self.index
@@ -315,32 +405,39 @@ pub mod build {
             self.tree.len()
         }
         /// Sets the stable key that actions refer to.
-        pub fn key(self, _key: impl Into<String>) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn key(mut self, key: impl Into<String>) -> Self {
+            self.node_mut().key = Some(key.into());
+            self
         }
         /// Sets the node flags.
-        pub fn flags(self, _flags: NodeFlags) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn flags(mut self, flags: NodeFlags) -> Self {
+            self.node_mut().flags = flags;
+            self
         }
         /// Sets the tooltip.
-        pub fn tooltip(self, _tooltip: Tooltip) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn tooltip(mut self, tooltip: Tooltip) -> Self {
+            self.node_mut().tooltip = Some(tooltip);
+            self
         }
         /// Sets the tab order index.
-        pub fn tab_index(self, _tab_index: i16) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn tab_index(mut self, tab_index: i16) -> Self {
+            self.node_mut().tab_index = Some(tab_index);
+            self
         }
         /// Disables the node and records why.
-        pub fn disabled_reason(self, _reason: impl Into<String>) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn disabled_reason(mut self, reason: impl Into<String>) -> Self {
+            self.node_mut().disabled_reason = Some(reason.into());
+            self
         }
         /// Appends a child by node index.
-        pub fn child(self, _child: u32) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn child(mut self, child: u32) -> Self {
+            self.node_mut().children.push(child);
+            self
         }
         /// Appends several children by node index.
-        pub fn children(self, _children: &[u32]) -> Self {
-            unimplemented!("rust-sdk.ui-tree-build")
+        pub fn children(mut self, children: &[u32]) -> Self {
+            self.node_mut().children.extend_from_slice(children);
+            self
         }
         /// Ends the builder and returns the node index.
         pub fn done(self) -> u32 {

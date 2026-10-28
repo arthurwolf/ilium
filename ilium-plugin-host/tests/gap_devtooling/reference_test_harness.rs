@@ -53,3 +53,21 @@ fn cases_run_in_sorted_order_and_a_seeded_shuffle_gives_identical_statuses() {
         "the permutation does not change any status"
     );
 }
+
+/// REQ: DEV-919
+#[test]
+fn each_fixture_case_runs_exactly_once_in_a_shuffled_run() {
+    let (_root, env, _dir) = project_with_fixtures(&["c-case", "a-case", "b-case"]);
+    let shuffled = run_in_project(&env, "test", &["--shuffle", "11"]);
+    assert_eq!(shuffled.exit_code, 0, "{:?}", shuffled.stdout_jsonl);
+    let mut names: Vec<String> = rows_with(&shuffled, "fixture")
+        .iter()
+        .map(|row| row["fixture"].as_str().expect("fixture name").to_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["a-case", "b-case", "c-case"],
+        "each case runs once, in any order"
+    );
+}

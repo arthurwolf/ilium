@@ -4,17 +4,27 @@
 
 use ilium_plugin_api::generated::host::clock::HostClock;
 
+use std::sync::OnceLock;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Process-wide origin of the guest-visible monotonic clock, shared by every import instance.
+static MONOTONIC_ORIGIN: OnceLock<Instant> = OnceLock::new();
+
 /// Host side of the `clock` interface.
 #[derive(Debug)]
 pub struct ClockImport;
 
 impl HostClock for ClockImport {
     fn now_unix_millis(&mut self) -> u64 {
-        unimplemented!("host::imports::clock::now_unix_millis")
+        let elapsed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO);
+        u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
     }
 
     fn monotonic_millis(&mut self) -> u64 {
-        unimplemented!("host::imports::clock::monotonic_millis")
+        let origin = MONOTONIC_ORIGIN.get_or_init(Instant::now);
+        u64::try_from(origin.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 }
 

@@ -120,3 +120,19 @@ fn build_warns_build_bundle_large_above_5_mib() {
     );
     assert_eq!(warnings[0]["severity"], "warn");
 }
+
+/// REQ: DEV-927
+#[test]
+fn conformance_suite_has_no_failing_parity_case_for_either_sdk() {
+    let root = scratch();
+    let cli_env = env(root.path());
+    let suite = run(&cli_env, &["conformance", "--json"]);
+    assert_eq!(suite.exit_code, 0, "{:?}", suite.stdout_jsonl);
+    let cases = rows_with(&suite, "case");
+    assert!(!cases.is_empty(), "the suite runs its parity cases");
+    let failed = cases
+        .iter()
+        .filter(|row| row["status"] == "fail")
+        .count();
+    assert_eq!(failed, 0, "{:?}", suite.stdout_jsonl);
+}

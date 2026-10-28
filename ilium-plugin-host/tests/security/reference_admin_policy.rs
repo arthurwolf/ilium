@@ -779,3 +779,30 @@ fn doc_sec_382_the_manual_treats_a_denied_extension_point_as_a_denied_grant() {
         &["extensions.deny_points", "treated as a denied grant"],
     );
 }
+
+/// REQ: SEC-186
+#[test]
+fn sec_186_the_policy_disabled_notice_text_is_shown_on_the_plugin_row() {
+    assert_page_has(
+        "reference-admin-policy.md",
+        &["The client shows `Disabled by your administrator`"],
+    );
+}
+
+/// REQ: SEC-193
+#[test]
+fn sec_193_a_matching_deny_grant_is_refused_at_run_time_with_reason_policy() {
+    assert_page_has(
+        "reference-admin-policy.md",
+        &["refused at run time with reason `policy`"],
+    );
+}
+
+/// REQ: SEC-382
+#[test]
+fn sec_382_denied_extension_points_drop_contributions_and_lock_the_grant_row() {
+    assert_page_has(
+        "reference-admin-policy.md",
+        &["Contributions to the listed points are dropped and the grant row is locked off ([SEC-382])"],
+    );
+}

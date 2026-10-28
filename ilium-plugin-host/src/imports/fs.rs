@@ -1,144 +1,848 @@
-//! Host implementation of `ilium:host/fs` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/fs`.
 //!
-//! Written once by the skeleton lane from the generated `HostFs` trait; hand-owned afterwards.
+//! Every scope (`package`, `data`, `cache`) is a folder on disk. Paths are checked lexically (no
+//! absolute paths, no `..`) and again against the canonical scope root so a symlink cannot lead
+//! out of the scope. The import is a unit struct, so the state it needs (scope folders, answers
+//! waiting for a `take-*` call, advisory locks, watches) lives per thread, one host instance per
+//! thread. Asynchronous operations finish inside the call; their answer waits for the matching
+//! `take-*` call, and failures are returned by the call itself.
+//!
+//! Scopes that need a user decision (`project`, `picked`, `pick`, `agent-config.propose`) are not
+//! granted by this import: they answer `not-permitted` until the grant layer wires them in.
+
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::UNIX_EPOCH;
 
 use ilium_plugin_api::generated::host::fs::{
-    ConfigChange, DirEntry, FsMetadata, HostFs, PickSpec, ProposalResult, RevisionToken,
+    ConfigChange, DirEntry, EntryKind, FsMetadata, HostFs, PickSpec, ProposalResult, RevisionToken,
     Revisioned, ScannedEntry, ScopeRoot, TailChunk, WriteMode,
 };
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{LockId, RequestId, WatchId};
 use ilium_plugin_api::generated::types::paths::FsPath;
+use regex::Regex;
+use sha2::{Digest, Sha256};
+
+/// Largest `max_bytes` of a synchronous `read` or `tail` (1 MiB).
+const SYNC_READ_MAX_BYTES: u32 = 1024 * 1024;
+/// Largest `max_entries` of `list-dir`.
+const LIST_DIR_MAX_ENTRIES: u32 = 4_096;
+/// Largest `max_entries` of `scan`.
+const SCAN_MAX_ENTRIES: u32 = 65_536;
+/// Largest payload of one write (`fs_write_mib`, 16 MiB by default).
+const WRITE_MAX_BYTES: usize = 16 * 1024 * 1024;
+/// Largest file `read-all` and `read-with-revision` return (64 MiB by default).
+const READ_ALL_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// Largest lock wait in milliseconds.
+const LOCK_MAX_TIMEOUT_MILLIS: u32 = 60_000;
+/// Longest error message in characters (api-errors).
+const MESSAGE_MAX_CHARS: usize = 256;
+
+const SCOPE_PACKAGE: &str = "package";
+const SCOPE_DATA: &str = "data";
+const SCOPE_CACHE: &str = "cache";
+
+static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Host side of the `fs` interface.
 #[derive(Debug)]
 pub struct FsImport;
 
+/// Folders behind the three always granted scopes.
+#[derive(Debug, Clone)]
+struct ScopeDirs {
+    package: PathBuf,
+    data: PathBuf,
+    cache: PathBuf,
+}
+
+/// Per-thread state of the import.
+#[derive(Debug, Default)]
+struct FsState {
+    dirs: Option<ScopeDirs>,
+    /// Scratch folder created by this state; removed when the thread ends.
+    owned_dir: Option<PathBuf>,
+    next_id: u64,
+    bytes: HashMap<u64, Vec<u8>>,
+    entries: HashMap<u64, Vec<ScannedEntry>>,
+    lock_answers: HashMap<u64, LockId>,
+    revisioned: HashMap<u64, Revisioned>,
+    written: HashMap<u64, RevisionToken>,
+    watches: HashSet<u64>,
+    /// Held advisory locks: lock id to (scope-qualified path, exclusive).
+    held_locks: HashMap<u64, (String, bool)>,
+}
+
+impl Drop for FsState {
+    fn drop(&mut self) {
+        if let Some(owned_dir) = self.owned_dir.take() {
+            let _ = fs::remove_dir_all(owned_dir);
+        }
+    }
+}
+
+thread_local! {
+    static STATE: RefCell<FsState> = RefCell::new(FsState::default());
+}
+
+fn with_state<R>(action: impl FnOnce(&mut FsState) -> R) -> R {
+    STATE.with(|cell| action(&mut cell.borrow_mut()))
+}
+
+/// Points the three scopes of the current thread at real folders (created when missing).
+///
+/// The host calls this when it mounts a plugin; without it the import uses a private scratch
+/// folder that is removed when the thread ends.
+pub fn configure_scope_roots(
+    package: PathBuf,
+    data: PathBuf,
+    cache: PathBuf,
+) -> Result<(), PluginError> {
+    for folder in [&package, &data, &cache] {
+        fs::create_dir_all(folder).map_err(io_error)?;
+    }
+    let canonical = |folder: &Path| fs::canonicalize(folder).map_err(io_error);
+    let dirs = ScopeDirs {
+        package: canonical(&package)?,
+        data: canonical(&data)?,
+        cache: canonical(&cache)?,
+    };
+    with_state(|state| {
+        state.dirs = Some(dirs);
+    });
+    Ok(())
+}
+
+fn plugin_error(code: ErrorCode, message: impl Into<String>) -> PluginError {
+    let message: String = message.into();
+    PluginError {
+        code,
+        message: message.chars().take(MESSAGE_MAX_CHARS).collect(),
+        retry_after_ms: None,
+    }
+}
+
+fn io_error(error: std::io::Error) -> PluginError {
+    use std::io::ErrorKind;
+    let code = match error.kind() {
+        ErrorKind::NotFound => ErrorCode::NotFound,
+        ErrorKind::PermissionDenied => ErrorCode::NotPermitted,
+        ErrorKind::AlreadyExists => ErrorCode::Conflict,
+        _ => ErrorCode::Io,
+    };
+    plugin_error(code, error.to_string())
+}
+
+impl FsState {
+    fn allocate_id(&mut self) -> u64 {
+        self.next_id += 1;
+        self.next_id
+    }
+
+    /// Returns the scope folders, creating the private scratch folders on first use.
+    fn scope_dirs(&mut self) -> Result<ScopeDirs, PluginError> {
+        if let Some(dirs) = &self.dirs {
+            return Ok(dirs.clone());
+        }
+        let unique = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "ilium-plugin-host-fs-{}-{unique}",
+            std::process::id()
+        ));
+        let dirs = ScopeDirs {
+            package: base.join(SCOPE_PACKAGE),
+            data: base.join(SCOPE_DATA),
+            cache: base.join(SCOPE_CACHE),
+        };
+        for folder in [&dirs.package, &dirs.data, &dirs.cache] {
+            fs::create_dir_all(folder).map_err(io_error)?;
+        }
+        let canonical_dirs = ScopeDirs {
+            package: fs::canonicalize(&dirs.package).map_err(io_error)?,
+            data: fs::canonicalize(&dirs.data).map_err(io_error)?,
+            cache: fs::canonicalize(&dirs.cache).map_err(io_error)?,
+        };
+        self.owned_dir = Some(base);
+        self.dirs = Some(canonical_dirs.clone());
+        Ok(canonical_dirs)
+    }
+}
+
+/// A scope-relative path resolved to a real location.
+#[derive(Debug)]
+struct Resolved {
+    target: PathBuf,
+    scope: String,
+    writable: bool,
+    is_scope_root: bool,
+    /// Scope-qualified, normalised path used as the advisory lock key.
+    key: String,
+}
+
+impl Resolved {
+    fn require_writable(&self) -> Result<(), PluginError> {
+        if self.writable {
+            Ok(())
+        } else {
+            Err(plugin_error(
+                ErrorCode::NotPermitted,
+                format!("scope {} is read only", self.scope),
+            ))
+        }
+    }
+}
+
+fn resolve(path: &FsPath) -> Result<Resolved, PluginError> {
+    let (root, writable) = with_state(|state| {
+        let dirs = state.scope_dirs()?;
+        match path.scope.as_str() {
+            SCOPE_PACKAGE => Ok((dirs.package, false)),
+            SCOPE_DATA => Ok((dirs.data, true)),
+            SCOPE_CACHE => Ok((dirs.cache, true)),
+            other => Err(plugin_error(
+                ErrorCode::NotPermitted,
+                format!("scope {other} is not granted"),
+            )),
+        }
+    })?;
+    if path.path.contains('\0') {
+        return Err(plugin_error(
+            ErrorCode::InvalidArgument,
+            "path contains a NUL character",
+        ));
+    }
+    if path.path.starts_with('/') || path.path.contains('\\') {
+        return Err(plugin_error(
+            ErrorCode::NotPermitted,
+            "path must be relative to its scope",
+        ));
+    }
+    let mut target = root.clone();
+    let mut normalised: Vec<&str> = Vec::new();
+    for component in path.path.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                return Err(plugin_error(
+                    ErrorCode::NotPermitted,
+                    "path leaves its scope",
+                ))
+            }
+            name => {
+                target.push(name);
+                normalised.push(name);
+            }
+        }
+    }
+    // A symlink inside the scope must not lead out of it: check the deepest existing ancestor.
+    let mut probe = target.clone();
+    while fs::symlink_metadata(&probe).is_err() {
+        if !probe.pop() {
+            break;
+        }
+    }
+    let canonical_probe = fs::canonicalize(&probe).map_err(io_error)?;
+    if !canonical_probe.starts_with(&root) {
+        return Err(plugin_error(
+            ErrorCode::NotPermitted,
+            "path leaves its scope through a link",
+        ));
+    }
+    Ok(Resolved {
+        key: format!("{}:{}", path.scope, normalised.join("/")),
+        is_scope_root: normalised.is_empty(),
+        target,
+        scope: path.scope.clone(),
+        writable,
+    })
+}
+
+fn kind_of(file_type: fs::FileType) -> EntryKind {
+    if file_type.is_symlink() {
+        EntryKind::Symlink
+    } else if file_type.is_dir() {
+        EntryKind::Directory
+    } else if file_type.is_file() {
+        EntryKind::File
+    } else {
+        EntryKind::Other
+    }
+}
+
+fn metadata_of(location: &Path, scope_writable: bool) -> Result<FsMetadata, PluginError> {
+    let raw = fs::symlink_metadata(location).map_err(io_error)?;
+    let modified_unix_millis = raw
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok());
+    Ok(FsMetadata {
+        kind: kind_of(raw.file_type()),
+        length: raw.len(),
+        modified_unix_millis,
+        read_only: !scope_writable || raw.permissions().readonly(),
+    })
+}
+
+fn revision_of(bytes: &[u8]) -> RevisionToken {
+    let digest = Sha256::digest(bytes);
+    let mut token = String::from("sha256-");
+    for byte in digest {
+        token.push_str(&format!("{byte:02x}"));
+    }
+    token
+}
+
+fn check_write_size(length: usize) -> Result<(), PluginError> {
+    if length > WRITE_MAX_BYTES {
+        return Err(plugin_error(
+            ErrorCode::InvalidArgument,
+            format!("payload of {length} bytes is over the {WRITE_MAX_BYTES} byte write cap"),
+        ));
+    }
+    Ok(())
+}
+
+fn require_parent_exists(target: &Path) -> Result<(), PluginError> {
+    match target.parent() {
+        Some(parent) if !parent.is_dir() => Err(plugin_error(
+            ErrorCode::NotFound,
+            "parent folder does not exist",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Writes `data` to a sibling temporary file and renames it over `target` (atomic replace).
+fn replace_atomically(target: &Path, data: &[u8]) -> Result<(), PluginError> {
+    require_parent_exists(target)?;
+    let unique = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let file_name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = target.with_file_name(format!(".{file_name}.tmp-{unique}"));
+    let outcome = fs::write(&temporary, data).and_then(|()| fs::rename(&temporary, target));
+    if outcome.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    outcome.map_err(io_error)
+}
+
+fn read_bounded(location: &Path, offset: u64, max_bytes: u32) -> Result<Vec<u8>, PluginError> {
+    let mut file = fs::File::open(location).map_err(io_error)?;
+    if file.metadata().map_err(io_error)?.is_dir() {
+        return Err(plugin_error(
+            ErrorCode::InvalidArgument,
+            "path is a folder, not a file",
+        ));
+    }
+    file.seek(SeekFrom::Start(offset)).map_err(io_error)?;
+    let mut buffer = Vec::new();
+    file.take(u64::from(max_bytes))
+        .read_to_end(&mut buffer)
+        .map_err(io_error)?;
+    Ok(buffer)
+}
+
+fn read_whole_file(location: &Path) -> Result<Vec<u8>, PluginError> {
+    let length = fs::metadata(location).map_err(io_error)?.len();
+    if length > READ_ALL_MAX_BYTES {
+        return Err(plugin_error(
+            ErrorCode::QuotaExceeded,
+            format!("file of {length} bytes is over the {READ_ALL_MAX_BYTES} byte read cap"),
+        ));
+    }
+    fs::read(location).map_err(io_error)
+}
+
+/// Translates a scope-root glob into a regular expression. `*` stops at `/`, `**` does not.
+fn glob_to_regex(glob: &str) -> Result<Regex, PluginError> {
+    let invalid = |reason: &str| plugin_error(ErrorCode::InvalidArgument, format!("glob: {reason}"));
+    if glob.is_empty() {
+        return Err(invalid("pattern is empty"));
+    }
+    let characters: Vec<char> = glob.chars().collect();
+    let mut pattern = String::from("^(?:");
+    let mut index = 0;
+    while index < characters.len() {
+        let character = characters[index];
+        match character {
+            '*' if characters.get(index + 1) == Some(&'*') => {
+                index += 1;
+                if characters.get(index + 1) == Some(&'/') {
+                    index += 1;
+                    pattern.push_str("(?:.*/)?");
+                } else {
+                    pattern.push_str(".*");
+                }
+            }
+            '*' => pattern.push_str("[^/]*"),
+            '?' => pattern.push_str("[^/]"),
+            '[' => {
+                let mut class = String::from("[");
+                index += 1;
+                if matches!(characters.get(index), Some('!') | Some('^')) {
+                    class.push('^');
+                    index += 1;
+                }
+                let class_start = class.len();
+                let mut closed = false;
+                while index < characters.len() {
+                    let inner = characters[index];
+                    if inner == ']' && class.len() > class_start {
+                        closed = true;
+                        break;
+                    }
+                    if matches!(inner, '\\' | '[' | '&' | '~' | '^') {
+                        class.push('\\');
+                    }
+                    class.push(inner);
+                    index += 1;
+                }
+                if !closed {
+                    return Err(invalid("character class is not closed"));
+                }
+                class.push(']');
+                pattern.push_str(&class);
+            }
+            other => pattern.push_str(&regex::escape(&other.to_string())),
+        }
+        index += 1;
+    }
+    pattern.push_str(")$");
+    Regex::new(&pattern).map_err(|error| invalid(&error.to_string()))
+}
+
+/// Collects entries below `folder` depth first in name order, stopping at `max_entries`.
+fn walk_matching(
+    folder: &Path,
+    relative_prefix: &str,
+    matcher: &Regex,
+    match_name_only: bool,
+    scope_writable: bool,
+    max_entries: usize,
+    found: &mut Vec<ScannedEntry>,
+) -> Result<(), PluginError> {
+    let mut children: Vec<fs::DirEntry> = fs::read_dir(folder)
+        .map_err(io_error)?
+        .filter_map(Result::ok)
+        .collect();
+    children.sort_by_key(fs::DirEntry::file_name);
+    for child in children {
+        if found.len() >= max_entries {
+            return Ok(());
+        }
+        let name = child.file_name().to_string_lossy().into_owned();
+        let relative_path = if relative_prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{relative_prefix}/{name}")
+        };
+        let metadata = match metadata_of(&child.path(), scope_writable) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let subject = if match_name_only { &name } else { &relative_path };
+        if matcher.is_match(subject) {
+            found.push(ScannedEntry {
+                relative_path: relative_path.clone(),
+                entry: DirEntry {
+                    name: name.clone(),
+                    metadata: metadata.clone(),
+                },
+            });
+        }
+        if metadata.kind == EntryKind::Directory {
+            walk_matching(
+                &child.path(),
+                &relative_path,
+                matcher,
+                match_name_only,
+                scope_writable,
+                max_entries,
+                found,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 impl HostFs for FsImport {
     fn roots(&mut self) -> Vec<ScopeRoot> {
-        unimplemented!("host::imports::fs::roots")
+        vec![
+            ScopeRoot {
+                scope: SCOPE_PACKAGE.to_owned(),
+                writable: false,
+            },
+            ScopeRoot {
+                scope: SCOPE_DATA.to_owned(),
+                writable: true,
+            },
+            ScopeRoot {
+                scope: SCOPE_CACHE.to_owned(),
+                writable: true,
+            },
+        ]
     }
 
-    fn metadata(&mut self, _path: FsPath) -> Result<FsMetadata, PluginError> {
-        unimplemented!("host::imports::fs::metadata")
+    fn metadata(&mut self, path: FsPath) -> Result<FsMetadata, PluginError> {
+        let resolved = resolve(&path)?;
+        metadata_of(&resolved.target, resolved.writable)
     }
 
-    fn list_dir(&mut self, _path: FsPath, _max_entries: u32) -> Result<Vec<DirEntry>, PluginError> {
-        unimplemented!("host::imports::fs::list_dir")
+    fn list_dir(
+        &mut self,
+        path: FsPath,
+        max_entries: u32,
+    ) -> Result<Vec<DirEntry>, PluginError> {
+        if max_entries > LIST_DIR_MAX_ENTRIES {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                format!("max-entries is at most {LIST_DIR_MAX_ENTRIES}"),
+            ));
+        }
+        let resolved = resolve(&path)?;
+        let mut children: Vec<fs::DirEntry> = fs::read_dir(&resolved.target)
+            .map_err(|error| {
+                if resolved.target.is_file() {
+                    plugin_error(ErrorCode::InvalidArgument, "path is a file, not a folder")
+                } else {
+                    io_error(error)
+                }
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        children.sort_by_key(fs::DirEntry::file_name);
+        let mut listing = Vec::new();
+        for child in children.into_iter().take(max_entries as usize) {
+            if let Ok(metadata) = metadata_of(&child.path(), resolved.writable) {
+                listing.push(DirEntry {
+                    name: child.file_name().to_string_lossy().into_owned(),
+                    metadata,
+                });
+            }
+        }
+        Ok(listing)
     }
 
     fn read(
         &mut self,
-        _path: FsPath,
-        _offset: u64,
-        _max_bytes: u32,
+        path: FsPath,
+        offset: u64,
+        max_bytes: u32,
     ) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("host::imports::fs::read")
+        if max_bytes > SYNC_READ_MAX_BYTES {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                format!("max-bytes is at most {SYNC_READ_MAX_BYTES}"),
+            ));
+        }
+        let resolved = resolve(&path)?;
+        read_bounded(&resolved.target, offset, max_bytes)
     }
 
-    fn read_all(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::read_all")
+    fn read_all(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+        let resolved = resolve(&path)?;
+        let content = read_whole_file(&resolved.target)?;
+        Ok(with_state(|state| {
+            let id = state.allocate_id();
+            state.bytes.insert(id, content);
+            RequestId(id)
+        }))
     }
 
     fn scan(
         &mut self,
-        _path: FsPath,
-        _glob: String,
-        _max_entries: u32,
+        path: FsPath,
+        glob: String,
+        max_entries: u32,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::scan")
+        if max_entries > SCAN_MAX_ENTRIES {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                format!("max-entries is at most {SCAN_MAX_ENTRIES}"),
+            ));
+        }
+        let matcher = glob_to_regex(&glob)?;
+        let resolved = resolve(&path)?;
+        if !resolved.target.is_dir() {
+            return Err(plugin_error(
+                if resolved.target.exists() {
+                    ErrorCode::InvalidArgument
+                } else {
+                    ErrorCode::NotFound
+                },
+                "scan needs an existing folder",
+            ));
+        }
+        let mut found = Vec::new();
+        walk_matching(
+            &resolved.target,
+            "",
+            &matcher,
+            !glob.contains('/'),
+            resolved.writable,
+            max_entries as usize,
+            &mut found,
+        )?;
+        Ok(with_state(|state| {
+            let id = state.allocate_id();
+            state.entries.insert(id, found);
+            RequestId(id)
+        }))
     }
 
     fn write(
         &mut self,
-        _path: FsPath,
-        _data: Vec<u8>,
-        _mode: WriteMode,
+        path: FsPath,
+        data: Vec<u8>,
+        mode: WriteMode,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::write")
+        let resolved = resolve(&path)?;
+        check_write_size(data.len())?;
+        resolved.require_writable()?;
+        if resolved.is_scope_root {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "a scope root is a folder, not a file",
+            ));
+        }
+        require_parent_exists(&resolved.target)?;
+        match mode {
+            WriteMode::CreateNew => {
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&resolved.target)
+                    .map_err(io_error)?;
+                file.write_all(&data).map_err(io_error)?;
+            }
+            WriteMode::Replace => replace_atomically(&resolved.target, &data)?,
+            WriteMode::Append => {
+                let mut file = fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&resolved.target)
+                    .map_err(io_error)?;
+                file.write_all(&data).map_err(io_error)?;
+            }
+        }
+        Ok(with_state(|state| RequestId(state.allocate_id())))
     }
 
-    fn create_dir(&mut self, _path: FsPath) -> Result<(), PluginError> {
-        unimplemented!("host::imports::fs::create_dir")
+    fn create_dir(&mut self, path: FsPath) -> Result<(), PluginError> {
+        let resolved = resolve(&path)?;
+        resolved.require_writable()?;
+        if resolved.target.is_dir() {
+            return Ok(());
+        }
+        require_parent_exists(&resolved.target)?;
+        fs::create_dir(&resolved.target).map_err(io_error)
     }
 
-    fn remove(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::remove")
+    fn remove(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+        let resolved = resolve(&path)?;
+        if resolved.is_scope_root {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "a scope root cannot be removed",
+            ));
+        }
+        resolved.require_writable()?;
+        let metadata = fs::symlink_metadata(&resolved.target).map_err(io_error)?;
+        if metadata.is_dir() {
+            fs::remove_dir_all(&resolved.target).map_err(io_error)?;
+        } else {
+            fs::remove_file(&resolved.target).map_err(io_error)?;
+        }
+        Ok(with_state(|state| RequestId(state.allocate_id())))
     }
 
-    fn rename(&mut self, _source: FsPath, _target: FsPath) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::rename")
+    fn rename(&mut self, source: FsPath, target: FsPath) -> Result<RequestId, PluginError> {
+        if source.scope != target.scope {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "rename stays inside one scope",
+            ));
+        }
+        let resolved_source = resolve(&source)?;
+        let resolved_target = resolve(&target)?;
+        if resolved_source.is_scope_root || resolved_target.is_scope_root {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "a scope root cannot be renamed or replaced",
+            ));
+        }
+        resolved_source.require_writable()?;
+        fs::symlink_metadata(&resolved_source.target).map_err(io_error)?;
+        require_parent_exists(&resolved_target.target)?;
+        if fs::symlink_metadata(&resolved_target.target).is_ok() {
+            return Err(plugin_error(
+                ErrorCode::Conflict,
+                "target already exists",
+            ));
+        }
+        fs::rename(&resolved_source.target, &resolved_target.target).map_err(io_error)?;
+        Ok(with_state(|state| RequestId(state.allocate_id())))
     }
 
-    fn watch(&mut self, _path: FsPath, _recursive: bool) -> Result<WatchId, PluginError> {
-        unimplemented!("host::imports::fs::watch")
+    fn watch(&mut self, path: FsPath, _recursive: bool) -> Result<WatchId, PluginError> {
+        let resolved = resolve(&path)?;
+        fs::symlink_metadata(&resolved.target).map_err(io_error)?;
+        Ok(with_state(|state| {
+            let id = state.allocate_id();
+            state.watches.insert(id);
+            WatchId(id)
+        }))
     }
 
-    fn unwatch(&mut self, _watch: WatchId) {
-        unimplemented!("host::imports::fs::unwatch")
+    fn unwatch(&mut self, watch: WatchId) {
+        with_state(|state| {
+            state.watches.remove(&watch.0);
+        });
     }
 
     fn lock(
         &mut self,
-        _path: FsPath,
-        _exclusive: bool,
-        _timeout_millis: u32,
+        path: FsPath,
+        exclusive: bool,
+        timeout_millis: u32,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::lock")
+        if timeout_millis > LOCK_MAX_TIMEOUT_MILLIS {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                format!("timeout-millis is at most {LOCK_MAX_TIMEOUT_MILLIS}"),
+            ));
+        }
+        let resolved = resolve(&path)?;
+        resolved.require_writable()?;
+        with_state(|state| {
+            let conflicts = state.held_locks.values().any(|(held_key, held_exclusive)| {
+                *held_key == resolved.key && (exclusive || *held_exclusive)
+            });
+            if conflicts {
+                // No other holder can release while this call runs, so waiting would only expire.
+                let code = if timeout_millis == 0 {
+                    ErrorCode::Busy
+                } else {
+                    ErrorCode::TimedOut
+                };
+                return Err(plugin_error(code, "path is locked by another holder"));
+            }
+            let lock_id = state.allocate_id();
+            state.held_locks.insert(lock_id, (resolved.key, exclusive));
+            let request_id = state.allocate_id();
+            state.lock_answers.insert(request_id, LockId(lock_id));
+            Ok(RequestId(request_id))
+        })
     }
 
-    fn unlock(&mut self, _lock: LockId) {
-        unimplemented!("host::imports::fs::unlock")
+    fn unlock(&mut self, lock: LockId) {
+        with_state(|state| {
+            state.held_locks.remove(&lock.0);
+        });
     }
 
     fn pick(&mut self, _spec: PickSpec) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::pick")
+        Err(plugin_error(
+            ErrorCode::NotPermitted,
+            "the fs.pick grant is not held",
+        ))
     }
 
-    fn read_with_revision(&mut self, _path: FsPath) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::read_with_revision")
+    fn read_with_revision(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+        let resolved = resolve(&path)?;
+        let bytes = read_whole_file(&resolved.target)?;
+        let revision = revision_of(&bytes);
+        Ok(with_state(|state| {
+            let id = state.allocate_id();
+            state.revisioned.insert(id, Revisioned { bytes, revision });
+            RequestId(id)
+        }))
     }
 
     fn write_atomic(
         &mut self,
-        _path: FsPath,
-        _data: Vec<u8>,
-        _expected: Option<RevisionToken>,
+        path: FsPath,
+        data: Vec<u8>,
+        expected: Option<RevisionToken>,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::write_atomic")
+        let resolved = resolve(&path)?;
+        check_write_size(data.len())?;
+        resolved.require_writable()?;
+        if resolved.is_scope_root {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "a scope root is a folder, not a file",
+            ));
+        }
+        match expected {
+            None => {
+                require_parent_exists(&resolved.target)?;
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&resolved.target)
+                    .map_err(io_error)?;
+                file.write_all(&data).map_err(io_error)?;
+            }
+            Some(token) => {
+                let current = match fs::read(&resolved.target) {
+                    Ok(current) => current,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        return Err(plugin_error(
+                            ErrorCode::Conflict,
+                            "file no longer exists",
+                        ))
+                    }
+                    Err(error) => return Err(io_error(error)),
+                };
+                if revision_of(&current) != token {
+                    return Err(plugin_error(
+                        ErrorCode::Conflict,
+                        "file changed since it was read",
+                    ));
+                }
+                replace_atomically(&resolved.target, &data)?;
+            }
+        }
+        let revision = revision_of(&data);
+        Ok(with_state(|state| {
+            let id = state.allocate_id();
+            state.written.insert(id, revision);
+            RequestId(id)
+        }))
     }
 
     fn tail(
         &mut self,
-        _path: FsPath,
-        _cursor: u64,
-        _max_bytes: u32,
+        path: FsPath,
+        cursor: u64,
+        max_bytes: u32,
     ) -> Result<TailChunk, PluginError> {
-        unimplemented!("host::imports::fs::tail")
-    }
-
-    fn take_bytes(&mut self, _request: RequestId) -> Option<Vec<u8>> {
-        unimplemented!("host::imports::fs::take_bytes")
-    }
-
-    fn take_entries(&mut self, _request: RequestId) -> Option<Vec<ScannedEntry>> {
-        unimplemented!("host::imports::fs::take_entries")
-    }
-
-    fn take_lock(&mut self, _request: RequestId) -> Option<LockId> {
-        unimplemented!("host::imports::fs::take_lock")
-    }
-
-    fn take_picked(&mut self, _request: RequestId) -> Option<FsPath> {
-        unimplemented!("host::imports::fs::take_picked")
-    }
-
-    fn take_revisioned(&mut self, _request: RequestId) -> Option<Revisioned> {
-        unimplemented!("host::imports::fs::take_revisioned")
-    }
-
-    fn take_written(&mut self, _request: RequestId) -> Option<RevisionToken> {
-        unimplemented!("host::imports::fs::take_written")
+        if max_bytes > SYNC_READ_MAX_BYTES {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                format!("max-bytes is at most {SYNC_READ_MAX_BYTES}"),
+            ));
+        }
+        let resolved = resolve(&path)?;
+        let length = fs::metadata(&resolved.target).map_err(io_error)?.len();
+        // A cursor past the end means the file was truncated or rotated: restart from the top.
+        let truncated = cursor > length;
+        let start = if truncated { 0 } else { cursor };
+        let bytes = read_bounded(&resolved.target, start, max_bytes)?;
+        Ok(TailChunk {
+            cursor: start + bytes.len() as u64,
+            bytes,
+            truncated,
+        })
     }
 
     fn propose_agent_config(
@@ -147,11 +851,38 @@ impl HostFs for FsImport {
         _title: String,
         _changes: Vec<ConfigChange>,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::fs::propose_agent_config")
+        Err(plugin_error(
+            ErrorCode::NotPermitted,
+            "the agent-config.propose grant is not held",
+        ))
     }
 
     fn take_proposal(&mut self, _request: RequestId) -> Option<ProposalResult> {
-        unimplemented!("host::imports::fs::take_proposal")
+        None
+    }
+
+    fn take_bytes(&mut self, request: RequestId) -> Option<Vec<u8>> {
+        with_state(|state| state.bytes.remove(&request.0))
+    }
+
+    fn take_entries(&mut self, request: RequestId) -> Option<Vec<ScannedEntry>> {
+        with_state(|state| state.entries.remove(&request.0))
+    }
+
+    fn take_lock(&mut self, request: RequestId) -> Option<LockId> {
+        with_state(|state| state.lock_answers.remove(&request.0))
+    }
+
+    fn take_picked(&mut self, _request: RequestId) -> Option<FsPath> {
+        None
+    }
+
+    fn take_revisioned(&mut self, request: RequestId) -> Option<Revisioned> {
+        with_state(|state| state.revisioned.remove(&request.0))
+    }
+
+    fn take_written(&mut self, request: RequestId) -> Option<RevisionToken> {
+        with_state(|state| state.written.remove(&request.0))
     }
 }
 

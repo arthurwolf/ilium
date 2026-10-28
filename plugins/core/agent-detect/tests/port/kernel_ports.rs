@@ -382,6 +382,14 @@ fn port_026_detailed_goal_classification_retains_the_provider_status_line() {
     assert!(goal("codex", &fixture("codex_goal_active_wide_footer.txt")).is_some());
 }
 
+/// REQ: PORT:ilium-detect/src/lib.rs::detailed_goal_classification_retains_the_provider_status_line
+#[test]
+fn port_026_detailed_goal_text_keeps_the_pursuing_goal_status_wording() {
+    let _host = server_host();
+    let text = goal("codex", &fixture("codex_goal_active_wide_footer.txt")).unwrap_or_default();
+    assert!(text.to_lowercase().contains("goal"), "{text:?}");
+}
+
 /// REQ: PORT:ilium-detect/src/lib.rs::fresh_screen_detection_covers_all_builtin_agents_without_treating_idle_as_fresh
 #[test]
 fn port_026_fresh_screen_detection_covers_all_builtin_agents_without_treating_idle_as_fresh() {
@@ -402,6 +410,17 @@ fn port_026_identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_ma
     let found = identify(vec![
         process("node", &["node", "/opt/codex/bin/codex.js"]),
         process("codex", &["codex"]),
+    ]);
+    assert_eq!(found, Some("codex".to_string()));
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match
+#[test]
+fn port_026_identify_agent_result_does_not_depend_on_process_order() {
+    let _host = server_host();
+    let found = identify(vec![
+        process("codex", &["codex"]),
+        process("node", &["node", "/opt/codex/bin/codex.js"]),
     ]);
     assert_eq!(found, Some("codex".to_string()));
 }
@@ -451,6 +470,13 @@ fn port_026_remembered_launcher_cannot_replace_exited_native_child_but_native_ca
     assert_eq!(identify_name("codex"), Some("codex".to_string()));
 }
 
+/// REQ: PORT:ilium-detect/tests/launcher_ancestor_identity.rs::remembered_launcher_cannot_replace_exited_native_child_but_native_candidates_remain_searchable
+#[test]
+fn port_026_native_binary_launched_by_absolute_path_is_identified() {
+    let _host = server_host();
+    assert_eq!(identify_argv(&["/opt/codex/codex"]), Some("codex".to_string()));
+}
+
 /// REQ: PORT:ilium-detect/tests/status_chronology.rs::background_diagnostics_choose_the_newest_eligible_matching_line
 #[test]
 fn port_026_background_diagnostics_choose_the_newest_eligible_matching_line() {
@@ -487,6 +513,14 @@ fn port_026_newest_status_evidence_remains_bounded_and_control_character_free() 
         text.chars().all(|character| !character.is_control()),
         "{text:?}"
     );
+}
+
+/// REQ: PORT:ilium-detect/tests/status_chronology.rs::newest_status_evidence_remains_bounded_and_control_character_free
+#[test]
+fn port_026_newest_status_evidence_is_a_single_line() {
+    let _host = server_host();
+    let text = goal("codex", &fixture("codex_goal_active_wide_footer.txt")).unwrap_or_default();
+    assert_eq!(text.lines().count(), 1, "{text:?}");
 }
 
 /// REQ: PORT:ilium-ipc/tests/agent_detection_settings_wire.rs::agent_detection_settings_event_round_trips_both_success_and_rejection

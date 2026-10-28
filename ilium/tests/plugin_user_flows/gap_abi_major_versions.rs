@@ -29,3 +29,27 @@ fn abi_060_inside_1x_host_applies_minor_window_and_refuses_major_mismatch() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: ABI-059
+#[test]
+fn abi_059_inputs_of_the_api_version_check_give_one_result() {
+    let page = manual_page("reference-abi-major-versions");
+    for phrase in [
+        "Inputs are the `api` key of the manifest and the `ilium:api-version` section of the component.",
+        "The output of the check is either a loaded package or one refusal code.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: ABI-060
+#[test]
+fn abi_060_major_one_package_is_outside_every_zero_host_window() {
+    let page = manual_page("reference-abi-major-versions");
+    for phrase in [
+        "is outside the window of every `0.x` host",
+        "A `0.x` package that is not the final minor is refused on a `1.0.0` host",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

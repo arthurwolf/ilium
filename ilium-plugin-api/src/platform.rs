@@ -98,6 +98,11 @@ impl std::str::FromStr for ProcessKind {
     }
 }
 
+/// The exact Wasmtime version the host pins (workspace `Cargo.toml`, `wasmtime = "=49.0.2"`).
+pub const PINNED_WASMTIME_VERSION: &str = "49.0.2";
+/// The Component Model canonical ABI revision that pinned Wasmtime implements.
+pub const CANONICAL_ABI_REVISION: &str = "component-model-0.2";
+
 /// What `ilium plugin doctor` reports about the runtime (ABI-070).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoctorReport {
@@ -110,11 +115,17 @@ pub struct DoctorReport {
 impl DoctorReport {
     /// The report as the text of the command (ABI-070).
     pub fn render(&self) -> String {
-        unimplemented!("api::platform::DoctorReport::render")
+        format!(
+            "wasmtime: {}\ncanonical-abi: {}\n",
+            self.wasmtime_version, self.canonical_abi_revision
+        )
     }
 }
 
 /// ABI-070: the runtime facts that `ilium plugin doctor` shows.
 pub fn doctor_report() -> DoctorReport {
-    unimplemented!("api::platform::doctor_report")
+    DoctorReport {
+        wasmtime_version: PINNED_WASMTIME_VERSION.to_owned(),
+        canonical_abi_revision: CANONICAL_ABI_REVISION.to_owned(),
+    }
 }

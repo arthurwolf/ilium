@@ -98,3 +98,60 @@ fn migration_is_idempotent_and_a_second_update_on_the_same_data_changes_nothing(
         "an already-migrated install does not run the migration again"
     );
 }
+
+/// REQ: DEV-982
+#[test]
+fn failed_later_step_of_a_multi_step_migration_restores_the_storage_and_names_its_index() {
+    let rig = MigrationRig::new();
+    rig.install(&PluginSpec::new(PLUGIN_ID, "1.0.0").data_version(1));
+    rig.write_data_file(PLUGIN_ID, "state.json", b"{\"layout\":\"old\"}");
+    let before = rig.data_dir_files(PLUGIN_ID);
+    let upgrade = PluginSpec::new(PLUGIN_ID, "1.1.0")
+        .data_version(2)
+        .migrator(vec![
+            Step::WriteFile("state.json".to_owned(), b"{\"layout\":\"new\"}".to_vec()),
+            Step::Trap,
+        ]);
+    let out = rig.update(&upgrade, &[]);
+    assert_ne!(out.exit_code, 0, "a failing step must fail the update");
+    assert_eq!(
+        rig.data_dir_files(PLUGIN_ID),
+        before,
+        "the storage must be restored to its state before step 1"
+    );
+    let failure = rig
+        .log_line("migrate.failed")
+        .expect("migrate.failed must be logged");
+    assert!(
+        failure["step"].is_number(),
+        "the failure names the step index: {failure}"
+    );
+}
+
+/// REQ: DEV-985
+#[test]
+fn dry_run_migrate_reports_the_migration_without_changing_any_stored_byte() {
+    let rig = MigrationRig::new();
+    rig.install(&PluginSpec::new(PLUGIN_ID, "1.0.0").data_version(1));
+    rig.write_data_file(PLUGIN_ID, "state.json", b"{\"theme\":\"dark\"}");
+    let before = rig.data_dir_files(PLUGIN_ID);
+    let stamp_before = rig.data_dir_stamp(PLUGIN_ID);
+    let upgrade = PluginSpec::new(PLUGIN_ID, "1.1.0")
+        .data_version(2)
+        .migrator(vec![Step::WriteFile(
+            "state.json".to_owned(),
+            b"{\"theme\":\"light\"}".to_vec(),
+        )]);
+    let dry = rig.update(&upgrade, &["--dry-run-migrate"]);
+    assert_eq!(dry.exit_code, 0, "{:?}", dry.stdout_jsonl);
+    assert_eq!(
+        rig.data_dir_files(PLUGIN_ID),
+        before,
+        "a dry run changes no data byte"
+    );
+    assert_eq!(
+        rig.data_dir_stamp(PLUGIN_ID),
+        stamp_before,
+        "a dry run does not move the stamp"
+    );
+}

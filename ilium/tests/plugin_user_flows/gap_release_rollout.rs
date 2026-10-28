@@ -29,3 +29,27 @@ fn pkg_695_rollout_never_limits_file_install() {
         assert!(page.contains(phrase), "missing: {phrase}");
     }
 }
+
+/// REQ: PKG-694
+#[test]
+fn pkg_694_halt_keeps_an_already_activated_version_running() {
+    let page = manual_page("reference-release-rollout");
+    for phrase in [
+        "A client that already runs `1.3.0` keeps running it.",
+        "No client moves a host to the previous version because of a halt.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}
+
+/// REQ: PKG-695
+#[test]
+fn pkg_695_outside_cohort_client_keeps_its_current_version_silently() {
+    let page = manual_page("reference-release-rollout");
+    for phrase in [
+        "It keeps working with the version it has, and the staged version is simply not chosen for it",
+        "No error, no notice. The host chooses the version it would have chosen without the staged version.",
+    ] {
+        assert!(page.contains(phrase), "missing: {phrase}");
+    }
+}

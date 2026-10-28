@@ -2,13 +2,35 @@
 use crate::generated::types::*;
 
 /// Event for an agent activity change; the host numbers `revision` +1 per node per host (events manual).
-pub fn activity(_node: u64, _previous: AgentActivity, _current: AgentActivity) -> Event {
-    unimplemented!("events.activity-revision")
+pub fn activity(node: u64, previous: AgentActivity, current: AgentActivity) -> Event {
+    let revision = ACTIVITY_REVISIONS.with(|revisions| {
+        let mut revisions = revisions.borrow_mut();
+        let next = revisions.entry(node).or_insert(0);
+        *next += 1;
+        *next
+    });
+    Event::AgentActivityChanged(AgentActivityEvent {
+        node: NodeId(node),
+        previous,
+        current,
+        revision,
+    })
+}
+
+thread_local! {
+    /// Last revision handed out per node; the real host numbers +1 per node per host.
+    static ACTIVITY_REVISIONS: std::cell::RefCell<std::collections::HashMap<u64, u64>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// Event for a command invocation from a JSON arguments string (events manual).
-pub fn command(_name: &str, _arguments_json: &str) -> Event {
-    unimplemented!("events.command")
+pub fn command(name: &str, arguments_json: &str) -> Event {
+    Event::CommandInvoked(CommandInvokedEvent {
+        command: name.to_string(),
+        arguments_json: arguments_json.to_string(),
+        origin: CommandOrigin::Cli,
+        context: CommandContext::default(),
+    })
 }
 
 /// Builds `Event::TreeChanged` (rust-sdk.md "Events").

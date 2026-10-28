@@ -49,3 +49,29 @@ fn abi_080_counter_per_abi_code_labelled_by_plugin_id() {
         );
     }
 }
+
+/// REQ: ABI-079
+#[test]
+fn abi_079_the_phase_field_is_the_same_each_time_the_same_code_fails() {
+    let codes = all_abi_codes();
+    assert!(!codes.is_empty(), "the ABI trap and refusal code list must not be empty");
+    let code = codes[0];
+    let first = trigger_abi_failure(code, "phase-fixture-plugin");
+    let second = trigger_abi_failure(code, "phase-fixture-plugin");
+    assert_eq!(
+        first.phase, second.phase,
+        "{code}: the same failure must always log the same phase"
+    );
+}
+
+/// REQ: ABI-080
+#[test]
+fn abi_080_no_counter_is_reported_for_a_plugin_that_never_failed() {
+    let codes = all_abi_codes();
+    assert!(!codes.is_empty(), "the ABI trap and refusal code list must not be empty");
+    trigger_abi_failure(codes[0], "failing-counter-plugin");
+    assert!(
+        metric_samples_for("silent-counter-plugin").is_empty(),
+        "counters must be labelled by plugin id, so a plugin that never failed has none"
+    );
+}

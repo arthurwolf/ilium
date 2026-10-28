@@ -5,7 +5,17 @@
 
 use serde_json::{json, Value};
 
-use crate::common::server;
+use crate::common::{near, server};
+
+/// Parses the y-axis label left of the axis glyph on rendered row `index`, or `None` when there is none.
+fn row_label(reply: &Value, index: usize) -> Option<f64> {
+    let line = reply["lines"].get(index)?.as_str()?;
+    line.split(|character: char| character == '┤' || character == '┼')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
 
 fn plot(series: Value, config: Value) -> Value {
     server("chart.plot", json!({ "series": series, "config": config }))
@@ -350,4 +360,184 @@ fn port_ascii_chart_stretching_keeps_the_endpoints() {
         json!([1.0, 2.0, 3.0, 4.0, 5.0])
     );
     assert_eq!(resample(json!([7.0]), 3, "max"), json!([7.0, 7.0, 7.0]));
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::stretching_keeps_the_endpoints
+#[test]
+fn port_ascii_chart_stretching_keeps_the_endpoints_midpoint() {
+    let stretched = resample(json!([1.0, 5.0]), 9, "interpolate");
+    let items = stretched.as_array().cloned().unwrap_or_default();
+    assert_eq!(items.len(), 9, "{stretched}");
+    assert!(near(&items[0], 1.0));
+    assert!(near(&items[4], 3.0));
+    assert!(near(&items[8], 5.0));
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::max_downsampling_keeps_a_spike_that_interpolation_can_miss
+#[test]
+fn port_ascii_chart_max_downsampling_keeps_the_exact_spike_value() {
+    let mut values = vec![0.0; 100];
+    values[51] = 50.0;
+    let maxed = resample(json!(values), 10, "max");
+    let items = maxed.as_array().cloned().unwrap_or_default();
+    assert!(items.iter().any(|item| near(item, 50.0)), "{maxed}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::a_custom_height_rescales_the_rows
+#[test]
+fn port_ascii_chart_a_custom_height_rescales_the_rows_row_count() {
+    let reply = plot(
+        json!([[2., 1., 1., 2., -2., 5., 7., 11., 3., 7., 1.]]),
+        json!({"height":4,"offset":3}),
+    );
+    assert_eq!(reply["rows"], json!(5));
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::a_label_formatter_replaces_the_number_format
+#[test]
+fn port_ascii_chart_a_label_formatter_drops_the_decimal_point() {
+    let reply = plot(
+        json!([[1000., 3000., 5000.]]),
+        json!({ "height": 2, "label_formatter": { "divide_by": 1000.0, "decimals": 0, "suffix": "k" } }),
+    );
+    assert_eq!(reply["rows"], json!(3));
+    let top = reply["lines"][0].as_str().unwrap_or("");
+    assert!(!top.contains('.'), "{top}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::a_target_width_interpolates_like_the_reference
+#[test]
+fn port_ascii_chart_a_target_width_interpolates_like_the_reference_endpoints() {
+    let stretched = resample(
+        json!([
+            0.3189989805,
+            0.149949026,
+            0.30142492354,
+            0.195129182935,
+            0.3142492354,
+            0.1674974513,
+            0.3142492354,
+            0.1474974513,
+            0.3047974513
+        ]),
+        30,
+        "interpolate",
+    );
+    let items = stretched.as_array().cloned().unwrap_or_default();
+    assert_eq!(items.len(), 30, "{stretched}");
+    assert!(near(&items[0], 0.3189989805));
+    assert!(near(&items[29], 0.3047974513));
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::empty_or_all_nan_input_draws_nothing
+#[test]
+fn port_ascii_chart_empty_or_all_nan_input_has_no_label_lines() {
+    for series in [json!([]), json!([[]]), json!([[null, null, null, null]])] {
+        let reply = plot(series, json!({}));
+        assert_eq!(reply["lines"].as_array().map_or(0, Vec::len), 0, "{reply}");
+    }
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::gutter_counts_the_label_and_axis_columns
+#[test]
+fn port_ascii_chart_gutter_matches_the_axis_position_in_the_top_row() {
+    let reply = plot(json!([[1., 2., 3.]]), json!({}));
+    let top = reply["raw_lines"][0].as_str().unwrap_or("");
+    let axis_column = top
+        .chars()
+        .position(|character| character == '┤' || character == '┼')
+        .unwrap_or(0);
+    assert_eq!(reply["gutter"], json!(axis_column + 1));
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::include_zero_extends_the_axis_to_zero
+#[test]
+fn port_ascii_chart_include_zero_bottom_label_parses_to_zero() {
+    let reply = plot(
+        json!([[100., 110., 120.]]),
+        json!({ "height": 4, "include_zero": true }),
+    );
+    let last = reply["lines"]
+        .as_array()
+        .map_or(0, Vec::len)
+        .saturating_sub(1);
+    assert_eq!(row_label(&reply, last), Some(0.0), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::large_values_drop_the_decimals
+#[test]
+fn port_ascii_chart_large_values_top_label_has_no_decimal_point() {
+    let reply = plot(
+        json!([[192., 431., 112., 449., -122., 375., 782., 123., 911., 1711., 172.]]),
+        json!({"height":10}),
+    );
+    let top = reply["lines"][0].as_str().unwrap_or("");
+    assert!(top.contains("1711"), "{top}");
+    assert!(!top.contains('.'), "{top}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::matches_the_reference_for_a_mixed_series
+#[test]
+fn port_ascii_chart_mixed_series_top_label_is_the_maximum() {
+    let reply = plot(
+        json!([[2., 1., 1., 2., -2., 5., 7., 11., 3., 7., 1.]]),
+        json!({}),
+    );
+    assert_eq!(row_label(&reply, 0), Some(11.0), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::nan_values_leave_gaps
+#[test]
+fn port_ascii_chart_nan_gaps_keep_the_top_label_and_row_count() {
+    let reply = plot(
+        json!([[0.1, 0.2, 0.3, null, 0.5, 0.6, 0.7, null, null, 0.9, 1.0]]),
+        json!({}),
+    );
+    assert_eq!(reply["rows"], json!(10));
+    assert_eq!(row_label(&reply, 0), Some(1.0), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::negative_only_series_keep_their_sign
+#[test]
+fn port_ascii_chart_negative_only_bottom_label_is_the_minimum() {
+    let reply = plot(
+        json!([[
+            -5., -2., -3., -4., 0., -5., -6., -7., -8., 0., -9., -3., -5., -2., -9., -3., -1.
+        ]]),
+        json!({}),
+    );
+    let last = reply["lines"]
+        .as_array()
+        .map_or(0, Vec::len)
+        .saturating_sub(1);
+    assert_eq!(row_label(&reply, last), Some(-9.0), "{reply}");
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::several_series_share_one_grid_and_report_their_index
+#[test]
+fn port_ascii_chart_several_series_share_one_grid_row_count() {
+    let reply = plot(
+        json!([
+            [0., 1., 2., 3., 3., 3., 2., 0.],
+            [5., 4., 2., 1., 4., 6., 6.]
+        ]),
+        json!({}),
+    );
+    assert_eq!(reply["rows"], json!(7));
+}
+
+/// REQ: PORT:ilium-client/src/ascii_chart.rs::short_series_are_padded_with_gaps_when_a_width_is_given
+#[test]
+fn port_ascii_chart_short_series_gaps_keep_every_series_drawn() {
+    let reply = plot(
+        json!([
+            [0., 0., 2., 2., null],
+            [1., 1., 1., 1., 1., 1., 1.],
+            [null, null, null, 0., 0., 2., 2.]
+        ]),
+        json!({}),
+    );
+    assert_eq!(reply["rows"], json!(3));
+    let kinds = reply["kinds"].as_array().cloned().unwrap_or_default();
+    assert!(kinds.contains(&json!("line:2")), "{kinds:?}");
 }

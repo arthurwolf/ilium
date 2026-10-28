@@ -10,14 +10,97 @@ pub struct UiDelta {
 }
 
 /// Diffs a retained tree against the next one.
-pub fn diff(_previous: &UiTree, _next: &UiTree) -> UiDelta {
-    unimplemented!("host::render::diff")
+pub fn diff(previous: &UiTree, next: &UiTree) -> UiDelta {
+    let longest = previous.nodes.len().max(next.nodes.len());
+    let mut changed_paths: Vec<String> = (0..longest)
+        .filter(|index| previous.nodes.get(*index) != next.nodes.get(*index))
+        .map(|index| format!("/nodes/{index}"))
+        .collect();
+    if previous.root != next.root {
+        changed_paths.push("/root".to_owned());
+    }
+    UiDelta { changed_paths }
 }
 
 /// Strips control and bidi characters from plugin text and cuts it to `limit` characters
 /// (reference-extension-security.md SEC-380).
-pub fn sanitize_plugin_text(_text: &str, _limit: usize) -> String {
-    unimplemented!("host::render::sanitize_plugin_text")
+pub fn sanitize_plugin_text(text: &str, limit: usize) -> String {
+    let cleaned = strip_unsafe_characters(text);
+    if cleaned.len() <= limit {
+        return cleaned.into_iter().collect();
+    }
+    if limit == 0 {
+        return String::new();
+    }
+    let mut cut: String = cleaned.into_iter().take(limit - 1).collect();
+    cut.push('\u{2026}');
+    cut
+}
+
+/// True for bidi controls and zero-width characters.
+fn is_invisible_format_character(character: char) -> bool {
+    matches!(character,
+        '\u{200b}'..='\u{200f}'
+        | '\u{202a}'..='\u{202e}'
+        | '\u{2060}'..='\u{2064}'
+        | '\u{2066}'..='\u{2069}'
+        | '\u{061c}'
+        | '\u{feff}')
+}
+
+/// Removes ANSI escapes, control, bidi and zero-width characters and runs of three or more
+/// box-drawing characters; newlines become one space each (CRLF counts once).
+fn strip_unsafe_characters(text: &str) -> Vec<char> {
+    let characters: Vec<char> = text.chars().collect();
+    let mut kept: Vec<char> = Vec::with_capacity(characters.len());
+    let mut index = 0;
+    while index < characters.len() {
+        let character = characters[index];
+        index += 1;
+        if character == '\u{1b}' {
+            if characters.get(index) == Some(&'[') {
+                index += 1;
+                while index < characters.len() {
+                    let final_byte = characters[index];
+                    index += 1;
+                    if ('\u{40}'..='\u{7e}').contains(&final_byte) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if character == '\r' && characters.get(index) == Some(&'\n') {
+            index += 1;
+            kept.push(' ');
+        } else if character == '\r' || character == '\n' {
+            kept.push(' ');
+        } else if character.is_control() || is_invisible_format_character(character) {
+            continue;
+        } else {
+            kept.push(character);
+        }
+    }
+    remove_box_drawing_runs(kept)
+}
+
+/// Drops every run of three or more box-drawing characters; shorter runs stay.
+fn remove_box_drawing_runs(characters: Vec<char>) -> Vec<char> {
+    let is_box = |character: char| ('\u{2500}'..='\u{257f}').contains(&character);
+    let mut result = Vec::with_capacity(characters.len());
+    let mut index = 0;
+    while index < characters.len() {
+        let run_end = characters[index..]
+            .iter()
+            .position(|character| is_box(*character) != is_box(characters[index]))
+            .map_or(characters.len(), |offset| index + offset);
+        let is_long_box_run = is_box(characters[index]) && run_end - index >= 3;
+        if !is_long_box_run {
+            result.extend_from_slice(&characters[index..run_end]);
+        }
+        index = run_end;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -254,5 +337,59 @@ mod tests {
     #[test]
     fn sanitize_does_not_count_removed_control_characters_against_the_limit() {
         assert_eq!(sanitize_plugin_text("\u{1b}[31mabc", 3), "abc");
+    }
+}
+
+/// Number of colours the outer terminal offers, for `nearest_terminal_colour` (HST-390).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalPalette {
+    Colours16,
+    Colours256,
+}
+
+/// Maps a plugin `rgb` colour to the nearest colour index the terminal offers. A 16-colour
+/// terminal still gets a valid index, so the plugin call never fails on colour (HST-390).
+pub fn nearest_terminal_colour(red: u8, green: u8, blue: u8, palette: TerminalPalette) -> u8 {
+    const BASE16: [(u8, u8, u8); 16] = [
+        (0, 0, 0), (128, 0, 0), (0, 128, 0), (128, 128, 0), (0, 0, 128), (128, 0, 128),
+        (0, 128, 128), (192, 192, 192), (128, 128, 128), (255, 0, 0), (0, 255, 0),
+        (255, 255, 0), (0, 0, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
+    ];
+    let level = |value: u8| -> u8 {
+        const STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+        let mut best = 0;
+        for (index, step) in STEPS.iter().enumerate() {
+            if value.abs_diff(*step) < value.abs_diff(STEPS[best]) {
+                best = index;
+            }
+        }
+        best as u8
+    };
+    let distance = |(r, g, b): (u8, u8, u8)| -> u32 {
+        let square = |a: u8, b: u8| u32::from(a.abs_diff(b)).pow(2);
+        square(r, red) + square(g, green) + square(b, blue)
+    };
+    let nearest_base = BASE16
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, colour)| distance(**colour))
+        .map(|(index, _)| index as u8)
+        .unwrap_or(0);
+    match palette {
+        TerminalPalette::Colours16 => nearest_base,
+        TerminalPalette::Colours256 => {
+            let cube = 16 + 36 * level(red) + 6 * level(green) + level(blue);
+            let steps = [0u8, 95, 135, 175, 215, 255];
+            let cube_rgb = (
+                steps[usize::from(level(red))],
+                steps[usize::from(level(green))],
+                steps[usize::from(level(blue))],
+            );
+            if distance(cube_rgb) <= distance(BASE16[usize::from(nearest_base)]) {
+                cube
+            } else {
+                nearest_base
+            }
+        }
     }
 }

@@ -121,3 +121,43 @@ fn port_028_claude_goal_wording_outside_the_indicator_row_is_ignored() {
 fn port_028_no_visible_composer_reports_no_goal() {
     assert_eq!(goal("claude", "◎ /goal active (4m)\nsome output"), None);
 }
+
+/// REQ: PORT:ilium-detect/src/lib.rs::captured_codex_goal_footers_map_to_their_goal_phase
+#[test]
+fn port_028_alt_captured_codex_paused_footer_has_non_empty_goal_text() {
+    let text = goal("codex", &fixture("codex_goal_paused_after_interrupt.txt"));
+    assert!(text.is_some_and(|value| !value.trim().is_empty()));
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::codex_goal_wording_outside_the_footer_is_ignored
+#[test]
+fn port_028_alt_codex_shortcut_overlay_reports_no_goal() {
+    assert_eq!(goal("codex", "• Done\n\n? for shortcuts"), None);
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::codex_overlays_that_replace_the_footer_are_inconclusive
+#[test]
+fn port_028_alt_codex_prose_goal_wording_reports_no_goal() {
+    let text =
+        "• Done\n\nThe goal was Pursuing goal (1h 5m) earlier.\n\n› Ask Codex to do anything";
+    assert_eq!(goal("codex", text), None);
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::captured_claude_code_goal_screens_map_to_their_goal_phase
+#[test]
+fn port_028_alt_captured_claude_active_screen_has_non_empty_goal_text() {
+    let text = goal("claude", &fixture("claude_goal_active_working.txt"));
+    assert!(text.is_some_and(|value| !value.trim().is_empty()));
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::claude_code_goal_wording_outside_the_indicator_row_is_ignored
+#[test]
+fn port_028_alt_claude_goal_indicator_alone_reports_no_goal() {
+    assert_eq!(goal("claude", "◎ /goal active (4m)"), None);
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::claude_code_without_a_visible_composer_is_inconclusive
+#[test]
+fn port_028_alt_claude_indicator_without_composer_reports_no_goal() {
+    assert_eq!(goal("claude", "◎ /goal active (4m)"), None);
+}

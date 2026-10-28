@@ -59,3 +59,16 @@ fn plugin_docs_are_byte_identical_across_runs_and_mark_missing_descriptions() {
         checked.stdout_jsonl
     );
 }
+
+/// REQ: DEV-938
+#[test]
+fn generated_plugin_docs_name_the_plugin_id_from_the_manifest() {
+    let (root, env, _dir) = new_rust_project();
+    let out_dir = root.path().join("docs-manifest");
+    let out = run_in_project(&env, "docs", &["--out", out_dir.to_str().expect("utf8")]);
+    assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
+    assert!(
+        all_text(&out_dir).contains("example.agent-tools"),
+        "the generated page lists the plugin id"
+    );
+}

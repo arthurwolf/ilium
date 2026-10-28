@@ -1,8 +1,8 @@
 //! `#[ilium_plugin(side = "...", exports = [...])]` (rust-sdk.md "The ilium_plugin macro").
 //!
-//! Skeleton: arguments are parsed and unknown ones are a compile error. The expansion is an
-//! `impl NativeEntry` whose methods are `unimplemented!`. The wasm32 glue (wit-bindgen exports)
-//! comes with the implementation phase.
+//! Arguments are parsed and unknown ones are a compile error. The expansion is an `impl NativeEntry`
+//! that forwards to the plugin's `Lifecycle` (and, with the `handler` export, `Handler`) implementation.
+//! The wasm32 glue (wit-bindgen exports) is generated separately.
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -89,6 +89,17 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     let side = &args.side;
     let exports = &args.exports;
     let krate = &args.krate;
+    // Only a plugin that declares the `handler` export implements `Handler`; others receive no events.
+    let on_events_body = if exports.iter().any(|export| export == "handler") {
+        quote! {
+            <Self as #krate::Handler>::on_events(self, batch)
+        }
+    } else {
+        quote! {
+            let _ = batch;
+            ::std::vec::Vec::new()
+        }
+    };
     quote! {
         #item_struct
 
@@ -98,23 +109,23 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
 
             fn native_activate(
                 &mut self,
-                _context: #krate::types::Activation,
+                context: #krate::types::Activation,
             ) -> ::core::result::Result<(), #krate::types::PluginError> {
-                unimplemented!("rust-sdk.macro-dispatch")
+                <Self as #krate::Lifecycle>::activate(self, context)
             }
 
             fn native_deactivate(
                 &mut self,
-                _reason: #krate::types::DeactivationReason,
+                reason: #krate::types::DeactivationReason,
             ) -> ::core::option::Option<::std::vec::Vec<u8>> {
-                unimplemented!("rust-sdk.macro-dispatch")
+                <Self as #krate::Lifecycle>::deactivate(self, reason)
             }
 
             fn native_on_events(
                 &mut self,
-                _batch: ::std::vec::Vec<#krate::types::Event>,
+                batch: ::std::vec::Vec<#krate::types::Event>,
             ) -> ::std::vec::Vec<#krate::types::Submission> {
-                unimplemented!("rust-sdk.macro-dispatch")
+                #on_events_body
             }
         }
     }

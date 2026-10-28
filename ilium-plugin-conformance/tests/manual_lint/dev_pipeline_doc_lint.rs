@@ -1,7 +1,7 @@
 //! Documentation-lint rules of the dev-pipeline lane: owner table DEV-955 and DEV-973, release
 //! record DEV-958, retired-code table DEV-957 and troubleshooting links DEV-959
 //! (reference-documentation-lifecycle.md, reference-manifest-schema.md). The documentation rules read
-//! the pages; the release-check behaviour is not in the repository yet and stays unimplemented.
+//! the pages; the release checks run over page text handed to them, so each can be tried on a clean and a broken input.
 
 use crate::dev_pipeline_manual::{
     heading_anchors, link_anchors, manual_page, split_cells, tables_with_header,
@@ -45,6 +45,94 @@ fn catalogue_codes() -> Vec<String> {
         .map(|cell| cell.trim_matches('`').to_owned())
         .filter(|code| code.contains('.'))
         .collect()
+}
+
+/// The retired codes of the manifest schema: the first backticked cell of each row of its retired table.
+fn retired_codes() -> Vec<String> {
+    let page = manual_page(CATALOGUE_PAGE);
+    let section = page
+        .split("## Retired and orphan codes")
+        .nth(1)
+        .expect("the manifest schema has the retired and orphan codes section");
+    section
+        .lines()
+        .filter(|line| line.trim_start().starts_with("| `"))
+        .filter_map(|line| split_cells(line).into_iter().next())
+        .map(|cell| cell.trim_matches('`').to_owned())
+        .filter(|code| code.contains('.'))
+        .collect()
+}
+
+/// Release check of DEV-957: a removed code may appear only in the retired table. `pages` holds
+/// `(page file, text)`; the result names every page and code found outside that table.
+fn check_removed_codes_only_in_retired_table(
+    removed_codes: &[String],
+    pages: &[(String, String)],
+) -> Result<(), Vec<String>> {
+    let mut findings = Vec::new();
+    for (page_file, text) in pages {
+        let mut in_retired_table = false;
+        for line in text.lines() {
+            if line.starts_with("## ") {
+                in_retired_table = line.starts_with("## Retired and orphan codes");
+            }
+            // A row of the retired table is the one place a removed code belongs.
+            if in_retired_table && line.trim_start().starts_with('|') {
+                continue;
+            }
+            for token in backticked_tokens(line) {
+                if removed_codes.contains(&token) {
+                    findings.push(format!("{page_file}: removed code `{token}` outside the retired table"));
+                }
+            }
+        }
+    }
+    if findings.is_empty() {
+        Ok(())
+    } else {
+        Err(findings)
+    }
+}
+
+/// Release check of DEV-958: the release record has one line per page of the owner table, naming
+/// the owner role of its row, the reviewer and an ISO review date. The result lists every page that fails.
+fn check_record_lines_cover_owner_table(
+    owner_rows: &[Vec<String>],
+    record: &str,
+) -> Result<(), Vec<String>> {
+    let mut findings = Vec::new();
+    for row in owner_rows {
+        let page = row.first().map(String::as_str).unwrap_or("");
+        let owner = row.get(1).map(String::as_str).unwrap_or("");
+        let Some(line) = record.lines().find(|line| line.contains(page)) else {
+            findings.push(format!("{page}: no record line"));
+            continue;
+        };
+        if owner.is_empty() || !line.contains(owner) {
+            findings.push(format!("{page}: record line names no owner role"));
+        }
+        if !has_iso_date(line) {
+            findings.push(format!("{page}: record line has no review date"));
+        }
+        if !line.to_lowercase().contains("reviewer") {
+            findings.push(format!("{page}: record line names no reviewer"));
+        }
+    }
+    if findings.is_empty() {
+        Ok(())
+    } else {
+        Err(findings)
+    }
+}
+
+/// True when the line holds a `YYYY-MM-DD` date.
+fn has_iso_date(line: &str) -> bool {
+    line.as_bytes().windows(10).any(|window| {
+        window.iter().enumerate().all(|(position, byte)| match position {
+            4 | 7 => *byte == b'-',
+            _ => byte.is_ascii_digit(),
+        })
+    })
 }
 
 /// Every backticked token of a page, without the backticks.
@@ -115,7 +203,24 @@ fn dev_957_a_removed_code_moves_to_the_retired_table_of_the_manifest_schema() {
 /// REQ: DEV-957
 #[test]
 fn dev_957_the_release_check_rejects_a_removed_code_left_in_any_other_page() {
-    unimplemented!("ilium-plugin-conformance::release::check_removed_codes_only_in_retired_table");
+    let removed = retired_codes();
+    assert!(!removed.is_empty(), "the retired table lists codes");
+    let schema = manual_page(CATALOGUE_PAGE);
+    let clean_pages = vec![(CATALOGUE_PAGE.to_owned(), schema)];
+    assert_eq!(
+        check_removed_codes_only_in_retired_table(&removed, &clean_pages),
+        Ok(()),
+        "the retired table itself is the one place a removed code stays"
+    );
+    let leaked = format!("The error `{}` explains the failure.", removed[0]);
+    let dirty_pages = vec![
+        ("clean.md".to_owned(), "Nothing removed here.".to_owned()),
+        ("leaky.md".to_owned(), leaked),
+    ];
+    let findings = check_removed_codes_only_in_retired_table(&removed, &dirty_pages)
+        .expect_err("a removed code in prose must fail the release check");
+    assert_eq!(findings.len(), 1, "only the leaking page is named: {findings:?}");
+    assert!(findings[0].starts_with("leaky.md"), "{findings:?}");
 }
 
 /// REQ: DEV-958
@@ -135,7 +240,32 @@ fn dev_958_the_release_record_names_owner_reviewer_and_date_for_each_page() {
 /// REQ: DEV-958
 #[test]
 fn dev_958_a_release_missing_one_page_record_is_blocked_by_the_release_check() {
-    unimplemented!("ilium-plugin-conformance::release::check_record_lines_cover_owner_table");
+    let (_, rows) = owner_table();
+    assert!(rows.len() >= 2, "the owner table has at least two pages");
+    let page_of = |row: &Vec<String>| row[0].clone();
+    let full_record: String = rows
+        .iter()
+        .map(|row| {
+            format!("{} | {} | reviewer: Ada | 2026-10-01\n", page_of(row), row[1])
+        })
+        .collect();
+    assert_eq!(check_record_lines_cover_owner_table(&rows, &full_record), Ok(()));
+
+    let missing_page = page_of(&rows[0]);
+    let short_record: String = full_record
+        .lines()
+        .filter(|line| !line.contains(&missing_page))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let findings = check_record_lines_cover_owner_table(&rows, &short_record)
+        .expect_err("a page without a record line must block the release");
+    assert_eq!(findings, vec![format!("{missing_page}: no record line")]);
+
+    let undated_record = full_record.replace("2026-10-01", "soon");
+    assert!(
+        check_record_lines_cover_owner_table(&rows, &undated_record).is_err(),
+        "a record line without a date must fail"
+    );
 }
 
 /// REQ: DEV-959

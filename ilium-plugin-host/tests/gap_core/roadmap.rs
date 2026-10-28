@@ -63,3 +63,15 @@ fn cor_104_a_failing_gate_on_a_candidate_stops_the_release_and_records_gate_wave
     );
     assert!(!record.commit.is_empty(), "the record must name the commit");
 }
+
+/// REQ: COR-104
+#[test]
+fn cor_104_a_passing_gate_on_a_candidate_does_not_stop_the_release() {
+    let rig = OpsRig::new();
+    let output = rig.run_release_gate(WAVE_ONE, "gate-passing-fixture");
+    assert_eq!(
+        output.exit_code, 0,
+        "the release job must continue when every gate passes"
+    );
+    assert_ne!(rig.release_job_status(WAVE_ONE), "stopped");
+}

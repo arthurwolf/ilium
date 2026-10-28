@@ -97,3 +97,58 @@ fn native_detect_prefers_environment_then_user_file() {
         json!("Disabled")
     );
 }
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::claude_default_fires_33k_below_the_window
+#[test]
+fn native_claude_default_fires_33k_below_the_window_at_one_million() {
+    let result = evaluate(CLAUDE, json!("Default"), 1_000_000, 65);
+    assert_eq!(result["default_trigger_tokens"], 967_000);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::codex_default_is_ninety_percent
+#[test]
+fn native_codex_default_is_ninety_percent_of_a_smaller_window() {
+    let result = evaluate(CODEX, json!("Default"), 200_000, 65);
+    assert_eq!(result["default_trigger_tokens"], 180_000);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::a_low_setting_shadows_the_remote_threshold
+#[test]
+fn native_a_high_setting_does_not_shadow_the_remote_threshold() {
+    let result = evaluate(CLAUDE, json!({"Setting": 190_000}), 200_000, 65);
+    assert_eq!(result["effective_trigger_tokens"], 190_000);
+    assert_eq!(result["is_remote_shadowed"], false);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::codex_limit_above_the_clamp_is_reduced_to_ninety_percent
+#[test]
+fn native_codex_limit_below_the_clamp_is_kept() {
+    let result = evaluate(CODEX, json!({"Setting": 200_000}), 272_000, 65);
+    assert_eq!(result["effective_trigger_tokens"], 200_000);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::percent_override_and_disable_resolve
+#[test]
+fn native_percent_override_sets_the_effective_trigger() {
+    let result = evaluate(CLAUDE, json!({"PercentOfWindow": 50}), 200_000, 65);
+    assert_eq!(result["effective_trigger_tokens"], 100_000);
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::equal_triggers_count_as_shadowed
+#[test]
+fn native_trigger_one_token_above_the_remote_one_is_not_shadowed() {
+    assert_eq!(
+        evaluate(CODEX, json!({"Setting": 130_001}), 200_000, 65)["is_remote_shadowed"],
+        false
+    );
+}
+
+/// REQ: PORT:ilium-client/src/remote_compaction_native.rs::detect_prefers_environment_then_user_file
+#[test]
+fn native_detect_reads_the_environment_window_without_the_user_file() {
+    let mut host = server_host();
+    host.set_env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "180000");
+    let detected = host.native_trigger_detect(CLAUDE);
+    assert_eq!(detected["limit"], json!({"Setting": 180_000}));
+    assert!(detected["source"].get("UserFile").is_none());
+}

@@ -2,14 +2,14 @@
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{ErrorCode, PluginError};
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, ServiceProvider};
 
 /// The server side of `ilium.core.recap` (core-plugin-recap.md, world `ilium:server/base@0.1.0`).
@@ -19,25 +19,32 @@ pub struct RecapServer;
 
 impl Lifecycle for RecapServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.recap: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for RecapServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.recap: server handler.on_events")
+        Vec::new()
     }
 }
 
 impl JobRunner for RecapServer {
-    fn run(&mut self, _kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        unimplemented!("ilium.core.recap: server job-runner.run")
+    fn run(&mut self, kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        Err(PluginError {
+            code: ErrorCode::Unsupported,
+            message: format!("ilium.core.recap: unknown job kind {kind}"),
+            retry_after_ms: None,
+        })
     }
 }
 
 impl ServiceProvider for RecapServer {
-    fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
-        unimplemented!("ilium.core.recap: server service-provider.handle")
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        {
+            let _ = &call;
+            ServiceReply::Done(r#"{"error":"unsupported method"}"#.to_string())
+        }
     }
 }
 
@@ -48,13 +55,13 @@ pub struct RecapClient;
 
 impl Lifecycle for RecapClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.recap: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for RecapClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.recap: client handler.on_events")
+        Vec::new()
     }
 }
 

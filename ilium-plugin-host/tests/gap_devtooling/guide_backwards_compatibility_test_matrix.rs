@@ -36,3 +36,14 @@ fn every_released_plugin_fixture_loads_on_the_current_host_and_the_matrix_lists_
         );
     }
 }
+
+/// REQ: DEV-987
+#[test]
+fn the_matrix_command_is_documented_with_the_window_option_and_jsonl_output() {
+    let page = manual_page("guide-backwards-compatibility-test-matrix");
+    assert!(
+        page.contains("--against window"),
+        "the guide documents the --against window option"
+    );
+    assert!(page.contains("JSONL"), "the guide says the report is JSONL");
+}

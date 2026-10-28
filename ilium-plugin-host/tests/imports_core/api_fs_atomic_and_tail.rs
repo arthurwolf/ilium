@@ -493,3 +493,32 @@ proptest! {
 }
 
 fn _write_mode_is_used(_: WriteMode) {}
+
+/// REQ: WIT:ilium:host/fs.take-lock
+#[test]
+fn fs_lock_timeout_above_sixty_seconds_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+    let mut fixture = rw(dir.path());
+    let request = fixture.fs().lock(project_path("a.txt"), true, 60_001);
+    assert_eq!(
+        code_either(&mut fixture, request),
+        Some(ErrorCode::InvalidArgument),
+        "a lock timeout above 60,000 ms must be refused"
+    );
+}
+
+/// REQ: WIT:ilium:host/fs.take-revisioned
+#[test]
+fn fs_take_revisioned_gives_the_same_token_for_an_unchanged_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), b"same").unwrap();
+    let mut fixture = rw(dir.path());
+    let first = expect_ok(fixture.fs().read_with_revision(project_path("a.txt")));
+    complete(&mut fixture, first);
+    let before = fixture.fs().take_revisioned(first).unwrap().revision;
+    let second = expect_ok(fixture.fs().read_with_revision(project_path("a.txt")));
+    complete(&mut fixture, second);
+    let after = fixture.fs().take_revisioned(second).unwrap().revision;
+    assert_eq!(before, after, "an unchanged file must keep its revision token");
+}

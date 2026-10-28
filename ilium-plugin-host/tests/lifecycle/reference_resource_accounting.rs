@@ -278,3 +278,15 @@ fn lif_146_source_is_one_of_the_five_documented_values() {
         );
     }
 }
+
+/// REQ: LIF-140
+#[test]
+fn lif_140_refusals_neither_inflate_nor_hide_a_real_failure_count() {
+    let mut host = one_plugin();
+    for _ in 0..100 {
+        host.bucket_refusal(A, -100);
+    }
+    trap(&mut host, A);
+    assert_eq!(failures(&host, A), 1);
+    assert_ne!(host.health(A), HealthState::Failed);
+}

@@ -55,3 +55,20 @@ fn upgrading_the_host_under_a_running_plugin_keeps_its_data_and_reports_pending_
         "the stored value is still readable after the upgrade"
     );
 }
+
+/// REQ: DEV-993
+#[test]
+fn direct_upgrade_from_one_minor_to_the_next_major_stamps_the_new_data_version() {
+    let rig = MigrationRig::new();
+    rig.install(&PluginSpec::new("example.agent-tools", "1.0.0").data_version(1));
+    let upgraded = rig.update(
+        &PluginSpec::new("example.agent-tools", "2.0.0").data_version(2),
+        &[],
+    );
+    assert_eq!(upgraded.exit_code, 0, "{:?}", upgraded.stdout_jsonl);
+    assert_eq!(
+        rig.data_dir_stamp("example.agent-tools"),
+        Some(2),
+        "the stored data moves to version 2 in one step"
+    );
+}

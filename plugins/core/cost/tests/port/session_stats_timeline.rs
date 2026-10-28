@@ -107,3 +107,41 @@ fn port_session_stats_timeline_scale_windows_end_at_the_last_event_and_never_pre
     assert_eq!(window(short, "day"), json!([1_000, 60_000]));
     assert_eq!(window(json!({}), "all"), Value::Null);
 }
+
+/// REQ: PORT:ilium-client/src/session_stats_timeline.rs::failure_outranks_success_in_one_column_and_cleared_runs_show_no_icon
+#[test]
+fn port_session_stats_timeline_a_success_only_column_reports_success() {
+    let spans = json!([{ "start_ms": 0, "end_ms": 50, "outcome": "success" }]);
+    let reply = ribbon(stats(json!([[0, "model"]]), spans, 100), 0, 100, 4);
+    assert_eq!(reply["outcomes"][0], json!("success"));
+    assert_eq!(reply["has_data"], json!(true));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_timeline.rs::open_progress_runs_to_the_end_and_empty_input_is_safe
+#[test]
+fn port_session_stats_timeline_open_progress_outside_the_window_is_not_flagged() {
+    let spans = json!([{ "start_ms": 50, "end_ms": null, "outcome": "running" }]);
+    let reply = ribbon(stats(json!([[0, "shell"]]), spans, 100), 0, 40, 4);
+    assert_eq!(reply["has_running_progress"], json!(false));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_timeline.rs::ribbon_columns_take_the_dominant_state_and_flag_running_progress
+#[test]
+fn port_session_stats_timeline_window_without_spans_has_no_outcomes() {
+    let reply = ribbon(stats(json!([[0, "idle"]]), json!([]), 100), 0, 100, 4);
+    assert_eq!(reply["has_running_progress"], json!(false));
+    assert!(reply["outcomes"]
+        .as_array()
+        .is_some_and(|all| all.iter().all(Value::is_null)));
+}
+
+/// REQ: PORT:ilium-client/src/session_stats_timeline.rs::scale_windows_end_at_the_last_event_and_never_precede_the_first
+#[test]
+fn port_session_stats_timeline_five_minute_window_on_a_short_session_starts_at_first_event() {
+    let short = stats(json!([[1_000, "model"]]), json!([]), 60_000);
+    let reply = client(
+        "timeline.scale-window",
+        json!({ "stats": short, "scale": "five_minutes" }),
+    );
+    assert_eq!(reply, json!([1_000, 60_000]));
+}

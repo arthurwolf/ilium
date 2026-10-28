@@ -1223,3 +1223,50 @@ fn sec_178_keygen_without_no_passphrase_and_without_a_passphrase_source_does_not
                 .contains("BEGIN PRIVATE KEY")
     );
 }
+
+/// REQ: SEC-146
+#[test]
+fn doc_sec_146_release_blocklist_is_verified_with_the_key_compiled_into_the_binary() {
+    let text = page("reference-trust-and-supply-chain.md");
+    assert!(text.contains("verified with the key compiled into the binary"));
+}
+
+/// REQ: SEC-171
+#[test]
+fn sec_171_runtime_advisory_from_a_policy_file_does_not_refuse_a_plugin() {
+    let fixture = trusted_fixture();
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "runtime", "advisory": "ILIUM-TEST-0001", "versions": "*", "reason": "test advisory"}]),
+    );
+    let out = install(&fixture, &vector_signed(), &[]);
+    assert!(!has(&out, "sandbox.unavailable"), "{}", all_text(&out));
+}
+
+/// REQ: SEC-172
+#[test]
+fn doc_sec_172_codec_pinning_links_to_the_security_testing_page() {
+    let text = page("reference-trust-and-supply-chain.md");
+    assert!(text.contains("[Security testing](/pages/reference-security-testing/)"));
+}
+
+/// REQ: SEC-173
+#[test]
+fn doc_sec_173_sdk_release_uses_signed_tags_and_locked_installs() {
+    let text = page("reference-trust-and-supply-chain.md");
+    assert!(text.contains("signed tags") && text.contains("npm ci"));
+}
+
+/// REQ: SEC-174
+#[test]
+fn doc_sec_174_compromise_advice_includes_a_rotation_statement_and_clean_signing() {
+    let text = page("reference-trust-and-supply-chain.md");
+    assert!(text.contains("clean build machine") && text.contains("rotation statement"));
+}
+
+/// REQ: SEC-176
+#[test]
+fn doc_sec_176_bundled_mismatch_is_a_fatal_startup_error_for_that_plugin() {
+    let text = page("reference-trust-and-supply-chain.md");
+    assert!(text.contains("fatal startup error") && text.contains(".cwasm"));
+}

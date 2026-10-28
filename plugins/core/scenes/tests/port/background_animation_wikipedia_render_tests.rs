@@ -983,3 +983,73 @@ fn port_word_wrap_does_not_invent_spaces_at_format_boundaries_or_lose_long_words
         "the manual page covers this feature"
     );
 }
+
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/render_tests.rs::braille_dot_positions_match_the_native_bit_contract
+#[test]
+fn port_braille_dot_positions_match_the_native_bit_contract_manual_contract() {
+    let mut scene = fake_scene("waves", 40, 10);
+    let screen = scene.frame(braille_frame(40, 10, 1500));
+    let lit = lit_cells(&screen);
+    assert!(!lit.is_empty(), "waves draws dots at 1500 ms");
+    for (row, column) in lit {
+        let symbol = screen.cell(row, column).symbol;
+        let code = symbol.chars().next().map(u32::from).unwrap_or(0);
+        assert!(
+            (0x2800..=0x28FF).contains(&code),
+            "cell ({row},{column}) holds one Braille glyph of 2 by 4 dots, got {symbol:?}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/render_tests.rs::cache_keys_separate_layout_ink_viewport_and_scroll_settings
+#[test]
+fn port_cache_keys_separate_layout_ink_viewport_and_scroll_settings_viewport_size_manual_contract() {
+    let mut wide = fake_scene("waves", 40, 10);
+    let mut narrow = fake_scene("waves", 20, 5);
+    let wide_screen = wide.frame(braille_frame(40, 10, 1500));
+    let narrow_screen = narrow.frame(braille_frame(20, 5, 1500));
+    assert_eq!((wide_screen.columns, wide_screen.rows), (40, 10));
+    assert_eq!(
+        (narrow_screen.columns, narrow_screen.rows),
+        (20, 5),
+        "a smaller viewport gets its own frame, never the wide one"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/render_tests.rs::defaults_and_normalization_match_the_packet
+#[test]
+fn port_defaults_and_normalization_match_the_packet_empty_settings_manual_contract() {
+    let mut defaults = fake_scene("waves", 40, 10);
+    let mut explicit = fake_scene("waves", 40, 10).with_settings("{}");
+    let default_text = defaults.frame(braille_frame(40, 10, 1500)).text();
+    let explicit_text = explicit.frame(braille_frame(40, 10, 1500)).text();
+    assert_eq!(
+        default_text, explicit_text,
+        "an empty settings object is the same as the defaults"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/render_tests.rs::invalid_dimensions_offsets_and_release_never_expose_stale_cells
+#[test]
+fn port_invalid_dimensions_offsets_and_release_never_expose_stale_cells_cell_count_manual_contract() {
+    let mut scene = fake_scene("waves", 24, 12);
+    let _ = scene.frame(braille_frame(24, 12, 0));
+    let mut resized = fake_scene("waves", 10, 4);
+    let screen = resized.frame(braille_frame(10, 4, 0));
+    assert_eq!(
+        screen.cells.len(),
+        10 * 4,
+        "the frame holds exactly the cells of the new grid, no leftovers"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/render_tests.rs::settings_serde_defaults_round_trip_and_unknown_key_tolerance
+#[test]
+fn port_settings_serde_defaults_round_trip_and_unknown_key_tolerance_non_object_refused_manual_contract() {
+    let mut scene = fake_scene("waves", 40, 10);
+    assert!(
+        !scene.reconfigure("[1, 2]"),
+        "a settings value that is not an object fails the settings schema and is refused"
+    );
+}

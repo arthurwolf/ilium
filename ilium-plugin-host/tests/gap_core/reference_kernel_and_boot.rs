@@ -200,3 +200,107 @@ fn cor_207_a_bundled_core_dependency_cycle_refuses_boot_and_names_the_path() {
         "the cycle path must be named: {text}"
     );
 }
+
+/// REQ: COR-091
+#[test]
+fn cor_091_a_startup_plugin_within_its_deadline_is_not_failed() {
+    let rig = OpsRig::new();
+    let quick = "com.example.startup-quick";
+    install_ok(&rig, &PackageSpec::new(quick, "1.0.0").startup());
+    let server = rig.start_server("s1");
+    rig.advance(Duration::from_secs(61));
+    assert_eq!(
+        server.state_of(quick, Side::Server),
+        InstanceState::Active,
+        "a startup plugin that meets its deadline must stay active"
+    );
+    assert!(
+        server.inactive_reason(quick).is_none(),
+        "no activation-timeout may be recorded for it"
+    );
+}
+
+/// REQ: COR-092
+#[test]
+fn cor_092_a_dependent_of_a_timed_out_startup_plugin_is_not_activated() {
+    let rig = OpsRig::new();
+    install_ok(
+        &rig,
+        &PackageSpec::new(SPY, "1.0.0")
+            .activate_misses_deadline()
+            .startup(),
+    );
+    install_ok(
+        &rig,
+        &PackageSpec::new(DEPENDENT, "1.0.0").requires_service(SPY),
+    );
+    let server = rig.start_server("s1");
+    rig.advance(Duration::from_secs(61));
+    assert_ne!(
+        server.state_of(DEPENDENT, Side::Server),
+        InstanceState::Active,
+        "the dependent must not be activated while its service is failed"
+    );
+}
+
+/// REQ: COR-107
+#[test]
+fn cor_107_three_core_failures_spread_over_more_than_sixty_seconds_do_not_degrade_it() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    for _ in 0..3 {
+        server.fail(CORE, Side::Server);
+        rig.advance(Duration::from_secs(61));
+    }
+    assert_ne!(
+        server.plugin_status(CORE),
+        "degraded",
+        "failures outside one 60-second window must not degrade the plugin"
+    );
+}
+
+/// REQ: COR-108
+#[test]
+fn cor_108_a_degraded_core_plugin_does_not_degrade_its_sibling_core_plugin() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    for _ in 0..3 {
+        server.fail(CORE, Side::Server);
+    }
+    assert_eq!(server.plugin_status(CORE), "degraded");
+    assert_ne!(
+        server.plugin_status(OTHER_CORE),
+        "degraded",
+        "the kernel must keep the other core plugins running"
+    );
+}
+
+/// REQ: COR-110
+#[test]
+fn cor_110_audit_records_of_repeated_failures_carry_an_increasing_restart_count() {
+    let rig = OpsRig::new();
+    let server = rig.start_server("s1");
+    server.fail(CORE, Side::Server);
+    server.fail(CORE, Side::Server);
+    let records = server.audit_records(CORE);
+    let restart_counts: Vec<Option<u64>> = records
+        .iter()
+        .map(|record| record.get("restart_count").and_then(|value| value.as_u64()))
+        .collect();
+    assert_eq!(restart_counts.len(), 2, "one audit record per failure");
+    assert!(
+        restart_counts.windows(2).all(|pair| pair[0] < pair[1]),
+        "each later record must show a higher restart count: {restart_counts:?}"
+    );
+}
+
+/// REQ: COR-207
+#[test]
+fn cor_207_an_acyclic_bundled_core_dependency_chain_boots() {
+    let rig = OpsRig::new();
+    let first =
+        PackageSpec::new("ilium.core.chain-a", "1.0.0").requires_service("ilium.core.chain-b");
+    let second = PackageSpec::new("ilium.core.chain-b", "1.0.0");
+    rig.boot_with_bundled_cores(&[first, second])
+        .expect("a bundle without a cycle must boot");
+}

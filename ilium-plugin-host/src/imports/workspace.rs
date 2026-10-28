@@ -1,35 +1,186 @@
-//! Host implementation of `ilium:host/workspace` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/workspace`: the kernel custody records of Git worktrees.
 //!
-//! Written once by the skeleton lane from the generated `HostWorkspace` trait; hand-owned afterwards.
+//! The kernel never runs Git. `register` only validates the spec against the kernel's view of the
+//! world (repository folders, tree nodes, busy panes) and records custody; `release` removes the
+//! record only (manual page `api-workspace`).
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use ilium_plugin_api::generated::host::workspace::{HostWorkspace, WorkspaceInfo, WorkspaceSpec};
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use ilium_plugin_api::generated::types::ids::NodeId;
+
+/// Scope that worktree folders must live in (`fs.write:worktrees`).
+const WORKTREES_SCOPE: &str = "worktrees";
+/// Maximum characters of an error message (the ABI caps it at 256).
+const MESSAGE_LIMIT: usize = 256;
+
+/// What the kernel knows about the outside world when it validates a worktree spec.
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceWorld {
+    /// Repository folders that hold a `.git` entry.
+    pub repositories: BTreeSet<FsPathKey>,
+    /// Tree nodes that exist.
+    pub nodes: BTreeSet<u64>,
+    /// Owner panes that currently run a process.
+    pub busy_owners: BTreeSet<u64>,
+}
+
+/// Ordered (scope, path) key of a folder.
+pub type FsPathKey = (String, String);
 
 /// Host side of the `workspace` interface.
-#[derive(Debug)]
-pub struct WorkspaceImport;
+#[derive(Debug, Default)]
+pub struct WorkspaceImport {
+    world: WorkspaceWorld,
+    records: BTreeMap<u64, WorkspaceInfo>,
+    next_id: u64,
+}
 
-impl HostWorkspace for WorkspaceImport {
-    fn register(&mut self, _spec: WorkspaceSpec) -> Result<u64, PluginError> {
-        unimplemented!("host::imports::workspace::register")
+impl WorkspaceImport {
+    /// Creates an import that validates against `world`.
+    pub fn with_world(world: WorkspaceWorld) -> Self {
+        Self {
+            world,
+            records: BTreeMap::new(),
+            next_id: 1,
+        }
     }
 
-    fn release(&mut self, _workspace: u64) -> Result<(), PluginError> {
-        unimplemented!("host::imports::workspace::release")
+    /// Replaces the kernel's view of the world (for example when panes open or close).
+    pub fn set_world(&mut self, world: WorkspaceWorld) {
+        self.world = world;
+    }
+
+    /// Clears the owner of every record owned by `node`, as the kernel does when the pane closes.
+    pub fn owner_closed(&mut self, node: NodeId) {
+        for record in self.records.values_mut() {
+            if record.owner == Some(node) {
+                record.owner = None;
+            }
+        }
+    }
+}
+
+fn error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.chars().take(MESSAGE_LIMIT).collect(),
+        retry_after_ms: None,
+    }
+}
+
+/// Git ref-name rules (`git check-ref-format --branch`), without running Git.
+fn is_valid_branch(branch: &str) -> bool {
+    if branch.is_empty()
+        || branch == "@"
+        || branch.starts_with('-')
+        || branch.starts_with('/')
+        || branch.ends_with('/')
+        || branch.ends_with('.')
+        || branch.contains("..")
+        || branch.contains("//")
+        || branch.contains("@{")
+    {
+        return false;
+    }
+    if branch
+        .chars()
+        .any(|c| c.is_control() || c.is_whitespace() || "~^:?*[\\".contains(c))
+    {
+        return false;
+    }
+    branch
+        .split('/')
+        .all(|part| !part.starts_with('.') && !part.ends_with(".lock"))
+}
+
+impl HostWorkspace for WorkspaceImport {
+    fn register(&mut self, spec: WorkspaceSpec) -> Result<u64, PluginError> {
+        if spec.path.scope != WORKTREES_SCOPE {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "the worktree path must be in the fs.write:worktrees scope",
+            ));
+        }
+        if !is_valid_branch(&spec.branch) || spec.path.path.is_empty() {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "the branch name or the worktree path is not valid",
+            ));
+        }
+        let repository = (spec.repository.scope.clone(), spec.repository.path.clone());
+        if !self.world.repositories.contains(&repository) {
+            return Err(error(
+                ErrorCode::NotFound,
+                "the repository folder has no .git entry",
+            ));
+        }
+        if let Some(owner) = spec.owner {
+            if !self.world.nodes.contains(&owner.0) {
+                return Err(error(ErrorCode::NotFound, "the owner node does not exist"));
+            }
+        }
+        if self.records.values().any(|record| record.path == spec.path) {
+            return Err(error(
+                ErrorCode::Conflict,
+                "a worktree is already registered at this path",
+            ));
+        }
+        let id = self.next_id.max(1);
+        self.next_id = id.saturating_add(1);
+        self.records.insert(
+            id,
+            WorkspaceInfo {
+                id,
+                path: spec.path,
+                branch: spec.branch,
+                owner: spec.owner,
+                in_use: false,
+            },
+        );
+        Ok(id)
+    }
+
+    fn release(&mut self, workspace: u64) -> Result<(), PluginError> {
+        match self.records.remove(&workspace) {
+            Some(_) => Ok(()),
+            None => Err(error(ErrorCode::NotFound, "no worktree record with this id")),
+        }
     }
 
     fn list(&mut self) -> Vec<WorkspaceInfo> {
-        unimplemented!("host::imports::workspace::list")
+        self.records
+            .values()
+            .map(|record| {
+                let mut info = record.clone();
+                info.in_use = record
+                    .owner
+                    .is_some_and(|owner| self.world.busy_owners.contains(&owner.0));
+                info
+            })
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::WorkspaceImport;
+    use super::{WorkspaceImport, WorkspaceWorld};
     use ilium_plugin_api::generated::host::workspace::{HostWorkspace, WorkspaceSpec};
     use ilium_plugin_api::generated::types::errors::ErrorCode;
     use ilium_plugin_api::generated::types::ids::NodeId;
     use ilium_plugin_api::generated::types::paths::FsPath;
+
+    /// Builds an import whose world knows the `project/repo` repository and owner panes 14 and 15.
+    fn test_import() -> WorkspaceImport {
+        let mut world = WorkspaceWorld::default();
+        world
+            .repositories
+            .insert(("project".to_string(), "repo".to_string()));
+        world.nodes.insert(OWNER_PANE);
+        world.nodes.insert(OWNER_PANE + 1);
+        WorkspaceImport::with_world(world)
+    }
 
     /// Node id used as an owner pane in these tests.
     const OWNER_PANE: u64 = 14;
@@ -56,7 +207,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn register_valid_spec_returns_an_id() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature/agent-one", Some(NodeId(OWNER_PANE)));
 
         let id = import.register(spec).expect("a valid spec must register");
@@ -67,7 +218,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn register_accepts_absent_base_and_owner() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = WorkspaceSpec {
             base: None,
             owner: None,
@@ -82,7 +233,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn register_empty_branch_is_invalid_argument() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("", None);
 
         let error = import
@@ -95,7 +246,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn register_branch_with_invalid_git_syntax_is_invalid_argument() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature..bad name", None);
 
         let error = import
@@ -108,7 +259,7 @@ mod tests {
     /// REQ: API-003
     #[test]
     fn register_invalid_argument_carries_no_retry_after() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("", None);
 
         let error = import
@@ -124,7 +275,7 @@ mod tests {
     /// REQ: CAP-013
     #[test]
     fn register_path_outside_worktrees_scope_is_not_permitted() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = WorkspaceSpec {
             path: FsPath {
                 scope: "project".to_string(),
@@ -143,7 +294,7 @@ mod tests {
     /// REQ: CAP-013
     #[test]
     fn register_default_empty_spec_is_not_permitted() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
 
         let error = import
             .register(WorkspaceSpec::default())
@@ -155,7 +306,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn register_missing_repository_folder_is_not_found() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = WorkspaceSpec {
             repository: FsPath {
                 scope: "project".to_string(),
@@ -174,7 +325,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn register_unknown_owner_node_is_not_found() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature/ghost-owner", Some(NodeId(UNKNOWN_WORKSPACE_ID)));
 
         let error = import
@@ -187,7 +338,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn register_same_path_twice_is_conflict() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let first = spec_for_branch("feature/duplicate", Some(NodeId(OWNER_PANE)));
         let second = first.clone();
         import
@@ -204,7 +355,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn list_on_empty_registry_returns_no_records() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
 
         let records = import.list();
 
@@ -217,7 +368,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn list_returns_registered_records_in_ascending_id_order_with_spec_fields() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let first_spec = spec_for_branch("feature/first", Some(NodeId(OWNER_PANE)));
         let second_spec = spec_for_branch("feature/second", Some(NodeId(OWNER_PANE + 1)));
         let first_id = import
@@ -247,7 +398,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn list_reports_absent_owner_as_none() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature/unowned", None);
         let id = import
             .register(spec)
@@ -265,7 +416,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn list_reports_idle_freshly_registered_worktree_as_not_in_use() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature/idle", Some(NodeId(OWNER_PANE)));
         let id = import.register(spec).expect("registration must succeed");
 
@@ -284,7 +435,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn release_registered_record_succeeds_and_removes_it_from_list() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature/release-me", Some(NodeId(OWNER_PANE)));
         let id = import.register(spec).expect("registration must succeed");
 
@@ -301,7 +452,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn release_unknown_id_is_not_found() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
 
         let error = import
             .release(UNKNOWN_WORKSPACE_ID)
@@ -313,7 +464,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn release_same_id_twice_is_not_found_on_second_call() {
-        let mut import = WorkspaceImport;
+        let mut import = test_import();
         let spec = spec_for_branch("feature/release-twice", None);
         let id = import.register(spec).expect("registration must succeed");
         import.release(id).expect("the first release must succeed");

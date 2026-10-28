@@ -961,3 +961,50 @@ fn dev_725_replay_reproduces_the_recorded_deadline_trap() {
     // manual does not pin the exit code of a replayed deadline trap (DEV-544 pins 0 and 3 only)
     assert_ne!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
 }
+
+/// REQ: DEV-683
+#[test]
+fn dev_683_the_tree_record_carries_a_root_object() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), backend_with_data());
+    let output = run(&env, &["inspect", PLUGIN, "--view", "main", "--json"]);
+    let trees = records_of(&output, "tree");
+    assert_eq!(trees.len(), 1);
+    assert!(
+        trees[0]["root"].is_object(),
+        "the single tree record must hold its root node as an object: {}",
+        trees[0]
+    );
+}
+
+/// REQ: DEV-684
+#[test]
+fn dev_684_rendering_at_another_size_still_leaves_the_tree_untouched() {
+    let tree = figure_tree();
+    let before = tree.clone();
+    let _ = render_inspector("panel main", &tree, 800, 4);
+    assert_eq!(tree, before, "a different viewport must not change the tree");
+}
+
+/// REQ: DEV-725
+#[test]
+fn dev_725_a_replayed_call_inside_its_deadline_raises_no_deadline_trap() {
+    let scratch = scratch();
+    let env = env_with_session(scratch.path(), backend_with_data());
+    let file = scratch.path().join("fast.replay");
+    std::fs::write(
+        &file,
+        r#"{"call":"on-events","host_call_ms":[100],"deadline_ms":500}"#,
+    )
+    .expect("replay");
+    let output = run(
+        &env,
+        &["test", "--replay", file.to_str().expect("utf8"), "--json"],
+    );
+    let errors = records_of(&output, "error");
+    assert!(
+        !errors.iter().any(|record| record["code"] == "trap.deadline"),
+        "a call that met its deadline must not replay as a deadline trap: {:?}",
+        output.stdout_jsonl
+    );
+}

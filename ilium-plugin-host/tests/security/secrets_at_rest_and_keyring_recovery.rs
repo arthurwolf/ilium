@@ -73,13 +73,50 @@ fn sec_959_a_file_store_value_moves_into_the_keyring_at_the_next_start_and_leave
 /// REQ: SEC-959
 #[test]
 fn sec_959_the_newer_file_value_overwrites_an_older_keyring_value() {
-    unimplemented!("ilium_plugin_host::secrets::file_store_to_keyring_newer_value_overwrites")
+    let mut rig = setup(&[]).keyring().secret("token", "older-keyring-value").start();
+    assert_eq!(
+        rig.host.keyring_value("example.demo", "token").as_deref(),
+        Some("older-keyring-value"),
+        "the keyring starts with the older value"
+    );
+    rig.setup = setup(&[]).no_keyring();
+    let rig = rig.restart();
+    rig.host.set_secret_now("token", "newer-file-value");
+    rig.host.persist_all_stores();
+    let mut rig = rig;
+    rig.setup = setup(&[]).keyring();
+    let rig = rig.restart();
+    assert_eq!(
+        rig.host.keyring_value("example.demo", "token").as_deref(),
+        Some("newer-file-value"),
+        "the value written while the file store was in use is the newest and must win"
+    );
 }
 
 /// REQ: SEC-959
 #[test]
 fn sec_959_the_file_copy_is_removed_only_after_the_keyring_readback_succeeds() {
-    unimplemented!("ilium_plugin_host::secrets::file_copy_removed_only_after_keyring_readback")
+    let mut rig = setup(&[]).no_keyring().start();
+    rig.host.set_secret_now("token", "readback-value");
+    rig.host.persist_all_stores();
+    // The keyring accepts the write but returns nothing on readback.
+    rig.setup = setup(&[]).keyring().option("keyring-readback", json!("fails"));
+    let mut rig = rig.restart();
+    assert!(
+        rig.host.stored_secret_text().contains("readback-value"),
+        "while the readback fails the file copy must stay"
+    );
+    rig.setup = setup(&[]).keyring();
+    let rig = rig.restart();
+    assert_eq!(
+        rig.host.keyring_value("example.demo", "token").as_deref(),
+        Some("readback-value"),
+        "once the keyring works the value moves"
+    );
+    assert!(
+        !rig.host.stored_secret_text().contains("readback-value"),
+        "the file copy is removed after the readback succeeds"
+    );
 }
 
 /// REQ: SEC-963
@@ -134,5 +171,23 @@ fn sec_964_the_host_offers_no_bulk_import_and_exports_no_secret_for_re_entry() {
 /// REQ: SEC-964
 #[test]
 fn sec_964_a_plugin_with_an_unset_secret_names_the_row_and_never_retries_with_an_empty_credential() {
-    unimplemented!("ilium_plugin_host::secrets::unset_secret_message_names_row_and_no_empty_retry")
+    let rig = setup(&[]).keyring().secret("token", "present-value").start();
+    rig.host.forget_secrets(Some("example.demo"));
+    let rig = rig.restart();
+    assert!(rig.host.secret_value("token").is_none(), "the lost secret reads as unset");
+    let shown = rig.host.notices().join("\n");
+    assert!(
+        shown.contains("token"),
+        "the message must name the missing row, got: {shown}"
+    );
+    let empty_credential_sent = rig.net.seen().iter().any(|request| {
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("authorization") && value.trim().trim_start_matches("Bearer").trim().is_empty())
+    });
+    assert!(
+        !empty_credential_sent,
+        "no request may go out with an empty credential for an unset secret"
+    );
 }

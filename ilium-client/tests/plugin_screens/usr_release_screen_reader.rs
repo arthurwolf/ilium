@@ -83,11 +83,35 @@ fn usr_951_a_failed_step_blocks_the_release_and_the_record_names_the_view() {
 /// REQ: USR-951
 #[test]
 fn usr_951_each_focusable_element_is_read_on_its_own_line_in_focus_order() {
-    unimplemented!("ilium_client::plugin_host::screens_rig::ScreensRig::set_screen_reader")
+    let mut rig = ilium_client::plugin_host::screens_rig::ScreensRig::new(48, 30);
+    rig.set_screen_reader(true);
+    rig.open_review_dialog("com.example.reader", &["tree.read", "clipboard.read"]);
+    let spoken = rig.speech_lines();
+    let tree = spoken.iter().position(|l| l.starts_with("tree.read")).expect("tree.read line");
+    let clip = spoken.iter().position(|l| l.starts_with("clipboard.read")).expect("clipboard.read line");
+    assert!(tree < clip, "focus order: {spoken:?}");
+    assert!(spoken[tree].contains("checkbox, checked, 1 of 2"), "{}", spoken[tree]);
+    assert!(
+        spoken[clip].contains("high risk") && spoken[clip].contains("unchecked, 2 of 2"),
+        "{}",
+        spoken[clip]
+    );
+    assert!(spoken.iter().any(|l| l == "Install, button"), "{spoken:?}");
 }
 
 /// REQ: USR-951
 #[test]
 fn usr_951_no_box_drawing_or_spinner_frame_is_spoken_on_the_consent_dialog() {
-    unimplemented!("ilium_client::plugin_host::screens_rig::ScreensRig::speech_lines")
+    let mut rig = ilium_client::plugin_host::screens_rig::ScreensRig::new(48, 30);
+    rig.set_screen_reader(true);
+    rig.open_review_dialog("com.example.reader", &["tree.read", "terminal.write"]);
+    for line in rig.speech_lines() {
+        for c in line.chars() {
+            assert!(
+                !matches!(c, '\u{2500}'..='\u{257f}' | '\u{2800}'..='\u{28ff}'),
+                "frame or spinner character in spoken line: {line}"
+            );
+        }
+        assert!(!line.trim().is_empty(), "empty spoken line");
+    }
 }

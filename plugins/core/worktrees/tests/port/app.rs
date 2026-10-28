@@ -88,3 +88,15 @@ fn port_072_the_default_where_starts_with_here_and_the_three_values_are_accepted
         );
     }
 }
+
+/// REQ: F-067, F-072, PORT:ilium-client/src/app.rs::new_agent_submenu_starts_with_here_and_updates_worktree_availability
+#[test]
+fn port_072_a_where_value_outside_the_three_choices_is_refused() {
+    let mut host = client_host();
+    let refused = set_git(&mut host, "default_where", json!("elsewhere"));
+    assert!(refused.is_err());
+    assert_eq!(
+        host.kernel_settings().get("git", "default_where"),
+        Some(json!("here"))
+    );
+}

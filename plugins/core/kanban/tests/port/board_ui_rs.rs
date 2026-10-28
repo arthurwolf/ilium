@@ -199,3 +199,21 @@ fn port_board_ui_a_checkbox_marker_is_never_split_across_a_wrap_point() {
     host.settle();
     assert_eq!(sections(&board_file(&mut host))[0].1, ["AAAA [x]"]);
 }
+
+/// REQ: PORT:ilium-client/src/board_ui.rs::cards_leave_a_spacer_row_and_follow_the_preview_line_setting
+#[test]
+fn port_board_ui_card_preview_setting_changes_the_drawn_card_rows() {
+    let (mut host, node) = board_host("## To do\n- Task\n  complete body\n");
+    host.settings()
+        .set("card_preview", json!(true))
+        .expect("preview on");
+    let shown = draw(&mut host, node, 40, 20).text();
+    host.settings()
+        .set("card_preview", json!(false))
+        .expect("preview off");
+    let hidden = draw(&mut host, node, 40, 20).text();
+    assert_ne!(
+        shown, hidden,
+        "the card_preview setting must change the drawn card"
+    );
+}

@@ -1,5 +1,5 @@
 //! Rule statements of the guide-patterns-cookbook page as the manual states them (doc-lint tests).
-use crate::support::assert_rule;
+use crate::support::{assert_page_line, assert_rule};
 
 /// REQ: AUT-001
 #[test]
@@ -90,6 +90,15 @@ fn doc_aut_008_rebuildable_data_not_in_durable_bucket() {
         "AUT-008",
         "MUST",
         &["`shared` bucket or to `/cache`", "16 MiB"],
+    );
+}
+
+/// REQ: AUT-008
+#[test]
+fn doc_aut_008_rule_line_names_the_bucket_fill_consequence() {
+    assert_page_line(
+        "AUT-008",
+        &["so that it does not fill the 16 MiB bucket"],
     );
 }
 

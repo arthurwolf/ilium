@@ -58,3 +58,50 @@ fn lif_318_backup_is_kept_until_retention_passes_despite_wall_clock_jumps() {
         "a backup younger than its retention is kept after a wall-clock move"
     );
 }
+
+/// REQ: LIF-317
+#[test]
+fn lif_317_monotonic_advance_fires_a_past_due_timer_once_and_wall_jumps_do_not_refire_it() {
+    assert_manual_says(
+        "reference-persistence-and-restart",
+        "A timer that came due during a suspend MUST fire once after resume, not once per missed period.",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    let server = rig.start_server("default");
+    rig.plant_durable_timer(NOTES, 1_800_000_000_000);
+    rig.advance(days(2));
+    server.apply_pending();
+    assert_eq!(
+        rig.timer_firings(NOTES),
+        1,
+        "the monotonic advance fires the due timer once"
+    );
+    rig.jump_wall_clock(-60 * 86_400);
+    server.apply_pending();
+    assert_eq!(
+        rig.timer_firings(NOTES),
+        1,
+        "a backward wall-clock jump does not fire the timer a second time"
+    );
+}
+
+/// REQ: LIF-318
+#[test]
+fn lif_318_backup_older_than_retention_is_pruned_on_monotonic_age_alone() {
+    assert_manual_says(
+        "reference-persistence-and-restart",
+        "Backup age pruning MUST use the age recorded as monotonic uptime plus the boot id",
+    );
+    let rig = rig();
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
+    rig.plant_backup(NOTES, "1.0.0.bak");
+    rig.age_backups(NOTES, days(365));
+    rig.prune_backups();
+    assert!(
+        !rig.backup_names(NOTES)
+            .iter()
+            .any(|name| name == "1.0.0.bak"),
+        "a backup far past its retention is pruned"
+    );
+}

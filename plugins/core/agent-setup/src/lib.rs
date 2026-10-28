@@ -1,20 +1,19 @@
 //! Core plugin `ilium.core.agent-setup` (manual page core-plugin-agent-setup.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! `unimplemented!` until the implementation phase moves the feature here.
+//! The server side serves `ilium.core.agent-setup/install` (install, remove, status): it validates
+//! the parameters here and edits agent configuration text through `config_writer`. Reading and
+//! writing the agent files needs SDK host file calls that are not implemented yet, so a valid
+//! request is answered with an `unsupported` error reply for now. The client side holds no state
+//! and draws an empty Setup tab.
 
 pub mod config_writer;
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
-use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::generated::types::layout::Area;
-use ilium_plugin_sdk::generated::types::ui::UiTree;
-use ilium_plugin_sdk::generated::types::ui::ViewTarget;
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{
+    Activation, Alignment, Area, Event, NodeFlags, ParagraphSpec, PluginError, Span, Style,
+    Submission, UiNode, UiTree, ViewTarget, Widget,
+};
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The server side of `ilium.core.agent-setup` (core-plugin-agent-setup.md, world `ilium:server/base@0.1.0`).
@@ -24,19 +23,19 @@ pub struct AgentSetupServer;
 
 impl Lifecycle for AgentSetupServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.agent-setup: server lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for AgentSetupServer {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.agent-setup: server handler.on_events")
+        Vec::new()
     }
 }
 
 impl ServiceProvider for AgentSetupServer {
-    fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
-        unimplemented!("ilium.core.agent-setup: server service-provider.handle")
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        ServiceReply::Done(handle_call(&call.method, &call.payload_json))
     }
 }
 
@@ -47,19 +46,93 @@ pub struct AgentSetupClient;
 
 impl Lifecycle for AgentSetupClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        unimplemented!("ilium.core.agent-setup: client lifecycle.activate")
+        Ok(())
     }
 }
 
 impl Handler for AgentSetupClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("ilium.core.agent-setup: client handler.on_events")
+        Vec::new()
     }
 }
 
 impl Views for AgentSetupClient {
     fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        unimplemented!("ilium.core.agent-setup: client views.render")
+        UiTree {
+            version: 1,
+            nodes: vec![UiNode {
+                key: None,
+                widget: Widget::Paragraph(ParagraphSpec {
+                    lines: vec![vec![Span {
+                        text: "Agent setup".to_string(),
+                        style: Style::default(),
+                    }]],
+                    rich: None,
+                    wrap: Some(false),
+                    alignment: Alignment::Left,
+                    style: Style::default(),
+                    scrollable: false,
+                }),
+                children: Vec::new(),
+                flags: NodeFlags::default(),
+                tooltip: None,
+                tab_index: None,
+                disabled_reason: None,
+            }],
+            root: 0,
+        }
+    }
+}
+
+/// Target ids of the service (core-plugin-agent-setup.md).
+const TARGETS: [&str; 4] = [
+    "claude-global",
+    "codex-global",
+    "claude-project",
+    "codex-project",
+];
+
+/// Extracts the string value of `key` from a flat JSON object; `None` when absent or not a string.
+fn json_string_member(payload: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let after_key = payload.split_once(&needle)?.1;
+    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let mut characters = after_colon.strip_prefix('"')?.chars();
+    let mut out = String::new();
+    while let Some(character) = characters.next() {
+        match character {
+            '"' => return Some(out),
+            '\\' => out.push(characters.next()?),
+            other => out.push(other),
+        }
+    }
+    None
+}
+
+fn error_reply(code: &str, message: &str) -> String {
+    format!("{{\"error\":{{\"code\":\"{code}\",\"message\":\"{message}\"}}}}")
+}
+
+/// Validates the parameters of one service method; the file work follows once host file calls exist.
+fn handle_call(method: &str, payload: &str) -> String {
+    let payload = payload.trim();
+    if !payload.starts_with('{') || !payload.ends_with('}') {
+        return error_reply("invalid-argument", "the payload is not a JSON object");
+    }
+    match method {
+        "install" | "remove" => {
+            let block = json_string_member(payload, "block");
+            let target = json_string_member(payload, "target");
+            let (Some(_block), Some(target)) = (block, target) else {
+                return error_reply("invalid-argument", "block and target are required strings");
+            };
+            if !TARGETS.contains(&target.as_str()) {
+                return error_reply("invalid-argument", "unknown target");
+            }
+            error_reply("unsupported", "agent files cannot be reached from the plugin yet")
+        }
+        "status" => error_reply("unsupported", "agent files cannot be reached from the plugin yet"),
+        _ => error_reply("not-found", "unknown method"),
     }
 }
 

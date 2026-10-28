@@ -393,3 +393,12 @@ fn wit_detector_classify_without_grant_is_never_called() {
     assert_eq!(host.detector_call_count("test.plugin"), 0);
     let _ = ErrorCode::NotPermitted;
 }
+
+/// REQ: HST-457
+#[test]
+fn hst_457_one_cycle_serves_every_one_of_thirty_panes() {
+    let (_kernel, host) = detector_host(&[("test.plugin", Tier::T3)]);
+    host.set_detector_cost_ms("test.plugin", 0);
+    let report = host.detect_cycle(&many_panes(30));
+    assert_eq!(report.served.len(), 30);
+}

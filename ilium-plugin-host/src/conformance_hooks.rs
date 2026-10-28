@@ -1,8 +1,12 @@
 //! Probe imports and budget probes used by `ilium-plugin-conformance` (reference-conformance-suite.md).
 
 /// Busy-waits for the given number of wall-clock milliseconds in the guest (the `busy-wait` probe import; deadlines are epoch-based and fuel is off).
-pub fn busy_wait_ms(_millis: u64) {
-    unimplemented!("host::conformance_hooks::busy_wait_ms")
+pub fn busy_wait_ms(millis: u64) {
+    let wait = std::time::Duration::from_millis(millis);
+    let started_at = std::time::Instant::now();
+    while started_at.elapsed() < wait {
+        std::hint::spin_loop();
+    }
 }
 
 #[cfg(test)]

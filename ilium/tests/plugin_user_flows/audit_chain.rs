@@ -66,3 +66,20 @@ fn usr_258_the_storage_ceiling_deletes_the_oldest_rotated_files_first_and_record
     let live = std::fs::read_to_string(dir.join("audit.jsonl")).unwrap_or_default();
     assert!(live.contains("deleted"), "{live}");
 }
+
+/// REQ: USR-258
+#[test]
+fn usr_258_deletion_stops_once_the_total_is_back_under_the_ceiling() {
+    let mut rig = UserRig::new();
+    let dir = rig.audit_dir();
+    std::fs::create_dir_all(&dir).expect("audit folder");
+    for index in 1..=3 {
+        let file =
+            std::fs::File::create(dir.join(format!("audit-{index}.jsonl"))).expect("rotated file");
+        file.set_len(100 * 1024 * 1024).expect("set size");
+    }
+    rig.start_server();
+    assert!(!dir.join("audit-1.jsonl").exists());
+    assert!(dir.join("audit-2.jsonl").exists());
+    assert!(dir.join("audit-3.jsonl").exists());
+}

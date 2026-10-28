@@ -19,6 +19,41 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
 
 /// REQ: PORT:ilium/tests/pty_tui_smoke.rs::last_prompt_banner_keeps_fixed_slot_for_a_short_prompt
 #[test]
+fn port_pty_tui_smoke_last_prompt_banner_keeps_fixed_slot_for_a_short_prompt_alternate() {
+    check(
+        Place::Client,
+        "banner.pty",
+        r####"{"prompt": ""}"####,
+        r####"{"banner_rows_reserved": 4, "content_starts_after_rows": 4}"####,
+    );
+}
+
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns
+#[test]
+fn port_pty_tui_smoke_last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns_alternate(
+) {
+    check(
+        Place::Client,
+        "banner.pty",
+        r####"{"paste": "one\rtwo"}"####,
+        r####"{"banner_rows": ["one", "two"], "last_prompt": "one\rtwo"}"####,
+    );
+}
+
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction
+#[test]
+fn port_pty_tui_smoke_last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction_alternate(
+) {
+    check(
+        Place::Client,
+        "banner.pty",
+        r####"{"keys": "ab\u007f"}"####,
+        r####"{"last_prompt": "a"}"####,
+    );
+}
+
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::last_prompt_banner_keeps_fixed_slot_for_a_short_prompt
+#[test]
 fn port_pty_tui_smoke_last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
     check(
         Place::Client,

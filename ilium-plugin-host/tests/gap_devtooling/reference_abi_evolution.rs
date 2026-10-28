@@ -103,3 +103,64 @@ fn compat_gate_names_every_removed_or_changed_export_in_its_report() {
         "the fixture changes at least one export"
     );
 }
+
+/// REQ: DEV-967
+#[test]
+fn two_patch_releases_of_one_minor_export_the_same_wit_surface() {
+    assert_eq!(
+        crate::release_surface("1.4.0"),
+        crate::release_surface("1.4.2"),
+        "patch releases of minor 1.4 export identical WIT packages"
+    );
+}
+
+/// REQ: DEV-968
+#[test]
+fn ilium_version_json_lists_the_wit_hashes_of_the_shipped_packages() {
+    let (_root, env, _dir) = new_rust_project();
+    let version = run(&env, &["version", "--json"]);
+    assert_eq!(version.exit_code, 0, "{:?}", version.stdout_jsonl);
+    assert!(
+        version
+            .stdout_jsonl
+            .iter()
+            .any(|record| record.get("wit_hashes").is_some()),
+        "ilium version --json lists wit_hashes: {:?}",
+        version.stdout_jsonl
+    );
+}
+
+/// REQ: DEV-975
+#[test]
+fn host_starts_a_plugin_built_for_a_supported_earlier_minor() {
+    let (_root, _env, dir) = new_rust_project();
+    set_manifest_abi(&dir, "1.4");
+    let loaded = host_load_attempt(&dir, "1.4");
+    assert!(
+        loaded.started,
+        "a plugin built for minor 1.4 starts on the 1.4 host"
+    );
+    assert_eq!(loaded.error_code, None);
+}
+
+/// REQ: DEV-977
+#[test]
+fn additive_change_within_the_same_major_passes_the_compatibility_gate() {
+    let report = abi_compat_gate("1.4", "1.5");
+    assert!(
+        report.passes,
+        "an additive minor passes the gate: {:?}",
+        report.failing_rule
+    );
+}
+
+/// REQ: DEV-978
+#[test]
+fn compat_gate_report_of_an_unchanged_release_lists_no_changed_items() {
+    let report = abi_compat_gate("1.4", "1.4");
+    assert!(
+        report.changed_items().is_empty(),
+        "an unchanged release changes no export"
+    );
+    assert!(report.passes, "an unchanged release passes the gate");
+}

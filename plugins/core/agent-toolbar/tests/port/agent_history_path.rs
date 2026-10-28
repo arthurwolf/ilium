@@ -182,3 +182,96 @@ fn port_agent_history_path_worktree_history_requires_the_panes_launch_cwd() {
         Value::Null
     );
 }
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::hint_naming_another_session_is_ignored
+#[test]
+fn port_agent_history_path_hint_for_another_session_alone_resolves_to_nothing() {
+    let requested_id = "77777777-7777-4777-8777-777777777777";
+    let other_id = "88888888-8888-4888-8888-888888888888";
+    let (other_path, other) = codex_file(PROJECT, other_id);
+    assert_eq!(
+        resolve(
+            vec![other],
+            PROJECT,
+            "codex",
+            requested_id,
+            Some(&other_path),
+            None
+        ),
+        Value::Null
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::hint_outside_the_expected_store_is_rejected
+#[test]
+fn port_agent_history_path_hint_naming_a_missing_file_resolves_to_nothing() {
+    let session_id = "12121212-1212-4212-8212-121212121212";
+    let missing = ".codex/sessions/2026/09/05/rollout-2026-09-05T12-00-00-missing.jsonl";
+    assert_eq!(
+        resolve(vec![], PROJECT, "codex", session_id, Some(missing), None),
+        Value::Null
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::refuses_providers_without_a_jsonl_history_contract
+#[test]
+fn port_agent_history_path_refuses_a_claude_shaped_file_for_a_provider_without_contract() {
+    let session_id = "13131313-1313-4313-8313-131313131313";
+    let (_, file) = claude_file(PROJECT, session_id);
+    assert_eq!(
+        resolve(vec![file], PROJECT, "antigravity", session_id, None, None),
+        Value::Null
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::resolves_codex_history_in_a_store_larger_than_the_old_menu_budget
+#[test]
+fn port_agent_history_path_large_store_without_the_target_resolves_to_nothing() {
+    let session_id = "14141414-1414-4414-8414-141414141414";
+    let mut files = Vec::new();
+    for index in 0..50 {
+        files.push(json!({
+            "path": format!(".codex/sessions/2025/01/01/rollout-{index}.jsonl"),
+            "content": "{}"
+        }));
+    }
+    assert_eq!(
+        resolve(files, PROJECT, "codex", session_id, None, None),
+        Value::Null
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::resolves_verified_absolute_paths_for_claude_and_codex_sessions
+#[test]
+fn port_agent_history_path_claude_file_does_not_resolve_for_an_unknown_session_id() {
+    let claude_id = "15151515-1515-4515-8515-151515151515";
+    let other_id = "16161616-1616-4616-8616-161616161616";
+    let (_, claude) = claude_file(PROJECT, claude_id);
+    assert_eq!(
+        resolve(vec![claude], PROJECT, "claude", other_id, None, None),
+        Value::Null
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::server_verified_hint_resolves_when_the_directory_scan_budget_is_exhausted
+#[test]
+fn port_agent_history_path_hint_without_a_matching_file_stays_unresolved_under_budget() {
+    let session_id = "17171717-1717-4717-8717-171717171717";
+    let (target, _) = codex_file(PROJECT, session_id);
+    assert_eq!(
+        resolve(vec![], PROJECT, "codex", session_id, Some(&target), Some(1)),
+        Value::Null
+    );
+}
+
+/// REQ: PORT:ilium-client/src/agent_history_path.rs::worktree_history_requires_the_panes_launch_cwd
+#[test]
+fn port_agent_history_path_claude_worktree_history_resolves_from_the_worktree_cwd() {
+    let worktree = "/work/history-path-test.worktrees/agent-task";
+    let session_id = "18181818-1818-4818-8818-181818181818";
+    let (path, file) = claude_file(worktree, session_id);
+    assert_eq!(
+        resolve(vec![file], worktree, "claude", session_id, None, None),
+        json!(path)
+    );
+}

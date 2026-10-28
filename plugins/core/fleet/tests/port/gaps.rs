@@ -320,3 +320,183 @@ fn port_052_new_pane_creates_exactly_one_terminal_pane_for_the_attached_tui() {
     assert_eq!(specs.len(), 1);
     assert_eq!(specs[0].content_kind, "ilium.terminal");
 }
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::agent_message_overflow_track_is_visible_and_does_not_toggle_a_recipient
+#[test]
+fn port_001b_a_small_popup_still_paints_the_send_button() {
+    let mut host = open_dialog();
+    let text = host.render(popup(), 40, 12).text();
+    assert!(text.contains("Send"), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::mouse_toggles_exact_painted_recipient_and_submit_control
+#[test]
+fn port_003b_clicking_the_painted_cancel_button_sends_nothing() {
+    let mut host = open_dialog();
+    type_text(&mut host, "not yet");
+    let screen = host.render(popup(), 80, 24);
+    let (row, column) = screen.find("Cancel").expect("a Cancel button is painted");
+    host.click(popup(), column, row);
+    host.settle();
+    assert_eq!(messages(&host), Vec::<(String, Vec<u8>)>::new());
+}
+
+/// REQ: PORT:ilium-client/src/agent_message_dialog.rs::top_level_mouse_dispatch_preserves_agent_message_recipient_selection
+#[test]
+fn port_006b_repeated_stray_clicks_send_nothing_before_any_send_action() {
+    let mut host = open_dialog();
+    type_text(&mut host, "still typing");
+    assert!(!host.click(popup(), 0, 0));
+    assert!(!host.click(popup(), 0, 0));
+    host.settle();
+    assert_eq!(messages(&host), Vec::<(String, Vec<u8>)>::new());
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::agent_message_dialog_marks_removed_snapshot_recipient_unavailable
+#[test]
+fn port_008b_when_every_recipient_was_removed_the_ask_reaches_no_pane() {
+    let mut host = server_host();
+    let only = add_agent(&mut host, "gone", "claude", AgentActivity::Idle);
+    host.tree().remove(only);
+    ask(&mut host, "status");
+    assert_eq!(sent_panes(&host), Vec::<NodeId>::new());
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::agent_message_dialog_without_enter_sends_message_bytes_without_newline
+#[test]
+fn port_009b_trailing_spaces_in_a_single_line_message_are_kept() {
+    let mut host = server_host();
+    add_agent(&mut host, "idle agent", "claude", AgentActivity::Idle);
+    ask(&mut host, "hi  ");
+    let texts: Vec<String> = sent_inputs(&host).into_iter().map(|s| s.text).collect();
+    assert_eq!(texts, vec!["hi  ".to_string()]);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::ask_for_update_includes_literal_custom_instructions
+#[test]
+fn port_011b_quotes_and_unicode_in_custom_instructions_are_kept() {
+    let mut host = server_host();
+    add_agent(&mut host, "idle agent", "claude", AgentActivity::Idle);
+    let text = "it's \"quoted\" \u{2192} ok";
+    ask(&mut host, text);
+    let texts: Vec<String> = sent_inputs(&host).into_iter().map(|s| s.text).collect();
+    assert_eq!(texts, vec![text.to_string()]);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::ask_for_update_menu_entry_only_appears_where_an_eligible_pane_exists
+#[test]
+fn port_012b_with_only_a_working_agent_the_ask_reaches_no_pane() {
+    let mut host = server_host();
+    add_agent(&mut host, "busy", "claude", AgentActivity::Working);
+    ask(&mut host, "status");
+    assert_eq!(sent_panes(&host), Vec::<NodeId>::new());
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::create_agent_line_closed_admission_preserves_draft_and_parent_modal
+#[test]
+fn port_013b_a_refused_blank_prompt_replies_with_a_json_error_body() {
+    let mut host = server_host();
+    post(&mut host, 1, &agent_body("/home/me/dev/app", " "));
+    let (status, body) = reply(&host, 1);
+    let value: Value = serde_json::from_slice(&body).expect("JSON body");
+    assert_eq!(status, 400);
+    assert!(value["error"].is_string());
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::create_agent_line_removed_parent_keeps_draft_without_retargeting
+#[test]
+fn port_014b_a_missing_project_stays_refused_on_repeated_attempts() {
+    let mut host = server_host();
+    post(&mut host, 1, &agent_body("ilium", "keep me"));
+    post(&mut host, 2, &agent_body("ilium", "keep me"));
+    assert_eq!(reply(&host, 1).0, 400);
+    assert_eq!(reply(&host, 2).0, 400);
+    assert_eq!(created_panes(&host).len(), 0);
+}
+
+/// REQ: PORT:ilium-client/src/render_cache.rs::tree_snapshot_creates_a_terminal_view_for_a_new_pane
+#[test]
+fn port_018b_an_agent_that_existed_before_the_ask_also_receives_it() {
+    let mut host = server_host();
+    let early = add_agent(&mut host, "early", "claude", AgentActivity::Idle);
+    ask(&mut host, "status");
+    assert_eq!(sent_panes(&host), [NodeId(early)]);
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::admitted_lookup_runs_on_native_bank_and_json_bytes_keep_original_charge
+#[test]
+fn port_034b_an_admitted_lookup_creates_the_pane_with_the_prompt_as_its_input() {
+    let mut host = server_host();
+    host.fs().write("/home/me/dev/ai/ilium/.keep", b"");
+    post(&mut host, 1, &agent_body("ilium", "go"));
+    for request in host.pending_requests() {
+        host.complete(request, Outcome::OkNode(NodeId(42)));
+    }
+    host.settle();
+    let specs = created_panes(&host);
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].initial_input.as_deref(), Some("go"));
+}
+
+/// REQ: PORT:ilium-server/src/http_api.rs::lookup_error_preserves_original_json_and_charge_until_last_byte_clone
+#[test]
+fn port_036b_the_lookup_error_message_names_the_project_that_was_not_found() {
+    let mut host = server_host();
+    post(&mut host, 1, &agent_body("missing-project", "go"));
+    let (_, body) = reply(&host, 1);
+    let value: Value = serde_json::from_slice(&body).expect("JSON body");
+    assert!(value["error"]
+        .as_str()
+        .unwrap_or("")
+        .contains("missing-project"));
+}
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::a_lone_carriage_return_becomes_a_line_break_not_a_premature_enter
+#[test]
+fn port_038b_consecutive_carriage_returns_reach_create_pane_unchanged() {
+    assert_eq!(initial_input_for("a\r\rb").as_deref(), Some("a\r\rb"));
+}
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::a_single_line_paste_start_marker_is_stripped_so_it_cannot_open_a_phantom_paste
+#[test]
+fn port_039b_a_paste_end_marker_alone_is_passed_through_unchanged() {
+    assert_eq!(
+        initial_input_for("x\u{1b}[201~").as_deref(),
+        Some("x\u{1b}[201~")
+    );
+}
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::an_embedded_paste_end_marker_is_stripped_so_it_cannot_end_the_paste_early
+#[test]
+fn port_040b_back_to_back_paste_markers_are_passed_through_unchanged() {
+    assert_eq!(
+        initial_input_for("\u{1b}[200~\u{1b}[201~").as_deref(),
+        Some("\u{1b}[200~\u{1b}[201~")
+    );
+}
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::an_embedded_paste_start_marker_inside_a_multiline_paste_is_stripped
+#[test]
+fn port_041b_a_trailing_paste_start_marker_after_a_newline_is_passed_through() {
+    assert_eq!(
+        initial_input_for("x\n\u{1b}[200~").as_deref(),
+        Some("x\n\u{1b}[200~")
+    );
+}
+
+/// REQ: PORT:ilium-server/src/initial_prompt.rs::crlf_line_endings_are_normalized_before_bracketing
+#[test]
+fn port_042b_a_trailing_crlf_reaches_create_pane_unchanged() {
+    assert_eq!(initial_input_for("one\r\n").as_deref(), Some("one\r\n"));
+}
+
+/// REQ: PORT:ilium/tests/pty_tui_smoke.rs::attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke
+#[test]
+fn port_052b_new_pane_passes_the_command_arguments_to_the_terminal_pane() {
+    let mut host = server_host();
+    add_session(&mut host, "default", true, &[]);
+    let (_, _, exit) = run_cli(&mut host, &["new-pane", "--", "claude"], b"");
+    let specs = created_panes(&host);
+    assert_eq!(exit, Some(0));
+    assert_eq!(specs[0].command, Some(vec!["claude".to_string()]));
+}

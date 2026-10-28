@@ -163,3 +163,123 @@ pub fn add_agent(host: &mut FakeHost, name: &str, signature: &str) -> u64 {
         }),
     })
 }
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::delivered_outcome_is_never_redelivered
+#[test]
+fn port_060_a_delivered_outcome_is_not_typed_again_after_ten_minutes() {
+    let mut host = activated_server();
+    let pane = settled(&mut host);
+    for request in host.pending_requests() {
+        host.complete(request, Outcome::Ok);
+    }
+    host.settle();
+    host.process().allow_unexpected();
+    pass(&mut host, 600_000);
+    assert_eq!(typed_texts(&host, pane).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::failed_evidence_is_sticky_failed_health_with_the_reason
+#[test]
+fn port_059_failed_health_stays_failed_after_ten_minutes_without_a_probe() {
+    let (mut host, pane) = host_with_pane();
+    let id = register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    for _ in 0..3 {
+        expect_exit(&mut host, PROBE, failing_exit(1));
+        tick(&mut host, 1);
+    }
+    host.process().allow_unexpected();
+    tick(&mut host, 600);
+    assert_eq!(health_of(&status(&mut host, pane), id), "failed");
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::outcome_with_live_delivery_task_is_left_alone
+#[test]
+fn port_060_a_queued_outcome_is_not_typed_twice_during_a_long_wait() {
+    let mut host = activated_server();
+    let pane = settled(&mut host);
+    host.process().allow_unexpected();
+    pass(&mut host, 60_000);
+    assert_eq!(typed_texts(&host, pane).len(), 1);
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::outcome_without_supported_composer_is_not_redelivered
+#[test]
+fn port_060_a_finished_monitor_stays_in_the_status_while_it_is_not_retyped() {
+    let (mut host, pane) = host_with_pane();
+    let id = register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    settle_with(&mut host, &done(JOB, "Finished"));
+    host.process().allow_unexpected();
+    tick(&mut host, 100);
+    let record = status(&mut host, pane);
+    assert_eq!(record["monitors"][0]["monitor_id"], id);
+    assert_eq!(record["monitors"][0]["report"]["status"], "done");
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::reconcile_fails_a_monitor_whose_observation_task_vanished
+#[test]
+fn port_059_disabling_the_monitor_keeps_its_last_report_readable() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    set_kernel_setting(
+        &mut host,
+        "ui.progress_monitor_enabled",
+        serde_json::json!(false),
+    )
+    .expect("accepted");
+    let record = status(&mut host, pane);
+    assert_eq!(record["monitor_count"], 1);
+    assert_eq!(record["monitors"][0]["report"]["status"], "running");
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::running_monitor_with_live_observation_task_is_left_alone
+#[test]
+fn port_059_a_live_probe_loop_keeps_running_probes_on_schedule() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    let before = probe_runs(&mut host);
+    expect_probe(&mut host, PROBE, &running(JOB, 20, "W"));
+    tick(&mut host, 21);
+    assert!(probe_runs(&mut host) > before);
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::running_monitor_without_observation_task_is_stopped
+#[test]
+fn port_059_a_disabled_monitor_is_not_removed_from_the_status() {
+    let (mut host, pane) = host_with_pane();
+    register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
+    set_kernel_setting(
+        &mut host,
+        "ui.progress_monitor_enabled",
+        serde_json::json!(false),
+    )
+    .expect("accepted");
+    assert_eq!(status(&mut host, pane)["monitor_count"], 1);
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::settled_outcome_not_yet_in_composer_is_redelivered_once
+#[test]
+fn port_060_a_redelivered_outcome_is_not_typed_a_third_time() {
+    let mut host = activated_server();
+    let pane = settled(&mut host);
+    host.process().allow_unexpected();
+    pass(&mut host, 20_000);
+    assert_eq!(typed_texts(&host, pane).len(), 2);
+    pass(&mut host, 60_000);
+    assert_eq!(typed_texts(&host, pane).len(), 2);
+}
+
+/// REQ: PORT:ilium-server/src/progress_watchdog.rs::uncertain_and_attempted_outcomes_are_redelivered_as_possible_duplicates
+#[test]
+fn port_060_a_possible_duplicate_is_typed_with_the_same_text_as_the_first_delivery() {
+    let mut host = activated_server();
+    let pane = settled(&mut host);
+    for request in host.pending_requests() {
+        host.complete(request, Outcome::Cancelled);
+    }
+    host.settle();
+    host.process().allow_unexpected();
+    pass(&mut host, 20_000);
+    let texts = typed_texts(&host, pane);
+    assert_eq!(texts.len(), 2);
+    assert_eq!(texts[0], texts[1]);
+}

@@ -1,14 +1,84 @@
-//! Host implementation of `ilium:primitives/terminal` (skeleton: every body is a stub).
+//! Host implementation of `ilium:primitives/terminal`.
 //!
-//! Written once by the skeleton lane from the generated `HostTerminal` trait; hand-owned afterwards.
+//! Hand-owned. The import carries no session pane table yet, so no pane is known: reads answer
+//! `none` and operations that need a pane answer `not-found` after their arguments validate.
+//! Input locks are real and tracked per thread (one plugin instance per thread).
 
 use ilium_plugin_api::generated::primitives::terminal::{
     CellRegion, CellRows, ForegroundProcess, HistoryMatch, HostTerminal, OutputFilter, Screen,
     ScreenPart, Selection, TerminalMode,
 };
-use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
 use ilium_plugin_api::generated::types::ui::PointerModifiers;
+use regex::Regex;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+/// Longest output-filter or history-search regex, in bytes (API-061).
+const REGEX_LIMIT_BYTES: usize = 512;
+
+/// Highest output-filter rate, in matches per second (API-061).
+const FILTER_RATE_LIMIT: u16 = 100;
+
+/// Most rows one `read-cells` call may return (PRI-001).
+const READ_CELLS_ROW_LIMIT: u32 = 1_000;
+
+/// Longest highlight label, in characters (API-061).
+const HIGHLIGHT_LABEL_LIMIT_CHARS: usize = 128;
+
+/// Longest highlight layer name, in characters (API-061).
+const HIGHLIGHT_LAYER_LIMIT_CHARS: usize = 32;
+
+/// Longest input lock, in milliseconds (PRI-005).
+const INPUT_LOCK_LIMIT_MILLIS: u16 = 2_000;
+
+/// Most matches one history search may request (API-061).
+const SEARCH_MATCH_LIMIT: u16 = 10_000;
+
+thread_local! {
+    /// Panes whose input is locked, with the instant the lock lapses.
+    static INPUT_LOCKS: RefCell<HashMap<u64, Instant>> = RefCell::new(HashMap::new());
+}
+
+/// Builds a terminal error with no retry delay.
+fn terminal_error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_string(),
+        retry_after_ms: None,
+    }
+}
+
+/// The error for a pane the import does not know.
+fn pane_not_found() -> PluginError {
+    terminal_error(ErrorCode::NotFound, "the pane does not exist")
+}
+
+/// Checks the length and syntax of a regex argument.
+fn validate_regex(regex: &str) -> Result<(), PluginError> {
+    if regex.len() > REGEX_LIMIT_BYTES {
+        return Err(terminal_error(
+            ErrorCode::InvalidArgument,
+            "the regex is longer than 512 bytes",
+        ));
+    }
+    Regex::new(regex)
+        .map(|_| ())
+        .map_err(|_| terminal_error(ErrorCode::InvalidArgument, "the regex does not compile"))
+}
+
+/// A layer name is 1 to 32 characters of lowercase letters, digits, `-` and `_`.
+fn is_valid_layer_name(layer: &str) -> bool {
+    let length = layer.chars().count();
+    (1..=HIGHLIGHT_LAYER_LIMIT_CHARS).contains(&length)
+        && layer.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_')
+        })
+}
 
 /// Host side of the `terminal` interface.
 #[derive(Debug)]
@@ -16,74 +86,114 @@ pub struct TerminalImport;
 
 impl HostTerminal for TerminalImport {
     fn read_screen(&mut self, _pane: NodeId, _part: ScreenPart, _max_rows: u32) -> Option<Screen> {
-        unimplemented!("host::imports::terminal::read_screen")
+        None
     }
 
     fn selection(&mut self, _pane: NodeId) -> Option<Selection> {
-        unimplemented!("host::imports::terminal::selection")
+        None
     }
 
     fn add_output_filter(
         &mut self,
         _pane: NodeId,
-        _filter: OutputFilter,
+        filter: OutputFilter,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::terminal::add_output_filter")
+        if filter.id.is_empty() {
+            return Err(terminal_error(
+                ErrorCode::InvalidArgument,
+                "the filter id is empty",
+            ));
+        }
+        if filter.rate_per_second == 0 || filter.rate_per_second > FILTER_RATE_LIMIT {
+            return Err(terminal_error(
+                ErrorCode::InvalidArgument,
+                "rate-per-second must be 1 to 100",
+            ));
+        }
+        validate_regex(&filter.regex)?;
+        Err(pane_not_found())
     }
 
-    fn remove_output_filter(&mut self, _pane: NodeId, _filter_id: String) {
-        unimplemented!("host::imports::terminal::remove_output_filter")
-    }
+    fn remove_output_filter(&mut self, _pane: NodeId, _filter_id: String) {}
 
     fn claim_pointer(&mut self, _pane: NodeId) -> Result<(), PluginError> {
-        unimplemented!("host::imports::terminal::claim_pointer")
+        Err(pane_not_found())
     }
 
     fn claim_pointer_gesture(
         &mut self,
         _pane: NodeId,
-        _modifiers: PointerModifiers,
+        modifiers: PointerModifiers,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::terminal::claim_pointer_gesture")
+        if modifiers.0 == 0 {
+            return Err(terminal_error(
+                ErrorCode::InvalidArgument,
+                "a gesture claim needs at least one modifier",
+            ));
+        }
+        Err(pane_not_found())
     }
 
-    fn release_pointer(&mut self, _pane: NodeId) {
-        unimplemented!("host::imports::terminal::release_pointer")
-    }
+    fn release_pointer(&mut self, _pane: NodeId) {}
 
     fn set_highlights(
         &mut self,
         _pane: NodeId,
-        _layer: String,
-        _regions: Vec<CellRegion>,
+        layer: String,
+        regions: Vec<CellRegion>,
     ) -> Result<(), PluginError> {
-        unimplemented!("host::imports::terminal::set_highlights")
+        if !is_valid_layer_name(&layer) {
+            return Err(terminal_error(
+                ErrorCode::InvalidArgument,
+                "the layer name must be 1 to 32 characters of a-z, 0-9, - and _",
+            ));
+        }
+        for region in &regions {
+            if region.first_row > region.last_row {
+                return Err(terminal_error(
+                    ErrorCode::InvalidArgument,
+                    "first-row is after last-row",
+                ));
+            }
+            let label_too_long = region
+                .label
+                .as_ref()
+                .is_some_and(|label| label.chars().count() > HIGHLIGHT_LABEL_LIMIT_CHARS);
+            if label_too_long {
+                return Err(terminal_error(
+                    ErrorCode::InvalidArgument,
+                    "a highlight label is longer than 128 characters",
+                ));
+            }
+        }
+        Err(pane_not_found())
     }
 
-    fn clear_highlights(&mut self, _pane: NodeId, _layer: String) {
-        unimplemented!("host::imports::terminal::clear_highlights")
-    }
+    fn clear_highlights(&mut self, _pane: NodeId, _layer: String) {}
 
     fn read_cells(
         &mut self,
         _pane: NodeId,
         _part: ScreenPart,
         _first_row: u32,
-        _count: u32,
+        count: u32,
     ) -> Option<CellRows> {
-        unimplemented!("host::imports::terminal::read_cells")
+        if count > READ_CELLS_ROW_LIMIT {
+            return None;
+        }
+        None
     }
 
     fn modes(&mut self, _pane: NodeId) -> Option<TerminalMode> {
-        unimplemented!("host::imports::terminal::modes")
+        None
     }
 
     fn foreground_process(&mut self, _pane: NodeId) -> Option<ForegroundProcess> {
-        unimplemented!("host::imports::terminal::foreground_process")
+        None
     }
 
     fn freeze_snapshot(&mut self, _pane: NodeId) -> Result<u64, PluginError> {
-        unimplemented!("host::imports::terminal::freeze_snapshot")
+        Err(pane_not_found())
     }
 
     fn read_snapshot_cells(
@@ -92,40 +202,64 @@ impl HostTerminal for TerminalImport {
         _first_row: u32,
         _count: u32,
     ) -> Option<CellRows> {
-        unimplemented!("host::imports::terminal::read_snapshot_cells")
+        None
     }
 
-    fn drop_snapshot(&mut self, _snapshot: u64) {
-        unimplemented!("host::imports::terminal::drop_snapshot")
-    }
+    fn drop_snapshot(&mut self, _snapshot: u64) {}
 
     fn history_text(&mut self, _pane: NodeId, _max_bytes: u32) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::terminal::history_text")
+        Err(pane_not_found())
     }
 
     fn take_history(&mut self, _request: RequestId) -> Option<String> {
-        unimplemented!("host::imports::terminal::take_history")
+        None
     }
 
     fn search_history(
         &mut self,
         _pane: NodeId,
-        _regex: String,
-        _max_matches: u16,
+        regex: String,
+        max_matches: u16,
     ) -> Result<RequestId, PluginError> {
-        unimplemented!("host::imports::terminal::search_history")
+        if max_matches == 0 || max_matches > SEARCH_MATCH_LIMIT {
+            return Err(terminal_error(
+                ErrorCode::InvalidArgument,
+                "max-matches must be 1 to 10000",
+            ));
+        }
+        validate_regex(&regex)?;
+        Err(pane_not_found())
     }
 
     fn take_matches(&mut self, _request: RequestId) -> Option<Vec<HistoryMatch>> {
-        unimplemented!("host::imports::terminal::take_matches")
+        None
     }
 
-    fn lock_input(&mut self, _pane: NodeId, _millis: u16) -> Result<(), PluginError> {
-        unimplemented!("host::imports::terminal::lock_input")
+    fn lock_input(&mut self, pane: NodeId, millis: u16) -> Result<(), PluginError> {
+        if millis > INPUT_LOCK_LIMIT_MILLIS {
+            return Err(terminal_error(
+                ErrorCode::InvalidArgument,
+                "an input lock lasts at most 2000 ms",
+            ));
+        }
+        let now = Instant::now();
+        INPUT_LOCKS.with(|cell| {
+            let mut locks = cell.borrow_mut();
+            if locks.get(&pane.0).is_some_and(|expiry| *expiry > now) {
+                return Err(terminal_error(
+                    ErrorCode::Conflict,
+                    "the pane input is already locked",
+                ));
+            }
+            locks.insert(pane.0, now + Duration::from_millis(u64::from(millis)));
+            Ok(())
+        })
     }
 
-    fn unlock_input(&mut self, _pane: NodeId) {
-        unimplemented!("host::imports::terminal::unlock_input")
+    fn unlock_input(&mut self, pane: NodeId) {
+        INPUT_LOCKS.with(|cell| {
+            cell.borrow_mut().remove(&pane.0);
+        });
     }
 }
 

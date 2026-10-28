@@ -108,3 +108,26 @@ fn port_preparation_and_failures_precede_long_source_provenance() {
         "the manual page covers this feature"
     );
 }
+
+
+/// REQ: PORT:ilium-client/src/background_animation/wikipedia/presentation.rs::layout_admission_refusal_keeps_the_last_good_article_frame_visible
+#[test]
+fn port_layout_admission_refusal_keeps_the_last_good_article_frame_visible_refused_settings_manual_contract() {
+    let mut scene = fake_scene("waves", 24, 12);
+    let before = scene.frame(braille_frame(24, 12, 0));
+    assert!(
+        !scene.reconfigure("{not json"),
+        "a refused settings change is not applied"
+    );
+    let after = scene.frame(braille_frame(24, 12, 0));
+    assert_eq!(
+        (after.columns, after.rows),
+        (24, 12),
+        "the scene keeps its last good grid after a refusal"
+    );
+    assert_eq!(
+        before.text(),
+        after.text(),
+        "the last good frame is still what the scene draws"
+    );
+}

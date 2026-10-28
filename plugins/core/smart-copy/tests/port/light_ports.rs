@@ -48,3 +48,32 @@ fn port_light_the_status_is_set_by_the_copy_and_nothing_hangs() {
     assert_eq!(host.clipboard().last_text().as_deref(), Some("abc"));
     assert!(host.failures().is_empty());
 }
+
+/// REQ: PORT:ilium-client/src/smart_copy_light.rs::short_text_is_shown_whole
+#[test]
+fn port_light_short_text_is_not_marked_as_clipped() {
+    assert!(!view_text(&["short text"], 40, 9).contains('…'));
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_light.rs::control_characters_never_reach_the_dialog
+#[test]
+fn port_light_the_printable_letters_survive_control_character_removal() {
+    let text = view_text(&["a\u{1b}[31mb\tc"], 40, 9);
+    assert!(text.contains('b') && text.contains('c'), "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_light.rs::extra_lines_collapse_into_a_count
+#[test]
+fn port_light_the_collapsed_preview_stays_within_the_dialog_height() {
+    let many: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
+    let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+    let text = view_text(&refs, 40, 6);
+    assert!(text.lines().count() <= 6, "{text}");
+}
+
+/// REQ: PORT:ilium-client/src/smart_copy_light.rs::long_lines_are_clipped_with_an_ellipsis
+#[test]
+fn port_light_a_clipped_line_keeps_its_leading_characters() {
+    let text = view_text(&["abcdefghijklmnopqrstuvwxyz0123456789"], 12, 9);
+    assert!(text.contains("abc"), "{text}");
+}

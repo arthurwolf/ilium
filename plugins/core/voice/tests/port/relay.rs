@@ -200,3 +200,180 @@ fn relay_052_two_concurrent_runs_get_distinct_request_ids() {
     assert_eq!(sent.len(), 2);
     assert_ne!(sent[0].request, sent[1].request);
 }
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::without_a_voice_client_the_request_is_rejected
+#[test]
+fn relay_052_without_a_voice_client_nothing_is_offered_and_the_run_exits_one() {
+    let mut host = host_with_clients(&[]);
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    assert_eq!(run.exit_code(), Some(1));
+    assert!(host.client_requests().sent().is_empty());
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_running_session_receives_the_normalized_sentences
+#[test]
+fn relay_052_an_accepted_offer_that_started_voice_reports_started_voice_and_exits_zero() {
+    let mut host = host_with_clients(&[1]);
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    let sent = host.client_requests().sent();
+    host.client_requests()
+        .answer(sent[0].request.clone(), Ok(result_line(true)));
+    host.settle();
+    assert_eq!(last_record(&run)["started_voice"], true);
+    assert_eq!(run.exit_code(), Some(0));
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_client_with_voice_running_wins_over_a_newer_one_that_is_off
+#[test]
+fn relay_052_the_newest_client_is_offered_first_and_the_older_running_one_answers_last() {
+    let mut host = host_with_clients(&[1, 2]);
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    let first = host.client_requests().sent()[0].clone();
+    assert_eq!(first.client, 2);
+    host.client_requests().answer(
+        first.request.clone(),
+        Ok(error_line("voice-off", "voice control is off")),
+    );
+    host.settle();
+    let second = host.client_requests().sent()[1].clone();
+    assert_eq!(second.client, 1);
+    host.client_requests()
+        .answer(second.request.clone(), Ok(result_line(false)));
+    host.settle();
+    assert_eq!(run.exit_code(), Some(0));
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_failed_voice_session_is_reported_over_a_switched_off_one
+#[test]
+fn relay_052_voice_unavailable_is_reported_even_when_the_newer_client_is_switched_off() {
+    let mut host = host_with_clients(&[1, 2]);
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    let mut answered = 0;
+    while let Some(offer) = host.client_requests().sent().get(answered).cloned() {
+        let reply = if offer.client == 1 {
+            error_line("voice-unavailable", "OpenAI API key must not be empty")
+        } else {
+            error_line("voice-off", "voice control is off")
+        };
+        host.client_requests()
+            .answer(offer.request.clone(), Ok(reply));
+        host.settle();
+        answered += 1;
+        if run.exit_code().is_some() {
+            break;
+        }
+    }
+    assert_eq!(last_record(&run)["code"], "voice-unavailable");
+    assert_eq!(run.exit_code(), Some(1));
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_silent_client_times_out_instead_of_hanging_the_request
+#[test]
+fn relay_052_a_silent_client_keeps_the_request_open_until_the_offer_timeout_elapses() {
+    let mut host = host_with_clients(&[1]);
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    let timeout_ms = host.client_requests().sent()[0].timeout_ms;
+    host.advance_clock(timeout_ms - 1);
+    host.settle();
+    assert!(run.exit_code().is_none());
+    host.advance_clock(1);
+    host.settle();
+    assert_eq!(run.exit_code(), Some(1));
+    assert_eq!(last_record(&run)["code"], "client-unresponsive");
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::disconnected_clients_are_forgotten
+#[test]
+fn relay_052_a_detached_newer_client_is_skipped_and_the_older_one_is_offered() {
+    let mut host = host_with_clients(&[1, 2]);
+    host.deliver_one(Event::ClientDetached(ClientId(2)));
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    let sent = host.client_requests().sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].client, 1);
+    host.client_requests()
+        .answer(sent[0].request.clone(), Ok(result_line(false)));
+    host.settle();
+    assert_eq!(run.exit_code(), Some(0));
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::registering_the_same_connection_twice_keeps_one_entry
+#[test]
+fn relay_052_one_detach_removes_a_connection_that_was_attached_twice() {
+    let mut host = host_with_clients(&[1, 1]);
+    host.deliver_one(Event::ClientDetached(ClientId(1)));
+    let run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    assert_eq!(last_record(&run)["code"], "no-voice-client");
+    assert!(host.client_requests().sent().is_empty());
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::start_is_offered_only_when_asked_for_and_only_to_one_client
+#[test]
+fn relay_052_without_the_start_flag_every_offer_carries_start_false() {
+    let mut host = host_with_clients(&[1, 2]);
+    let _run = host.cli().invoke(&["say", "hello"], b"");
+    host.settle();
+    for index in 0..4 {
+        let Some(offer) = host.client_requests().sent().get(index).cloned() else {
+            break;
+        };
+        let payload: Value = serde_json::from_str(&offer.payload_json).expect("payload");
+        assert_eq!(payload["start"], false);
+        host.client_requests().answer(
+            offer.request.clone(),
+            Ok(error_line("voice-off", "voice control is off")),
+        );
+        host.settle();
+    }
+    assert_eq!(host.client_requests().sent().len(), 2);
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::a_request_id_cannot_be_reused_while_it_is_in_flight
+#[test]
+fn relay_052_concurrent_runs_each_finish_with_the_answer_given_to_their_own_offer() {
+    let mut host = host_with_clients(&[1]);
+    let first = host.cli().invoke(&["say", "one"], b"");
+    let second = host.cli().invoke(&["say", "two"], b"");
+    host.settle();
+    let sent = host.client_requests().sent();
+    host.client_requests().answer(
+        sent[1].request.clone(),
+        Ok(error_line("voice-off", "voice control is off")),
+    );
+    host.settle();
+    assert_eq!(last_record(&second)["code"], "voice-off");
+    assert!(first.exit_code().is_none());
+    host.client_requests()
+        .answer(sent[0].request.clone(), Ok(result_line(false)));
+    host.settle();
+    assert_eq!(first.exit_code(), Some(0));
+}
+
+/// REQ: PORT:ilium-server/src/voice_relay.rs::malformed_requests_are_rejected_before_any_client_is_asked
+#[test]
+fn relay_052_blank_sentences_are_invalid_request_and_are_not_offered() {
+    let mut host = host_with_clients(&[1]);
+    let run = host.cli().invoke(&["say", "", "   "], b"");
+    host.settle();
+    assert_eq!(last_record(&run)["code"], "invalid-request");
+    assert_eq!(run.exit_code(), Some(1));
+    assert!(host.client_requests().sent().is_empty());
+}
+
+/// REQ: PORT:ilium-server/tests/voice_text_relay.rs::a_malformed_request_is_refused_with_the_invalid_request_code
+#[test]
+fn relay_052_a_blank_start_request_is_refused_with_invalid_request_and_exit_one() {
+    let mut host = host_with_clients(&[1]);
+    let run = host.cli().invoke(&["say", "--start", "   "], b"");
+    host.settle();
+    assert_eq!(last_record(&run)["code"], "invalid-request");
+    assert_eq!(run.exit_code(), Some(1));
+    assert!(host.client_requests().sent().is_empty());
+}

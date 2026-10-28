@@ -1054,6 +1054,20 @@ fn pkg_345_missing_service_provider_installs_and_waits() {
     );
 }
 
+/// REQ: PKG-345
+#[test]
+fn pkg_345_waiting_record_names_the_missing_service() {
+    let fx = Fx::new();
+    let out = fx.install(&Spec::new("example.a", "1.0.0").service("example:svc/s@0.1.0"));
+    assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
+    let record = fx.record("example.a").expect("record");
+    assert_eq!(record["state"], "waiting-dependency");
+    assert!(
+        record.to_string().contains("example:svc/s"),
+        "the waiting record must name service S: {record}"
+    );
+}
+
 /// REQ: PKG-346
 #[test]
 fn pkg_346_host_range_above_running_release_is_host_version() {
@@ -1191,5 +1205,32 @@ fn pkg_349_installing_b_again_re_enables_the_dependant() {
     assert_eq!(
         fx.record("example.a").expect("record")["state"],
         "installed-enabled"
+    );
+}
+
+/// REQ: PKG-337
+#[test]
+fn pkg_337_dry_run_plan_names_the_dependency_it_would_install() {
+    let fx = Fx::new();
+    let out = fx.install_with(
+        &Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true),
+        &["--dry-run"],
+    );
+    assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
+    assert!(
+        out.all_text().contains("example.b"),
+        "the printed plan must name the dependency: {}",
+        out.all_text()
+    );
+}
+
+/// REQ: PKG-342
+#[test]
+fn pkg_342_a_source_with_a_version_outside_the_range_does_not_satisfy_the_dependency() {
+    let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
+    let sources = vec![source(pkg("example.b", "0.9.0"), 0, &"b".repeat(64))];
+    assert_eq!(
+        codes(&resolve_plan(&input(incoming, Vec::new(), sources))),
+        vec!["dependency.unresolved".to_owned()]
     );
 }

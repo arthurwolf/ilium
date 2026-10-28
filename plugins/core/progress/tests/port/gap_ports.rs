@@ -256,3 +256,153 @@ fn port_061_cancellation_keeps_a_blocked_callback_admitted_until_the_native_writ
         "released once the native write returned"
     );
 }
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::installer_writes_one_bash_guard_and_is_idempotent
+#[test]
+fn port_060_the_installer_creates_the_settings_file_when_none_exists() {
+    let mut host = activated_client();
+    assert!(!settings_path(&host).exists());
+    assert!(install(&mut host));
+    assert!(settings_path(&host).exists());
+    assert!(read_settings(&host)["hooks"]["PreToolUse"].is_array());
+}
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::installer_rewrites_the_legacy_command_and_keeps_other_hooks
+#[test]
+fn port_060_the_hook_group_of_another_tool_keeps_its_matcher_after_the_rewrite() {
+    let mut host = activated_client();
+    write_settings(
+        &host,
+        r#"{"model":"x","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"ilium progress guard","timeout":10}]},{"matcher":"Edit","hooks":[{"type":"command","command":"other"}]}]}}"#,
+    );
+    assert!(install(&mut host));
+    let root = read_settings(&host);
+    assert_eq!(root["hooks"]["PreToolUse"][1]["matcher"], "Edit");
+}
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::installer_keeps_a_user_written_guard_wrapper
+#[test]
+fn port_060_a_second_install_leaves_the_user_wrapper_unchanged() {
+    let mut host = activated_client();
+    let wrapper = "ilium progress --help 2>/dev/null | grep -qE '^ +guard( |$)' || exit 0; exec ilium progress guard";
+    let original = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": wrapper, "timeout": 10}]}]}});
+    write_settings(&host, &original.to_string());
+    assert!(install(&mut host));
+    assert!(install(&mut host));
+    assert_eq!(read_settings(&host), original);
+}
+
+/// REQ: PORT:ilium-client/src/progress_guard.rs::installer_rejects_a_settings_file_that_is_not_an_object
+#[test]
+fn port_060_a_malformed_settings_file_is_refused_and_left_untouched() {
+    let mut host = activated_client();
+    write_settings(&host, "{not json");
+    assert!(!install(&mut host), "malformed settings are refused");
+    assert_eq!(
+        std::fs::read_to_string(settings_path(&host)).unwrap(),
+        "{not json"
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::completed_progress_expiry_is_independent_in_both_split_orientations
+#[test]
+fn port_061_both_split_results_are_visible_before_the_done_deadline_in_either_orientation() {
+    for orientation in ["vertical", "horizontal"] {
+        let mut host = activated_client();
+        host.set_split_orientation(orientation);
+        show(
+            &mut host,
+            vec![
+                monitor_with(1, "split-done", "done", 100.0, "retained split result", "", Value::Null),
+                monitor_with(2, "split-busy", "running", 100.0, "busy split result", "", Value::Null),
+            ],
+        );
+        let text = footer(&mut host, 80, 12);
+        assert!(
+            text.contains("retained split result") && text.contains("busy split result"),
+            "{orientation}: {text}"
+        );
+    }
+}
+
+/// REQ: PORT:ilium-server/src/ipc/handlers.rs::failed_progress_snapshot_write_rejects_replacement_and_preserves_old_monitor
+#[test]
+fn port_059_a_failed_write_keeps_the_old_report_percent_unchanged() {
+    let (mut host, pane) = host_with_pane();
+    register(
+        &mut host,
+        pane,
+        PROBE,
+        &running("preserved-job", 23, "running"),
+        &[],
+    );
+    host.fail_next_durable_write();
+    expect_probe(
+        &mut host,
+        "/opt/other.sh",
+        &running("unacknowledged-job", 24, "running"),
+    );
+    progress(&mut host, pane, &["set", "--command", "/opt/other.sh"]);
+    let record = status(&mut host, pane);
+    assert_eq!(record["monitors"][0]["report"]["percent"], 23.0);
+}
+
+/// REQ: PORT:ilium-server/src/startup_progress.rs::native_publication_runs_off_caller_and_preserves_record_readback
+#[test]
+fn port_061_a_later_publish_replaces_the_startup_marker_text() {
+    let mut host = server_host();
+    let phase = host.begin_startup_phase();
+    host.startup_publish(phase, "Restoring panes", "Exact pane", 2, 7);
+    host.startup_publish(phase, "Restoring panes", "Next pane", 3, 7);
+    host.settle();
+    assert_eq!(
+        host.startup_marker(),
+        Some((
+            "Restoring panes".to_string(),
+            "Next pane".to_string(),
+            3,
+            7
+        ))
+    );
+}
+
+/// REQ: PORT:ilium-server/src/startup_progress.rs::finish_fences_a_late_write_and_cannot_clear_a_newer_phase
+#[test]
+fn port_061_a_publish_on_a_finished_phase_is_ignored() {
+    let mut host = server_host();
+    let old = host.begin_startup_phase();
+    host.startup_finish(old);
+    host.settle();
+    host.startup_publish(old, "Late", "Phase", 0, 1);
+    host.settle();
+    assert_eq!(host.startup_marker(), None);
+}
+
+/// REQ: PORT:ilium-server/src/startup_progress.rs::finish_closes_its_phase_even_if_a_younger_update_returns_first
+#[test]
+fn port_061_a_phase_finished_without_any_publish_leaves_no_marker() {
+    let mut host = server_host();
+    let phase = host.begin_startup_phase();
+    host.startup_finish(phase);
+    host.settle();
+    assert_eq!(host.startup_marker(), None);
+}
+
+/// REQ: PORT:ilium-server/src/startup_progress.rs::cancellation_keeps_a_blocked_callback_admitted_until_native_return
+#[test]
+fn port_061_a_new_phase_can_publish_after_a_cancelled_one_has_drained() {
+    let mut host = server_host();
+    let phase = host.begin_startup_phase();
+    host.block_next_startup_write();
+    host.startup_publish(phase, "Blocked", "Write", 0, 1);
+    host.cancel_startup();
+    host.release_startup_write();
+    host.settle();
+    let next = host.begin_startup_phase();
+    host.startup_publish(next, "Fresh", "Phase", 0, 1);
+    host.settle();
+    assert_eq!(
+        host.startup_marker(),
+        Some(("Fresh".to_string(), "Phase".to_string(), 0, 1))
+    );
+}
