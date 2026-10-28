@@ -338,6 +338,13 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
 /// editor focus use this path too; terminal panes are intercepted earlier as
 /// one native paste. Leader prefixes stay direct so paste cancels them whole.
 pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
+    // A numeric paste is data, including punctuation; it must never execute
+    // the delay row's +/-/* shortcuts or discard invalid characters.
+    if matches!(&app.mode, Mode::TextTriggerDialog(state)
+        if state.focus == crate::text_trigger_dialog::TextTriggerFocus::Delay)
+    {
+        return false;
+    }
     !matches!(
         &app.mode,
         Mode::LeaderPending
@@ -1686,6 +1693,16 @@ fn handle_text_trigger_dialog_event(
     event: &Event,
 ) {
     use crate::text_trigger_dialog::TextTriggerFocus;
+    if let Event::Paste(pasted) = event {
+        if state.focus == TextTriggerFocus::Delay {
+            for character in pasted.chars() {
+                let _ = crate::text_prompt::handle_key(&mut state.delay, KeyCode::Char(character));
+            }
+            state.save_error = None;
+        }
+        app.mode = Mode::TextTriggerDialog(state);
+        return;
+    }
     let Event::Key(key) = event else {
         app.mode = Mode::TextTriggerDialog(state);
         return;
@@ -1731,7 +1748,17 @@ fn handle_text_trigger_dialog_event(
             app.mode = Mode::TextTriggerDialog(state);
         }
         KeyCode::Enter if state.focus == TextTriggerFocus::Save => {
-            let trigger = state.candidate();
+            let trigger = match state.candidate() {
+                Ok(trigger) => trigger,
+                Err(error) => {
+                    state.focus = TextTriggerFocus::Delay;
+                    state.save_error = Some(error.clone());
+                    app.status_message = Some(error);
+                    app.mode = Mode::TextTriggerDialog(state);
+                    return;
+                }
+            };
+            state.save_error = None;
             let editing_id = state.editing_id.clone();
             let editing_base = state.editing_base.clone();
             app.mode = Mode::TextTriggerDialog(state);
@@ -2626,6 +2653,30 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         app.mode = Mode::Settings(Box::new(state));
         return;
+    }
+    if state.tab == SettingsTab::Padding && state.selected_row == crate::padding_ui::ROW_THRESHOLD {
+        match key.code {
+            KeyCode::Char('h' | 'l') => {
+                app.step_settings_number(
+                    crate::value_settings::SettingsNumber::PaddingThreshold,
+                    if key.code == KeyCode::Char('h') {
+                        -1
+                    } else {
+                        1
+                    },
+                );
+                app.mode = Mode::Settings(Box::new(state));
+                return;
+            }
+            KeyCode::Char(' ') => {
+                app.mode = Mode::Settings(Box::new(state));
+                app.begin_settings_number_dialog(
+                    crate::value_settings::SettingsNumber::PaddingThreshold,
+                );
+                return;
+            }
+            _ => {}
+        }
     }
     if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
         app.mode = Mode::Settings(Box::new(state));
@@ -5204,11 +5255,11 @@ mod indent_outdent_tests {
     fn cost_star_retains_exact_number_after_disk_failure_then_retries_durably() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "[cost\n").unwrap();
         let mut app = App::new("cost-value-test".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 50));
         app.cost_settings.calibration = crate::cost_model::Calibration::Budget;
+        crate::config::save_cost_settings(directory.path(), &app.cost_settings).unwrap();
         let row = crate::cost_settings_ui::rows(&app)
             .iter()
             .position(|row| *row == crate::cost_settings::CostRow::Budget)
@@ -5219,6 +5270,8 @@ mod indent_outdent_tests {
             ..SettingsState::default()
         }));
         press(&mut app, KeyCode::Char('*'));
+        app.settle_filesystem_for_test();
+        std::fs::write(&path, "[cost\n").unwrap();
         let Mode::ValueDialog(host) = &mut app.mode else {
             panic!("number dialog");
         };
@@ -5337,6 +5390,7 @@ mod indent_outdent_tests {
         }));
 
         press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
         let Mode::ValueDialog(host) = &app.mode else {
             panic!("exact window dialog");
         };
@@ -5384,6 +5438,7 @@ mod indent_outdent_tests {
         );
 
         press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
         press(&mut app, KeyCode::Char('9'));
         press(&mut app, KeyCode::Esc);
         assert_eq!(
@@ -5475,6 +5530,52 @@ mod indent_outdent_tests {
                 ..
             }] if command == "claude"
         ));
+    }
+
+    #[test]
+    fn universal_review_scheduled_numeric_paste_rejects_without_sending_and_can_correct() {
+        for pasted in ["-1", "1.5", "1e2", "1s", "99999999999999999999999"] {
+            let mut app = App::new("schedule-paste".into(), std::env::temp_dir());
+            let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+            let pane_id = app
+                .tree
+                .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+                .unwrap();
+            let mut state = ScheduledInputDialogState::new(pane_id);
+            state.focus = ScheduledInputFocus::Seconds;
+            state.seconds = TextPromptState::new("");
+            app.mode = Mode::SchedulePaneInput(Box::new(state));
+            handle_event(&mut app, Event::Paste(pasted.into()));
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+            );
+            let Mode::SchedulePaneInput(state) = &app.mode else {
+                panic!("invalid paste submitted {pasted}")
+            };
+            assert_eq!(state.seconds.buf, pasted);
+            assert!(app.status_message.is_some());
+            assert!(app.take_outbound_requests().is_empty());
+            for _ in pasted.chars() {
+                handle_event(
+                    &mut app,
+                    Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+                );
+            }
+            handle_event(&mut app, Event::Paste("17".into()));
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+            );
+            assert!(matches!(
+                app.take_outbound_requests().as_slice(),
+                [ClientRequest::SchedulePaneInput {
+                    delay_seconds: 17,
+                    ..
+                }]
+            ));
+            assert!(matches!(app.mode, Mode::Normal));
+        }
     }
 
     #[test]
@@ -5945,7 +6046,7 @@ mod text_trigger_retry_and_delete_tests {
         editor.regexp.buf = "synthetic-ready".to_owned();
         editor.message.buf = "synthetic-continue".to_owned();
         editor.focus = TextTriggerFocus::Save;
-        let expected_id = editor.candidate().id;
+        let expected_id = editor.candidate().unwrap().id;
         let original_box = std::ptr::from_ref(editor.as_ref());
         handle_event(
             &mut app,
@@ -5956,7 +6057,7 @@ mod text_trigger_retry_and_delete_tests {
             panic!("failed save closed draft");
         };
         assert_eq!(std::ptr::from_ref(editor.as_ref()), original_box);
-        assert_eq!(editor.candidate().id, expected_id);
+        assert_eq!(editor.candidate().unwrap().id, expected_id);
         assert!(app.take_outbound_requests().is_empty());
 
         for (width, height) in [(80, 24), (120, 40)] {
@@ -5998,6 +6099,82 @@ mod text_trigger_retry_and_delete_tests {
         assert_eq!(persisted.triggers[0].id, expected_id);
         assert!(matches!(app.take_outbound_requests().as_slice(),
             [ClientRequest::UpdateTextTriggers { settings }] if settings == &persisted));
+    }
+
+    #[test]
+    fn universal_review_text_trigger_paste_never_saves_a_substitute() {
+        for invalid in [
+            "86401",
+            "99999999999999999999",
+            "-1",
+            "1.5",
+            "1e2",
+            "1s",
+            "not a number",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
+            app.config_dir = Some(directory.path().to_path_buf());
+            app.mode = Mode::Settings(Box::new(SettingsState {
+                tab: SettingsTab::TextTriggers,
+                ..SettingsState::default()
+            }));
+            app.open_text_trigger_dialog(None);
+            let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+                panic!("editor did not open")
+            };
+            editor.regexp.buf = "synthetic-ready".into();
+            editor.message.buf = "synthetic-continue".into();
+            editor.delay = crate::text_prompt::TextPromptState::new("");
+            editor.focus = TextTriggerFocus::Delay;
+            handle_event(&mut app, Event::Paste(invalid.into()));
+            let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+                panic!("paste closed the editor")
+            };
+            editor.focus = TextTriggerFocus::Save;
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            );
+            app.settle_filesystem_for_test();
+            let Mode::TextTriggerDialog(editor) = &app.mode else {
+                panic!("invalid delay closed draft: {invalid}")
+            };
+            assert_eq!(editor.delay.buf, invalid);
+            assert!(
+                editor.save_error.is_some(),
+                "invalid delay must have a visible validation error"
+            );
+            assert!(app.take_outbound_requests().is_empty());
+            assert!(crate::config::load(directory.path())
+                .unwrap()
+                .text_triggers
+                .triggers
+                .is_empty());
+            // Correction uses the real paste and save dispatch, not a replacement
+            // buffer that could bypass the original input bug.
+            for _ in invalid.chars() {
+                handle_event(
+                    &mut app,
+                    Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+                );
+            }
+            handle_event(&mut app, Event::Paste("17".into()));
+            let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+                panic!("correction lost draft")
+            };
+            editor.focus = TextTriggerFocus::Save;
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            );
+            app.settle_filesystem_for_test();
+            let saved = crate::config::load(directory.path()).unwrap().text_triggers;
+            assert_eq!(saved.triggers.len(), 1);
+            assert_eq!(saved.triggers[0].delay_seconds, 17);
+            assert!(matches!(app.take_outbound_requests().as_slice(),
+                [ClientRequest::UpdateTextTriggers { settings }] if settings == &saved));
+        }
     }
 
     #[test]
@@ -6043,5 +6220,167 @@ mod text_trigger_retry_and_delete_tests {
         assert!(matches!(app.take_outbound_requests().as_slice(),
             [ClientRequest::UpdateTextTriggers { settings }] if settings.triggers.is_empty()));
         assert!(matches!(app.mode, Mode::Settings(_)));
+    }
+}
+
+#[cfg(test)]
+mod board_storage_catalog_submission_tests {
+    use super::*;
+
+    fn fixture(
+        storage_kind: BoardStorageKind,
+        relative_path: &str,
+    ) -> (tempfile::TempDir, App, CreateBoardState, std::path::PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let project = ilium_platform::paths::canonicalize(directory.path()).unwrap();
+        let expected_path = project.join(relative_path);
+        let mut app = App::new("board-selector".into(), project);
+        let parent_group = app.tree.add_group(ROOT_ID, "Captured destination").unwrap();
+        let mut draft = CreateBoardState {
+            parent_group,
+            name: TextPromptState::new("Authored λ board"),
+            path: TextPromptState::new(relative_path),
+            storage_kind,
+            editing_path: true,
+        };
+        draft.name.cursor = 3;
+        draft.path.cursor = 7;
+        app.mode = Mode::CreateBoard(draft.clone());
+        (directory, app, draft, expected_path)
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+
+    fn open_catalog(app: &mut App) {
+        handle_event(
+            app,
+            Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+        );
+        assert!(matches!(app.mode, Mode::ValueDialog(_)));
+    }
+
+    fn assert_authored_fields(current: &CreateBoardState, original: &CreateBoardState) {
+        assert_eq!(current.name, original.name);
+        assert_eq!(current.path, original.path);
+        assert_eq!(current.editing_path, original.editing_path);
+    }
+
+    #[test]
+    fn chosen_board_storage_reaches_submission_and_disk_readback() {
+        // Losing the catalog choice before submission must fail the file and request assertions.
+        for (initial, chosen, selection_key, relative_path) in [
+            (
+                BoardStorageKind::MarkdownFile,
+                BoardStorageKind::Folder,
+                KeyCode::Up,
+                "plans/authored folder",
+            ),
+            (
+                BoardStorageKind::Folder,
+                BoardStorageKind::MarkdownFile,
+                KeyCode::Down,
+                "plans/authored plan.md",
+            ),
+        ] {
+            let (_directory, mut app, draft, expected_path) = fixture(initial, relative_path);
+            open_catalog(&mut app);
+            press(&mut app, selection_key);
+            press(&mut app, KeyCode::Enter);
+            let Mode::CreateBoard(parent) = &app.mode else {
+                panic!("accepted storage catalog did not restore Create Board");
+            };
+            assert_authored_fields(parent, &draft);
+            assert_eq!(parent.parent_group, draft.parent_group);
+            assert_eq!(parent.storage_kind, chosen);
+            assert!(app.take_outbound_requests().is_empty());
+            assert!(
+                !expected_path.exists(),
+                "choosing storage must not create a board"
+            );
+
+            press(&mut app, KeyCode::Enter);
+            app.settle_filesystem_for_test();
+            assert!(matches!(app.mode, Mode::Normal));
+            let expected_storage = match chosen {
+                BoardStorageKind::Folder => ilium_core::BoardStorage::Folder {
+                    path: expected_path.clone(),
+                },
+                BoardStorageKind::MarkdownFile => ilium_core::BoardStorage::MarkdownFile {
+                    path: expected_path.clone(),
+                },
+            };
+            let requests = app.take_outbound_requests();
+            let [ClientRequest::NewBoard {
+                parent_group,
+                name,
+                storage,
+            }] = requests.as_slice()
+            else {
+                panic!("expected one board creation request, got {requests:?}");
+            };
+            assert_eq!(*parent_group, draft.parent_group);
+            assert_eq!(name, &draft.name.buf);
+            assert_eq!(storage, &expected_storage);
+            assert_eq!(expected_path.is_dir(), chosen == BoardStorageKind::Folder);
+            assert_eq!(
+                expected_path.is_file(),
+                chosen == BoardStorageKind::MarkdownFile
+            );
+
+            let reloaded = crate::board::BoardPane::load(storage.clone()).unwrap();
+            assert_eq!(reloaded.storage, expected_storage);
+            let mut titles = reloaded
+                .columns
+                .iter()
+                .map(|column| column.title.as_str())
+                .collect::<Vec<_>>();
+            titles.sort();
+            assert_eq!(titles, vec!["Doing", "Done", "To do"]);
+        }
+    }
+
+    #[test]
+    fn stale_board_storage_catalog_keeps_the_draft_without_creating_storage() {
+        // Removing the destination fence must not apply the choice to a replacement parent.
+        let (_directory, mut app, draft, expected_path) =
+            fixture(BoardStorageKind::Folder, "plans/authored plan.md");
+        let changed_destination = app.tree.add_group(ROOT_ID, "Changed destination").unwrap();
+        open_catalog(&mut app);
+        let Some(Mode::CreateBoard(parent)) = app.modal_stack.last_mut() else {
+            panic!("storage catalog lost its Create Board parent");
+        };
+        parent.parent_group = changed_destination;
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("stale destination incorrectly accepted the storage choice");
+        };
+        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("storage catalog changed kind");
+        };
+        assert!(choice
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("destination changed")));
+        let Some(Mode::CreateBoard(parent)) = app.modal_stack.last() else {
+            panic!("stale catalog lost its authored parent");
+        };
+        assert_authored_fields(parent, &draft);
+        assert_eq!(parent.parent_group, changed_destination);
+        assert_eq!(parent.storage_kind, draft.storage_kind);
+        app.settle_filesystem_for_test();
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(!expected_path.exists());
+
+        press(&mut app, KeyCode::Esc);
+        let Mode::CreateBoard(parent) = &app.mode else {
+            panic!("cancelling stale catalog did not restore the authored form");
+        };
+        assert_authored_fields(parent, &draft);
+        assert_eq!(parent.parent_group, changed_destination);
+        assert_eq!(parent.storage_kind, draft.storage_kind);
     }
 }

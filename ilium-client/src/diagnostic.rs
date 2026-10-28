@@ -166,7 +166,7 @@ fn contextual_text(app: &App) -> Option<String> {
         Mode::AgentMessageDialog(state) => state.error.clone(),
         Mode::ValueDialog(host) => match &host.dialog {
             ValueDialogState::Choice(state) => state.notice.clone(),
-            ValueDialogState::Number(state) => state.error.clone(),
+            ValueDialogState::Number(state) => state.notice.clone().or_else(|| state.error.clone()),
         },
         Mode::CreateAgentWorkspace(state) => Some(state.status_text()),
         Mode::WorktreeManager(state) => Some(state.detail_text()),

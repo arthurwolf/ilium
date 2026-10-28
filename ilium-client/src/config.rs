@@ -1534,8 +1534,19 @@ pub enum ConfigSaveError {
 /// to start the client over a typo in an optional config file.
 pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
     let path = config_dir.join("config.toml");
-    if !path.exists() {
-        return Ok(ClientConfig::default());
+    // Only true absence selects defaults. Path::exists hides permission and
+    // dangling-link errors, which exact editors must never present as saved data.
+    match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ClientConfig::default());
+        }
+        Err(source) => {
+            return Err(ClientError::ConfigLoad {
+                path,
+                source: ConfigLoadError::Read(source),
+            })
+        }
+        Ok(_) => {}
     }
     let contents = read_config_text(&path).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),

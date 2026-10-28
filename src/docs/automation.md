@@ -88,7 +88,7 @@ Triggers are matched on the server, on the output path, so they work for hidden 
 | **Regexp** | A Rust `regex` pattern (not PCRE: no look-around or back-references). Must not be empty and must compile. |
 | **Message** | The literal text to send. Must be a single line; Enter is added by Ilium. Not interpreted as a template. |
 | **Target** (arrows select) | **Agents** (panes classified as a known agent), **Terminals** (panes classified as a plain shell) or **Both** (default). Detected agents are deliberately separate from shells so a broad shell rule does not type into an agent session. |
-| **Delay (seconds)** | Whole seconds between detecting the match and sending the message. Default 60. `0` sends immediately. Maximum 86400 (24 hours); larger numbers are clamped. A blank field means the default of 60. |
+| **Delay (seconds)** | Whole seconds between detecting the match and sending the message. Default 60. `0` sends immediately. Maximum 86400 (24 hours). Invalid or out-of-range input stays in the editor with an error when you save; correct it or cancel. A blank field means the default of 60. |
 | **Sample text** | A multi-line scratch area kept with the rule. The **Live preview** below it marks which sample lines match the regexp. |
 | **Enabled** | A disabled rule is kept and previewable but never fires. |
 

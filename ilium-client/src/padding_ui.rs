@@ -16,14 +16,19 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::{App, SettingsState};
 use crate::padding::{PaddingMode, PaddingSettings};
 use crate::theme;
+use crate::value_control::{
+    ControlAction, ControlKind, ControlSpec, ControlStyles, PointerButton, ValueControl,
+};
 
 /// Height of every mode box, borders included.
 pub const CARD_HEIGHT: u16 = 10;
 const CARD_GAP: u16 = 1;
 const SIDE_MARGIN: u16 = 2;
 const INTRO_ROWS: u16 = 4;
-const BUTTON_WIDTH: u16 = 3;
-const FIELD_WIDTH: u16 = 7;
+/// Cells reserved for the threshold value: four digits (the largest value the
+/// field accepts is 1000). A fixed width keeps the shared editor's control
+/// geometry stable.
+const THRESHOLD_TEXT_CELLS: usize = 5;
 const SUMMARY_ROWS: usize = 4;
 const FINE_TUNE_LABEL: &str = " Padding fine-tuning ";
 
@@ -37,9 +42,9 @@ pub const ROW_FINE_TUNE: usize = 2;
 pub enum PaddingHit {
     /// A mode box (anywhere on it that is not a control).
     Mode(PaddingMode),
-    /// A threshold stepper, by the number of columns it moves.
+    /// The threshold's "-" or "+" button, by the number of columns it moves.
     Step(i32),
-    /// The threshold's number field (starts typing).
+    /// The threshold's value (opens the shared exact number editor).
     Field,
     /// The "Padding fine-tuning" button.
     FineTune,
@@ -49,8 +54,6 @@ pub enum PaddingHit {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PaddingUiState {
     pub hover: Option<PaddingHit>,
-    /// Digits typed into the threshold field, while it is being edited.
-    pub editing: Option<String>,
     pub dialog: Option<crate::padding_dialog::DialogState>,
 }
 
@@ -58,11 +61,8 @@ pub struct PaddingUiState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TabLayout {
     pub cards: [Rect; 3],
-    pub big_decrement: Option<Rect>,
-    pub decrement: Rect,
-    pub field: Rect,
-    pub increment: Rect,
-    pub big_increment: Option<Rect>,
+    /// The threshold's number control row inside the size-dependent card.
+    pub threshold: Rect,
     pub fine_tune: Option<Rect>,
 }
 
@@ -83,23 +83,7 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     let inside = Block::default().borders(Borders::ALL).inner(cards[1]);
     let input_row = inside.bottom().saturating_sub(1);
-    let has_big_steps = inside.width >= BUTTON_WIDTH * 4 + FIELD_WIDTH + 4;
-    let total = if has_big_steps {
-        BUTTON_WIDTH * 4 + FIELD_WIDTH + 4
-    } else {
-        BUTTON_WIDTH * 2 + FIELD_WIDTH + 2
-    };
-    let mut x = inside.x + inside.width.saturating_sub(total) / 2;
-    let mut place = |width: u16| {
-        let rect = Rect::new(x, input_row, width.min(inside.right().saturating_sub(x)), 1);
-        x = x.saturating_add(width + 1);
-        rect
-    };
-    let big_decrement = has_big_steps.then(|| place(BUTTON_WIDTH));
-    let decrement = place(BUTTON_WIDTH);
-    let field = place(FIELD_WIDTH);
-    let increment = place(BUTTON_WIDTH);
-    let big_increment = has_big_steps.then(|| place(BUTTON_WIDTH));
+    let threshold = Rect::new(inside.x, input_row, inside.width, 1);
 
     let button_width = FINE_TUNE_LABEL.width() as u16;
     let fine_tune = (settings.mode != PaddingMode::Disabled).then(|| {
@@ -113,13 +97,27 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     TabLayout {
         cards,
-        big_decrement,
-        decrement,
-        field,
-        increment,
-        big_increment,
+        threshold,
         fine_tune,
     }
+}
+
+/// The threshold's shared number control uses a fixed value width so pointer
+/// targets retain their geometry while the shared editor is open.
+fn threshold_control(row: Rect, threshold: u16) -> ValueControl {
+    let padded = format!("{threshold:^width$}", width = THRESHOLD_TEXT_CELLS);
+    ValueControl::new(
+        row,
+        ControlSpec {
+            kind: ControlKind::Number,
+            label: "",
+            value: &padded,
+            label_width: 0,
+            previous_enabled: threshold > crate::padding::MIN_WIDTH_THRESHOLD,
+            next_enabled: threshold < crate::padding::MAX_WIDTH_THRESHOLD,
+            open_enabled: true,
+        },
+    )
 }
 
 /// What is under `position`, if anything.
@@ -130,19 +128,16 @@ pub fn hit(area: Rect, settings: &PaddingSettings, position: Position) -> Option
             return Some(PaddingHit::FineTune);
         }
     }
-    let steps = [
-        (layout.big_decrement, -10),
-        (Some(layout.decrement), -1),
-        (Some(layout.increment), 1),
-        (layout.big_increment, 10),
-    ];
-    for (rect, delta) in steps {
-        if rect.is_some_and(|rect| rect.contains(position)) {
-            return Some(PaddingHit::Step(delta));
-        }
-    }
-    if layout.field.contains(position) {
-        return Some(PaddingHit::Field);
+    if layout.threshold.contains(position) {
+        // Inert spots in the number row do not fall through to the mode card.
+        let action = threshold_control(layout.threshold, settings.width_threshold)
+            .hit(position, PointerButton::Left);
+        return match action {
+            Some(ControlAction::Decrement) => Some(PaddingHit::Step(-1)),
+            Some(ControlAction::Increment) => Some(PaddingHit::Step(1)),
+            Some(ControlAction::EditNumber) => Some(PaddingHit::Field),
+            _ => None,
+        };
     }
     PaddingMode::ALL
         .into_iter()
@@ -185,20 +180,6 @@ fn card_border_style(is_selected: bool, is_hovered: bool) -> Style {
     } else {
         theme::border_style(false)
     }
-}
-
-fn pill(frame: &mut Frame, rect: Rect, text: &str, is_hovered: bool, is_active: bool) {
-    let style = if is_hovered {
-        theme::selected_style().add_modifier(Modifier::BOLD)
-    } else if is_active {
-        Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-    } else {
-        Style::new().add_modifier(Modifier::REVERSED | Modifier::DIM)
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(text.to_owned(), style)).alignment(Alignment::Center),
-        rect,
-    );
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
@@ -314,34 +295,43 @@ fn render_threshold(
     } else {
         Style::new().add_modifier(Modifier::DIM)
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled("Terminal columns:", label_style)),
-        Rect::new(inside.x, layout.field.y.saturating_sub(1), inside.width, 1),
-    );
-    let hovered_step = |delta: i32| ui.hover == Some(PaddingHit::Step(delta));
-    if let Some(rect) = layout.big_decrement {
-        pill(frame, rect, "«", hovered_step(-10), is_active);
-    }
-    pill(frame, layout.decrement, "‹", hovered_step(-1), is_active);
-    pill(frame, layout.increment, "›", hovered_step(1), is_active);
-    if let Some(rect) = layout.big_increment {
-        pill(frame, rect, "»", hovered_step(10), is_active);
-    }
-    let is_editing = ui.editing.is_some();
-    let text = match &ui.editing {
-        Some(buffer) => format!("{buffer}▏"),
-        None => settings.width_threshold.to_string(),
+    let label = if inside.width < 17 {
+        "Columns:"
+    } else {
+        "Terminal columns:"
     };
-    let style = if is_editing {
-        theme::selected_style().add_modifier(Modifier::BOLD)
-    } else if ui.hover == Some(PaddingHit::Field) || state.selected_row == ROW_THRESHOLD {
+    frame.render_widget(
+        Paragraph::new(Span::styled(label, label_style)),
+        Rect::new(
+            inside.x,
+            layout.threshold.y.saturating_sub(1),
+            inside.width,
+            1,
+        ),
+    );
+    let is_highlighted = ui.hover == Some(PaddingHit::Field)
+        || ui.hover == Some(PaddingHit::Step(-1))
+        || ui.hover == Some(PaddingHit::Step(1))
+        || state.selected_row == ROW_THRESHOLD;
+    let value_style = if is_highlighted {
         Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else {
         Style::new().add_modifier(Modifier::BOLD)
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled(text, style)).alignment(Alignment::Center),
-        layout.field,
+    let button_style = if is_active {
+        Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        Style::new().add_modifier(Modifier::REVERSED | Modifier::DIM)
+    };
+    threshold_control(layout.threshold, settings.width_threshold).render(
+        frame,
+        ControlStyles {
+            background: Style::new(),
+            label: label_style,
+            value: value_style,
+            button: button_style,
+            disabled: Style::new().add_modifier(Modifier::DIM),
+        },
     );
 }
 
@@ -352,10 +342,6 @@ pub fn update_hover(area: Rect, app: &App, state: &mut SettingsState, position: 
 
 /// Applies a click on the tab.
 pub fn click(app: &mut App, state: &mut SettingsState, target: PaddingHit) {
-    // Leaving the field by clicking anything else ends the edit.
-    if target != PaddingHit::Field {
-        state.padding.editing = None;
-    }
     match target {
         PaddingHit::Mode(mode) => {
             state.selected_row = ROW_MODE;
@@ -363,13 +349,14 @@ pub fn click(app: &mut App, state: &mut SettingsState, target: PaddingHit) {
         }
         PaddingHit::Step(delta) => {
             state.selected_row = ROW_THRESHOLD;
-            app.padding_set_mode(PaddingMode::WidthDependent);
-            app.padding_step_threshold(delta);
+            app.step_settings_number(
+                crate::value_settings::SettingsNumber::PaddingThreshold,
+                delta,
+            );
         }
         PaddingHit::Field => {
             state.selected_row = ROW_THRESHOLD;
-            app.padding_set_mode(PaddingMode::WidthDependent);
-            state.padding.editing = Some(String::new());
+            // Caller opens the shared number dialog after restoring Settings mode.
         }
         PaddingHit::FineTune => {
             state.selected_row = ROW_FINE_TUNE;
@@ -386,37 +373,8 @@ pub fn handle_key(
 ) -> bool {
     use crossterm::event::KeyCode;
 
-    if let Some(buffer) = state.padding.editing.as_mut() {
-        match key.code {
-            KeyCode::Char(character) if character.is_ascii_digit() && buffer.len() < 4 => {
-                buffer.push(character);
-                if let Ok(columns) = buffer.parse::<u16>() {
-                    // Applied as soon as it is valid; an in-progress value
-                    // below the minimum is kept in the field without saving.
-                    let _ = app.padding_set_threshold(columns);
-                }
-            }
-            KeyCode::Backspace => {
-                buffer.pop();
-            }
-            KeyCode::Enter => {
-                let result = buffer
-                    .parse::<u16>()
-                    .map_err(|_| "Enter a whole number of columns".to_owned())
-                    .and_then(|columns| app.padding_set_threshold(columns));
-                if let Err(message) = result {
-                    app.status_message = Some(message);
-                }
-                state.padding.editing = None;
-            }
-            KeyCode::Esc => state.padding.editing = None,
-            _ => {}
-        }
-        return true;
-    }
-
     let rows = if app.padding_settings.mode == PaddingMode::Disabled {
-        1
+        2
     } else {
         3
     };
@@ -442,15 +400,17 @@ pub fn handle_key(
                     let next = (index + direction).clamp(0, 2) as usize;
                     app.padding_set_mode(PaddingMode::ALL[next]);
                 }
-                ROW_THRESHOLD => app.padding_step_threshold(direction),
+                ROW_THRESHOLD => return false,
                 _ => {}
             }
         }
+        KeyCode::Char('-' | '+') if state.selected_row == ROW_THRESHOLD => return false,
+        // PageUp/PageDown keep the established ten-column step through the same saver.
         KeyCode::PageUp | KeyCode::PageDown if state.selected_row == ROW_THRESHOLD => {
-            app.padding_step_threshold(if key.code == KeyCode::PageUp { 10 } else { -10 });
+            app.step_padding_threshold_by(if key.code == KeyCode::PageUp { 10 } else { -10 });
         }
         KeyCode::Enter | KeyCode::Char(' ') => match state.selected_row {
-            ROW_THRESHOLD => state.padding.editing = Some(String::new()),
+            ROW_THRESHOLD => return false,
             ROW_FINE_TUNE => {
                 state.padding.dialog = Some(crate::padding_dialog::DialogState::default());
             }
@@ -499,7 +459,7 @@ mod tests {
             assert_eq!(pair[0].width, pair[1].width);
         }
         assert!(layout.fine_tune.is_none(), "hidden while disabled");
-        assert!(layout.cards[1].contains(layout.field.as_position()));
+        assert!(layout.cards[1].contains(layout.threshold.as_position()));
     }
 
     #[test]
@@ -541,70 +501,388 @@ mod tests {
         assert!(state.padding.dialog.is_some());
         state.padding.dialog = None;
 
-        let step = hit(area, &app.padding_settings, layout.increment.as_position()).unwrap();
+        let control = threshold_control(layout.threshold, app.padding_settings.width_threshold);
+        let increment = control.geometry().next.as_position();
+        let step = hit(area, &app.padding_settings, increment).unwrap();
         assert_eq!(step, PaddingHit::Step(1));
         click(&mut app, &mut state, step);
         assert_eq!(app.padding_settings.mode, PaddingMode::WidthDependent);
         assert_eq!(app.padding_settings.width_threshold, 201);
-        let big = hit(
-            area,
-            &app.padding_settings,
-            layout.big_decrement.unwrap().as_position(),
-        );
-        click(&mut app, &mut state, big.unwrap());
-        assert_eq!(app.padding_settings.width_threshold, 191);
+        let decrement = control.geometry().previous.as_position();
+        let step = hit(area, &app.padding_settings, decrement);
+        assert_eq!(step, Some(PaddingHit::Step(-1)));
+        click(&mut app, &mut state, step.unwrap());
+        assert_eq!(app.padding_settings.width_threshold, 200);
     }
 
     #[test]
-    fn typed_threshold_applies_when_valid_and_rejects_values_of_ten_or_less() {
+    fn threshold_keys_are_delegated_to_shared_numeric_settings() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let (mut app, _directory) = app();
         let mut state = SettingsState {
             selected_row: ROW_THRESHOLD,
             ..SettingsState::default()
         };
-        click(&mut app, &mut state, PaddingHit::Field);
-        assert_eq!(state.padding.editing.as_deref(), Some(""));
-        for character in ['1', '5', '0'] {
-            handle_key(
-                &mut app,
-                &mut state,
-                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
-            );
-        }
-        assert_eq!(app.padding_settings.width_threshold, 150);
-        handle_key(
-            &mut app,
-            &mut state,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        );
-        assert!(state.padding.editing.is_none());
-
-        click(&mut app, &mut state, PaddingHit::Field);
-        for character in ['1', '0'] {
-            handle_key(
-                &mut app,
-                &mut state,
-                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
-            );
-        }
-        assert_eq!(
-            app.padding_settings.width_threshold, 150,
-            "10 is not above 10"
-        );
-        handle_key(
-            &mut app,
-            &mut state,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        );
-        assert!(app.status_message.is_some());
+        let press = |app: &mut App, state: &mut SettingsState, code: KeyCode| {
+            handle_key(app, state, KeyEvent::new(code, KeyModifiers::NONE))
+        };
+        assert!(!press(&mut app, &mut state, KeyCode::Char('-')));
+        assert!(!press(&mut app, &mut state, KeyCode::Char('+')));
+        assert!(press(&mut app, &mut state, KeyCode::PageDown));
+        assert_eq!(app.padding_settings.width_threshold, 190);
+        assert!(press(&mut app, &mut state, KeyCode::PageUp));
+        assert_eq!(app.padding_settings.width_threshold, 200);
+        assert!(!press(&mut app, &mut state, KeyCode::Char('*')));
+        assert_eq!(app.padding_settings.width_threshold, 200);
     }
 
     #[test]
-    fn narrow_content_drops_the_double_step_buttons_but_keeps_the_input() {
+    fn threshold_buttons_are_left_click_targets_and_value_opens_shared_editor() {
+        let settings = PaddingSettings::default();
+        let area = Rect::new(0, 0, 90, 20);
+        let layout = tab_layout(area, &settings);
+        let control = threshold_control(layout.threshold, settings.width_threshold);
+        let geometry = control.geometry();
+        assert_eq!(
+            hit(area, &settings, geometry.previous.as_position()),
+            Some(PaddingHit::Step(-1))
+        );
+        assert_eq!(
+            hit(area, &settings, geometry.next.as_position()),
+            Some(PaddingHit::Step(1))
+        );
+        assert_eq!(
+            hit(area, &settings, geometry.open.as_position()),
+            Some(PaddingHit::Field)
+        );
+        let ink = control.value_ink()[0];
+        assert_eq!(
+            hit(area, &settings, ink.as_position()),
+            Some(PaddingHit::Field)
+        );
+        assert_eq!(
+            control.hit(geometry.previous.as_position(), PointerButton::Right),
+            None,
+            "only the left button steps"
+        );
+    }
+
+    #[test]
+    fn threshold_glyphs_are_plain_minus_plus_and_star() {
+        let (mut app, _directory) = app();
+        app.padding_settings.mode = PaddingMode::WidthDependent;
+        let state = SettingsState::default();
+        let mut terminal = Terminal::new(TestBackend::new(90, 20)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+        let layout = tab_layout(Rect::new(0, 0, 90, 20), &app.padding_settings);
+        let geometry =
+            threshold_control(layout.threshold, app.padding_settings.width_threshold).geometry();
+        for (rect, glyph) in [
+            (geometry.previous, "-"),
+            (geometry.next, "+"),
+            (geometry.open, "*"),
+        ] {
+            assert_eq!(
+                terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                glyph
+            );
+        }
+    }
+
+    fn send_key(app: &mut App, code: crossterm::event::KeyCode) {
+        crate::keys::handle_event(
+            app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                code,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+    }
+
+    fn open_threshold_editor(app: &mut App, code: crossterm::event::KeyCode) {
+        app.mode = crate::app::Mode::Settings(Box::new(SettingsState {
+            tab: crate::app::SettingsTab::Padding,
+            selected_row: ROW_THRESHOLD,
+            ..SettingsState::default()
+        }));
+        send_key(app, code);
+        assert!(matches!(app.mode, crate::app::Mode::ValueDialog(_)));
+        app.settle_filesystem_for_test();
+    }
+
+    #[test]
+    fn threshold_keyboard_aliases_keep_step_and_space_open_behavior() {
+        use crossterm::event::KeyCode;
+        let (mut app, directory) = app();
+        app.padding_set_mode(PaddingMode::WidthDependent);
+        app.padding_set_threshold(200).unwrap();
+        app.settle_filesystem_for_test();
+
+        app.mode = crate::app::Mode::Settings(Box::new(SettingsState {
+            tab: crate::app::SettingsTab::Padding,
+            selected_row: ROW_THRESHOLD,
+            ..SettingsState::default()
+        }));
+        send_key(&mut app, KeyCode::Char('h'));
+        assert_eq!(app.padding_settings.width_threshold, 199);
+        send_key(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.padding_settings.width_threshold, 200);
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::config::load(directory.path())
+                .unwrap()
+                .padding
+                .width_threshold,
+            200
+        );
+
+        send_key(&mut app, KeyCode::Char(' '));
+        assert!(matches!(app.mode, crate::app::Mode::ValueDialog(_)));
+        app.settle_filesystem_for_test();
+        if let crate::app::Mode::ValueDialog(host) = &app.mode {
+            let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
+                panic!("Space must open the shared number editor");
+            };
+            assert_eq!(number.draft.buf, "200");
+        }
+    }
+
+    #[test]
+    fn pointer_field_dispatch_opens_the_shared_number_dialog() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::layout::Rect;
+
+        let (mut app, _directory) = app();
+        app.padding_settings.mode = PaddingMode::WidthDependent;
+        let screen = Rect::new(0, 0, 120, 40);
+        app.set_screen_area(screen);
+        let state = SettingsState {
+            tab: crate::app::SettingsTab::Padding,
+            ..SettingsState::default()
+        };
+        let mut settings_layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
+        let instruction_height = crate::settings_ui::instructions_panel_height(
+            &app,
+            state.tab,
+            settings_layout.content_area,
+        );
+        settings_layout.content_area.y += instruction_height;
+        settings_layout.content_area.height = settings_layout
+            .content_area
+            .height
+            .saturating_sub(instruction_height);
+        let padding_layout = tab_layout(settings_layout.content_area, &app.padding_settings);
+        let editor = threshold_control(
+            padding_layout.threshold,
+            app.padding_settings.width_threshold,
+        );
+        let position = editor.geometry().open.as_position();
+        app.mode = crate::app::Mode::Settings(Box::new(state));
+
+        let emitted = app.capture_emitted_geometry(1);
+        app.commit_emitted_geometry(emitted);
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(matches!(app.mode, crate::app::Mode::ValueDialog(_)));
+    }
+
+    fn replace_editor_text(app: &mut App, old: &str, new: &str) {
+        for _ in old.chars() {
+            send_key(app, crossterm::event::KeyCode::Backspace);
+        }
+        for character in new.chars() {
+            send_key(app, crossterm::event::KeyCode::Char(character));
+        }
+    }
+
+    #[test]
+    fn shared_threshold_editor_cancel_and_enter_are_deferred_for_every_mode() {
+        use crossterm::event::KeyCode;
+
+        for mode in PaddingMode::ALL {
+            let (mut app, directory) = app();
+            app.padding_set_mode(mode);
+            app.padding_set_threshold(200).unwrap();
+            app.settle_filesystem_for_test();
+            let accepted = app.padding_settings;
+
+            // `*` opens exact entry without first forcing WidthDependent mode.
+            open_threshold_editor(&mut app, KeyCode::Char('*'));
+            replace_editor_text(&mut app, "200", "150");
+            assert_eq!(app.padding_settings, accepted, "typing mutated {mode:?}");
+            send_key(&mut app, KeyCode::Esc);
+            app.settle_filesystem_for_test();
+            assert_eq!(app.padding_settings, accepted, "cancel mutated {mode:?}");
+            assert_eq!(
+                crate::config::load(directory.path()).unwrap().padding,
+                accepted
+            );
+
+            // Enter opens the same shared dialog; only its Enter commits the value.
+            open_threshold_editor(&mut app, KeyCode::Enter);
+            replace_editor_text(&mut app, "200", "150");
+            assert_eq!(app.padding_settings, accepted, "draft applied before Enter");
+            send_key(&mut app, KeyCode::Enter);
+            app.settle_filesystem_for_test();
+            assert_eq!(app.padding_settings.mode, PaddingMode::WidthDependent);
+            assert_eq!(app.padding_settings.width_threshold, 150);
+            assert_eq!(
+                crate::config::load(directory.path()).unwrap().padding,
+                app.padding_settings
+            );
+        }
+    }
+
+    #[test]
+    fn shared_threshold_editor_retains_invalid_drafts_and_corrects_exactly() {
+        use crossterm::event::KeyCode;
+
+        for invalid in ["", "10", "1001", "10000", "65536"] {
+            let (mut app, directory) = app();
+            app.padding_set_mode(PaddingMode::Enabled);
+            app.padding_set_threshold(200).unwrap();
+            app.settle_filesystem_for_test();
+            let accepted = app.padding_settings;
+
+            open_threshold_editor(&mut app, KeyCode::Char('*'));
+            replace_editor_text(&mut app, "200", invalid);
+            send_key(&mut app, KeyCode::Enter);
+            let crate::app::Mode::ValueDialog(host) = &app.mode else {
+                panic!("invalid draft {invalid:?} closed the shared editor");
+            };
+            let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
+                panic!("padding editor is not numeric");
+            };
+            assert_eq!(number.draft.buf, invalid);
+            assert!(number.error.is_some());
+            app.settle_filesystem_for_test();
+            assert_eq!(app.padding_settings, accepted);
+            assert_eq!(
+                crate::config::load(directory.path()).unwrap().padding,
+                accepted
+            );
+
+            replace_editor_text(&mut app, invalid, "153");
+            send_key(&mut app, KeyCode::Enter);
+            app.settle_filesystem_for_test();
+            assert_eq!(app.padding_settings.mode, PaddingMode::WidthDependent);
+            assert_eq!(app.padding_settings.width_threshold, 153);
+            assert_eq!(
+                crate::config::load(directory.path()).unwrap().padding,
+                app.padding_settings
+            );
+        }
+    }
+
+    #[test]
+    fn threshold_arrows_at_domain_bounds_are_disabled() {
+        for (value, disabled_action) in [
+            (
+                crate::padding::MIN_WIDTH_THRESHOLD,
+                ControlAction::Decrement,
+            ),
+            (
+                crate::padding::MAX_WIDTH_THRESHOLD,
+                ControlAction::Increment,
+            ),
+        ] {
+            let control = threshold_control(Rect::new(0, 0, 30, 1), value);
+            let geometry = control.geometry();
+            let disabled = if disabled_action == ControlAction::Decrement {
+                geometry.previous
+            } else {
+                geometry.next
+            };
+            assert_eq!(
+                control.hit(Position::new(disabled.x, disabled.y), PointerButton::Left),
+                None
+            );
+            assert_eq!(
+                control.hit(
+                    Position::new(geometry.open.x, geometry.open.y),
+                    PointerButton::Left
+                ),
+                Some(ControlAction::EditNumber)
+            );
+        }
+    }
+
+    #[test]
+    fn threshold_steps_at_bounds_are_noops_without_forcing_padding_mode() {
+        for (threshold, direction) in [
+            (crate::padding::MIN_WIDTH_THRESHOLD, -1),
+            (crate::padding::MAX_WIDTH_THRESHOLD, 1),
+        ] {
+            let (mut app, _directory) = app();
+            app.padding_set_threshold(threshold).unwrap();
+            app.settle_filesystem_for_test();
+            let before = app.configuration_admission.attempts;
+            app.step_settings_number(
+                crate::value_settings::SettingsNumber::PaddingThreshold,
+                direction,
+            );
+            assert_eq!(app.padding_settings.mode, PaddingMode::Disabled);
+            assert_eq!(app.padding_settings.width_threshold, threshold);
+            assert_eq!(app.configuration_admission.attempts, before);
+        }
+    }
+
+    #[test]
+    fn compact_padding_content_keeps_the_threshold_label_readable() {
+        let (mut app, _directory) = app();
+        app.padding_settings.mode = PaddingMode::WidthDependent;
+        // The Settings sidebar leaves 53 content columns at an 80-column screen.
+        let text = draw(&app, &SettingsState::default(), 53, 20);
+        assert!(text.contains("Columns:"), "compact units must fit: {text}");
+        assert!(
+            !text.contains("Terminal colu"),
+            "do not clip the longer label: {text}"
+        );
+    }
+
+    #[test]
+    fn narrow_content_keeps_every_threshold_target() {
         let settings = PaddingSettings::default();
         let layout = tab_layout(Rect::new(0, 0, 60, 20), &settings);
-        assert!(layout.big_decrement.is_none() && layout.big_increment.is_none());
-        assert!(layout.field.width > 0);
+        let geometry = threshold_control(layout.threshold, settings.width_threshold).geometry();
+        assert_eq!(geometry.previous.width, 1);
+        assert_eq!(geometry.next.width, 1);
+        assert_eq!(geometry.open.width, 1);
+        assert!(geometry.value.width >= 3, "the value stays readable");
+    }
+    #[test]
+    fn disabled_threshold_arrows_do_not_fall_through_to_the_mode_card() {
+        let area = Rect::new(0, 0, 90, 20);
+        for (threshold, decrement) in [
+            (crate::padding::MIN_WIDTH_THRESHOLD, true),
+            (crate::padding::MAX_WIDTH_THRESHOLD, false),
+        ] {
+            let settings = PaddingSettings {
+                width_threshold: threshold,
+                ..PaddingSettings::default()
+            };
+            let row = tab_layout(area, &settings).threshold;
+            let control = threshold_control(row, threshold);
+            let geometry = control.geometry();
+            let disabled = if decrement {
+                geometry.previous
+            } else {
+                geometry.next
+            };
+            assert_eq!(hit(area, &settings, disabled.as_position()), None);
+            assert_eq!(
+                hit(area, &settings, geometry.open.as_position()),
+                Some(PaddingHit::Field)
+            );
+        }
     }
 }

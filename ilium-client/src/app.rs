@@ -3541,6 +3541,14 @@ impl App {
                 crate::value_dialog_host::ValueDialogHost::cost(&self.cost_settings, row, directory)
             });
         match result {
+            Ok(host)
+                if matches!(
+                    host.dialog,
+                    crate::value_dialog::ValueDialogState::Number(_)
+                ) =>
+            {
+                self.begin_authoritative_number_dialog(host)
+            }
             Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
             Err(error) => self.status_message = Some(error),
         }
@@ -3551,9 +3559,13 @@ impl App {
         host: &mut crate::value_dialog_host::ValueDialogHost,
         outcome: &crate::value_dialog::DialogOutcome,
     ) -> Result<(), String> {
-        let crate::value_dialog_host::ValueTarget::Cost { target, directory } = &host.target else {
+        let crate::value_dialog_host::ValueTarget::Cost {
+            target, directory, ..
+        } = &host.target
+        else {
             return Err("This is not a cost value dialog".into());
         };
+        host.number_read_ready()?;
         if host.is_saving() {
             return Err("The previous value is still being saved".into());
         }
@@ -30577,7 +30589,7 @@ mod text_trigger_concurrency_tests {
             .commit_text_trigger(
                 editor.editing_id.as_deref(),
                 editor.editing_base.as_ref(),
-                editor.candidate()
+                editor.candidate().unwrap()
             )
             .is_err());
 
@@ -30620,7 +30632,7 @@ mod text_trigger_concurrency_tests {
         app.commit_text_trigger(
             editor.editing_id.as_deref(),
             editor.editing_base.as_ref(),
-            editor.candidate(),
+            editor.candidate().unwrap(),
         )
         .expect("save by stable ID");
         app.settle_filesystem_for_test();

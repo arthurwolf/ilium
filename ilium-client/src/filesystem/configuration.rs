@@ -5,7 +5,24 @@ use ilium_execution::{Job, JobContext, JobCost};
 use ilium_ipc::{TextTrigger, TextTriggerSettings};
 use std::path::PathBuf;
 
+pub enum NumberReadTarget {
+    Settings(crate::value_settings::SettingsNumber),
+    Cost(crate::value_cost::CostValueTarget),
+}
+impl NumberReadTarget {
+    fn value(&self, config: &crate::config::ClientConfig) -> Result<String, String> {
+        match self {
+            Self::Settings(field) => Ok(field.persisted_snapshot(config)),
+            Self::Cost(target) => match target.dialog(&config.cost)? {
+                crate::value_dialog::ValueDialogState::Number(number) => Ok(number.draft.buf),
+                _ => Err("The saved cost setting is no longer numeric; reopen this dialog".into()),
+            },
+        }
+    }
+}
+
 pub enum ConfigurationChange {
+    NumberRead(NumberReadTarget),
     Ui(Box<crate::config::UiSettings>),
     Terminal(crate::config::TerminalSettings),
     Git(crate::config::GitSettings),
@@ -57,6 +74,7 @@ pub enum ConfigurationChange {
     },
 }
 pub enum ConfigurationSaved {
+    NumberRead(String),
     Plain,
     Session(SessionSettings),
     AgentSetup(AgentSetupSettings),
@@ -90,6 +108,16 @@ impl Job for ConfigurationWrite {
         use ConfigurationChange::*;
         let directory = &self.directory;
         let result = match self.change {
+            NumberRead(field) => {
+                return read_number(directory, field)
+                    .map(ConfigurationSaved::NumberRead)
+                    .map_err(|message| ConfigurationFailure {
+                        message,
+                        observed_session: None,
+                        observed_agent_setup: None,
+                    });
+            }
+
             Ui(value) => crate::config::save_ui_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Terminal(value) => crate::config::save_terminal_settings(directory, &value)
@@ -304,7 +332,8 @@ impl ConfigurationChange {
             | Keyboard(_)
             | Kanban(_)
             | Padding(_)
-            | Separators(_) => 0,
+            | Separators(_)
+            | NumberRead(_) => 0,
             ProjectName {
                 proposal: value, ..
             } => {
@@ -439,6 +468,13 @@ fn normalize<T: serde::Serialize + serde::de::DeserializeOwned>(value: &T) -> Re
         .map_err(|_| "Could not encode configuration command".to_owned())?;
     serde_json::from_slice(&bytes)
         .map_err(|_| "Could not normalize configuration command".to_owned())
+}
+
+/// Read and validate the shared document without changing runtime state.
+fn read_number(directory: &std::path::Path, field: NumberReadTarget) -> Result<String, String> {
+    crate::config::load(directory)
+        .map_err(|error| format!("Saved value unavailable: {error}"))
+        .and_then(|config| field.value(&config))
 }
 
 pub struct ProjectRead {

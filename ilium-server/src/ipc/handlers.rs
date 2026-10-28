@@ -6153,8 +6153,24 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     let (detection_config, _) = state.agent_detection_settings_snapshot().await;
     let before_admission = crate::workspace_prune::spawn_directory_generation(state, cwd).await;
     let is_terminal = matches!(&kind, PaneSnapshotKind::Terminal(_));
+    // Isolate the large debug admission poll frame from the nested connection
+    // and pane-creation frames on the server's unchanged 2 MiB worker stack.
+    // The guard aborts admission if its awaiting owner is cancelled; returning
+    // the result transfers repository lock/lease ownership back to this scope.
+    let admission_state = Arc::clone(state);
+    let admission_cwd = cwd.to_path_buf();
     let repository_admission =
-        crate::workspace_prune::spawn_repository_admission(state, cwd, is_terminal).await;
+        crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+            crate::workspace_prune::spawn_repository_admission(
+                &admission_state,
+                &admission_cwd,
+                is_terminal,
+            )
+            .await
+        }))
+        .join()
+        .await
+        .unwrap_or_else(|error| Err(format!("launch repository admission task failed: {error}")));
     let repository_admission = match repository_admission {
         Ok(admission) => admission,
         Err(reason) => return Err(refuse_unregistered_pane_spawn(state, pane_id, reason).await),
