@@ -601,6 +601,14 @@ impl HeapBytes for ServerEvent {
                 .saturating_add(first_sequence.heap_bytes())
                 .saturating_add(sequence.heap_bytes())
                 .saturating_add(bytes.heap_bytes()),
+            Self::ScreenPreview {
+                pane_id,
+                through_sequence,
+                bytes,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(through_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes()),
             Self::PaneStatusChanged { pane_id, status } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(status.heap_bytes()),
