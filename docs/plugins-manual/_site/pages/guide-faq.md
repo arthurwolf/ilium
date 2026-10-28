@@ -22,11 +22,11 @@ Short answers to questions that plugin authors ask often. Each answer points to 
 
 **Can I ask for a grant later?** No. Grants are in the manifest, and a new grant needs an update that the user reviews.
 
-**How much memory can I use?** 32 MiB by default. The ceiling is 256 MiB for bundled (T1) plugins and 128 MiB for T2 and T3. See [Errors and limits](/pages/errors-and-limits/).
+**How much memory can I use?** 32 MiB by default. The ceiling is 256 MiB for bundled (T1) plugins and 128 MiB for T2 and T3. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 **How long may a handler run?** Events 20 ms (T1: 50 ms), commands 50 ms, render 10 ms, `activate` 2 s, `deactivate` 500 ms. Longer work goes to jobs. See [Performance](/pages/performance/).
 
-**What happens when I break a limit?** The instance traps and restarts after 1 s, then 5 s, then 30 s. The third failure in 10 minutes disables the plugin on that side.
+**What happens when I break a limit?** The instance traps and restarts after 1 s, then 5 s. The third failure in 10 minutes disables the plugin on that side.
 
 **Can I use threads?** No. A component is single-threaded. Use jobs or requests for background work.
 

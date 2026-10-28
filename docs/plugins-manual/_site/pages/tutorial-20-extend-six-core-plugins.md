@@ -133,7 +133,7 @@ The manifest is the larger part of the package. It has seven grants, six extensi
 Points to notice:
 
 - Each extension needs its own grant, and each grant names one point. There is no "contribute to any" grant, and a wildcard fails with `manifest.grant-wildcard`. A missing grant fails with `manifest.grant-missing-extension`.
-- `point` carries `@0.1.0`. The owner must offer that version or a newer minor in the same major. Otherwise the entry stays dormant.
+- `point` carries `@0.1.0`. The version is a caret range: the owner must offer `>=0.1.0 <0.2.0`. Otherwise the entry stays dormant.
 - `priority` is left out. The default is 50. Collect entries are listed in priority order, so priority matters only when two entries compete, such as two recognisers that match the same text.
 - Backslashes in a JSON string are doubled. The Text Triggers pattern `Run the tests\\? \\(y/n\\)` reaches the owner as `Run the tests\? \(y/n\)`.
 - The trigger rule is `enabled: false`. A rule pack is a set the user turns on. It never starts sending text by itself.
@@ -177,7 +177,7 @@ Teams keep different rules per repository. Build the rule pack from the file `.i
 
 The code has three parts. A pure function turns the file text into entries. A function registers the entries through a callback, so a test can replace the host call. The handler runs both on start and on the command.
 
-Two facts matter. First, `register` works only on a point that is `dynamic`. If the Text Triggers point is static, `register` returns `not-dynamic`. The plugin does not crash. It logs one line and keeps the static entries. Second, `register` validates the entry again, so a bad rule in the file gives `schema-mismatch` for that pack only, and the other packs still register.
+Two facts matter. First, `register` works only on a point that is `dynamic`. If the Text Triggers point is static, `register` fails with `extension.not-dynamic` (the WIT case `not-dynamic`, `NotDynamic` in Rust). The plugin does not crash. It logs one line and keeps the static entries. Second, `register` validates the entry again, so a bad rule in the file gives `schema-mismatch` for that pack only, and the other packs still register.
 
 **Rust**
 
@@ -223,7 +223,7 @@ pub fn register_packs(
     for (extension, entry_json) in packs {
         match register(extension, entry_json) {
             Ok(()) => accepted += 1,
-            Err(reason) if reason.contains("NotDynamic") => {
+            Err(reason) if reason.contains("NotDynamic") || reason.contains("not-dynamic") => {
                 log::log(Level::Warn, "rule-packs is not dynamic; project rules skipped");
                 break;
             }

@@ -30,13 +30,13 @@ Terms:
 
 | Rust | TypeScript | Returns |
 |---|---|---|
-| `host.mode() -> Mode` | `host.mode(): 'native' \| 'component'` | The mode of this host. The default is native under `cargo test` and `bun test`, and component under `ilium plugin test --component`. |
+| `host.mode() -> Mode` | `host.mode(): 'native' \| 'component'` | The mode of this host. The default is native under `cargo test` and `bun test`, and component under `ilium plugin test` (`--component <file>` only picks the wasm file). |
 
 - **[DEV-400]** Both modes MUST expose the same `FakeHost` API. A test written for native mode MUST run in component mode with no source change when it uses only the API on this page.
 - **[DEV-401]** In component mode the harness MUST enforce the deadlines and the memory ceiling of [Errors and limits](/pages/reference-errors-and-limits/). In native mode it MUST NOT, and it MUST say so in `host.mode()`, which returns `Mode::Native` (TypeScript `'native'`) or `Mode::Component` (`'component'`).
 - **[DEV-402]** The project's own tests run in native mode with `cargo test` or `bun test`. `ilium plugin test` runs the fixtures with expectation files in component mode, as [Plugin command-line reference](/pages/reference-plugin-cli/) defines. A test written with `FakeHost` MAY be run in component mode by setting `ILIUM_PLUGIN_TEST_MODE=component`, which makes `FakeHost` load `dist/<side>.wasm` instead of the native type.
 - **[DEV-403]** In component mode a trap MUST be reported as a test failure with the trap code, unless the test calls `expect_trap`.
-- **[DEV-404]** `host.mode()` MUST return `native` under `cargo test` and `bun test`, and `component` under `ilium plugin test --component` or `ILIUM_PLUGIN_TEST_MODE=component`. `assert_within_budget` MUST be skipped with the reason `needs-component` when `host.mode()` is `native`.
+- **[DEV-404]** `host.mode()` MUST return `native` under `cargo test` and `bun test`, and `component` under `ilium plugin test` (`--component <file>` only picks the wasm file) or `ILIUM_PLUGIN_TEST_MODE=component`. `assert_within_budget` MUST be skipped with the reason `needs-component` when `host.mode()` is `native`.
 
 ## Setup: the builder
 
@@ -73,7 +73,7 @@ A host is built in steps, then activated. Setup is complete at `activate`. Grant
 - **[DEV-415]** `host.grant_now(name)` on an active plugin MUST call `deactivate(granted)`, then `activate` with `instance` plus 1 and the new `granted` list. `host.revoke(name)` MUST do the same with `deactivate(revoked)`. No event is delivered.
 - **[DEV-564]** `host.grants_changed(list)` MUST follow the revocation rule of [Runtime model](/pages/reference-runtime-model/#13-link-time-grant-enforcement): requests that need a removed grant complete as `failed(revoked)` before `deactivate(revoked)`, then `activate` runs with the new list. A list that only adds grants MUST use `deactivate(granted)`.
 - **[DEV-565]** `host.breach_deadline(export)` MUST apply the effect of the call class in the scheduling table, and a `deactivate` breach MUST NOT count as a failure.
-- **[DEV-416]** After `revoke`, or for a capability the test declined, intents that need the grant MUST complete as `refused(plugin-error{code: not-permitted})`, and host imports that need it MUST return `Err(not-permitted)`. A call to a function of a capability the manifest never requested MUST trap with `trap.import-not-requested`.
+- **[DEV-416]** After `revoke`, or for a capability the test declined, intents that need the grant MUST complete as `refused(plugin-error{code: not-permitted})`, and host imports that need it MUST return `Err(not-permitted)`. A call to a function of a capability the manifest never requested MUST trap with `host.capability-not-requested`.
 - **[DEV-417]** Runtime results MUST use the WIT `error-code` enum of [Errors and limits](/pages/reference-errors-and-limits/#the-plugin-error-record) and no other value. Dotted codes such as `harness.setup-closed` or `trap.deadline` are harness, fixture, trap and command-line diagnostics only, and MUST NOT appear in `plugin-error.code`.
 
 **Error values.** Runtime results always use the WIT error-code enum. Dotted codes are used only for harness, fixture, trap and CLI diagnostics, never inside `plugin-error.code`. The table maps the situations of this page to the values a test asserts.
@@ -82,7 +82,7 @@ A host is built in steps, then activated. Setup is complete at `activate`. Grant
 |---|---|
 | Grant revoked or declined, intent | `refused(plugin-error{code: not-permitted})` |
 | Grant revoked or declined, import | `Err(not-permitted)` |
-| Function of a capability never requested | trap `trap.import-not-requested` |
+| Function of a capability never requested | trap `host.capability-not-requested` |
 | Path out of the granted scope | `Err(not-permitted)` |
 | Storage value or bucket over its quota | `Err(quota-exceeded)` |
 | Setting value that fails validation | `Err(invalid-argument)` |
@@ -130,7 +130,7 @@ A host is built in steps, then activated. Setup is complete at `activate`. Grant
 - **[DEV-431]** `deliver` MUST return the submissions the plugin returned from `on-events`, without applying them. It MUST also record them in `submitted()`.
 - **[DEV-432]** `deliver` MUST NOT deliver outcomes by itself. Outcomes are queued as `request-completed` events. `settle()` delivers them and also delivers the submissions that those events produce, until the queue is empty or 100 rounds pass. After 100 rounds `settle` MUST fail with `harness.settle-limit`.
 - **[DEV-433]** More than 256 submissions from one batch MUST fail the test with `trap.submission-batch` in both modes, because the real host traps the instance.
-- **[DEV-434]** The harness MUST apply the batch refusal rule of [Events and intents](/pages/reference-events-and-intents/): a refused submission completes as `refused(error)` and all others complete as `refused(cancelled)` with the message `batch refused: submission <index>`.
+- **[DEV-434]** The harness MUST apply the batch refusal rule of [Events and intents](/pages/reference-events-and-intents/): a refused submission completes as `refused(not-permitted)` or `refused(invalid-argument)` and all others complete as `refused(cancelled)` with the message `batch refused: submission <index>`.
 - **[DEV-435]** The harness MUST validate dedup keys: charset `[A-Za-z0-9._:/-]`, 1 to 128 characters, and a second submission with the same key inside 10 fake minutes MUST complete as `duplicate`. A bad key MUST complete as `refused(plugin-error{code: invalid-argument, message starting "dedup-key-invalid:"})`.
 - **[DEV-436]** `deliver` MUST NOT run timers. Time moves only through `advance_clock`.
 
@@ -464,7 +464,7 @@ An expectation file has the same base name plus `.expect.json`.
 | `subset` | Each given item appears at least once, order ignored |
 
 - **[DEV-515]** In an expectation item, only the given fields are compared. Fields absent from the item are ignored.
-- **[DEV-514]** A fixture with `side` `scene` MUST accept only the keys `schema`, `side`, `settings`, `clock` and `frames`. Any other key MUST fail with `fixture.unknown-key`. `lifecycle` steps MUST run after the events. `expect_state` MUST fail the fixture with `fixture.state-mismatch` when the state differs.
+- **[DEV-514]** A fixture with `side` `scene` MUST accept only the keys `schema`, `side`, `settings`, `clock`, `lifecycle`, `expect_state` and `frames`. Any other key MUST fail with `fixture.unknown-key`. `lifecycle` steps MUST run after the events. `expect_state` MUST fail the fixture with `fixture.state-mismatch` when the state differs.
 - **[DEV-516]** `host.run_fixture(path)` MUST load the fixture, deliver the events, settle, and compare the expectation file when it exists. A missing expectation file means the run only asserts that nothing traps.
 - **[DEV-517]** `ilium plugin test` MUST run every `tests/fixtures/*.json` as a test case named `fixture:<file>` and MUST compare the expectation file when one exists.
 
@@ -517,7 +517,7 @@ A replay file records the inputs of one session so a bug can be reproduced.
 
 | Record `type` | Fields |
 |---|---|
-| `test-case` | `name`, `status` (`pass`, `fail`, `trap`), `duration_ms`, `reason` (not for a pass) |
+| `test-case` | `name`, `status` (`pass`, `fail`, `trap`, `skipped`), `duration_ms`, `reason` (required when `status` is `skipped`, present for `fail` and `trap`, absent for `pass`) |
 | `summary` | `passed`, `failed`, `skipped`, `duration_ms` |
 
 - **[DEV-550]** The test names in records MUST be stable between runs.
@@ -597,7 +597,7 @@ Every dotted code named on this page and on the conformance page is in this tabl
 | `replay.diverged`, `replay.version-unsupported` | Replay errors |
 | `toolchain.coverage-tool-missing` | `--coverage` needs `cargo llvm-cov` or `bun test --coverage` |
 | `test.no-expectation` | Warning: a fixture has no expectation file |
-| `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.import-not-requested`, `trap.abi`, `trap.panic` | Trap codes. The table in [Errors and limits](/pages/reference-errors-and-limits/#trap-codes) owns them. |
+| `trap.deadline`, `trap.memory`, `trap.table`, `trap.submission-batch`, `trap.invalid-ui-tree`, `trap.abi`, `trap.panic` | Trap codes (a never-requested capability traps with `host.capability-not-requested`). The table in [Errors and limits](/pages/reference-errors-and-limits/#trap-codes) owns them. |
 
 ## See also
 

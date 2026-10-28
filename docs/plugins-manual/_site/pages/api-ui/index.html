@@ -576,7 +576,7 @@ Which kind each widget sends is listed on the widget pages, starting with <a hre
   roles when it paints. On a theme change the host repaints the last tree of every open view at once, delivers <code>theme-changed</code>, and triggers exactly one <code>views.render</code> per open view, coalesced with any other trigger in the same 16 ms window. A plugin need not call <code>invalidate</code>. Plugins cannot ship themes.</li>
 </ul>
 <div class="warn">
-<p>An invalid tree traps the plugin with a <code>ui.*</code> code: <code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code> or <code>ui.render-timeout</code>. The host keeps the previous tree, marked stale, and logs one error. <code>views.render</code> returns a tree, not a result, so it never returns <code>invalid-argument</code>.
+<p>An invalid tree traps the plugin with <code>trap.invalid-ui-tree</code>, whose logged detail reason is a <code>ui.*</code> code: <code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code> or <code>ui.render-timeout</code>. The host keeps the previous tree, marked stale, and logs one error. <code>views.render</code> returns a tree, not a result, so it never returns <code>invalid-argument</code>.
 A trap counts as a failure for the restart rule: the third failure in ten minutes disables the plugin on
 that side.</p>
 </div>
@@ -944,7 +944,7 @@ let frames = if extras.reduced_motion { 1 } else { 8 };
 const frames = themeExtras().reducedMotion ? 1 : 8;
 </code></pre>
 <p><strong>Focus and popups.</strong> Tab and Shift+Tab follow the <a href="/pages/ui-model/#focus-order">focus order</a>. At most 4 popups per view are open (<code>quota-exceeded</code>). A node with <code>disabled-reason</code> is muted and shows the reason as its tooltip.</p>
-<p><strong>Settings views.</strong> A <code>settings-page</code> tree may now use layout, <code>split</code>, <code>scroll-view</code>, <code>markdown</code>, <code>diff-view</code>, <code>check-list</code>, the data-display widgets, <code>progress-row</code>, <code>meter</code>, <code>minimap</code>, <code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code>, <code>image</code>, <code>surface</code>, <code>location-picker</code> and a read-only <code>code-view</code>. Still refused there: <code>popup</code>, <code>dialog</code>, <code>menu</code>, <code>video</code>, <code>terminal-view</code> and the input widgets other than <code>button</code>, <code>schema-form</code> and <code>location-picker</code>; they fail with <code>invalid-argument</code> on render and are logged.</p>
+<p><strong>Settings views.</strong> A <code>settings-page</code> tree may now use layout, <code>split</code>, <code>scroll-view</code>, <code>markdown</code>, <code>diff-view</code>, <code>check-list</code>, the data-display widgets, <code>progress-row</code>, <code>meter</code>, <code>minimap</code>, <code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code>, <code>image</code>, <code>surface</code>, <code>location-picker</code> and a read-only <code>code-view</code>. Still refused there: <code>popup</code>, <code>dialog</code>, <code>menu</code>, <code>video</code>, <code>terminal-view</code> and the input widgets other than <code>button</code>, <code>schema-form</code> and <code>location-picker</code>; a tree that contains one traps with <code>ui.widget-not-allowed</code> on render (render returns a tree, never <code>invalid-argument</code>) and is logged.</p>
 <h3 id="wit">WIT</h3>
 <p>The contract below is an excerpt. The owner is the <a href="/pages/reference-wit/">WIT reference</a>, and that page wins if the two differ.</p>
 <pre><code class="language-wit">// Excerpt of ilium:host/ui-host in reference-wit
@@ -965,7 +965,7 @@ set-widget-state: func(view: view-target, key: string, state: widget-state) -&gt
 display-width: func(text: string) -&gt; u16;
 theme: func() -&gt; theme-tokens;
 theme-extras: func() -&gt; theme-extras;
-/// Rows are top to bottom. first-row plus the rows written must be within the surface height.
+/// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
 /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
 write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
 </code></pre>
@@ -979,7 +979,7 @@ write-surface: func(view: view-target, key: string, first-row: u32, format: pixe
 <li><a href="/pages/settings-screens/">Settings screens</a> for settings pages and <code>schema-form</code>.</li>
 <li><a href="/pages/capability-ui-panels/">Capability: ui panels</a> for the grant and its dialog.</li>
 <li><a href="/pages/primitives-basic/">Basic primitive</a> for plugin pane bodies.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and the restart rule.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and the restart rule.</li>
 </ul>
 <p>Interface: <code>ilium:host/ui</code> and <code>ilium:types/ui</code> in <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-tree/"><small>Previous</small>tree</a><a class="next" href="/pages/api-workspace/"><small>Next</small>workspace</a></nav>

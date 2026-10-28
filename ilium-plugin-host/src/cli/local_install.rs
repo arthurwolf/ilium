@@ -171,7 +171,12 @@ impl LocalInstall {
                 "Existing installations require a complete dependency and grant-evidence snapshot",
             )));
         }
-        let mut grants = GrantStore::open(&self.env.state_dir).map_err(|e| fail(io(e)))?;
+        let mut grants = GrantStore::open(&self.env.state_dir).map_err(|e| {
+            fail(error(
+                "install.grants-unavailable",
+                format!("Grant store could not be opened: {e:?}"),
+            ))
+        })?;
         let audit = AuditLog::open_with_context(
             self.env.state_dir.join("audit/audit.jsonl"),
             Some(self.audit_context.clone()),

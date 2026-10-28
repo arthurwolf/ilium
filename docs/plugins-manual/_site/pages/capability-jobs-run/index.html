@@ -398,7 +398,7 @@
 <h3 id="what-you-need">What you need</h3>
 <ul>
 <li>The <code>jobs.run</code> grant. It takes no argument.</li>
-<li>A <code>job-runner</code> export. Add <code>"job-runner"</code> to the manifest <code>exports</code> list of the side that runs the job, and implement it: the <code>JobRunner</code> trait in Rust, or the <code>run</code> member of <code>definePlugin</code> in TypeScript. The <code>with-jobs</code> world fragment adds the import and export (section 8.5 of the API). See <a href="/pages/api-exports/">exports</a>.</li>
+<li>A <code>job-runner</code> export. Add <code>"job-runner"</code> to the manifest <code>exports</code> list of the side that runs the job, and implement it: the <code>JobRunner</code> trait in Rust, or the <code>run</code> member of <code>definePlugin</code> in TypeScript. The <code>with-jobs</code> world fragment adds the import and export (see <a href="/pages/api-exports/">exports</a> for the world fragments). See <a href="/pages/api-exports/">exports</a>.</li>
 <li>One <code>contributes.jobs</code> entry for every job kind the plugin starts.</li>
 <li>A side that supports jobs: <code>server</code>, <code>client</code> or <code>scene</code>. A scene declares the grant in <code>capabilities.scene</code>.</li>
 </ul>
@@ -601,7 +601,7 @@
 </tr>
 </tbody>
 </table>
-<p>The per-kind values in <code>contributes.jobs</code> override the CPU and memory defaults for that kind, within the same ceilings. Time spent in <code>wait-request</code> counts against the wall-clock deadline only. All plugins in one server or client share <code>session_job_workers</code>, which defaults to <code>min(4, cores / 2)</code> with a minimum of 1. Jobs queue when those workers are busy.</p>
+<p>The per-kind values in <code>contributes.jobs</code> override the CPU and memory defaults for that kind, within the same ceilings. Time spent in <code>wait-request</code> counts against the wall-clock deadline only. All plugins in one server or client share one pool of job worker instances per server or client. Its size is fixed by the host, is not a setting and cannot be changed by a plugin; it is <code>min(4, cores / 2)</code> with a minimum of 1. Jobs queue when those workers are busy.</p>
 <h3 id="how-a-job-runs">How a job runs</h3>
 <figure>
 <svg viewBox="0 0 320 300" role="img" aria-label="Job flow from start call to worker run, progress events and take-output" width="480" height="450">
@@ -645,7 +645,7 @@
 <td><code>start</code> returns <code>invalid-argument</code>.</td>
 </tr>
 <tr>
-<td>Input over the input limit</td>
+<td>Input over <code>job_io_mib</code> (input and output together; default 16 MiB, ceiling 64 for tier 1 and 16 for tiers 2 and 3)</td>
 <td><code>start</code> returns <code>invalid-argument</code> at once. Nothing is queued.</td>
 </tr>
 <tr>

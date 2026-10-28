@@ -85,11 +85,11 @@ A plugin's own pane kind has the content kind `<plugin-id>/<kind>`, where `<kind
 
 ## Worked example: Rust, server side
 
-This server plugin opens a review pane each time an agent finishes. It keeps the correlation numbers of its own submissions and logs the node id when the pane exists. The manifest requests `agent.read` for the activity event and `panes.create` for the new pane.
+This server plugin opens a review pane each time an agent finishes. It keeps the correlation numbers of its own submissions and logs the node id when the pane exists. The manifest requests `agent.read` for the activity event, `panes.create` for the new pane and `panes.create-command:git` for the `git` program it runs in that pane.
 
 ```json
 {
-  "capabilities": { "server": ["panes.create", "agent.read"] }
+  "capabilities": { "server": ["panes.create", "panes.create-command:git", "agent.read"] }
 }
 ```
 
@@ -200,11 +200,11 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-The manifest for this plugin requests `panes.create` on the client side and `fs.read:project` for the `cwd` scope:
+The manifest for this plugin requests `panes.create` and `panes.create-command:tail` (the program in `command`) on the client side, and `fs.read:project` for the `cwd` scope:
 
 ```json
 {
-  "capabilities": { "client": ["panes.create", "fs.read:project"] }
+  "capabilities": { "client": ["panes.create", "panes.create-command:tail", "fs.read:project"] }
 }
 ```
 
@@ -259,7 +259,7 @@ A refused submission does not reserve its dedup key, so a retry with the same ke
 
 ## What the user sees
 
-After the kernel accepts the request, the new pane appears in the tree under its parent, with its title and status line. The command runs at once. With `parent: none`, the pane is placed after the focused pane in its group, the same place a user-created pane gets (U33).
+After the kernel accepts the request, the new pane appears in the tree under its parent, with its title and status line. The command runs at once. With `parent: none`, the pane is placed after the focused pane in its group, the same place a user-created pane gets.
 
 <figure>
 <pre class="term"><span class="t-dim">session default</span>

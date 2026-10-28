@@ -454,14 +454,14 @@
 <li>[LIF-192] A replacement disabled by failure MUST re-enable the built-in plugin with a notice. Test: fail a replacement.</li>
 </ul>
 <h3 id="the-recovery-page">The recovery page</h3>
-<p>The recovery page lists plugins with state and last failure. It offers: enable or disable, uninstall, reset failures, forget settings, and start in safe mode (<a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode</a>). Open it with <code>Ctrl+Alt+R</code>.</p>
+<p>The recovery page lists plugins with state and last failure. It offers seven actions: enable, disable, reset failures, uninstall, forget settings, safe mode and open config file (<a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode</a>). Open it with <code>Ctrl+B</code>, then <code>:</code> (the command prompt).</p>
 <h3 id="update-rollback-and-uninstall">Update, rollback and uninstall</h3>
 <p>Select Update on a row, or run <code>ilium plugin update &lt;id&gt;</code>. If the new version fails to start within the trial, Ilium puts the old version back. Uninstall asks whether to keep or delete the plugin data (<a href="/pages/reference-plugin-files/">Plugin files</a>). Details are in <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>.</p>
 <h3 id="administrator-policy">Administrator policy</h3>
 <p>An administrator controls plugins for all users with <code>/etc/ilium/policy.toml</code> on Linux. Keys are in <a href="/pages/reference-plugin-policy/">Plugin policy</a>. A plugin that the policy blocks shows "Blocked by policy" and its data stays. A policy may forbid third-party plugins, limit tiers, allow or deny publishers and ids, and forbid grants. On macOS the file is in <code>/Library/Application Support/ilium/</code> and on Windows in <code>%PROGRAMDATA%\ilium\</code>.</p>
-<p>The policy can also block exact versions with <code>policy.blocked</code>, force safe mode, or pin a version. These keys are planned and are not in the first policy format. Until they exist, use <code>plugins.deny_ids</code> and <code>plugins.allow_ids</code>.</p>
+<p>The policy can also block exact versions, force safe mode, or pin a version. These per-version keys are planned and are not in the first policy format. A plugin blocked by id already shows <code>policy.blocked</code> as its disabled reason. Until the per-version keys exist, use <code>plugins.deny_ids</code> and <code>plugins.allow_ids</code>.</p>
 <ul>
-<li>[LIF-193] A plugin blocked by policy MUST show "Blocked by policy" with the code and MUST keep its data. Test: add its id to <code>denied_ids</code>.</li>
+<li>[LIF-193] A plugin blocked by policy MUST show "Blocked by policy" with the policy code of the rule that blocked it (for example <code>policy.id-denied</code>, <code>policy.third-party-denied</code>; codes in <a href="/pages/reference-plugin-policy/">Plugin policy</a>) and MUST keep its data. Test: add its id to <code>plugins.deny_ids</code> and assert the row text and the code.</li>
 </ul>
 <h3 id="see-also">See also</h3>
 <ul>

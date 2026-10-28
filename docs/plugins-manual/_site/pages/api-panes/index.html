@@ -739,7 +739,7 @@ export const { handler } = definePlugin({
 <p>Illustrative, not generated. The names and timestamps are placeholders. The refused line appears only if a retry runs before the process starts.</p>
 <h3 id="lifecycle-state-and-the-pane-journal">Lifecycle state and the pane journal</h3>
 <p>A pane's process can be running, frozen, restarting or exited. The host reports every change with <code>pane-lifecycle-changed { pane, state, by }</code> (grant <code>panes.read</code>, never dropped). <code>by</code> is the plugin that asked for the change, or none when the user or the process did it. The intents that cause changes (<code>freeze-pane</code>, <code>unfreeze-pane</code>, <code>replace-pane-command</code>, <code>terminate-pane-process</code>, <code>resize-pane</code>) are on <a href="/pages/api-pane-lifecycle/">pane lifecycle</a>. A frozen pane keeps its last screen; a plugin that reads it with <code>terminal.read-cells</code> gets that last screen.</p>
-<p>The <code>panes</code> interface itself has no function for this. To find out whether a pane is frozen, a plugin keeps the last state it saw from the event. To read what happened to a pane earlier (created, exited, resumed), use the pane journal from <a href="/pages/api-clock-and-timers/">clock and timers</a>: the host writes <code>pane-created</code> and <code>pane-exited</code> entries into it, and <code>journal.read</code> returns them.</p>
+<p>The <code>panes</code> interface itself has no function for this. To find out whether a pane is frozen, a plugin keeps the last state it saw from the event. To read what happened to a pane earlier (created, exited, resumed), use the pane journal described in <a href="/pages/capability-journal-read/">journal.read</a> and <a href="/pages/api-log/">log</a>: the host writes <code>pane-created</code> and <code>pane-exited</code> entries into it, and <code>journal.read</code> returns them.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::Event;
@@ -803,7 +803,7 @@ export function isFrozen(pane: bigint): boolean {
 </ul>
 <p>Requirement ids for this page: [EVT-020], [PAN-008], [PAN-010], [PAN-011], [PAN-012]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
 <h3 id="a-pane-whose-plugin-is-gone">A pane whose plugin is gone</h3>
-<p>When the plugin that provided a pane kind is uninstalled or off, the pane stays in the tree. The host draws a placeholder in its place and no plugin code runs. Input to the pane is refused. When the plugin returns, the pane comes back to life with its saved state (USR-142).</p>
+<p>When the plugin that provided a pane kind is uninstalled or off, the pane stays in the tree. The host draws a placeholder in its place and no plugin code runs. Input to the pane is refused with <code>not-found</code>. The message text <code>plugin not available</code> is informational and not a catalogued code. When the plugin returns, the pane comes back to life with its saved state (USR-142).</p>
 <figure>
 <pre class="term"><span class="t-dim">Plugin Notes is not installed</span>
 

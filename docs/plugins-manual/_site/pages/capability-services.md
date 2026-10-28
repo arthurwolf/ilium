@@ -244,6 +244,7 @@ A call returns a `request-id` or a synchronous error. Everything that needs the 
 | Code | When | Where it appears |
 |---|---|---|
 | `not-permitted` | consumer grant missing, declined or revoked | synchronous |
+| `revoked` | the grant changed during the call | completion |
 | `not-found` | no installed and enabled provider; `reply` for an unknown or expired call | synchronous |
 | `invalid-argument` | payload over 1 MiB or fails the schema; `reply` over 1 MiB or fails the result schema | synchronous |
 | `unsupported` | the method is not in the provider schema | synchronous |
@@ -272,7 +273,7 @@ A call that finds the provider installed but not running starts it with the trig
 - **Consumer declined.** Every `call` returns `not-permitted`. Each refusal is written to the plugin log with the grant name.
 - **Provider declined.** The provider is installed, but its service is never registered and its `handle` export is never called. Callers get `not-found`.
 - **Provider not installed or disabled.** `call` returns `not-found` at once.
-- **Provider cycle.** Two plugins that require each other's services are refused at install (section 16.3 of the API).
+- **Provider cycle.** Two plugins that require each other's services are refused at install with `manifest.service-cycle` ([errors and limits](/pages/reference-errors-and-limits/)).
 - **Failing provider.** A provider that stops or restarts before it answers fails its pending callers with `cancelled`. Three failures within 10 minutes disable it.
 
 ### Review dialog and what the user sees

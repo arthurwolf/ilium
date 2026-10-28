@@ -138,7 +138,7 @@ The audit file is per user, in the user's state folder, because Ilium runs as th
 2. **Block its key.** If a whole publisher is at fault, remove its fingerprint from `publishers.allow`.
 3. **Find who has it.** Search the audit log for the plugin id.
 4. **Clean up.** Ask users to run `ilium plugin uninstall <id> --purge`. The policy does not delete anything on its own.
-5. **Remove the key.** Users can run `ilium plugin trust remove <publisher>`. Plugins signed with it then show `untrusted`.
+5. **Remove the key.** Users can run `ilium plugin trust remove <key_id> --force`. Without `--force` the command refuses with `trust.in-use` while an installed plugin is signed with the key. Plugins signed with it then show `untrusted`.
 
 Users see "Blocked by policy" and the detail code, for example `policy.id-denied`. See [Troubleshooting plugins](/pages/user-troubleshooting/).
 

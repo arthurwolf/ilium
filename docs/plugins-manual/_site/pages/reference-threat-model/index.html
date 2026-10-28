@@ -786,7 +786,7 @@
 <h2 id="toxic-grant-combinations">Toxic grant combinations</h2>
 <p>Some dangers come from two grants that are each harmless on their own.</p>
 <p>Read grants of normal risk expose private data: <code>terminal.read-screen</code>, <code>terminal.read-cells</code>, <code>fs.read:project</code>, <code>tree.read</code>, <code>agent.read</code>, <code>journal.read</code>. Egress grants of normal risk move data off the machine: <code>http</code>, <code>inference</code>, notify channels, <code>clipboard.write</code>, <code>messages.peer</code>, <code>services.use</code>. A plugin that holds one grant from each list can read a password echoed on screen, an API key in a project file or an agent's reply, and send it to a server. No high-risk grant is involved, so a user who only checks the pre-ticked rows is exposed.</p>
-<p><strong>[SEC-004]</strong> The decision: the platform does not make these grants high risk, because most useful plugins hold such a pair. Instead the review dialog MUST show a <strong>toxic combination row</strong> whenever the requested set contains at least one data-read grant and at least one egress grant. The row is drawn in the warning style and reads: <code>This plugin can read your data and send data out.</code> The row is informational and cannot be unchecked. It lists the two groups of grants that triggered it. Details are in <a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a>.</p>
+<p><strong>[SEC-004]</strong> The decision: the platform does not make these grants high risk, because most useful plugins hold such a pair. Instead the review dialog MUST show a <strong>toxic combination row</strong> whenever the requested set contains at least one data-read grant and at least one egress grant. The row is drawn in the warning style and reads: <code>This plugin can read your data and send data out.</code> The row is informational and has no checkbox of its own. The user can still refuse the grants it lists. When the admin policy forbids the combination (SEC-005), the row instead reads <code>Blocked by your administrator</code>, and the grants of the combination are shown locked off. It lists the two groups of grants that triggered it. Details are in <a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a>.</p>
 <p><strong>[SEC-005]</strong> The admin policy MAY forbid the combination for chosen plugins with <code>[grants] deny_combinations</code>, see <a href="/pages/reference-admin-policy/">Admin policy</a>.</p>
 <p><strong>[SEC-006]</strong> Data-read and egress grant lists are fixed by the contract. A grant that moves between lists is a contract change.</p>
 <p>Inter-plugin channels bypass grants too. Plugin B can receive scrollback from plugin A through <code>messages.peer</code>, a service or a topic, without holding a read grant. The platform's decisions on this are in [SEC-007] below and in <a href="/pages/reference-extension-security/">Extension security</a>.</p>
@@ -794,7 +794,7 @@
 <ul>
 <li>The review dialog MUST show a row <code>Receives data from other plugins</code> for a plugin that declares <code>messages.peer</code>, <code>services.use</code> of a service another plugin provides, or a topic subscription.</li>
 <li>A receiver of <code>messages.peer</code> MUST declare <code>accepts_messages_from</code> in the manifest, a list of plugin ids. Messages from other ids are dropped with a log line, so a plugin cannot be sent unsolicited data.</li>
-<li><code>inference.provide</code> is high risk, because the provider receives every prompt that other plugins send. Its review wording is <code>Receives the text other plugins send to the AI model</code>.</li>
+<li><code>inference.provide</code> has normal risk (see the capability table) and is checked by default, but the provider receives every prompt that other plugins send. Its review wording is <code>Receives the text other plugins send to the AI model</code>.</li>
 </ul>
 <h2 id="side-channels">Side channels</h2>
 <p><strong>[SEC-370]</strong> Guest-visible clocks (<code>clock</code> and the virtualised <code>wasi:clocks</code>) for T2 and T3 plugins MUST be coarsened to 1 ms and jittered by up to 1 ms, to limit timing attacks. T1 plugins get the same resolution unless their manifest requests a finer clock.</p>
@@ -826,7 +826,7 @@
 </tr>
 <tr>
 <td>The policy forbids the combination</td>
-<td>The install succeeds, the combination row is locked off and reads <code>Blocked by your administrator</code>, and calls return <code>not-permitted</code> with the reason <code>policy</code></td>
+<td>The install succeeds, the combination row reads <code>Blocked by your administrator</code> with its grants locked off, and calls return <code>not-permitted</code> with the reason <code>policy</code></td>
 </tr>
 <tr>
 <td>A plugin that never declared <code>accepts_messages_from</code> is sent a peer message</td>

@@ -776,7 +776,7 @@ plugin". The grant is remembered once the user accepts it.</p>
 </tr>
 <tr>
 <td>Grant revoked at run time</td>
-<td><code>revoked</code> on the next call.</td>
+<td>A call that is already running when the revoke lands returns <code>revoked</code>. A call that starts after the revoke returns <code>not-permitted</code>.</td>
 </tr>
 <tr>
 <td>Basic panes and restore</td>
@@ -792,8 +792,8 @@ plugin". The grant is remembered once the user accepts it.</p>
 </tr>
 </tbody>
 </table>
-<p>Only the codes listed here are specific to the basic primitive. Every call can also return
-<code>revoked</code> and <code>internal</code>.</p>
+<p>Only the codes listed here are specific to the basic primitive. Every call that has a result can also return
+<code>revoked</code> and <code>internal</code>; <code>size</code> returns <code>None</code> instead and has no error code.</p>
 <h2 id="first-party-features-that-request-it">First-party features that request it</h2>
 <ul>
 <li>Feature 22, file explorer and picker, which provides the <code>files</code> kind.</li>

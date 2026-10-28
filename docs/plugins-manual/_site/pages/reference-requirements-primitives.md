@@ -4,17 +4,17 @@
 
 Normative behaviour of the terminal, agent, editor and basic pane primitives.
 
-The rows follow the format and the observation channels of the [requirements index](/pages/reference-requirements/). The id prefix is `PRI`.
+The rows follow the format and the observation channels of the [requirements index](/pages/reference-requirements/). The id prefix is `PRI`. The id PRI-009 is intentionally unused: it was retired and ids are never reused, so the numbering runs from PRI-008 to PRI-010.
 
 | Id | Requirement | Source | Observable test |
 |---|---|---|---|
-| [PRI-001] | A terminal read MUST need terminal.read-screen. read-cells MUST accept at most 1,000 rows per call and return quota-exceeded above that. | [edge cases and errors](/pages/primitives-terminal/#edge-cases-and-errors) | (sync-return) read-cells with 1,001 rows -> quota-exceeded. |
+| [PRI-001] | A screen read MUST need terminal.read-screen. read-cells is a separate grant, terminal.read-cells, and MUST accept at most 1,000 rows per call and return quota-exceeded above that. | [edge cases and errors](/pages/primitives-terminal/#edge-cases-and-errors) | (sync-return) read-cells with 1,001 rows -> quota-exceeded. |
 | [PRI-002] | history-text over 4 MiB MUST keep the newest 4 MiB. | [requestable limits](/pages/reference-errors-and-limits/#requestable-limits) | (sync-return) read history of 5 MiB -> 4 MiB, the newest. |
 | [PRI-003] | send-input MUST accept at most 16 stages, a total stage delay of 10 s and 64 KiB of raw bytes. Above any of them it MUST refuse with invalid-argument. | [primitives terminal input](/pages/primitives-terminal-input/) | (completion) 17 stages -> refused(invalid-argument). |
 | [PRI-004] | Check order for send-input MUST be: capability, stage and size rules, if-current precondition, then the lock. A failed precondition MUST refuse the intent before any lock is taken. | [capability terminal input lock](/pages/capability-terminal-input-lock/) | (completion) stale if-current on a locked pane -> refused(conflict) and the lock unchanged. |
 | [PRI-005] | An input lock MUST last at most 2 s. There MUST be one lock per pane. A second lock MUST return conflict. | [requestable limits](/pages/reference-errors-and-limits/#requestable-limits) | (sync-return) lock a locked pane -> conflict. |
 | [PRI-006] | A terminal output filter MUST accept at most rate_per_second matches per filter instance and pane. A match above the limit MUST be dropped and counted, not delivered. | [capability terminal output filter](/pages/capability-terminal-output-filter/) | (event-delivery) 500 matches in a second at rate 10 -> 10 delivered, the next batch starts with events-dropped. |
-| [PRI-007] | A pointer claim MUST belong to one plugin at a time. A second claim on the same cell MUST return conflict. | [primitives terminal pointer](/pages/primitives-terminal-pointer/) | (sync-return) two plugins claim one cell -> the second gets conflict. |
+| [PRI-007] | A pointer claim MUST belong to one plugin at a time. A whole-pane claim belongs to one pane, so a second whole claim on the same pane MUST return conflict. | [primitives terminal pointer](/pages/primitives-terminal-pointer/) | (sync-return) two plugins claim one pane -> the second gets conflict. |
 | [PRI-008] | screen-changed MUST be delivered at most 10 times per second per pane. | [requestable limits](/pages/reference-errors-and-limits/#requestable-limits) | (event-delivery) change a screen 100 times a second -> at most 10 events. |
 | [PRI-010] | register-signature MUST return invalid-argument for a rule with a bad id, process names, aliases, icon, action count or key size, and conflict for an id the manifest already contributes. | [errors and edge cases](/pages/primitives-agent/#errors-and-edge-cases) | (sync-return) register a signature with an empty id -> invalid-argument. |
 | [PRI-011] | A signature of the user MUST win over a plugin signature, which MUST win over a built-in one. An overlap MUST be logged as a warning. | [errors and edge cases](/pages/primitives-agent/#errors-and-edge-cases) | (log-line) two signatures match one process -> one warning, the user rule applies. |

@@ -89,7 +89,7 @@ The kernel checks every `send-input` submission in this order. The first failing
 <text x="226" y="27" font-size="11" fill="currentColor">refused: invalid-argument</text>
 <text x="226" y="63" font-size="11" fill="currentColor">refused: not-permitted</text>
 <text x="226" y="99" font-size="11" fill="currentColor">duplicate(original)</text>
-<text x="226" y="135" font-size="11" fill="currentColor">refused: not-found</text>
+<text x="226" y="135" font-size="11" fill="currentColor">refused: not-found / unsupported</text>
 <text x="226" y="171" font-size="11" fill="currentColor">refused: pane-not-ready</text>
 <text x="226" y="207" font-size="11" fill="currentColor">refused: rate-limited</text>
 <text x="226" y="243" font-size="11" fill="currentColor">refused: conflict</text>
@@ -97,7 +97,7 @@ The kernel checks every `send-input` submission in this order. The first failing
 <figcaption>The eight checks of a send-input submission. A failed check stops the submission and returns the outcome beside it. The key of a refused submission is not reserved, so a retry with the same key is valid after the cause is fixed.</figcaption>
 </figure>
 
-Two rules apply to the whole batch, not to one submission. A batch is refused as a whole when a submission is malformed (wrong shape, a missing `dedup-key`, or more than 256 submissions) or when the plugin lacks the grant. In that case every submission of the batch completes as `refused(cancelled)` with the message `batch refused: submission <index>`, except the offending one. All other checks run per submission.
+Two rules apply to the whole batch, not to one submission. A batch is refused as a whole when a submission is malformed (wrong shape, or a missing `dedup-key`; more than 256 submissions is a trap, not a refusal) or when the plugin lacks the grant. In that case every submission of the batch completes as `refused(cancelled)` with the message `batch refused: submission <index>`. The offending submission itself completes as `refused(invalid-argument)` when it is malformed, or as `refused(not-permitted)` when the grant is missing; this is the same whole-batch refusal that [Errors and limits](#errors-and-edge-cases) lists. All other checks run per submission.
 
 ## Dedup keys
 
@@ -105,7 +105,7 @@ A plugin can lose track of whether a send worked, for example after a restart. S
 
 - The key is mandatory for `send-input` and `agent-action`. A submission without one is malformed.
 - The key has 1 to 128 characters from `[A-Za-z0-9._:/-]`. Another character makes the submission malformed.
-- The key is reserved for the pair of plugin id and key, for 10 minutes. From build phase 5, the kernel also journals `send-input` keys in the session snapshot before the write. A server restart then does not repeat input. Before that phase, keys live in memory only.
+- The key is reserved for the pair of plugin id and key, for the 10-minute reservation window (a different window from the 24-hour dedup journal in the limits table). From Phase 5 of the [roadmap](/pages/roadmap/), the kernel also journals `send-input` keys in the session snapshot before the write. A server restart then does not repeat input. Before Phase 5, keys live in memory only.
 - A submission whose key is reserved completes as `duplicate(original)`, where `original` names the submission that reserved the key. It has no effect.
 - A key is reserved only after every check passed. A refused submission keeps its key free, so a retry is valid. An accepted submission keeps its key reserved even if it later fails, so a retry of a failed send needs a new key.
 
@@ -308,7 +308,7 @@ Limits:
 | Text per submission | 64 KiB |
 | Dedup key | 1 to 128 characters |
 | Dedup window | 10 minutes |
-| Dedup journal | 24 hours or 4,096 entries per session, whichever is smaller |
+| Dedup journal (a different window from the 10-minute reservation) | 24 hours or 4,096 entries per session, whichever is smaller |
 | Rate | 20 per second per pane per plugin |
 | Submissions per batch | 256 |
 
@@ -330,6 +330,6 @@ Limits:
 - [agent.control](/pages/capability-agent-control/) for sending an agent's own action keys, which is a separate grant with its own checks.
 - [panes.create](/pages/capability-panes-create/) for the `initial-input` field of `create-pane`.
 - [panes.signal](/pages/capability-panes-signal/) for signals sent to a pane's process, which need no text.
-- [errors and limits](/pages/errors-and-limits/) for the full table of error codes.
+- [errors and limits](/pages/reference-errors-and-limits/) for the full table of error codes.
 
 Checked against the API version `ilium:plugin@0.1.0`.

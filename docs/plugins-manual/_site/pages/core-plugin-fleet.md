@@ -16,7 +16,7 @@ Spawning a PTY and typing into it are kernel-native. Fleet drives them through t
 
 ### See it
 
-<figure><img src="/assets/demos/05-ask-for-update.gif" alt="A dialog asks for a status update and sends it to every agent" loading="lazy"><figcaption>Ask for update: one short message goes to one agent or to all of them.</figcaption></figure>
+<figure><img src="/assets/demos/05-ask-for-update.gif" alt="Ilium asks two idle local agent fixtures for a status update while a working fixture is skipped" loading="lazy"><figcaption>Ask for status update sends the built-in prompt to two idle local fixtures. The working fixture receives no input.</figcaption></figure>
 
 ### What the user sees
 
@@ -32,12 +32,11 @@ review   4     shell   <span class="t-dim">-</span>          <span class="t-dim"
 
 <figure>
 <pre class="term"><span class="t-dim">╭ Ask for update ─────────────────────────────╮</span>
-<span class="t-dim">│</span> To……………………………………………………… <span class="t-hi">All agents (3)</span>      <span class="t-dim">│</span>
 <span class="t-dim">│</span> Message…… What is your status in one line? <span class="t-dim"> │</span>
 <span class="t-dim">│</span>                                             <span class="t-dim">│</span>
 <span class="t-dim">│</span>                  [ Send ]   [ Cancel ]      <span class="t-dim">│</span>
 <span class="t-dim">╰─────────────────────────────────────────────╯</span></pre>
-<figcaption>Rendered at 48 columns. Illustrative. The Ask for update dialog with a message field and Send and Cancel buttons.</figcaption>
+<figcaption>Rendered at 48 columns. Illustrative. The Ask for update dialog with a message field and Send and Cancel buttons. The dialog has no target field.</figcaption>
 </figure>
 
 ### Manifest
@@ -53,10 +52,10 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "contributes": {
     "cli": [
       { "name": "panes", "summary": "List panes in every session", "output": "jsonl",
-        "requires_server": false },
+        "requires_server": true },
       { "name": "broadcast", "summary": "Send a line to agents", "output": "jsonl",
-        "requires_server": false, "argument_groups": ["pane-selector"] },
-      { "name": "new-pane", "summary": "Create a pane", "output": "jsonl",
+        "requires_server": true, "argument_groups": ["pane-selector"] },
+      { "name": "new-pane", "summary": "Create a pane", "output": "mixed",
         "requires_server": true }
     ],
     "http_routes": [ { "method": "POST", "path": "/create_agent" } ],
@@ -125,13 +124,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "name": "panes",
         "summary": "List panes in every session",
         "output": "jsonl",
-        "requires_server": false
+        "requires_server": true
       },
       {
         "name": "broadcast",
         "summary": "Send a line to agents",
         "output": "jsonl",
-        "requires_server": false,
+        "requires_server": true,
         "argument_groups": [
           "pane-selector"
         ]
@@ -378,7 +377,7 @@ export function broadcast(text: string): Submission[] {
 
 #### Ask for update
 
-A dialog sends a short request to one agent or to all of them. The client side shows a `dialog` ([layout and containers](/pages/widgets-layout-and-containers/)) with a `text-input` and buttons ([input widgets](/pages/widgets-input/)) under [ui.panels](/pages/capability-ui-panels/). On Send it submits a `message` to the server side ([messages and topics](/pages/api-messages-and-topics/)), which submits `send-input` to each target ([send-input](/pages/api-intent-send-input/)).
+A dialog sends a short request to one agent or to all of them. The dialog has no target field: the server component that receives the `ask-for-update` message sends the text to the agent pane that was focused when the dialog opened, or to every agent when no agent pane was focused. The client side shows a `dialog` ([layout and containers](/pages/widgets-layout-and-containers/)) with a `text-input` and buttons ([input widgets](/pages/widgets-input/)) under [ui.panels](/pages/capability-ui-panels/). On Send it submits a `message` to the server side ([messages and topics](/pages/api-messages-and-topics/)), which submits `send-input` to each target ([send-input](/pages/api-intent-send-input/)).
 
 **Rust**
 
@@ -504,6 +503,8 @@ The kernel owns the HTTP listener, its port and its on/off setting (Settings, AP
 
 The local HTTP API creates an agent pane. The plugin routes `POST /create_agent` ([HTTP API](/pages/api-http-api/), [http-api.route](/pages/capability-http-api-route/)). On `http-called` ([events](/pages/api-events/)) it validates the JSON body and submits `create-pane` ([intents](/pages/api-intents/)). When the `request-completed` event carries the new node, it replies with the pane id.
 
+On success the route answers 201 with `{"pane_id":N}`. When the host refuses the `create-pane` intent or it fails, the plugin answers 502 with `{"error":"create-pane failed"}`; an unparsable body answers 400 and another path or method answers 404.
+
 **Rust**
 
 ```rust
@@ -539,6 +540,11 @@ fn answer(request: &HttpCalledEvent, pending: &mut std::collections::HashMap<u64
     let submission = Submission::keyed(Intent::CreatePane(spec), format!("http-{}", request.call));
     pending.insert(submission.correlation, request.call);
     vec![submission]
+}
+
+fn on_refused(call: u64) {
+    // The create-pane intent was refused or failed: answer 502 so the HTTP caller never hangs.
+    let _ = http_api::respond(call, 502, &[], br#"{"error":"create-pane failed"}"#);
 }
 
 fn on_created(call: u64, node: NodeId) {
@@ -581,6 +587,14 @@ export function answer(request: HttpCalledEvent): Submission[] {
     correlation,
     dedupKey: `http-${request.call}`,
   }];
+}
+
+export function onRefused(correlation: bigint): void {
+  // The create-pane intent was refused or failed: answer 502 so the HTTP caller never hangs.
+  const call = pending.get(correlation);
+  if (call === undefined) return;
+  pending.delete(correlation);
+  respond(call, 502, [], new TextEncoder().encode('{"error":"create-pane failed"}'));
 }
 
 export function onCreated(correlation: bigint, node: bigint): void {
@@ -664,7 +678,7 @@ Other plugins change what `ilium.core.fleet` does through the points below. The 
 
 Calls `ilium.core.cost/usage` for the cost column.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.fleet"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.fleet"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Lets `ilium broadcast --select reviewers` reach every pane tagged `review`
 

@@ -397,7 +397,7 @@
 <p>The original transcript is read and never changed. Antigravity sessions cannot be converted. The conversion engine itself is the Rust crate <code>ilium-session-convert</code>, which reports steps, log lines and progress. The plugin turns those reports into the dialog.</p>
 <h3 id="what-it-covers">What it covers</h3>
 <ul>
-<li>The entries <strong>Convert to Codex</strong> (for a Claude Code pane) and <strong>Convert to Claude Code</strong> (for a Codex pane). An entry appears only when the pane has a verified session, no other conversion is running, and the pane is not a worktree pane.</li>
+<li>The entries <strong>Convert to Codex</strong> (for a Claude Code pane) and <strong>Convert to Claude Code</strong> (for a Codex pane). The entry for the other agent is always listed in the menu of an agent pane. It is enabled only when the pane has a verified session, no other conversion is running, and the pane is not a worktree pane; otherwise it stays visible but disabled and shows the reason.</li>
 <li>The progress dialog with one row per step, a progress bar and a log.</li>
 <li>Claude Code to Codex: locate the transcript, inspect it, start a private <code>codex app-server</code>, import the session with Codex's own importer, verify the Codex rollout, stop the app-server.</li>
 <li>Codex to Claude Code: locate the rollout, parse it, convert it to Claude Code lines, write the Claude Code transcript, verify it, register it with Claude Code. User prompts, assistant text, and shell or tool calls with results are carried over. Reasoning and token events are dropped.</li>
@@ -475,6 +475,7 @@
     &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
     &quot;exports&quot;: [&quot;views&quot;, &quot;menu-provider&quot;]
   },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
   &quot;capabilities&quot;: {
     &quot;server&quot;: [
       &quot;panes.read&quot;, &quot;panes.lifecycle&quot;, &quot;panes.create&quot;, &quot;tree.write&quot;, &quot;agent.read&quot;,
@@ -545,6 +546,7 @@
       &quot;menu-provider&quot;
     ]
   },
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
   &quot;capabilities&quot;: {
     &quot;server&quot;: [
       &quot;panes.read&quot;,
@@ -814,7 +816,14 @@ use ilium_plugin_sdk::types::paths::FsPath;
 
 fn codex_to_claude(input: &amp;ConvertInput) -&gt; Result&lt;ConvertOutput, PluginError&gt; {
     let rollout = FsPath { scope: &quot;agent-sessions:codex&quot;.into(), path: input.rollout.clone() };
-    let text = String::from_utf8_lossy(&amp;fs::read(&amp;rollout, 0, 1_048_576)?).to_string(); // offset 0, at most 1 MiB
+    // One read returns at most 1 MiB, so a larger rollout is read in a loop over offsets.
+    let mut bytes: Vec&lt;u8&gt; = Vec::new();
+    loop {
+        let chunk = fs::read(&amp;rollout, bytes.len() as u64, 1_048_576)?;
+        if chunk.is_empty() { break; }
+        bytes.extend_from_slice(&amp;chunk);
+    }
+    let text = String::from_utf8_lossy(&amp;bytes).to_string();
     let lines: Vec&lt;&amp;str&gt; = text.lines().collect();
     let (mut out, mut kept, mut dropped) = (Vec::new(), 0u32, 0u32);
     for (index, line) in lines.iter().enumerate() {
@@ -833,7 +842,18 @@ fn codex_to_claude(input: &amp;ConvertInput) -&gt; Result&lt;ConvertOutput, Plug
 import { isCancelled, reportProgress } from '@ilium/plugin-sdk/host/jobs';
 
 export function codexToClaude(input: { rollout: string }) {
-  const bytes = read({ scope: 'agent-sessions:codex', path: input.rollout }, 0n, 1048576); // offset 0n, at most 1 MiB
+  // One read returns at most 1 MiB, so a larger rollout is read in a loop over offsets.
+  const chunks: Uint8Array[] = [];
+  let offset = 0n;
+  for (;;) {
+    const chunk = read({ scope: 'agent-sessions:codex', path: input.rollout }, offset, 1048576);
+    if (chunk.length === 0) break;
+    chunks.push(chunk);
+    offset += BigInt(chunk.length);
+  }
+  const bytes = new Uint8Array(chunks.reduce((total, part) =&gt; total + part.length, 0));
+  let at = 0;
+  for (const part of chunks) { bytes.set(part, at); at += part.length; }
   const lines = new TextDecoder().decode(bytes).split('\n');
   const out: string[] = [];
   let dropped = 0;
@@ -887,7 +907,7 @@ fn start_app_server(&amp;mut self, conversion: u64) -&gt; Result&lt;(), PluginEr
     let child = process::spawn(&amp;SpawnSpec {
         process: ProcessSpec {
             program: &quot;codex&quot;.into(), arguments: vec![&quot;app-server&quot;.into()],
-            cwd: None, stdin: None, environment: Vec::new(), timeout_millis: 0,
+            cwd: None, stdin: None, environment: Vec::new(), timeout_millis: 1_000,
         },
         stdin_open: true,
         line_mode: true,
@@ -911,7 +931,7 @@ const appServers = new Map&lt;bigint, Child&gt;();
 export function startAppServer(conversion: bigint): void {
   const child = spawn({
     process: { program: 'codex', arguments: ['app-server'], cwd: undefined, stdin: undefined,
-               environment: [], timeoutMillis: 0 },
+               environment: [], timeoutMillis: 1_000 },
     stdinOpen: true,
     lineMode: true,
   });
@@ -1032,7 +1052,7 @@ fn formats(&amp;self) -&gt; Vec&lt;Format&gt; {
 
 fn announce(&amp;mut self, from: &amp;str, to: &amp;str, messages: u32, path: &amp;str) {
     let payload = serde_json::json!({ &quot;from&quot;: from, &quot;to&quot;: to, &quot;messages&quot;: messages, &quot;path&quot;: path });
-    if let Ok(request) = extensions::run_hook(&quot;ilium.core.session-convert/after-convert&quot;, &amp;payload.to_string()) {
+    if let Ok(request) = extensions::run_hook_request(&quot;ilium.core.session-convert/after-convert&quot;, &amp;payload.to_string()) {
         self.observers.insert(request);
     }
 }
@@ -1089,7 +1109,7 @@ export function announce(from: string, to: string, messages: number, path: strin
 <ul>
 <li><code>ilium.core.session-convert/convert</code>: start: convert a transcript between two formats</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.session-convert"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.session-convert"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-a-third-transcript-format">Example: Adds a third transcript format</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

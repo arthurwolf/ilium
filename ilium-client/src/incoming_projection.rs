@@ -44,9 +44,13 @@ enum Slot {
     Status,
     Evidence,
     Session,
+    CustomAgentIdentity,
     EditorPath,
     LastPrompt,
     Progress,
+    Resources,
+    ResourceObservation,
+    ResourceWait,
     Git,
     Debug(u64),
     Global(Discriminant<ServerEvent>),
@@ -134,6 +138,7 @@ impl ProjectionRetention {
                 (Slot::Evidence, Some(*pane_id))
             }
             PaneSessionIdResolved { pane_id, .. } => (Slot::Session, Some(*pane_id)),
+            PaneCustomAgentIdentity { pane_id, .. } => (Slot::CustomAgentIdentity, Some(*pane_id)),
             PaneSessionIdCleared { pane_id, .. } => {
                 update.clear_session = Some(*pane_id);
                 return update;
@@ -146,6 +151,17 @@ impl ProjectionRetention {
             }
             PaneLastPromptChanged { pane_id, .. } => (Slot::LastPrompt, Some(*pane_id)),
             PaneProgressChanged { pane_id, .. } => (Slot::Progress, Some(*pane_id)),
+            ResourceObservationFailed { .. } => (Slot::ResourceObservation, None),
+            ResourceSnapshot { catalog, .. } => {
+                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>catalog.revision){return update;}
+                (Slot::Resources,None)
+            }
+            ResourceResult { result:Ok(reply), .. } => {
+                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>reply.catalog.revision){return update;}
+                (Slot::Resources,None)
+            }
+            ResourceResult { result:Err(_), .. } => (Slot::ResourceObservation,None),
+            ResourceWaitChanged { pane_id, .. } => (Slot::ResourceWait, Some(*pane_id)),
             PaneGitStatusChanged { pane_id, .. } => (Slot::Git, Some(*pane_id)),
             PaneDebugLogSnapshot {
                 pane_id, entries, ..
@@ -377,6 +393,11 @@ pub(crate) fn projection_metadata_bytes(event: &ServerEvent) -> usize {
         .saturating_mul(2)
         .saturating_mul(std::mem::size_of::<Key>())
         .saturating_add(512)
+}
+
+#[cfg(test)]
+pub(crate) fn registry_metadata_bytes_for_test(keys: usize) -> Option<usize> {
+    metadata_layout(keys)
 }
 
 #[cfg(test)]

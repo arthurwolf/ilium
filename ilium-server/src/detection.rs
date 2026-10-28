@@ -3798,8 +3798,11 @@ fn is_awaiting_launched_agent(
     launched_at: Instant,
     now: Instant,
 ) -> bool {
-    matches!(origin, crate::pane::TerminalOrigin::Command(_))
-        && matches!(status, PaneStatus::PlainShell)
+    matches!(
+        origin,
+        crate::pane::TerminalOrigin::Command(_)
+            | crate::pane::TerminalOrigin::CustomAgent { frozen: false, .. }
+    ) && matches!(status, PaneStatus::PlainShell)
         && now.saturating_duration_since(launched_at) < LAUNCH_FAST_POLL_WINDOW
 }
 

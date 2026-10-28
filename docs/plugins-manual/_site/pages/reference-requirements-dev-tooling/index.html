@@ -557,7 +557,7 @@
 </tr>
 <tr>
 <td>DEV-024</td>
-<td>The <code>status</code> field of <code>test-case</code> MUST be <code>pass</code>, <code>fail</code>, <code>trap</code> or <code>skip</code>. The <code>status</code> field of <code>doctor-check</code> MUST be <code>ok</code>, <code>warn</code> or <code>fail</code>.</td>
+<td>The <code>status</code> field of <code>test-case</code> MUST be <code>pass</code>, <code>fail</code>, <code>trap</code> or <code>skipped</code>. The <code>status</code> field of <code>doctor-check</code> MUST be <code>ok</code>, <code>warn</code> or <code>fail</code>.</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -684,7 +684,7 @@
 </tr>
 <tr>
 <td>DEV-070</td>
-<td><code>check</code> MUST run offline and MUST report the same rule codes (<code>manifest.*</code>, <code>package.*</code>, <code>signature.*</code>) that the install path reports, plus the component rules (<code>component.*</code>).</td>
+<td><code>check</code> MUST run offline and MUST report the same rule codes (<code>manifest.*</code>) that the install path reports (the install path uses no <code>package.*</code> codes), plus the component rules (<code>component.*</code>, <code>signature.*</code>) of DEV-201.</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -828,7 +828,7 @@
 </tr>
 <tr>
 <td>DEV-101</td>
-<td><code>pack</code> MUST fail with <code>pack.size-cap</code> when the package is larger than 128 MiB, and MUST print a <code>warning</code> with the same code at 100 MiB. See <code>lint.package-size-near-cap</code>.</td>
+<td><code>pack</code> MUST fail with <code>package.size-limit</code> when the package is larger than 300 MiB (the package format cap, PKG-130), and MUST print a <code>warning</code> with the separate code <code>pack.size-cap</code> at 100 MiB. See <code>lint.package-size-near-cap</code>.</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -852,7 +852,7 @@
 </tr>
 <tr>
 <td>DEV-112</td>
-<td>The fingerprint of a key is its <code>key_id</code>, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form shows the first 4 and the last 4 characters joined by <code>…</code>, for example <code>3f2a…9c01</code>.</td>
+<td>The fingerprint of a key is its <code>key_id</code>, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form is the first 8 digits, for example <code>3f2a91c0</code>, shown only beside the full form or in <code>trust list</code> (SEC-177).</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -924,7 +924,7 @@
 </tr>
 <tr>
 <td>DEV-140</td>
-<td><code>install</code> MUST run the validation pipeline of <a href="/pages/reference-package-format/#the-validation-pipeline">Package format</a> before it runs any plugin code, print every failure as an <code>error</code> with the code of that pipeline, and exit with the code of <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>. Sources other than a file are defined there.</td>
+<td><code>install</code> MUST run the validation pipeline of <a href="/pages/reference-package-format/#the-validation-order">Package format</a> before it runs any plugin code, print every failure as an <code>error</code> with the code of that pipeline, and exit with the code of <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>. Sources other than a file are defined there.</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command and assert the exit code and the error code</td>
 </tr>
@@ -942,7 +942,7 @@
 </tr>
 <tr>
 <td>DEV-143</td>
-<td>A declined review MUST fail with <code>install.review-declined</code>. A declined key trust MUST fail with <code>trust.declined</code>. An unsigned package without <code>--allow-unsigned</code> MUST fail with <code>install.unsigned</code>. A lower version without <code>--allow-downgrade</code> MUST fail with <code>install.downgrade</code>.</td>
+<td>A declined review MUST fail with <code>install.review-declined</code>. A declined key trust MUST fail with <code>trust.declined</code>. An unsigned package without <code>--allow-unsigned</code> MUST fail with <code>install.unsigned</code>. A lower version without <code>--allow-downgrade</code> MUST fail with <code>package.downgrade</code>.</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -954,7 +954,7 @@
 </tr>
 <tr>
 <td>DEV-155</td>
-<td><code>uninstall</code> MUST deactivate the plugin with reason <code>disabled</code>, withdraw its contributions and remove the package. Without <code>--purge</code> the <code>data</code> folder, the storage and the settings values MUST stay on disk for a later reinstall.</td>
+<td><code>uninstall</code> MUST deactivate the plugin with reason <code>disabled</code>, withdraw its contributions and remove the package. Without <code>--purge</code> the <code>data</code> folder, the storage and the settings values MUST stay on disk for a later reinstall. <code>--keep-data</code> is accepted, means the same as the default, and excludes <code>--purge</code> (<code>usage.conflict</code>, exit 2).</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -984,7 +984,7 @@
 </tr>
 <tr>
 <td>DEV-165</td>
-<td><code>list</code> text mode MUST print one line per plugin with the id, the version, the tier, the state (<code>running</code>, <code>disabled</code>, <code>stopped</code>, <code>untrusted</code>) and the grant count. A <code>[dev]</code> badge MUST mark a plugin installed by <code>dev</code>.</td>
+<td><code>list</code> text mode MUST print one line per plugin with the id, the version, the tier, the state and the grant count. The state word maps from the lifecycle states: <code>running</code> is <code>installed-enabled</code> with an active instance, <code>stopped</code> is <code>installed-enabled</code> with no active instance (including <code>stopped-by-failure</code>), <code>disabled</code> is <code>installed-disabled-by-user</code> or <code>disabled-by-policy</code>, and <code>untrusted</code> is <code>disabled-untrusted</code> or <code>disabled-blocked</code>. <code>list --json</code> MUST print the lifecycle state name itself (LIF-001). A <code>[dev]</code> badge MUST mark a plugin installed by <code>dev</code>.</td>
 <td><a href="/pages/reference-plugin-cli/">reference-plugin-cli</a></td>
 <td>Run the command in a scratch project and assert the output and exit code</td>
 </tr>
@@ -1123,7 +1123,7 @@
 </tr>
 <tr>
 <td>DEV-202</td>
-<td>Every <code>check</code> finding is an <code>error</code>, except <code>signature.absent</code>, <code>component.size-warning</code> and <code>check.stale-build</code>, which are <code>warn</code>, and <code>signature.fingerprint</code>, which is <code>info</code>. The severity column of the rule tables is normative.</td>
+<td>Every <code>check</code> finding is an <code>error</code>, except <code>signature.absent</code>, <code>check.stale-build</code> and <code>component.size-warning</code> from 8 to 32 MiB, which are <code>warn</code> (<code>component.size-warning</code> is an <code>error</code> above 32 MiB, DEV-206), and <code>signature.fingerprint</code>, which is <code>info</code>. The severity column of the rule tables is normative.</td>
 <td><a href="/pages/reference-check-and-lint-rules/">reference-check-and-lint-rules</a></td>
 <td>Run check or lint on a fixture project and assert the finding and exit code</td>
 </tr>
@@ -1231,7 +1231,7 @@
 </tr>
 <tr>
 <td>DEV-227</td>
-<td><code>check</code> MUST exit with 3 when any <code>error</code> finding exists, and <code>check</code> has no deny flag, because its two <code>warn</code> findings (an unsigned package and a large component) are normal during development.</td>
+<td><code>check</code> MUST exit with 3 when any <code>error</code> finding exists, and <code>check</code> has no deny flag, because its three <code>warn</code> findings (<code>signature.absent</code> for an unsigned package, <code>component.size-warning</code> for a component from 8 to 32 MiB and <code>check.stale-build</code>) are normal during development.</td>
 <td><a href="/pages/reference-check-and-lint-rules/">reference-check-and-lint-rules</a></td>
 <td>Run the command and assert the exit code and the error code</td>
 </tr>
@@ -1486,7 +1486,7 @@
 </tr>
 <tr>
 <td>DEV-404</td>
-<td><code>host.mode()</code> MUST return <code>native</code> under <code>cargo test</code> and <code>bun test</code>, and <code>component</code> under <code>ilium plugin test --component</code> or <code>ILIUM_PLUGIN_TEST_MODE=component</code>. <code>assert_within_budget</code> MUST be skipped with the reason <code>needs-component</code> when <code>host.mode()</code> is <code>native</code>.</td>
+<td><code>host.mode()</code> MUST return <code>native</code> under <code>cargo test</code> and <code>bun test</code>, and <code>component</code> under <code>ilium plugin test</code> or <code>ILIUM_PLUGIN_TEST_MODE=component</code>. <code>assert_within_budget</code> MUST be skipped with the reason <code>needs-component</code> when <code>host.mode()</code> is <code>native</code>.</td>
 <td><a href="/pages/reference-test-harness/">reference-test-harness</a></td>
 <td>Run under cargo test and under --component, read host.mode(), then call assert_within_budget in native mode and expect the skip</td>
 </tr>
@@ -1528,9 +1528,9 @@
 </tr>
 <tr>
 <td>DEV-416</td>
-<td>After <code>revoke</code>, or for a capability the test declined, intents that need the grant MUST complete as <code>refused(plugin-error{code: not-permitted})</code>, and host imports that need it MUST return <code>Err(not-permitted)</code>. A call to a function of a capability the manifest never requested MUST trap with <code>trap.import-not-requested</code>.</td>
+<td>After <code>revoke</code>, or for a capability the test declined, intents that need the grant MUST complete as <code>refused(plugin-error{code: not-permitted})</code>, and host imports that need it MUST return <code>Err(not-permitted)</code>. A call to a function of a capability the manifest never requested MUST trap with <code>host.capability-not-requested</code>.</td>
 <td><a href="/pages/reference-test-harness/">reference-test-harness</a></td>
-<td>Revoke, call the import and submit the intent, assert not-permitted; call a function of a capability never requested and assert trap.import-not-requested</td>
+<td>Revoke, call the import and submit the intent, assert not-permitted; call a function of a capability never requested and assert host.capability-not-requested</td>
 </tr>
 <tr>
 <td>DEV-417</td>
@@ -1624,7 +1624,7 @@
 </tr>
 <tr>
 <td>DEV-434</td>
-<td>The harness MUST apply the batch refusal rule of <a href="/pages/reference-events-and-intents/">Events and intents</a>: a refused submission completes as <code>refused(error)</code> and all others complete as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>.</td>
+<td>The harness MUST apply the batch refusal rule of <a href="/pages/reference-events-and-intents/">Events and intents</a>: a refused submission completes as <code>refused(not-permitted)</code> or <code>refused(invalid-argument)</code> and all others complete as <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>.</td>
 <td><a href="/pages/reference-test-harness/">reference-test-harness</a></td>
 <td>Harness unit test that asserts the stated behaviour or error code</td>
 </tr>
@@ -1966,7 +1966,7 @@
 </tr>
 <tr>
 <td>DEV-514</td>
-<td>A fixture with <code>side</code> <code>scene</code> MUST accept only the keys <code>schema</code>, <code>side</code>, <code>settings</code>, <code>clock</code> and <code>frames</code>. Any other key MUST fail with <code>fixture.unknown-key</code>. <code>lifecycle</code> steps MUST run after the events. <code>expect_state</code> MUST fail the fixture with <code>fixture.state-mismatch</code> when the state differs.</td>
+<td>A fixture with <code>side</code> <code>scene</code> MUST accept only the keys <code>schema</code>, <code>side</code>, <code>settings</code>, <code>clock</code>, <code>lifecycle</code>, <code>expect_state</code> and <code>frames</code>. Any other key MUST fail with <code>fixture.unknown-key</code>. <code>lifecycle</code> steps MUST run after the events. <code>expect_state</code> MUST fail the fixture with <code>fixture.state-mismatch</code> when the state differs.</td>
 <td><a href="/pages/reference-test-harness/">reference-test-harness</a></td>
 <td>Load a scene fixture with a foreign key; load a fixture with a wrong expect_state</td>
 </tr>
@@ -2171,7 +2171,7 @@
 </tr>
 <tr>
 <td>DEV-607</td>
-<td>Durations in case expectations are fake-clock milliseconds, except the call time measured in fuel. A case that needs a deadline breach MUST use the built-in probe plugin <code>conformance-probe.wasm</code> with its fuel-burn import, never the plugin under test.</td>
+<td>Durations in case expectations are fake-clock milliseconds, except the call time measured in epoch-based wall-clock milliseconds (fuel is off and never enforces or measures deadlines, per HST-058 and LIF-127). A case that needs a deadline breach MUST use the built-in probe plugin <code>conformance-probe.wasm</code> with its busy-wait import, never the plugin under test.</td>
 <td><a href="/pages/reference-conformance-suite/">reference-conformance-suite</a></td>
 <td>Run the deadline cases and read their duration units and plugin name</td>
 </tr>
@@ -2195,7 +2195,7 @@
 </tr>
 <tr>
 <td>DEV-613</td>
-<td>A <code>skip</code> MUST carry a reason: <code>grant-not-requested</code>, <code>side-not-built</code>, <code>subject-mismatch</code> or <code>needs-session</code>.</td>
+<td>A <code>skip</code> MUST carry a reason: <code>grant-not-requested</code>, <code>side-not-built</code>, <code>subject-mismatch</code>, <code>needs-session</code> or <code>needs-component</code>.</td>
 <td><a href="/pages/reference-conformance-suite/">reference-conformance-suite</a></td>
 <td>Run the case by id and assert the verdict</td>
 </tr>
@@ -2298,7 +2298,7 @@
 </tr>
 <tr>
 <td>DEV-655</td>
-<td>The restart message MUST be <code>restarting in 1 s (failure 1 of 3 in 10 minutes)</code> at level <code>warn</code>, with the delay and the failure count of that restart. The last failure MUST log <code>disabled after 3 failures in 10 minutes</code>.</td>
+<td>The restart message MUST be <code>restarting in &lt;delay&gt; s (failure &lt;n&gt; of 3 in 10 minutes)</code> at level <code>warn</code>, with the delay of that restart (1 for the first failure, 5 for the second) and its failure count. The last failure MUST log <code>disabled after 3 failures in 10 minutes</code>.</td>
 <td><a href="/pages/reference-debugging-tools/">reference-debugging-tools</a></td>
 <td>Test with a fake session: write log lines, read the trace, inspect the output</td>
 </tr>
@@ -2653,7 +2653,7 @@
 </tr>
 <tr>
 <td>DEV-772</td>
-<td>The lock file (<code>Cargo.lock</code> or <code>bun.lock</code>) MUST be committed, and CI MUST build with <code>--locked</code> (Rust) or <code>--frozen-lockfile</code> (Bun). <code>build</code> SHOULD pass the flag by itself when the lock file exists, and MUST fail with <code>toolchain.lockfile-missing</code> when it does not exist and <code>--release</code> is set.</td>
+<td>The lock file (<code>Cargo.lock</code> or <code>bun.lock</code>) MUST be committed, and CI MUST build with <code>--locked</code> (Rust) or <code>--frozen-lockfile</code> (Bun). <code>build</code> SHOULD pass the flag by itself when the lock file exists, and MUST fail with <code>toolchain.lockfile-missing</code> when it does not exist and <code>--release</code> is set without <code>--locked</code> (exit 4). When <code>--locked</code> is also given, the missing lock file is reported as <code>build.lockfile-missing</code> (exit 1, see DEV-053), so one missing file never yields two codes.</td>
 <td><a href="/pages/guide-ci-recipes/">guide-ci-recipes</a></td>
 <td>Run the pipeline or lint in a scratch project and assert the result</td>
 </tr>

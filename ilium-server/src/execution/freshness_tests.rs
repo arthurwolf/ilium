@@ -65,7 +65,16 @@ async fn detection_progresses_with_full_general_and_codec_envelopes_and_busy_wor
             },
         )
         .expect("remaining general input/result envelope");
-    let codec_cost = JobCost {
+    // A completed decoder result retains its JobHold/Arc metadata; encoder
+    // jobs retain their original result envelope. Fill both real contracts.
+    let decoder_cost = JobCost {
+        input_bytes: 128 * MIB,
+        result_bytes: ilium_execution::retained_result_storage_bytes::<ilium_ipc::ClientRequest>(
+            192 * MIB,
+        )
+        .expect("full decoded request and owner envelope"),
+    };
+    let encoder_cost = JobCost {
         input_bytes: 128 * MIB,
         result_bytes: 192 * MIB,
     };
@@ -74,13 +83,7 @@ async fn detection_progresses_with_full_general_and_codec_envelopes_and_busy_wor
             owner
                 .decoder
                 .foundation
-                .try_reserve(
-                    Lane::Cpu,
-                    JobCost {
-                        result_bytes: SERVER_DECODER_RESULT_BYTES,
-                        ..codec_cost
-                    },
-                )
+                .try_reserve(Lane::Cpu, decoder_cost)
                 .expect("full existing decoder capacity")
         })
         .collect();
@@ -89,7 +92,7 @@ async fn detection_progresses_with_full_general_and_codec_envelopes_and_busy_wor
             owner
                 .encoder
                 .foundation
-                .try_reserve(Lane::Cpu, codec_cost)
+                .try_reserve(Lane::Cpu, encoder_cost)
                 .expect("full existing encoder capacity")
         })
         .collect();

@@ -435,14 +435,21 @@ write-batch: func(bucket: bucket, entries: list&lt;entry&gt;) -&gt; result&lt;_,
 <td><code>put(bucket, key, &amp;[u8]) -&gt; Result&lt;(), PluginError&gt;</code></td>
 <td><code>put(bucket, key, Uint8Array): void</code>, throws</td>
 <td>nothing</td>
-<td><code>invalid-argument</code>, <code>quota-exceeded</code></td>
+<td><code>invalid-argument</code>, <code>quota-exceeded</code>, <code>io</code> (<code>no-space</code>, [LIF-119]), <code>conflict</code> (<code>stale-data-version</code>, [LIF-121])</td>
 </tr>
 <tr>
 <td><code>remove</code></td>
-<td><code>remove(bucket, key)</code></td>
-<td><code>remove(bucket, key): void</code></td>
+<td><code>remove(bucket, key) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>remove(bucket, key): void</code>, throws</td>
 <td>nothing</td>
-<td>none</td>
+<td><code>conflict</code> (<code>stale-data-version</code>, [LIF-121])</td>
+</tr>
+<tr>
+<td><code>lease</code></td>
+<td><code>lease(key, ttl_millis) -&gt; bool</code></td>
+<td><code>lease(key, ttlMillis): boolean</code></td>
+<td>true for the one caller that may refresh a <code>shared</code> entry</td>
+<td>none; a caller that does not win the lease gets false, which is not an error</td>
 </tr>
 <tr>
 <td><code>keys</code></td>
@@ -456,12 +463,12 @@ write-batch: func(bucket: bucket, entries: list&lt;entry&gt;) -&gt; result&lt;_,
 <td><code>write_batch(bucket, &amp;[Entry]) -&gt; Result&lt;(), PluginError&gt;</code></td>
 <td><code>writeBatch(bucket, entries): void</code>, throws</td>
 <td>nothing</td>
-<td><code>invalid-argument</code>, <code>quota-exceeded</code>, <code>conflict</code></td>
+<td><code>invalid-argument</code>, <code>quota-exceeded</code>, <code>io</code> (<code>no-space</code>, [LIF-119]), <code>conflict</code> (<code>stale-data-version</code>, [LIF-121])</td>
 </tr>
 </tbody>
 </table>
-<p>The bucket type is the enum <code>Bucket</code> with the variants <code>Global</code>, <code>Project</code> and <code>Session</code> in Rust. In TypeScript it is the string <code>'global'</code>, <code>'project'</code> or <code>'session'</code>. All four functions are synchronous: each call returns when the host has applied it, with no request id to wait for.</p>
-<p><code>put</code> also returns the universal codes <code>not-permitted</code>, <code>revoked</code> and <code>internal</code> (see <a href="/pages/errors-and-limits/">errors and limits</a>). In practice these appear only when the grant is revoked during a call.</p>
+<p>The bucket type is the enum <code>Bucket</code> with the variants <code>Global</code>, <code>Project</code>, <code>Session</code> and <code>Shared</code> in Rust. In TypeScript it is the string <code>'global'</code>, <code>'project'</code>, <code>'session'</code> or <code>'shared'</code> (see <a href="#the-shared-bucket-and-the-lease">The shared bucket and the lease</a>). All six functions (<code>get</code>, <code>put</code>, <code>remove</code>, <code>keys</code>, <code>write-batch</code> and <code>lease</code>) are synchronous: each call returns when the host has applied it, with no request id to wait for.</p>
+<p><code>put</code> also returns the universal codes <code>not-permitted</code>, <code>revoked</code> and <code>internal</code> (see <a href="/pages/reference-errors-and-limits/">errors and limits</a>). In practice these appear only when the grant is revoked during a call.</p>
 <h3 id="buckets">Buckets</h3>
 <table>
 <thead>
@@ -493,7 +500,7 @@ write-batch: func(bucket: bucket, entries: list&lt;entry&gt;) -&gt; result&lt;_,
 </tr>
 </tbody>
 </table>
-<p>A session's name comes from its file under <code>.ilium/sessions/</code>. The bare <code>ilium</code> command owns the <code>default</code> session. When a pane's kind declares <code>persist: "storage"</code>, the kernel deletes that pane's session keys under <code>pane/&lt;node-id&gt;/</code> when the pane closes.</p>
+<p>A session's name comes from its file under <code>.ilium/sessions/</code>. The bare <code>ilium</code> command owns the <code>default</code> session. The kernel does not delete a plugin's storage keys when a pane closes; a plugin that keys data by pane removes it itself.</p>
 <h3 id="rules">Rules</h3>
 <ul>
 <li><strong>Keys:</strong> a non-empty UTF-8 string of at most 256 bytes. The host stores the key byte for byte, with no trimming or case folding. A slash has no special meaning to the host; the <code>pane/&lt;node-id&gt;/</code> pattern above is a convention.</li>
@@ -673,6 +680,7 @@ format <code>YYYY-MM-DD HH:mm:ss</code>, the level, the plugin id and the messag
 formats them. The key, values and times are placeholders.</p>
 <p>When a plugin is uninstalled, the user chooses whether to keep or delete its data and storage. A
 deleted session bucket goes with its session.</p>
+<p><strong>Export before you remove.</strong> <code>ilium plugin export &lt;id&gt; --out &lt;file&gt;</code> copies a plugin's data, buckets and settings values into one archive, and <code>ilium plugin import &lt;id&gt; --from &lt;file&gt;</code> restores it on another machine. Details: LIF-290 to LIF-292 in <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>.</p>
 <h3 id="errors">Errors</h3>
 <table>
 <thead>
@@ -693,8 +701,20 @@ deleted session bucket goes with its session.</p>
 <tr>
 <td><code>quota-exceeded</code></td>
 <td><code>put</code></td>
-<td>the bucket or the disk limit (<code>data</code> plus <code>cache</code>) would be passed</td>
+<td>the bucket's size (key bytes plus value bytes) would pass its quota; a full disk is <code>io</code> (<code>no-space</code>), not this code</td>
 <td>remove keys or shrink values, then retry</td>
+</tr>
+<tr>
+<td><code>io</code> (<code>no-space</code>)</td>
+<td><code>put</code>, <code>write-batch</code></td>
+<td>the disk is full; never reported as <code>quota-exceeded</code> ([LIF-119])</td>
+<td>free disk space, then retry</td>
+</tr>
+<tr>
+<td><code>conflict</code> (<code>stale-data-version</code>)</td>
+<td><code>put</code>, <code>remove</code>, <code>write-batch</code></td>
+<td>the instance is older than the bucket's data version stamp ([LIF-121])</td>
+<td>restart the plugin on the current version</td>
 </tr>
 </tbody>
 </table>
@@ -765,14 +785,14 @@ export function indexBytes(): Uint8Array | undefined {
   return get('shared', 'index');
 }
 </code></pre>
-<p>Errors: <code>put</code> into <code>shared</code> returns <code>quota-exceeded</code> only when one value alone is larger than <code>shared_cache_mib</code>; otherwise the oldest entries go. The key rules are those of the other buckets.</p>
+<p>Errors: the 1 MiB value cap applies to <code>shared</code> like every bucket, so a larger value is <code>invalid-argument</code>. <code>shared</code> never returns <code>quota-exceeded</code> for size: when the bucket exceeds <code>shared_cache_mib</code>, the oldest entries go. The key rules are those of the other buckets.</p>
 <h3 id="see-also">See also</h3>
 <ul>
 <li><a href="/pages/api-fs/">fs</a> for files, which suit large data.</li>
 <li><a href="/pages/guide-data-migration/">Data migration</a> for changing the layout of stored data between versions.</li>
 <li><a href="/pages/api-settings/">settings</a> for values that the user edits.</li>
 <li><a href="/pages/capability-always-granted/">Always-granted capabilities</a> for the other imports that need no grant.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and the full limit table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and the full limit table.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-settings/"><small>Previous</small>settings</a><a class="next" href="/pages/api-tree/"><small>Next</small>tree</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

@@ -404,7 +404,7 @@
 <li>Agent debug history (see Agent monitoring, "Troubleshooting").</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/01-agent-activity.gif" alt="A pane frame shows the last prompt on top while the agent works and a toolbar on the right" loading="lazy"><figcaption>The banner shows the last prompt while the agent works. The same recording shows the activity icons from the Agent detection plugin.</figcaption></figure>
+<figure><img src="/assets/demos/01-agent-activity.gif" alt="Current Ilium displays local scripted agent activity and completion" loading="lazy"><figcaption>Current Ilium renders local scripted fixture panes, activity signals and unread completion. This capture does not show hosted agents or a last-prompt banner.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -494,7 +494,7 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;event:agent-state-changed&quot;,
+    &quot;event:agent-activity-changed&quot;,
     &quot;startup&quot;
   ],
   &quot;contributes&quot;: {
@@ -699,7 +699,7 @@ export function onEvents(batch: Event[]): Submission[] {
         val: {
           pane: event.val.pane,
           slot: 'prompt',
-          content: { spans: [{ text: `&gt; ${trimmed}` }] },
+          content: [{ text: `&gt; ${trimmed}` }],
           icon: undefined,
           tooltip: undefined,
         },
@@ -879,7 +879,7 @@ export function onStop(
         val: {
           pane: node,
           slot: 'recover',
-          content: { spans: [{ text: `Stopped. Last prompt: ${lastPrompt}` }] },
+          content: [{ text: `Stopped. Last prompt: ${lastPrompt}` }],
           icon: undefined,
           tooltip: undefined,
         },
@@ -999,7 +999,7 @@ impl Handler for GoalLine {
 <ul>
 <li><code>ilium.core.agent-toolbar/last-prompt</code>: get: last prompt text of an agent pane</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.agent-toolbar"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.agent-toolbar"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-adds-a-review-button-to-claude-panes">Example: Adds a Review button to Claude panes</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

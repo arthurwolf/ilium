@@ -112,8 +112,8 @@ interface extensions {
 
 // export fragment `with-hook-handler`, listed as "hook-handler" in `exports`
 variant hook-reply { pass, replace(string), refuse(string), answer(string) }
-record hook-call { point: string, extension: string, call: u64, payload-json: string }
-handle-hook: func(call: hook-call) -> hook-reply;
+record hook-call { call: u64, point: string, payload-json: string }
+handle-hook: func(call: hook-call) -> result<hook-reply, plugin-error>;
 ```
 
 ### Functions
@@ -172,7 +172,7 @@ For `transform`, a `replace` carries the whole payload. The host validates it ag
 
 - **Payloads.** A payload, a reply and a hook chain result are each capped at 64 KiB. An entry is capped at 16 KiB. The host checks the payload against `payload_schema` before the first handler runs. A failing payload returns `schema-mismatch` from `run-hook` and no handler runs.
 - **What a contributor sees.** A handler gets the payload of the owner's `payload_schema` and nothing else. It does not see the owner's state, the other handlers or the other contributors.
-- **Deadlines.** Each handler gets `deadline_ms`, between 5 and 50 milliseconds, 20 by default. The whole chain gets 100 milliseconds. Handlers that have not started when the chain reaches 100 ms are skipped and logged (see Chain cap).
+- **Deadlines.** Each handler gets `deadline_ms`, 20 milliseconds by default. The range is 5 to 50 milliseconds for every tier: the T1 ceiling and the T2 and T3 ceiling are both 50 milliseconds. This is separate from the plugin's own `event_deadline_ms`, whose ceiling is 50 milliseconds at T1 and 20 milliseconds at T2 and T3. The whole chain gets 100 milliseconds. Handlers that have not started when the chain reaches 100 ms are skipped and logged (see Chain cap).
 - **Order.** The user order is a stored list of (plugin id, extension id) per point. Items in it run first, in that order. Items not in it follow, sorted by tier band (T1 before T2 and T3), then priority (lower first), then plugin id, then extension id (byte-wise ASCII comparison). A contributor installed after the user reordered therefore lands after the stored items. An update keeps the stored position, and an uninstall removes it. The same order applies to `list` on collect points. Declared priorities are kept: `ExtensionEntry.priority` returns the declared value. [EXT-007] [EXT-008]
 - **Fail open.** A handler that times out, traps or errors counts as `pass`. A timeout never vetoes. A **breach** is a timeout, a trap, an error return, a reply over 64 KiB, a `replace` or `answer` that fails its schema, a CPU budget overrun, or a skip because the contributor's instance was busy. `reply-not-allowed` and a chain-cap skip are not breaches. The counter is per contributor, point and extension id. Any call that returns an accepted reply within its deadline resets it to 0. The third consecutive breach stops the extension. The stop ends when the contributor's instance restarts or the user presses Reset, and it is not persisted. The user sees a notice and a Reset button. [EXT-021]
 - **Re-entry.** A `run-hook` on any point that is already on the current chain stack, directly or indirectly (A runs B, and B's handler runs A), fails with `extension.reentrant`.
@@ -591,7 +591,7 @@ Further edge cases:
 - **Contributor removed while a chain runs.** The chain skips its handler and logs `extension.disabled`.
 - **Equal priority.** Two extensions on one point with the same priority run in plugin id order, then in extension id order [EXT-007].
 - **Two contributors, same id.** The id is unique per contributor and point, so both stay. The user sees them as two rows.
-- **Version mismatch.** A contribution asks for `point@X.Y.Z`. The rule is the one for services: same major; minor at least the requested one; for major 0 the minor must be equal; patch is ignored. Otherwise it stays dormant and the Plugins screen says why. A contribution without `@version` matches any owner version. Examples with an owner at `1.2.0`: `@1.0.0` accepted, `@1.2.0` accepted, `@1.3.0` dormant, `@2.0.0` dormant. With an owner at `0.1.2`: `@0.1.0` and `@0.1.9` accepted, `@0.2.0` dormant [EXT-006].
+- **Version mismatch.** A contribution asks for `point@X.Y.Z`. The version is a caret range (PKG-317, PKG-318, PKG-328 in [Dependency resolution](/pages/reference-dependency-resolution/)): the owner must satisfy `>=X.Y.Z` within the same left-most non-zero part. Otherwise it stays dormant and the Plugins screen says why. A contribution without `@version` matches any owner version. Examples with an owner at `1.2.0`: `@1.0.0` accepted, `@1.2.0` accepted, `@1.3.0` dormant, `@2.0.0` dormant. With an owner at `0.1.2`: `@0.1.0` and `@0.1.9` accepted, `@0.2.0` dormant [EXT-006].
 - **Hook with no handlers.** `run-hook` resolves at once with outcome `ok` and no reply. The owner continues with its original data.
 - **Slow owner path.** The owner pays for the chain. The action waits for a `veto`, `transform` or `first` chain, at most the 100 ms cap plus one deadline. A handler that is skipped at the cap counts as `pass`, so a `veto` chain that never reached a refusal lets the action go on.
 - **No retry by the kernel.** The kernel never re-runs a failed chain. The owner decides.
@@ -615,7 +615,7 @@ Requirement ids for this page: [EXT-002], [EXT-003], [EXT-004], [EXT-005], [EXT-
 - [services](/pages/api-services/), [messages and topics](/pages/api-messages-and-topics/) and [menu provider](/pages/api-menu-provider/) for the other ways plugins work together.
 - [exports](/pages/api-exports/) for `hook-handler` and its `with-hook-handler` fragment.
 - [requests and outcomes](/pages/requests-and-outcomes/) for `request-completed` and `refused`.
-- [errors and limits](/pages/errors-and-limits/) and [reference: errors and limits](/pages/reference-errors-and-limits/) for the full code table.
+- [errors and limits](/pages/reference-errors-and-limits/) and [reference: errors and limits](/pages/reference-errors-and-limits/) for the full code table.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the module layout of each language.
 - [reference: manifest](/pages/reference-manifest/) for the manifest keys, and [versioning](/pages/versioning/) for point versions.
 

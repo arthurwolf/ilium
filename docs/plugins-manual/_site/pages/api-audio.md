@@ -8,8 +8,8 @@ Use this import in client plugins and scenes. The server world has no audio impo
 
 ### What you need
 
-- **Grants.** `audio.capture` opens a microphone (H). `audio.loopback` captures what the computer plays (H). `audio.playback` plays samples. Listing devices needs no grant of its own: `audio.devices` returns only the devices that your granted capabilities allow.
-- **Worlds.** The import is in the client world (`ilium:client`) and the animation world (`ilium:anim`).
+- **Grants.** `audio.capture` opens a microphone (H). `audio.loopback` captures what the computer plays (H). `audio.playback` plays samples. Listing devices has no error code, because `devices` returns a plain list. It lists devices only while you hold at least one audio grant; with none granted it returns an empty list.
+- **Worlds.** The import is in the client world (`ilium:client/base`) and the animation world (`ilium:anim/base`).
 - **Manifest.** Declare each grant under the side that uses it in `manifest.json`:
 
 ```json
@@ -28,7 +28,7 @@ Use this import in client plugins and scenes. The server world has no audio impo
 | `audio::open_capture(device, sample_rate, channels)` | `audio.openCapture(device, sampleRate, channels)` | `audio.capture` | sync | `Result<u64, PluginError>` | Opens a microphone and returns a capture id. `None` or `undefined` selects the default input. |
 | `audio::open_loopback(sample_rate, channels)` | `audio.openLoopback(sampleRate, channels)` | `audio.loopback` | sync | `Result<u64, PluginError>` | Opens a capture of the desktop output. |
 | `audio::close_capture(capture)` | `audio.closeCapture(capture)` | the grant that opened it | sync | nothing | Stops the capture and releases the device. |
-| `audio::play(samples, sample_rate, channels).await` | `await audio.play(samples, sampleRate, channels)` | `audio.playback` | async | `Result<(), PluginError>` | Plays samples. Completes when playback ends. |
+| `audio::play(samples, sample_rate, channels).await` | `await audio.play(samples, sampleRate, channels)` | `audio.playback` | async | `Result<(), PluginError>` | Plays samples. The WIT function returns `result<request-id, plugin-error>`: a request id at once, and the host delivers `request-completed` with that id when playback ends. The SDK `await` resolves at that completion with this result type. |
 
 Types and events:
 
@@ -297,7 +297,7 @@ audio.closeCapture(capture);
 
 | Call | Code | When |
 |---|---|---|
-| `devices` | none | Returns an empty list when every audio grant is declined. A plugin with no audio grant in its manifest traps when it calls `devices`. |
+| `devices` | none | Never fails. Returns an empty list when no audio grant is held (none declared, all declined or revoked); with a grant held, an empty list means the computer has no audio device. |
 | `open-capture` | `not-permitted` | `audio.capture` is missing, declined or revoked. |
 | `open-capture` | `not-found` | The device id does not exist. |
 | `open-capture` | `busy` | Another client holds the device exclusively. |
@@ -320,4 +320,4 @@ A grant revoked while a stream is open makes its frames stop, and `not-permitted
 - [Requests and outcomes](/pages/requests-and-outcomes/) for how `play` completes.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the generated names.
 - [Media](/pages/api-media/) for video decoding.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes.

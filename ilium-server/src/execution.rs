@@ -643,10 +643,18 @@ impl ExecutionClient {
             let notified = self.completed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            // A CPU request above an immutable group/tenant ceiling will
-            // never become admissible. Distinguish it from temporary pressure.
-            if matches!(lane, Lane::Cpu) {
-                match self.foundation.maximum_cpu_job_cost() {
+            // A finite job above an immutable group/tenant ceiling will
+            // never become admissible. I/O has the same byte/job ledgers as
+            // CPU: waiting for release cannot make an oversized job fit.
+            // Service uses a separate service-job ledger and remains governed
+            // by its checked reservation below.
+            if matches!(lane, Lane::Cpu | Lane::Io) {
+                let maximum = if matches!(lane, Lane::Cpu) {
+                    self.foundation.maximum_cpu_job_cost()
+                } else {
+                    self.foundation.maximum_external_job_cost()
+                };
+                match maximum {
                     Ok(maximum) if cost.input_bytes > maximum.input_bytes => {
                         return Err(ilium_execution::RejectReason::InputBytes)
                     }
@@ -909,10 +917,33 @@ mod tests {
                     .output_metadata_quota
                     .snapshot()
                     .limits
-                    .worker_bytes
-                + DECODER_RESULT_OWNER_BYTES,
-            PROCESS_WORKER_BYTES,
-            "worker shares and decoder-result ownership stay inside the process ceiling"
+                    .worker_bytes,
+            PROCESS_WORKER_BYTES - DECODER_RESULT_OWNER_BYTES,
+            "worker shares make room for the exact decoder owner RESULT transfer"
+        );
+        let shared = resources.quota_group().snapshot().limits;
+        let partition_bytes = resources
+            .visible_recovery_quota
+            .snapshot()
+            .limits
+            .worker_bytes
+            + resources.output_quota.snapshot().limits.worker_bytes
+            + resources
+                .visible_output_quota
+                .snapshot()
+                .limits
+                .worker_bytes
+            + resources
+                .output_metadata_quota
+                .snapshot()
+                .limits
+                .worker_bytes;
+        // Hand-derived original ceilings: input1280 + result1280 + worker4096 MiB.
+        // Detection is a subaccount already carved from shared worker bytes.
+        assert_eq!(
+            shared.input_bytes + shared.result_bytes + shared.worker_bytes + partition_bytes,
+            6656 * MIB,
+            "decoder owner metadata must not increase the full declared byte ceiling"
         );
     }
 
@@ -1059,7 +1090,15 @@ mod tests {
                 },
             )
             .expect("general envelope");
-        let cost = JobCost {
+        let decoder_cost = JobCost {
+            input_bytes: 128 * MIB,
+            result_bytes:
+                ilium_execution::retained_result_storage_bytes::<ilium_ipc::ClientRequest>(
+                    192 * MIB,
+                )
+                .unwrap(),
+        };
+        let encoder_cost = JobCost {
             input_bytes: 128 * MIB,
             result_bytes: 192 * MIB,
         };
@@ -1068,12 +1107,15 @@ mod tests {
                 owner
                     .decoder
                     .foundation
-                    .try_reserve(Lane::Cpu, cost)
+                    .try_reserve(Lane::Cpu, decoder_cost)
                     .expect("decoded request envelope")
             })
             .collect();
         assert!(matches!(
-            owner.decoder.foundation.try_reserve(Lane::Cpu, cost),
+            owner
+                .decoder
+                .foundation
+                .try_reserve(Lane::Cpu, decoder_cost),
             Err(ilium_execution::RejectReason::JobLimit)
         ));
         let writers: Vec<_> = (0..2)
@@ -1081,17 +1123,58 @@ mod tests {
                 owner
                     .encoder
                     .foundation
-                    .try_reserve(Lane::Cpu, cost)
+                    .try_reserve(Lane::Cpu, encoder_cost)
                     .expect("output headroom must survive waiting handlers")
             })
             .collect();
         assert!(matches!(
-            owner.encoder.foundation.try_reserve(Lane::Cpu, cost),
+            owner
+                .encoder
+                .foundation
+                .try_reserve(Lane::Cpu, encoder_cost),
             // The process envelope is now exactly full; root byte checks
             // precede this tenant's third-job limit.
             Err(ilium_execution::RejectReason::InputBytes)
         ));
+        let root_usage = owner.client.quota_group().snapshot();
+        assert_eq!(root_usage.result_bytes, root_usage.limits.result_bytes);
         drop((general, readers, writers));
+    }
+
+    #[tokio::test]
+    async fn impossible_io_reservations_fail_without_waiting_for_release() {
+        let owner = ServerExecution::start().expect("execution");
+        let maximum = owner.client.foundation.maximum_external_job_cost().unwrap();
+        for (cost, expected) in [
+            (
+                JobCost {
+                    input_bytes: maximum.input_bytes + 1,
+                    result_bytes: 1,
+                },
+                ilium_execution::RejectReason::InputBytes,
+            ),
+            (
+                JobCost {
+                    input_bytes: 1,
+                    result_bytes: maximum.result_bytes + 1,
+                },
+                ilium_execution::RejectReason::ResultBytes,
+            ),
+        ] {
+            let before = owner.client.foundation.usage();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                owner.client.reserve(Lane::Io, cost),
+            )
+            .await
+            .expect("impossible admission must not await a capacity release");
+            assert_eq!(result.err(), Some(expected));
+            let after = owner.client.foundation.usage();
+            assert_eq!(
+                (after.jobs, after.input_bytes, after.result_bytes),
+                (before.jobs, before.input_bytes, before.result_bytes)
+            );
+        }
     }
 
     /// Callers often count only the heap data a job carries. A cost smaller

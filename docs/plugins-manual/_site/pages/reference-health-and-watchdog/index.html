@@ -469,7 +469,7 @@
 </tr>
 <tr>
 <td>Event queue</td>
-<td>the queue held more than 75% of <code>event_queue</code> (768 of 1,024 by default) at any sample</td>
+<td>the queue held at least 75% of <code>event_queue</code> (768 of 1,024 by default) at any sample</td>
 <td>the last 1 minute</td>
 </tr>
 <tr>
@@ -541,7 +541,7 @@
 </ul>
 <h3 id="async-tasks-pending-requests-and-orphans">Async tasks, pending requests and orphans</h3>
 <ul>
-<li>Each asynchronous request has its own timeout (for example 30 s for a command or service reply, 120 s for inference). See <a href="/pages/errors-and-limits/">Errors and limits</a>.</li>
+<li>Each asynchronous request has its own timeout (for example 30 s for a command or service reply, 120 s for inference). See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</li>
 <li>When an instance is dropped or deactivated, every request it has pending completes as <code>cancelled</code>, every timer and watch ends, and no code runs for them. Exceptions: on a trap, completions of submissions are delivered to the new instance, and on revocation requests that need the revoked grant complete as <code>failed(revoked)</code> (see <a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a>).</li>
 <li>
 <p>A task that never completes is handled by its timeout. The plugin gets <code>timed-out</code>.</p>
@@ -552,7 +552,7 @@
 <li>[LIF-131] A request that has no reply within its timeout MUST complete as <code>timed-out</code>. Test: a service that never answers.</li>
 </ul>
 <h3 id="the-sandbox-helper-t2-and-t3">The sandbox helper (T2 and T3)</h3>
-<p>Third-party plugins run in a helper process. One helper hosts the T2 and T3 instances of one session server, at most 8 instances per helper. T1 plugins run in the Ilium process and have no helper.</p>
+<p>Third-party plugins run in a helper process. Each T2 or T3 plugin side runs in its own helper, and a helper never hosts two plugins (see [HST-150]). T1 plugins run in the Ilium process and have no helper.</p>
 <table>
 <thead>
 <tr>
@@ -683,7 +683,7 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 </tr>
 <tr>
 <td>The machine sleeps during a call</td>
-<td>The monotonic clock may not advance; the host treats a jump larger than 5 s as a clock skip and does not count the call as a breach.</td>
+<td>The monotonic clock may not advance; the host treats a gap of more than 1 s as a clock skip and does not count the call as a breach.</td>
 </tr>
 </tbody>
 </table>
@@ -691,7 +691,7 @@ com.example.cursor    <span class="t-err">failed</span>     -      -
 <ul>
 <li><a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/performance/">Performance</a></li>
 <li><a href="/pages/debugging/">Debugging</a></li>
 <li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>

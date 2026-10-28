@@ -73,7 +73,7 @@ Lines count from zero, and columns count Unicode scalar values, not bytes. A `te
 | `save-buffer` | `save_buffer(buffer, path).await` | `saveBuffer(buffer, path?)` | `editor.edit`, `fs.write` | async | Writes a buffer to its path, or to a new path. |
 | `close-buffer` | `close_buffer(buffer)` | `closeBuffer(buffer)` | `editor.edit` | sync | Closes a buffer and frees its slot in the quota. |
 
-Sync functions return `Result<T, PluginError>` in Rust. In TypeScript they return the value or throw a `PluginError`. The async functions return a request in the raw form, and the wrappers take the buffer at once.
+Fallible sync functions return `Result<T, PluginError>` in Rust. In TypeScript they return the value or throw a `PluginError`. The infallible editor reads `buffers()`, `buffer-for-pane()` and `selections()` have no result: they return the list or option directly, and with `editor.read` declined or revoked they return an empty list or none (see the edge cases). The async functions return a request in the raw form, and the wrappers take the buffer at once.
 
 Decorations and gutter marks belong to the plugin. Each layer is named by the plugin, and a call on one layer never touches another layer or another plugin's marks. The host clears every layer of a plugin when the plugin stops.
 
@@ -358,7 +358,7 @@ Requirement ids for this page: [PRI-020], [PRI-021], [PRI-022], [PRI-023], [PRI-
 - [Editor read](/pages/capability-editor-read/) for the grant, events and limits in full.
 - [Editor edit](/pages/capability-editor-edit/) for buffers, saving and the edit intent.
 - [Commands](/pages/api-commands/) for the command that a gutter mark runs.
-- [Errors and limits](/pages/errors-and-limits/) for the error codes used here.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the error codes used here.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the import paths.
 
 Checked against `ilium:plugin@0.1.0`.

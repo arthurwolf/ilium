@@ -221,7 +221,7 @@ All caps are below the 64 MiB frame limit. The host checks them before encoding.
 | Whole envelope | about 17 MiB | `ipc.payload-too-large` |
 | Contribution delta | 4 MiB | `ipc.payload-too-large` |
 
-An oversized item is refused at the sender. The sender's call completes with `failed(too-large)`.
+An oversized item is refused at the sender. The sender's call returns `ipc.payload-too-large`.
 
 - **[HST-124]** The sender MUST check the caps above and refuse an oversized item with `ipc.payload-too-large` before it is encoded.
 - **[HST-125]** A receiver MUST drop an envelope above 17 MiB and close the connection with `ipc.payload-too-large`.
@@ -232,7 +232,7 @@ An oversized item is refused at the sender. The sender's call completes with `fa
 |---|---|---|
 | `ipc.protocol-mismatch` | Different `plugin_protocol` or `contract` | Rejected; client exits 76 |
 | `ipc.sequence-gap` | A gap in envelope `seq` | Connection closed; client re-attaches |
-| `ipc.payload-too-large` | A cap above is exceeded | Item refused |
+| `ipc.payload-too-large` | A cap above is exceeded | Item refused; the sender's call returns this code |
 | `ipc.client-too-slow` | More than 16 MiB queued | Client disconnected |
 | `plugin.version-skew` | Client and server plugin differ | Client half disabled |
 | `plugin.server-missing` | Plugin not installed on the server | Client half disabled |

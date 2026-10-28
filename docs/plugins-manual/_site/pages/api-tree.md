@@ -343,7 +343,7 @@ Reading the tree shows nothing on its own. The user sees what the plugin does wi
 
 ### Errors and limits
 
-Reads never fail. A missing node gives none or an empty list. The error cases are these:
+A read of a missing node never fails: it gives none or an empty list. Reads can still fail for a missing grant or a revoked authorization, as the rows below show:
 
 | Situation | Result |
 |---|---|

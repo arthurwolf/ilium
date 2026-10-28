@@ -34,7 +34,7 @@ A `tab` entry adds a page to the rail. It holds one to eight inline sections. A 
 | `id` | string | Local id, `[a-z][a-z0-9-]{0,31}`. The global id is `<plugin-id>/<id>`. |
 | `title` | string | Tab title (1 to 32 characters) or section title (at most 40). |
 | `tab` | string | Section only. A built-in tab id (needs `settings.contribute:<tab-id>`) or `self:<tab-id>`. |
-| `placement` | string | Section only. `end` (default), `before:<section>` or `after:<section>`. |
+| `placement` | string | Section only. `end` (default), `before:<section>` or `after:<section>`. `before:main` is refused at install with `manifest.settings-anchor`. |
 | `scope` | `server` or `client` | The side whose values the rows edit. Defaults to `client`. |
 | `rows` | list | One to 24 rows, one of the 18 row types. |
 
@@ -149,7 +149,7 @@ block  titles: "Demo"  borders: all
 
 ### Widgets a settings view may embed
 
-A settings view is a normal view, so it may use the display widgets, `schema-form`, `button` and the `location-picker` ([Settings schema reference](/pages/reference-settings-schema/)). It may not use the widgets that need a pane or a terminal. Kernel tabs never host view content. A view cannot reach the rows of a built-in tab; it can only open them through the link `ilium://settings/<tab-id>#<key>`.
+A settings view is a normal view, so it may use the display widgets, `schema-form`, `button` and the `location-picker` ([Settings schema reference](/pages/reference-settings-schema/)). It may not use `popup`, `dialog`, `menu`, `video`, `terminal-view` or any input widget other than `button`, `schema-form` and `location-picker` ([UI API](/pages/api-ui/)); a tree that contains one traps with `ui.widget-not-allowed` on render. Kernel tabs never host view content. A view cannot reach the rows of a built-in tab; it can only open them through the link `ilium://settings/<tab-id>#<key>`.
 
 **Rust**
 
@@ -240,7 +240,7 @@ The `settings` import works on the plugin's own values. Keys belong to the side 
 
 `set-json` reads the patch as an RFC 7396 JSON merge patch. A key set to `null` resets to its schema `default`. A key that is not in the schema is `invalid-argument` and the message names it. The patch is applied all or nothing: one invalid key stores nothing. A patch that changes no stored value succeeds and sends no `settings-changed`.
 
-`settings-changed` carries a `settings-change` record: `keys` (the changed keys, sorted), `origin` (`user`, `plugin`, `reset`, `other-plugin` or `file`) and `scope`. In Rust it is `Event::SettingsChanged(change)`, and in TypeScript `{ tag: 'settings-changed', val: { keys, origin, scope } }`. A plugin has one code path for every change, including its own `set-json`.
+`settings-changed` carries a `settings-change` record: `keys` (the changed keys, sorted), `origin` (`user`, `plugin`, `reset`, `other-plugin` or `file`) and `side` (`server` or `client`, the side that owns the keys). In Rust it is `Event::SettingsChanged(change)`, and in TypeScript `{ tag: 'settings-changed', val: { keys, origin, side } }`. A plugin has one code path for every change, including its own `set-json`.
 
 `list-settings` returns `settings-ref` records with `plugin`, `tab`, `section` (when the entry is a section), `title`, `scope` and `kernel-tab` (when the section is in a built-in tab). A plugin without settings is not listed.
 
@@ -256,9 +256,9 @@ Input widgets send a `ui-action` event, and the host applies a debounce before t
 | `text-input` | `changed` with `text` | 600 ms after the last key; `submitted` on Enter when `submit-on-enter` is set |
 | `text-area` | `changed` with `text` | 600 ms while the text is at most 10,000 bytes, 1 s above that |
 
-The rows of a plugin tab and of a section follow the same timing (see the [auto-save table](/pages/settings-extension/)): toggles, choices and dialog confirmations write at once, number steps and typed text write 600 ms after the last change, and text areas write 1 s after the last change. Closing Settings flushes any pending write.
+The rows of a plugin tab and of a section follow the same timing (see the [auto-save table](/pages/settings-extension/)): toggles, choices and dialog confirmations write at once, number steps and typed text write 600 ms after the last change, text areas write 600 ms after the last change while the text is at most 10,000 bytes and 1 s after it above that. Closing Settings flushes any pending write.
 
-Show a saving state while a `set-json` is pending, so the user can tell that a change has not reached the store yet.
+**[SET-032]** The host MUST show the saving state on a row from the moment the user edits it until the write completes or is refused: the row's trailing marker reads `Saving…` (U+2026) while the 600 ms or 1 s debounce runs or a `set-json` is pending, and the marker disappears when the write completes or the save is refused. It is the same for the row of a plugin tab and for the schema-form of a view.
 
 <figure>
 <pre class="term">╭  ≡ ● · General · plugin───────────────────────────────╮

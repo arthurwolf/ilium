@@ -411,6 +411,19 @@ impl App {
                                 }
                             }
                         }
+                        ConfigurationSaved::CustomAgents(settings) => {
+                            self.custom_agents = settings;
+                            if let Mode::Settings(state) = &mut self.mode {
+                                if state.tab == crate::app::SettingsTab::CustomAgents
+                                    && state.custom_agent_save_pending
+                                {
+                                    state.custom_agent_save_pending = false;
+                                    state.custom_agent_editor = None;
+                                    state.selected_row =
+                                        state.selected_row.min(self.custom_agents.profiles.len());
+                                }
+                            }
+                        }
                         ConfigurationSaved::Animation(settings) => {
                             if let Some(ConfigurationIntent::Animation {
                                 path,
@@ -471,6 +484,9 @@ impl App {
                             .unwrap_or_else(|| format!("{label} saved to disk")),
                         Some(ConfigurationIntent::TextTriggers { .. }) => {
                             "Text Triggers saved to disk".into()
+                        }
+                        Some(ConfigurationIntent::CustomAgents) => {
+                            "Custom agents saved to disk".into()
                         }
                         Some(ConfigurationIntent::ProjectName) => {
                             "Project name saved to disk".into()
@@ -550,6 +566,11 @@ impl App {
                         Some(ConfigurationIntent::TextTriggers { .. }) => {
                             if let Mode::TextTriggerDialog(state) = &mut self.mode {
                                 state.save_error = Some(failure.message.clone());
+                            }
+                        }
+                        Some(ConfigurationIntent::CustomAgents) => {
+                            if let Mode::Settings(state) = &mut self.mode {
+                                state.custom_agent_save_pending = false;
                             }
                         }
                         Some(ConfigurationIntent::Onboarding { .. }) => {

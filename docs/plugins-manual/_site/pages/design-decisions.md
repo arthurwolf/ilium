@@ -2,9 +2,9 @@
 
 ## Design decisions
 
-The user made seven decisions on 2026-10-11 about the plugin platform, D1 to D7. On the same day the user overrode one earlier rule so that plugins can add tabs and sections to Settings, recorded as SE1 to SE20. On 2026-10-12 the user asked that the API and the widget catalogue express everything Ilium has. That work added 42 additions (AX1 to AX42) and raised fourteen open questions, D8 to D25. This page records each decision: the question it answered, the decision, the reason and the effect on plugin authors.
+The user made seven decisions on 2026-10-11 about the plugin platform, D1 to D7. On the same day the user overrode one earlier rule so that plugins can add tabs and sections to Settings, recorded as SE1 to SE20. On 2026-10-12 the user asked that the API and the widget catalogue express everything Ilium has. That work added 42 additions (AX1 to AX42) and raised eighteen open questions, D8 to D25. This page records each decision: the question it answered, the decision, the reason and the effect on plugin authors.
 
-D1 to D25 and SE1 to SE20 are decided. Each entry states the choice and the alternative that was not taken. Where a decision differs from the original recommendation, the page says so.
+D1 to D27 and SE1 to SE20 are decided (D3 is superseded in part by D27, D9 is replaced by D13). Most entries state the choice and the alternative that was not taken. Where a decision differs from the original recommendation, the page says so.
 
 In plain terms, a plugin is a WebAssembly component. Rust and TypeScript both compile to that form and run under one contract, one set of limits and one set of capability grants. Third-party code runs in a separate helper process. First-party code runs inside the Ilium process. The decisions set these boundaries, and the other pages apply them.
 
@@ -22,7 +22,7 @@ Nothing to install or grant. This page explains design choices and asks nothing 
 | D4 | Editors and boards are native in version 1 | Decided | Use the editor primitive; a plugin that provides the editor is a post-v1 feature |
 | D5 | A separate-process sandbox is mandatory for T2 and T3 | Decided | Third-party code runs in a helper process; Windows and macOS refuse it |
 | D6 | Bundled plugins are precompiled and start lazily | Decided | Activation triggers decide when your plugin first runs |
-| D7 | One `.iliumpkg` format replaces `.iliumanim` | Decided | Rebuild old packages; the `limits` object gains four fields |
+| D7 | One `.iliumpkg` format replaces `.iliumanim` | Decided | Rebuild old packages; the `limits` object gains five fields |
 | SE1 to SE20 | Plugins add tabs and sections to Settings | Decided | Rows are declared in the manifest, labelled by the kernel and stored under your plugin id |
 | D8 | `path` rows store a string only | Decided | A path picked in Settings gives no file scope |
 | D9 | Reading built-in values | Replaced by D13 | See D13 |
@@ -170,7 +170,7 @@ Illustrative, not generated. A signed third-party package refused on Windows, ne
 
 **Question.** Should the animation package format stay alongside the plugin format?
 
-**Decision.** One `.iliumpkg` format replaces `.iliumanim`, with no compatibility layer. The package is a deterministic ZIP32 archive with stored entries, sorted paths and fixed timestamps. The `limits` object gains memory, table, event-deadline and render-deadline fields. The loader does not accept the old format.
+**Decision.** One `.iliumpkg` format replaces `.iliumanim`, with no compatibility layer. The package is a deterministic ZIP32 archive with stored entries, sorted paths and fixed timestamps. The `limits` object gains memory, table, event-deadline, render-deadline and command-deadline fields. The loader does not accept the old format.
 
 **Reason.** Keeping both formats would mean two loaders to maintain. The project has no users yet, so a one-time rebuild costs little.
 
@@ -228,7 +228,7 @@ On 2026-10-11 the user overrode the earlier rule that a plugin cannot attach to 
 | SE12, SE13 | Limits are enforced at load time. Ordering is anchor, then `order`, then plugin id, then declaration order |
 | SE14 | Values are never deleted by disable, failure, upgrade or uninstall. Only `--purge` or "Forget settings" deletes them |
 | SE15 | Toggles and choices save at once. Number steps and text save 600 ms after the last change, and text areas after 1 s |
-| SE16, SE17 | `settings-changed` carries `keys`, `origin` and `scope`. The optional export `settings-validate` has a 100 ms deadline |
+| SE16, SE17 | `settings-changed` carries `keys`, `origin` and `side`. The optional export `settings-validate` has a 100 ms deadline |
 | SE18 to SE20 | Id grammar, a kernel search filter over kernel and plugin rows, and a kernel-owned settings registry |
 
 The extended rows are part of these decisions: SE7's twelve base row types are joined by six more (`location`, `preview`, `notice`, `map`, `multi-choice` and `meter`), SE8's object items may have up to 8 fields, and SE10 still keeps `preview` rows and every view-rendered content out of kernel tabs (D19).
@@ -242,8 +242,9 @@ The decisions below are final. Each entry states the choice, and the second half
 | ID | Question | Decided | If the user chooses otherwise |
 |---|---|---|---|
 | D8 | Does a `path` row grant file access to the picked path? | No. The row stores a string only. A plugin that must open the file asks for an `fs.read` grant, or uses `path-field`, which returns a picked scope and never a raw path | The plugin could open the picked path without a broad grant, at the cost of a persistent file scope created from Settings |
+| D9 | Reading built-in values | Replaced by [D13](#d13-kernel-settings-are-readable-and-the-tab-owner-may-write): kernel settings are readable and the tab owner may write | See D13 |
 | D10 | May the user reorder plugin sections inside a built-in tab? | No. The order is anchor, then `order`, then plugin id | A per-user order that must be stored and reconciled when plugins appear or disappear |
-| D11 | Do kernel rows adopt the `r` reset, the `•` modified mark and the 600 ms debounce of plugin rows? | Optional follow-up, outside the settings extension | Kernel and plugin rows would behave the same everywhere |
+| D11 | Do kernel rows adopt the `r` reset, the `•` modified mark and the 600 ms debounce of plugin rows? | No. Kernel rows keep their own reset and debounce behaviour. Only plugin rows have the `r` reset and the `•` modified mark | Kernel and plugin rows would behave the same everywhere |
 
 ### D12: the first-party limits tier
 
@@ -463,11 +464,11 @@ function statusSubmissions(): Submission[] {
 
 **Why one uniform mechanism.** Core plugins use only the public contract, so everything they can do a third-party plugin can do with the same grants. Services have one provider and topics have no reply. The manual needed a third shape, many contributors to one owner, and building it once keeps one set of limits, one review dialog group and one error table. The existing mechanisms stay.
 
-**Why hooks fail open.** A handler is someone else's code inside the owner's flow. If a timeout, a trap or an error stopped the owner, one slow or broken plugin could freeze text triggers, titles or fleet actions. A failing handler counts as a pass, three breaches in a row stop that extension, and the whole chain is capped at 100 ms. Only a `veto` handler that answers on purpose can stop an action.
+**Why hooks fail open.** A handler is someone else's code inside the owner's flow. If a timeout, a trap or an error stopped the owner, one slow or broken plugin could freeze text triggers, titles or fleet actions. A failing handler counts as a pass at every point except the high veto points, which fail closed with `on_failure: refuse` ([SEC-287]), three breaches in a row stop that extension, and the whole chain is capped at 100 ms. Only a `veto` handler that answers on purpose can stop an action.
 
 **Why replacement needs a surface.** A replacement that provides only part of a core plugin would leave dangling services, commands, pane kinds and topics for other plugins. The `surface` list is the checklist, and `manifest.replaces-surface-incomplete` names what is missing. Replacement needs the user's confirmation, not a grant, because the user decides which built-in behaviour to give up. `ilium.core.sessions` and `ilium.core.settings` are not replaceable, because they protect saved data and the Plugins screen itself.
 
-**Why no wildcard grants.** A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show `Text triggers > Before fire: can stop a trigger from sending text (high risk)`. The grant `extensions.contribute-any` does not exist.
+**Why no wildcard grants.** A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show `Text triggers > Before fire: can stop a trigger from sending text (high risk)`. The name `extensions.contribute-any` is not a grant and does not exist.
 
 **Alternative.** Per-plugin special hooks, which give core plugins a private API, or a single global event bus with veto rights, which cannot show the user what a package may stop.
 
@@ -486,7 +487,7 @@ The additions AX1 to AX42 are all additive. "Shape" additions add optional field
 | AX5 | Pane lifecycle intents: freeze, unfreeze, replace command, terminate process, resize with refusal |
 | AX6 | Tree structure intents and atomic restructure batches with undo |
 | AX7 | Title provenance (`source`, expected revision), inferred icon, attention marks |
-| AX8 | `open-external` intent through the host allowlist |
+| AX8 | `open-external` intent through the kernel checks: the scheme list and the per-origin consent (no separate target allowlist) |
 | AX9 | Tree and chrome contribution points; lazy virtual-row children; drops on virtual rows |
 | AX10 | Rich decorations: styled spans, tooltip, frame animation, trailing segments, hover visibility |
 | AX11 | Pointer model: view pointer with sub-cell coordinates, drag-over feedback, terminal move and modifier gesture |
@@ -527,14 +528,14 @@ The decisions of the extended contract that need explanation are these:
 - **Kernel keeps the engine, plugins own the choice.** Every addition names the part that stays in the kernel: dithering and the shared look, the vt100 emulation, the tree layout solver, the toast stack, the command palette, the syntax engine and every GPU shader. The plugin supplies content and intent. The kernel draws and decides.
 - **Intents, not mutations.** Pane lifecycle, tree restructure, attention, status segments, frame slots, toasts and `open-external` are intents. The kernel checks them against the grant and the current state, and a submission completes with one outcome. A new outcome case, `ok-epoch`, carries the new prompt epoch for `send-input` on an agent pane.
 - **Read paths are typed and redacted.** Terminal cells, scrollback, transcripts, kernel settings and the keymap are read paths, each behind its own grant, and all of them are read only.
-- **High risk is explicit even for T1.** The nine high-risk grants always need an explicit grant, and the dialog shows them in the warning style.
+- **High risk is explicit even for T1.** The ten high-risk grants of the extended set always need an explicit grant, and the dialog shows them in the warning style.
 - **Streaming, not polling.** HTTP streams, spawned children and screen changes arrive as events whose delivery policy is stated per event: coalesced, or never dropped with back-pressure.
 
 ## What the user sees
 
 - The review dialog lists every capability a plugin requests, before the first run. The user grants or declines each one. High-risk rows start unchecked.
 - A T2 package is shown with its publisher and signature status. A T3 package carries a dev badge for as long as it is installed.
-- A bundled plugin with high-risk grants asks once at its first start. The first open of a site, a new host from a setting, and the first place lookup each ask once.
+- A bundled plugin with high-risk grants is asked at its first start, and again at each later start after Not now, at most three prompts in total. The first open of a site, a new host from a setting, and the first place lookup each ask once.
 - A plugin that is disabled after three failures shows a notice in the tree footer. The user re-enables it in settings or on the kernel recovery page.
 - A refused install shows the three-line message from D5 and leaves the other plugins running.
 - Plugin rows in a built-in Settings tab sit under a divider that names the plugin, with a `▏` gutter.
@@ -575,7 +576,7 @@ The decisions of the extended contract that need explanation are these:
 - [Rust SDK reference](/pages/rust-sdk/)
 - [TypeScript SDK reference](/pages/typescript-sdk/)
 
-Checked against the API version `ilium:plugin@0.1.0`. D1 to D25 and SE1 to SE20 are decided.
+Checked against the API version `ilium:plugin@0.1.0`. D1 to D27 and SE1 to SE20 are decided.
 
 ### Security
 

@@ -532,7 +532,7 @@ interface terminal {
 <h3 id="frozen-snapshots">Frozen snapshots</h3>
 <p><code>freeze-snapshot</code> copies the visible screen and the scrollback into a stable object and returns its id. Reads through <code>read-snapshot-cells</code> see exactly that copy while the program keeps printing. This is what Smart Copy needs: the user selects, the plugin freezes, analyses at leisure, and writes the result to the clipboard. A snapshot is held by the host until <code>drop-snapshot</code>, until the plugin stops, or until the pane is removed. A plugin holds at most 4 snapshots per pane; the fifth call returns <code>quota-exceeded</code>. The copy shares storage with the live grid until a row changes, so a snapshot of an idle pane costs almost nothing.</p>
 <h3 id="history-text-and-search">History text and search</h3>
-<p><code>history-text</code> returns the scrollback and the visible screen as one string, newest text kept when the pane holds more than <code>max-bytes</code>. The limit is 4 MiB per call. Lines are joined with a newline and trailing blanks are removed. <code>search-history</code> runs a regular expression of the Rust <code>regex</code> dialect over the same text and returns at most <code>max-matches</code> positions, each as row, column and length in cells, counted from the oldest retained row. Both are high risk because scrollback can hold secrets the user typed or pasted long ago. The host removes the regions that a program marked as a hidden password prompt.</p>
+<p><code>history-text</code> returns the scrollback and the visible screen as one string, newest text kept when the pane holds more than <code>max-bytes</code>. The limit is 4 MiB per call: a larger <code>max-bytes</code> is clamped to 4 MiB and the call does not fail. For <code>search-history</code>, a <code>max-matches</code> of 0 is <code>invalid-argument</code>, and a value over 10,000 is clamped to 10,000 without a failure. Lines are joined with a newline and trailing blanks are removed. <code>search-history</code> runs a regular expression of the Rust <code>regex</code> dialect over the same text and returns at most <code>max-matches</code> positions, each as row, column and length in cells, counted from the oldest retained row. Both are high risk because scrollback can hold secrets the user typed or pasted long ago. The host removes the regions that a program marked as a hidden password prompt.</p>
 <h3 id="events">Events</h3>
 <table>
 <thead>
@@ -635,6 +635,7 @@ const found = takeMatches(request);
 for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 </code></pre>
 <h3 id="outcomes-errors-and-limits">Outcomes, errors and limits</h3>
+<p><code>read-cells</code> and <code>read-snapshot-cells</code> return <code>none</code> and never a <code>plugin-error</code>, because their WIT signature is <code>option&lt;cell-rows&gt;</code>. The host writes a refusal line with the code to the plugin log: <code>pane-not-ready</code> when the pane has no process yet, <code>not-found</code> for no such pane or snapshot, <code>not-permitted</code> without the grant, and <code>quota-exceeded</code> when <code>count</code> is above 1,000 rows. Only the calls in the table below return a <code>plugin-error</code>.</p>
 <table>
 <thead>
 <tr>
@@ -645,19 +646,14 @@ for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 </thead>
 <tbody>
 <tr>
-<td><code>read-cells</code>, <code>freeze-snapshot</code></td>
+<td><code>freeze-snapshot</code></td>
 <td><code>pane-not-ready</code></td>
 <td>the pane has no process yet</td>
 </tr>
 <tr>
-<td><code>read-cells</code>, <code>freeze-snapshot</code></td>
+<td><code>freeze-snapshot</code></td>
 <td><code>not-found</code></td>
-<td>no such pane or snapshot</td>
-</tr>
-<tr>
-<td><code>read-cells</code></td>
-<td><code>quota-exceeded</code></td>
-<td><code>count</code> above 1,000 rows</td>
+<td>no such pane</td>
 </tr>
 <tr>
 <td><code>freeze-snapshot</code></td>
@@ -667,7 +663,7 @@ for (const match of found ?? []) { /* match.row, match.column, match.length */ }
 <tr>
 <td><code>search-history</code></td>
 <td><code>invalid-argument</code></td>
-<td>the regex does not compile in the <code>regex</code> dialect, or is over 1 KiB</td>
+<td>the regex does not compile in the <code>regex</code> dialect, or is over 1 KiB, or <code>max-matches</code> is 0</td>
 </tr>
 <tr>
 <td><code>history-text</code>, <code>search-history</code></td>

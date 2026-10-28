@@ -12,7 +12,7 @@ The Layout plugin (`ilium.core.layout`, side both) owns split views and the arra
 
 ### See it
 
-<figure><img src="/assets/demos/03-mixed-splits.gif" alt="A terminal, an editor and a board share one screen in a mixed split" loading="lazy"><figcaption>A mixed split. Terminal, editor and board panes sit side by side, and focus moves between them.</figcaption></figure>
+<figure><img src="/assets/demos/03-mixed-splits.gif" alt="Two local fixture terminals, a text editor and a live clock share a four-pane split" loading="lazy"><figcaption>A four-pane split combines two labelled local terminal fixtures, a text editor and a live clock. Focus moves between panes.</figcaption></figure>
 
 ### What the user sees
 
@@ -54,7 +54,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "version": "0.1.0",
   "publisher": "Ilium",
   "capabilities": {
-    "server": ["panes.read", "panes.lifecycle", "tree.restructure"],
+    "server": ["panes.read", "panes.lifecycle", "panes.create", "tree.restructure"],
     "client": ["panes.read", "ui.panels"]
   }
 }
@@ -85,6 +85,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "server": [
       "panes.read",
       "panes.lifecycle",
+      "panes.create",
       "tree.restructure"
     ],
     "client": [
@@ -99,6 +100,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "limits_tier": "first-party"
 }
 ```
+
+The server side holds `panes.create` because the `create-pane` intent that the split samples submit is opened only by that grant ([panes.create](/pages/capability-panes-create/)). The two activation triggers name a command and a view that the plugin registers itself at run time through the command and view registries ([commands](/pages/api-commands/), [UI model](/pages/ui-model/)), not through `contributes`. The trigger `command:layout.preset` starts the plugin when that command is first run, and `view:layout.presets` when the presets panel is first shown. A trigger whose name the plugin never registers never fires, and the plugin then starts only at the next explicit use.
 
 ### Samples
 
@@ -327,7 +330,7 @@ fn on_drag(&mut self, divider_column: u16) -> Option<Submission> {
     })))
 }
 
-// Server side: refused(conflict) names the neighbour that blocks the size.
+// Server side: a size that a neighbour blocks is refused with `conflict`.
 fn resize(pane: NodeId, columns: u16) -> Submission {
     Submission::new(Intent::ResizePane(ResizePaneSpec { pane, columns: Some(columns), rows: None }))
 }
@@ -355,7 +358,7 @@ function onDrag(dividerColumn: number): Submission | undefined {
   };
 }
 
-// Server side: refused(conflict) names the neighbour that blocks the size.
+// Server side: a size that a neighbour blocks is refused with `conflict`.
 const resize = (pane: bigint, columns: number): Submission => ({
   intent: { tag: 'resize-pane', val: { pane, columns, rows: undefined } },
   correlation: 5n,
@@ -369,8 +372,10 @@ Other plugins change what `ilium.core.layout` does through the points below. The
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `layout-presets` | collect | Offer a named split layout in the layout chooser. | entry: id, title, template (nested split description with pane-kind placeholders) | standard |
+| `layout-presets` | collect | Offer a named split layout in the layout chooser. | entry: id, title, template (a preset template string, grammar below) | standard |
 | `before-split` | hook (veto) | Refuse a split, for example above a pane count the plugin allows. | node, direction, pane_count | standard |
+
+**Preset template grammar.** A `template` is a string. `h(a, b, ...)` is a horizontal split (children side by side) and `v(a, b, ...)` is a vertical split (children stacked), each with two or more children and each child either a nested split or a pane-kind placeholder. A placeholder is a bare word naming a pane kind: `terminal`, `agent`, `editor` or `board`. Whitespace between tokens is ignored and names are lowercase. A template that does not parse, has a split with fewer than two children, or names an unknown kind is refused with `invalid-argument` when the contribution is validated at load, and the preset is not offered. Example: `h(agent, v(editor, terminal))` puts the agent pane left and an editor above a terminal on the right.
 
 **Services** (grant `services.use:<name>`):
 
@@ -380,7 +385,7 @@ Other plugins change what `ilium.core.layout` does through the points below. The
 
 - `ilium.core.layout/changed`: { group, split_count } after a split is added, removed or resized
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.layout"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.layout"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds a three-pane review layout to the layout chooser
 

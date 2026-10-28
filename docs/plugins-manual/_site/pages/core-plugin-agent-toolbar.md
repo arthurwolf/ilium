@@ -16,7 +16,7 @@ The frame around a pane and the terminal underneath it are kernel-native. The pl
 
 ### See it
 
-<figure><img src="/assets/demos/01-agent-activity.gif" alt="A pane frame shows the last prompt on top while the agent works and a toolbar on the right" loading="lazy"><figcaption>The banner shows the last prompt while the agent works. The same recording shows the activity icons from the Agent detection plugin.</figcaption></figure>
+<figure><img src="/assets/demos/01-agent-activity.gif" alt="Current Ilium displays local scripted agent activity and completion" loading="lazy"><figcaption>Current Ilium renders local scripted fixture panes, activity signals and unread completion. This capture does not show hosted agents or a last-prompt banner.</figcaption></figure>
 
 ### What the user sees
 
@@ -114,7 +114,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "event:agent-state-changed",
+    "event:agent-activity-changed",
     "startup"
   ],
   "contributes": {
@@ -249,7 +249,7 @@ export function onEvents(batch: Event[]): Submission[] {
         val: {
           pane: event.val.pane,
           slot: 'prompt',
-          content: { spans: [{ text: `> ${trimmed}` }] },
+          content: [{ text: `> ${trimmed}` }],
           icon: undefined,
           tooltip: undefined,
         },
@@ -453,7 +453,7 @@ export function onStop(
         val: {
           pane: node,
           slot: 'recover',
-          content: { spans: [{ text: `Stopped. Last prompt: ${lastPrompt}` }] },
+          content: [{ text: `Stopped. Last prompt: ${lastPrompt}` }],
           icon: undefined,
           tooltip: undefined,
         },
@@ -570,7 +570,7 @@ Other plugins change what `ilium.core.agent-toolbar` does through the points bel
 
 - `ilium.core.agent-toolbar/last-prompt`: get: last prompt text of an agent pane
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.agent-toolbar"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.agent-toolbar"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds a Review button to Claude panes
 

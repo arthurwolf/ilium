@@ -575,6 +575,8 @@ chord-label: func(chord: string) -&gt; string;                         // the us
 </tbody>
 </table>
 <p>An unknown id fails with <code>not-found</code>. The labels are for the reader of this table; the plugin passes the id.</p>
+<h3 id="key-automatic_ai-of-the-inference-tab">Key <code>automatic_ai</code> of the <code>inference</code> tab</h3>
+<p>The <code>inference</code> tab holds the boolean key <code>automatic_ai</code>. It is <code>true</code> when the user has switched on automatic AI features under Inference and privacy, and <code>false</code> otherwise. A plugin that sends screen text to a model, such as the recap plugin (<a href="/pages/core-plugin-recap/">recap</a>), reads this key first and treats a missing key as <code>false</code>.</p>
 <h3 id="what-read-returns">What <code>read</code> returns</h3>
 <p>The result is one JSON object of the tab's values. The keys are the kernel's stable configuration keys of that tab. A key that the kernel removes in a later release disappears from the object, so read keys defensively and give each a default. Every secret value, such as an API key, is the string <code>"&lt;redacted&gt;"</code> and never the secret. The object has the shape of the tab at the moment of the call, and a later change does not alter an object already returned.</p>
 <figure>
@@ -707,7 +709,7 @@ write: func(tab: string, key: string, value: string) -&gt; result&lt;_, plugin-e
 </tr>
 </tbody>
 </table>
-<p>A write sends <code>kernel-settings-changed</code> to every reader of the tab, including the writer. A secret key cannot be written through this call; the owner uses the secrets import. Tabs with no owner plugin have no writer: the kernel row is the only editor.</p>
+<p>A write sends <code>kernel-settings-changed</code> to every reader of the tab, including the writer. A secret key cannot be written through this call; the owner stores it through the secrets store (<a href="/pages/reference-secrets/">secrets</a>). Tabs with no owner plugin have no writer: the kernel row is the only editor.</p>
 <h3 id="link-to-a-setting">Link to a setting</h3>
 <p>A plugin that does not own the tab cannot write it. It links to the row with <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code>, through the <code>open-external</code> intent. Ilium opens Settings at that row.</p>
 <p><strong>Rust</strong></p>
@@ -853,7 +855,7 @@ export function openTerminalSetting(key: string): Submission {
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#interface">Interface</a></li><li class="l2"><a href="#the-kernel-tab-ids">The kernel tab ids</a></li><li class="l2"><a href="#what-read-returns">What read returns</a></li><li class="l2"><a href="#example-1-read-a-kernel-tab">Example 1: read a kernel tab</a></li><li class="l2"><a href="#example-2-show-the-users-chord-for-a-command">Example 2: show the user&#x27;s chord for a command</a></li><li class="l2"><a href="#writing-a-kernel-tab">Writing a kernel tab</a></li><li class="l2"><a href="#link-to-a-setting">Link to a setting</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#interface">Interface</a></li><li class="l2"><a href="#the-kernel-tab-ids">The kernel tab ids</a></li><li class="l2"><a href="#key-automatic_ai-of-the-inference-tab">Key automatic_ai of the inference tab</a></li><li class="l2"><a href="#what-read-returns">What read returns</a></li><li class="l2"><a href="#example-1-read-a-kernel-tab">Example 1: read a kernel tab</a></li><li class="l2"><a href="#example-2-show-the-users-chord-for-a-command">Example 2: show the user&#x27;s chord for a command</a></li><li class="l2"><a href="#writing-a-kernel-tab">Writing a kernel tab</a></li><li class="l2"><a href="#link-to-a-setting">Link to a setting</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

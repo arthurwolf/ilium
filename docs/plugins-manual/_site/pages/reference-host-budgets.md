@@ -46,17 +46,17 @@ A miss of more than 2x on B1, B3 or B4 stops the platform plan. The design assum
 | B16 | Key press to start of the plugin call, T1 and T2 | 1 ms (T1) and 1.5 ms (T2) at the 99th percentile |
 | B17 | Key press to bytes at the PTY through a 0.1 ms plugin handler | Under 5 ms at the 99th percentile |
 | B18 | Helper round trip of a forwarded import | 0.2 ms median, 0.5 ms at the 99th percentile |
-| B19 | Delay of a PTY frame while the plugin queue is full (4 MiB) | Under 1 ms at the 99th percentile |
+| B19 | Delay of a PTY frame while the plugin event queue is full (`event_queue` entries, 1,024 by default) | Under 1 ms at the 99th percentile |
 | B20 | Server decoration change to the client mirror | Under 5 ms at the 99th percentile |
-| B21 | Helper start: spawn to `Ready` for a 2 MiB component | Record; under 80 ms median expected |
-| B22 | Session memory: 40 bundled plugins plus 8 T2 helpers, steady state | Added RSS under 120 MiB for the bundled set; helpers under `memory_mib + 32` MiB each |
+| B21 | Helper start: spawn to `Ready` for a 2 MiB component | Record only (no pass or fail threshold) |
+| B22 | Session memory: 40 bundled plugins plus 8 T2 helpers, steady state | Added RSS under 120 MiB for the bundled set; each helper under the sum of its hosted instances' `memory_mib` plus 32 MiB |
 | B23 | `ilium` CLI cold run (CLI-COLD) | Under 60 ms with a warm file cache |
 | B24 | Idle cost: 40 loaded plugins, no events, 10 minutes | Under 0.5 % of one core; at most 100 wake-ups per second |
 
 The B1 to B9 rows are the phase-0 benchmarks of the platform plan, kept with their targets. B10 to B24 are added by this reference.
 
 - **[HST-305]** `ilium-plugin-bench` MUST contain one program for each of B1 to B24, with the id in its name.
-- **[HST-306]** The release gate MUST include B1 to B9 and B16 to B20 on the reference machine, and MUST fail when any budget is missed.
+- **[HST-306]** The release gate MUST include B1 to B9, B16 to B20 and B23 on the reference machine, and MUST fail when any budget is missed.
 
 ## Named budgets
 

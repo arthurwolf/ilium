@@ -872,7 +872,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><code>ilium.core.inference/request-finished</code>: { purpose, provider, millis }</li>
 </ul>
 <p>Providers implemented by plugins use the <code>inference-provider</code> export and <code>inference.provide</code>.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.inference"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.inference"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-replaces-home-directory-paths-in-outgoing-text-with">Example: Replaces home-directory paths in outgoing text with <code>~</code></h4>
 <p>A package adds a <code>transform</code> handler. Each handler gets the previous output and may replace it.</p>
 <pre><code class="language-json">{
@@ -901,10 +901,12 @@ impl HookHandler for Plugin {
         match call.extension.as_str() {
             &quot;redact_paths&quot; =&gt; {
                 // call.payload_json holds: purpose, provider, model, messages_length, text
-                let _payload: serde_json::Value = match serde_json::from_str(&amp;call.payload_json) {
+                let mut payload: serde_json::Value = match serde_json::from_str(&amp;call.payload_json) {
                     Ok(value) =&gt; value,
                     Err(_) =&gt; return HookReply::Pass,
                 };
+                // Change the fields the hook owns, for example payload[&quot;text&quot;].
+                let new_payload_json = payload.to_string();
                 HookReply::Replace(new_payload_json)
             }
             _ =&gt; HookReply::Pass,
@@ -918,7 +920,8 @@ impl HookHandler for Plugin {
     if (call.extension !== 'redact_paths') return { tag: 'pass' };
     // call.payloadJson holds: purpose, provider, model, messages_length, text
     const payload = JSON.parse(call.payloadJson);
-    void payload;
+    // Change the fields the hook owns, for example payload.text.
+    const newPayloadJson = JSON.stringify(payload);
     return { tag: 'replace', val: newPayloadJson };
   },
 });

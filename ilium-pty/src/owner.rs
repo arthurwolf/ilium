@@ -128,8 +128,9 @@ impl Drop for CleanupOnFailure {
 }
 
 impl PtyOwner {
-    /// `setup_failure` kills/reaps ONLY the child just spawned by this session.
-    /// It runs before dropping native control on every ordinary setup error.
+    /// `setup_failure` requests shutdown of ONLY this session's child through
+    /// its already started, supervised reaper. It runs before dropping native
+    /// control on every ordinary setup error; native cleanup may remain pending.
     /// A successful owner never invokes it and never signals a user process.
     pub(crate) fn spawn(
         master: Box<dyn MasterPty + Send>,

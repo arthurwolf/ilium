@@ -485,12 +485,12 @@
 <tr>
 <td><code>set-status-segment</code>, <code>clear-status-segment</code></td>
 <td>intents</td>
-<td>Fill or clear an own segment: <code>content: rich-text</code>, <code>tooltip</code>, <code>tone</code>.</td>
+<td>Fill or clear an own segment: <code>segment</code> (the own <code>status_segments</code> id), <code>content: rich-text</code>, <code>tooltip</code>, <code>tone</code>. <code>clear-status-segment</code> takes <code>segment</code> only.</td>
 </tr>
 <tr>
 <td><code>set-frame-slot</code>, <code>clear-frame-slot</code></td>
 <td>intents</td>
-<td>Fill or clear an own slot for one pane.</td>
+<td>Fill or clear an own slot for one pane: <code>pane</code>, <code>slot</code> (the own <code>pane_frame_slots</code> id), <code>content: rich-text</code>, <code>icon</code>, <code>tooltip</code>. <code>clear-frame-slot</code> takes <code>pane</code> and <code>slot</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -561,7 +561,7 @@ export const { lifecycle, handler } = definePlugin({
   },
 });
 </code></pre>
-<p>The client draws the segment with the real status bar separators, and drops the lowest-priority segments first when the terminal is narrow.</p>
+<p>The client draws the segment with the real status bar separators, and drops segments when the terminal is narrow, in ascending <code>priority</code> order (lowest first; segments of equal priority drop the one whose plugin id sorts last, then the later segment id). A dropped segment is hidden whole, never truncated below its <code>max_width</code> floor of 4 cells. Test: with segments of priority 10, 50 and 90 and room for two, only the priority 10 segment is hidden.</p>
 <h3 id="errors-and-edge-cases">Errors and edge cases</h3>
 <table>
 <thead>
@@ -579,7 +579,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Segment or slot id not declared</td>
-<td><code>refused(invalid-argument)</code></td>
+<td><code>refused(not-found)</code></td>
 <td>Declare it in the manifest.</td>
 </tr>
 <tr>
@@ -588,7 +588,7 @@ export const { lifecycle, handler } = definePlugin({
 <td>Check the pane kind first.</td>
 </tr>
 <tr>
-<td>More than 10 updates per second</td>
+<td>More than 10 updates per second to one segment or slot</td>
 <td><code>refused(rate-limited)</code></td>
 <td>Coalesce updates.</td>
 </tr>

@@ -423,7 +423,7 @@
 </tr>
 <tr>
 <td>A plugin that calls <code>http</code></td>
-<td>yes, and it gets <code>unavailable</code> or <code>timed-out</code></td>
+<td>yes, and it gets <code>network</code> or <code>timed-out</code></td>
 </tr>
 </tbody>
 </table>
@@ -432,7 +432,7 @@
 <li>[LIF-171] Install of a local file MUST NOT contact the network. Test: install with the network blocked.</li>
 </ul>
 <h3 id="low-disk-and-disk-full">Low disk and disk full</h3>
-<p>The host checks free space on the data volume before an install or an update. It needs the package size times 3, plus 64 MiB. If less is free, the action stops before any write with <code>install.no-space</code>.</p>
+<p>The host checks free space on the data volume before an install or an update. It needs the package size times 3, plus 64 MiB. A separate data check runs before <code>migrate</code>: twice the data size plus 100 MiB (Data migration). If less is free, the action stops before any write with <code>install.no-space</code>.</p>
 <table>
 <thead>
 <tr>
@@ -451,7 +451,7 @@
 </tr>
 <tr>
 <td>Disk full when a plugin writes</td>
-<td>The write returns <code>io</code>. Storage writes in a batch roll back.</td>
+<td>The write returns <code>io</code> with the message <code>no-space</code>, never <code>quota-exceeded</code> ([LIF-119]). Storage writes in a batch roll back.</td>
 </tr>
 <tr>
 <td>Disk full when the host writes a log</td>
@@ -511,7 +511,7 @@
 <li>[LIF-175] A corrupt storage database MUST be moved aside and replaced with an empty one, never deleted. Test: write garbage into the file.</li>
 </ul>
 <h3 id="the-compile-cache">The compile cache</h3>
-<p>T2 and T3 components are compiled ahead of use and cached in <code>&lt;cache&gt;/plugins/compiled/</code>. The key is the component hash, the Wasmtime version and the CPU features. A change of any part makes a new entry. The cache may be removed at any time and is rebuilt on demand. It is not needed to run, only to start fast.</p>
+<p>T2 and T3 components are compiled ahead of use and cached in <code>&lt;cache dir&gt;/ilium/plugins/compile/</code>. The key is the component hash, the Wasmtime version and the CPU features. A change of any part makes a new entry. The cache may be removed at any time and is rebuilt on demand. It is not needed to run, only to start fast.</p>
 <ul>
 <li>[LIF-176] The compile cache key MUST include the component hash, the Wasmtime version and the CPU features, and a missing cache MUST NOT stop a plugin. Test: delete the cache and start.</li>
 </ul>

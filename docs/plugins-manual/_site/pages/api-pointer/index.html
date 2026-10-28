@@ -470,7 +470,7 @@ enum drop-accept { none, before, after, inside }
 }
 </code></pre>
 <h3 id="errors-and-limits">Errors and limits</h3>
-<p>Pointer events are not requests; they have no error. A node that sets <code>pointer-events</code> without <code>focusable</code> is refused at render with <code>invalid-argument</code>. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
+<p>Pointer events are not requests; they have no error. A node that sets <code>pointer-events</code> without <code>focusable</code> is not an error: the node sends no pointer actions (WID-010) and render does not fail. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h3 id="see-also">See also</h3>
 <ul>
 <li><a href="/pages/api-ui/">ui</a>, <a href="/pages/api-popovers/">popovers</a>, <a href="/pages/api-surface-glyph-plane/">glyph plane</a>, <a href="/pages/primitives-terminal-pointer/">terminal pointer</a>.</li>

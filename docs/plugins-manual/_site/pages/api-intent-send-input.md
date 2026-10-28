@@ -10,7 +10,7 @@
 
 ```wit
 // Excerpt of ilium:types/intents in reference-wit
-variant delivery { typed, submitted, pasted }
+enum delivery { typed, submitted, pasted }
 record input-stage { text: string, delay-ms: u16, delivery: delivery }
 record terminal-mouse { kind: pointer-kind, button: pointer-button, column: u16, row: u16, modifiers: pointer-modifiers }
 record input-precondition { activity: option<agent-activity>, screen-revision: option<u64>, foreground: option<string> }
@@ -30,7 +30,7 @@ record send-input-spec {
 }
 ```
 
-The mandatory key is the `dedup-key` of the submission (the field is called `idempotency-key` in the intent table). It follows the format and window rules in [intents](/pages/api-intents/). `pointer-kind`, `pointer-button` and `pointer-modifiers` are the shared types also used by the `pointer` event: kinds `down`, `up`, `move`, `drag`, `wheel-up`, `wheel-down`, `wheel-left` and `wheel-right`; buttons `none`, `left`, `middle` and `right`; modifiers `shift`, `control` and `alt`.
+The mandatory key is the `dedup-key` of the submission. It follows the format and window rules in [intents](/pages/api-intents/). `pointer-kind`, `pointer-button` and `pointer-modifiers` are the shared types also used by the `pointer` event: kinds `down`, `up`, `move`, `drag`, `wheel-up`, `wheel-down`, `wheel-left` and `wheel-right`; buttons `none`, `left`, `middle` and `right`; modifiers `shift`, `control` and `alt`.
 
 ### Fields and rules
 
@@ -40,7 +40,7 @@ The mandatory key is the `dedup-key` of the submission (the field is called `ide
 | `raw` | Bytes written as they are, with no encoding, no bracketed paste and no submit keys. At most 64 KiB. Needs `terminal.raw-input`. |
 | `mouse` | The host encodes each event in the protocol the program enabled (for example SGR 1006). `refused(unsupported)` when mouse reporting is off. Needs `terminal.raw-input`. |
 | `if-current` | A precondition. Every field that is set must match, otherwise `refused(conflict)` before any byte is written. The message names the failed field: `activity`, `screen-revision` or `foreground`. |
-| `lock-user-input` | Hold the user's keys for the duration of the stages, at most 2 s. Keys the user types meanwhile are queued, not lost. |
+| `lock-user-input` | Hold the user's keys for the duration of the stages. The lock lasts as long as the stages, so a batch with `lock-user-input` whose total delay is over 2 s is refused with `invalid-argument`. Keys the user types meanwhile are queued, not lost. |
 | `journal` | Write the journal entry before the PTY write. See "Crash safety" below. |
 
 The text of a stage, and `text` itself, is at most 64 KiB.
@@ -96,7 +96,7 @@ use ilium_plugin_sdk::types::intents::{InputPrecondition, InputStage, SendInputS
 use ilium_plugin_sdk::types::intents::Delivery;
 use ilium_plugin_sdk::types::tree::AgentActivity;
 
-fn compact(pane: NodeId) -> Submission {
+fn compact(pane: NodeId, attempt: u32) -> Submission {
     let spec = SendInputSpec {
         pane,
         text: String::new(),
@@ -116,7 +116,7 @@ fn compact(pane: NodeId) -> Submission {
         lock_user_input: true,
         journal: true,
     };
-    Submission::keyed(Intent::SendInput(spec), format!("compact-{pane}"))
+    Submission::keyed(Intent::SendInput(spec), format!("compact-{pane}-{attempt}"))
 }
 ```
 
@@ -125,7 +125,7 @@ fn compact(pane: NodeId) -> Submission {
 ```ts
 import type { Submission } from '@ilium/plugin-sdk/types';
 
-function compact(pane: bigint): Submission {
+function compact(pane: bigint, attempt: number): Submission {
   return {
     intent: {
       tag: 'send-input',
@@ -142,7 +142,7 @@ function compact(pane: bigint): Submission {
       },
     },
     correlation: 1n,
-    dedupKey: `compact-${pane}`,
+    dedupKey: `compact-${pane}-${attempt}`,
   };
 }
 ```
@@ -199,7 +199,7 @@ With `journal: true` the kernel writes a pane journal entry (kind `input-sent`, 
 Event::InputUncertain(InputUncertainEvent { pane, dedup_key }) => {
     // read the visible rows with terminal::read_cells (terminal.read-cells), decide, then:
     if !self.screen_shows(pane, "/compact") {
-        out.push(compact(pane));   // build it with a new key suffix: the old key is reserved
+        out.push(compact(pane, 2));   // a new attempt number gives a new key: the old key is reserved and would complete as duplicate
     }
     log::log(Level::Warn, &format!("input {dedup_key} on {pane} was uncertain"));
 }
@@ -210,7 +210,7 @@ Event::InputUncertain(InputUncertainEvent { pane, dedup_key }) => {
 ```ts
 if (event.tag === 'input-uncertain') {
   // read the visible rows with readCells (terminal.read-cells), decide, then:
-  if (!screenShows(event.val.pane, '/compact')) out.push(compact(event.val.pane));   // with a new key suffix
+  if (!screenShows(event.val.pane, '/compact')) out.push(compact(event.val.pane, 2));   // new attempt number, new key
   log('warn', `input ${event.val.dedupKey} on ${event.val.pane} was uncertain`);
 }
 ```
@@ -233,7 +233,7 @@ An agent signature in the manifest may declare an action as stages with the same
 
 | Condition | Result |
 |---|---|
-| More than 16 stages, total delay over 10 s, `raw` over 64 KiB, lock over 2 s | batch refused, `invalid-argument` |
+| More than 16 stages, total delay over 10 s, `raw` over 64 KiB, `lock-user-input` with a total stage delay over 2 s | batch refused, `invalid-argument` |
 | `raw`, `mouse` or lock without its grant | batch refused, `not-permitted` |
 | Restored pane that has not started | `refused(pane-not-ready)` |
 | Mouse reporting off | `refused(unsupported)` |
@@ -249,7 +249,7 @@ While the lock is held the user's keys wait, and a typed line appears after the 
 <span class="t-hi">›   🦀 🔒 ⠋ Fix auth</span>
 <span class="t-dim">›   🖥️    Shell</span>
 
-<span class="t-dim">pane 7 (claude)  send-input  compact-7</span>
+<span class="t-dim">pane 7 (claude)  send-input  compact-7-1</span>
 <span class="t-ok">0 ms     stage 1 typed   "/compact"</span>
 <span class="t-ok">120 ms   stage 2 submit  CR</span>
 <span class="t-ok">121 ms   outcome         ok-epoch(5)</span>

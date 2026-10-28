@@ -138,7 +138,7 @@ keep_days = 365
 <figcaption>Rendered at 48 columns. Illustrative. A policy-denied row is locked off and cannot be checked.</figcaption>
 </figure>
 
-**[SEC-186]** An installed plugin that violates a new policy is disabled at the next start, with a notice `Disabled by your administrator`, and the audit log records `policy-violation`. Its data is kept.
+**[SEC-186]** An installed plugin that violates a new policy rule of the kinds that disable a plugin (`plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` and the publisher rules, see [SEC-198]) is disabled at the next start, with a notice `Disabled by your administrator`, and the audit log records `policy-violation`. Its data is kept.
 
 **[SEC-187]** A malformed policy file (TOML error, unknown key, wrong type, `version` not 1) fails **closed** for third parties: T2 and T3 plugins refuse to load with `policy.invalid`, and T1 plugins run normally. The server shows `Admin policy is invalid: <line and message>` and keeps running. A policy file that is missing is not an error (no policy). An unreadable one (permission error) counts as malformed.
 

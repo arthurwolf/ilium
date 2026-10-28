@@ -54,7 +54,7 @@ A mirror copies a registry so that machines without internet can install. Run `i
 
 | Id | Rule |
 |---|---|
-| [PKG-473] | A mirror MUST NOT be signed by the mirror operator. Clients check the signatures of the original registry. |
+| [PKG-473] | A full mirror MUST NOT be signed by the mirror operator. Clients check the signatures of the original registry. The one exception is a partial mirror ([PKG-409]), which signs with its own keys and its own `root.json`; clients verify that mirror against its own root, set in `[plugins.registry]`. |
 | [PKG-474] | With `packages.allowed_sources` set to the mirror, a client that cannot reach the mirror reports `registry.unreachable` and never falls back to another registry. |
 
 ## Policy keys for registries and sources

@@ -395,7 +395,7 @@
 
 <p>This guide is the review list an author runs before each release. Every item says what to check, which command checks it, and what no command can check. The rule codes are those of <a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a>. Requirement ids of this page are in the range <code>AUT-400</code> to <code>AUT-499</code>.</p>
 <h3 id="how-to-use-the-list">How to use the list</h3>
-<p>Work top to bottom. The first five sections can be run by a machine. The last three need a person. A release is ready when every item is checked or has a written reason in <code>lint.toml</code> or in the release notes.</p>
+<p>Work top to bottom. Sections 1 to 6 are run by a machine wherever a row names a command or test; a row marked <code>Review</code> in those sections is a manual check. Section 6 (Behaviour tests) is run with <code>test</code>. The last two sections need a person. A release is ready when every item is checked or has a written reason in <code>lint.toml</code> or in the release notes.</p>
 <p>A release MUST have no <code>check</code> error and no unsuppressed <code>lint</code> error. [AUT-401]</p>
 <p>A release SHOULD pass <code>ilium plugin lint --deny warnings</code>, and every suppression SHOULD carry a reason that a reviewer can read. [AUT-402]</p>
 <h2 id="1-package-and-manifest">1. Package and manifest</h2>
@@ -429,7 +429,7 @@
 <td><code>manifest.api-version</code></td>
 </tr>
 <tr>
-<td><code>description</code> is one paragraph of 280 characters or less</td>
+<td><code>description</code> is one paragraph of 280 characters or less (hard limit 500)</td>
 <td><code>lint</code></td>
 <td><code>lint.description-missing</code></td>
 </tr>
@@ -455,7 +455,7 @@
 </tr>
 </tbody>
 </table>
-<p>A plugin SHOULD NOT list an <code>unstable</code> feature in a release, because the shape of that feature can change without a major version. [AUT-403]</p>
+<p>A plugin MUST NOT list an <code>unstable</code> feature in a release unless the plugin is for development use, because the shape of that feature can change without a major version. [AUT-403]</p>
 <h2 id="2-grants-and-privacy">2. Grants and privacy</h2>
 <table>
 <thead>
@@ -493,7 +493,7 @@
 </tr>
 </tbody>
 </table>
-<p>A plugin MUST request the smallest grant set that works, and every grant MUST be explained in the README with the feature that needs it. [AUT-404]</p>
+<p>Every capability a plugin requests MUST be exercised by a tested call path, no unused grant may remain in the manifest, and every grant MUST be explained in the README with the feature that needs it. [AUT-404]</p>
 <p>A plugin MUST handle <code>not-permitted</code> for every call of an optional grant and MUST keep working with a reduced feature set. [AUT-405]</p>
 <h2 id="3-resource-use">3. Resource use</h2>
 <table>
@@ -537,7 +537,7 @@
 </tr>
 </tbody>
 </table>
-<p>A plugin SHOULD keep every measured use below 80 percent of its limit on the largest realistic data set, because the limit is a trap, not a warning. See <a href="/pages/performance/">Performance</a>. [AUT-406]</p>
+<p>A plugin SHOULD keep every measured use below 80 percent of its limit on the fixture data set named in the README (one stated size per limit, such as the largest list length or buffer size the plugin documents), because the limit is a trap, not a warning. See <a href="/pages/performance/">Performance</a>. [AUT-406]</p>
 <h2 id="4-views-and-keys">4. Views and keys</h2>
 <table>
 <thead>

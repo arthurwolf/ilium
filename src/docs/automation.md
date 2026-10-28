@@ -586,3 +586,9 @@ Stored under `[reset_planning]` as `monitor_claude`, `monitor_codex` and `time_s
 | `ilium chat send` says the project does not have a chatroom | Run `ilium chat init` there, or add the room from the project menu. |
 | Agents ignore Chatroom or Progress rules | Check Settings, Setup for the target status; start a new agent session so it re-reads its instruction files. |
 | `curl` to port 8872 is refused | Server started with another `[api] port`; the port was in use when the server started (see the server log); the server has not been restarted since you changed the port. |
+
+## Shared resource coordination
+
+Project resources provide exclusive FIFO reservations for a GPU or individual USB board, shared with any project that links the same resource. Creating or linking one installs catalog-driven managed instructions in the project's supported agent files. These blocks are independent of the global Chatroom and Progress setup switches; unlinking removes only the resource projection. Failed instruction synchronization is reported as repair debt rather than undoing a committed resource.
+
+An agent reserves once and uses `ilium resource wait RESERVATION` when queued. The command blocks and displays a native segmented queue strip; it requires no shell probe and consumes none of the eight generic progress-monitor slots. Interrupting the command retains the reservation. Acquisition notifications remain pending until authenticated status/wait readback. See [Resource queues](resource-queues.md) for commands, safe release and guarded recovery.

@@ -101,7 +101,7 @@ activate: func(context: activation) -> result<_, plugin-error>;
 deactivate: func(reason: deactivation-reason) -> option<list<u8>>;
 ```
 
-The record `activation` is defined once in the [WIT reference](/pages/reference-wit/#413-lifecycle). It has the fields `plugin`, `api`, `instance`, `side`, `settings-json`, `granted` and `restored`.
+The record `activation` is defined once in the [WIT reference](/pages/reference-wit/) (`lifecycle`, [section 4.13](/pages/reference-wit/#413-lifecycle)). It has the fields `plugin`, `api`, `instance`, `side`, `settings-json`, `granted` and `restored`.
 
 `granted` lists the capabilities actually granted, so a plugin can hide features it cannot use. The bytes that `deactivate` returns come back as `restored` on the next activation. Use them to keep state across a restart.
 
@@ -195,8 +195,8 @@ The host calls `activate` first, then `on-events` with the first batch. A `deact
 
 <pre class="term">
 <span class="t-prompt">$</span> ilium plugin logs example.skeleton --tail 3
-<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-ok">info </span> activated example.skeleton with 2 grants
-<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-dim">debug</span> on-events batch: 3 events, 1 submission
+<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-ok">info </span> activated example.skeleton with 0 grants
+<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-dim">debug</span> on-events batch: 3 events, 0 submissions
 <span class="t-dim">2026-10-11 09:45:19</span> <span class="t-ok">info </span> deactivating: shutdown, 0 bytes returned
 <span class="t-prompt">$</span> <span class="t-dim">3 lines shown</span>
 </pre>
@@ -324,7 +324,7 @@ Each export runs under a deadline. The default is the same for every tier. The v
 | `annotator.annotate` | 10 ms (20 ms) | late result dropped; the third breach in a row traps |
 | `renderer` frame | the frame budget (1,000 ms divided by the effective frame rate, rounded down; 33 ms at 30 fps; `frame_deadline_ms` may raise it to at most 50 ms) | frame skipped; 30 breaches in a row trap |
 | `detector.identify` and `detector.classify` | 20 ms (50 ms), key `detector_deadline_ms` | previous classification kept; the third breach in a row traps |
-| `lifecycle.migrate` | 30,000 ms (60,000 ms), key `migrate_deadline_ms` | the migration fails, the backup is restored; not a failure |
+| `migrator.migrate` | 30,000 ms (60,000 ms), key `migrate_deadline_ms` | the migration fails, the backup is restored; not a failure |
 | `hook-handler.handle-hook` | 20 ms by default, 5 to 50 ms by the manifest `deadline_ms` | counts as `pass`; the third breach in a row disables that extension |
 | `service-provider` call | 50 ms (100 ms), key `command_deadline_ms` | trap; the caller's request fails with `internal` |
 | `inference-provider.complete` and `models` | 50 ms (100 ms), key `command_deadline_ms` | trap; the request fails with `internal` |

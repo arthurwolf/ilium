@@ -92,7 +92,7 @@ const slot = { tag: 'set-frame-slot', val: {
 
 ### open-external
 
-`open-external` hands a target to the desktop. `url` accepts `http`, `https` and `mailto` only. `file` opens a path with the desktop handler. `settings` takes an `ilium://settings/<tab-id>#<key>` link and opens the Settings screen at that row, which is how a plugin points at a kernel setting it may not write. The first time a plugin opens a target origin the user is asked, and the answer is remembered for that plugin. A declined request is `refused(not-permitted)`. The `open_target` allowlist stays in the kernel.
+`open-external` hands a target to the desktop. `url` accepts `http`, `https` and `mailto` only. `file` opens a path with the desktop handler. `settings` takes an `ilium://settings/<tab-id>#<key>` link and opens the Settings screen at that row, which is how a plugin points at a kernel setting it may not write. The first time a plugin opens a target origin the user is asked, and the answer is remembered for that plugin. A declined request is `refused(not-permitted)`. There is no separate allowlist of targets: the only checks are the scheme list above (a URL with any other scheme is `refused(not-permitted)`, SEC-043) and the per-origin consent, and both run in the kernel, never in the plugin.
 
 **Rust**
 
@@ -115,8 +115,10 @@ const settings = { tag: 'open-external', val: { target: { tag: 'settings', val: 
 **Rust**
 
 ```rust
+use ilium_plugin_sdk::types::tree::TitleSource;
+
 let rename = Intent::RenameNode(RenameNodeSpec {
-    node, title: "Fix auth".into(), source: TitleOrigin::Inferred, expected_revision: Some(view.revision),
+    node, title: "Fix auth".into(), source: TitleSource::Inferred, expected_revision: Some(view.revision),
 });
 let icon = Intent::SetInferredIcon(SetInferredIconSpec { node, icon: Some("🔧".into()), source: "titler".into() });
 ```
@@ -214,7 +216,7 @@ const deco = { tag: 'set-decoration', val: {
 | More than 10 `set-status-segment` or `set-frame-slot` per second per slot | `refused(rate-limited)` |
 | Segment or slot id not declared by the plugin | `refused(not-found)` |
 | Pane does not match `applies_to` | `refused(invalid-argument)` |
-| `open-external` declined, or a scheme other than `http`, `https`, `mailto` | `refused(not-permitted)` or `refused(invalid-argument)` |
+| `open-external` declined, or a scheme other than `http`, `https`, `mailto` | `refused(not-permitted)` |
 | `mark-attention` reason over 80 characters | `refused(invalid-argument)` |
 | Manual title or icon in place | `refused(conflict)` |
 | Frames outside 2 to 16, `frame-ms` under 90 | `refused(invalid-argument)` |

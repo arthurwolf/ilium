@@ -66,6 +66,7 @@ The tabs appear in this order:
 | Titles | Title style and entry-naming instructions | `[inference]` |
 | Triggers | Which events run AI titling and tree organization | `[triggers]` |
 | Text Triggers | Regular-expression rules that send text to panes | `[text_triggers]` |
+| Custom Agents | Named Claude or Codex profiles, icons and environment variables | `[custom_agents]` |
 | Debug | File logging | `[debug]` |
 | API | Port of the local HTTP agent-creation API | `[api]` |
 | About | Version and project information | none |
@@ -310,6 +311,16 @@ The terminal checkpoint fires after every second submitted plain-shell command. 
 
 Rules pairing a regular expression with a literal message. When an enabled regex matches a completed output line, Ilium sends the message plus Enter to the selected target after the rule's **Delay** (whole seconds, default 60, `0` sends immediately). See [Automation](automation.md).
 
+### Custom Agents
+
+Create a named profile for Claude or Codex, choose its icon, and add environment rows. Select a profile to edit it, or select the add row to create one. Values are masked by default; the editor can reveal them. Select an environment row's remove control to delete it. Save validates the entire draft; duplicate names or keys, invalid keys, and reserved variables are rejected. Empty values and literal spaces, quotes, equals signs, newlines and Unicode are preserved when supported by the platform.
+
+Saved profiles appear as additional icons in the tree toolbar. Use the arrows on that row to reach profiles that do not fit; hover an icon to see its name and click it to launch. With the tree focused, `Alt+Left` and `Alt+Right` select a profile and `Alt+Enter` starts it. Right-click a profile icon to open the new-worktree dialog; selecting an existing worktree before launching opens the existing-worktree dialog. The tree context menu also lists each profile under its Claude or Codex new-agent submenu, with choices for launching here or in a new or existing worktree.
+
+The profile values override inherited environment variables. Ilium reserves `TERM`, `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME`, `ILIUM_SESSION_SOCKET`, `ILIUM_WORKTREE`, and `ILIUM_BRANCH`, plus the terminal-filtered `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `TMUX`, `ZELLIJ`, `NO_COLOR`, and variables beginning with `WEZTERM_`, `KITTY_`, `TMUX_` or `ZELLIJ_`. Reserved names are rejected instead of silently ignored.
+
+**Profile values are plaintext in Ilium's owner-only configuration file; they are not encrypted.** The launched agent and its descendants inherit them. Edits apply to future starts and restarts, while a running process keeps its existing environment. Deletion requires confirmation: a running process continues, but its pane cannot restart as that profile until the profile is restored. Session snapshots keep the profile identity and provider rather than the environment values. For a missing profile still referenced by a pane, Settings offers **Restore missing profile** with its original identity; re-enter its name, icon and environment values before saving.
+
 ### Debug
 
 **File logging** (default off). When on, instrumented actions, errors and complete text LLM exchanges are written to a timestamped session log; enabling applies at once to the client and the detached server. See [Inference and privacy](inference-and-privacy.md#logging).
@@ -461,3 +472,7 @@ Most Settings rows have a help affordance. Press `?` on a selected row (or click
 - **Experiments in a temporary configuration.** Run Ilium with `ILIUM_CONFIG_DIR` pointing at an empty directory to start from defaults without touching your real file.
 
 Related: [Getting started](getting-started.md), [Inference and privacy](inference-and-privacy.md), [Voice](voice.md), [Session recovery](session-recovery.md), [CLI reference](cli-reference.md).
+
+## Resource queue grouping
+
+**Group agents under resources** (`[ui].resource_queue_grouping`, default `true`) displays a local owner and waiting agents beneath the resource row, in authoritative queue order. Queue numbers remain global when agents belong to another linked project. Turning this off restores the ordinary pane placement while retaining waiting badges, resource rows, queue details and native wait progress. Grouping changes display only; it does not move real pane parents, alter splits or redirect input. See [Resource queues](resource-queues.md).

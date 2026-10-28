@@ -24,7 +24,7 @@ In `ilium:plugin@0.1.0` the supported way to publish is to hand over files. A re
 
 Users add the key once with `ilium plugin trust add publisher.pub` and install the package with `ilium plugin install`. A newer version of an installed id is an update.
 
-The manual also specifies an optional registry, a set of signed static files that a client can read (see [Registry reference](/pages/reference-registry/)). It adds search, channels, yank and deprecate. The command `ilium plugin publish` is described there, while the command-line reference marks it as reserved in this contract version. Until those two pages agree, an author MUST treat the package file as the only publishing route that is certain to work, and MAY add a registry as a second route when the host supports it. [AUT-301]
+The manual also specifies an optional registry, a set of signed static files that a client can read (see [Registry reference](/pages/reference-registry/)). It adds search, channels, yank and deprecate. The command `ilium plugin publish <file> --registry <url>` uploads a signed package to a registry (see [Distribution commands](/pages/reference-plugin-distribution-cli/)). The package file stays the base route that needs no registry, and an author MAY add a registry as a second route. [AUT-301]
 
 ## Before you release
 
@@ -46,7 +46,7 @@ ilium plugin verify dist/com.example.notes-1.4.0.iliumpkg
 | `test` | Behaviour against your fixtures |
 | `build --release` | A release build without debug information |
 | `pack` | The deterministic archive with the `files` inventory |
-| `verify` | Offline replay of the install stages 1 to 8 on the finished file |
+| `verify` | Offline replay of the install stages 1 to 7 on the finished file |
 
 A release MUST pass `check` without errors and SHOULD pass `lint --deny warnings`. [AUT-302]
 
@@ -92,7 +92,7 @@ ilium plugin sign dist/com.example.notes-1.4.0.iliumpkg --key ~/keys/example/pub
 | Keep `publisher.key` outside the project and outside version control | A key in a repository is a leaked key |
 | Keep an offline copy | A lost key cannot be recovered |
 | Sign last | A later `pack` writes a new archive without a signature |
-| Sign in a clean environment, or give CI the key through `ILIUM_PLUGIN_SIGNING_KEY` | The key never appears in a command line or a log |
+| Sign in a clean environment, or give CI the key through `ILIUM_PLUGIN_SIGNING_KEY` (path of a key file) or `ILIUM_PUBLISHER_KEY` (PEM text) | The key never appears in a command line or a log |
 
 The secret key MUST NOT be committed, packaged or printed. [AUT-306]
 
@@ -100,14 +100,14 @@ A release MUST be signed after the last `pack`, and the signed file MUST be the 
 
 ### Show users the fingerprint
 
-The key fingerprint is the SHA-256 of the raw public key. Users see its short form (for example `3f2a…9c01`) in the trust dialog. The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two. [AUT-308]
+The key fingerprint is the SHA-256 of the raw public key. Users see its short form (the first 8 digits, for example `3f2a 91c0`) in the trust dialog. The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two. [AUT-308]
 
 ### Lost, leaked or changed keys
 
 | Situation | What happens | What the author does |
 |---|---|---|
 | Key lost | No new signed release for that publisher id | Make a new key and a new publisher id, publish a new plugin id, and tell users |
-| Key leaked | Anyone can sign as you | Stop shipping, tell users to run `ilium plugin trust revoke <key_id>`, publish under a new key |
+| Key leaked | Anyone can sign as you | Stop shipping, tell users to run `ilium plugin trust revoke <key_id> --reason compromised`, publish under a new key |
 | A known publisher id arrives with another key | Refused with `package.publisher-key-changed` | Users must remove the old key and add the new one on purpose |
 | Registry in use | A key can also be revoked in the registry metadata | Publish the revocation there too |
 

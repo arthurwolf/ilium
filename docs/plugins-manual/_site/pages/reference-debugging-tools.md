@@ -45,7 +45,7 @@ One space separates the parts. Example:
 - **[DEV-652]** The thresholds in order are `trace`, `debug`, `info`, `warn`, `error`. A line is written when its level is at or above the threshold.
 - **[DEV-653]** The default threshold MUST be `info`. A plugin installed with `dev` has the default `debug`. `debug` and `trace` lines at a threshold of `info` are dropped, not stored.
 - **[DEV-654]** `ilium plugin log-level` and the environment variable `ILIUM_PLUGIN_LOG_LEVEL` MUST set the threshold. The command wins over the variable.
-- **[DEV-655]** The restart message MUST be `restarting in 1 s (failure 1 of 3 in 10 minutes)` at level `warn`, with the delay and the failure count of that restart. The last failure MUST log `disabled after 3 failures in 10 minutes`.
+- **[DEV-655]** The restart message MUST be `restarting in <delay> s (failure <n> of 3 in 10 minutes)` at level `warn`, with the delay of that restart (1 for the first failure, 5 for the second) and its failure count, for example `restarting in 1 s (failure 1 of 3 in 10 minutes)` and `restarting in 5 s (failure 2 of 3 in 10 minutes)`. The last failure MUST log `disabled after 3 failures in 10 minutes`.
 - **[DEV-656]** The log rate limit is 200 lines per second for an ordinary plugin and 1,000 for a trusted T1 plugin. Lines over the limit MUST be dropped and counted. Once per second, when lines were dropped, the host MUST write one `warn` line `<n> lines dropped in the last second`. That line does not use the rate budget.
 - **[DEV-657]** When the host event queue of a plugin is full, the host MUST write one line with level `error` and the message `event queue full: dropped N events`.
 - **[DEV-658]** A plugin MUST NOT be able to write a line with the side `host`.

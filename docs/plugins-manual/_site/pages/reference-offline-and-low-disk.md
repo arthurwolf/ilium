@@ -16,20 +16,20 @@ Installed plugins run with no network. Ilium itself needs no network for plugins
 | Install from a local `.iliumpkg` file | no |
 | Verify a signature (`ilium plugin verify`) | no |
 | Update check, install from a source | yes |
-| A plugin that calls `http` | yes, and it gets `unavailable` or `timed-out` |
+| A plugin that calls `http` | yes, and it gets `network` or `timed-out` |
 
 - [LIF-170] The host MUST load, activate and run installed plugins with no network. Test: block the network in the fixture and start all fixtures.
 - [LIF-171] Install of a local file MUST NOT contact the network. Test: install with the network blocked.
 
 ### Low disk and disk full
 
-The host checks free space on the data volume before an install or an update. It needs the package size times 3, plus 64 MiB. If less is free, the action stops before any write with `install.no-space`.
+The host checks free space on the data volume before an install or an update. It needs the package size times 3, plus 64 MiB. A separate data check runs before `migrate`: twice the data size plus 100 MiB (Data migration). If less is free, the action stops before any write with `install.no-space`.
 
 | Event | Result |
 |---|---|
 | Disk full during install | The staging folder is removed. Nothing is registered. `install.io`. |
 | Disk full during update | The trial is abandoned. The old version stays. |
-| Disk full when a plugin writes | The write returns `io`. Storage writes in a batch roll back. |
+| Disk full when a plugin writes | The write returns `io` with the message `no-space`, never `quota-exceeded` ([LIF-119]). Storage writes in a batch roll back. |
 | Disk full when the host writes a log | Lines are dropped. A count is kept. |
 | Disk full when the snapshot is written | Previous snapshot kept. See [Persistence](/pages/reference-persistence-and-restart/). |
 | Free space below 64 MiB while running | The host shows one warning and blocks installs and updates. Plugins keep running. |
@@ -57,7 +57,7 @@ If the data folder is not writable, the host starts in a read-only mode. Install
 
 ### The compile cache
 
-T2 and T3 components are compiled ahead of use and cached in `<cache>/plugins/compiled/`. The key is the component hash, the Wasmtime version and the CPU features. A change of any part makes a new entry. The cache may be removed at any time and is rebuilt on demand. It is not needed to run, only to start fast.
+T2 and T3 components are compiled ahead of use and cached in `<cache dir>/ilium/plugins/compile/`. The key is the component hash, the Wasmtime version and the CPU features. A change of any part makes a new entry. The cache may be removed at any time and is rebuilt on demand. It is not needed to run, only to start fast.
 
 - [LIF-176] The compile cache key MUST include the component hash, the Wasmtime version and the CPU features, and a missing cache MUST NOT stop a plugin. Test: delete the cache and start.
 

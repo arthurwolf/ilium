@@ -7,7 +7,7 @@ Everything Ilium does is done by a plugin. The 30 core plugins ship with Ilium, 
 Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]`, collected in [User and administrator requirements](/pages/reference-requirements-user-admin/).
 
 <div class="note">
-<p>Decision status. Which core plugins a user may turn off is a pending decision. The column "Can you turn it off" below is the proposal. The two rules that are not pending: a core plugin never needs an install, and the kernel recovery page can never be turned off or replaced.</p>
+<p>The set is fixed: the plugins marked "no" in the column "Can you turn it off" below cannot be turned off. A core plugin never needs an install, and the kernel recovery page can never be turned off or replaced.</p>
 </div>
 
 ### Contents
@@ -35,7 +35,7 @@ Core plugins have ids of the form `ilium.core.<name>`. They appear in **Settings
 
 ### The 30 core plugins
 
-The column "Can you turn it off" is a proposal, see the decision status above. "Replaceable" says whether a third-party plugin may take over the job with `replaces`.
+The column "Can you turn it off" lists the fixed set of plugins that stay on. "Replaceable" says whether a third-party plugin may take over the job with `replaces`.
 
 #### Tree and panes
 
@@ -96,7 +96,7 @@ A plugin you replace or turn off keeps its settings and data on disk. See [Plugi
 
 The two plugins that cannot be replaced, Settings and Sessions, hold data and roles that a replacement cannot take over safely. The kernel recovery page, which is not a plugin, can never be turned off or replaced either.
 
-- [USR-041] The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why. Test: press Space on `ilium.core.tree` and assert the refusal text. (Pending decision: the set of "no" plugins.)
+- [USR-041] The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why. Test: press Space on `ilium.core.tree` and assert the refusal text.
 - [USR-042] A request to replace `ilium.core.settings` or `ilium.core.sessions` MUST fail at install with `manifest.replaces-not-replaceable`. Test: install a package with such a `replaces` entry.
 
 ### Turning one off
@@ -140,13 +140,13 @@ If the replacement imports the old data on its own initiative, it needs a permis
 
 ### Updates
 
-Core plugins are updated together with Ilium. You never update one on its own. When you update Ilium, every core plugin changes to the version inside it. Third-party plugins are unaffected. A third-party plugin built for an older interface version may be refused after an Ilium update with `api.window`. See [Install and manage plugins](/pages/user-install-and-manage/).
+Core plugins are updated together with Ilium. You never update one on its own. When you update Ilium, every core plugin changes to the version inside it. Third-party plugins are unaffected. A third-party plugin built for an older interface version may be refused after an Ilium update with the message "built for an interface version this Ilium does not support" (code `package.api-unsupported`). See [Install and manage plugins](/pages/user-install-and-manage/).
 
 ### Errors and edge cases
 
 | Situation | What happens |
 |---|---|
-| You uninstall a core plugin | Refused with `plugin.not-removable` (pending decision: code name). Turn it off instead |
+| You uninstall a core plugin | Refused with `plugin.not-removable` (USR-040). Turn it off instead |
 | Two plugins replace the same core plugin | Only one can be on. Turning on the second turns off the first and tells you |
 | A replacement fails three times | It is turned off by the usual rule and the built-in plugin comes back |
 | You turn off a core plugin that a replacement needs | The replacement shows "Waiting for <owner>" |

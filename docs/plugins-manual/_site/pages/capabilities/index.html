@@ -992,7 +992,7 @@ high-risk grant. It always needs an explicit grant, even for a T1 bundled plugin
 </tbody>
 </table>
 <h3 id="extended-grants">Extended grants</h3>
-<p>The grants below cover the wider kernel surface: tree restructuring, pane lifecycle, terminal and agent data, chrome, sessions, inference and process control. Nine of them are high risk and always need an explicit grant, even for a T1 bundled plugin: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code> and <code>settings.read-kernel:api</code>. The grant <code>gpu.kernels</code> is unstable and exists only in development builds. Both <code>extensions.*</code> grants take exactly one global point id and refuse wildcards (<code>manifest.grant-wildcard</code>). <code>extensions.contribute</code> is high risk only for a point that declares <code>risk: "high"</code>; the review dialog then shows a warning. Four argument forms are worth knowing: <code>http:setting:&lt;key&gt;</code> (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), <code>fs.read:agent-sessions:gemini</code> with <code>fs.read:agent-config:gemini</code>, <code>fs.read:agent-config:antigravity</code>, and <code>settings.read-kernel:&lt;kernel-tab-id&gt;</code> (argument required, no wildcard).</p>
+<p>The grants below cover the wider kernel surface: tree restructuring, pane lifecycle, terminal and agent data, chrome, sessions, inference and process control. Eleven of them are high risk and always need an explicit grant, even for a T1 bundled plugin: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code>, <code>settings.write-kernel:&lt;tab&gt;</code> and <code>panes.create-command:&lt;program&gt;</code>. The grant <code>gpu.kernels</code> is unstable and exists only in development builds. Both <code>extensions.*</code> grants take exactly one global point id and refuse wildcards (<code>manifest.grant-wildcard</code>). <code>extensions.contribute</code> is high risk only for a point that declares <code>risk: "high"</code>; the review dialog then shows a warning. Four argument forms are worth knowing: <code>http:setting:&lt;key&gt;</code> (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), <code>fs.read:agent-sessions:gemini</code> with <code>fs.read:agent-config:gemini</code>, <code>fs.read:agent-config:antigravity</code>, and <code>settings.read-kernel:&lt;kernel-tab-id&gt;</code> (argument required, no wildcard).</p>
 <table>
 <thead>
 <tr>
@@ -1095,7 +1095,7 @@ high-risk grant. It always needs an explicit grant, even for a T1 bundled plugin
 <li><code>http:&lt;host&gt;</code> takes an exact host, <code>*.&lt;domain&gt;</code> for any subdomain at any depth (not the bare
   domain), and an optional port. <code>localhost</code>, <code>127.0.0.1</code> and <code>[::1]</code> allow plain HTTP. A bare <code>*</code>
   is refused.</li>
-<li><code>topics.subscribe:&lt;pattern&gt;</code> takes an exact topic, <code>&lt;prefix&gt;/*</code> or a bare <code>*</code> (H).</li>
+<li><code>topics.subscribe:&lt;pattern&gt;</code> takes an exact topic, <code>&lt;prefix&gt;/*</code> or a bare <code>*</code>. Exact and prefix patterns are normal risk; only the bare <code>*</code> is high risk (H).</li>
 <li><code>process.run:*</code> is refused with <code>manifest.grant-wildcard</code>. <code>process.run:sh</code> is valid and H.</li>
 <li><code>messages.peer:&lt;plugin-id&gt;</code> takes one exact plugin id and no wildcard.</li>
 <li><code>extensions.provide</code> and <code>extensions.contribute</code> take one exact <code>&lt;plugin-id&gt;/&lt;point&gt;</code> and no wildcard. There is no <code>extensions.contribute-any</code>. List each point.</li>
@@ -1157,7 +1157,7 @@ at 72 columns for a signed notes package.</p>
 │ Notes 0.1.0 by Example Labs (T2, signed)                                   │
 │                                                                            │
 │ <span class="t-hi">Server side</span>                                                                │
-│ [x] Reads the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
+│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
 │ [x] Reads files in this project <span class="t-dim">……………………………………………………………………</span> fs.read:project │
 │ <span class="t-warn">! [ ] Runs the program git</span> <span class="t-dim">…………………………………………………………………………………</span> <span class="t-warn">process.run:git</span> │
 │ [x] Connects to api.example.com <span class="t-dim">………………………………………………………</span> http:api.example.com │
@@ -1401,7 +1401,7 @@ call) and <code>failed(revoked)</code> (a pending request lost its grant).</p>
 <li><code>fs.pick</code> needs <code>fs.read:picked</code> or <code>fs.write:picked</code>. Without either it fails with
   <code>manifest.grant-dependency</code>.</li>
 <li><code>settings.write-all</code> needs <code>settings.read-all</code>, and the review dialog cannot grant write alone.</li>
-<li><code>settings.contribute:&lt;tab-id&gt;</code> lets a plugin add sections to one built-in tab, such as <code>settings.contribute:terminal</code>. It is low risk and independent of <code>settings.read-all</code> and <code>settings.write-all</code>: it never implies them, and they never imply it. A plugin's own tabs need no grant. See <a href="/pages/settings-extension/">Plugin settings extension</a>.</li>
+<li><code>settings.contribute:&lt;tab-id&gt;</code> lets a plugin add sections to one built-in tab, such as <code>settings.contribute:terminal</code>. It is normal risk and independent of <code>settings.read-all</code> and <code>settings.write-all</code>: it never implies them, and they never imply it. A plugin's own tabs need no grant. See <a href="/pages/settings-extension/">Plugin settings extension</a>.</li>
 <li><code>fs.write:agent-sessions:&lt;agent&gt;</code> is refused at install with <code>manifest.grant-scope</code>. Transcripts
   are read only.</li>
 <li>An <code>inference-provider</code> export needs <code>inference.provide</code>. Without the grant the plugin installs
@@ -1422,7 +1422,7 @@ packages must be rebuilt, because there is no compatibility layer.</p>
 <li><a href="/pages/packages/">Packages and manifests</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
 <li><a href="/pages/security/">Security</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/reference-capabilities/">Reference: capabilities</a></li>
 <li><a href="/pages/settings-extension/">Plugin settings extension</a></li>
 </ul>

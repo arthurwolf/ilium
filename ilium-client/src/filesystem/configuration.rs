@@ -62,6 +62,10 @@ pub enum ConfigurationChange {
         previous: Option<TextTrigger>,
         desired: Option<TextTrigger>,
     },
+    CustomAgents {
+        previous: crate::config::CustomAgentSettings,
+        desired: crate::config::CustomAgentSettings,
+    },
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
     ProjectName {
@@ -75,6 +79,7 @@ pub enum ConfigurationSaved {
     Session(SessionSettings),
     AgentSetup(AgentSetupSettings),
     TextTriggers(TextTriggerSettings),
+    CustomAgents(crate::config::CustomAgentSettings),
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
     ProjectName(crate::project_naming::ProjectNameBootstrap),
@@ -175,6 +180,10 @@ impl Job for ConfigurationWrite {
                 desired.as_ref(),
             )
             .map(ConfigurationSaved::TextTriggers),
+            CustomAgents { previous, desired } => {
+                crate::config::update_custom_agent_settings(directory, &previous, &desired)
+                    .map(ConfigurationSaved::CustomAgents)
+            }
             Animation(settings) => {
                 return crate::project_config::set_animation(directory, (*settings).clone())
                     .map(|()| ConfigurationSaved::Animation(settings))
@@ -354,6 +363,9 @@ impl ConfigurationChange {
             TextTriggerEdit { previous, desired } => {
                 serialized_bound(previous)? + serialized_bound(desired)?
             }
+            CustomAgents { previous, desired } => {
+                serialized_bound(previous)? + serialized_bound(desired)?
+            }
         };
         if bytes > 1024 * 1024 {
             return Err("Configuration command exceeds byte limit".into());
@@ -437,6 +449,10 @@ impl ConfigurationChange {
                 desired: normalize(&desired)?,
             },
             TextTriggerEdit { previous, desired } => TextTriggerEdit {
+                previous: normalize(&previous)?,
+                desired: normalize(&desired)?,
+            },
+            CustomAgents { previous, desired } => CustomAgents {
                 previous: normalize(&previous)?,
                 desired: normalize(&desired)?,
             },

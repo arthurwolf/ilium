@@ -554,7 +554,7 @@
 </tr>
 </tbody>
 </table>
-<p>An author MUST read the code in an install error before changing anything, because each code names one cause. [AUT-802]</p>
+<p>An author looks the code in an install error up in the error table above and changes only the field or file that row names, because each code names one cause. [AUT-802]</p>
 <h2 id="activation">Activation</h2>
 <table>
 <thead>
@@ -625,11 +625,11 @@
 <tr>
 <td>Plugin disabled after three failures in 10 minutes</td>
 <td>Repeated traps</td>
-<td>Fix the first trap in the log. Then <code>ilium plugin reset-failures &lt;id&gt;</code></td>
+<td>Fix the first trap in the log. Then <code>ilium plugin reset-failures &lt;id&gt;</code>, which clears the count without starting the plugin; turn it on again in Settings &gt; Plugins or with <code>ilium plugin enable &lt;id&gt;</code></td>
 </tr>
 <tr>
 <td>Event handler trap on time</td>
-<td>A handler ran over 20 ms (50 ms for T1)</td>
+<td>A handler ran over the 20 ms default (50 ms is only the T1 ceiling of <code>event_deadline_ms</code>; T2 and T3 stop at 20 ms. A hook handler may use 5 to 50 ms at any tier)</td>
 <td>Move slow work to jobs or requests</td>
 </tr>
 <tr>
@@ -788,7 +788,7 @@
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="/pages/debugging/">Debugging</a> and <a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
 <li><a href="/pages/guide-faq/">FAQ</a></li>
 </ul>

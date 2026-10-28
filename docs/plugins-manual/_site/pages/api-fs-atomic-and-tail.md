@@ -2,7 +2,7 @@
 
 ## fs: atomic write, revisions, tail, agent homes
 
-The `fs` import also offers four things for plugins that share files with other programs: a read that returns a revision token, a write that succeeds only when the file is still at that revision, a cursor-based `tail` for growing files, and three more agent home scopes. They are specified in section 6.29. The base functions (`read`, `write`, `lock`, `watch` and the scopes) are on the [fs](/pages/api-fs/) page; read that first.
+The `fs` import also offers four things for plugins that share files with other programs: a read that returns a revision token, a write that succeeds only when the file is still at that revision, a cursor-based `tail` for growing files, and three more agent home scopes. They are specified in the `fs` interface of the [WIT reference](/pages/reference-wit/). The base functions (`read`, `write`, `lock`, `watch` and the scopes) are on the [fs](/pages/api-fs/) page; read that first.
 
 ### What you need
 
@@ -20,7 +20,7 @@ The additional scopes:
 |---|---|---|---|
 | `agent-sessions:gemini` | `/agent-sessions/gemini` | the Gemini CLI transcripts, `~/.gemini/tmp/*/chats` | high for read; a write grant is refused at install, as for every `agent-sessions` scope |
 | `agent-config:gemini` | `/agent-config/gemini` | the Gemini CLI configuration, `~/.gemini/settings.json` | normal for read, high for write |
-| `agent-config:antigravity` | `/agent-config/antigravity` | the Antigravity configuration directory | normal for read, high for write |
+| `agent-config:antigravity` | `/agent-config/antigravity` | the Antigravity configuration directory, `~/.gemini/antigravity` (a directory root, not a single file) | normal for read, high for write |
 
 The kernel resolves each root per platform, so a plugin never builds the home path itself. A scope whose directory does not exist is still granted; the calls then return `not-found`.
 
@@ -366,4 +366,4 @@ Limits: `tail` returns at most 1 MiB per call; `read-with-revision` is bounded b
 - [Capability: fs.read](/pages/capability-fs-read/), [fs.write](/pages/capability-fs-write/) and [fs.watch](/pages/capability-fs-watch/) for the grants.
 - [Requests and outcomes](/pages/requests-and-outcomes/) for how the async calls complete.
 - [Events](/pages/api-events/) for `fs-changed`.
-- [Errors and limits](/pages/errors-and-limits/) for the shared codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the shared codes.

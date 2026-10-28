@@ -556,7 +556,7 @@ record fs-changed-event { watch: watch-id, paths: list&lt;string&gt; }          
 <li><strong>Quota.</strong> <code>watches</code> defaults to 64 per plugin. A recursive watch counts once, however many folders it covers. The manifest may request another value under <code>limits</code>, clamped to 256 for a T1 bundled plugin and 64 for T2 and T3. A <code>watch</code> beyond the quota returns <code>quota-exceeded</code>.</li>
 <li><strong>Duplicates.</strong> A second <code>watch</code> on the same folder returns a new id and counts separately. Each id sends its own event.</li>
 <li><strong>Lifetime.</strong> A watch ends on <code>unwatch</code>, when its instance deactivates, restarts or is disabled, or when the plugin loses the grant. Ids do not survive a restart, so the plugin starts its watches again in <code>activate</code>.</li>
-<li><strong>Delivery.</strong> <code>fs-changed</code> reaches only the instance that called <code>watch</code>. Events of one watch keep their order, and <code>fs-changed</code> is never dropped under the drop policy.</li>
+<li><strong>Delivery.</strong> <code>fs-changed</code> reaches only the instance that called <code>watch</code>. Events of one watch keep their order, and <code>fs-changed</code> is coalesced by watch: events of the same watch that are still pending merge, so a slow plugin sees fewer events with the newest paths and none is reported in <code>events-dropped</code> (the coalesced delivery policy defined in <a href="/pages/api-events/">events</a>).</li>
 </ul>
 <figure>
 <svg viewBox="0 0 400 280" role="img" aria-label="Watch flow from the watch call to one fs-changed event" width="600" height="420">
@@ -585,13 +585,13 @@ record fs-changed-event { watch: watch-id, paths: list&lt;string&gt; }          
 
 <h3 id="risk-and-tier-rules">Risk and tier rules</h3>
 <ul>
-<li><code>fs.watch:&lt;scope&gt;</code> is a normal-risk grant. The API permission table does not mark it as high risk.</li>
+<li><code>fs.watch:&lt;scope&gt;</code> is a normal-risk grant, except <code>fs.watch:agent-sessions:&lt;agent&gt;</code>, which is high risk like the <code>agent-sessions</code> scopes of <a href="/pages/capability-fs-read/">fs.read</a>: the user checks it by hand and a T1 plugin is asked at first activation.</li>
 <li><code>fs.watch:path:</code> with a literal absolute path is high risk. The user checks it by hand.</li>
 <li>A T1 bundled plugin receives a normal grant up to its manifest ceiling. A T2 or T3 package lists the grant in the install dialog, checked by default.</li>
 <li>Revoking the grant withdraws every watch of the plugin. Calls in flight return <code>revoked</code>. The plugin receives <code>deactivate(revoked)</code> and is activated again with the reduced grant set. A later <code>watch</code> returns <code>not-permitted</code>.</li>
 </ul>
 <h3 id="what-the-user-sees">What the user sees</h3>
-<p>The install and permission dialog shows one row for the grant. The row text is "Watch files in the project folder for changes", followed by the grant string. The row is grey-dotted, as every row of that dialog is.</p>
+<p>The install and permission dialog shows one row for the grant. The row text is "Watches files in this project", followed by the grant string. The row is grey-dotted, as every row of that dialog is.</p>
 <figure>
 <pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
 │ com.example.fs 0.1.0 by Example Ltd                                        │
@@ -741,7 +741,7 @@ export const { lifecycle, handler } = definePlugin({
 });
 </code></pre>
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code> that request a watch on the project:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a> that request a watch on the project:</p>
 <ul>
 <li>22 File explorer and picker: <code>fs.watch:project</code>, to refresh the tree.</li>
 <li>62 Chatroom: <code>fs.watch:project</code>, to notice new coordination messages.</li>

@@ -57,11 +57,11 @@ The result holds one page of children and the cursor of the next page. A `none` 
 ### How the call behaves
 
 - **When.** The host calls the export when the user expands a row of a kind declared with `children: "provider"`. `parent` is the id of the expanded row, and the first call has `cursor` unset. The host asks again with the returned cursor when the user chooses the row `Load more`.
-- **Deadline.** 20 ms per call. A page that is not ready in time is shown as a row `…` with a spinner. A plugin that needs longer returns what it has cached and sends a fresh `set-virtual-rows` when the data arrives.
+- **Deadline.** 20 ms per call. While a page is pending the host shows a row `…` with a spinner. A page that misses the deadline with no cached page ends as the row `Could not load` (see Errors). A plugin that needs longer returns what it has cached and sends a fresh `set-virtual-rows` when the data arrives.
 - **Page size.** At most 256 children per page.
 - **Expansion state.** The host keeps which rows are expanded. The plugin may change it with `set-expanded`.
 - **Cancel.** Collapsing a row discards its pending page. A late result for a collapsed row is dropped.
-- **Errors.** The contract does not define how a failed page is drawn. Return a page whose first child explains the problem when the user must see it.
+- **Errors.** When the export returns an error or misses its deadline without a cached page, the host draws one dim row `Could not load` with the error code in place of the page, and the `Load more` row stays so the user can retry; the expansion state is kept. A late page for the same cursor replaces that row. Test: make the export return `internal` and assert the row `Could not load` is shown under the expanded parent.
 
 <figure>
 <svg viewBox="0 0 420 220" role="img" aria-label="Sequence of expanding a provider virtual row">

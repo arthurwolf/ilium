@@ -59,7 +59,7 @@ Payloads use WIT types. Capabilities are the grant strings from the manifest.
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch` | `agent.read-prompts` | never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, drag, wheel, move), `button`, plus `sub-x`, `sub-y`, `modifiers` | `terminal.pointer` while claimed | coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button`, plus `sub-x`, `sub-y`, `modifiers` | `terminal.pointer` while claimed | coalesced (drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | never dropped |
@@ -74,7 +74,7 @@ Payloads use WIT types. Capabilities are the grant strings from the manifest.
 | `key-pressed`, `key-released` | `grab: option<u64>`, `pane: option<node-id>`, `chord`, `repeat` | `keys.intercept` or `wants_keys` | never dropped |
 | `view-visibility` | `view`, `visible: bool` | own views | coalesced |
 | `fs-changed` | `watch`, `paths: list<string>` | `fs.watch` | coalesced by watch |
-| `audio-frames` | `capture`, `samples: list<s16>` | audio grant | drop oldest, counted |
+| `audio-frames` | `capture`, `samples: list<s16>` | `audio.capture` for input frames, `audio.loopback` for loopback frames | drop oldest, counted |
 | `cli-invoked` | `invocation`, `name`, `argv`, `cwd` | `cli.contribute` | never dropped |
 | `cli-cancelled` | `invocation: u64` | `cli.contribute` | never dropped |
 | `http-called` | `call`, `method`, `path`, `headers`, `body` | `http-api.route` | never dropped |
@@ -200,7 +200,9 @@ The contract appends 18 more event cases after `events-dropped`. Each payload is
 
 The never-dropped rule is as follows: a full queue marks the plugin as stuck and restarts it. `http-stream-data` and `child-output` add back-pressure first, so a fast network peer or a chatty child slows down before that point. `events-dropped` still counts the drop-oldest events only.
 
-Extended payloads of existing events (shape changes):
+### Extended payloads of existing events
+
+Shape changes:
 
 - `pointer` gains `sub-x`, `sub-y`, `modifiers` and the kind `move`. A `move` is reported only while the plugin claims the pointer and the pointer is over the pane. A claim may ask for a modifier gesture, so plain clicks keep going to the program.
 - `command-invoked` `origin` gains `toast`, `row-action`, `status-segment`, `tree-toolbar`, `frame-slot`, `virtual-row-drop` and `text` (a clickable span). Its `context` gains `virtual-row: option<string>` and `menu-item: option<string>`.
@@ -373,8 +375,8 @@ impl Handler for Notices {
                 Event::TimerFired(timer_id) => {
                     log::log(Level::Debug, &format!("timer {timer_id} fired"));
                 }
-                Event::SettingsChanged(keys) => {
-                    if keys.iter().any(|key| key == "sound-enabled") {
+                Event::SettingsChanged(change) => {
+                    if change.keys.iter().any(|key| key == "sound-enabled") {
                         self.sound_muted = !read_sound_enabled(); // see api-settings
                     }
                 }
@@ -562,7 +564,7 @@ Requirement ids for this page: [EVT-030]. See the [requirements index](/pages/re
 - [Plugin exports](/pages/api-exports/) for `handler` and the lifecycle that delivers the batches.
 - [Clock and timers](/pages/api-clock-and-timers/) for `timer-fired`.
 - [Tree](/pages/api-tree/) for the `tree.read` grant behind `tree-changed`.
-- [Errors and limits](/pages/errors-and-limits/) for the full limit table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full limit table.
 - [Lifecycle](/pages/lifecycle/) for activation, deactivation and restarts.
 
 Checked against `ilium:plugin@0.1.0`.

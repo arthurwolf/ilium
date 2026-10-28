@@ -17,7 +17,7 @@ Progress monitors let a long task show how far it is. An agent or a script regis
 
 ### See it
 
-<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A progress monitor row fills while a long task runs and ends as done" loading="lazy"><figcaption>A registered monitor appears in the tree footer, updates on each probe run and settles when the task ends.</figcaption></figure>
+<figure><img src="/assets/demos/07-progress-monitor.gif" alt="A local Codex-shaped fixture runs a monitored five-card census task and receives its completed result" loading="lazy"><figcaption>A local script acts as the Codex-shaped fixture. Ilium registers its monitor, shows progress, and posts the result; no provider request is made.</figcaption></figure>
 
 ### What the user sees
 

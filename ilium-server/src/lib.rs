@@ -22,6 +22,7 @@ mod antigravity_statusline_delivery;
 mod chatroom_router;
 pub mod config;
 mod config_refresh;
+pub mod custom_agent_config;
 mod detection;
 mod detection_effects;
 pub mod error;
@@ -34,6 +35,7 @@ mod initial_prompt;
 mod ipc;
 mod lifecycle_log;
 mod mouse;
+mod native_terminal_spawn;
 mod notifications;
 mod pane;
 pub mod paths;
@@ -45,6 +47,7 @@ mod prompt_queue;
 mod ready_log;
 mod recovery;
 mod repo_facts_cache;
+pub mod resources;
 mod scheduled_input;
 mod session_backups;
 mod session_id;
@@ -99,6 +102,9 @@ pub struct ReadyLogMetadata {
 /// by tests with tempdir paths -- either way `run` itself never touches
 /// `directories::ProjectDirs`.
 pub struct ServerOptions {
+    /// Shared durable resource catalog, resolved by the composition root.
+    /// None disables resource coordination for explicitly isolated consumers.
+    pub resource_catalog_path: Option<PathBuf>,
     pub session_name: String,
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
@@ -225,6 +231,9 @@ pub async fn run_with_resources(
     if state.execution.set(execution).is_err() {
         return Err(std::io::Error::other("server execution was already started").into());
     }
+    if let Some(path) = options.resource_catalog_path {
+        let _ = state.resources.set(resources::ResourceService::new(path));
+    }
     let execution = state
         .execution
         .get()
@@ -331,6 +340,7 @@ pub async fn run_with_resources(
     if let Some(phase) = &startup {
         phase.finish().await;
     }
+    let _resource_task = AbortOnDropHandle::new(resources::spawn(Arc::clone(&state)));
     let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
     let workspace_git_requests = state.take_workspace_git_full_receiver().await;
     let git_status_task = AbortOnDropHandle::new(git_status::spawn(
@@ -1650,6 +1660,7 @@ mod restore_tests {
             .expect("write snapshot fixture");
 
         let options = ServerOptions {
+            resource_catalog_path: None,
             session_name: "restore-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
@@ -1700,7 +1711,10 @@ mod restore_tests {
         .await
         .expect("write Attach request");
 
-        let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
+        let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::PaneStateSnapshot { .. })
+        })
+        .await;
         let ServerEvent::PaneStateSnapshot {
             tree: restored_tree,
             ..
@@ -2133,6 +2147,7 @@ mod restore_tests {
         let socket_path = directory.path().join("restart-test.sock");
         let snapshot_path = directory.path().join("restart-test.snapshot.json");
         let options = ServerOptions {
+            resource_catalog_path: None,
             session_name: "restart-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
@@ -2205,6 +2220,7 @@ mod socket_tests {
         ready_log_metadata: Option<ReadyLogMetadata>,
     ) -> ServerOptions {
         ServerOptions {
+            resource_catalog_path: None,
             session_name: "ready-metadata-test".to_string(),
             socket_path,
             snapshot_path: directory.path().join("session.snapshot.json"),

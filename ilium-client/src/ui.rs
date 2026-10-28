@@ -171,6 +171,7 @@ pub(crate) fn draw_at_with_cursor(
         app.animation_frame.discard_composed_receipt();
         return None;
     }
+    app.resource_overlay(frame);
     cursor
 }
 
@@ -847,12 +848,52 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let agent_models = app.current_tree_models();
     // Read before `render` takes `&mut app.tree_state`; the hover state only needs the mask.
     let pending_toolbar = app.pending_toolbar_mask();
+    let mut custom_toolbar_pending: std::collections::HashSet<String> = app
+        .pending_pane_creations
+        .values()
+        .filter(|pending| !pending.uncertainty_reported)
+        .filter_map(|pending| pending.custom_profile_id.clone())
+        .collect();
+    if app.active_workspace_create_request_id.is_some() {
+        if let Mode::CreateAgentWorkspace(state) = &app.mode {
+            if let Some(identity) = &state.custom_agent {
+                custom_toolbar_pending.insert(identity.profile_id.clone());
+            }
+        }
+    }
+    let profiles_by_id: std::collections::HashMap<_, _> = app
+        .custom_agents
+        .profiles
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect();
+    let custom_agent_labels: std::collections::HashMap<_, _> = app
+        .custom_agent_panes
+        .iter()
+        .map(|(pane_id, identity)| {
+            let label = profiles_by_id
+                .get(identity.profile_id.as_str())
+                .map(|profile| (profile.icon.clone(), profile.name.clone()))
+                .unwrap_or_else(|| {
+                    (
+                        "?".to_string(),
+                        format!("Missing profile ({})", identity.profile_id),
+                    )
+                });
+            (*pane_id, label)
+        })
+        .collect();
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
         &app.tree,
         &mut app.tree_state,
         tree_ui::TreeRenderOptions {
+            custom_toolbar_profiles: Some(&app.custom_agents.profiles),
+            custom_toolbar_selected: app.custom_toolbar_selected.as_deref(),
+            custom_toolbar_hovered: app.custom_toolbar_hovered.as_deref(),
+            custom_toolbar_pending: Some(&custom_toolbar_pending),
+            custom_agent_labels: Some(&custom_agent_labels),
             focused: tree_focused,
             elapsed_ms: if matches!(
                 app.ui_settings.motion_level,
@@ -899,6 +940,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             sidebar_files: &app.sidebar_snapshot,
             chatroom_projects: &app.chatroom_projects,
+            resources: Some(&app.resources),
             panes: &app.panes,
         },
     );
@@ -1727,7 +1769,7 @@ fn draw_context_menu(
         let item = &submenu.items[index];
         let checked = if matches!(submenu.parent, crate::app::ContextMenuAction::OrderBy) {
             Some(
-                matches!(item.action, SubmenuItemAction::SetTreeOrder(order) if order == current_tree_order),
+                matches!(&item.action, SubmenuItemAction::SetTreeOrder(order) if *order == current_tree_order),
             )
         } else {
             None
@@ -2601,6 +2643,10 @@ fn draw_pane_sources(
         crate::agent_debug_ui::render(frame, area, app, state);
         return Vec::new();
     }
+    if matches!(app.right_panel_target, RightPanelTarget::Resource { .. }) {
+        app.resource_detail(frame, area);
+        return Vec::new();
+    }
     if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
         crate::chatroom_ui::render(frame, area, app, *project_id);
         return Vec::new();
@@ -3011,9 +3057,33 @@ fn draw_pane_runtime(
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_progress_footer(viewport.pane_id)
         {
+            let native_rows = app.resource_wait_footer_rows(viewport.pane_id, progress_area.height);
+            let native_wait = native_rows > 0;
+            let ordinary_area = if native_wait {
+                Rect::new(
+                    progress_area.x,
+                    progress_area.y.saturating_add(native_rows),
+                    progress_area.width,
+                    progress_area.height.saturating_sub(native_rows),
+                )
+            } else {
+                progress_area
+            };
+            if native_wait {
+                app.resource_wait_footer(
+                    frame,
+                    Rect::new(
+                        progress_area.x,
+                        progress_area.y,
+                        progress_area.width,
+                        native_rows,
+                    ),
+                    viewport.pane_id,
+                );
+            }
             crate::progress_bar::render_monitors(
                 frame,
-                progress_area,
+                ordinary_area,
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,

@@ -509,7 +509,7 @@ impl Handler for Attention {
         for event in batch {
             match event {
                 Event::CommandInvoked(invoked) if invoked.command == &quot;com.example.attention/build-done&quot; =&gt; {
-                    if let Some(node) = invoked.pane {
+                    if let Some(node) = invoked.context.pane {
                         submissions.push(Submission::new(Intent::MarkAttention(MarkAttentionSpec {
                             node, reason: &quot;Build finished&quot;.into(),
                         })));
@@ -535,9 +535,9 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     const submissions: Submission[] = [];
     for (const event of batch) {
-      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'com.example.attention/build-done' &amp;&amp; event.val.pane !== undefined) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'com.example.attention/build-done' &amp;&amp; event.val.context.pane !== undefined) {
         submissions.push({
-          intent: { tag: 'mark-attention', val: { node: event.val.pane, reason: 'Build finished' } },
+          intent: { tag: 'mark-attention', val: { node: event.val.context.pane, reason: 'Build finished' } },
           correlation: 1n,
           dedupKey: undefined,
         });
@@ -576,8 +576,8 @@ export const { lifecycle, handler } = definePlugin({
 <td>Re-read the tree.</td>
 </tr>
 <tr>
-<td>Marking too often</td>
-<td><code>refused(rate-limited)</code></td>
+<td>Marking too often (more than 10 <code>mark-attention</code> and <code>ack-attention</code> submissions per second for one node by one plugin, the two calls together, sliding 1 s window, per <a href="/pages/reference-errors-and-limits/">limits</a>)</td>
+<td><code>refused(rate-limited)</code> with <code>retry-after-ms</code></td>
 <td>Coalesce marks per node.</td>
 </tr>
 <tr>

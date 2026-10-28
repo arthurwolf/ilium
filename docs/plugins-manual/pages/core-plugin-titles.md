@@ -21,9 +21,9 @@ Ilium keeps one rule about names: a title that you typed by hand is never replac
 
 ### See it
 
-<figure><img src="/assets/demos/03-contextual-titles.gif" alt="Pane titles change as the user sends prompts to agents" loading="lazy"><figcaption>Pane titles follow the prompts sent to each agent.</figcaption></figure>
+<figure><img src="/assets/demos/03-contextual-titles.gif" alt="A terminal gains an inferred title while the manually named Keep pane stays unchanged" loading="lazy"><figcaption>Current Ilium applies an automatic title from a supplied local response fixture. The manually named Keep pane stays unchanged.</figcaption></figure>
 
-<figure><img src="/assets/demos/01-ai-tree.gif" alt="The tree is reorganised into groups by the model" loading="lazy"><figcaption>The tree organised into groups.</figcaption></figure>
+<figure><img src="/assets/demos/01-ai-tree.gif" alt="A scripted plan regroups current Ilium panes by topic" loading="lazy"><figcaption>A scripted plan is applied to current Ilium, then the same panes are visited after thematic grouping. Local agent fixtures; no model inference.</figcaption></figure>
 
 <figure><img src="/assets/demos/07c-settings-tour-c.gif" alt="A tour of the last Settings tabs, including the title options" loading="lazy"><figcaption>The title options in Settings.</figcaption></figure>
 

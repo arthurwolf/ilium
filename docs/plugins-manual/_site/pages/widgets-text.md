@@ -195,7 +195,7 @@ A link behaves in one of two ways.
 - With `link-command` set, the host runs that command through the command registry on activation. It passes the arguments `{"target": "<link target>"}`. The command must be one of the plugin's own commands or covered by its `commands.invoke` grant. The plugin then receives `command-invoked`.
 - Without `link-command`, the plugin receives a `ui-action` of kind `activated` whose value is `text(<link target>)`. The host never opens a browser itself.
 
-With `task-click`, a click on a task item sends `toggled` with `text("<line>")`, the line number of the item. The plugin rewrites its source, for example `- [ ]` to `- [x]`, and renders again. With `images`, an image written as `![alt](asset:path)`, or a file inside a granted `fs` scope, renders through the rules of the `image` widget. Any other image shows its alt text.
+With `task-click`, a click on a task item sends `toggled` with `text("<line>")`, the one-based line number of the item in the source text (the first line is `1`; lines are split at `\n`). The plugin rewrites its source, for example `- [ ]` to `- [x]`, and renders again. With `images`, an image written as `![alt](asset:path)`, or a file inside a granted `fs` scope, renders through the rules of the `image` widget. Any other image shows its alt text.
 
 <figure>
 <pre class="term">╭─ Help: keys ─────────────────────────────────────────╮
@@ -512,7 +512,7 @@ export const { lifecycle, handler, views } = definePlugin({
 });
 ```
 
-The `toggled` value is the zero-based or one-based line number as the host counts it; check it against your own source on the first run, because the specification names it only as the line of the task item.
+The `toggled` value is the one-based line number of the task item in the source text: the first line of the source is `"1"`. Convert it with `lines[Number(value) - 1]` when you index an array.
 
 ## Width and language
 
@@ -527,7 +527,7 @@ The text widgets return no error codes of their own. The errors below come from 
 | Two widgets with the same `key` in one view | The tree is invalid and the instance traps. |
 | A tree with more than 4,096 nodes, or a child index out of range | The tree is invalid and the instance traps. |
 | A scrollable paragraph with no `key` | Its offset resets on every render. |
-| A tooltip longer than 200 characters | Not allowed. The limit is 200 characters. |
+| A tooltip longer than 200 characters | The host cuts it at 199 Unicode scalar values and appends an ellipsis. There is no error. |
 | `set-widget-state` with an unknown key | `not-found`. |
 | `set-widget-state` with `offset` on a `leader-row` | `invalid-argument`, because the state kind does not fit the widget. |
 | A link, span or hint whose command the plugin may not invoke | `not-permitted`. The command does not run. |
@@ -539,7 +539,7 @@ The text widgets return no error codes of their own. The errors below come from 
 | Key hints wider than the row | The list is cut and ends with `… N more`. |
 | A markdown image outside a granted scope | The alt text shows. |
 
-The limits of the whole tree are in [Errors and limits](/pages/errors-and-limits/). Trap behaviour is in the [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) pages.
+The limits of the whole tree are in [Errors and limits](/pages/reference-errors-and-limits/). Trap behaviour is in the [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) pages.
 
 ## What the user sees
 
@@ -555,6 +555,6 @@ Requirement ids for this page: [WID-025]. See the [requirements index](/pages/re
 - [Input](/pages/widgets-input/) for editable values
 - [Commands invoke](/pages/capability-commands-invoke/)
 - [The UI model](/pages/ui-model/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.

@@ -508,7 +508,7 @@ impl Handler for Audit {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != &quot;com.example.audit/count&quot; { continue; }
             let since = clock::now_unix_millis() - 3_600_000;
-            let entries = journal::read(invoked.pane, since, 50);
+            let entries = journal::read(invoked.context.pane, since, 50);
             let sent = entries.iter().filter(|entry| entry.kind == &quot;input-sent&quot;).count();
             log::log(Level::Info, &amp;format!(&quot;{sent} inputs sent in the last hour&quot;));
         }
@@ -528,7 +528,7 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
       if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.audit/count') continue;
-      const entries = read(event.val.pane, nowUnixMillis() - 3_600_000n, 50);
+      const entries = read(event.val.context.pane, nowUnixMillis() - 3_600_000n, 50);
       const sent = entries.filter((entry) =&gt; entry.kind === 'input-sent').length;
       log('info', `${sent} inputs sent in the last hour`);
     }
@@ -553,8 +553,8 @@ export const { lifecycle, handler } = definePlugin({
 <td>Do not treat an empty result as proof that nothing happened.</td>
 </tr>
 <tr>
-<td><code>limit</code> above the cap</td>
-<td>clamped</td>
+<td><code>limit</code> above 1,000 (the per-call read cap)</td>
+<td>clamped to 1,000</td>
 <td>Page with <code>since</code>.</td>
 </tr>
 <tr>
@@ -573,8 +573,13 @@ export const { lifecycle, handler } = definePlugin({
 <td>Nothing.</td>
 </tr>
 <tr>
-<td>Grant revoked later</td>
+<td>Grant revoked while a call is in flight</td>
 <td><code>revoked</code></td>
+<td>Stop reading foreign entries.</td>
+</tr>
+<tr>
+<td>Call made after the grant was revoked</td>
+<td><code>not-permitted</code></td>
 <td>Stop reading foreign entries.</td>
 </tr>
 </tbody>

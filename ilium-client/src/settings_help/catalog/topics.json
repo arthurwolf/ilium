@@ -1,5 +1,15 @@
 [
   {
+    "id": "CUSTOMAGENT-01",
+    "title": "Custom agent profiles",
+    "explanation": "Create named Claude or Codex profiles with their own icon and environment variables.",
+    "specimen": "Profile: Work\nProvider: Claude\nEnvironment: TOKEN = ••••••••",
+    "states": "Values are masked until revealed. Changes affect future launches and restarts; running processes keep their existing environment.",
+    "frames": ["Profile: Work\nProvider: Claude\nEnvironment: TOKEN = ••••••••"],
+    "motion": "None.",
+    "caveat": "Values are stored as plaintext in an owner-only configuration file, not encrypted. Deleting a profile prevents its panes from restarting until the profile is restored or reassigned."
+  },
+  {
     "id": "AM-01",
     "title": "Display mode",
     "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",
@@ -4712,5 +4722,18 @@
     "motion": "The list gives its bottom two rows to the larger buttons.",
     "caveat": "Very short panels fall back to a one-row button to preserve the list and toolbar.",
     "frames": ["Large attention buttons ........ [○ OFF]", "Large attention buttons ........ [ON  ●]"]
+  },
+  {
+    "id": "AP-36",
+    "title": "Group agents under resources",
+    "explanation": "Display resource owners and waiting agents beneath the shared resource in queue order. This is a presentation preference; real pane parents, split geometry and terminal input routes remain unchanged.",
+    "specimen": "ON\n▾ GPU · Taken · queue 2\n  🔑 Owner\n  ⌛ 1. Waiting agent\n  ⌛ 2. Waiting agent\nOFF\nGPU · Taken · queue 2\nAgents remain in their normal tree locations with waiting badges.",
+    "states": "Default On. Off keeps resource rows, queue details and waiting indicators visible.",
+    "frames": [
+      "Grouped resource participants",
+      "Ordinary pane rows with waiting badges"
+    ],
+    "motion": "Static projection only.",
+    "caveat": "Participants in splits and other sessions appear as navigation references; no pane is physically moved."
   }
 ]

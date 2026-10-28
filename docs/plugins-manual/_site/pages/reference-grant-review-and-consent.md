@@ -64,7 +64,7 @@ A **grant** is a standing permission that the user gives a plugin at install, fo
 
 **[SEC-103]** Protection against accidental approval. The default focus is on **Cancel**. The dialog ignores `Enter` and `Space` for 500 ms after it opens and while a key is auto-repeating (a second press of the same key within 80 ms of the previous one, without release). The dialog ignores input that arrived before it was drawn. A plugin cannot open the dialog while the user types in a terminal (see [SEC-377]). At most one review dialog is open at a time; others queue.
 
-**[SEC-104]** Names. The publisher is shown as `Name (self-declared)` next to the verified fingerprint. Display names, plugin titles and publisher names shown in the dialog have control characters, bidirectional overrides and isolates, and zero-width joiners removed; they are limited to 64 characters; and they are refused (the install fails with `manifest.display-name`) when they equal or are confusable with a kernel name (`Ilium`, `Settings`, `Plugins`, `Security`, `Kernel`, `Ilium Team`) after case-folding and removal of spaces and punctuation.
+**[SEC-104]** Names. The publisher is shown as `Name (self-declared)` next to the verified fingerprint. Display names, plugin titles and publisher names shown in the dialog have control characters, bidirectional overrides and isolates, and zero-width joiners removed; and they are shortened with an ellipsis to 64 characters for display only. This shortening is a display rule and never refuses an install. The install-time name rules (3 to 40 characters, no kernel-name spoofing) are in [SEC-381](/pages/reference-extension-security/).
 
 **[SEC-107]** Details (reachable with Tab) shows: full SHA-256 fingerprint in groups of 4 hex digits, package SHA-256, the tier, `security_contact` if present, `data_use` if present, each grant with its risk, each file's size, and the optional provenance entries ([Trust and supply chain](/pages/reference-trust-and-supply-chain/)).
 
@@ -91,6 +91,8 @@ A **grant** is a standing permission that the user gives a plugin at install, fo
 </figure>
 
 The fingerprint is the SHA-256 of the raw public key, shown as 64 hex digits in 16 groups of 4. The short form `3F2A91C0` is the first 8 hex digits and appears only next to the full form or in `trust list`.
+
+**Localisation of dialog text.** The review dialog, consent prompts and notices use the host's own wording for fixed text. Text supplied by the plugin (the grant reason, a toast body) is shown verbatim as data, cut with `…`, and is never translated by the host. Ids stay identifiers. See [Internationalisation](/pages/guide-internationalisation/) ([AUT-618] to [AUT-622]).
 
 ## Updates
 
@@ -204,9 +206,9 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 
 ## Who may approve
 
-**[SEC-116]** A decision that adds a grant, trusts a key, installs a package with `--allow-unsigned` or marks a project trusted MUST be confirmed in a dialog in an attached TUI client of the same session. When `ilium plugin install` runs in a shell pane (the `ILIUM_PANE_ID` variable is set), the CLI asks the server to open the dialog in the client, and the dialog names the requesting pane: `Requested from pane "shell 3"`. If no client is attached, the CLI waits up to 60 s, prints `waiting for a client to approve`, and then fails with `approval.no-client`.
+**[SEC-116]** A decision that adds a grant, trusts a key, installs a package with `--allow-unsigned` or marks a project trusted MUST be confirmed in a dialog in an attached TUI client of the same session, or by the exact-item flags of [SEC-117]. When `ilium plugin install` runs in a shell pane (the `ILIUM_PANE_ID` variable is set), the CLI asks the server to open the dialog in the client, and the dialog names the requesting pane: `Requested from pane "shell 3"`. With `--yes` the dialog is skipped for normal grants (see [PKG-429]). If no client is attached and `--yes` is not given, the CLI waits up to 60 s, prints `waiting for a client to approve`, and then fails with `install.review-required` (exit 1).
 
-**[SEC-117]** No command-line flag grants a high-risk capability, trusts a key or approves a project without that confirmation. The only exception is a grant that the admin policy lists in `preapproved` for that plugin id, which requires no dialog. A prompt-injected agent that runs `ilium plugin install pkg --yes` still reaches the dialog, and the dialog shows what is installed.
+**[SEC-117]** No command-line flag grants a high-risk capability, trusts a key or approves a project without that confirmation, except the flag that names the exact item: `--grant <grant>` for one high-risk grant and `--trust <key_id>` for one key ([PKG-282], [PKG-429]). `--yes` alone never does. The only exception is a grant that the admin policy lists in `preapproved` for that plugin id, which requires no dialog. A prompt-injected agent that runs `ilium plugin install pkg --yes` gets only the normal grants.
 
 ## Revocation and uninstall
 
@@ -214,7 +216,7 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 
 **[SEC-120]** CLI. `ilium plugin consents <id>` prints consents as JSONL. `ilium plugin consents <id> --withdraw <target>` withdraws one. `ilium plugin grants <id> --revoke <grant>` revokes one grant. Granting never happens from the CLI ([SEC-116]).
 
-**[SEC-119]** Uninstall forgets the plugin's grants, consents and picked paths. Its data and cache are removed unless `--keep-data` is passed. A reinstall starts with a fresh review dialog.
+**[SEC-119]** Uninstall forgets the plugin's grants, consents and picked paths. Its data is kept unless `--purge` is passed ([PKG-294]); the cache is always removed. A reinstall starts with a fresh review dialog.
 
 ## Edge cases
 
@@ -225,7 +227,7 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 | The terminal is smaller than the dialog minimum (40 by 12) | The dialog shows `Terminal too small` and Cancel only |
 | Two clients attached | The dialog opens in the client that most recently had input; the other shows `Waiting for approval` |
 | Grants store missing | All third-party plugins are treated as not installed and the user is told |
-| Package re-signed with the same key, same version | `install` refuses with `install.same-version` |
+| Package re-signed with the same key, same version | `install` refuses with `package.version-reused` ([PKG-274]) |
 
 ### See also
 
