@@ -1972,15 +1972,36 @@ async fn local_catalog_admission_waits_without_spending_worker_capacity() {
     let fixture = fixture(None).await;
     let service = service(&fixture.state).unwrap();
     let held = service.catalog_access.lock().await;
-    let baseline = fixture.state.execution.get().unwrap().client.quota_group().snapshot();
+    let baseline = fixture
+        .state
+        .execution
+        .get()
+        .unwrap()
+        .client
+        .quota_group()
+        .snapshot();
     let pending = read(&fixture.state);
     tokio::pin!(pending);
-    assert!(tokio::time::timeout(std::time::Duration::from_millis(20), &mut pending).await.is_err());
-    let queued = fixture.state.execution.get().unwrap().client.quota_group().snapshot();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut pending)
+            .await
+            .is_err()
+    );
+    let queued = fixture
+        .state
+        .execution
+        .get()
+        .unwrap()
+        .client
+        .quota_group()
+        .snapshot();
     assert_eq!(queued.worker_bytes, baseline.worker_bytes);
     assert_eq!(queued.input_bytes, baseline.input_bytes);
     drop(held);
-    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(5), &mut pending).await.unwrap().unwrap();
+    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(5), &mut pending)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(snapshot.resources.is_empty());
 }
 
@@ -2004,8 +2025,7 @@ async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
         fixture.directory.path(),
     )
     .await
-    .unwrap()
-    else {
+    .unwrap() else {
         panic!("foreign live process actor")
     };
     // Preserve a real process birth proof, but model another daemon's pane
@@ -2055,7 +2075,10 @@ async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
     close_composer(&fixture, foreign_process_pane).await;
     close_composer(&fixture, local_pane).await;
     let observed = observed.unwrap().unwrap();
-    assert_eq!(observed.get(&local.invocation_id), Some(&InvocationEligibility::Live));
+    assert_eq!(
+        observed.get(&local.invocation_id),
+        Some(&InvocationEligibility::Live)
+    );
     assert_eq!(
         observed.get(&foreign.invocation_id),
         Some(&InvocationEligibility::Unknown),
