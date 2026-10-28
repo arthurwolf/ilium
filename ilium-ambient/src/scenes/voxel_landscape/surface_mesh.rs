@@ -385,12 +385,18 @@ pub struct FaceOwner {
     pub face: u16,
     pub layer: u16,
 }
+/// The block position lives only in `owner`, which is the collision-free key.
+/// Keeping a second copy here cost 8 bytes per retained face on every tile.
 #[derive(Clone, Debug)]
 pub struct MeshFace {
-    pub position: [i32; 3],
     pub model: Arc<BoundModel>,
     pub quad_index: u16,
     pub owner: FaceOwner,
+}
+impl MeshFace {
+    pub fn position(&self) -> [i32; 3] {
+        self.owner.position
+    }
 }
 #[derive(Clone, Copy, Debug)]
 pub struct MeshRegion {
@@ -536,7 +542,6 @@ impl PreparedMesh {
                     continue;
                 }
                 faces.push(MeshFace {
-                    position: *position,
                     model: Arc::clone(model),
                     quad_index: index as u16,
                     owner: FaceOwner {

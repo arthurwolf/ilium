@@ -421,7 +421,7 @@ pub fn measure(
             .quads
             .get(usize::from(face.quad_index))
             .ok_or(Error::Geometry("unknown model quad"))?;
-        extents.quad(face.position, quad, &mut work)?;
+        extents.quad(face.position(), quad, &mut work)?;
     }
     if let Some(fluid) = fluid {
         for face in &fluid.faces {
