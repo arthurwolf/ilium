@@ -1328,6 +1328,9 @@ impl PaintedTerminal {
             .map(|charge| charge.reserve_capture(bytes))
             .transpose()
     }
+    pub(crate) fn live_size(&self) -> (u16, u16) {
+        self.parser.screen().size()
+    }
     pub(crate) fn allocation_bytes(&self) -> usize {
         self.snapshot
             .allocation_charge
