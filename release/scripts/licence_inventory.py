@@ -84,7 +84,10 @@ def external_notice(register_path, entry):
 def local_packages(workspace):
     root = tomllib.loads((workspace / "Cargo.toml").read_text(encoding="utf-8"))
     packages = {}
-    paths = [workspace / member / "Cargo.toml" for member in root.get("workspace", {}).get("members", [])]
+    # Cargo expands member patterns; treating '*' literally loses locked local crates.
+    paths = [directory / "Cargo.toml"
+             for member in root.get("workspace", {}).get("members", [])
+             for directory in sorted(workspace.glob(member))]
     for value in root.get("patch", {}).get("crates-io", {}).values():
         if isinstance(value, dict) and "path" in value:
             paths.append(workspace / value["path"] / "Cargo.toml")
@@ -110,9 +113,10 @@ def local_packages(workspace):
         if isinstance(version, dict) and version.get("workspace"):
             version = root["workspace"]["package"]["version"]
         license_value = package.get("license")
-        if isinstance(license_value, dict) and license_value.get("workspace"):
+        inherited_license = isinstance(license_value, dict) and license_value.get("workspace")
+        if inherited_license:
             license_value = root["workspace"]["package"].get("license")
-        packages[(package.get("name"), version)] = (path.parent, license_value)
+        packages[(package.get("name"), version)] = (path.parent, license_value, inherited_license)
     return packages
 
 
@@ -146,9 +150,9 @@ def build_inventory(workspace, registry, register_path, output_directory):
             licence_source = f"https://crates.io/api/v1/crates/{name}/{version}/download (Cargo.lock SHA-256 {item['checksum']})"
         else:
             require(source == "workspace-or-vendored" and (name, version) in local, f"unsupported licence source: {name}@{version}")
-            directory, license_value = local[(name, version)]
+            directory, license_value, inherited_license = local[(name, version)]
             content = source_notices(directory)
-            if not content and directory.parent == workspace:
+            if not content and (inherited_license or directory.parent == workspace):
                 content = source_notices(workspace)
             licence_source = "https://github.com/arthurwolf/ilium (candidate workspace/vendor source)"
         entry = register["packages"].get(f"{name}@{version}")
