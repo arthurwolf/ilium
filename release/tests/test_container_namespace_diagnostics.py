@@ -107,6 +107,30 @@ class namespace_diagnostic_tests(unittest.TestCase):  # Exercise rejected layout
             manager_run.assert_not_called()  # Do not start or stop a manager for a rejected topology.
             case_run.assert_not_called()  # Never attempt installation before namespace admission.
 
+    @unittest.skipUnless(os.name == 'posix', 'Linux guest uses O_NOFOLLOW; native acceptance remains mandatory')  # Keep Windows release test discovery portable.
+    def test_main_rejects_retained_hybrid_topology_without_starting_manager_or_package(self):  # Replay the observed failure through real finalization.
+        row = '519 635 0:57 / /sys/fs/cgroup ro,nosuid,nodev,noexec shared:303 - tmpfs tmpfs ro,size=4096k,nr_inodes=1024,mode=755,uid=678297600,gid=678297600,inode64\n'  # Reproduce the actual Debian 12 hybrid mount recorded in the native packet.
+        records = self.records(row)  # Preserve the real failed topology independently of launch configuration.
+        records['/proc/1/cgroup'] = '1:name=systemd:/init.scope\n0::/init.scope\n'  # Both legacy and unified memberships coexist in the failed boot.
+        records['/proc/self/cgroup'] = '1:name=systemd:/system.slice/ilium-container-acceptance.service\n0::/system.slice/ilium-container-acceptance.service\n'  # A unified membership line alone cannot establish a usable cgroup-v2 mount.
+        with tempfile.TemporaryDirectory() as directory:  # Own every emitted record and empty output stream.
+            state_root = Path(directory)  # Preserve actual filesystem publication and SHA-256 behavior.
+            with patch.object(guest, 'state_root', state_root), patch.object(guest, 'Path', side_effect=self.mocked_path(records)), patch.object(guest.os, 'stat', side_effect=self.kernel_stat), patch.object(guest.os, 'geteuid', return_value=0), patch.object(guest, 'run') as manager_run, patch.object(guest.subprocess, 'run') as case_run:  # Mock authority observations while prohibiting external execution.
+                self.assertEqual(guest.main(), 1)  # Capability rejection must retain a failed exit status.
+            result = json.loads((state_root / 'result.json').read_text())  # Inspect the actual atomically published record.
+            self.assertEqual(result['state'], 'failed')  # Diagnostic availability is never package qualification.
+            self.assertEqual(result['errors'], ['cgroup namespace root is not a writable unified hierarchy'])  # Keep the primary failure intact.
+            self.assertIsNone(result['case_exit_code'])  # The package transaction was never attempted.
+            self.assertFalse(result['user_manager_retired'])  # No manager was started and no retirement is fabricated.
+            self.assertNotIn('namespace', result)  # Partial observations cannot impersonate accepted evidence.
+            self.assertEqual(result['namespace_diagnostics']['mount_checks'], {'root_is_slash': True, 'mount_rw': False, 'filesystem_is_cgroup2': False, 'superblock_rw': False})  # Retain all four actually observed predicate outcomes.
+            self.assertEqual(result['namespace_diagnostics']['cgroup_mount_rows'], [{'text': row.rstrip('\n'), 'truncated': False}])  # Preserve the exact native failure pattern after finalization.
+            self.assertEqual(result['namespace_diagnostics']['/proc/1/cgroup']['text'], records['/proc/1/cgroup'])  # Do not hide hybrid membership behind the available unified row.
+            self.assertFalse((state_root / 'ready.json').exists())  # Rejected topology cannot ask the host to admit the package transaction.
+            self.assertEqual(result['case.stdout_sha256'], guest.hashlib.sha256(b'').hexdigest())  # Preserve uniform output hashing even before execution.
+            manager_run.assert_not_called()  # Do not start or stop a manager for a rejected topology.
+            case_run.assert_not_called()  # Never attempt installation before namespace admission.
+
 
 if __name__ == '__main__':  # Support direct isolated execution and unittest discovery.
     unittest.main()  # Return the real regression outcome.

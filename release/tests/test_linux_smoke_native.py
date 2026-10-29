@@ -396,6 +396,7 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                     output = ''.join(key + '=' + values[key] + '\n' for key in container_fixture.unit_keys)  # Retain the actual property parsing boundary.
                     code = 4 if missing else 0  # Only explicit not-found evidence permits this nonzero result.
                 elif argv[0] == '/usr/bin/systemd-run':  # Model a partial or completed service start.
+                    state.launch_environment = dict(options.get('env', {}))  # Distinguish the client's sanitized environment from the transient service's explicit environment.
                     state.started = True  # Arm retained resource state before reporting the startup result.
                     group.mkdir(parents=True)  # No real cgroup is ever created.
                     (group / 'memory.max').write_text('3221225472')  # Keep outer budget readback active in the positive case.
@@ -437,6 +438,45 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
             state.admission = stack.enter_context(patch.object(container_fixture, 'admit_guest', return_value=record['host_admission']))  # Observe that rejected startup never requests host admission.
             state.result, state.record = container_fixture.run_fixture('ubuntu:22.04', 'deb', 'x86_64', base, inputs, logs, 'lane', 'false # synthetic transaction; never executed\n', 'fixture.deb', runner, sources)  # Run the real complete allocation, preparation, cleanup and evidence flow.
             yield state  # Assert custody before the outer test scope removes any retained failures.
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX bind-path fixture required; native boot acceptance remains mandatory')  # Keep the existing portable source-test boundary.
+    def test_unified_hierarchy_is_set_for_nspawn_service_without_reducing_isolation(self):  # Exercise the real launch builder through full host orchestration.
+        with patch.dict(os.environ, {'SYSTEMD_NSPAWN_UNIFIED_HIERARCHY': '0', 'SYSTEMD_NSPAWN_USE_CGNS': '0'}), self.host_fixture('complete') as state:  # Host shell overrides cannot select the fixture's topology.
+            self.assertEqual(state.result.returncode, 0, state.record)  # Require the complete synthetic custody flow to reach validation and cleanup.
+            launches = [call for call in state.calls if call[0] == '/usr/bin/systemd-run']  # Inspect actual adapter argv, not production source text.
+            self.assertEqual(len(launches), 1)  # One retained transient service owns this acceptance boot.
+            command = launches[0]  # Keep command positions available for the service-versus-guest boundary check.
+            boundary = command.index('/usr/bin/systemd-nspawn')  # systemd-run stops parsing its own options at the executable.
+            service_arguments, nspawn_arguments = command[1:boundary], command[boundary + 1:]  # Prevent the identically named nspawn option from satisfying this regression.
+            self.assertEqual([value for value in service_arguments if value.startswith('--setenv=')], ['--setenv=SYSTEMD_NSPAWN_UNIFIED_HIERARCHY=1'])  # Pin the selector exactly once on the service manager's side.
+            self.assertFalse(any('SYSTEMD_NSPAWN_' in value for value in nspawn_arguments))  # A guest environment variable cannot select nspawn's earlier mount construction.
+            self.assertEqual(state.launch_environment, {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'})  # Keep ambient nspawn overrides out of the client process too.
+            isolation = ('--private-users=pick', '--private-users-ownership=chown', '--private-network', '--register=no', '--settings=no', '--keep-unit', '--boot')  # These boundaries remain mandatory with an explicit hierarchy.
+            for option in isolation:  # Require every retained isolation argument once.
+                self.assertEqual(nspawn_arguments.count(option), 1, option)  # Do not silently omit or duplicate an authority-bearing option.
+            self.assertEqual([value for value in nspawn_arguments if value.startswith('--private-users')], ['--private-users=pick', '--private-users-ownership=chown'])  # A later identity-map override must fail this test.
+            self.assertFalse(any(value.startswith(('--network-', '--bind=', '--bind-user=', '--capability=', '--share-system')) for value in nspawn_arguments))  # The fix must not add a host network, writable host bind or broader privilege option.
+            self.assertEqual(nspawn_arguments[nspawn_arguments.index('--') + 1:], ['--unit=ilium-container.target'])  # Preserve the exact guest init arguments without a guest-only hierarchy workaround.
+            properties = ['Type=exec', 'Slice=system.slice', 'Delegate=yes', 'MemoryMax=3221225472', 'MemorySwapMax=0', 'TasksMax=1024', 'CPUQuota=200%', 'RuntimeMaxSec=1200', 'TimeoutStopSec=20', 'KillMode=control-group', 'RemainAfterExit=yes']  # Freeze the independently bounded owned service contract.
+            self.assertEqual([value.removeprefix('--property=') for value in service_arguments if value.startswith('--property=')], properties)  # Hierarchy selection cannot remove budget, deadline or retirement properties.
+            state.admission.assert_called_once()  # Explicit configuration never replaces independent host admission.
+            self.assertEqual(state.record['cleanup'], dict.fromkeys(('unit_retired', 'cgroup_absent', 'docker_removed', 'state_removed'), True))  # All original cleanup gates remain necessary.
+
+    def test_unified_request_cannot_make_bad_topology_or_incomplete_evidence_pass(self):  # Validate observations independently of the new launch setting.
+        sources = {name: container_fixture.sha(root / name) for name in container_fixture.source_files}  # Bind each synthetic receipt to the exact tested controllers.
+        stdout = 'ILIUM_ANIMATION_BEGIN\n{}\n{}\n{}\n{}\nILIUM_ANIMATION_END\n'  # This controller-only fixture is not installed-render qualification.
+        original = fixture_record('appimage', 'ubuntu:24.04', 'x86_64', sources, stdout)  # Use a lane that genuinely failed the native topology gate.
+        container_fixture.validate_record(original, 'appimage', 'ubuntu:24.04', 'x86_64', sources)  # Establish the complete positive schema before independent mutations.
+        mutations = [(('guest', 'namespace', 'cgroup_filesystem'), 'tmpfs'), (('guest', 'namespace', 'cgroup_writable'), False), (('guest', 'namespace', 'cgroup_mount_root'), '/foreign'), (('guest', 'namespace', 'uid_map'), [[0, 0, 65536]]), (('host_admission', 'visible_cgroup_inode'), 999), (('host_admission', 'host_namespaces', 'net'), original['guest']['namespace']['namespaces']['net']), (('source_files', container_fixture.source_files[0]), '0' * 64)]  # Each retained observation must independently reject a misleading passed state.
+        mutations += [(('cleanup', name), False) for name in ('unit_retired', 'cgroup_absent', 'docker_removed', 'state_removed')]  # Treat all four retirement gates as independent acceptance requirements.
+        for path, value in mutations:  # Keep every adverse receipt otherwise identical to the positive case.
+            changed = json.loads(json.dumps(original))  # Deep-copy nested test observations without altering the positive baseline.
+            selected = changed  # Walk only the explicitly selected receipt field.
+            for key in path[:-1]:  # Preserve all unrelated evidence.
+                selected = selected[key]  # The fixture schema is complete; missing parents must fail the test.
+            selected[path[-1]] = value  # Inject one independently discriminating observation.
+            with self.subTest(path=path), self.assertRaises(ValueError):  # No requested hierarchy flag may substitute for truthful runtime evidence.
+                container_fixture.validate_record(changed, 'appimage', 'ubuntu:24.04', 'x86_64', sources)  # Run the same validator used by independent release sealing.
 
     @unittest.skipUnless(os.name == 'posix', 'POSIX bind-path fixture required; all real Linux acceptance lanes remain mandatory')  # A Windows drive colon is intentionally invalid in the production Linux bind grammar.
     def test_host_runtime_success_and_each_failure_preserve_custody(self):  # Require failure-specific behavior, not source-string matching.
