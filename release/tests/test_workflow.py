@@ -277,6 +277,41 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pipeline.native_workspace_scope('unknown', 'x86_64-unknown-linux-gnu')
 
+    def test_preview_integration_scope_retains_product_targets_in_mixed_packages(self):
+        # Package exclusion alone cannot remove preview suites inside product crates.
+        metadata = {'workspace_members': ['product', 'client', 'plugin'], 'packages': [
+            {'id': 'product', 'name': 'ilium', 'targets': [
+                {'name': 'ilium', 'kind': ['bin']},
+                {'name': 'pty_tui_smoke', 'kind': ['test']},
+                {'name': 'cli_compat', 'kind': ['test']},
+                {'name': 'plugin_cli', 'kind': ['test']}]},
+            {'id': 'client', 'name': 'ilium-client', 'targets': [
+                {'name': 'plugin_render', 'kind': ['test']},
+                {'name': 'settings_save', 'kind': ['test']}]},
+            {'id': 'plugin', 'name': 'ilium-plugin-host', 'targets': [
+                {'name': 'host_runtime', 'kind': ['test']}]}]}
+        arguments = pipeline.preview_integration_arguments(metadata)
+        separator = arguments.index('--')
+        self.assertEqual(arguments[:separator], [
+            '--test', 'cli_compat', '--test', 'pty_tui_smoke', '--test', 'settings_save'])
+        self.assertEqual(arguments[separator + 1:], [
+            '--skip', 'reference_cli_compatibility::',
+            '--skip', 'cli_reference::f_111_hidden_commands_work_with_no_plugins',
+            '--skip', 'animations::f_102_an_old_format_iliumanim_package_is_refused_with_package_old_format'])
+        # The animation probe, Save-button and PTY checks must never be filtered.
+        self.assertNotIn('animations::f_104', arguments)
+        self.assertNotIn('settings_save', arguments[separator + 1:])
+        self.assertNotIn('pty_tui_smoke', arguments[separator + 1:])
+        self.assertNotIn('host_runtime', arguments)
+
+    def test_preview_integration_scope_fails_closed_on_empty_or_invalid_workspace(self):
+        for metadata in ({'workspace_members': [], 'packages': []},
+                         {'workspace_members': ['missing'], 'packages': []}):
+            with self.subTest(metadata=metadata), self.assertRaises(ValueError):
+                pipeline.preview_integration_arguments(metadata)
+        with self.assertRaises(ValueError):
+            pipeline.native_test_command('linux-x86-preview', 'x86_64-unknown-linux-gnu', ['--test', '*'])
+
     def test_linux_preview_workflow_qualifies_without_publishing(self):
         path = ROOT / '.github/workflows/linux-preview.yml'
         workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)

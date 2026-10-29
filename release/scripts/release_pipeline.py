@@ -32,6 +32,7 @@ import build_windows_installers as windows_installers
 import smoke_macos_packages as macos_smoke
 import pages
 import release_tool
+from native_test_scope import preview_integration_arguments
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = 'arthurwolf/ilium'
@@ -315,6 +316,8 @@ def native_clippy_command(profile, target):
 
 
 def native_test_command(profile, target, cargo_arguments):
+    require(profile != 'linux-x86-preview' or cargo_arguments != ['--test', '*'],
+            'preview integration tests require explicit product target selection')
     return (['cargo', 'test', '--locked'] + native_workspace_scope(profile, target) +
             ['--no-fail-fast', '--target', target] + cargo_arguments)
 
@@ -452,9 +455,24 @@ def native(arguments):
 
     logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
     logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
-    logged(test_command(['--test', '*'], environment), root, work / 'workspace-tests.log', environment, timeout=7200)
-    # Full qualification runs every workspace package; the Linux preview
-    # excludes plugin packages while retaining the other workspace checks.
+    integration_arguments = ['--test', '*']
+    if profile == 'linux-x86-preview':
+        # Package exclusions alone still run preview suites in product crates.
+        # Cargo metadata retains every product target instead of a fragile allowlist.
+        metadata_log = work / 'preview-workspace-metadata.log'
+        logged(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'],
+               root, metadata_log, environment)
+        records = [json.loads(line) for line in metadata_log.read_text(encoding='utf-8').splitlines()
+                   if line.startswith('{')]
+        require(len(records) == 1, 'missing unique Cargo workspace metadata record')
+        integration_arguments = preview_integration_arguments(records[0])
+        write_json(work / 'preview-test-scope.json', {
+            'qualification_profile': profile, 'arguments': integration_arguments,
+            'workspace_metadata_sha256': sha(metadata_log),
+        })
+    logged(test_command(integration_arguments, environment), root, work / 'workspace-tests.log', environment, timeout=7200)
+    # Full qualification runs every workspace target. The explicitly plugin-free
+    # preview retains every product target and records its exact test selection.
     # POSIX fixture tests
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
     # Portable archive/manifest/source/evidence contracts run on every lane.
