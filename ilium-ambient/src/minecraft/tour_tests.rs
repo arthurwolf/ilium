@@ -1307,7 +1307,7 @@ fn proto_incomplete_unaddressable_and_mismatched_coverage_are_rejected() {
     for fault in 0..6 {
         let mut chunk = decoded([0, 0], None, 3218);
         match fault {
-            0 => chunk.status = Some("features".into()),
+            0 => chunk.sections.get_mut(&0).unwrap().block_states = None,
             1 => {
                 chunk.sections.remove(&0);
             }

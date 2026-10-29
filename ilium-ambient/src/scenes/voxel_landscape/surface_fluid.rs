@@ -65,7 +65,7 @@ impl FluidMesh {
     /// It is separate from `build` because generated `FluidCell` levels and
     /// corner averaging do not implement the pinned 1.19.3 renderer.
     pub fn from_native_faces(
-        faces: Vec<FluidFace>,
+        mut faces: Vec<FluidFace>,
         region: MeshRegion,
         bank: &TextureBank,
         budget: &ByteBudget,
@@ -127,8 +127,10 @@ impl FluidMesh {
             }
         }
         // The assembler reserves up to six slots per liquid cell, then culls
-        // most of them in dense water. Vec keeps that allocation when moved
-        // here, so charge its retained capacity rather than its visible len.
+        // most of them in dense water. The unused slots stay allocated for the
+        // whole tile, so release them before charging: the charge then equals
+        // the retained bytes instead of pinning hundreds of MB of empty capacity.
+        faces.shrink_to_fit();
         let face_storage = (faces.capacity() as u64)
             .checked_mul(std::mem::size_of::<FluidFace>() as u64)
             .and_then(|bytes| bytes.checked_add(4096))
@@ -431,7 +433,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     #[test]
-    fn mostly_culled_native_faces_keep_their_full_capacity_charged() {
+    fn mostly_culled_native_faces_are_shrunk_before_charging() {
         let budget = ByteBudget::new(256 << 20).unwrap();
         let stop = AtomicBool::new(false);
         let cancel = Cancel::new(&stop);
@@ -504,10 +506,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(mesh.faces.len(), 1);
-        assert!(mesh.faces.capacity() >= 64);
+        assert_eq!(mesh.faces.capacity(), 1);
         assert_eq!(
             budget.used() - before,
-            4096 + mesh.faces.capacity() as u64 * std::mem::size_of::<FluidFace>() as u64
+            4096 + std::mem::size_of::<FluidFace>() as u64
         );
         drop(mesh);
         assert_eq!(budget.used(), before);

@@ -213,7 +213,8 @@ mod tests {
         let content = b"fixture image bytes";
         fs::write(cache_dir.path().join(cache_file_name(url, "img")), content)
             .expect("cached fixture");
-        let resources = crate::resources::test_resources();
+        // Isolated: absolute worker_bytes deltas would race other parallel tests.
+        let (_execution, resources) = crate::resources::isolated_test_resources();
         let quota = resources.finite().quota_group();
         let baseline = quota.snapshot().worker_bytes;
         let capture = resources.reserve_storage(1024).expect("capture storage");

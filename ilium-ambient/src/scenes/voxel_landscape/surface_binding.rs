@@ -365,6 +365,35 @@ fn request(
     )
 }
 
+/// Block textures that the 1.19.3 Java jar and the pinned packs lack but the
+/// surface vocabulary places (1.20+ blocks and the 1.20.3+ grass names). Each
+/// target is a visibly similar 1.19.3-era block texture. The candidate is
+/// labelled as compatibility art, never as the requested native texture.
+const REVIEWED_ABSENT_SOURCE_ALTERNATES: &[(&str, &str)] = &[
+    ("block/mud", "minecraft:block/dirt"),
+    ("block/short_grass", "minecraft:block/grass"),
+    ("block/tall_grass", "minecraft:block/grass"),
+    ("block/bush", "minecraft:block/grass"),
+    ("block/firefly_bush", "minecraft:block/grass"),
+    ("block/cactus_flower", "minecraft:block/pink_tulip"),
+    ("block/pink_petals", "minecraft:block/pink_tulip"),
+    ("block/torchflower", "minecraft:block/poppy"),
+    ("block/pitcher_plant", "minecraft:block/fern"),
+    ("block/cherry_leaves", "minecraft:block/oak_leaves"),
+    ("block/cherry_log", "minecraft:block/oak_log"),
+    ("block/cherry_planks", "minecraft:block/oak_planks"),
+    ("block/leaf_litter", "minecraft:block/dirt"),
+    ("block/short_dry_grass", "minecraft:block/dead_bush"),
+    ("block/tall_dry_grass", "minecraft:block/dead_bush"),
+];
+
+fn reviewed_absent_source_alternate(texture_path: &str) -> Option<&'static str> {
+    REVIEWED_ABSENT_SOURCE_ALTERNATES
+        .iter()
+        .find(|(absent, _)| *absent == texture_path)
+        .map(|(_, alternate)| *alternate)
+}
+
 fn request_with_fallback_aliases(
     id: ResourceId,
     pack: &ResourceId,
@@ -419,13 +448,7 @@ fn request_with_fallback_aliases(
     // Reviewed semantic compatibility for absent modern source members. The
     // candidate record keeps the selected image's real origin and this reason;
     // it must not be reported as a native texture for the requested state.
-    let alternate = match id.parts().1 {
-        "block/mud" => Some("minecraft:block/dirt"),
-        "block/short_grass" | "block/tall_grass" | "block/bush" | "block/firefly_bush" => {
-            Some("minecraft:block/grass")
-        }
-        _ => None,
-    };
+    let alternate = reviewed_absent_source_alternate(id.parts().1);
     if let Some(alternate) = alternate {
         let reason = Label::new(&format!(
             "Authored selected-pack compatibility: {id} absent; visibly use {alternate}; not native {id} art"
@@ -2467,6 +2490,39 @@ mod supplied_tests {
             source_limitations: Vec::new(),
         }
     }
+    #[test]
+    fn reviewed_absent_source_alternates_are_labelled_compatibility_candidates() {
+        let selected = ResourceId::parse("ilium:java-default").unwrap();
+        let no_aliases = BTreeMap::new();
+        for (absent_path, alternate) in REVIEWED_ABSENT_SOURCE_ALTERNATES {
+            let id = ResourceId::parse(&format!("minecraft:{absent_path}")).unwrap();
+            let request = request_with_fallback_aliases(
+                id.clone(),
+                &selected,
+                &no_aliases,
+                false,
+                None,
+                false,
+                &no_aliases,
+            )
+            .unwrap();
+            assert_eq!(request.requirement.id, id);
+            let expected_alternate = ResourceId::parse(alternate).unwrap();
+            assert!(
+                request.candidates.iter().any(|candidate| {
+                    matches!(
+                        &candidate.location,
+                        TextureLocation::Resource {
+                            id,
+                            alias_reason: Some(_),
+                        } if *id == expected_alternate
+                    )
+                }),
+                "{absent_path} must offer labelled compatibility art from {alternate}"
+            );
+        }
+    }
+
     #[test]
     fn reviewed_fallback_aliases_keep_fallback_pack_provenance() {
         let id = ResourceId::parse("minecraft:block/beehive_top").unwrap();

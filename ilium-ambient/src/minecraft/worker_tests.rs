@@ -1,18 +1,35 @@
 use super::*;
+use ilium_execution::RejectReason;
 use std::sync::mpsc;
 
 fn start_worker<T: Send + Sync + 'static>(
     prepare: impl FnMut(&Request, &dyn Fn() -> bool) -> Result<T, String> + Send + 'static,
 ) -> PreparationWorker<T> {
-    PreparationWorker::start_with(
-        &crate::resources::test_resources(),
-        WorkerCost {
-            threads: 1,
-            resident_bytes: 8 * 1024 * 1024,
-        },
-        prepare,
-    )
-    .unwrap()
+    let resources = crate::resources::test_resources();
+    // The prepare closure is shared so a Busy admission can be retried with it.
+    let prepare = std::sync::Arc::new(std::sync::Mutex::new(prepare));
+    crate::resources::retry_while_busy(|| {
+        let prepare = std::sync::Arc::clone(&prepare);
+        PreparationWorker::start_with(
+            &resources,
+            WorkerCost {
+                threads: 1,
+                resident_bytes: 8 * 1024 * 1024,
+            },
+            move |request, stop| {
+                let mut prepare = prepare.lock().unwrap();
+                (*prepare)(request, stop)
+            },
+        )
+        .map_err(|message| {
+            if message.ends_with("Busy") {
+                RejectReason::Busy
+            } else {
+                panic!("{message}")
+            }
+        })
+    })
+    .expect("preparation worker admission")
 }
 
 fn request(generation: u64) -> Request {
