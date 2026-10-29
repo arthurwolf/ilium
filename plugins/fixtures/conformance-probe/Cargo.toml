@@ -12,4 +12,4 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
+ilium-plugin-sdk = { version = "0.1.1-linux.1", path = "../../../ilium-plugin-sdk" }

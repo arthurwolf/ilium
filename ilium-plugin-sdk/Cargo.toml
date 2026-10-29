@@ -8,9 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ilium-plugin-sdk-core = { version = "0.1.1", path = "../ilium-plugin-sdk-core" }
-ilium-plugin-sdk-macros = { version = "0.1.1", path = "../ilium-plugin-sdk-macros" }
-ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit", optional = true }
+ilium-plugin-sdk-core = { version = "0.1.1-linux.1", path = "../ilium-plugin-sdk-core" }
+ilium-plugin-sdk-macros = { version = "0.1.1-linux.1", path = "../ilium-plugin-sdk-macros" }
+ilium-plugin-testkit = { version = "0.1.1-linux.1", path = "../ilium-plugin-testkit", optional = true }
 
 [features]
 # Re-exports the testkit as `ilium_plugin_sdk::testing`.

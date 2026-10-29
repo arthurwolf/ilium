@@ -18,9 +18,9 @@ qualification-test-support = ["ilium-animation-js/qualification-test-support"]
 ui-capture = []
 
 [dependencies]
-ilium-http = { version = "0.1.1", path = "../ilium-http" }
-ilium-wikipedia = { version = "0.1.1", path = "../ilium-wikipedia" }
-ilium-prompts = { version = "0.1.1", path = "../ilium-prompts" }
+ilium-http = { version = "0.1.1-linux.1", path = "../ilium-http" }
+ilium-wikipedia = { version = "0.1.1-linux.1", path = "../ilium-wikipedia" }
+ilium-prompts = { version = "0.1.1-linux.1", path = "../ilium-prompts" }
 anyhow = "1.0.103"
 arboard = "3.6.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
@@ -29,27 +29,27 @@ cosmic-text = "0.14"
 directories = "6.0.0"
 emoji = "0.2.1"
 fastembed = { version = "5.17.3", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
-ilium-agent-debug = { version = "0.1.1", path = "../ilium-agent-debug" }
-ilium-agent-session = { version = "0.1.1", path = "../ilium-agent-session" }
-ilium-compaction-analysis = { version = "0.1.1", path = "../ilium-compaction-analysis" }
-ilium-ambient = { version = "0.1.1", path = "../ilium-ambient" }
-ilium-animation-js = { version = "0.1.1", path = "../ilium-animation-js" }
-ilium-gpu = { version = "0.1.1", path = "../ilium-gpu" }
-ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
-ilium-core = { version = "0.1.1", path = "../ilium-core" }
-ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
-ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
+ilium-agent-debug = { version = "0.1.1-linux.1", path = "../ilium-agent-debug" }
+ilium-agent-session = { version = "0.1.1-linux.1", path = "../ilium-agent-session" }
+ilium-compaction-analysis = { version = "0.1.1-linux.1", path = "../ilium-compaction-analysis" }
+ilium-ambient = { version = "0.1.1-linux.1", path = "../ilium-ambient" }
+ilium-animation-js = { version = "0.1.1-linux.1", path = "../ilium-animation-js" }
+ilium-gpu = { version = "0.1.1-linux.1", path = "../ilium-gpu" }
+ilium-execution = { version = "0.1.1-linux.1", path = "../ilium-execution" }
+ilium-core = { version = "0.1.1-linux.1", path = "../ilium-core" }
+ilium-ipc = { version = "0.1.1-linux.1", path = "../ilium-ipc" }
+ilium-plugin-host = { version = "0.1.1-linux.1", path = "../ilium-plugin-host" }
 # `plugin_host::widget_rig::solve_row` takes the generated `Constraint` (WID-005..007).
-ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
-ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
-ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
-ilium-remote-compaction = { version = "0.1.1", path = "../ilium-remote-compaction" }
-ilium-session-convert = { version = "0.1.1", path = "../ilium-session-convert" }
-ilium-sound = { version = "0.1.1", path = "../ilium-sound" }
-ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
-ilium-voice = { version = "0.1.1", path = "../ilium-voice" }
+ilium-plugin-api = { version = "0.1.1-linux.1", path = "../ilium-plugin-api" }
+ilium-inference = { version = "0.1.1-linux.1", path = "../ilium-inference" }
+ilium-logging = { version = "0.1.1-linux.1", path = "../ilium-logging" }
+ilium-remote-compaction = { version = "0.1.1-linux.1", path = "../ilium-remote-compaction" }
+ilium-session-convert = { version = "0.1.1-linux.1", path = "../ilium-session-convert" }
+ilium-sound = { version = "0.1.1-linux.1", path = "../ilium-sound" }
+ilium-transport = { version = "0.1.1-linux.1", path = "../ilium-transport" }
+ilium-voice = { version = "0.1.1-linux.1", path = "../ilium-voice" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
-ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
+ilium-platform = { version = "0.1.1-linux.1", path = "../ilium-platform" }
 mongodb = "3.8.0"
 pulldown-cmark = "0.13"
 regex = "1.12.3"
@@ -80,10 +80,10 @@ uuid = { version = "1.23.5", features = ["v4"] }
 
 [dev-dependencies]
 # Plugin platform test lanes (test-plan.md section 1.5).
-ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
-ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+ilium-plugin-host = { version = "0.1.1-linux.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1-linux.1", path = "../ilium-plugin-testkit" }
 proptest = "1"
-ilium-server = { version = "0.1.1", path = "../ilium-server" }
+ilium-server = { version = "0.1.1-linux.1", path = "../ilium-server" }
 tempfile = "3.27.0"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 

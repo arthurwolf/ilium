@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ilium-http = { version = "0.1.1", path = "../ilium-http" }
+ilium-http = { version = "0.1.1-linux.1", path = "../ilium-http" }
 ilium-ambient = { path = "../ilium-ambient" }
 ilium-execution = { path = "../ilium-execution" }
 ilium-platform = { path = "../ilium-platform" }

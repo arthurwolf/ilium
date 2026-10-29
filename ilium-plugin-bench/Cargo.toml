@@ -9,8 +9,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
-ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+ilium-plugin-host = { version = "0.1.1-linux.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1-linux.1", path = "../ilium-plugin-testkit" }
 # `BenchResult::to_json` returns a `serde_json::Value` (HST-301, HST-303).
 serde_json = "1.0.151"
 

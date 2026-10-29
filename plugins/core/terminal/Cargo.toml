@@ -13,10 +13,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
+ilium-plugin-sdk = { version = "0.1.1-linux.1", path = "../../../ilium-plugin-sdk" }
 
 [dev-dependencies]
-ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
+ilium-plugin-sdk = { version = "0.1.1-linux.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
 serde_json = "1.0.151"
 proptest = "1"
 # Link patterns of the terminal feature tests (tests/features/links.rs, tests/port/terminal_links.rs).

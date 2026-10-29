@@ -15,10 +15,10 @@ serde_json_canonicalizer = "0.3.2"
 ed25519-dalek = "2"
 base64 = "0.22.1"
 regex = "1.12.3"
-ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
-ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
-ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
-ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
+ilium-plugin-api = { version = "0.1.1-linux.1", path = "../ilium-plugin-api" }
+ilium-execution = { version = "0.1.1-linux.1", path = "../ilium-execution" }
+ilium-platform = { version = "0.1.1-linux.1", path = "../ilium-platform" }
+ilium-logging = { version = "0.1.1-linux.1", path = "../ilium-logging" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
 toml = "0.8.23"
@@ -37,7 +37,7 @@ tempfile = { version = "3.27.0", optional = true }
 proptest = "1"
 tempfile = "3.27.0"
 # `ilium_plugin_testkit::manual::pages_dir()` in the documentation-lint tests (DEV-762, DEV-780).
-ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+ilium-plugin-testkit = { version = "0.1.1-linux.1", path = "../ilium-plugin-testkit" }
 
 [features]
 # FakeKernel, NativeGuest, WAT loader and HostHarness for host and conformance tests.

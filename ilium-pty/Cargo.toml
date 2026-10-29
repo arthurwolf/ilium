@@ -10,8 +10,8 @@ repository.workspace = true
 anyhow = "1.0.103"
 crossterm = "0.29.0"
 # Native transport, cancellation, worker ownership and process probes.
-ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
-ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
+ilium-platform = { version = "0.1.1-linux.1", path = "../ilium-platform" }
+ilium-execution = { version = "0.1.1-linux.1", path = "../ilium-execution" }
 portable-pty = "0.9.0"
 thiserror = "2.0.18"
 tracing = "0.1.44"
