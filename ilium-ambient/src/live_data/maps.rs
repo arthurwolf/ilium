@@ -329,14 +329,6 @@ impl LiveMapScene {
             feed_retry_at: std::time::Duration::from_secs(1), // Initial failed admission can retry after one scene second.
         }
     }
-    /// Fixtures use the admitted host resources that `new` always supplies.
-    /// Without them the fleet layer correctly refuses to start its preparer.
-    #[cfg(test)]
-    fn offline_with_test_resources(kind: MapKind, settings: MapSettings) -> Self {
-        let mut scene = Self::offline(kind, settings);
-        scene.resources = Some(crate::resources::test_resources());
-        scene
-    }
     fn start_worker(&mut self) {
         self.worker = None;
         self.startup_error = None;

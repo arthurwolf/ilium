@@ -521,7 +521,6 @@ impl PreparedMesh {
                 ));
             }
             faces.push(MeshFace {
-                position,
                 quad_index,
                 owner: FaceOwner {
                     position,

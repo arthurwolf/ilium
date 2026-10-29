@@ -161,15 +161,6 @@ pub(crate) fn isolated_test_resources() -> (ilium_execution::Execution, AmbientR
     create_isolated_test_resources()
 }
 
-#[cfg(test)]
-impl AmbientResources {
-    /// Worker bytes still admissible, including bank metadata already charged.
-    pub(crate) fn free_worker_bytes(&self) -> usize {
-        let snapshot = self.quota.snapshot();
-        snapshot.limits.worker_bytes - snapshot.worker_bytes
-    }
-}
-
 /// `Busy` is a momentary try-lock miss on the admission ledger, never a capacity
 /// refusal: production callers retry it. Tests that need admission to succeed
 /// use this instead of unwrapping the first attempt.
