@@ -2,7 +2,7 @@
 
 This page explains every supported way to install Ilium: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
 
-Status note: at the last check (2026-10-03) no releases had been published and the hosted installers were not yet live. Until releases exist, [build from source](building-from-source.md). The GitHub Actions artifacts of the [release workflow](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) are candidate builds, not qualified releases. All download links below select assets from the newest published release and will work once one exists.
+**Not ready yet:** As of 2026-10-29, no Ilium release has been published. The download links and hosted installer commands on this page are not ready. The first planned release is for Linux x86_64; Linux ARM64, macOS and Windows will follow. Until a release is available, [build from source](building-from-source.md). GitHub Actions artifacts from the [release workflow](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) are candidate builds, not qualified releases. The links below point to the latest release and do not establish that any particular asset is available.
 
 ## Contents
 
