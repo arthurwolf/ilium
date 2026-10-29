@@ -211,6 +211,25 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
+/// Preserve the test-owned process identities when agent detection times out.
+fn fixture_processes(root: &Path) -> String {
+    let output = match std::process::Command::new("ps")
+        .args(["-eo", "pid,ppid,comm,args"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => return format!("process inspection failed: {}", output.status),
+        Err(error) => return format!("process inspection unavailable: {error}"),
+    };
+    let root = root.to_string_lossy();
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.contains(root.as_ref()))
+        .take(64)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 async fn wait_for_file(path: &Path, needle: &str) -> bool {
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
@@ -298,8 +317,9 @@ async fn broadcast_reaches_selected_agents_across_projects_and_never_shells() {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "agents never detected: {}",
-            run_ilium(&dirs, &alpha, &["panes"], None).await.stdout
+            "agents never detected: {}\ntest-owned processes:\n{}",
+            run_ilium(&dirs, &alpha, &["panes"], None).await.stdout,
+            fixture_processes(temp_root.path())
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     }

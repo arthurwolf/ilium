@@ -1150,22 +1150,21 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
                 .await
                 .expect("read event while checking invalidated-session quarantine");
             if matches!(
-                event,
+                &event,
                 ServerEvent::PaneSessionIdResolved {
                     pane_id: changed_id,
                     session_id,
                     ..
-                } if changed_id == pane_id && session_id == resumed_session_id
+                } if *changed_id == pane_id && session_id.as_str() == resumed_session_id
             ) {
-                return;
+                return event;
             }
         }
     })
     .await;
-    assert!(
-        rebound_old_session.is_err(),
-        "the same PID's still-open old transcript must not restore an invalidated session ID"
-    );
+    if let Ok(event) = rebound_old_session {
+        panic!("the same PID's still-open old transcript must not restore an invalidated session ID; observed {event:?}");
+    }
 
     // Recreate the IPC ordering race directly: a worker result tagged with
     // the cleared ID arrives after invalidation. The server's compare-and-set
