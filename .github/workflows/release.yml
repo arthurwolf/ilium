@@ -8,6 +8,7 @@ name: Native release and installation
   push:
     tags:
     - v*
+    - '!v*-linux.*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -28,7 +29,15 @@ env:
   RUST_BACKTRACE: '1'
   PYTHONDONTWRITEBYTECODE: '1'
 jobs:
+  linux-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.1'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/linux-preview.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
   source:
+    if: github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.1'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
@@ -54,6 +63,8 @@ jobs:
       matrix: ${{ steps.identity.outputs.matrix }}
       tag: ${{ steps.identity.outputs.tag }}
       commit: ${{ steps.identity.outputs.commit }}
+      selection: ${{ steps.identity.outputs.selection }}
+      selection_sha256: ${{ steps.identity.outputs.selection_sha256 }}
   native:
     needs:
     - source

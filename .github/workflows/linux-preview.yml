@@ -1,0 +1,159 @@
+# Qualification only: publication requires separately verified artifacts.
+name: Linux x86_64 preview qualification
+'on':
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  RUST_BACKTRACE: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Linux native build prerequisites
+      run: 'sudo apt-get update
+
+        sudo apt-get install -y bubblewrap libasound2-dev pkg-config libssl-dev
+
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
+    - name: Pinned release test parser
+      run: python -m pip install PyYAML==6.0.2
+    - name: Linux product build, tests, licence closure and candidate audit
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python release/scripts/release_pipeline.py native --qualification-profile linux-x86-preview --tag "${{ inputs.release_tag }}" --target "x86_64-unknown-linux-gnu" --runner-identity "ubuntu-22.04" --work "$RUNNER_TEMP/native-work" --output "$GITHUB_WORKSPACE/native-output"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: native-x86_64-unknown-linux-gnu
+        path: native-output/
+        if-no-files-found: error
+        retention-days: '30'
+    - name: Retain native failure evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-x86_64-unknown-linux-gnu
+        path: '${{ runner.temp }}/native-work/*.log
+
+          ${{ runner.temp }}/native-work/*/*.log
+
+          ${{ runner.temp }}/native-work/*/*.json
+
+          '
+        if-no-files-found: warn
+        retention-days: '30'
+  linux-packages:
+    needs:
+    - native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-x86_64-unknown-linux-gnu
+        path: native-linux
+    - name: Packaging toolchain
+      run: 'sudo apt-get update
+
+        sudo apt-get install -y systemd-container ffmpeg bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 qemu-system-x86 qemu-utils cloud-image-utils openssh-client # Supply native package inspectors and the disposable guest tools.
+
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+        command -v snap >/dev/null # Require the runner''s existing Snap tooling before building or installing.
+
+        command -v docker >/dev/null # Require native distribution-container coverage on this runner.
+
+        '
+    - name: Build deb, rpm, AppImage, Flatpak and Snap from the audited tarball
+      run: python release/scripts/build_linux_packages.py build --tag "${{ inputs.release_tag }}" --arch "x86_64" --archive "native-linux/ilium-linux-x86_64.tar.gz" --work "$RUNNER_TEMP/package-work" --output linux-packages
+    - name: Inspect all four offline formats against their receipt-bound files
+      run: 'set -o pipefail # A failed required format must fail this workflow step.
+
+        mkdir -p "$RUNNER_TEMP/package-smoke-inspect" # Keep diagnostics outside the exact package artifact inventory.
+
+        python release/scripts/smoke_linux_packages.py inspect --arch "x86_64" --packages linux-packages --formats deb,rpm,appimage,snap | tee "$RUNNER_TEMP/package-smoke-inspect/inspect.jsonl" # Require every supported offline format explicitly.
+
+        '
+    - name: Install and run all six distribution-container lanes with owned systemd fixtures
+      run: 'set -o pipefail
+
+        mkdir -p "$RUNNER_TEMP/package-smoke"
+
+        sudo -n env PYTHONDONTWRITEBYTECODE=1 "$(command -v python)" release/scripts/smoke_linux_packages.py containers --arch "x86_64" --packages linux-packages --formats deb,rpm,appimage --log "$RUNNER_TEMP/package-smoke" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke/containers-results.jsonl"
+
+        '
+    - name: Install and run Snap, Flatpak, deb and the AppImage FUSE mount on the disposable runner
+      run: 'set -o pipefail
+
+        mkdir -p "$RUNNER_TEMP/package-smoke-host"
+
+        python release/scripts/smoke_linux_packages.py host --arch "x86_64" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
+
+        '
+    - name: Execute every declared native Linux sandbox case
+      run: python release/scripts/native_sandbox_runner.py --artifact-directory native-linux/evidence --helper native-linux/candidate/ilium-animation-helper --workspace Cargo.toml --output "$RUNNER_TEMP/native-sandbox"
+    - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
+      run: 'set -o pipefail
+
+        mkdir -p "$RUNNER_TEMP/package-smoke-vm"
+
+        python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
+
+        '
+    - name: Seal native Linux animation evidence
+      run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "x86_64-unknown-linux-gnu" --tag "${{ inputs.release_tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-x86_64.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host" --native-sandbox-receipt "$RUNNER_TEMP/native-sandbox/native-sandbox-tests.json"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: linux-packages-x86_64
+        path: linux-packages/
+        if-no-files-found: error
+        retention-days: '30'
+    - name: Retain package logs
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-linux-packages-x86_64
+        path: '${{ runner.temp }}/package-smoke-inspect/
+
+          ${{ runner.temp }}/package-smoke/
+
+          ${{ runner.temp }}/package-smoke-host/
+
+          ${{ runner.temp }}/package-smoke-vm/
+
+          package-vm.jsonl
+
+          ${{ runner.temp }}/native-sandbox/
+
+          '
+        if-no-files-found: warn
+        retention-days: '30'

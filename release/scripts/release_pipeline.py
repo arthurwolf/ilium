@@ -157,7 +157,7 @@ def git_identity(root):
     return commit
 
 
-def source_matrix(manifest, workspace, tag):
+def source_selection(manifest, workspace, tag, *, selection_path=None, policy_path=None):
     # Consume the actual manifest CLI, including its strict five-target policy.
     response = subprocess.run([sys.executable, str(ROOT / 'release/scripts/release_tool.py'), 'targets', '--manifest', str(Path(manifest).resolve())], capture_output=True, text=True, check=True)
     records = [json.loads(line) for line in response.stdout.splitlines()]
@@ -166,15 +166,35 @@ def source_matrix(manifest, workspace, tag):
     require(targets == release_tool.load_targets(manifest), 'targets CLI differs from authoritative manifest')
     version_tag = 'v' + workspace_version(workspace)
     require(not tag or tag == version_tag, 'tag differs from workspace version')
-    git_identity(Path(workspace).resolve().parent)
-    return {'include': targets}, version_tag
+    commit = git_identity(Path(workspace).resolve().parent)
+    # One validated snapshot supplies both the matrix and its published identity.
+    import release_selection
+    policy_content = (release_selection.require_committed_policy(Path(workspace).resolve().parent, policy_path, commit)
+                      if policy_path is not None else None)
+    intent = release_selection.resolve_intent(manifest=manifest, expected_tag=version_tag,
+                                               expected_commit=commit, intent_path=selection_path,
+                                               policy_content=policy_content)
+    selected = set(intent['selected_targets'])
+    targets = [row for row in targets if row['rust_target'] in selected]
+    return {'include': targets}, version_tag, intent
+
+
+def source_matrix(manifest, workspace, tag, *, selection_path=None):
+    matrix, version_tag, _intent = source_selection(manifest, workspace, tag, selection_path=selection_path)
+    return matrix, version_tag
 
 
 def source(arguments):
-    matrix, tag = source_matrix(arguments.manifest, arguments.workspace, arguments.tag)
-    commit = git_identity(arguments.workspace.resolve().parent)
-    gh_output(matrix=json.dumps(matrix, separators=(',', ':')), tag=tag, commit=commit)
-    emit('result', command='source', matrix=matrix, tag=tag, commit=commit)
+    import release_selection
+    matrix, tag, intent = source_selection(arguments.manifest, arguments.workspace, arguments.tag,
+                                           selection_path=arguments.selection_intent,
+                                           policy_path=getattr(arguments, 'selection_policy', None))
+    content = release_selection.canonical_bytes(intent)
+    selection_sha256 = hashlib.sha256(content).hexdigest()
+    gh_output(matrix=json.dumps(matrix, separators=(',', ':')), tag=tag, commit=intent['commit'],
+              selection=content.decode('ascii').rstrip('\n'), selection_sha256=selection_sha256)
+    emit('result', command='source', matrix=matrix, tag=tag, commit=intent['commit'],
+         selection=intent, selection_sha256=selection_sha256)
 
 
 class HTTPSOnly(urllib.request.HTTPRedirectHandler):
@@ -281,10 +301,33 @@ def rustup_install_command():
     return command
 
 
+def native_workspace_scope(profile, target):
+    if profile == 'full':
+        return ['--workspace']
+    require(profile == 'linux-x86-preview' and target == 'x86_64-unknown-linux-gnu',
+            'unsupported native qualification profile or target')
+    return ['--workspace', '--exclude', 'ilium-plugin-*']
+
+
+def native_clippy_command(profile, target):
+    return (['cargo', 'clippy', '--locked'] + native_workspace_scope(profile, target) +
+            ['--all-targets', '--keep-going', '--target', target, '--', '-D', 'warnings'])
+
+
+def native_test_command(profile, target, cargo_arguments):
+    return (['cargo', 'test', '--locked'] + native_workspace_scope(profile, target) +
+            ['--no-fail-fast', '--target', target] + cargo_arguments)
+
+
 def native(arguments):
     target = release_tool.selected_target(arguments.manifest, arguments.target)
     root = arguments.workspace.resolve().parent
     version = release_tool.workspace_version(arguments.workspace, arguments.tag)
+    profile = getattr(arguments, 'qualification_profile', 'full')
+    native_workspace_scope(profile, arguments.target)
+    if profile == 'linux-x86-preview':
+        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-linux\.[0-9]+', arguments.tag),
+                'Linux preview profile requires a Linux preview tag')
     expected_system = {'linux': 'Linux', 'windows': 'Windows', 'macos': 'Darwin'}[target['os']]
     expected_machines = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64', 'ARM64'}}[target['arch']]
     require(platform.system() == expected_system and platform.machine() in expected_machines, 'native runner does not match target')
@@ -376,7 +419,7 @@ def native(arguments):
                 environment['PATH'] = str(ort_library_directory) + os.pathsep + environment['PATH']
         logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server', '--bin', 'ilium-animation-helper'], root, work / 'release-build.log', environment)
     logged(['cargo', 'fmt', '--all', '--check'], root, work / 'fmt.log', environment)
-    logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--keep-going', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
+    logged(native_clippy_command(profile, arguments.target), root, work / 'clippy.log', environment)
     # Mirror the hosted CI split: unit tests run in parallel, integration tests are
     # serialized because PTY-heavy tests contend for the runner. On Linux the animation
     # sandbox needs a delegated cgroup-v2 ancestor, which a transient user scope provides.
@@ -386,7 +429,7 @@ def native(arguments):
     parallel_environment['RUST_TEST_THREADS'] = '2'
 
     def test_command(cargo_arguments, test_environment):
-        command = ['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target] + cargo_arguments
+        command = native_test_command(profile, arguments.target, cargo_arguments)
         if target['os'] != 'linux':
             return command
         # The animation sandbox needs an owned cgroup-v2 ancestor with the cpu,
@@ -410,7 +453,9 @@ def native(arguments):
     logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
     logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
     logged(test_command(['--test', '*'], environment), root, work / 'workspace-tests.log', environment, timeout=7200)
-    # Product tests above run in full on every native OS. POSIX fixture tests
+    # Full qualification runs every workspace package; the Linux preview
+    # excludes plugin packages while retaining the other workspace checks.
+    # POSIX fixture tests
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
     # Portable archive/manifest/source/evidence contracts run on every lane.
     for test_module in sorted((root / 'release/tests').glob('test_*.py')):
@@ -446,6 +491,7 @@ def native(arguments):
                 '--package', 'ilium-platform', '--test', 'native_animation_sandbox',
                 '--no-run', '--message-format=json'], root, sandbox_log, environment)
     command = [sys.executable, root / 'release/scripts/native_candidate.py', '--manifest', arguments.manifest.resolve(), '--workspace', arguments.workspace.resolve(), '--tag', arguments.tag, '--target', arguments.target, '--runner-identity', arguments.runner_identity, '--build-directory', cargo_target / arguments.target / 'release', '--output-directory', arguments.output.resolve(), '--dependency-inventory', inventory, '--ort-source-archive', ort_archive, '--model-directory', model_directory]
+    command.extend(['--qualification-profile', profile])
     if target['ort_strategy'] == 'pinned-source-build':
         if target['os'] == 'macos':
             command.extend(['--intel-ort-report', work / 'intel-ort/receipt.json'])
@@ -602,10 +648,14 @@ def validate_macos_candidate_binding(binding, target, metadata, source_root):
 
 
 def aggregate(arguments):
+    import release_selection
     targets = release_tool.load_targets(arguments.manifest)
     root = arguments.workspace.resolve().parent
     version = release_tool.workspace_version(arguments.workspace, arguments.tag)
     commit = git_identity(root)
+    selection = release_selection.resolve_intent(manifest=arguments.manifest,
+                                                expected_tag=arguments.tag,
+                                                expected_commit=commit)
     artifacts = arguments.artifacts.resolve()
     require({path.name for path in artifacts.iterdir()} == {'native-' + row['rust_target'] for row in targets}, 'candidate artifacts must contain exactly five native target directories')
     output = arguments.output.resolve()
@@ -618,6 +668,7 @@ def aggregate(arguments):
         bridge_path = native / 'native-candidate-receipt.json'
         bridge = release_tool.read_json(bridge_path)
         require(bridge.get('schema') == 1 and bridge.get('state') == 'passed' and bridge.get('publication_allowed') is True and bridge.get('tag') == arguments.tag and bridge.get('target') == target['rust_target'], 'native candidate is unqualified or mismatched')
+        require(bridge.get('qualification_profile') == 'full', 'full release requires a full native qualification profile')
         require(native.is_dir() and not native.is_symlink(), 'native artifact directory must be regular')
         harness_name = 'native-test-binary.exe' if target['os'] == 'windows' else 'native-test-binary'
         expected_names = {'candidate', 'evidence', 'native-audit.json', 'runtime-inventory.json', 'dependency-inventory.json', 'embedding-command.json', 'embedding-receipt.json', target['archive'], 'SHA256SUMS', 'native-candidate-receipt.json', harness_name, 'native-test-harness.json'}
@@ -740,7 +791,7 @@ def aggregate(arguments):
         shutil.copyfile(root / 'release' / name, output / name)
     import smoke_installed_animation as animation_gate
     source_inputs = {name: sha(root / name) for name in ('Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES)}
-    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes, 'macos_packages': macos_hashes, 'macos_bindings': macos_bindings, 'package_animation_smoke': package_animation_smoke}
+    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'selection': selection, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes, 'macos_packages': macos_hashes, 'macos_bindings': macos_bindings, 'package_animation_smoke': package_animation_smoke}
     write_json(output / 'candidate.json', metadata)
     pages.build_pages(arguments.manifest, output / 'site', arguments.tag, output / 'SHA256SUMS', source_root=root)
     gh_output(subjects=json.dumps([str(output / name) for name in sorted(archives) + sorted(windows_installer_hashes) + sorted(linux_package_hashes) + sorted(macos_hashes)]))
@@ -760,6 +811,12 @@ def candidate_data(directory, manifest, workspace):
             re.fullmatch('[0-9a-f]{40}', metadata['commit']), 'candidate source identity is invalid')
     require(git_identity(Path(workspace).resolve().parent) == metadata['commit'],
             'candidate commit differs from current clean checkout')
+    import release_selection
+    selection = release_selection.validate_intent(metadata.get('selection'), manifest=manifest,
+                                                  expected_tag=metadata['tag'],
+                                                  expected_commit=metadata['commit'])
+    require(selection == metadata['selection'] and selection['mode'] == 'full',
+            'candidate selection is not canonical full inventory')
     import validate_animation_smoke as animation_smoke
     expected_inputs = {'Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES}
     require(set(metadata.get('source_inputs', {})) == expected_inputs, 'candidate source inventory differs')
@@ -1159,7 +1216,8 @@ def github(path, *, method='GET', payload=None, binary=None):
 def publication_files(candidate):
     candidate = Path(candidate)
     metadata = release_tool.read_json(candidate / 'candidate.json')
-    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']), *sorted(metadata['macos_packages']))]
+    availability = ('AVAILABILITY',) if metadata.get('selection', {}).get('mode') == 'partial' else ()
+    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *availability, *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']), *sorted(metadata['macos_packages']))]
 
 
 def validate_qualified_publication(candidate, metadata, qualification):
@@ -1869,6 +1927,9 @@ def parser():
         command.add_argument('--workspace', type=Path, default=ROOT / 'Cargo.toml')
         if name in {'source', 'native', 'aggregate'}:
             command.add_argument('--tag', required=name != 'source')
+        if name == 'source':
+            command.add_argument('--selection-intent', type=Path)
+            command.add_argument('--selection-policy', type=Path)
         if name == 'baseline':
             command.add_argument('--output', type=Path, required=True)
         if name in {'publish', 'latest', 'deploy', 'install', 'qualify', 'recovery-ready', 'recover'}:
@@ -1886,6 +1947,7 @@ def parser():
         if name == 'native':
             command.add_argument('--target', required=True)
             command.add_argument('--runner-identity', required=True)
+            command.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview'), default='full')
             command.add_argument('--work', type=Path, required=True)
             command.add_argument('--output', type=Path, required=True)
         if name == 'aggregate':

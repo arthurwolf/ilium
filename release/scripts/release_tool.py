@@ -114,6 +114,12 @@ def load_targets(manifest):
     """Read an explicit TOML path and reject any deviation from release policy."""
     with Path(manifest).open("rb") as manifest_file:
         document = tomllib.load(manifest_file)
+    return validate_targets_document(document) # Preserve the existing full policy through one shared document validator.
+
+
+def validate_targets_document(document: object) -> list[dict[str, object]]: # Admit only a complete parsed capability catalog, including byte-snapshot callers.
+    if not isinstance(document, dict): # Reject malformed direct callers before testing exact field names.
+        raise ReleaseError("manifest must be a TOML table") # Preserve structured policy failures for this new pure entry point.
     if set(document) != {"target"}:
         raise ReleaseError("manifest must contain only [[target]] records")
     if not isinstance(document["target"], list):
@@ -170,7 +176,8 @@ def version_identity(executable, output, version):
     return identity
 
 
-def read_json(path):
+def parse_json(content):
+    """Parse one captured JSON document with duplicate-key rejection."""
     def unique_keys(pairs):
         document = {}
         for key, value in pairs:
@@ -178,10 +185,14 @@ def read_json(path):
                 raise ReleaseError(f"duplicate JSON key: {key}")
             document[key] = value
         return document
-    document = json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=unique_keys)
+    document = json.loads(content, object_pairs_hook=unique_keys)
     if not isinstance(document, dict):
         raise ReleaseError("JSON input must be an object")
     return document
+
+
+def read_json(path):
+    return parse_json(Path(path).read_text(encoding="utf-8"))
 
 
 def workspace_version(workspace, tag):

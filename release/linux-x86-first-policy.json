@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "kind": "target-selection-policy",
+  "state": "planned",
+  "publication_allowed": false,
+  "mode": "partial",
+  "selected_targets": [
+    "x86_64-unknown-linux-gnu"
+  ],
+  "omitted_targets": {
+    "aarch64-unknown-linux-gnu": "Linux ARM64 is scheduled after the initial Linux x86_64 release.",
+    "aarch64-apple-darwin": "macOS Apple Silicon is scheduled after the initial Linux x86_64 release.",
+    "x86_64-apple-darwin": "macOS Intel is scheduled after the initial Linux x86_64 release.",
+    "x86_64-pc-windows-msvc": "Windows is scheduled after the initial Linux x86_64 release."
+  },
+  "omitted_assets": {}
+}
