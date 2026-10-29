@@ -41,6 +41,7 @@ async fn fixture(shared: Option<PathBuf>) -> Fixture {
     assert!(state
         .resources
         .set(ResourceService {
+            read_cache: Default::default(),
             catalog_access: Default::default(),
             path: shared.unwrap_or_else(|| root.join("isolated-ledger/catalog.json")),
             incarnation: uuid::Uuid::new_v4().to_string(),
@@ -401,6 +402,154 @@ async fn project_metadata_failure_retains_authority_and_records_sync_debt() {
         std::fs::read_to_string(f.directory.path().join(".ilium/config.yaml")).unwrap(),
         "[malformed"
     );
+}
+
+// Final unlink has no surviving link on which to store projection debt.
+// Reopening the affected project must still reconcile its empty binding set.
+#[tokio::test]
+async fn final_unlink_cleanup_failure_retries_after_project_state_restart() {
+    let original = fixture(None).await;
+    std::fs::write(
+        original.directory.path().join("CLAUDE.md"),
+        "Authored project policy\n",
+    )
+    .unwrap();
+    drop(create(&original).await);
+    let root = original.directory.path();
+    let instructions = root.join("CLAUDE.md");
+    let authored = std::fs::read_to_string(&instructions).unwrap();
+    assert!(authored.contains("test-gpu"));
+    let tree_path = root.join("restart-tree.json");
+    std::fs::write(
+        &tree_path,
+        serde_json::to_vec(&*original.state.tree.read().await).unwrap(),
+    )
+    .unwrap();
+    // A directory at an instruction target deterministically refuses writes.
+    std::fs::remove_file(&instructions).unwrap();
+    std::fs::create_dir(&instructions).unwrap();
+    let reply = execute(
+        &original.state,
+        request(
+            &original,
+            ResourceCommand::Unlink {
+                project_id: project_identity(root).unwrap(),
+                resource_id: "test-gpu".into(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(reply.catalog.links.is_empty());
+    assert!(reply
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("synchronization"));
+    let shared = service(&original.state).unwrap().path.clone();
+    let restarted = fixture(Some(shared)).await;
+    *restarted.state.tree.write().await =
+        serde_json::from_slice(&std::fs::read(&tree_path).unwrap()).unwrap();
+    let paths = vec![root.to_string_lossy().into_owned()];
+    let mut current = reconciled(&restarted.state).await.unwrap().0;
+    assert!(
+        repair_local_projections(&restarted.state, &mut current, &paths)
+            .await
+            .is_err(),
+        "failed empty-link cleanup must retain a retry obligation"
+    );
+    std::fs::remove_dir(&instructions).unwrap();
+    std::fs::write(&instructions, &authored).unwrap();
+    repair_local_projections(&restarted.state, &mut current, &paths)
+        .await
+        .unwrap();
+    let repaired = std::fs::read_to_string(&instructions).unwrap();
+    assert!(
+        !repaired.contains("test-gpu"),
+        "removed resource instructions must not survive reopening"
+    );
+    assert!(repaired.starts_with("Authored project policy\n"));
+    let settings: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(root.join(".ilium/config.yaml")).unwrap())
+            .unwrap();
+    assert!(settings["resources"].as_sequence().unwrap().is_empty());
+    let authoritative = store(&restarted).snapshot().unwrap();
+    assert!(authoritative.links.is_empty());
+    assert_eq!(
+        authoritative.resources.len(),
+        1,
+        "repair must not delete the shared definition"
+    );
+}
+
+// Opening a project is observable even when its client disconnects before the
+// resource observer ticks. No subscriber or waiter may be needed for cleanup.
+#[tokio::test]
+async fn final_unlink_cleanup_observes_new_project_while_idle() {
+    let original = fixture(None).await;
+    let instructions = original.directory.path().join("CLAUDE.md");
+    std::fs::write(&instructions, "Authored project policy\n").unwrap();
+    drop(create(&original).await);
+    let stale = std::fs::read_to_string(&instructions).unwrap();
+    let tree = serde_json::to_vec(&*original.state.tree.read().await).unwrap();
+    drop(
+        execute(
+            &original.state,
+            request(
+                &original,
+                ResourceCommand::Unlink {
+                    project_id: project_identity(original.directory.path()).unwrap(),
+                    resource_id: "test-gpu".into(),
+                },
+            ),
+        )
+        .await
+        .unwrap(),
+    );
+    std::fs::write(&instructions, &stale).unwrap();
+    let observer_fixture = fixture(Some(service(&original.state).unwrap().path.clone())).await;
+    let initial = observer_fixture.directory.path().join("CLAUDE.md");
+    std::fs::write(&initial, &stale).unwrap();
+    assert!(!observer_fixture.state.events.has_subscribers());
+    let observer = spawn(Arc::clone(&observer_fixture.state));
+    async fn await_cleanup(path: &std::path::Path) {
+        tokio::time::timeout(std::time::Duration::from_secs(180), async {
+            loop {
+                if std::fs::read_to_string(path).is_ok_and(|text| !text.contains("test-gpu")) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("idle resource observer did not remove stale instructions");
+    }
+    await_cleanup(&initial).await;
+    // Initial cleanup proves the empty-link observer completed a cycle. Its
+    // next cycle must notice this changed path even with no connected client.
+    *observer_fixture.state.tree.write().await = serde_json::from_slice(&tree).unwrap();
+    await_cleanup(&instructions).await;
+    observer.abort();
+    let _ = observer.await;
+    assert!(!observer_fixture.state.events.has_subscribers());
+    assert!(service(&observer_fixture.state)
+        .unwrap()
+        .waits
+        .lock()
+        .unwrap()
+        .entries
+        .is_empty());
+    assert!(std::fs::read_to_string(&instructions)
+        .unwrap()
+        .starts_with("Authored project policy\n"));
+    let settings: serde_norway::Value = serde_norway::from_str(
+        &std::fs::read_to_string(original.directory.path().join(".ilium/config.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert!(settings["resources"].as_sequence().unwrap().is_empty());
+    let authoritative = store(&observer_fixture).snapshot().unwrap();
+    assert!(authoritative.links.is_empty());
+    assert_eq!(authoritative.resources.len(), 1);
 }
 
 #[tokio::test]
@@ -1172,6 +1321,47 @@ async fn close_composer(fixture: &Fixture, pane: NodeId) {
 }
 #[cfg(target_os = "linux")]
 #[tokio::test]
+async fn invocation_label_uses_bounded_pane_title_without_changing_identity() {
+    let fixture = fixture(None).await;
+    let (pane, _) = composer_fixture(&fixture).await;
+    fixture
+        .state
+        .tree
+        .write()
+        .await
+        .rename_node(pane, "Shared board worker", None, None)
+        .unwrap();
+    let ResourceActor::Agent(before) = actor(&fixture.state, Some(pane), fixture.directory.path())
+        .await
+        .unwrap()
+    else {
+        panic!("agent actor")
+    };
+    assert_eq!(before.label, "Shared board worker");
+    fixture
+        .state
+        .tree
+        .write()
+        .await
+        .rename_node(pane, "🧪".repeat(200), None, None)
+        .unwrap();
+    let ResourceActor::Agent(after) = actor(&fixture.state, Some(pane), fixture.directory.path())
+        .await
+        .unwrap()
+    else {
+        panic!("agent actor")
+    };
+    assert!(
+        before.same_invocation(&after),
+        "renaming is presentation, not an ownership change"
+    );
+    assert_eq!(after.label.chars().count(), 120);
+    assert_eq!(after.label.len(), 480);
+    close_composer(&fixture, pane).await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
 async fn captured_actor_replaced_before_commit_cannot_mutate_authority() {
     let fixture = fixture(None).await;
     drop(create(&fixture).await);
@@ -1362,7 +1552,7 @@ async fn ready_notice_is_once_per_grant_across_reconnect_snapshots_and_wait_retr
             "ready composer must not receive duplicate grant notices"
         );
         assert!(
-            !store(&fixture).snapshot().unwrap().resources[&"test-gpu".into()]
+            !snapshot_when_store_available(&fixture).await.resources[&"test-gpu".into()]
                 .reservations
                 .iter()
                 .find(|reservation| reservation.id == claim)
@@ -1592,7 +1782,11 @@ async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
             .modified()
             .unwrap();
         let before_queue = snapshot_when_store_available(&fixture).await;
-        assert!(before_queue.links[0].sync_debt.is_none());
+        assert!(
+            before_queue.links[0].sync_debt.is_none(),
+            "instruction synchronization debt after notice: {:?}",
+            before_queue.links[0].sync_debt
+        );
 
         stage = "reserving an owner and adding a queued participant";
         // Direct fixture actors keep grant-ready notices separate from the live
@@ -1661,8 +1855,14 @@ async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
     observer.0.abort();
     let _ = (&mut observer.0).await;
     close_composer(&fixture, pane).await;
-    result
-        .unwrap_or_else(|error| panic!("instruction notice test timed out while {stage}: {error}"));
+    result.unwrap_or_else(|error| {
+        panic!(
+            "instruction notice test timed out while {stage}: {error}; catalog: {:?}; instructions: {:?}; transcript: {:?}",
+            store(&fixture).snapshot(),
+            std::fs::read_to_string(&instructions),
+            std::fs::read_to_string(&transcript)
+        )
+    });
 }
 
 // An unrelated admitted I/O capture must not starve catalog operations, even
@@ -1935,7 +2135,12 @@ async fn attached_wait_survives_catalog_busy_until_grant_or_disconnect() {
             drop(ledger);
             let reply = tokio::time::timeout(std::time::Duration::from_secs(10), &mut waiting)
                 .await
-                .expect("Busy retry must discover a grant without a new observer notification")
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "Busy retry did not discover a grant without a new observer notification: {error}; durable catalog: {:?}",
+                        store(&fixture).snapshot()
+                    )
+                })
                 .unwrap();
             assert_eq!(
                 reply.reservation.as_ref().unwrap().state,
@@ -1972,15 +2177,36 @@ async fn local_catalog_admission_waits_without_spending_worker_capacity() {
     let fixture = fixture(None).await;
     let service = service(&fixture.state).unwrap();
     let held = service.catalog_access.lock().await;
-    let baseline = fixture.state.execution.get().unwrap().client.quota_group().snapshot();
+    let baseline = fixture
+        .state
+        .execution
+        .get()
+        .unwrap()
+        .client
+        .quota_group()
+        .snapshot();
     let pending = read(&fixture.state);
     tokio::pin!(pending);
-    assert!(tokio::time::timeout(std::time::Duration::from_millis(20), &mut pending).await.is_err());
-    let queued = fixture.state.execution.get().unwrap().client.quota_group().snapshot();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut pending)
+            .await
+            .is_err()
+    );
+    let queued = fixture
+        .state
+        .execution
+        .get()
+        .unwrap()
+        .client
+        .quota_group()
+        .snapshot();
     assert_eq!(queued.worker_bytes, baseline.worker_bytes);
     assert_eq!(queued.input_bytes, baseline.input_bytes);
     drop(held);
-    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(5), &mut pending).await.unwrap().unwrap();
+    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(5), &mut pending)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(snapshot.resources.is_empty());
 }
 
@@ -2004,8 +2230,7 @@ async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
         fixture.directory.path(),
     )
     .await
-    .unwrap()
-    else {
+    .unwrap() else {
         panic!("foreign live process actor")
     };
     // Preserve a real process birth proof, but model another daemon's pane
@@ -2055,7 +2280,10 @@ async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
     close_composer(&fixture, foreign_process_pane).await;
     close_composer(&fixture, local_pane).await;
     let observed = observed.unwrap().unwrap();
-    assert_eq!(observed.get(&local.invocation_id), Some(&InvocationEligibility::Live));
+    assert_eq!(
+        observed.get(&local.invocation_id),
+        Some(&InvocationEligibility::Live)
+    );
     assert_eq!(
         observed.get(&foreign.invocation_id),
         Some(&InvocationEligibility::Unknown),

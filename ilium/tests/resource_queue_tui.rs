@@ -131,9 +131,21 @@ impl Sandbox {
             log_paths.sort();
             excerpts.extend(log_paths.into_iter().filter_map(|path| {
                 let contents = std::fs::read_to_string(&path).ok()?;
+                let slow_resource_stages = contents
+                    .lines()
+                    .filter(|line| {
+                        line.contains("resource I/O stage is still waiting")
+                            || line.contains("resource worker diagnostic")
+                            || line.contains("resource request diagnostic")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let excerpt = contents.chars().rev().take(12000).collect::<String>();
                 let excerpt = excerpt.chars().rev().collect::<String>();
-                Some(format!("--- {} ---\n{excerpt}", path.display()))
+                Some(format!(
+                    "--- {} ---\n{slow_resource_stages}\n{excerpt}",
+                    path.display()
+                ))
             }));
         }
         if excerpts.is_empty() {
@@ -188,6 +200,12 @@ impl Sandbox {
 }
 impl Drop for Sandbox {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "isolated resource queue server diagnostics:\n{}",
+                self.server_log_excerpt()
+            );
+        }
         // Only this test's canonical project and private socket directory are
         // addressed. The user's installed binary and running server are unused.
         let mut command = std::process::Command::new(candidate_ilium_binary());
@@ -418,37 +436,48 @@ async fn rpc(
             std::sync::atomic::Ordering::Relaxed
         )
     ));
-    loop {
-        write_frame(
-            stream,
-            &ClientRequest::Resource {
-                request_id: 700,
-                request: request.clone(),
-            },
-        )
-        .await
-        .unwrap();
-        let ServerEvent::ResourceResult { result, .. } =
-            event(stream, "resource RPC response", |event| {
-                matches!(
-                    event,
-                    ServerEvent::ResourceResult {
-                        request_id: 700,
-                        ..
-                    }
-                )
-            })
+    let operation_label = format!("{:?}", request.operation);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            write_frame(
+                stream,
+                &ClientRequest::Resource {
+                    request_id: 700,
+                    request: request.clone(),
+                },
+            )
             .await
-        else {
-            unreachable!()
-        };
-        match result {
-            Err(error) if error.code == "busy" => {
-                tokio::time::sleep(Duration::from_millis(20)).await
+            .unwrap();
+            let ServerEvent::ResourceResult { result, .. } =
+                event(stream, "resource RPC response", |event| {
+                    matches!(
+                        event,
+                        ServerEvent::ResourceResult {
+                            request_id: 700,
+                            ..
+                        }
+                    )
+                })
+                .await
+            else {
+                unreachable!()
+            };
+            match result {
+                Err(error) if error.code == "busy" => {
+                    tokio::time::sleep(Duration::from_millis(20)).await
+                }
+                result => {
+                    return *result.unwrap_or_else(|error| {
+                        panic!("resource request {:?} failed: {error:?}", request.operation)
+                    });
+                }
             }
-            result => return *result.unwrap(),
         }
-    }
+    })
+    .await
+    .unwrap_or_else(|error| {
+        panic!("resource request {operation_label} exceeded its deadline: {error}")
+    })
 }
 async fn spawn_agent(
     stream: &mut SessionStream,
@@ -549,35 +578,97 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
         "resource grouping defaults on"
     );
     let witness_dimensions = sandbox.project.join("witness-terminal-size");
-    sandbox.cli(&["new-pane", "--", "sh", "-c",
+    let witness_script = sandbox.project.join("witness.sh");
+    std::fs::write(
+        &witness_script,
         r#"n=0; while IFS= read -r line; do n=$((n+1)); { printf '%s ' "$n"; stty size; } > "$1.next"; mv "$1.next" "$1"; printf '%s\n' "$line"; done"#,
-        "resource-size-witness", witness_dimensions.to_str().unwrap()]).await;
+    )
+    .unwrap();
+    let tui = sandbox.tui();
+    screen(&tui, "project").await;
     let mut control = sandbox.connect().await;
     let initial = tree(&mut control).await;
     let project = initial.project_ids()[0];
-    let original_pane = initial.pane_ids_in_tree_order()[0];
-    let tui = sandbox.tui();
+    let existing = initial.pane_ids_in_tree_order();
+    write_frame(
+        &mut control,
+        &ClientRequest::NewPane {
+            request_id: 700,
+            parent_group: project,
+            kind: NewPaneKind::Command(format!(
+                "sh {} {}",
+                witness_script.display(),
+                witness_dimensions.display()
+            )),
+            working_directory: NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let created = event(&mut control, "terminal witness pane created", |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.pane_ids_in_tree_order().iter().any(|pane| !existing.contains(pane)))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(initial) = created else {
+        unreachable!()
+    };
+    let original_pane = *initial
+        .pane_ids_in_tree_order()
+        .iter()
+        .find(|pane| !existing.contains(pane))
+        .unwrap();
     assert_eq!(initial.get(project).unwrap().name, "project");
     screen(&tui, "project").await;
     click(&tui, "project", 2);
     screen(&tui, "New resource").await;
     click_menu_and_expect_form(&tui, "New resource", "Physical identity (optional)").await;
     screen(&tui, "[Submit]  [Cancel]").await;
-    tui.write(
-        b"Synthetic GPU\tgpu\tTerminal acceptance only\tExplicit release\t\ttest-device:tui\r",
-    )
-    .unwrap();
+    tui.write(b"Synthetic GPU\tgpu\tTerminal acceptance only\tExplicit release\t\ttest-device:tui")
+        .unwrap();
+    screen(&tui, "test-device:tui").await;
+    tui.write(b"\r").unwrap();
+    // A pending submission can temporarily hide the Submit button. Wait for
+    // the authoritative commit rather than mistaking that frame for success.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let mut form_statuses = Vec::new();
+    let catalog = loop {
+        let rendered = tui.screen_text();
+        let lines: Vec<_> = rendered.lines().collect();
+        if let Some(index) = lines.iter().position(|line| line.contains("[Submit]")) {
+            if let Some(line) = index.checked_sub(1).and_then(|index| lines.get(index)) {
+                if !form_statuses.iter().any(|status| status == line) {
+                    form_statuses.push((*line).to_owned());
+                }
+            }
+        }
+        let catalog = rpc(&mut control, project, None, ResourceOperation::Snapshot)
+            .await
+            .catalog;
+        if catalog.links.iter().any(|link| link.slug == "gpu") {
+            break catalog;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "created GPU slug missing from authoritative links: {:?}; form status history: {:?}; terminal:\n{}\nserver logs:\n{}",
+            catalog.links,
+            form_statuses,
+            tui.screen_text(),
+            sandbox.server_log_excerpt()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     dialog_closed(&tui).await;
     screen(&tui, "Synthetic GPU").await;
-    // The canonical catalog, not appearance alone, proves dialog persistence.
-    let catalog = rpc(&mut control, project, None, ResourceOperation::Snapshot)
-        .await
-        .catalog;
     let resource_id = catalog
         .links
         .iter()
         .find(|link| link.slug == "gpu")
-        .unwrap()
+        .unwrap_or_else(|| {
+            panic!(
+                "created GPU slug missing from authoritative links: {:?}",
+                catalog.links
+            )
+        })
         .resource_id
         .clone();
     assert_eq!(
@@ -590,8 +681,22 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     click(&tui, "Synthetic GPU", 0);
     screen(&tui, "No current owner or waiting reservations.").await;
     screen(&tui, "Enforced policy: exclusive").await;
-    tui.write(b"e").unwrap();
-    screen(&tui, "Local slug (create only)").await;
+    // The detail can render before its refresh finishes. Management actions
+    // are deliberately refused while that request is pending. Re-click the
+    // Edit action until its exact form appears; pointer retries cannot type
+    // accidental characters into a form that opened between rendered frames.
+    let open_edit_deadline = tokio::time::Instant::now() + TIMEOUT;
+    while !tui.screen_text().contains("Edit shared resource — global") {
+        assert!(
+            tokio::time::Instant::now() < open_edit_deadline,
+            "resource editor did not open: {}",
+            tui.screen_text()
+        );
+        if tui.screen_text().contains("[e Edit]") {
+            click(&tui, "[e Edit]", 0);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     tui.write(b" revised\r").unwrap();
     let edit_deadline = tokio::time::Instant::now() + TIMEOUT;
     loop {
@@ -789,8 +894,11 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     click(&tui, "QueueSplit", 0);
     tui.write(b"\x02wl").unwrap();
     screen(&tui, "InputWitness").await;
-    click(&tui, "InputWitness", 0);
+    // The witness is a split child; focus its visible terminal viewport, not
+    // a tree row that may disappear when the split is collapsed.
+    tui.write(b"\x1b[<0;80;10M\x1b[<0;80;10m").unwrap();
     tui.write(b"resource-input-witness\r").unwrap();
+    pane_output(&mut control, original_pane, "resource-input-witness").await;
     screen(&tui, "resource-input-witness").await;
     screen(&tui, "esc to interrupt").await;
     // Distinct input must reach the original second PTY, including while its
@@ -1838,10 +1946,7 @@ async fn interactive_recovery_rejects_stale_confirmation_and_preserves_other_wai
         .find(|claim| claim.id.0 == owner_id)
         .unwrap();
     assert_eq!(authoritative_owner.agent.pane_id, owner);
-    assert_eq!(
-        authoritative_owner.agent.label,
-        format!("Agent {}", owner.0)
-    );
+    assert_eq!(authoritative_owner.agent.label, "RecoveryOwner");
     // Recovery displays the durable invocation label, independently of a pane's
     // mutable UI name. Assert both the exact actor label and reservation ID.
     screen(

@@ -5,7 +5,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ilium_core::PaneContentKind;
-use ilium_ipc::ClientRequest;
+use ilium_ipc::{resource::ResourceOperation, ClientRequest};
 use ratatui::{backend::TestBackend, layout::Position, Terminal};
 
 struct Fixture {
@@ -98,6 +98,136 @@ fn render(app: &mut App) {
 
 fn key(app: &mut App, code: KeyCode) {
     crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+#[test]
+fn submit_during_catalog_load_runs_after_successful_snapshot() {
+    let mut fixture = fixture();
+    let mut dialog = ResourceDialog::create(fixture.project);
+    dialog.fields[0] = "Synthetic board".into();
+    dialog.fields[1] = "board".into();
+    fixture.app.resources.dialog = Some(dialog);
+    fixture.app.resources.pending = Some(99);
+    key(&mut fixture.app, KeyCode::Enter);
+    assert!(
+        fixture
+            .app
+            .resources
+            .dialog
+            .as_ref()
+            .unwrap()
+            .submit_when_ready
+    );
+    assert!(fixture.app.take_outbound_requests().is_empty());
+    let catalog = fixture.app.resources.catalog.clone().unwrap();
+    fixture.app.receive_resource_reply(
+        99,
+        Ok(ilium_ipc::resource::ResourceReply {
+            catalog,
+            wait_revision: 0,
+            active_waits: Vec::new(),
+            local_invocations: Vec::new(),
+            clock: ResourceClock {
+                unix_millis: 1000,
+                monotonic_millis: 1000,
+                boot_id: "boot".into(),
+            },
+            result: None,
+            reservation: None,
+            recovery_token: None,
+            message: None,
+        }),
+    );
+    assert!(fixture.app.take_outbound_requests().iter().any(|request| matches!(request,
+        ClientRequest::Resource { request, .. } if matches!(&request.operation, ilium_ipc::resource::ResourceOperation::Mutate(ResourceCommand::Create { .. }))
+    )));
+}
+
+#[test]
+fn submit_during_failed_catalog_load_preserves_form_and_reports_error() {
+    let mut fixture = fixture();
+    fixture.app.resources.dialog = Some(ResourceDialog::create(fixture.project));
+    fixture.app.resources.pending = Some(99);
+    key(&mut fixture.app, KeyCode::Enter);
+    fixture.app.receive_resource_reply(
+        99,
+        Err(ilium_ipc::resource::ResourceError {
+            code: "catalog".into(),
+            message: "catalog unavailable".into(),
+        }),
+    );
+    let dialog = fixture.app.resources.dialog.as_ref().unwrap();
+    assert!(!dialog.submitted && !dialog.submit_when_ready);
+    assert!(fixture
+        .app
+        .resources
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("catalog unavailable"));
+    assert!(fixture.app.take_outbound_requests().is_empty());
+}
+
+#[test]
+fn busy_catalog_load_retries_read_without_losing_submit_or_replaying_mutation() {
+    let mut fixture = fixture();
+    let mut form = ResourceDialog::create(fixture.project);
+    form.fields[0] = "Synthetic board".into();
+    form.fields[1] = "board".into();
+    let key_before = form.request_key.clone();
+    fixture.app.resources.dialog = Some(form);
+    fixture.app.resources.pending = Some(99);
+    key(&mut fixture.app, KeyCode::Enter);
+    fixture.app.receive_resource_reply(
+        99,
+        Err(ilium_ipc::resource::ResourceError {
+            code: "busy".into(),
+            message: "catalog admission busy".into(),
+        }),
+    );
+    assert!(
+        fixture
+            .app
+            .resources
+            .dialog
+            .as_ref()
+            .unwrap()
+            .submit_when_ready
+    );
+    assert!(fixture.app.take_outbound_requests().is_empty());
+    fixture
+        .app
+        .tick_resource_dialog(std::time::Instant::now() + std::time::Duration::from_secs(1));
+    let requests = fixture.app.take_outbound_requests();
+    let [ClientRequest::Resource {
+        request_id,
+        request,
+    }] = requests.as_slice()
+    else {
+        panic!("expected one catalog read: {requests:?}");
+    };
+    assert!(matches!(request.operation, ResourceOperation::Snapshot));
+    let reply = ilium_ipc::resource::ResourceReply {
+        catalog: fixture.app.resources.catalog.clone().unwrap(),
+        clock: fixture.app.resources.clock.clone().unwrap(),
+        active_waits: vec![],
+        wait_revision: 0,
+        local_invocations: vec![],
+        result: None,
+        reservation: None,
+        recovery_token: None,
+        message: None,
+    };
+    fixture.app.receive_resource_reply(*request_id, Ok(reply));
+    let requests = fixture.app.take_outbound_requests();
+    let [ClientRequest::Resource { request, .. }] = requests.as_slice() else {
+        panic!("expected one submitted mutation: {requests:?}");
+    };
+    assert!(matches!(
+        &request.operation,
+        ResourceOperation::Mutate(ResourceCommand::Create { .. })
+    ));
+    assert_eq!(request.request_key.as_deref(), Some(key_before.as_str()));
 }
 
 fn position(app: &mut App, target: NodeId) -> Position {

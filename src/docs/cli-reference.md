@@ -799,7 +799,7 @@ ilium --reset-session new-session scratch
 
 ## Shared resource queues
 
-`ilium resource` (alias `ilium ressource`) coordinates exclusive access across linked projects on this machine. Commands connect to an existing project server; they never start or restart one. Use `--project PATH` and optionally `--session NAME` to select it. Agent operations infer the current pane or accept `--agent PANE` / `--agent SESSION/PANE`.
+`ilium resource` (alias `ilium ressource`) coordinates exclusive access across linked projects on this machine. Commands connect to an existing project server; they never start or restart one. Use `--project PATH` or the global `--cwd PATH` to select a project and optionally `--session NAME` to select its session. An explicit project directory takes precedence over an inherited pane connection; when selecting a project explicitly, supply `--agent PANE` or `--agent SESSION/PANE` for agent operations. Without an explicit project or session, commands can infer the current pane.
 
 | Command | Result |
 |---|---|

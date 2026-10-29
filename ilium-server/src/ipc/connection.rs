@@ -318,6 +318,9 @@ where
     // Connection ownership bounds work and aborts queries on disconnect.
     let mut repository_queries = tokio::task::JoinSet::new();
     let mut resource_waits = tokio::task::JoinSet::new();
+    // A slow durable catalog read must not hold the interactive attach barrier.
+    // This task belongs to the connection and is cancelled when it closes.
+    let mut resource_snapshot = tokio::task::JoinSet::new();
     loop {
         let decoded = tokio::select! {
             biased;
@@ -559,6 +562,11 @@ where
             &request,
             ClientRequest::Attach { .. } | ClientRequest::AttachInteractive { .. }
         );
+        let refresh_resources = match &request {
+            ClientRequest::Attach { session, .. }
+            | ClientRequest::AttachInteractive { session, .. } => session == &state.session_name,
+            _ => false,
+        };
         if completes_attach {
             // Switch phases before the handler awaits or snapshots replay so
             // output produced after the cutover cannot pass the direct batch.
@@ -611,6 +619,15 @@ where
                 return RequestReaderExit::CloseImmediately;
             }
             attach_phase_tx.send_replace(AttachPhase::Ready);
+            if refresh_resources {
+                resource_snapshot.abort_all();
+                while resource_snapshot.try_join_next().is_some() {}
+                let snapshot_state = Arc::clone(&state);
+                let replies = direct_tx.clone();
+                resource_snapshot.spawn(async move {
+                    crate::resources::send_snapshot(&snapshot_state, &replies).await;
+                });
+            }
         }
         if should_close {
             break;
@@ -2850,6 +2867,77 @@ mod text_trigger_writer_tests {
         }));
         initialize_fixture_execution(&state);
         (state, Task(sound_task))
+    }
+
+    #[tokio::test]
+    async fn attach_seed_does_not_wait_for_locked_resource_catalog() {
+        let root = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/data/ilium-resource-queue-tests"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".scratch-reaper"), b"").unwrap();
+        let directory = tempfile::tempdir_in(root).unwrap();
+        let (state, _sounds) = state_at(directory.path());
+        assert!(state
+            .resources
+            .set(crate::resources::ResourceService::new(
+                directory.path().join("catalog.json")
+            ))
+            .is_ok());
+        let catalog_lock = crate::resources::hold_catalog_access_for_test(&state).await;
+        let (client, server) = duplex(16384);
+        let (replies, mut events) = DirectEventSender::channel(64);
+        let (phase, _phase_receiver) = watch::channel(AttachPhase::Ready);
+        let (controls, mut control_events) = mpsc::channel::<StreamControlCommand>(8);
+        let _control_task = Task(tokio::spawn(async move {
+            while let Some(control) = control_events.recv().await {
+                let _ = control.applied.send(());
+            }
+        }));
+        let mut reader = Task(tokio::spawn(read_requests(
+            state.clone(),
+            server,
+            replies,
+            phase,
+            controls,
+        )));
+        let mut requests = FrameWriter::new(client);
+        requests
+            .write(&ClientRequest::AttachInteractive {
+                session: state.session_name.clone(),
+                hello: Default::default(),
+            })
+            .await
+            .unwrap();
+        timeout(WAIT, async {
+            loop {
+                if matches!(
+                    events.recv().await,
+                    Some(ServerEvent::InitialStateSyncComplete)
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("attach seed must not wait for resource catalog");
+        drop(catalog_lock);
+        timeout(WAIT, async {
+            loop {
+                match events.recv().await {
+                    Some(ServerEvent::ResourceSnapshot { .. }) => break,
+                    Some(ServerEvent::ResourceObservationFailed { message }) => {
+                        panic!("catalog observation failed: {message}")
+                    }
+                    Some(_) => {}
+                    None => panic!("connection closed before resource snapshot"),
+                }
+            }
+        })
+        .await
+        .expect("resource snapshot must arrive after catalog access is released");
+        drop(requests);
+        reader.joined().await;
     }
 
     #[tokio::test]

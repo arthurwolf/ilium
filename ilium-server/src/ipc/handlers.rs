@@ -1639,7 +1639,6 @@ async fn handle_attach(
         .await;
         return false;
     }
-    crate::resources::send_snapshot(state, direct_tx).await;
     loop {
         match state.recovery.attach_status().await {
             crate::recovery::AttachStatus::Pending { pane_count } => {

@@ -369,18 +369,61 @@ async fn custom_agent_real_pty_preserves_literal_environment_for_both_providers(
     std::fs::write(&snapshot, &snapshot_text).unwrap();
     let restore_log = root.join("restore.log");
     let child = Command::new(&binary)
-        .args(["--session-name", "custom-agent-test", "--socket-path", socket.to_str().unwrap(), "--snapshot-path", snapshot.to_str().unwrap(), "--session-cwd", project.to_str().unwrap(), "--log-path", restore_log.to_str().unwrap()])
-        .env("PATH", &search_path).env("SHELL", "/bin/sh").env("CAPTURE_DIR", &capture)
+        .args([
+            "--session-name",
+            "custom-agent-test",
+            "--socket-path",
+            socket.to_str().unwrap(),
+            "--snapshot-path",
+            snapshot.to_str().unwrap(),
+            "--session-cwd",
+            project.to_str().unwrap(),
+            "--log-path",
+            restore_log.to_str().unwrap(),
+        ])
+        .env("PATH", &search_path)
+        .env("SHELL", "/bin/sh")
+        .env("CAPTURE_DIR", &capture)
         .env(ilium_server::paths::CONFIG_DIR_ENV, &config)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
     let mut restored_server = OwnedServer(child);
-    assert!(common::wait_until(|| endpoint.probe_liveness() == Liveness::Live, Duration::from_secs(15)).await);
+    assert!(
+        common::wait_until(
+            || endpoint.probe_liveness() == Liveness::Live,
+            Duration::from_secs(15)
+        )
+        .await
+    );
     let mut restored_client = endpoint.connect().await.unwrap();
-    write_frame(&mut restored_client, &ClientRequest::Attach { session: "custom-agent-test".into(), hello: Default::default() }).await.unwrap();
-    let (tree, events) = common::read_initial_state(&mut restored_client, Duration::from_secs(15)).await;
-    assert!(tree.get(replacement_pane).is_some(), "missing profile must retain its recoverable pane");
+    write_frame(
+        &mut restored_client,
+        &ClientRequest::Attach {
+            session: "custom-agent-test".into(),
+            hello: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let (tree, events) =
+        common::read_initial_state(&mut restored_client, Duration::from_secs(15)).await;
+    assert!(
+        tree.get(replacement_pane).is_some(),
+        "missing profile must retain its recoverable pane"
+    );
     assert!(events.iter().any(|event| matches!(event, ServerEvent::PaneCustomAgentIdentity { pane_id, identity: Some(identity) } if *pane_id == replacement_pane && identity.profile_id == "one")), "missing profile identity must remain visible after restore");
     assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.iter().any(|error| error.message.contains("profile")))), "restore must report the missing profile");
-    write_frame(&mut restored_client, &ClientRequest::KillSession).await.unwrap();
-    assert!(common::wait_until(|| restored_server.0.try_wait().ok().flatten().is_some(), Duration::from_secs(15)).await);
+    write_frame(&mut restored_client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    assert!(
+        common::wait_until(
+            || restored_server.0.try_wait().ok().flatten().is_some(),
+            Duration::from_secs(15)
+        )
+        .await
+    );
 }

@@ -373,7 +373,11 @@ fn stable_id(prefix: &str, key: &str) -> String {
     format!("{prefix}-{:x}", Sha256::digest(key.as_bytes()))
 }
 
-pub(crate) async fn run(args: ResourceArgs, cwd: &Path) -> Result<(), CliError> {
+pub(crate) async fn run(
+    args: ResourceArgs,
+    cwd: &Path,
+    explicit_cwd: bool,
+) -> Result<(), CliError> {
     let key = args.request_id.clone().unwrap_or_else(request_key);
     let operation = match &args.command {
         ResourceCommandArgs::List { .. } => "resource_list",
@@ -433,7 +437,8 @@ pub(crate) async fn run(args: ResourceArgs, cwd: &Path) -> Result<(), CliError> 
             ));
         }
     }
-    let use_inherited = args.project.is_none() && selected_session.is_none();
+    // An explicit project directory must never target the enclosing pane's server.
+    let use_inherited = args.project.is_none() && selected_session.is_none() && !explicit_cwd;
     let (socket, session_name, pane) = if use_inherited {
         if let Some(identity) = inherited.as_ref() {
             (

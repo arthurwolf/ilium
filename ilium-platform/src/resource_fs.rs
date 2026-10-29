@@ -1,8 +1,8 @@
 //! Fail-closed local resource-ledger durability primitives.
 //!
-//! Every transaction holds a separate stable lock, then synchronizes the current
-//! file and parent directory *before* reading/applying a new mutation. This is
-//! unconditional: even a process killed after rename cannot hide quarantine.
+//! Every transaction holds a separate stable lock and reconciles the current
+//! file before applying a mutation. A held descriptor can prove that an unchanged
+//! inode was already reconciled; replacement always requires fresh durability.
 use crate::{file_lock::ExclusiveFileLock, secure_fs};
 use std::{
     io::{self, Read, Write},
@@ -10,6 +10,45 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+/// One bounded, process-local durability proof, never catalog authority.
+#[derive(Debug, Default)]
+pub struct ResourceLedgerReadCache(std::sync::Mutex<Option<VerifiedLedger>>);
+#[derive(Debug)]
+struct VerifiedLedger {
+    path: PathBuf,
+    missing: bool,
+    // Keeping the descriptor open prevents inode-number reuse from making an
+    // unacknowledged replacement look like the previously reconciled file.
+    file: std::fs::File,
+    identity: LedgerIdentity,
+}
+#[derive(Debug, PartialEq, Eq)]
+struct LedgerIdentity {
+    device: u64,
+    inode: u64,
+    length: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+fn ledger_identity(file: &std::fs::File) -> io::Result<LedgerIdentity> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = file.metadata()?;
+        Ok(LedgerIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            length: metadata.len(),
+            modified: (metadata.mtime(), metadata.mtime_nsec()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = file;
+        Err(unsupported())
+    }
+}
 #[derive(Debug)]
 pub struct ResourceLedgerFile {
     path: PathBuf,
@@ -59,6 +98,8 @@ enum ReplaceTestStage {
 #[cfg(test)]
 thread_local! {static REPLACE_TEST_CRASH:std::cell::Cell<Option<ReplaceTestStage>>=const{std::cell::Cell::new(None)};static REPLACE_TEST_WRITE_ERROR:std::cell::Cell<Option<i32>>=const{std::cell::Cell::new(None)};}
 #[cfg(test)]
+thread_local! {static RECONCILE_TEST_ERROR:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+#[cfg(test)]
 fn crash_at_test_stage(stage: ReplaceTestStage) {
     if REPLACE_TEST_CRASH.with(|configured| configured.get() == Some(stage)) {
         std::process::exit(86)
@@ -100,10 +141,34 @@ impl ResourceLedgerFile {
         let Some(lock) = ExclusiveFileLock::try_acquire(&lock_path)? else {
             return Ok(None);
         };
-        secure_fs::sync_parent_directory(&lock_path)?;
+        // read_reconciled synchronizes this directory with the catalog. Doing
+        // it before every read would force a journal flush even for an unchanged
+        // file with an existing durability proof. replace also syncs the parent.
         Ok(Some(Self { path, _lock: lock }))
     }
     pub fn read_reconciled(&self, maximum: u64) -> io::Result<Option<Vec<u8>>> {
+        self.read_with_cache(maximum, None)
+    }
+    pub fn read_reconciled_cached(
+        &self,
+        maximum: u64,
+        cache: &ResourceLedgerReadCache,
+    ) -> io::Result<Option<Vec<u8>>> {
+        self.read_with_cache(maximum, Some(cache))
+    }
+    fn read_with_cache(
+        &self,
+        maximum: u64,
+        cache: Option<&ResourceLedgerReadCache>,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let mut cached = cache
+            .map(|cache| {
+                cache
+                    .0
+                    .lock()
+                    .map_err(|_| io::Error::other("resource durability cache poisoned"))
+            })
+            .transpose()?;
         let file = match secure_fs::private_open_options()
             .read(true)
             .write(true)
@@ -111,7 +176,38 @@ impl ResourceLedgerFile {
         {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                secure_fs::sync_parent_directory(&self.path)?;
+                let parent = self
+                    .path
+                    .parent()
+                    .ok_or_else(|| io::Error::other("catalog parent absent"))?;
+                let directory = std::fs::File::open(parent)?;
+                let identity = ledger_identity(&directory)?;
+                let verified = cached
+                    .as_ref()
+                    .and_then(|entry| entry.as_ref())
+                    .is_some_and(|entry| {
+                        entry.missing
+                            && entry.path == self.path
+                            && entry.identity == identity
+                            && ledger_identity(&entry.file).is_ok_and(|held| held == identity)
+                    });
+                if !verified {
+                    #[cfg(test)]
+                    if RECONCILE_TEST_ERROR.with(|fault| fault.replace(false)) {
+                        return Err(io::Error::other(
+                            "injected durability reconciliation failure",
+                        ));
+                    }
+                    secure_fs::sync_parent_directory(&self.path)?;
+                    if let Some(cached) = cached.as_mut() {
+                        **cached = Some(VerifiedLedger {
+                            path: self.path.clone(),
+                            missing: true,
+                            file: directory,
+                            identity,
+                        });
+                    }
+                }
                 return Ok(None);
             }
             Err(e) => return Err(e),
@@ -129,8 +225,34 @@ impl ResourceLedgerFile {
                 "catalog exceeds byte capacity",
             ));
         }
-        file.sync_all()?;
-        secure_fs::sync_parent_directory(&self.path)?;
+        let identity = ledger_identity(&file)?;
+        let verified = cached
+            .as_ref()
+            .and_then(|entry| entry.as_ref())
+            .is_some_and(|entry| {
+                !entry.missing
+                    && entry.path == self.path
+                    && entry.identity == identity
+                    && ledger_identity(&entry.file).is_ok_and(|held| held == identity)
+            });
+        if !verified {
+            #[cfg(test)]
+            if RECONCILE_TEST_ERROR.with(|fault| fault.replace(false)) {
+                return Err(io::Error::other(
+                    "injected durability reconciliation failure",
+                ));
+            }
+            file.sync_all()?;
+            secure_fs::sync_parent_directory(&self.path)?;
+            if let Some(cached) = cached.as_mut() {
+                **cached = Some(VerifiedLedger {
+                    path: self.path.clone(),
+                    missing: false,
+                    file: file.try_clone()?,
+                    identity,
+                });
+            }
+        }
         let mut bytes = Vec::new();
         file.take(maximum + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > maximum {
@@ -187,6 +309,97 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(".scratch-reaper"), b"").unwrap();
         tempfile::tempdir_in(root).unwrap()
+    }
+    #[test]
+    fn cached_read_skips_only_previously_reconciled_inode_and_rechecks_replacements() {
+        let directory = durable_test_directory();
+        let path = directory.path().join("catalog.json");
+        let cache = ResourceLedgerReadCache::default();
+        let ledger = ResourceLedgerFile::try_lock(&path).unwrap().unwrap();
+        assert!(ledger
+            .read_reconciled_cached(1024, &cache)
+            .unwrap()
+            .is_none());
+        RECONCILE_TEST_ERROR.with(|fault| fault.set(true));
+        assert!(ledger
+            .read_reconciled_cached(1024, &cache)
+            .unwrap()
+            .is_none());
+        ledger.replace(b"acknowledged").unwrap();
+        assert!(ledger.read_reconciled_cached(1024, &cache).is_err());
+        assert_eq!(
+            ledger
+                .read_reconciled_cached(1024, &cache)
+                .unwrap()
+                .unwrap(),
+            b"acknowledged"
+        );
+        drop(ledger);
+        RECONCILE_TEST_ERROR.with(|fault| fault.set(true));
+        let ledger = ResourceLedgerFile::try_lock(&path).unwrap().unwrap();
+        // Same file, still held open by the cache: no new durability operation.
+        assert_eq!(
+            ledger
+                .read_reconciled_cached(1024, &cache)
+                .unwrap()
+                .unwrap(),
+            b"acknowledged"
+        );
+        ledger.replace(b"new-owner").unwrap();
+        // A replacement must not inherit the old inode's proof, even though
+        // the old descriptor remains open and the path did not change.
+        assert!(ledger
+            .read_reconciled_cached(1024, &cache)
+            .unwrap_err()
+            .to_string()
+            .contains("injected durability"));
+        assert_eq!(
+            ledger
+                .read_reconciled_cached(1024, &cache)
+                .unwrap()
+                .unwrap(),
+            b"new-owner"
+        );
+        RECONCILE_TEST_ERROR.with(|fault| fault.set(true));
+        assert!(ledger
+            .read_reconciled_cached(1024, &ResourceLedgerReadCache::default())
+            .is_err());
+    }
+    #[test]
+    fn warmed_cache_reconciles_child_rename_without_acknowledgement() {
+        let directory = durable_test_directory();
+        let path = directory.path().join("catalog.json");
+        let cache = ResourceLedgerReadCache::default();
+        let ledger = ResourceLedgerFile::try_lock(&path).unwrap().unwrap();
+        ledger.replace(b"old-owner").unwrap();
+        assert_eq!(
+            ledger
+                .read_reconciled_cached(1024, &cache)
+                .unwrap()
+                .unwrap(),
+            b"old-owner"
+        );
+        drop(ledger);
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "resource_fs::tests::child_crash_after_unacknowledged_rename",
+                "--nocapture",
+            ])
+            .env("ILIUM_RESOURCE_CRASH_RENAME_PATH", &path)
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(73));
+        let ledger = ResourceLedgerFile::try_lock(&path).unwrap().unwrap();
+        RECONCILE_TEST_ERROR.with(|fault| fault.set(true));
+        assert!(ledger.read_reconciled_cached(1024, &cache).is_err());
+        assert_eq!(
+            ledger
+                .read_reconciled_cached(1024, &cache)
+                .unwrap()
+                .unwrap(),
+            b"new-owner"
+        );
     }
     #[test]
     fn child_crash_after_unacknowledged_rename() {

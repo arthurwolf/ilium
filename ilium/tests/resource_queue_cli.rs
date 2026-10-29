@@ -98,6 +98,59 @@ fn missing_server_does_not_launch_an_authority() {
     assert!(!session.socket_path.exists());
 }
 
+#[tokio::test]
+async fn explicit_cwd_never_routes_resource_commands_to_inherited_pane() {
+    use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
+    let directory = tempfile::tempdir().unwrap();
+    let inherited_socket = directory.path().join("inherited.sock");
+    let mut listener = ilium_transport::SessionEndpoint::from_path(&inherited_socket)
+        .bind()
+        .await
+        .unwrap();
+    let peer = tokio::spawn(async move {
+        let mut stream = listener.accept().await.unwrap();
+        let _: ClientRequest = read_frame(&mut stream).await.unwrap();
+        let ClientRequest::Resource { request_id, .. } = read_frame(&mut stream).await.unwrap()
+        else {
+            panic!("expected resource request");
+        };
+        write_frame(
+            &mut stream,
+            &ServerEvent::ResourceResult {
+                request_id,
+                result: Err(ilium_ipc::resource::ResourceError {
+                    code: "wrong_server".into(),
+                    message: "Inherited session was incorrectly selected".into(),
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    });
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
+            .arg("--cwd")
+            .arg(directory.path())
+            .args(["resource", "list"])
+            .env(ilium_ipc::pane_env::PANE_ID, "42")
+            .env(ilium_ipc::pane_env::SESSION_NAME, "default")
+            .env(ilium_ipc::pane_env::SESSION_SOCKET, &inherited_socket)
+            .env(
+                ilium_platform::runtime_dir::SOCKET_DIR_ENV,
+                directory.path(),
+            )
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("resource command must terminate")
+    .unwrap();
+    peer.abort();
+    let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(record["code"], "service_unavailable");
+}
+
 /// This fixture verifies the CLI wire contract only; it is not hardware or
 /// cross-process authority qualification.
 #[tokio::test]
@@ -142,8 +195,7 @@ async fn uncertain_and_stale_errors_are_structured_without_automatic_retry() {
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
-                .args(["--cwd"])
-                .arg(directory.path())
+                .current_dir(directory.path())
                 .args(["resource", "list", "--request-id", "1000:non-retry"])
                 .env(ilium_ipc::pane_env::PANE_ID, "42")
                 .env(ilium_ipc::pane_env::SESSION_NAME, "default")
@@ -327,8 +379,7 @@ async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_tr
         .unwrap();
     });
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
-        .args(["--cwd"])
-        .arg(directory.path())
+        .current_dir(directory.path())
         .args([
             "resource",
             "reserve",
@@ -471,8 +522,7 @@ async fn bare_status_excludes_foreign_and_replaced_invocations_with_same_pane_nu
         .unwrap();
     });
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
-        .arg("--cwd")
-        .arg(directory.path())
+        .current_dir(directory.path())
         .args(["resource", "status"])
         .env(ilium_ipc::pane_env::PANE_ID, "42")
         .env(ilium_ipc::pane_env::SESSION_NAME, "default")
@@ -638,8 +688,7 @@ async fn blocking_wait_terminal_errors_and_disconnect_are_correlated_jsonl() {
             // Otherwise close the authority stream without an acknowledgement.
         });
         let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
-            .arg("--cwd")
-            .arg(directory.path())
+            .current_dir(directory.path())
             .args([
                 "resource",
                 "wait",

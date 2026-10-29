@@ -45,6 +45,7 @@ impl WaitRegistry {
 }
 pub(crate) struct ResourceService {
     pub path: PathBuf,
+    read_cache: Arc<ilium_platform::resource_fs::ResourceLedgerReadCache>,
     catalog_access: tokio::sync::Mutex<()>,
     pub waits: std::sync::Mutex<WaitRegistry>,
     pub incarnation: String,
@@ -83,11 +84,24 @@ impl ResourceService {
             waits: Default::default(),
             catalog_access: Default::default(),
             path,
+            read_cache: Default::default(),
             incarnation: uuid::Uuid::new_v4().to_string(),
             changed: tokio::sync::watch::channel(0).0,
             confirmations: Default::default(),
         }
     }
+}
+#[cfg(test)]
+pub(crate) async fn hold_catalog_access_for_test(
+    state: &ServerState,
+) -> tokio::sync::MutexGuard<'_, ()> {
+    state
+        .resources
+        .get()
+        .expect("resource service")
+        .catalog_access
+        .lock()
+        .await
 }
 fn service(state: &ServerState) -> Result<&ResourceService, ResourceError> {
     state
@@ -104,7 +118,9 @@ async fn decode_rpc(
     })
     .await
 }
-async fn catalog_access(state: &ServerState) -> Result<tokio::sync::MutexGuard<'_, ()>, ResourceError> {
+async fn catalog_access(
+    state: &ServerState,
+) -> Result<tokio::sync::MutexGuard<'_, ()>, ResourceError> {
     // Queue local observers and commands fairly before taking the shared file
     // lock. Admission is finite/cancellable and owns no worker or tree guard.
     tokio::time::timeout(
@@ -112,14 +128,20 @@ async fn catalog_access(state: &ServerState) -> Result<tokio::sync::MutexGuard<'
         service(state)?.catalog_access.lock(),
     )
     .await
-    .map_err(|_| err("busy", "Local catalog admission busy; retry the same request key"))
+    .map_err(|_| {
+        err(
+            "busy",
+            "Local catalog admission busy; retry the same request key",
+        )
+    })
 }
 async fn read(state: &ServerState) -> Result<Catalog, ResourceError> {
     let _access = catalog_access(state).await?;
     let path = service(state)?.path.clone();
+    let cache = Arc::clone(&service(state)?.read_cache);
     io(state, move || {
         store::ResourceStore::new(path)
-            .and_then(|s| s.snapshot())
+            .and_then(|s| s.with_read_cache(cache).snapshot())
             .map_err(store_error)
     })
     .await
@@ -141,6 +163,7 @@ async fn commit(
 ) -> Result<ResourceMemory<store::CommittedResourceChange>, ResourceError> {
     let _access = catalog_access(state).await?;
     let path = service(state)?.path.clone();
+    let cache = Arc::clone(&service(state)?.read_cache);
     // Try both locks without waiting while holding another lock. Keeping these
     // read guards until the durable transaction finishes fences tree moves and
     // provider replacement throughout an agent-authorized mutation.
@@ -200,7 +223,7 @@ async fn commit(
             context.eligibility = eligibility.value.clone();
         }
         store::ResourceStore::new(path)
-            .and_then(|s| s.transact(command, context))
+            .and_then(|s| s.with_read_cache(cache).transact(command, context))
             .map_err(store_error)
     })
     .await;
@@ -267,7 +290,18 @@ async fn actor(
     let Some(pane_id) = pane_id else {
         return Ok(ResourceActor::User);
     };
-    let (process_id, generation, label) = {
+    // Persist a readable label for participants shown in another project. The
+    // invocation proof, not this mutable presentation text, defines ownership.
+    // At most 120 Unicode scalars fits the domain's 480-byte label bound.
+    let label = state
+        .tree
+        .read()
+        .await
+        .get(pane_id)
+        .map(|node| node.name.chars().take(120).collect::<String>())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| format!("Agent {}", pane_id.0));
+    let (process_id, generation) = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
             return Err(err("actor", "Agent pane is not a live terminal"));
@@ -278,11 +312,7 @@ async fn actor(
                 "Agent invocation has not been confirmed by detection",
             )
         })?;
-        (
-            process,
-            runtime.agent_generation,
-            format!("Agent {}", pane_id.0),
-        )
+        (process, runtime.agent_generation)
     };
     let proof = io(state, move || {
         capture_resource_process(process_id).map_err(|e| err("actor", e))
@@ -472,6 +502,21 @@ async fn evidence(state: &ServerState, catalog: &Catalog) -> Result<Eligibility,
     Ok(Arc::new(eligibility))
 }
 async fn reconciled(state: &ServerState) -> Result<(Catalog, ResourceClock), ResourceError> {
+    // Multiple servers or an attach refresh may reconcile the same revision.
+    // Re-read all evidence after a lost race; never retry user confirmations.
+    for _ in 0..8 {
+        match reconcile_once(state).await {
+            Err(error) if error.code == "revision_conflict" => continue,
+            result => return result,
+        }
+    }
+    Err(err(
+        "busy",
+        "Catalog reconciliation is busy; retry the same request",
+    ))
+}
+
+async fn reconcile_once(state: &ServerState) -> Result<(Catalog, ResourceClock), ResourceError> {
     let mut catalog = read(state).await?;
     let now = clock()?;
     let eligibility = evidence(state, &catalog).await?;
@@ -705,12 +750,19 @@ async fn handle_inner(
     request: ResourceRequest,
     replies: &DirectEventSender,
 ) {
+    let operation_kind = std::mem::discriminant(&request.operation);
+    tracing::debug!(
+        request_id,
+        ?operation_kind,
+        "resource request diagnostic: received"
+    );
     let waiting = matches!(request.operation, ResourceOperation::Wait { .. });
     let result = if waiting {
         wait(state, &request, replies).await
     } else {
         execute(state, request).await
     };
+    tracing::debug!(request_id, ?operation_kind, error = ?result.as_ref().err(), "resource request diagnostic: executed");
     match result {
         Ok(reply) => {
             let event = reply.map(|reply| ServerEvent::ResourceResult {
@@ -735,6 +787,11 @@ async fn handle_inner(
                 .await;
         }
     }
+    tracing::debug!(
+        request_id,
+        ?operation_kind,
+        "resource request diagnostic: reply sent"
+    );
 }
 async fn execute(
     state: &ServerState,
@@ -1129,6 +1186,12 @@ async fn wait(
                         "Ownership requires guarded recovery",
                     ))
                 }
+                Some(ReservationState::Cancelled) => {
+                    break Err(err("reservation_cancelled", "Reservation was cancelled"))
+                }
+                Some(ReservationState::Revoked { .. }) => {
+                    break Err(err("reservation_revoked", "Reservation was revoked"))
+                }
                 _ => break Err(err("terminal", "Reservation is no longer queued or owned")),
             },
             Err(error) if error.code == "busy" => {
@@ -1154,17 +1217,21 @@ async fn repair_local_projections(
 ) -> Result<(), ResourceError> {
     for path in paths {
         let catalog = Arc::clone(current);
-        let path = path.clone();
+        let target_path = path.clone();
         let links = io(state, move || {
             Ok(catalog
                 .links
                 .iter()
-                .filter(|l| l.project_path == path)
+                .filter(|l| l.project_path == target_path)
                 .cloned()
                 .collect::<Vec<_>>())
         })
         .await?;
         if links.is_empty() {
+            // Empty authority is also a projection: final unlink can commit
+            // before instruction/settings cleanup finishes. The session tree
+            // retains the project path across restart even without a link.
+            projections::synchronize(state, current, std::path::Path::new(path)).await?;
             continue;
         }
         let reason =
@@ -1242,6 +1309,9 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         let mut last = None;
         let mut projected = None;
+        // Retain the admitted project-path snapshot too: an unlinked project
+        // opened in this server must trigger cleanup even if link rows match.
+        let mut projected_paths: Option<ResourceMemory<Vec<String>>> = None;
         let mut delivered = std::collections::BTreeSet::new();
         let mut notified: BTreeMap<(NodeId, u64), Vec<(ResourceId, u64)>> = BTreeMap::new();
         let mut active = true;
@@ -1258,16 +1328,56 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
                         .map(|waits| !waits.entries.is_empty())
                 })
                 .unwrap_or(true);
-            if !active && !state.events.has_subscribers() && !has_waits {
+            // Project membership can change while the observer has no subscribers.
+            // Admit and compare paths before the idle gate so a quick disconnect
+            // cannot strand stale instructions in a newly opened project.
+            let paths: Result<ResourceMemory<Vec<String>>, ResourceError> = async {
+                let tree = state.tree.read().await;
+                let ids = tree.project_ids();
+                let bytes = ids.iter().filter_map(|id| tree.project_path_for(*id)).fold(
+                    4096usize,
+                    |bytes, path| {
+                        bytes
+                            .saturating_add(std::mem::size_of::<String>())
+                            .saturating_add(path.as_os_str().len().saturating_mul(3))
+                    },
+                );
+                let storage = memory::reserve_storage(&state, bytes)?;
+                let values = ids
+                    .into_iter()
+                    .filter_map(|id| {
+                        tree.project_path_for(id)
+                            .map(|path| path.to_string_lossy().into_owned())
+                    })
+                    .collect::<Vec<_>>();
+                Ok(ResourceMemory::from_parts(values, storage))
+            }
+            .await;
+            let paths = match paths {
+                Ok(paths) => paths,
+                Err(error) => {
+                    state
+                        .events
+                        .publish(ServerEvent::ResourceObservationFailed {
+                            message: error.to_string(),
+                        });
+                    continue;
+                }
+            };
+            if !active
+                && !state.events.has_subscribers()
+                && !has_waits
+                && projected_paths.as_ref().map(|previous| &previous.value) == Some(&paths.value)
+            {
                 continue;
             }
             let outcome:Result<ResourceMemory<ServerEvent>,ResourceError>=async{
  let(mut catalog,mut observed_clock)=reconciled(&state).await?;
  let pane_count=state.panes.read().await.len();let links_bytes=catalog.links.iter().fold(0usize,|bytes,link|bytes.saturating_add(std::mem::size_of::<(ResourceId,u64)>()).saturating_add(link.resource_id.heap_bytes()));let potential_notices=pane_count.saturating_mul(links_bytes.saturating_add(1024));let potential_deliveries=catalog.resources.values().flat_map(|r|&r.reservations).filter(|q|q.state.active()).fold(0usize,|bytes,claim|bytes.saturating_add(claim.id.heap_bytes()).saturating_add(1024));let anticipated=memory::observer_bytes(&projected,&delivered,&notified).saturating_add(catalog.links.retained_bytes()).saturating_add(potential_notices).saturating_add(potential_deliveries);observer_charge=Some(memory::reserve_storage(&state,anticipated)?);
- let paths={let tree=state.tree.read().await;let ids=tree.project_ids();let bytes=ids.iter().filter_map(|id|tree.project_path_for(*id)).fold(4096usize,|bytes,path|bytes.saturating_add(std::mem::size_of::<String>()).saturating_add(path.as_os_str().len().saturating_mul(3)));let storage=memory::reserve_storage(&state,bytes)?;let values=ids.into_iter().filter_map(|id|tree.project_path_for(id).map(|p|p.to_string_lossy().into_owned())).collect::<Vec<_>>();ResourceMemory::from_parts(values,storage)};
  active=catalog.links.iter().any(|l|paths.contains(&l.project_path));
  let signature:Vec<_>=catalog.links.iter().filter(|l|paths.contains(&l.project_path)).map(|l|(l.project_id.clone(),l.resource_id.clone(),l.desired_instruction_revision)).collect();
- if projected.as_ref()!=Some(&signature)||catalog.links.iter().any(|l|paths.contains(&l.project_path)&&l.sync_debt.is_some()) {match repair_local_projections(&state,&mut catalog,&paths).await{Ok(())=>projected=Some(signature),Err(error)=>state.events.publish(ServerEvent::ResourceObservationFailed{message:error.to_string()})}if let Ok(now)=clock(){observed_clock=now;}}
+ let mut projections_ready = true;
+ if projected_paths.as_ref().map(|previous|&previous.value)!=Some(&paths.value)||projected.as_ref()!=Some(&signature)||catalog.links.iter().any(|l|paths.contains(&l.project_path)&&l.sync_debt.is_some()) {match repair_local_projections(&state,&mut catalog,&paths).await{Ok(())=>{projected=Some(signature);projected_paths=Some(paths)},Err(error)=>{projections_ready=false;active=true;state.events.publish(ServerEvent::ResourceObservationFailed{message:error.to_string()})}}if let Ok(now)=clock(){observed_clock=now;}}
             // Instruction changes are delivered through the existing fenced composer,
             // once per live invocation and binding revision, after readiness.
             let candidates:Vec<_>={let panes=state.panes.read().await;panes.iter().filter_map(|(id,pane)|match pane{PaneResource::Terminal(runtime) if runtime.detected_agent_process_id.is_some()=>Some((*id,runtime.agent_generation)),_=>None}).collect()};
@@ -1275,6 +1385,7 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
             for (pane,generation) in candidates {
                 let project_path={let tree=state.tree.read().await;tree.project_ancestor(pane).and_then(|id|tree.project_path_for(id).map(|p|p.to_path_buf()))};
                 let Some(path)=project_path else{continue};
+                if !projections_ready || catalog.links.iter().any(|link|std::path::Path::new(&link.project_path)==path && link.sync_debt.is_some()){continue}
                 let bindings:Vec<_>=catalog.links.iter().filter(|link|std::path::Path::new(&link.project_path)==path).map(|link|(link.resource_id.clone(),link.desired_instruction_revision)).collect();
                 if notified.get(&(pane,generation))==Some(&bindings) || (bindings.is_empty()&&!notified.contains_key(&(pane,generation))){continue}
                 let Ok(ResourceActor::Agent(agent))=actor(&state,Some(pane),&path).await else{continue};

@@ -35,7 +35,9 @@ pub struct ResourceDialog {
     pub fields: Vec<String>,
     pub field: usize,
     pub submitted: bool,
+    pub submit_when_ready: bool,
     pub expected_revision: Option<u64>,
+    pub edit_baseline: Option<ResourceDefinition>,
     pub selected_resource: Option<ResourceId>,
     pub dirty_at: Option<std::time::Instant>,
     pub cursor: usize,
@@ -58,7 +60,9 @@ impl ResourceDialog {
             ],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: None,
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -77,7 +81,9 @@ impl ResourceDialog {
             fields: vec![String::new(), String::new()],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: None,
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -100,7 +106,9 @@ impl ResourceDialog {
             ],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: Some(definition.clone()),
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -119,7 +127,9 @@ impl ResourceDialog {
             fields: vec![String::new(), String::new()],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: None,
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -329,8 +339,12 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                         insert(&mut dialog, "\n")
                     }
                     KeyCode::Enter => {
-                        if app.resources.pending.is_none() {
-                            match command(app, &dialog) {
+                        if app.resources.pending.is_some() {
+                            dialog.submit_when_ready = true;
+                            dialog.submitted = true;
+                        } else {
+                            match rebase_edit(app, &mut dialog).and_then(|()| command(app, &dialog))
+                            {
                                 Ok(command) => {
                                     let token = match &dialog.kind {
                                         DialogKind::Confirm { token, .. } => token.clone(),
@@ -898,6 +912,31 @@ mod tests {
     }
 }
 
+// Rebase only when the authoritative definition is unchanged; never overwrite
+// a concurrent metadata edit merely because another catalog revision arrived.
+fn rebase_edit(app: &App, dialog: &mut ResourceDialog) -> Result<(), String> {
+    let Some(baseline) = &dialog.edit_baseline else {
+        return Ok(());
+    };
+    let Some(catalog) = &app.resources.catalog else {
+        return Err("Resource catalog unavailable; reload before editing".into());
+    };
+    if catalog
+        .resources
+        .get(&baseline.id)
+        .map(|record| &record.definition)
+        != Some(baseline)
+    {
+        return Err("Resource metadata changed; reopen the editor before saving".into());
+    }
+    dialog.expected_revision = Some(
+        dialog
+            .expected_revision
+            .map_or(catalog.revision, |revision| revision.max(catalog.revision)),
+    );
+    Ok(())
+}
+
 pub(super) fn autosave(app: &mut App, now: std::time::Instant) -> bool {
     let Some(mut dialog) = app.resources.dialog.take() else {
         return false;
@@ -910,7 +949,7 @@ pub(super) fn autosave(app: &mut App, now: std::time::Instant) -> bool {
         });
     if due {
         dialog.dirty_at = None;
-        match command(app, &dialog) {
+        match rebase_edit(app, &mut dialog).and_then(|()| command(app, &dialog)) {
             Ok(command) => {
                 app.resource_request_full(
                     dialog.project,
