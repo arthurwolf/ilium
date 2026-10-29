@@ -10,6 +10,8 @@
 
 Release downloads and installer commands are **not ready yet**. The first planned release covers Linux x86_64; other platforms will follow. Until the release is published, [build from source](src/docs/building-from-source.md).
 
+Plugins are a development preview, not a supported feature of the first Linux release. Plugin code is present for future integration and is not ready for use.
+
 Linux and macOS:
 
 ```sh
