@@ -3541,6 +3541,14 @@ impl App {
                 crate::value_dialog_host::ValueDialogHost::cost(&self.cost_settings, row, directory)
             });
         match result {
+            Ok(host)
+                if matches!(
+                    host.dialog,
+                    crate::value_dialog::ValueDialogState::Number(_)
+                ) =>
+            {
+                self.begin_authoritative_number_dialog(host)
+            }
             Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
             Err(error) => self.status_message = Some(error),
         }
@@ -3551,9 +3559,13 @@ impl App {
         host: &mut crate::value_dialog_host::ValueDialogHost,
         outcome: &crate::value_dialog::DialogOutcome,
     ) -> Result<(), String> {
-        let crate::value_dialog_host::ValueTarget::Cost { target, directory } = &host.target else {
+        let crate::value_dialog_host::ValueTarget::Cost {
+            target, directory, ..
+        } = &host.target
+        else {
             return Err("This is not a cost value dialog".into());
         };
+        host.number_read_ready()?;
         if host.is_saving() {
             return Err("The previous value is still being saved".into());
         }
@@ -4793,18 +4805,15 @@ impl App {
                 if !is_terminal {
                     return viewport;
                 }
-                // Reserve before interaction: metadata changes only redraw these slots.
                 let viewport = if self.ui_settings.agent_toolbar_enabled {
                     viewport.with_agent_toolbar_reserved(self.ui_settings.section_frames_enabled)
                 } else {
                     viewport
                 };
-                let viewport = if self.ui_settings.last_prompt_enabled
-                    && !self.last_prompt_banner_closed.contains(&viewport.pane_id)
-                {
+                let viewport = if self.shows_last_prompt_banner(viewport.pane_id) {
                     // In a physically clipped pane, leave room for the progress
                     // gauge and a detail row as well as the terminal itself.
-                    let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+                    let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
                         2.min(viewport.content_area.height.saturating_sub(2))
                     } else {
                         0
@@ -4832,7 +4841,7 @@ impl App {
                     viewport
                 };
                 let viewport = self.with_briefing_slot(viewport);
-                if self.ui_settings.progress_monitor_enabled {
+                if self.shows_progress_footer(viewport.pane_id) {
                     viewport.with_progress_reserved(
                         crate::progress_bar::reserved_height(
                             self.ui_settings.progress_max_lines.into(),
@@ -4859,7 +4868,7 @@ impl App {
     /// terminal's size and the box can never disagree. The box asks for what
     /// is left after the terminal's minimum height and the progress footer.
     fn with_briefing_slot(&self, viewport: PaneViewport) -> PaneViewport {
-        let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+        let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
             2.min(viewport.content_area.height.saturating_sub(2))
         } else {
             0
@@ -5045,10 +5054,12 @@ impl App {
     pub(crate) fn close_last_prompt_banner(&mut self, pane_id: NodeId) {
         self.last_prompt_banner_closed.insert(pane_id);
         self.hovered_last_prompt_button = None;
+        self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
     pub(crate) fn reopen_last_prompt_banner(&mut self, pane_id: NodeId) {
         self.last_prompt_banner_closed.remove(&pane_id);
+        self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
     /// Runs one banner-toolbar button for `pane_id`.
@@ -5085,8 +5096,7 @@ impl App {
         }
     }
 
-    /// Whether the fixed prompt slot displays recorded text. Hiding its text
-    /// never changes terminal dimensions.
+    /// Whether recorded prompt text needs a visible banner.
     pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
         self.ui_settings.last_prompt_enabled
             && !self.last_prompt_banner_closed.contains(&pane_id)
@@ -5095,7 +5105,7 @@ impl App {
                 .is_some_and(|text| !text.is_empty())
     }
 
-    /// Whether the already-reserved progress slot displays a report: the user
+    /// Whether the progress slot displays a report: the user
     /// hasn't turned the feature off and the server has an active report for
     /// this pane. Unlike the toolbar/last-prompt banner, this is not gated
     /// on "detected agent" -- a progress monitor can be running in any
@@ -5191,6 +5201,9 @@ impl App {
         let visibility_changed = previous
             .iter()
             .any(|(pane_id, was_visible)| *was_visible != self.shows_progress_footer(*pane_id));
+        if visibility_changed {
+            self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        }
         visibility_changed
             || (second_changed
                 && previous.iter().any(|(pane_id, _)| {
@@ -10478,8 +10491,8 @@ impl App {
     }
 
     /// Adjusts the fixed prompt slot by one row within the supported range.
-    /// This explicit setting changes terminal geometry even before a prompt
-    /// exists; subsequent text changes only wrap inside the reserved slot.
+    /// This setting changes terminal geometry while a prompt is visible;
+    /// subsequent text changes wrap inside the reserved slot.
     pub fn settings_adjust_last_prompt_max_lines(&mut self, delta: i32) {
         let current = self.ui_settings.last_prompt_max_lines;
         let lines = (i32::from(current) + delta).clamp(
@@ -12305,6 +12318,49 @@ impl App {
             .find(|(pane, _)| *pane == id)
             .map(|(_, source)| source)
     }
+    /// Applies a server's live-screen preview to one pane's display. The
+    /// history is not touched; the replay that follows replaces the preview.
+    pub(crate) fn apply_screen_preview(
+        &mut self,
+        pane_id: ilium_core::NodeId,
+        through_sequence: u64,
+        bytes: &[u8],
+    ) {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return;
+        };
+        let (rows, columns) = view.with_screen(|screen| screen.size());
+        if let Some(frontend) = &view.frontend {
+            frontend.show_screen_preview(rows, columns, bytes, through_sequence);
+        }
+    }
+    /// A hidden pane whose parser refuses output keeps its event at the head of
+    /// the pending list, and that event blocks every pane queued behind it. Its
+    /// parser is released and the event dropped instead; the server journal
+    /// rebuilds the pane when it is displayed again. Returns false (keep the
+    /// event pending) for displayed panes.
+    pub(crate) fn release_refused_hidden_terminal_event(
+        &mut self,
+        event: &ilium_ipc::ServerEvent,
+    ) -> bool {
+        let (ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. }
+        | ilium_ipc::ServerEvent::TerminalReplay { pane_id, .. }) = event
+        else {
+            return false;
+        };
+        let pane_id = *pane_id;
+        if self.is_pane_displayed(pane_id) {
+            return false;
+        }
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return false;
+        };
+        if !view.force_evict_hidden_parser() {
+            return false;
+        }
+        self.pending_terminal_discards.push(pane_id);
+        true
+    }
     pub(crate) fn submit_terminal_event(
         &mut self,
         event: ilium_ipc::ServerEvent,
@@ -12574,8 +12630,10 @@ impl App {
         // Publish a focus change to the parser before draining its result
         // queue. Applying a large batch of old pane results must not postpone
         // the newly selected pane's priority update.
+        // The parser's top priority follows the pane the right panel shows, not
+        // keyboard focus: a tree click shows the pane but leaves focus on the tree.
         let focused = self
-            .focused_pane_id()
+            .active_pane_id()
             .filter(|pane_id| self.displayed_pane_slots().contains(&Some(*pane_id)));
         if let Some(pane_id) = focused {
             if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
@@ -12724,7 +12782,7 @@ impl App {
         // ordered negotiated-mode barrier before terminal delivery.
         let input_targets = self.terminal_input.pending_panes();
         let focused = self
-            .focused_pane_id()
+            .active_pane_id()
             .filter(|pane_id| displayed.contains(pane_id));
         let parser_retry_priority: Vec<NodeId> = self
             .visible_pane_stream_order()
@@ -12762,14 +12820,28 @@ impl App {
         }
         // Configured pool pressure and the hard app-wide storage ceiling both
         // reclaim only hidden idle engines. Retiring targets keep their claims.
+        // A displayed pane whose output is refused (queue full or storage
+        // pressure) must not wait behind hidden panes that hold the queue.
         let is_displayed_refused = self.panes.iter().any(|(id, pane)| {
                 displayed.contains(id)
                     && matches!(pane, PaneRuntime::Terminal(view)
-                        if view.parser_pressure().is_some_and(|pressure| pressure.can_reclaim_hidden_engine()))
+                        if view.has_suspended_output()
+                            || view.parser_pressure().is_some_and(|pressure| pressure.can_reclaim_hidden_engine()))
             });
+        if is_displayed_refused {
+            // Queued output of released panes keeps their engine claims alive; drop it first.
+            parsing.purge_released_commands();
+        }
         if is_displayed_refused && parsing.engine_claims() <= engines_held {
             let tree = &self.tree;
-            let victim = self
+            let least_recently_focused = |candidate: &&NodeId| {
+                (
+                    tree.get(**candidate)
+                        .and_then(|node| node.last_focus_activity_revision),
+                    **candidate,
+                )
+            };
+            let idle_victim = self
                 .panes
                 .iter()
                 .filter(|(id, pane)| {
@@ -12777,19 +12849,35 @@ impl App {
                         && !input_targets.contains(id)
                         && matches!(pane, PaneRuntime::Terminal(view) if view.can_evict_parser())
                 })
-                .min_by_key(|(id, _)| {
-                    (
-                        tree.get(**id)
-                            .and_then(|node| node.last_focus_activity_revision),
-                        **id,
-                    )
-                })
-                .map(|(id, _)| *id);
-            if let Some(victim) = victim {
+                .map(|(id, _)| id)
+                .min_by_key(least_recently_focused)
+                .copied();
+            if let Some(victim) = idle_victim {
                 if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&victim) {
                     if view.evict_parser() {
                         self.pending_terminal_discards.push(victim);
                         changed = true;
+                    }
+                }
+            } else {
+                // Every hidden parser has queued output, so none is idle. Release
+                // the least recently focused one; its queued commands are dropped.
+                let forced_victim = self
+                    .panes
+                    .iter()
+                    .filter(|(id, pane)| {
+                        !displayed.contains(id)
+                            && matches!(pane, PaneRuntime::Terminal(view) if view.frontend.is_some())
+                    })
+                    .map(|(id, _)| id)
+                    .min_by_key(least_recently_focused)
+                    .copied();
+                if let Some(victim) = forced_victim {
+                    if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&victim) {
+                        if view.force_evict_hidden_parser() {
+                            self.pending_terminal_discards.push(victim);
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -22297,7 +22385,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_progress_expiry_hides_text_without_resizing_or_losing_result() {
+    fn completed_progress_expiry_reclaims_rows_without_losing_result() {
         use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = app();
@@ -22349,9 +22437,9 @@ mod tests {
 
         assert!(app.tick_completed_progress_display(61_000));
         let after = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(after, before);
+        assert!(after.content_area.height > before.content_area.height);
         assert!(!app.shows_progress_footer(pane_id));
-        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
         terminal
             .draw(|frame| crate::ui::draw(frame, &mut app))
             .unwrap();
@@ -22440,11 +22528,11 @@ mod tests {
             assert!(app.tick_completed_progress_display(61_000));
             let done_after = app.pane_viewport(done).unwrap();
             let busy_after = app.pane_viewport(busy).unwrap();
-            assert_eq!(done_after, done_before);
+            assert!(done_after.content_area.height > done_before.content_area.height);
             assert!(!app.shows_progress_footer(done));
             assert_eq!(busy_after, busy_before);
             assert!(!app.tree.pane_progress(done).is_empty());
-            assert!(app.take_outbound_requests().is_empty());
+            assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { pane_id, .. } if *pane_id == done)));
             app.ui_settings.completed_progress_hide_after_seconds = 0;
             app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
             assert!(app.pane_viewport(done).unwrap().progress_area.is_some());
@@ -30577,7 +30665,7 @@ mod text_trigger_concurrency_tests {
             .commit_text_trigger(
                 editor.editing_id.as_deref(),
                 editor.editing_base.as_ref(),
-                editor.candidate()
+                editor.candidate().unwrap()
             )
             .is_err());
 
@@ -30620,7 +30708,7 @@ mod text_trigger_concurrency_tests {
         app.commit_text_trigger(
             editor.editing_id.as_deref(),
             editor.editing_base.as_ref(),
-            editor.candidate(),
+            editor.candidate().unwrap(),
         )
         .expect("save by stable ID");
         app.settle_filesystem_for_test();

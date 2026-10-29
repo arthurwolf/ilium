@@ -1276,6 +1276,9 @@ where
         // Send one bounded frame per visible pane per round. A newer
         // selection can replace this replay while it waits for admission;
         // once a frame write begins, it always finishes before cancellation.
+        // One live-screen preview per pane and selection: it shows content
+        // while that pane's backlog parses, and never changes history.
+        let mut previewed_panes: HashSet<ilium_core::NodeId> = HashSet::new();
         let mut pending_panes: Vec<_> = ordered_pane_ids
             .iter()
             .copied()
@@ -1330,6 +1333,24 @@ where
                     }
                     return false;
                 };
+                if previewed_panes.insert(pane_id) {
+                    if let Some(preview) = handlers::terminal_screen_preview(state, pane_id).await {
+                        if let Err(error) = write_server_event(
+                            frame_writer,
+                            preview,
+                            delivered_terminal_sequences,
+                            Some(state),
+                        )
+                        .await
+                        {
+                            tracing::warn!("connection write failed during pane preview: {error}");
+                            for applied in applied_controls {
+                                let _ = applied.send(());
+                            }
+                            return false;
+                        }
+                    }
+                }
                 let result = write_server_event_with_storage(
                     frame_writer,
                     event,

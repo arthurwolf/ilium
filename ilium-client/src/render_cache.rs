@@ -44,6 +44,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 active_waits,
                 wait_revision,
             );
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
             None
         }
         ServerEvent::ResourceResult { request_id, result } => {
@@ -72,6 +73,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 }
             }
             app.bump_tree_version();
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
             None
         }
         ServerEvent::PaneCustomAgentIdentity { pane_id, identity } => {
@@ -204,12 +206,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 return None;
             }
             if let Err(event) = app.submit_terminal_event(event) {
-                app.pending_terminal_events.push_front(
-                    crate::connection::Received::with_retention(
-                        *event,
-                        app.processing_event_retention.clone(),
-                    ),
-                );
+                if !app.release_refused_hidden_terminal_event(&event) {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(
+                            *event,
+                            app.processing_event_retention.clone(),
+                        ),
+                    );
+                }
             }
             None
         }
@@ -276,12 +280,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 return None;
             }
             if let Err(event) = app.submit_terminal_event(event) {
-                app.pending_terminal_events.push_front(
-                    crate::connection::Received::with_retention(
-                        *event,
-                        app.processing_event_retention.clone(),
-                    ),
-                );
+                if !app.release_refused_hidden_terminal_event(&event) {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(
+                            *event,
+                            app.processing_event_retention.clone(),
+                        ),
+                    );
+                }
             }
             None
         }
@@ -360,6 +366,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     // invalidate structural hit testing when detection changes
                     // that visible rank even though no TreeSnapshot follows.
                     app.bump_tree_version();
+                    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
                     transition_event
                         .or_else(|| {
                             (became_agent && app.agent_session_ids.contains_key(&pane_id))
@@ -647,6 +654,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
                 tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
             None
         }
         ServerEvent::PaneProgressChanged {
@@ -656,6 +664,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             if let Err(error) = app.tree.replace_pane_progress(pane_id, progress_monitors) {
                 tracing::warn!("dropping PaneProgressChanged for pane {pane_id:?}: {error}");
             }
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
             None
         }
         ServerEvent::ProgressMonitorEnabledChanged { enabled } => {
@@ -761,6 +770,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         // Plugin traffic is consumed by the client plugin host, not by the render cache.
         ServerEvent::Plugin(_) | ServerEvent::Contributions(_) | ServerEvent::Rejected(_) => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
+        ServerEvent::ScreenPreview {
+            pane_id,
+            through_sequence,
+            bytes,
+        } => {
+            app.apply_screen_preview(pane_id, through_sequence, &bytes);
+            None
+        }
         ServerEvent::VoiceTextOffered {
             request_id,
             sentences,
@@ -1927,12 +1944,12 @@ mod tests {
         );
         assert!(app.shows_last_prompt_banner(pane_id));
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(with_prompt, before);
+        assert!(with_prompt.content_area.height < before.content_area.height);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]
@@ -1993,12 +2010,12 @@ mod tests {
             },
         );
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(with_prompt, after_toolbar);
+        assert!(with_prompt.content_area.height < after_toolbar.content_area.height);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]

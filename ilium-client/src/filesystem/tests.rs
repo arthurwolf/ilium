@@ -57,7 +57,7 @@ fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
     let mut state = state;
     state.regexp.buf = trigger.regexp.clone();
     state.message.buf = trigger.message.clone();
-    let trigger = state.candidate();
+    let trigger = state.candidate().unwrap();
     app.mode = Mode::TextTriggerDialog(Box::new(state));
     let lock = ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
         .unwrap();
@@ -1373,4 +1373,37 @@ fn frozen_screen_save_reports_durable_writer_failure() {
             .unwrap()
             .shutdown_complete
     );
+}
+
+#[test]
+fn older_valid_trigger_receipt_does_not_close_a_later_invalid_draft() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new(
+        "trigger-receipt-fixture".into(),
+        directory.path().to_path_buf(),
+    );
+    app.config_dir = Some(directory.path().to_path_buf());
+    let mut state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
+    state.regexp.buf = "ready$".into();
+    state.message.buf = "continue".into();
+    let accepted = state.candidate().unwrap();
+    app.mode = Mode::TextTriggerDialog(Box::new(state));
+    let lock = ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
+        .unwrap();
+    app.commit_text_trigger(None, None, accepted.clone())
+        .unwrap();
+    let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+        panic!("missing editor")
+    };
+    editor.delay.buf = "99999999999999999999".into();
+    drop(lock);
+    app.settle_filesystem_for_test();
+    let Mode::TextTriggerDialog(editor) = &app.mode else {
+        panic!("an older receipt closed the invalid draft")
+    };
+    assert_eq!(editor.delay.buf, "99999999999999999999");
+    let saved = crate::config::load(directory.path()).unwrap().text_triggers;
+    assert_eq!(saved.triggers, vec![accepted]);
+    assert!(matches!(app.take_outbound_requests().as_slice(),
+        [ilium_ipc::ClientRequest::UpdateTextTriggers { settings }] if settings == &saved));
 }

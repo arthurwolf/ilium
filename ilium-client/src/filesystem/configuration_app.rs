@@ -269,6 +269,10 @@ impl App {
                 break;
             };
             changed = true;
+            if let Some(ConfigurationIntent::NumberRead { token }) = &intent {
+                self.collect_settings_number_read(token, completion);
+                continue;
+            }
             if let Some(ConfigurationIntent::SessionValueDialog { desired, token }) = &intent {
                 self.collect_session_choice_configuration(*desired, token, completion);
                 continue;
@@ -352,6 +356,7 @@ impl App {
                         }
                     }
                     match saved {
+                        ConfigurationSaved::NumberRead(_) => {}
                         ConfigurationSaved::Session(saved) => {
                             if matches!(&intent,Some(ConfigurationIntent::Session{desired}) if self.session_settings==*desired)
                             {
@@ -400,7 +405,7 @@ impl App {
                                 dialog: Some(expected),
                             }) = &intent
                             {
-                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate()==*expected)
+                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate().as_ref()==Ok(expected))
                                 {
                                     self.pop_modal();
                                 }
@@ -618,6 +623,7 @@ mod inference_value_receipt_tests {
             ..crate::app::SettingsState::default()
         }));
         app.begin_settings_number_dialog(SettingsNumber::InferenceTokenBudget);
+        app.settle_filesystem_for_test();
         app
     }
 
@@ -780,12 +786,12 @@ mod inference_value_receipt_tests {
     #[test]
     fn typed_budget_waits_for_one_own_write_retains_failure_and_retries() {
         let directory = tempfile::tempdir().unwrap();
+        let mut app = budget_app(directory.path());
         std::fs::write(
             directory.path().join("config.toml"),
             "invalid synthetic configuration = [",
         )
         .unwrap();
-        let mut app = budget_app(directory.path());
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("exact budget");
         };

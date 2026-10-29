@@ -1,11 +1,12 @@
 //! Exact cost-dialog catalogs and fresh validation without persistence side effects.
 use crate::cost_model::{Calibration, CostMetric, QuotaWindow};
 use crate::cost_settings::{
-    CostRow, CostSettings, CostVisibility, BURN_PRESETS, FIXED_PRESETS, QUOTA_BURN_PRESETS,
-    QUOTA_FIXED_PRESETS,
+    CostRow, CostSettings, CostVisibility, MedalScope, BURN_PRESETS, FIXED_PRESETS,
+    QUOTA_BURN_PRESETS, QUOTA_FIXED_PRESETS,
 };
 use crate::value_dialog::{ChoiceDialogState, ChoiceOption, NumberDialogState, ValueDialogState};
 
+#[derive(Clone)]
 pub struct CostValueTarget {
     pub row: CostRow,
     metric: CostMetric,
@@ -18,6 +19,7 @@ pub fn is_choice(row: CostRow) -> bool {
         row,
         CostRow::Metric(_)
             | CostRow::QuotaWindow
+            | CostRow::MedalScope
             | CostRow::Calibration(_)
             | CostRow::FixedPreset
             | CostRow::BurnPreset
@@ -50,6 +52,7 @@ impl CostValueTarget {
             CostRow::Metric(_) => "Cost metric".into(),
             CostRow::Calibration(_) => "Cost rating".into(),
             CostRow::QuotaWindow => "Quota window".into(),
+            CostRow::MedalScope => "Medal scope".into(),
             CostRow::FixedPreset => "Fixed thresholds".into(),
             CostRow::BurnPreset => "Burn thresholds".into(),
             CostRow::HistoryDays => "History days".into(),
@@ -115,6 +118,20 @@ impl CostValueTarget {
                     .map(|window| (window.key().into(), window.label().into()))
                     .collect(),
                 settings.quota_window.key().into(),
+            ),
+            CostRow::MedalScope => (
+                vec![
+                    ("global".into(), MedalScope::Global.label().into()),
+                    (
+                        "per_provider".into(),
+                        MedalScope::PerProvider.label().into(),
+                    ),
+                ],
+                match settings.medal_scope {
+                    MedalScope::Global => "global",
+                    MedalScope::PerProvider => "per_provider",
+                }
+                .into(),
             ),
             CostRow::Visibility(display) => (
                 vec![
@@ -210,6 +227,13 @@ impl CostValueTarget {
                     .find(|window| window.key() == id)
                     .ok_or("Unknown quota window")?
             }
+            CostRow::MedalScope => {
+                settings.medal_scope = match id {
+                    "global" => MedalScope::Global,
+                    "per_provider" => MedalScope::PerProvider,
+                    _ => return Err("Unknown medal scope".into()),
+                };
+            }
             CostRow::Visibility(display) => {
                 settings.set_visibility(
                     display,
@@ -278,6 +302,73 @@ fn calibration_id(calibration: Calibration) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn medal_scope_catalog_commits_both_choices_and_rejects_unknown_ids() {
+        use crate::cost_settings::MedalScope;
+
+        // Omitting MedalScope, reversing its IDs, or accepting unknown IDs must fail.
+        for (initial, current_id, chosen_id, expected) in [
+            (
+                MedalScope::Global,
+                "global",
+                "per_provider",
+                MedalScope::PerProvider,
+            ),
+            (
+                MedalScope::PerProvider,
+                "per_provider",
+                "global",
+                MedalScope::Global,
+            ),
+        ] {
+            let mut settings = CostSettings {
+                medal_scope: initial,
+                budget_usd: 17.125,
+                ..CostSettings::default()
+            };
+            let target = CostValueTarget::new(&settings, CostRow::MedalScope).unwrap();
+            let ValueDialogState::Choice(dialog) = target.dialog(&settings).unwrap() else {
+                panic!("medal scope must offer its complete choice catalog");
+            };
+            assert_eq!(target.title(), "Medal scope");
+            assert_eq!(dialog.selected_id.as_deref(), Some(current_id));
+            assert_eq!(
+                dialog
+                    .options()
+                    .iter()
+                    .map(|option| (option.id.as_str(), option.label.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    ("global", "All agents together"),
+                    ("per_provider", "Separate by provider")
+                ]
+            );
+            assert!(dialog
+                .options()
+                .iter()
+                .all(|option| option.disabled_reason.is_none()));
+            let before = settings.clone();
+            for invalid in ["unknown", "Global", "global ", "per_provider "] {
+                assert!(target.set_choice(&mut settings, invalid).is_err());
+                assert_eq!(settings, before);
+            }
+            assert!(target.set_number(&mut settings, "1").is_err());
+            assert_eq!(settings, before);
+            target.set_choice(&mut settings, chosen_id).unwrap();
+            assert_eq!(
+                settings,
+                CostSettings {
+                    medal_scope: expected,
+                    ..before
+                }
+            );
+            let ValueDialogState::Choice(updated) = target.dialog(&settings).unwrap() else {
+                panic!("medal scope must remain a choice");
+            };
+            assert_eq!(updated.selected_id.as_deref(), Some(chosen_id));
+        }
+    }
 
     #[test]
     fn selectors_offer_the_full_metric_and_calibration_catalogs() {

@@ -36,6 +36,9 @@ pub(crate) struct AnimationPickerSave {
     pub location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) enum ConfigurationIntent {
+    NumberRead {
+        token: Arc<()>,
+    },
     ValueDialog {
         token: Arc<()>,
     },

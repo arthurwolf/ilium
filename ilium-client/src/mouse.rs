@@ -2550,6 +2550,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     crate::padding_ui::hit(layout.content_area, &app.padding_settings, position)
                 {
                     crate::padding_ui::click(app, &mut state, target);
+                    if target == crate::padding_ui::PaddingHit::Field {
+                        app.mode = Mode::Settings(Box::new(state));
+                        app.begin_settings_number_dialog(
+                            crate::value_settings::SettingsNumber::PaddingThreshold,
+                        );
+                        return;
+                    }
                 }
             }
             _ => {}
