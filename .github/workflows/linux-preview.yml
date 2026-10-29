@@ -20,6 +20,9 @@ jobs:
   native:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
+    outputs:
+      bridge_sha256: ${{ steps.native-bindings.outputs.bridge_sha256 }}
+      harness_sha256: ${{ steps.native-bindings.outputs.harness_sha256 }}
     permissions:
       contents: read
     steps:
@@ -42,6 +45,12 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: python release/scripts/release_pipeline.py native --qualification-profile linux-x86-preview --tag "${{ inputs.release_tag }}" --target "x86_64-unknown-linux-gnu" --runner-identity "ubuntu-22.04" --work "$RUNNER_TEMP/native-work" --output "$GITHUB_WORKSPACE/native-output"
+    - name: Bind native receipts before artifact transfer
+      id: native-bindings
+      run: |
+        set -euo pipefail
+        printf 'bridge_sha256=%s\n' "$(sha256sum native-output/native-candidate-receipt.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+        printf 'harness_sha256=%s\n' "$(sha256sum native-output/native-test-harness.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: native-x86_64-unknown-linux-gnu
@@ -129,6 +138,55 @@ jobs:
         python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
 
         '
+    - name: Qualify a fresh direct tarball installation and retire its owned process boundary
+      env:
+        NATIVE_BRIDGE_SHA256: ${{ needs.native.outputs.bridge_sha256 }}
+        NATIVE_HARNESS_SHA256: ${{ needs.native.outputs.harness_sha256 }}
+      run: |
+        set -euo pipefail
+        source_dir="$GITHUB_WORKSPACE"
+        native_dir="$source_dir/native-linux"
+        direct_output="$RUNNER_TEMP/direct-tarball"
+        owner_dir="$RUNNER_TEMP/direct-tarball-owner"
+        mkdir -m 700 "$owner_dir"
+        unit_name="ilium-preview-direct-$(python -c 'import uuid; print(uuid.uuid4().hex)').service"
+        test "$(sudo -n systemctl show "$unit_name" -p LoadState --value)" = not-found
+        [[ "$NATIVE_BRIDGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+        [[ "$NATIVE_HARNESS_SHA256" =~ ^[0-9a-f]{64}$ ]]
+        set +e
+        sudo -n systemd-run --unit="$unit_name" --uid="$(id -u)" --gid="$(id -g)" \
+          --wait --pipe --collect --property=Slice=system.slice --property=Delegate=yes \
+          --property=KillMode=control-group --property=RuntimeMaxSec=60min \
+          --property=MemoryMax=4G --property=MemorySwapMax=0 --property=TasksMax=512 \
+          --working-directory="$source_dir" --setenv=PYTHONDONTWRITEBYTECODE=1 \
+          /bin/bash -ec 'group=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); printf "%s\n" "$group" > "$1"; shift; mkdir "$group/leaf"; printf "0\n" > "$group/leaf/cgroup.procs"; printf "+cpu +memory +pids\n" > "$group/cgroup.subtree_control"; exec "$@"' \
+          bash "$owner_dir/cgroup-path.txt" "$(command -v python)" -B \
+          "$source_dir/release/scripts/qualify_linux_tarball.py" \
+          --source "$source_dir" --native-directory "$native_dir" --commit "${{ github.sha }}" \
+          --tag "${{ inputs.release_tag }}" --output "$direct_output" --unit "$unit_name" \
+          --expected-bridge-sha256 "$NATIVE_BRIDGE_SHA256" --expected-harness-sha256 "$NATIVE_HARNESS_SHA256" \
+          > "$owner_dir/stdout.log" 2> "$owner_dir/stderr.log"
+        direct_exit=$?
+        set -e
+        printf '%s\n' "$direct_exit" > "$owner_dir/exit-code.txt"
+        # A successful checker cannot substitute for actual kernel retirement.
+        python - "$owner_dir" "$direct_output" "$unit_name" "$direct_exit" <<'PY'
+        import hashlib, json, pathlib, subprocess, sys
+        owner, output = map(pathlib.Path, sys.argv[1:3])
+        unit, code = sys.argv[3], int(sys.argv[4])
+        expected = '/sys/fs/cgroup/system.slice/' + unit
+        observed = (owner / 'cgroup-path.txt').read_text().strip()
+        state = subprocess.run(['sudo', '-n', 'systemctl', 'show', unit, '-p', 'LoadState', '--value'], capture_output=True, text=True)
+        absent = state.returncode in (0, 4) and state.stdout.strip() == 'not-found'
+        retired = observed == expected and not pathlib.Path(expected).exists() and absent
+        receipt_path = output / 'direct-tarball.json'
+        receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
+        passed = code == 0 and retired and receipt.get('state') == 'passed' and receipt.get('filesystem_state_cleaned') is True
+        result = {'schema': 1, 'scope': 'direct-tarball-process-retirement', 'state': 'passed' if passed else 'failed', 'publication_allowed': False, 'unit': unit, 'observed_cgroup': observed, 'expected_cgroup': expected, 'unit_absent': absent, 'cgroup_absent': not pathlib.Path(expected).exists(), 'direct_exit_code': code, 'direct_receipt_sha256': hashlib.sha256(receipt_path.read_bytes()).hexdigest() if receipt_path.is_file() else None, 'systemctl_exit_code': state.returncode, 'systemctl_stdout': state.stdout, 'systemctl_stderr': state.stderr}
+        (owner / 'cleanup.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+        print(json.dumps({'type': 'result', **result}))
+        sys.exit(0 if passed else 1)
+        PY
     - name: Seal native Linux animation evidence
       run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "x86_64-unknown-linux-gnu" --tag "${{ inputs.release_tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-x86_64.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host" --native-sandbox-receipt "$RUNNER_TEMP/native-sandbox/native-sandbox-tests.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -153,6 +211,10 @@ jobs:
           package-vm.jsonl
 
           ${{ runner.temp }}/native-sandbox/
+
+          ${{ runner.temp }}/direct-tarball/
+
+          ${{ runner.temp }}/direct-tarball-owner/
 
           '
         if-no-files-found: warn
