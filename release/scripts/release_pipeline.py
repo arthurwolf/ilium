@@ -528,6 +528,10 @@ def native(arguments):
         command.extend(['--dumpbin', tools[0]])
     logged(command, root, work / 'native-candidate.log', environment)
     output = arguments.output.resolve()
+    if profile == 'linux-x86-preview':
+        # Keep the exact selection auditable in the uploaded, hash-bound evidence.
+        for name in ('preview-test-scope.json', 'preview-workspace-metadata.log'):
+            shutil.copyfile(work / name, output / 'evidence' / name)
     if target['os'] in ('linux', 'macos') and target['ort_strategy'] != 'pinned-source-build':
         shutil.copyfile(shared_output / 'ort-runtime-receipt.json', output / 'evidence/ort-runtime-receipt.json')
     harness_name = 'native-test-binary.exe' if target['os'] == 'windows' else 'native-test-binary'
