@@ -1,8 +1,10 @@
 # Installation
 
-This page explains every supported way to install Ilium: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
+This page describes Ilium's installation routes: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
 
-**Not ready yet:** As of 2026-10-29, no Ilium release has been published. The download links and hosted installer commands on this page are not ready. The first planned release is for Linux x86_64; Linux ARM64, macOS and Windows will follow. Until a release is available, [build from source](building-from-source.md). GitHub Actions artifacts from the [release workflow](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) are candidate builds, not qualified releases. The links below point to the latest release and do not establish that any particular asset is available.
+Linux x86_64 preview target: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1). The six pinned package downloads and SHA256SUMS are usable only after this immutable prerelease is published and its public hashes are verified. Until then, [build from source](building-from-source.md). This preview never activates `latest`; full cross-platform v0.1.1 remains reserved.
+
+**Not ready for this preview:** hosted installers, Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
 
 ## Contents
 
@@ -26,9 +28,9 @@ Linux is the primary platform. macOS and Windows support is implemented, with di
 
 | Platform | Architectures | Package formats |
 | --- | --- | --- |
-| Linux | x86_64 (Intel/AMD), aarch64 (ARM64) | tar.gz, deb, rpm, AppImage, Snap, Flatpak |
-| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg |
-| Windows | x86_64 (native AMD64) | setup exe, msi, zip |
+| Linux | x86_64 (Intel/AMD); aarch64 (ARM64) **not ready** | tar.gz, deb, rpm, AppImage, Snap, Flatpak |
+| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; **not ready** |
+| Windows | x86_64 (native AMD64) | setup exe, msi, zip; **not ready** |
 
 Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the tested Fedora and openSUSE environments). Flatpak uses its declared platform runtime. All packages are unsigned: check the asset digest on the release page.
 
@@ -40,6 +42,8 @@ Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the t
 4. Optional but useful: `ffmpeg` and `ffprobe` for the video animations, and `pw-record` or `parec` (Linux) for the audio-spectrum animation. See [Animations](animations.md).
 
 ## Option 1: hosted installer
+
+**Hosted installers are not ready for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.1.
 
 The installers pick your architecture, download the matching archive, verify it against the release checksums, and install it for your user without administrator rights.
 
@@ -102,7 +106,7 @@ Download packages from [GitHub Releases](https://github.com/arthurwolf/ilium/rel
 
 Every portable archive contains the client (`ilium`), the server (`ilium-server`), the animation helper, the two bundled `.iliumanim` animations and runtime libraries. Keep them together. The helper and animations live beside the client; moving only `ilium` prevents bundled animation discovery. Add the extracted package directory to `PATH`, then run `ilium` in your project.
 
-Download the archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS) from the same release, and [verify the checksum](#verifying-checksums) before extracting.
+Download the archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS) from the same release, and [verify the checksum](#verifying-checksums) before extracting.
 
 ## Linux packages
 
@@ -110,8 +114,8 @@ Download the archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/rele
 
 Choose your architecture:
 
-- Intel/AMD: [`ilium-linux-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.tar.gz)
-- ARM64: [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz)
+- Intel/AMD: [`ilium-linux-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz)
+- ARM64 (**not ready**): [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz)
 
 1. Download the archive and `SHA256SUMS` into one directory.
 2. Verify: `sha256sum --ignore-missing --check SHA256SUMS`. Confirm your archive reports `OK`.
@@ -121,7 +125,7 @@ Choose your architecture:
 
 ### deb package
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.deb) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · **Not ready:** [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb).
 
 1. Verify the checksum.
 2. Install on Debian, Ubuntu or Mint: `sudo apt install ./ilium-linux-x86_64.deb`.
@@ -130,7 +134,7 @@ It installs to `/usr/lib/ilium` and links `ilium` into `/usr/bin`. The package d
 
 ### rpm package
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.rpm) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.rpm) · **Not ready:** [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm).
 
 1. Verify the checksum.
 2. Fedora: `sudo dnf install ./ilium-linux-x86_64.rpm`. openSUSE: `sudo zypper install ./ilium-linux-x86_64.rpm`.
@@ -139,7 +143,7 @@ Same layout as the deb, with the same Bubblewrap dependency.
 
 ### AppImage
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.AppImage) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · **Not ready:** [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage).
 
 1. Verify the checksum.
 2. `chmod +x ilium-linux-x86_64.AppImage`
@@ -149,7 +153,7 @@ The AppImage needs FUSE. The first run copies Ilium to `~/.local/share/ilium/app
 
 ### Snap package
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.snap) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.snap) · **Not ready:** [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap).
 
 1. Verify the checksum.
 2. `sudo snap install --dangerous --classic ilium-linux-x86_64.snap`
@@ -158,7 +162,7 @@ The snap uses classic confinement, so it is not on the Snap Store. Commands: `il
 
 ### Flatpak bundle
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.flatpak) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) · **Not ready:** [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak).
 
 1. Verify the checksum.
 2. `flatpak install --user ilium-linux-x86_64.flatpak`
@@ -170,6 +174,8 @@ Flatpak is experimental. The package forwards its trusted CLI to the host from t
 The Linux release gate requires receipt-bound installed-file checks, client, server and helper versions, Beach and Carpet rendering through the installed helper, an isolated pane lifecycle, and verified removal on each native architecture. Distribution containers cover deb, rpm and AppImage extract-and-run; disposable native runners cover deb, Snap, the real Flatpak sandbox and an AppImage FUSE mount. Separate VM evidence and public installation evidence remain distinct from candidate checks. Details: [Linux acceptance boundaries](../../release/RELEASING.md#linux-acceptance-boundaries).
 
 ## macOS packages
+
+**Not ready.** These instructions describe a future release.
 
 Choose your archive:
 
@@ -195,6 +201,8 @@ The PKG needs administrator approval and installs into `/usr/local/lib/ilium/<ve
 The ZIP, PKG and DMG packages are unsigned and not notarized. macOS may block downloaded software. Review the release and verify its digest before approving an installation through macOS security controls.
 
 ## Windows packages
+
+**Not ready.** These instructions describe a future release.
 
 For a guided install, use [`ilium-windows-x86_64-setup.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) or [`ilium-windows-x86_64.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi). Both install for your user without administrator rights, add Ilium to your `PATH`, and uninstall from Windows Settings. Use one installer, not several. To upgrade, run the newer installer.
 
@@ -235,7 +243,7 @@ Open a new terminal in your project and run `ilium`. First-run setup walks throu
 
 | Installation | How to upgrade |
 | --- | --- |
-| Hosted installer | Run the installer again; it installs the new version beside the old and switches the `current` pointer. |
+| Hosted installer (not ready for this preview) | Run the installer again; it installs the new version beside the old and switches the `current` pointer. |
 | deb / rpm | Install the newer package with the same command. |
 | AppImage | Replace the downloaded image; remove old caches under `${XDG_DATA_HOME:-$HOME/.local/share}/ilium/appimage` if wanted. |
 | Snap / Flatpak | Install the newer file with the same command. |
