@@ -446,6 +446,45 @@ impl App {
                                     })
                             })
                     });
+                // A link reply can likewise follow its own newer broadcast.
+                // Confirm both the submitted binding and the server-assigned
+                // project identity remain present before closing the form.
+                let confirmed_link = correlated
+                    && self.resources.dialog.as_ref().is_some_and(|dialog| {
+                        matches!(dialog.kind, dialog::DialogKind::Link { .. })
+                            && dialog.submitted
+                            && !dialog.submit_when_ready
+                            && self.resources.retry_request.as_ref().is_some_and(|request| {
+                                if request.project_id != Some(dialog.project)
+                                    || request.request_key.as_deref()
+                                        != Some(dialog.request_key.as_str())
+                                {
+                                    return false;
+                                }
+                                let ilium_ipc::resource::ResourceOperation::Mutate(
+                                    ResourceCommand::Link { link },
+                                ) = &request.operation else {
+                                    return false;
+                                };
+                                reply.result.as_ref().is_some_and(|result| {
+                                    result.resource_id.as_ref() == Some(&link.resource_id)
+                                        && self.resources.catalog.as_ref().is_some_and(|catalog| {
+                                            catalog.revision >= result.revision
+                                                && reply.catalog.links.iter().any(|committed| {
+                                                    committed.resource_id == link.resource_id
+                                                        && committed.project_path == link.project_path
+                                                        && committed.slug == link.slug
+                                                        && catalog.links.iter().any(|current| {
+                                                            current.project_id == committed.project_id
+                                                                && current.resource_id == committed.resource_id
+                                                                && current.project_path == committed.project_path
+                                                                && current.slug == committed.slug
+                                                        })
+                                                })
+                                        })
+                                })
+                            })
+                    });
                 // A successful edit may also arrive behind a newer broadcast.
                 // Only acknowledge its baseline when the current definition is
                 // exactly the one returned for this correlated submitted edit.
@@ -479,7 +518,7 @@ impl App {
                     reply.wait_revision,
                 );
                 if !accepted && !confirmed_edit {
-                    if confirmed_create {
+                    if confirmed_create || confirmed_link {
                         self.resources.dialog = None;
                         self.resources.retry_request = None;
                         self.resources.observation_error = None;
@@ -1056,6 +1095,31 @@ mod review_regressions {
         assert!(app.resources.dialog.is_none());
         assert!(app.resources.retry_request.is_none());
         assert_eq!(app.resources.catalog.as_ref().unwrap().revision, 7);
+    }
+    #[test]
+    fn reordered_link_reply_closes_only_when_the_submitted_link_still_exists() {
+        for link_still_exists in [true, false] {
+            let (mut app, project, _) = setup();
+            let link = app.resources.catalog.as_ref().unwrap().links[0].clone();
+            let mut form = ResourceDialog::link(project);
+            form.submitted = true;
+            let mut request = ResourceRequest::new(
+                Some(project),
+                ResourceOperation::Mutate(ResourceCommand::Link { link: link.clone() }),
+            );
+            request.request_key = Some(form.request_key.clone());
+            app.resources.dialog = Some(form);
+            app.resources.retry_request = Some(request);
+            app.resources.pending = Some(42);
+            let committed = reply(&app, 6);
+            if !link_still_exists {
+                app.resources.catalog.as_mut().unwrap().links.clear();
+            }
+            app.receive_resource_reply(42, Ok(committed));
+            assert_eq!(app.resources.dialog.is_none(), link_still_exists);
+            assert_eq!(app.resources.retry_request.is_none(), link_still_exists);
+            assert_eq!(app.resources.catalog.as_ref().unwrap().revision, 7);
+        }
     }
     #[test]
     fn edit_rebases_unrelated_catalog_update_without_losing_metadata() {

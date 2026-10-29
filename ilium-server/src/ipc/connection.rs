@@ -2962,6 +2962,87 @@ mod text_trigger_writer_tests {
     }
 
     #[tokio::test]
+    async fn attach_retries_resource_snapshot_after_shared_catalog_contention() {
+        let root = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/data/ilium-resource-queue-tests"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".scratch-reaper"), b"").unwrap();
+        let directory = tempfile::tempdir_in(root).unwrap();
+        let path = directory.path().join("catalog.json");
+        let (state, _sounds) = state_at(directory.path());
+        assert!(state
+            .resources
+            .set(crate::resources::ResourceService::new(path.clone()))
+            .is_ok());
+        let lock = ilium_platform::resource_fs::ResourceLedgerFile::try_lock(&path)
+            .unwrap()
+            .unwrap();
+        let (client, server) = duplex(16384);
+        let (replies, mut events) = DirectEventSender::channel(64);
+        let (phase, _phase_receiver) = watch::channel(AttachPhase::Ready);
+        let (controls, mut control_events) = mpsc::channel::<StreamControlCommand>(8);
+        let _control_task = Task(tokio::spawn(async move {
+            while let Some(control) = control_events.recv().await {
+                let _ = control.applied.send(());
+            }
+        }));
+        let mut reader = Task(tokio::spawn(read_requests(
+            state.clone(),
+            server,
+            replies,
+            phase,
+            controls,
+        )));
+        let mut requests = FrameWriter::new(client);
+        requests
+            .write(&ClientRequest::AttachInteractive {
+                session: state.session_name.clone(),
+                hello: Default::default(),
+            })
+            .await
+            .unwrap();
+        let initial_error = timeout(WAIT, async {
+            loop {
+                match events.recv().await {
+                    Some(ServerEvent::ResourceObservationFailed { message }) => break message,
+                    Some(_) => {}
+                    None => panic!("connection closed before contention was reported"),
+                }
+            }
+        })
+        .await
+        .expect("busy shared catalog must be reported without blocking attach");
+        drop(lock);
+        let mut subsequent_errors = Vec::new();
+        // Reconciliation runs through the bounded I/O executor and can wait
+        // behind another catalog operation; only attach itself has a short
+        // deadline. The recovery must still arrive without another request.
+        let snapshot_received = timeout(Duration::from_secs(60), async {
+            loop {
+                match events.recv().await {
+                    Some(ServerEvent::ResourceSnapshot { .. }) => break,
+                    Some(ServerEvent::ResourceObservationFailed { message }) => {
+                        subsequent_errors.push(message);
+                    }
+                    Some(_) => {}
+                    None => panic!("connection closed before resource snapshot"),
+                }
+            }
+        })
+        .await;
+        if snapshot_received.is_err() {
+            let direct_snapshot = crate::resources::snapshot(&state)
+                .await
+                .map(|_| ())
+                .map_err(|error| format!("{error:?}"));
+            panic!("initial resource snapshot did not recover: initial={initial_error:?}, subsequent={subsequent_errors:?}, direct={direct_snapshot:?}");
+        }
+        drop(requests);
+        reader.joined().await;
+    }
+
+    #[tokio::test]
     async fn progress_monitor_wait_starts_without_terminal_subscription() {
         let directory = tempfile::tempdir().unwrap();
         let (state, _sounds) = state_at(directory.path());

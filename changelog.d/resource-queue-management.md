@@ -24,3 +24,7 @@
 - Keep resource metadata autosave usable when a newer queue update arrives before its successful save reply, while retaining conflicts for concurrent metadata edits.
 
 - Retry interrupted final-unlink instruction/settings cleanup while the project is open and when it is reopened, including after server restart.
+
+- Reject older terminal protocol layouts after integrating screen previews, preventing event misinterpretation between mismatched client and server builds.
+- Close the resource link form after a successful save when a newer catalog update arrives first, while retaining the form if the binding was subsequently removed.
+- Retry initial resource snapshots after temporary shared-catalog contention so project resource rows recover without a reconnect.

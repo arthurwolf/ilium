@@ -148,7 +148,7 @@ async fn hst_100_plugin_frame_is_length_prefix_then_bincode_body() {
     // The prefix carries a schema tag in its top five bits (see `frame_length_word`
     // in ilium-ipc/src/framing.rs); the low 27 bits hold the payload length.
     const SCHEMA_TAG_MASK: u32 = 0xF800_0000;
-    const SCHEMA_TAG: u32 = 0xC800_0000;
+    const SCHEMA_TAG: u32 = 0xD000_0000;
     assert_eq!(declared & SCHEMA_TAG_MASK, SCHEMA_TAG);
     assert_eq!((declared & !SCHEMA_TAG_MASK) as usize, body.len());
     assert_eq!(&framed[4..], body.as_slice());

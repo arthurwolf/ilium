@@ -2424,11 +2424,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
-    // Debug follows Text Triggers. Its real toggle must preserve the fresh-install
+    // Debug follows Text Triggers and Custom Agents. Its real toggle must preserve the fresh-install
     // default (no `.txt` file before opt-in), persist the choice, open both
     // process writers immediately, and make the next structural request land
     // in the server's major-action trail.
-    tui.write(b"\t\t")
+    tui.write(b"\t\t\t")
         .expect("switching to the Debug settings tab");
     assert!(
         wait_until(
@@ -7397,8 +7397,8 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         tui.screen_text()
     );
 
-    // Before any prompt is recorded, terminal content already starts after the
-    // four configured prompt rows. Recording a prompt must not move it.
+    // Before any prompt is recorded, empty prompt rows consume no space:
+    // terminal content follows the toolbar and its separator immediately.
     assert!(
         wait_until(
             || {
@@ -7409,7 +7409,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
                     let cols = screen.size().1;
                     screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 7) as usize)
+                        .nth((toolbar_row + 2) as usize)
                         .unwrap_or_default()
                         .contains("Pursuing goal")
                 })
@@ -7417,8 +7417,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
             WAIT_TIMEOUT,
         )
         .await,
-        "with no prompt recorded yet, pane content should start after the four reserved \
-         prompt rows: {:?}",
+        "with no prompt recorded yet, pane content should follow the toolbar separator: {:?}",
         tui.screen_text()
     );
 

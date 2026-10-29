@@ -1949,7 +1949,10 @@ mod tests {
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]
@@ -2015,7 +2018,10 @@ mod tests {
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]

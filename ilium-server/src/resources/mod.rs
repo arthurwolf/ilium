@@ -714,22 +714,40 @@ pub(crate) fn send_snapshot<'a>(
     Box::pin(send_snapshot_inner(state, replies))
 }
 async fn send_snapshot_inner(state: &ServerState, replies: &DirectEventSender) {
-    match snapshot(state).await {
-        Ok(event) => {
-            if let Err(error) = memory::send(state, replies, event).await {
-                let _ = replies
-                    .send(ServerEvent::ResourceObservationFailed {
-                        message: error.to_string(),
-                    })
-                    .await;
+    let mut reported_busy = false;
+    loop {
+        match snapshot(state).await {
+            Ok(event) => {
+                if let Err(error) = memory::send(state, replies, event).await {
+                    let _ = replies
+                        .send(ServerEvent::ResourceObservationFailed {
+                            message: error.to_string(),
+                        })
+                        .await;
+                }
+                return;
             }
-        }
-        Err(error) => {
-            let _ = replies
-                .send(ServerEvent::ResourceObservationFailed {
-                    message: error.to_string(),
-                })
-                .await;
+            Err(error) => {
+                let retry = error.code == "busy";
+                if (!reported_busy || !retry)
+                    && replies
+                        .send(ServerEvent::ResourceObservationFailed {
+                            message: error.to_string(),
+                        })
+                        .await
+                        .is_err()
+                {
+                    return;
+                }
+                if !retry {
+                    return;
+                }
+                reported_busy = true;
+                // This task belongs to the connection and is cancelled on
+                // disconnect. A missed initial revision cannot rely on the
+                // observer broadcasting the same unchanged revision again.
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
         }
     }
 }

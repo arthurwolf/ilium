@@ -22439,7 +22439,10 @@ mod tests {
         let after = app.pane_viewport(pane_id).unwrap();
         assert!(after.content_area.height > before.content_area.height);
         assert!(!app.shows_progress_footer(pane_id));
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
         terminal
             .draw(|frame| crate::ui::draw(frame, &mut app))
             .unwrap();

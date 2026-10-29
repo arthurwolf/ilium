@@ -246,9 +246,20 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
         .waits
         .insert(first, ReservationId::from("reservation"));
     app.ui_settings.resource_queue_grouping = false;
-    assert_eq!(before, app.pane_viewports());
-    app.resources.waits.clear();
+    let waiting = app.pane_viewports();
+    assert_eq!(waiting.len(), before.len());
+    for (original, current) in before.iter().zip(&waiting) {
+        assert_eq!(original.pane_id, current.pane_id);
+        assert_eq!(original.outer_area, current.outer_area);
+        assert_eq!(original.slot_index, current.slot_index);
+    }
+    // The native wait footer uses space inside its pane, never a sibling's split.
+    assert!(waiting[0].progress_area.is_some());
+    assert!(waiting[0].content_area.height < before[0].content_area.height);
+    assert_eq!(waiting[1], before[1]);
     app.ui_settings.resource_queue_grouping = true;
+    assert_eq!(waiting, app.pane_viewports());
+    app.resources.waits.clear();
     assert_eq!(before, app.pane_viewports());
     assert_eq!(app.tree.parent_of(first), Some(split));
     assert_eq!(app.tree.parent_of(second), Some(split));

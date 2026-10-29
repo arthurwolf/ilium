@@ -741,30 +741,55 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     click(&linked_tui, "Link existing resource", 0);
     screen(&linked_tui, "Search existing resources").await;
     screen(&linked_tui, "[Submit]  [Cancel]").await;
+    // The global catalog may still be loading when the picker first opens.
+    // A visible candidate proves there is a resource to select before Enter.
+    screen(&linked_tui, "▸ Synthetic GPU revised · gpu").await;
     linked_tui
         .write(b"Synthetic GPU revised\tshared-gpu\r")
         .unwrap();
-    dialog_closed(&linked_tui).await;
-    screen(&linked_tui, "Synthetic GPU revised").await;
     let mut linked_control = linked.connect().await;
     let linked_project = tree(&mut linked_control).await.project_ids()[0];
-    let shared = rpc(
-        &mut linked_control,
-        linked_project,
-        None,
-        ResourceOperation::Snapshot,
-    )
-    .await
-    .catalog;
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let shared = loop {
+        let catalog = rpc(
+            &mut linked_control,
+            linked_project,
+            None,
+            ResourceOperation::Snapshot,
+        )
+        .await
+        .catalog;
+        if catalog
+            .links
+            .iter()
+            .any(|link| link.slug == "shared-gpu" && link.resource_id == resource_id)
+        {
+            break catalog;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "linked resource absent from authoritative snapshot: links={:?}; terminal:\n{}",
+            catalog.links,
+            linked_tui.screen_text()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    dialog_closed(&linked_tui).await;
+    screen(&linked_tui, "Synthetic GPU revised").await;
     assert_eq!(
         shared.resources.len(),
         1,
         "linking must not create another authority"
     );
-    assert!(shared
-        .links
-        .iter()
-        .any(|link| link.slug == "shared-gpu" && link.resource_id == resource_id));
+    assert!(
+        shared
+            .links
+            .iter()
+            .any(|link| link.slug == "shared-gpu" && link.resource_id == resource_id),
+        "linked resource absent from authoritative snapshot: links={:?}; terminal:\n{}",
+        shared.links,
+        linked_tui.screen_text()
+    );
     assert!(
         std::fs::read_to_string(linked.project.join(".ilium/config.yaml"))
             .unwrap()
@@ -898,20 +923,24 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     // a tree row that may disappear when the split is collapsed.
     tui.write(b"\x1b[<0;80;10M\x1b[<0;80;10m").unwrap();
     tui.write(b"resource-input-witness\r").unwrap();
-    pane_output(&mut control, original_pane, "resource-input-witness").await;
+    pane_output(&mut control, &tui, original_pane, "resource-input-witness").await;
     screen(&tui, "resource-input-witness").await;
     screen(&tui, "esc to interrupt").await;
     // Distinct input must reach the original second PTY, including while its
     // tree entry is a resource participant reference to a split child.
     click(&tui, "QueueWaiter", 0);
     tui.write(b"resource-agent-input-witness").unwrap();
-    pane_output(&mut control, waiter, "resource-agent-input-witness").await;
+    pane_output(&mut control, &tui, waiter, "resource-agent-input-witness").await;
     screen(&tui, "resource-agent-input-witness").await;
     let cat_position = locate(&tui, "resource-input-witness");
     let agent_position = locate(&tui, "resource-agent-input-witness");
     assert_ne!(cat_position, agent_position);
     let split_id = split.parent_of(waiter).unwrap();
-    let before_split = serde_json::to_value(split.get(split_id).unwrap()).unwrap();
+    // The click on QueueSplit above can change its expanded state. Capture the
+    // current authoritative tree immediately before testing the toggles.
+    let mut before_control = sandbox.connect().await;
+    let before_grouping = tree(&mut before_control).await;
+    let before_split = serde_json::to_value(before_grouping.get(split_id).unwrap()).unwrap();
     write_frame(
         &mut control,
         &ClientRequest::KeyInput {
@@ -2212,9 +2241,10 @@ async fn candidate_daemon_crash_keeps_claim_occupied_while_synthetic_workload_su
     );
 }
 
-async fn pane_output(stream: &mut SessionStream, pane: NodeId, expected: &str) {
-    tokio::time::timeout(TIMEOUT, async {
-        let mut observed = String::new();
+async fn pane_output(stream: &mut SessionStream, tui: &PtySession, pane: NodeId, expected: &str) {
+    let mut observed = String::new();
+    let mut other = String::new();
+    let result = tokio::time::timeout(TIMEOUT, async {
         loop {
             let message: ServerEvent = read_frame(stream).await.unwrap();
             if let ServerEvent::ScreenUpdate { pane_id, bytes, .. } = message {
@@ -2227,10 +2257,19 @@ async fn pane_output(stream: &mut SessionStream, pane: NodeId, expected: &str) {
                         observed.len() < 1_048_576,
                         "bounded test output did not contain input witness"
                     );
+                } else if other.len() < 4096 {
+                    other.push_str(&format!(
+                        "{pane_id:?}: {}\n",
+                        String::from_utf8_lossy(&bytes)
+                    ));
                 }
             }
         }
     })
-    .await
-    .expect("input must reach its original split child PTY");
+    .await;
+    assert!(
+        result.is_ok(),
+        "input {expected:?} must reach split child {pane:?}; observed {observed:?}; other panes {other:?}; terminal:\n{}",
+        tui.screen_text()
+    );
 }
