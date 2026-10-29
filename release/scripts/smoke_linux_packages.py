@@ -43,7 +43,8 @@ LIFECYCLE = ROOT / 'release/packaging/linux/lifecycle.sh'
 DEB_IMAGES = ('ubuntu:22.04', 'ubuntu:24.04', 'debian:12')
 RPM_IMAGES = ('fedora:41', 'opensuse/leap:15.6')
 APPIMAGE_IMAGE = 'ubuntu:24.04'
-UNPRIVILEGED = 'setpriv --reuid=65534 --regid=65534 --clear-groups'
+ROOT_PACKAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+UNPRIVILEGED = 'setpriv --reuid=65534 --regid=65534 --clear-groups env PATH=/usr/bin:/bin'
 
 
 def require(condition, message):
@@ -408,6 +409,7 @@ def managed_script(package_format, prelude, install, remove, body):  # Preserve 
     absent = '/smoke/absent-' + package_format + '.sh'  # Reuse the exact before/after inventory gate.
     return '\n'.join([  # Each cleanup command has its own explicit failure handling.
         'set -eu # Fail native acceptance on the first functional error.',  # Run through the existing sh -ec interface.
+        'export PATH=' + ROOT_PACKAGE_PATH + ' # Resolve root package tools and helpers only from standard system directories.',
         'owned=0 # Never remove an installation before ownership preflight.',  # Installation ownership is armed only after absence.
         'cleanup() { # Preserve both primary failure and cleanup outcome.',  # Trap-owned teardown is part of qualification.
         '    prior=$? # Retain the original command status.',  # Successful removal must not erase a failed smoke.

@@ -7,6 +7,7 @@ import json  # Build exact synthetic installed JSONL output.
 import importlib.util  # Import the actual complete smoke source afresh.
 import os  # Supply isolated shell environments.
 from pathlib import Path, PureWindowsPath  # Exercise Windows package-path spelling too.
+import re  # Substitute only native command names at generated shell command boundaries.
 import shlex  # Quote only owned fixture paths.
 import shutil  # Locate the tools needed by shell-only fixtures.
 import subprocess  # Run harmless generated shell checks against temporary data.
@@ -334,8 +335,16 @@ shell_available = sys.platform.startswith('linux') and all(shutil.which(tool) fo
 @unittest.skipUnless(shell_available, 'requires Linux shell/coreutils fixture tools; no native package operations')  # This fixture skip never changes production required-format gates.
 class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell logic against owned temporary paths.
     def test_offline_deb_installs_exact_file_and_checks_dependencies_before_body(self):  # Exercise the real generated transaction without invoking a native package manager.
+        self.check_deb_transactions()
+
+    def test_deb_transaction_resolves_admin_tools_without_inherited_path_entries(self):
+        for inherited_path in ('minimal', 'hostile'):
+            with self.subTest(inherited_path=inherited_path):
+                self.check_deb_transactions(inherited_path)
+
+    def check_deb_transactions(self, inherited_path=None):
         adapter_source = '\n'.join([  # This complete adapter rejects every unexpected tool or argument vector.
-            'import os, sys # Read only the explicit fixture environment and arguments.',  # Keep the helper independent of repository imports.
+            'import json, os, shutil, sys # Resolve administrative tools without executing them.',
             'from pathlib import Path # Touch only run-owned markers.',  # No real package database is accessed.
             'tool, arguments = sys.argv[1], sys.argv[2:] # Retain argument boundaries for quoted package paths.',  # Spaces must not split the artifact argument.
             'mode = os.environ["fixture_mode"] # Select one controlled failure.',  # Make failure origin explicit.
@@ -352,6 +361,13 @@ class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell 
             '    stream.write(operation + "\\n") # Record before a partial mutation can fail.',  # Retain failed installation attempts.
             'if operation == "unexpected": # Reject any manager invocation outside the contract.',  # No real manager is used as fallback.
             '    sys.exit(91) # Stop the actual generated shell.',  # Preserve failure-sensitive dispatch.
+            'expected_path = os.environ.get("fixture_expected_root_path")',
+            'if expected_path:',
+            '    resolved = {name: shutil.which(name) for name in ("ldconfig", "start-stop-daemon")}',
+            '    with open(os.environ["fixture_path_events"], "a") as stream:',
+            '        stream.write(json.dumps({"path": os.environ["PATH"], "resolved": resolved}) + "\\n")',
+            '    if os.environ["PATH"] != expected_path or any(not path or str(Path(path).parent) not in expected_path.split(":") for path in resolved.values()):',
+            '        print("fixture administrative command lookup failed: " + repr(resolved), file=sys.stderr); sys.exit(92)',
             'if operation == "install": # A failed install may leave partial state.',  # Exercise trap responsibility.
             '    payload.write_bytes(b"owned partial install") # Create only the disposable package marker.',  # Cleanup must remove it.
             'if operation == "remove" and mode != "leftover": # Model authoritative removal separately from its status.',  # A retained marker must still fail absence.
@@ -365,10 +381,11 @@ class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell 
                 directory = Path(temporary)  # Never reuse ambient package-manager state.
                 adapter = directory / 'adapter.py'  # Use the current Python interpreter through a shell launcher.
                 adapter.write_text(adapter_source)  # Retain the complete explicit manager behavior.
-                for tool in ('apt-get', 'dpkg', 'dpkg-deb'):  # Shadow every invoked native manager.
-                    executable = directory / tool  # Ensure PATH resolves only these harmless adapters first.
-                    executable.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' + shlex.quote(str(adapter)) + ' "${0##*/}" "$@" # Preserve exact tool and argv boundaries.\n')  # Avoid a shebang path containing spaces.
-                    executable.chmod(0o755)  # Permit execution only inside this temporary fixture.
+                # Replace native managers with shell functions so the generated
+                # transaction's PATH remains observable rather than test-modified.
+                managers = '\n'.join('fixture_' + tool.replace('-', '_') + '() { ' + shlex.quote(sys.executable) + ' '
+                                     + shlex.quote(str(adapter)) + ' ' + shlex.quote(tool)
+                                     + ' "$@"; }' for tool in ('apt-get', 'dpkg', 'dpkg-deb')) + '\n'
                 payload, events = directory / 'payload', directory / 'events'  # Model actual ownership and observed command order.
                 absent = directory / 'absent.sh'  # Keep the production transaction's pre/post readback calls.
                 absent.write_text('set -eu # Fail on any retained marker.\nprintf "absence\\n" >> "$fixture_events" # Retain readback order.\n' + smoke.absence_script([payload]))  # Apply the real filesystem-absence generator.
@@ -378,11 +395,23 @@ class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell 
                     return transaction_script(package_format, prelude if offline else ': # Image prerequisites are simulated by this fixture.', install, remove, body)  # Never modify host dpkg configuration or refresh real repositories.
                 with patch.object(smoke, 'installed_body', return_value=': # Installed behavior has separate complete regressions.\n'), patch.object(smoke, 'managed_script', side_effect=generated_transaction):  # Keep this test focused on transaction dispatch and dependencies.
                     script = smoke.deb_script("receipt file's.deb", '0.1.1-linux.1', offline=offline)  # Exercise shell-safe exact-file argv as well as early return semantics.
-                script = script.replace('/smoke/absent-deb.sh', shlex.quote(str(absent))).replace('/smoke/package-deb.sh', shlex.quote(str(verifier)))  # Redirect only owned helper paths.
+                script = re.sub(r'(?m)^(\s*)(apt-get|dpkg-deb|dpkg)(?=\s)', lambda match: match[1] + 'fixture_' + match[2].replace('-', '_'), script)  # Keep exact argv and transaction control flow; replace only manager entry points.
+                script = managers + script.replace('/smoke/absent-deb.sh', shlex.quote(str(absent))).replace('/smoke/package-deb.sh', shlex.quote(str(verifier)))  # Redirect only owned helper paths.
                 if mode == 'foreign':  # Refuse to adopt a package present before the transaction.
                     payload.write_bytes(b'foreign sentinel')  # Require preservation of this pre-existing marker.
-                environment = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'], 'fixture_mode': mode, 'fixture_package': "/packages/receipt file's.deb", 'fixture_payload': str(payload), 'fixture_events': str(events)}  # Bind every adapter effect to this case.
-                result = subprocess.run(['sh', '-ec', script], env=environment, capture_output=True, text=True, timeout=10)  # Execute the real generated trap with harmless managers.
+                environment = {**os.environ, 'fixture_mode': mode, 'fixture_package': "/packages/receipt file's.deb", 'fixture_payload': str(payload), 'fixture_events': str(events)}  # Bind every adapter effect to this case.
+                path_events = directory / 'path-events.jsonl'
+                if inherited_path:
+                    hostile = directory / 'hostile-bin'
+                    hostile.mkdir()
+                    for name in ('ldconfig', 'start-stop-daemon'):
+                        shadow = hostile / name
+                        shadow.write_text('#!/bin/sh\nexit 97 # Never adopt an inherited administrative command.\n')
+                        shadow.chmod(0o755)
+                    environment.update(PATH=(str(hostile) + ':' if inherited_path == 'hostile' else '') + '/usr/bin:/bin',
+                                       fixture_expected_root_path='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                                       fixture_path_events=str(path_events))
+                result = subprocess.run([shutil.which('sh'), '-ec', script], env=environment, capture_output=True, text=True, timeout=10)  # Resolve the test shell before applying the hostile environment.
                 self.assertEqual(result.returncode == 0, mode == 'pass', result.stdout + result.stderr)  # Only a complete transaction can qualify.
                 recorded = events.read_text().splitlines()  # Every case must perform an authoritative absence query.
                 self.assertNotIn('unexpected', recorded)  # Check exact manager names, flags and artifact argument boundaries.
@@ -395,9 +424,17 @@ class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell 
                 self.assertEqual('verify' in recorded, mode not in ('install-fails', 'check-fails'))  # Both failures must stop before installed-file or application checks.
                 self.assertEqual(recorded[-2:], ['remove', 'absence'])  # Always retain removal and authoritative cleanup readback.
                 self.assertEqual(payload.exists(), mode == 'leftover')  # Do not erase evidence to make cleanup pass.
+                if inherited_path:
+                    lookups = [json.loads(line) for line in path_events.read_text().splitlines()]
+                    self.assertGreaterEqual(len(lookups), 2)  # Installation and cleanup both retain the safe root environment.
+                    for lookup in lookups:
+                        self.assertEqual(lookup['path'], environment['fixture_expected_root_path'])
+                        self.assertEqual(set(lookup['resolved']), {'ldconfig', 'start-stop-daemon'})
+                        self.assertTrue(all(path and str(Path(path).parent) in lookup['path'].split(':') for path in lookup['resolved'].values()))
 
     def test_installed_body_requires_both_versions_and_real_lifecycle_success(self):  # Run the shared deb/RPM body with synthetic binaries and the actual lifecycle.
         client_source = '#!/bin/sh\nset -eu\nif [ "${1:-}" = --version ]; then printf "%s\\n" "${fixture_client_version:-ilium 0.1.0}"; exit 0; fi\nif [ "${1:-}" = release-animation-probe ]; then test "${fixture_animation_failure:-0}" = 0; printf "%s\\n" "$fixture_animation_output"; exit 0; fi\ncase "$3" in\nnew-pane) test "${fixture_lifecycle_failure:-0}" = 0; touch "$fixture_alive" ;;\nls) if [ -e "$fixture_alive" ]; then echo "default running"; else echo "default not running"; fi ;;\nkill-session) rm -f "$fixture_alive" ;;\n*) exit 2 ;;\nesac\n'  # This complete harmless CLI changes only a named fixture marker.
+        client_source = client_source.replace('if [ "${1:-}" = release-animation-probe ];', 'test "$PATH" = /usr/bin:/bin\nif [ "${1:-}" = release-animation-probe ];')  # Check the actual child environment before animation and lifecycle commands.
         server_source = '#!/bin/sh\nset -eu\nprintf "%s\\n" "${fixture_server_version:-ilium-server 0.1.0}"\n'  # Version changes are adapter outcomes rather than changed audited bytes.
         helper_source = '#!/bin/sh\nset -eu\nprintf "%s\\n" "$fixture_helper_version"\n'
         for mode in ('pass', 'wrong-client', 'wrong-server', 'wrong-helper', 'animation-fails', 'lifecycle-fails'):  # Every installed caller failure must disqualify the generated shell.
@@ -415,8 +452,9 @@ class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell 
                 checks.mkdir()  # Create the test-owned helper directory.
                 smoke.write_smoke_files(checks, receipt)  # Copy the actual current bounded lifecycle unchanged.
                 (checks / 'expected.sha256').write_text(smoke.expected_hashes(receipt).replace('  /usr/', '  ' + str(tree) + '/usr/'))  # Redirect checksum reads to actual fixture installation paths.
-                script = smoke.installed_body('0.1.0').replace('/usr/', shlex.quote(str(tree)) + '/usr/').replace('/smoke/', shlex.quote(str(checks)) + '/').replace(smoke.UNPRIVILEGED, 'env')  # Substitute filesystem/identity adapters while preserving every production assertion.
+                script = smoke.installed_body('0.1.0').replace('/usr/lib/ilium', shlex.quote(str(tree)) + '/usr/lib/ilium').replace('/usr/bin/', shlex.quote(str(tree)) + '/usr/bin/').replace('/smoke/', shlex.quote(str(checks)) + '/').replace('setpriv --reuid=65534 --regid=65534 --clear-groups', 'env')  # Adapt identity while preserving the production child PATH restriction.
                 environment = {**os.environ, 'fixture_alive': str(tree / 'alive'), 'fixture_client_version': 'ilium 9.9.9' if mode == 'wrong-client' else 'ilium 0.1.0', 'fixture_server_version': 'ilium-server 9.9.9' if mode == 'wrong-server' else 'ilium-server 0.1.0', 'fixture_helper_version': release_tool.helper_version_record('9.9.9') if mode == 'wrong-helper' else release_tool.helper_version_record('0.1.0'), 'fixture_animation_failure': '1' if mode == 'animation-fails' else '0', 'fixture_animation_output': '{"type":"fixture"}', 'fixture_lifecycle_failure': '1' if mode == 'lifecycle-fails' else '0', 'ILIUM_SMOKE_BASE': str(tree / 'state'), 'TMPDIR': str(tree)}  # All application effects are temporary and explicit.
+                environment['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'  # The root transaction's administrative PATH must not reach the application child.
                 result = subprocess.run(['sh', '-ec', script], env=environment, capture_output=True, text=True, timeout=20)  # No system binary or package manager runs through the installed paths.
                 self.assertEqual(result.returncode == 0, mode == 'pass', result.stdout + result.stderr)  # Both version mismatches and actual lifecycle failure must disqualify the body.
                 self.assertEqual('lifecycle: passed' in result.stdout, mode == 'pass')  # Require the real lifecycle to complete on the positive path.
