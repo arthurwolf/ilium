@@ -441,9 +441,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('--completed-qualification', command)
         self.assertIn('--channel-readback', command)
         self.assertIn('--intent ghcr-evidence/ghcr-intent.json', command)
-        self.assertFalse(any('publish_ghcr.py' in step.get('run', '')
-                             for name, job in jobs.items() if name != 'ghcr-package'
-                             for step in job['steps']))
+        # Reusable jobs have no inline steps. Inspect their committed local
+        # workflow too, so the preview cannot hide an extra registry publisher.
+        preview = yaml.safe_load((ROOT / '.github/workflows/linux-preview.yml').read_text())
+        self.assertEqual(jobs['linux-preview']['uses'], './.github/workflows/linux-preview.yml')
+        for label, document in (('release', workflow), ('linux-preview', preview)):
+            self.assertFalse(any('publish_ghcr.py' in step.get('run', '')
+                                 for name, job in document['jobs'].items()
+                                 if (label, name) != ('release', 'ghcr-package')
+                                 for step in job.get('steps', [])))
 
 
 if __name__ == '__main__':
