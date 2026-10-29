@@ -20,9 +20,8 @@ use std::{
 };
 
 const MAX_MAPS: usize = 16;
-const MAX_CHUNKS: usize = 384;
-// Same count as loader::MAX_PROJECTED_CHUNKS; see the note there.
-const MAX_PROJECTED_CHUNKS: usize = 1024;
+const MAX_CHUNKS: usize = super::loader::MAX_MERGED_CHUNKS;
+const MAX_PROJECTED_CHUNKS: usize = super::loader::MAX_PROJECTED_CHUNKS;
 const MAX_TARGETS: usize = 2304;
 const MAX_OWNERS: usize = 8192;
 const RECENT_RUNS: u64 = 8;
@@ -98,6 +97,10 @@ impl<'a> Budget<'a> {
 }
 
 /// Immutable admitted snapshot. Retains the loader Arc, never clones palettes.
+/// Saved-world planning only: chunks of camera-footprint reach beyond a 16-block
+/// viewport (1 for the 9-block vertical overhang and halo, 2 for the biome ring).
+pub(crate) const SAVED_SEARCH_CHUNK_MARGIN: i32 = 3;
+
 /// Construct off the render thread. Targets must come from evidence::analyze on
 /// THIS snapshot, with THIS Source; structural validation is not reclassification.
 #[derive(Debug)]
@@ -105,6 +108,10 @@ pub struct PreparedMap {
     source: Source,
     last_played: i64,
     loaded: Arc<LoadedWindow>,
+    // Camera lines are searched here, not on `loaded.coverage`: a line whose 16-block
+    // view fits saved chunks can still need saved chunks beyond it (vertical overhang
+    // and biome ring), which only this margin keeps inside the saved area.
+    search_coverage: super::coverage::Coverage,
     targets: Vec<TargetSummary>,
     // An enlarged renderer-only map must never outlive its decoded-storage
     // account. Arc clones, owner receipts and tile maps all retain this charge.
@@ -178,9 +185,11 @@ impl PreparedMap {
         if targets.windows(2).any(|pair| pair[0].key == pair[1].key) {
             return Err(Error::Invalid("duplicate target"));
         }
+        let search_coverage = loaded.coverage.clone();
         let result = Self {
             source,
             last_played,
+            search_coverage,
             loaded,
             targets,
             _projected_charge: projected_charge,
@@ -192,6 +201,27 @@ impl PreparedMap {
         budget.check()?;
         Ok(result)
     }
+    /// A copy whose camera lines are searched inside the saved area shrunk by
+    /// `chunk_margin` chunks. A save too small to survive the shrink keeps its full
+    /// area, so tiny saves still propose lines. The qualification step still checks the real footprint.
+    pub(crate) fn with_search_margin(&self, chunk_margin: i32) -> Self {
+        let eroded = self.loaded.coverage.eroded(chunk_margin);
+        let search_coverage = if eroded.chunks.is_empty() {
+            self.loaded.coverage.clone()
+        } else {
+            eroded
+        };
+        Self {
+            source: self.source,
+            last_played: self.last_played,
+            loaded: Arc::clone(&self.loaded),
+            search_coverage,
+            targets: self.targets.clone(),
+            _projected_charge: self._projected_charge.clone(),
+            _catalog_charge: self._catalog_charge.clone(),
+        }
+    }
+
     /// Decoder-owned capacities and diagnostic allowance, wrapper and summaries.
     pub(crate) fn retained_catalog_charge(&self) -> Option<usize> {
         if self.loaded.retained_storage_charge < std::mem::size_of::<LoadedWindow>() {
@@ -806,7 +836,7 @@ impl Search<'_, '_, '_> {
             self.budget.charge(steps * side * side + 64)?;
             self.audit.line_queries += 1;
             let prepared = &self.maps[map];
-            let result = prepared.loaded.coverage.line_through(
+            let result = prepared.search_coverage.line_through(
                 point,
                 direction,
                 radius,
@@ -1253,7 +1283,12 @@ impl ProjectedDisplay {
         budget.check()?;
         if rendered_map.source != plan.source()
             || rendered_map._projected_charge.is_none()
-            || &rendered_map.loaded.coverage.chunks != request.support_chunks()
+            || rendered_map.loaded.coverage.chunks.is_empty()
+            || !rendered_map
+                .loaded
+                .coverage
+                .chunks
+                .is_subset(request.support_chunks())
             || !request.matches_view(plan.line, plan.focus_y, size, scale)
         {
             return Err(Error::Invalid("projected display source"));

@@ -1,0 +1,105 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.ambient",
+  "name": "Ambient look",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Ambient look plugin (id ilium.core.ambient, side: client) is the plugin form of the shared look of animated backgrounds.",
+  "license": "MIT",
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "client": [
+      "location.geocode",
+      "media.video",
+      "ui.panels",
+      "settings.write-kernel:animations"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "contributes": {
+    "panels": [
+      {
+        "id": "gallery",
+        "title": "Scenes",
+        "modal": false
+      }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "animations",
+        "title": "Animations",
+        "sections": [
+          {
+            "id": "look",
+            "title": "Look",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "choice",
+                "key": "scene",
+                "title": "Scene",
+                "default": "stars",
+                "options": [
+                  {
+                    "value": "stars",
+                    "title": "Stars"
+                  },
+                  {
+                    "value": "clouds",
+                    "title": "Clouds"
+                  }
+                ]
+              },
+              {
+                "type": "preview",
+                "view": "scene-preview",
+                "height": 4,
+                "live": true
+              },
+              {
+                "type": "toggle",
+                "key": "semantic",
+                "title": "Semantic animation",
+                "default": false
+              },
+              {
+                "type": "location",
+                "key": "observer",
+                "title": "Observer location",
+                "search": true,
+                "allow_current": true,
+                "precision": 4,
+                "default": {
+                  "lat": 38.7223,
+                  "lon": -9.1393,
+                  "label": "Lisbon"
+                }
+              },
+              {
+                "type": "map",
+                "key": "saved_places",
+                "title": "Saved places",
+                "value_type": "string",
+                "key_pattern": "^[a-z-]{1,24}$",
+                "max_entries": 8,
+                "key_title": "Name",
+                "value_title": "Label",
+                "default": {}
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

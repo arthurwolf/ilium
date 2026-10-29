@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Capability: http | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details open><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/" aria-current="page">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Capabilities</b></p>
+<h1>Capability: http</h1>
+<h2 id="httphost-pattern">http:&lt;host-pattern&gt;</h2>
+<p>The <code>http:&lt;host-pattern&gt;</code> grant lets a plugin send HTTP requests to the hosts that match the pattern. Each host needs its own grant. The host checks the grant before a request leaves the machine, so a request to any other host returns <code>not-permitted</code> at once and nothing is sent.</p>
+<p>Use this grant for remote APIs, data feeds, map tiles and article sources. For large transfers, run the download in a job with <a href="/pages/capability-jobs-run/"><code>jobs.run</code></a>. A job can call <code>http.fetch</code> with the same grants as its side, and the job's memory and wall-clock limits apply.</p>
+<h3 id="what-you-need">What you need</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Grant</td>
+<td>One <code>http:&lt;host-pattern&gt;</code> per host, on the side that sends the request: <code>client</code>, <code>server</code> or <code>scene</code> in the manifest. A job needs the grant on the side that runs it.</td>
+</tr>
+<tr>
+<td>Rust</td>
+<td><code>ilium_plugin_sdk::host::http</code></td>
+</tr>
+<tr>
+<td>TypeScript</td>
+<td><code>@ilium/plugin-sdk/host/http</code></td>
+</tr>
+<tr>
+<td>Protocol</td>
+<td>HTTPS only. Plain HTTP works only for loopback hosts (<code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code>) when the grant names them.</td>
+</tr>
+<tr>
+<td>Tier</td>
+<td>T1 bundled plugins receive the grant up to the manifest ceiling. T2 and T3 packages must be approved in the review dialog.</td>
+</tr>
+</tbody>
+</table>
+<p>Declare grants in the manifest under the side that makes the request:</p>
+<pre><code class="language-json">&quot;capabilities&quot;: { &quot;server&quot;: [&quot;http:api.example.com&quot;, &quot;http:*.openstreetmap.org&quot;] }
+</code></pre>
+<h3 id="grant-syntax">Grant syntax</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Valid</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http:api.example.com</code></td>
+<td>yes</td>
+<td>one exact host</td>
+</tr>
+<tr>
+<td><code>http:api.example.com:8443</code></td>
+<td>yes</td>
+<td>one exact host and port</td>
+</tr>
+<tr>
+<td><code>http:*.openstreetmap.org</code></td>
+<td>yes</td>
+<td>any subdomain at any depth; not the bare domain</td>
+</tr>
+<tr>
+<td><code>http:localhost</code></td>
+<td>yes</td>
+<td>loopback; plain HTTP allowed</td>
+</tr>
+<tr>
+<td><code>http:127.0.0.1</code></td>
+<td>yes</td>
+<td>loopback IPv4 literal; plain HTTP allowed</td>
+</tr>
+<tr>
+<td><code>http:[::1]</code></td>
+<td>yes</td>
+<td>loopback IPv6 literal; plain HTTP allowed</td>
+</tr>
+<tr>
+<td><code>http:*</code></td>
+<td>no</td>
+<td>a bare <code>*</code> is refused</td>
+</tr>
+<tr>
+<td><code>http:tile.*.org</code></td>
+<td>no</td>
+<td>a wildcard in any position other than the leftmost label</td>
+</tr>
+<tr>
+<td><code>http</code></td>
+<td>no</td>
+<td>the host pattern is missing</td>
+</tr>
+<tr>
+<td><code>http:https://api.example.com/v1</code></td>
+<td>no</td>
+<td>a scheme or path; keep only the host</td>
+</tr>
+</tbody>
+</table>
+<p>A grant without a port matches the default port of the scheme only (443 for HTTPS, 80 for plain HTTP on loopback). A grant with <code>:&lt;port&gt;</code> matches that port alone.</p>
+<p><code>http:*.openstreetmap.org</code> covers <code>a.openstreetmap.org</code> and <code>a.b.openstreetmap.org</code>, but not <code>openstreetmap.org</code>. Declare the bare domain as its own grant when you need it.</p>
+<h3 id="surface">Surface</h3>
+<p>The <code>http</code> module has three calls: one that waits for the response, one that starts a request and returns its id, and one that reads a stored response.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Returns</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Send and wait</td>
+<td><code>http::fetch(request).await</code></td>
+<td><code>await http.fetch(request)</code></td>
+<td><code>Result&lt;HttpResponse, PluginError&gt;</code> / <code>Promise&lt;HttpResponse&gt;</code></td>
+<td>Sends the request and resolves with the full response.</td>
+</tr>
+<tr>
+<td>Start</td>
+<td><code>http::fetch_request(request)</code></td>
+<td><code>http.fetchRequest(request)</code></td>
+<td><code>Result&lt;RequestId, PluginError&gt;</code> / <code>bigint</code></td>
+<td>Starts the request and returns its id. Use it when you need the id first.</td>
+</tr>
+<tr>
+<td>Read result</td>
+<td><code>http::take_response(id)</code></td>
+<td><code>http.takeResponse(id)</code></td>
+<td><code>Option&lt;HttpResponse&gt;</code> / <code>HttpResponse \| undefined</code></td>
+<td>Returns the response once it is available. Nothing is returned before the request completes.</td>
+</tr>
+</tbody>
+</table>
+<p>Failed requests do not appear as a response. A transport failure, timeout or limit breach completes the request with an error code. The async wrapper turns that completion into a <code>PluginError</code>. The raw form delivers it in a <code>request-completed</code> event.</p>
+<p>The types are the same in both languages:</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>HttpRequest</code></td>
+<td><code>method</code></td>
+<td>string</td>
+<td><code>GET</code>, <code>HEAD</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code> or <code>OPTIONS</code>, in upper case. Any other value is <code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td><code>HttpRequest</code></td>
+<td><code>url</code></td>
+<td>string</td>
+<td>Absolute <code>https://</code> URL, at most 8 KiB.</td>
+</tr>
+<tr>
+<td><code>HttpRequest</code></td>
+<td><code>headers</code></td>
+<td><code>Header</code> list</td>
+<td>At most 64 entries.</td>
+</tr>
+<tr>
+<td><code>HttpRequest</code></td>
+<td><code>body</code></td>
+<td>bytes, optional</td>
+<td>At most 8 MiB. <code>None</code> or <code>undefined</code> sends no body.</td>
+</tr>
+<tr>
+<td><code>HttpRequest</code></td>
+<td><code>timeout_millis</code></td>
+<td><code>u32</code></td>
+<td>1 to 300,000. Covers connect, redirects and reading the body.</td>
+</tr>
+<tr>
+<td><code>Header</code></td>
+<td><code>name</code>, <code>value</code></td>
+<td>string</td>
+<td>One header.</td>
+</tr>
+<tr>
+<td><code>HttpResponse</code></td>
+<td><code>status</code></td>
+<td><code>u16</code></td>
+<td>The HTTP status code. A 404 or a 503 is a normal response.</td>
+</tr>
+<tr>
+<td><code>HttpResponse</code></td>
+<td><code>headers</code></td>
+<td><code>Header</code> list</td>
+<td>The response headers.</td>
+</tr>
+<tr>
+<td><code>HttpResponse</code></td>
+<td><code>body</code></td>
+<td>bytes</td>
+<td>The response body. Default cap 8 MiB for every tier; a T1 plugin may request up to 64 MiB in <code>limits</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Each plugin may hold 64 pending requests by default (<code>pending_requests</code>); a T1 plugin may request up to 256. A call over that limit returns <code>busy</code>.</p>
+<h3 id="worked-example-rust-server-side">Worked example: Rust, server side</h3>
+<p>This plugin fetches a notes feed when it activates. The request runs on the server side, so the manifest grants <code>http:api.example.com</code> under <code>server</code>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;com.example.notes&quot;,
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;http:api.example.com&quot;] }
+}
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::http::{self, Header, HttpRequest};
+use ilium_plugin_sdk::host::log::{self, Level};
+
+const NOTES_URL: &amp;str = &quot;https://api.example.com/v1/notes?since=2026-10-01&quot;;
+
+async fn sync_notes() -&gt; Result&lt;(), PluginError&gt; {
+    let request = HttpRequest {
+        method: &quot;GET&quot;.into(),
+        url: NOTES_URL.into(),
+        headers: vec![Header { name: &quot;accept&quot;.into(), value: &quot;application/json&quot;.into() }],
+        body: None,
+        timeout_millis: 5_000,
+    };
+    let response = http::fetch(request).await?;
+    let text = String::from_utf8_lossy(&amp;response.body);
+    log::log(
+        Level::Info,
+        &amp;format!(&quot;notes sync: status {}, {} bytes&quot;, response.status, text.len()),
+    );
+    Ok(())
+}
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct NotesSync;
+
+impl Lifecycle for NotesSync {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        task::spawn(async {
+            if let Err(error) = sync_notes().await {
+                log::log(Level::Warn, &amp;format!(&quot;notes sync failed: {:?}&quot;, error.code));
+            }
+        });
+        Ok(())
+    }
+}
+
+impl Handler for NotesSync {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+</code></pre>
+<p>The <code>?</code> operator works because <code>http::fetch</code> returns <code>Result&lt;_, PluginError&gt;</code>. The <code>task::spawn</code> block keeps the request running after <code>activate</code> returns, and its error is logged rather than dropped.</p>
+<h3 id="worked-example-typescript-client-side">Worked example: TypeScript, client side</h3>
+<p>The same request from a client plugin. The manifest grants the host under <code>client</code>.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;com.example.notes&quot;,
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;http:api.example.com&quot;] }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type PluginError } from '@ilium/plugin-sdk';
+import * as http from '@ilium/plugin-sdk/host/http';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const NOTES_URL = 'https://api.example.com/v1/notes?since=2026-10-01';
+
+async function syncNotes(): Promise&lt;void&gt; {
+  const response = await http.fetch({
+    method: 'GET',
+    url: NOTES_URL,
+    headers: [{ name: 'accept', value: 'application/json' }],
+    body: undefined,
+    timeoutMillis: 5000,
+  });
+  const text = new TextDecoder().decode(response.body);
+  log('info', `notes sync: status ${response.status}, ${text.length} characters`);
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate() {
+    syncNotes().catch((error: PluginError) =&gt; {
+      log('warn', `notes sync failed: ${error.code}`);
+    });
+  },
+  onEvents() {
+    return [];
+  },
+});
+</code></pre>
+<p><code>import * as http</code> keeps the SDK call apart from the global <code>fetch</code>. The promise is handled in <code>activate</code>, so a failure is logged and never becomes an unhandled rejection.</p>
+<figure>
+<svg viewBox="0 0 320 300" role="img" aria-label="HTTP request flow through host grant, admission gate, request and response" width="480" height="450">
+  <defs>
+    <marker id="htt-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="8" width="300" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="160" y="32" text-anchor="middle" font-size="11" fill="currentColor">Plugin calls fetch(http-request)</text>
+  <line x1="160" y1="48" x2="160" y2="66" stroke="currentColor" marker-end="url(#htt-arrow)"/>
+  <rect x="10" y="66" width="300" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="160" y="90" text-anchor="middle" font-size="11" fill="currentColor">Host matches an http grant</text>
+  <line x1="160" y1="106" x2="160" y2="124" stroke="currentColor" marker-end="url(#htt-arrow)"/>
+  <rect x="10" y="124" width="300" height="40" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="160" y="148" text-anchor="middle" font-size="11" fill="currentColor">Admission gate, for inference provider hosts</text>
+  <line x1="160" y1="164" x2="160" y2="182" stroke="currentColor" marker-end="url(#htt-arrow)"/>
+  <rect x="10" y="182" width="300" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="160" y="206" text-anchor="middle" font-size="11" fill="currentColor">Request runs; redirects checked again</text>
+  <line x1="160" y1="222" x2="160" y2="240" stroke="currentColor" marker-end="url(#htt-arrow)"/>
+  <rect x="10" y="240" width="300" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="160" y="264" text-anchor="middle" font-size="11" fill="currentColor">Response returned to the plugin</text>
+</svg>
+<figcaption>Each request passes the host grant check first. The dashed admission gate is kernel policy; the plugin cannot skip it.</figcaption>
+</figure>
+
+<h3 id="rules-for-every-request">Rules for every request</h3>
+<ul>
+<li>Only HTTPS is accepted, except loopback when the grant names <code>localhost</code>, <code>127.0.0.1</code> or <code>[::1]</code>.</li>
+<li>A request follows at most 5 redirects, and each hop must match a grant. A redirect to an ungranted host completes as <code>failed(not-permitted)</code>. A sixth redirect completes as <code>failed(network)</code>.</li>
+<li>A request to the host of a configured inference provider passes the AI admission gate first. The gate can refuse it by the user's policy (<code>not-permitted</code>) or throttle it (<code>rate-limited</code>, with <code>retry-after-ms</code>). Each admitted request adds one line to the privacy log. A refused request writes none.</li>
+<li>A non-2xx status is a normal response. Check <code>status</code> yourself; only transport failures are errors.</li>
+<li>The response body is capped at 8 MiB by default for every tier; a T1 plugin may request up to 64 MiB in <code>limits</code>. A larger body completes as <code>failed(quota-exceeded)</code>.</li>
+<li><code>timeout_millis</code> covers the whole exchange. Passing it completes as <code>failed(timed-out)</code>.</li>
+<li>The kernel never forwards a request from one side to another. The side that calls <code>fetch</code> needs the grant.</li>
+</ul>
+<h3 id="review-dialog-and-tiers">Review dialog and tiers</h3>
+<p>The install review dialog shows one row per capability. An <code>http</code> row reads <code>Connect to &lt;host&gt;</code> and shows the grant string at the right edge. Rows that are not <code>HIGH</code> start checked. <code>http</code> is not a <code>HIGH</code> capability, so it does not need a separate opt-in.</p>
+<figure>
+
+<pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
+│ com.example.http 0.1.0 by Example Ltd                                      │
+│                                                                            │
+│ <span class="t-hi">Client side</span>                                                                │
+│ [x] Connects to api.example.com <span class="t-dim">………………………………………………………</span> http:api.example.com │
+│                                                                            │
+│ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
+╰────────────────────────────────────────────────────────────────────────────╯
+</pre>
+
+<figcaption>The review dialog for a package that requests http:api.example.com, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
+</figure>
+
+<p>A declined grant shows as unchecked and dimmed. The plugin's <code>granted</code> list in the activation context leaves it out, so a plugin can check its own status at start and tell the user what is missing.</p>
+<h3 id="when-a-grant-is-missing-or-declined">When a grant is missing or declined</h3>
+<p>A request to a host without a grant returns <code>not-permitted</code> at once. The host also writes one refusal line to the plugin log. The <code>reason</code> field is <code>declined</code> when the user unticked the row, and <code>not-granted</code> when the manifest asked for other hosts but not this one:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;refusal&quot;,&quot;grant&quot;:&quot;http:api.example.com&quot;,&quot;function&quot;:&quot;http.fetch&quot;,&quot;reason&quot;:&quot;declined&quot;}
+</code></pre>
+<p>A request that matches a granted host still works. A granted host that is down or unreachable returns <code>network</code>, not <code>not-permitted</code>.</p>
+<h3 id="errors">Errors</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>When it happens</th>
+<th>Where it appears</th>
+<th>Retry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>URL not HTTPS outside loopback, unparsable or over 8 KiB; body over 8 MiB; timeout outside 1 to 300,000 ms; over 64 headers; method not in the list</td>
+<td>at the call</td>
+<td>no, fix the call</td>
+</tr>
+<tr>
+<td><code>not-permitted</code></td>
+<td>no grant for the host; the admission policy refused an AI provider call; a redirect to an ungranted host</td>
+<td>at the call, or in the completion for redirects and policy</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>busy</code></td>
+<td>64 pending requests (256 at T1)</td>
+<td>at the call</td>
+<td>yes, later</td>
+</tr>
+<tr>
+<td><code>quota-exceeded</code></td>
+<td>response body over the cap; CPU budget of the quota group spent</td>
+<td>in the completion, or at the call with <code>retry-after-ms</code></td>
+<td>after freeing resources or after <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td><code>rate-limited</code></td>
+<td>the admission gate throttled a provider host</td>
+<td>in the completion, with <code>retry-after-ms</code></td>
+<td>yes, after <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td><code>network</code></td>
+<td>DNS, connect or TLS failure; more than 5 redirects</td>
+<td>in the completion</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>timed-out</code></td>
+<td>the exchange did not finish within <code>timeout_millis</code></td>
+<td>in the completion</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>revoked</code>, <code>internal</code></td>
+<td>the grant changed during the call; a host bug</td>
+<td>at the call or in the completion</td>
+<td><code>revoked</code>: the plugin is re-activated</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases">Edge cases</h3>
+<ul>
+<li>A <code>404</code> or a <code>503</code> from the server is an <code>ok</code> response with that status. Only transport failures are errors.</li>
+<li>A wildcard grant does not cover the bare domain, and a grant without a port does not cover other ports.</li>
+<li>A redirect chain is checked hop by hop. A granted first host that redirects to an ungranted second host fails with <code>failed(not-permitted)</code>.</li>
+<li><code>timeout_millis</code> includes redirects and the body download. A slow body fails with <code>failed(timed-out)</code> even when the headers arrived in time.</li>
+<li>A request from a job uses the job's side. Declare the grant on the side that runs the job.</li>
+<li>A scene declares its host grants under <code>capabilities.scene</code>.</li>
+</ul>
+<h3 id="who-requests-it">Who requests it</h3>
+<p>First-party plugins that use this grant:</p>
+<ul>
+<li>50 Voice session: <code>http:&lt;provider-host&gt;</code>.</li>
+<li>84 AI providers: one <code>http:&lt;provider-host&gt;</code> grant for each provider.</li>
+<li>88 Reset planning: <code>http:&lt;feed-host&gt;</code>.</li>
+<li>99 Live-data scenes: one <code>http:&lt;data-host&gt;</code> grant for each source.</li>
+<li>100 Maps, space, Wikipedia and voxel saved worlds: <code>http:*.openstreetmap.org</code> and <code>http:*.wikipedia.org</code>.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/capability-inference/">inference</a> for requests that go through the AI admission gate.</li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a> for long downloads.</li>
+<li><a href="/pages/api-http/">api-http</a> for the full function reference.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error code table and every size limit.</li>
+<li><a href="/pages/capability-http-api-route/">capability-http-api-route</a> for the opposite direction: local requests that reach your plugin.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>
+<h3 id="security">Security</h3>
+<p>Address checks, redirects, TLS and the offline switch are defined in <a href="/pages/reference-network-egress/">Network egress</a>. Extra <code>not-permitted</code> reasons: <code>private-address</code>, <code>downgrade</code>, <code>reserved</code>, <code>offline</code>, <code>policy</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-help-read/"><small>Previous</small>Capability: help.read</a><a class="next" href="/pages/capability-http-api-route/"><small>Next</small>Capability: http-api.route</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#httphost-pattern">http:&lt;host-pattern&gt;</a></li><li class="l3"><a href="#what-you-need">What you need</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#surface">Surface</a></li><li class="l3"><a href="#worked-example-rust-server-side">Worked example: Rust, server side</a></li><li class="l3"><a href="#worked-example-typescript-client-side">Worked example: TypeScript, client side</a></li><li class="l3"><a href="#rules-for-every-request">Rules for every request</a></li><li class="l3"><a href="#review-dialog-and-tiers">Review dialog and tiers</a></li><li class="l3"><a href="#when-a-grant-is-missing-or-declined">When a grant is missing or declined</a></li><li class="l3"><a href="#errors">Errors</a></li><li class="l3"><a href="#edge-cases">Edge cases</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

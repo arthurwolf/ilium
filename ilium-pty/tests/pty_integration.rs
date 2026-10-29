@@ -402,9 +402,17 @@ mod unix_only {
         // orphan's fd for the full 30 seconds (or forever, for a longer-lived
         // orphan), keeping its `Arc` clones of the parser/journal/child alive
         // the whole time.
+        // The orphan records its pid so the test can kill it afterwards: a
+        // sleeper left running past the test is flagged by ni-build as an
+        // unretired compiler descendant and fails the whole remote job.
+        let pid_file =
+            std::env::temp_dir().join(format!("ilium-pty-orphan-{}", std::process::id()));
         let command = PtyCommand::new("sh", std::env::temp_dir(), 24, 80)
             .arg("-c")
-            .arg("setsid sleep 30 & sleep 100");
+            .arg(format!(
+                "setsid sh -c 'echo $$ > {}; exec sleep 30' & sleep 100",
+                pid_file.display()
+            ));
         let mut session = PtySession::spawn(command).expect("spawning sh should succeed");
 
         // Give the shell time to fork and `setsid` its orphan before killing
@@ -438,6 +446,11 @@ mod unix_only {
         })
         .await
         .is_ok();
+
+        if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+            let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+        }
+        let _ = std::fs::remove_file(&pid_file);
 
         assert!(
             reader_thread_stopped,

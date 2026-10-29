@@ -1,0 +1,2051 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Requirements: kernel and host | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/" aria-current="page">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Requirements: kernel and host</h1>
+
+<p>This page lists every normative statement of the kernel and host lane. Each statement has a stable id <code>HST-NNN</code>, appears under the same id in the page named in the third column, and has a test method in the fourth. A test author cites the id in the test name. Ids are not dense: the blocks are HST-001 to 045 (architecture), 050 to 089 (runtime), 100 to 125 (IPC), 150 to 171 (helper), 180 to 216 (scheduling), 250 to 272 (rendering), 300 to 313 (budgets), 350 to 363 (telemetry), 380 to 388 (platform), 400 to 412 (errors and limits, owned by <a href="/pages/reference-errors-and-limits/">Error codes and limits</a>), 450 to 457 (agent signatures), 470 to 478 (extension points and menu provider) and 490 to 494 (intents and tree). Unused numbers are reserved and have no requirement. If a statement and its page differ, the page wins and this table is regenerated.</p>
+<h2 id="words-and-ids">Words and ids</h2>
+<ul>
+<li><strong>MUST</strong> and <strong>MUST NOT</strong> are absolute. <strong>SHOULD</strong> and <strong>SHOULD NOT</strong> allow a stated exception. <strong>MAY</strong> is optional.</li>
+<li>Ids are fixed once published. A removed requirement keeps its id and is marked withdrawn. An id is never reused.</li>
+<li>Ranges: 001-049 host architecture and crates; 050-099 runtime and Wasmtime; 100-149 IPC; 150-179 sandbox helper; 180-249 scheduling, deadlines, cancellation and backpressure; 250-299 rendering; 300-349 budgets and benchmarks; 350-379 telemetry; 380-399 platform support; 400-449 limits and the restart rule; 450-469 detection loop; 470-489 hooks and providers across sides; 490-499 client-side tree and intent semantics.</li>
+<li>Test methods: unit tests in <code>ilium-plugin-host</code>, integration tests that start a host and plugin fixtures, conformance fixtures, IPC round-trip tests in <code>ilium-ipc</code>, benchmarks B1 to B24 with the thresholds of <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a>, platform CI lanes, and manual checks.</li>
+</ul>
+<h2 id="table">Table</h2>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Statement</th>
+<th>Page</th>
+<th>Testable how</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HST-001</td>
+<td>The workspace MUST contain the crates <code>ilium-plugin-api</code>, <code>ilium-plugin-host</code> and <code>ilium-plugin-helper</code>, and <code>ilium-plugin-api</code> MUST NOT depend on Wasmtime, V8, tokio or any I/O crate.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: workspace test: crate list and ilium-plugin-api has no wasmtime/tokio in cargo metadata</td>
+</tr>
+<tr>
+<td>HST-002</td>
+<td>The dependency edges in the table above MUST hold, and a workspace test MUST fail when <code>cargo metadata</code> shows a forbidden edge.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: cargo metadata edge check in a workspace test</td>
+</tr>
+<tr>
+<td>HST-003</td>
+<td><code>ilium-core</code> MUST NOT depend on any plugin crate.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: cargo metadata: ilium-core dependency list</td>
+</tr>
+<tr>
+<td>HST-004</td>
+<td><code>ilium-ipc</code> MUST carry plugin traffic as typed records from <code>ilium-plugin-api</code> and MUST NOT carry or link Wasmtime values.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: cargo metadata plus compile-fail check on ilium-ipc types</td>
+</tr>
+<tr>
+<td>HST-005</td>
+<td>Client presentation modules MUST NOT name Wasmtime types. Only one client module, <code>plugin_host</code>, MAY depend on <code>ilium-plugin-host</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: source scan: Wasmtime type names outside plugin_host module</td>
+</tr>
+<tr>
+<td>HST-006</td>
+<td><code>ilium-plugin-host</code> MUST reach the tree, panes, settings and commands only through the kernel facade trait, so that the host can be tested with a fake kernel and no PTY.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: host tests run against a fake KernelFacade with no PTY</td>
+</tr>
+<tr>
+<td>HST-007</td>
+<td>A plugin side MUST be hosted by exactly one process at a time: the session server for <code>server</code>, an attached client for <code>client</code> and <code>scene</code>, or a CLI process for a <code>server</code> component that is run for a <code>requires_server: false</code> entry.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: start server, client, CLI process; assert which process instantiates each side</td>
+</tr>
+<tr>
+<td>HST-008</td>
+<td>T1 components MUST run inside the process of their side and MUST NOT run in a helper.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: assert T1 instances exist only in the process of their side, none in helper</td>
+</tr>
+<tr>
+<td>HST-009</td>
+<td>T2 and T3 components MUST run only inside a sandbox helper, and the parent process MUST NOT instantiate a T2 or T3 component in its own Engine.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: T2 package: parent Engine instantiation counter stays 0</td>
+</tr>
+<tr>
+<td>HST-010</td>
+<td>The exit of a client process, a CLI process or a helper MUST NOT stop the session server or any other plugin side.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: kill client, CLI process and helper in turn; server stays up</td>
+</tr>
+<tr>
+<td>HST-011</td>
+<td>A session MUST have exactly one server host, and the dispatcher MUST be the only subscriber of the kernel event journal on behalf of plugins.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: session has one server host; journal subscriber count is 1 for plugins</td>
+</tr>
+<tr>
+<td>HST-012</td>
+<td>Server-side plugin state (queues, failure counts, restart timers, quota buckets) MUST be kept per plugin per side in the server host and MUST survive the detach and attach of clients.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: detach and attach a client; server-side queues and counters unchanged</td>
+</tr>
+<tr>
+<td>HST-013</td>
+<td>Each attached client MUST own its client host, and a failure in one client host MUST NOT change the failure count, restart timer or enabled state of the same plugin in another client.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: two clients; trap plugin in A; B counters unchanged</td>
+</tr>
+<tr>
+<td>HST-014</td>
+<td>A plugin disabled by the restart rule in one client MUST stay enabled in other clients, and the notice MUST be shown only to the client that disabled it.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: disable in A by restart rule; B still enabled; notice only in A</td>
+</tr>
+<tr>
+<td>HST-015</td>
+<td>Scene instances MUST live in Stores that are separate from the client host's Stores, and scene frame calls MUST run on a thread that is neither the client UI thread nor a client plugin executor thread.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: scene Store set is separate; thread id of frame call differs from UI and executor threads</td>
+</tr>
+<tr>
+<td>HST-016</td>
+<td>A scene frame that is not ready when the compositor needs it MUST NOT delay the client frame. The compositor MUST reuse the previous complete frame.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: stall a scene frame; client frame time unaffected; previous frame reused</td>
+</tr>
+<tr>
+<td>HST-017</td>
+<td>A job MUST run in its own Store, MUST NOT share linear memory with the plugin's main instance, and MUST run on the job worker bank.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: job memory write does not appear in main instance; job thread is a bank thread</td>
+</tr>
+<tr>
+<td>HST-018</td>
+<td>The count of live job instances of one plugin side MUST NOT exceed <code>concurrent_jobs</code>; further jobs wait in the job queue.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: start concurrent_jobs+1 jobs; assert live count never exceeds the limit</td>
+</tr>
+<tr>
+<td>HST-019</td>
+<td>A CLI-process host MUST host only the plugin named by the entry plus the services it <code>requires</code>, and MUST NOT activate any other plugin.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: CLI process with two plugins installed; only the named one activates</td>
+</tr>
+<tr>
+<td>HST-020</td>
+<td>In a CLI-process host, imports that need a session MUST return <code>unavailable</code> and MUST NOT start a server.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: CLI-process host calls tree.get; assert unavailable and no server spawned</td>
+</tr>
+<tr>
+<td>HST-021</td>
+<td>A process MUST create exactly one Wasmtime <code>Engine</code> for plugin use, and every Store in that process MUST be created from it.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: Engine constructor count per process is 1</td>
+</tr>
+<tr>
+<td>HST-022</td>
+<td>Each plugin instance, including each job instance, MUST have its own <code>Store</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: every instance and job instance has a distinct Store id</td>
+</tr>
+<tr>
+<td>HST-023</td>
+<td>The grant store MUST have a single writer at any time and MUST be replaced atomically, so a reader never sees a partial file.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: concurrent grant-store writers; reader never sees partial file</td>
+</tr>
+<tr>
+<td>HST-024</td>
+<td>The retained contribution registry for server-side plugins MUST be owned by the server host, and a client MUST hold only a replica built from <code>ContributionDelta</code> records.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>IPC round-trip test: client holds replica only; mutate replica does not change server registry</td>
+</tr>
+<tr>
+<td>HST-025</td>
+<td>The extension-point registry and the service registry MUST be per hosting process. A point or service owned by a client side MUST NOT be visible to server-side plugins.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: client-owned point not visible to server-side plugin</td>
+</tr>
+<tr>
+<td>HST-026</td>
+<td>The server host MUST start after <code>restore_snapshot</code> and MUST deliver exactly one <code>tree-changed</code> batch for the restored tree to each plugin that subscribes to it, and no replay of restore steps.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: restore a tree with 30 nodes; each subscriber receives exactly one tree-changed</td>
+</tr>
+<tr>
+<td>HST-027</td>
+<td>Manifest verification, signature verification, component validation and static contribution registration MUST be completed eagerly before any plugin is activated. Instantiation MUST be lazy except for plugins with the <code>startup</code> trigger.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: instantiation counter is zero after verification for non-startup plugins</td>
+</tr>
+<tr>
+<td>HST-028</td>
+<td>A service provider MUST be activated before the plugins that <code>requires</code> it, and a cycle in <code>requires</code> MUST leave the plugins in the cycle disabled with <code>manifest.requires-cycle</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: requires cycle fixture yields manifest.requires-cycle and disabled plugins</td>
+</tr>
+<tr>
+<td>HST-029</td>
+<td>On server shutdown the host MUST stop after the services stop and before <code>drain_session_work</code> and the final snapshot, and MUST refuse new submissions as <code>cancelled</code> before the first <code>deactivate</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: order of log markers: services stop, refuse, deactivate, drain, snapshot</td>
+</tr>
+<tr>
+<td>HST-030</td>
+<td><code>deactivate(shutdown)</code> MUST be called in reverse activation order, and the total shutdown time spent in plugin calls MUST NOT exceed 5 seconds.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: 10 plugins with slow deactivate; total plugin shutdown time under 5 s</td>
+</tr>
+<tr>
+<td>HST-031</td>
+<td>A client that connects before the server host finished step 6 MUST be refused with the retriable error <code>server.starting</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>IPC round-trip test: connect during step 6; expect server.starting</td>
+</tr>
+<tr>
+<td>HST-032</td>
+<td>The client host MUST bound its own shutdown at 2 seconds in total, and a client that exits MUST NOT prevent the server from delivering outcomes for other clients.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: client exit with slow deactivate bounded at 2 s; server delivers others outcomes</td>
+</tr>
+<tr>
+<td>HST-033</td>
+<td><code>--safe-plugins</code> MUST load no T2 or T3 package and MUST ignore <code>replaces</code>, and <code>--no-plugins</code> MUST start no plugin host. Neither switch MUST change installed packages, grants or stored plugin data.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: start with each switch; assert loaded set and unchanged stores</td>
+</tr>
+<tr>
+<td>HST-034</td>
+<td>A session MUST boot to a usable terminal, tree and recovery page with <code>--no-plugins</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: start with --no-plugins; terminal, tree, recovery page respond</td>
+</tr>
+<tr>
+<td>HST-035</td>
+<td>A guest trap MUST end only the instance that trapped. Pending requests of that instance MUST complete as <code>cancelled</code>, and its retained contributions MUST be kept and marked stale.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Conformance fixture: trap fixture; pending requests cancelled; decorations stale</td>
+</tr>
+<tr>
+<td>HST-036</td>
+<td>A panic in a host import implementation MUST be caught at the import boundary, MUST trap only the calling instance with the error <code>host.import-panic</code>, and MUST NOT unwind into the dispatcher or the kernel.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: import that panics; instance traps with host.import-panic; dispatcher alive</td>
+</tr>
+<tr>
+<td>HST-037</td>
+<td>If the Engine cannot be created, the process MUST continue without a plugin host as if started with <code>--no-plugins</code>, and MUST log <code>host.engine-failed</code>.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: inject Engine creation failure; server continues without host</td>
+</tr>
+<tr>
+<td>HST-038</td>
+<td>The host MUST NOT hold a kernel lock while a guest call is running, and an import MUST take kernel locks only for the duration of its own work.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: loom or lock-order test: no kernel lock held during guest call</td>
+</tr>
+<tr>
+<td>HST-039</td>
+<td>A helper process failure MUST NOT crash or hang the parent process.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: kill helper with SIGKILL in loop; parent stays alive</td>
+</tr>
+<tr>
+<td>HST-040</td>
+<td>When the restart rule disables a core plugin, the session MUST keep running, the disabled state MUST persist across restarts, and the kernel recovery page MUST open once in the affected client.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: three traps in core plugin; session alive, state persists, recovery page opens</td>
+</tr>
+<tr>
+<td>HST-041</td>
+<td>The kernel recovery page and the command <code>kernel.open-recovery</code> MUST work with every plugin disabled and MUST NOT be removable by a plugin.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: recovery page with all plugins disabled; keymap plugin cannot unbind</td>
+</tr>
+<tr>
+<td>HST-042</td>
+<td>With <code>ilium.core.tree</code> disabled, the kernel MUST draw tree rows from node names and status only.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Integration test: disable ilium.core.tree; screenshot of rows contains names and glyphs only</td>
+</tr>
+<tr>
+<td>HST-043</td>
+<td>When both safe-start switches are given, <code>--no-plugins</code> MUST win.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: both flags; no host started</td>
+</tr>
+<tr>
+<td>HST-044</td>
+<td>An unreadable grant store MUST NOT start T2 or T3 plugins and MUST NOT grant a T1 plugin more than its default grants.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: corrupt grants.json; T2 refused, T1 default grants</td>
+</tr>
+<tr>
+<td>HST-045</td>
+<td>A package whose content hash differs from the recorded hash MUST NOT be loaded.</td>
+<td><a href="/pages/reference-host-architecture/">Host architecture</a></td>
+<td>Unit test in ilium-plugin-host: alter package file; load refused with manifest.file-hash</td>
+</tr>
+<tr>
+<td>HST-050</td>
+<td>Each Ilium release MUST pin Wasmtime to one exact version in <code>Cargo.lock</code> and in the workspace manifest (<code>=</code> requirement). The version at the time this contract was written is 49.0.2, which needs Rust 1.96 or later. The version in use is shown by <code>ilium plugin doctor</code> and recorded in every <code>.cwasm</code> header and in every benchmark result.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: assert Cargo.lock wasmtime version equals pinned requirement and ilium plugin doctor output</td>
+</tr>
+<tr>
+<td>HST-051</td>
+<td>A Wasmtime security release that fixes a vulnerability reachable from guest code MUST be taken into a point release of Ilium within 14 days of the upstream fix (see [SEC-171]), and within 48 hours when the vulnerability is exploited in the wild.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Manual check: release checklist: advisory-to-release time recorded in release notes</td>
+</tr>
+<tr>
+<td>HST-052</td>
+<td>A Wasmtime version bump MUST NOT be merged until all of these pass on the new version: the full conformance suite for the Rust and TypeScript guests, the benchmark gate of <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a> with no regression beyond its thresholds, the test that every embedded <code>.cwasm</code> deserializes, and the safety tests listed under "Errors and edge cases" below.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>CI check: bump pipeline job: conformance, bench gate, cwasm deserialize test, safety tests</td>
+</tr>
+<tr>
+<td>HST-053</td>
+<td>Every embedded <code>.cwasm</code> MUST be regenerated by the release build on every Wasmtime bump and on every change of a <code>Config</code> value that affects code generation. A stale <code>.cwasm</code> MUST fail the build, never ship.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>CI check: build fails when embedded cwasm fingerprint differs from host fingerprint</td>
+</tr>
+<tr>
+<td>HST-054</td>
+<td>The host MUST build Wasmtime with exactly the feature set above, and a workspace test MUST fail when <code>component-model-async</code> is enabled.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: workspace test on cargo metadata features of wasmtime</td>
+</tr>
+<tr>
+<td>HST-055</td>
+<td>The host MUST set <code>wasm_component_model_async(false)</code>. A component that needs it MUST be refused at load with <code>component.invalid</code>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: component using async model refused with component.invalid</td>
+</tr>
+<tr>
+<td>HST-056</td>
+<td>The host MUST fix the <code>concurrency_support</code> setting at build time to the value that keeps Wasmtime's concurrency APIs unused, and a test MUST instantiate, call and drop a component under that setting. (Disabling it makes those APIs panic, so the host never calls them.)</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: instantiate call drop under pinned concurrency_support setting</td>
+</tr>
+<tr>
+<td>HST-057</td>
+<td>The <code>Config</code> values in the table MUST be identical in the release build that produces <code>.cwasm</code> and in the host, and the host MUST compute a <code>config fingerprint</code> (a hash of Wasmtime version, target triple and every value in the table) and store it in the header of each embedded artifact.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: fingerprint function stable; header of each artifact equals host fingerprint</td>
+</tr>
+<tr>
+<td>HST-058</td>
+<td>Epoch interruption MUST be on, and fuel MUST be off.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: Config introspection: epoch on, fuel off</td>
+</tr>
+<tr>
+<td>HST-059</td>
+<td><code>max_wasm_stack</code> MUST be 512 KiB and <code>async_stack_size</code> MUST be 1 MiB.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: stack-recursion guest traps at 512 KiB; Config values asserted</td>
+</tr>
+<tr>
+<td>HST-060</td>
+<td>Signals-based traps MUST be enabled on every supported platform, and the Ilium processes MUST NOT install handlers for SIGSEGV, SIGBUS or SIGILL on Unix.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Platform CI lane: run on Linux, macOS, Windows; guest OOB access traps and process survives</td>
+</tr>
+<tr>
+<td>HST-061</td>
+<td>The compile cache MUST be owner-only, MUST be keyed by Wasmtime version and config fingerprint, and the host MUST delete caches of other keys at startup.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: cache dir mode 0700, name has version and fingerprint, stale dirs deleted</td>
+</tr>
+<tr>
+<td>HST-062</td>
+<td>The host MUST work with an unreadable, unwritable or full compile cache by compiling in memory and logging <code>host.cache-unavailable</code> once.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: read-only cache dir; load works; host.cache-unavailable logged once</td>
+</tr>
+<tr>
+<td>HST-063</td>
+<td>The host MUST use the on-demand allocator unless the benchmark rule below selects pooling.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: Config introspection: allocator is on-demand by default</td>
+</tr>
+<tr>
+<td>HST-064</td>
+<td>The benchmark B6 selects pooling if and only if both of these hold on the reference machine class: on-demand misses <code>HOST-START</code> (150 ms for the 40-plugin bundled set) or the instantiate time <code>B2</code> (5 ms median), and pooling meets both while adding no more than 16 MiB RSS. A selection MUST be recorded in the benchmark results page together with the Wasmtime version.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Benchmark B6: results page records selection; rule evaluated by script</td>
+</tr>
+<tr>
+<td>HST-065</td>
+<td><code>Component::deserialize</code> MUST be used only for artifacts that the release build of this exact Ilium version produced with the host's Engine <code>Config</code>. It MUST NOT be called on bytes from a package, a download, a user path or a cache that the host did not write.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: static check: deserialize call sites only in embedded loader</td>
+</tr>
+<tr>
+<td>HST-066</td>
+<td>A test MUST deserialize every embedded <code>.cwasm</code> on the host Engine and MUST fail the build if any artifact is rejected.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: test deserializes every embedded cwasm</td>
+</tr>
+<tr>
+<td>HST-067</td>
+<td>T2 and T3 components MUST be loaded with <code>Component::new</code> (inside the helper), through the compile cache, and the host MUST NOT call <code>Component::deserialize</code> on package bytes. The Wasmtime compile cache is the only path that deserializes, and it reads only files that the same host wrote under its owner-only cache directory.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: T2 fixture loads via Component::new in helper; no deserialize call on package bytes</td>
+</tr>
+<tr>
+<td>HST-068</td>
+<td>A package that contains a <code>.cwasm</code> file MUST be refused at install with <code>package.precompiled-forbidden</code>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: package fixture with cwasm refused with package.precompiled-forbidden</td>
+</tr>
+<tr>
+<td>HST-069</td>
+<td>The host MUST build one <code>InstancePre</code> per plugin side and MUST rebuild it whenever the grant set of that plugin changes (grant, revoke, upgrade). Existing instances keep running until they are re-activated as described in <a href="/pages/lifecycle/">Lifecycle</a>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: change grants; InstancePre generation increments</td>
+</tr>
+<tr>
+<td>HST-070</td>
+<td>The host MUST build one <code>Linker</code> per distinct grant set and MUST cache it under the SHA-256 of the sorted list of granted interface names plus the side and the tier. Two plugins with equal grant sets on equal sides share a <code>Linker</code>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: two plugins equal grant sets share a Linker; different sets do not</td>
+</tr>
+<tr>
+<td>HST-071</td>
+<td>A declined or revoked capability MUST link its functions to stubs that return <code>not-permitted</code> without running kernel code.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Conformance fixture: declined grant fixture: call returns not-permitted, kernel counter unchanged</td>
+</tr>
+<tr>
+<td>HST-072</td>
+<td>A component that imports an interface that is neither always granted nor unlocked by a requested capability MUST be refused at install or load with <code>manifest.import-not-requested</code>, and MUST NOT be instantiated.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: component importing unrequested interface refused with manifest.import-not-requested</td>
+</tr>
+<tr>
+<td>HST-073</td>
+<td>A call to a function whose capability the manifest never requested, inside a linked interface, MUST trap the instance with <code>host.capability-not-requested</code> and count as a failure.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Conformance fixture: call function of unrequested capability traps with host.capability-not-requested</td>
+</tr>
+<tr>
+<td>HST-074</td>
+<td>Every Store MUST be created with <code>StoreLimits</code> taken from the clamped manifest limits and MUST have <code>trap_on_grow_failure(true)</code>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: Store limits equal clamped manifest values; grow failure traps and the guest never sees -1</td>
+</tr>
+<tr>
+<td>HST-075</td>
+<td>Each Store MUST carry the plugin id, side, instance number, kind, authorization epoch and quota handle, and every import MUST check the authorization epoch against the current grant generation before it acts. A mismatch returns <code>revoked</code>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: revoke grant mid-session; import returns revoked</td>
+</tr>
+<tr>
+<td>HST-076</td>
+<td>The host MUST link WASI Preview 2 with captured stdout and stderr, an empty environment, no stdin, <code>wasi:cli/exit</code> as a trap, and preopens only from <code>fs.*</code> grants.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Conformance fixture: WASI fixture: stdout to log, env empty, exit traps, no preopen without grant</td>
+</tr>
+<tr>
+<td>HST-077</td>
+<td>A component that imports <code>wasi:sockets</code> or <code>wasi:http</code> MUST be refused at load with <code>component.wasi-forbidden</code> and MUST NOT be instantiated.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: components importing sockets or http refused with component.wasi-forbidden</td>
+</tr>
+<tr>
+<td>HST-078</td>
+<td>A stdout or stderr line longer than 16 KiB MUST be cut at 16 KiB and marked <code>[cut]</code>.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: 20 KiB stdout line is cut at 16 KiB with [cut]</td>
+</tr>
+<tr>
+<td>HST-079</td>
+<td>Each Engine MUST have exactly one epoch ticker thread, named <code>ilium-plugin-epoch</code>, that increases the epoch every 10 ms. The tick period is 10 ms on every platform.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: ticker thread name and period measured at 10 ms</td>
+</tr>
+<tr>
+<td>HST-080</td>
+<td>Before every guest call the host MUST install an <code>epoch_deadline_callback</code> for the Store. The callback runs on each tick while that call is executing. It compares the host monotonic clock with the call's deadlines and returns one of: continue, yield (only for yielding call classes), or a trap.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: callback installed before call; call-state visible in tick</td>
+</tr>
+<tr>
+<td>HST-081</td>
+<td>The host MUST set the instance deadline of a call with deadline <code>d</code> milliseconds to <code>ceil(d / 10) + 1</code> ticks after the call starts. A guest that spins traps no earlier than <code>d</code> and no later than <code>d + 20</code> ms of wall time on a host that is not overloaded, and a call that returns at <code>d - 1</code> ms never traps. A 20 ms deadline traps between 20 and 40 ms.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: loop guest with 20 ms deadline trap time in [20,40] ms over 1000 runs; a guest that returns at 19 ms never traps</td>
+</tr>
+<tr>
+<td>HST-082</td>
+<td>The ticker MUST continue while any call is in flight, and MUST detect a clock jump of more than one second between two ticks (for example after a system suspend) and in that case skip deadline decisions for that tick.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: inject clock jump; no trap decision on jump tick</td>
+</tr>
+<tr>
+<td>HST-083</td>
+<td>A trap caused by an epoch deadline MUST carry the error <code>trap.deadline</code> with the call class and the limit in milliseconds, and MUST be logged once.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: deadline trap carries trap.deadline, class and limit</td>
+</tr>
+<tr>
+<td>HST-084</td>
+<td>The host MUST apply the seven validation steps in this order and MUST report the first failing step's error id.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: multi-fault fixtures; first failing step id is reported</td>
+</tr>
+<tr>
+<td>HST-085</td>
+<td>The <code>ilium:api-version</code> custom section MUST be exactly six bytes and MUST equal the manifest <code>api</code> in all three fields.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: api-version section with wrong bytes refused</td>
+</tr>
+<tr>
+<td>HST-086</td>
+<td>A component larger than 32 MiB, a custom section larger than 4 MiB, or custom sections together larger than 8 MiB MUST be refused.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: oversized component and custom section fixtures refused</td>
+</tr>
+<tr>
+<td>HST-087</td>
+<td>The precompile step and the host MUST obtain their <code>Config</code> from the same function.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: precompile tool and host call the same runtime_config function</td>
+</tr>
+<tr>
+<td>HST-088</td>
+<td>When the config fingerprint of an embedded <code>.cwasm</code> differs from the host's, the host MUST NOT call <code>Component::deserialize</code> on it, MUST fall back to <code>Component::new</code> on the embedded <code>.wasm</code>, and MUST log <code>host.cwasm-incompatible</code>. A release-build test MUST fail if any bundled plugin takes this path.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Unit test in ilium-plugin-host: cwasm with other fingerprint; fallback to Component::new and log</td>
+</tr>
+<tr>
+<td>HST-089</td>
+<td>A stack overflow in guest code MUST trap the instance with <code>host.stack-overflow</code> and MUST NOT crash the process.</td>
+<td><a href="/pages/reference-host-runtime/">Host runtime</a></td>
+<td>Conformance fixture: recursion fixture traps with host.stack-overflow; host survives</td>
+</tr>
+<tr>
+<td>HST-100</td>
+<td>Plugin traffic MUST use <code>ClientRequest::Plugin</code>, <code>ServerEvent::Plugin</code>, <code>ServerEvent::Contributions</code> and <code>ServerEvent::Rejected</code> on the existing connection, and MUST NOT open another connection or change the framing.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>IPC round-trip test: bincode round trip of every Plugin variant on existing connection</td>
+</tr>
+<tr>
+<td>HST-101</td>
+<td><code>EnvelopeBody</code> MUST NOT contain a variant that carries a hook call or any guest call. Guest calls MUST NOT cross a process boundary.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: EnvelopeBody has no hook-call variant; compile-time exhaustive match test</td>
+</tr>
+<tr>
+<td>HST-102</td>
+<td><code>seq</code> MUST increase by one for each envelope in one direction of one connection. A receiver MUST treat a gap as a protocol error and close the connection with <code>ipc.sequence-gap</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: seq gap closes connection with ipc.sequence-gap</td>
+</tr>
+<tr>
+<td>HST-103</td>
+<td>A client MUST send <code>hello</code> in every <code>Attach</code> and <code>AttachInteractive</code>. A server MUST answer a mismatch of <code>plugin_protocol</code> or <code>contract</code> with <code>Rejected(ipc.protocol-mismatch)</code> and close the connection.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>IPC round-trip test: Attach with hello; mismatch rejected with ipc.protocol-mismatch</td>
+</tr>
+<tr>
+<td>HST-104</td>
+<td>A client that receives <code>ipc.protocol-mismatch</code> MUST print the cause and exit with code 76 without drawing the interface.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: client exit code 76 on protocol mismatch</td>
+</tr>
+<tr>
+<td>HST-105</td>
+<td>A plugin-set skew MUST disable only the client half of the affected plugin, with <code>plugin.version-skew</code> or <code>plugin.server-missing</code>. The server half and all other plugins MUST keep running.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: skewed plugin disables client half only</td>
+</tr>
+<tr>
+<td>HST-106</td>
+<td>The protocol constant MUST be a <code>u16</code> named <code>PLUGIN_PROTOCOL_VERSION</code> in <code>ilium-ipc</code>, and MUST change only when the envelope or handshake layout changes.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: PLUGIN_PROTOCOL_VERSION is u16 equal to 1</td>
+</tr>
+<tr>
+<td>HST-107</td>
+<td>The first contribution message after attach MUST be a <code>Snapshot</code>, and every later one an <code>Increment</code> with the next <code>sequence</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>IPC round-trip test: first contribution message is Snapshot then Increments</td>
+</tr>
+<tr>
+<td>HST-108</td>
+<td>A client MUST resync on a <code>sequence</code> gap, and the server MUST answer <code>Control::Resync</code> with a full <code>Snapshot</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: gap triggers Resync and new Snapshot</td>
+</tr>
+<tr>
+<td>HST-109</td>
+<td>A delta MUST NOT exceed 4 MiB.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: delta above 4 MiB split or refused</td>
+</tr>
+<tr>
+<td>HST-110</td>
+<td>The server MUST send the tree change caused by a forwarded submission BEFORE the <code>request-completed</code> outcome of the same submission, on the same connection.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: tree change precedes request-completed on same connection</td>
+</tr>
+<tr>
+<td>HST-111</td>
+<td>The mirror MUST be updated before the client half's event queue receives the matching <code>tree-changed</code> event, and a <code>request-completed</code> MUST NOT be delivered to a plugin before the mirror shows the effect.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: mirror updated before event delivery</td>
+</tr>
+<tr>
+<td>HST-112</td>
+<td>A client MUST forward each submission of a client-hosted plugin in a <code>Submit</code> envelope and MUST NOT apply tree or session effects itself.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: client never applies tree or session effects itself</td>
+</tr>
+<tr>
+<td>HST-113</td>
+<td>The dedup scope of a forwarded submission MUST be the pair (plugin id, client id), the window MUST be 10 minutes, and the table MUST be held by the server.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: dedup keyed by plugin and client id, 10 min window</td>
+</tr>
+<tr>
+<td>HST-114</td>
+<td>The server MUST check the grant of the plugin at the time of application, not at the time of sending, and a submission whose grant was revoked in between MUST complete as <code>revoked</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: grant checked at application time; revoked completes as revoked</td>
+</tr>
+<tr>
+<td>HST-115</td>
+<td>The server MUST answer each <code>Submit</code> with exactly one <code>Outcome</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>IPC round-trip test: exactly one Outcome per Submit</td>
+</tr>
+<tr>
+<td>HST-116</td>
+<td>The server MUST keep outcome records for 30 seconds after a client connection closes, at most 1,024 records per client id.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: outcome records kept 30 s, max 1,024</td>
+</tr>
+<tr>
+<td>HST-117</td>
+<td>On re-attach within the grace period the server MUST replay outcomes with a higher <code>seq</code> than the client reports and MUST then send a contribution snapshot.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: re-attach replays outcomes then snapshot</td>
+</tr>
+<tr>
+<td>HST-118</td>
+<td>After the grace period, unapplied submissions of that client MUST complete as <code>cancelled</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: unapplied submissions cancelled after grace</td>
+</tr>
+<tr>
+<td>HST-119</td>
+<td>A detached client MUST queue at most 256 submissions and MUST complete later ones as <code>refused(busy)</code> at once. Submissions still queued when the client exits MUST complete as <code>cancelled</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: detached queue 256 then the 257th completes refused(busy); exit the client and the queued ones complete cancelled</td>
+</tr>
+<tr>
+<td>HST-120</td>
+<td>The writer MUST send PTY frames before plugin envelopes and MUST guarantee one plugin envelope for every eight frames while plugin data is queued.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: writer ordering and 1 in 8 share</td>
+</tr>
+<tr>
+<td>HST-121</td>
+<td>The plugin queue MUST be bounded at 4 MiB or 4,096 records. On overflow the server MUST merge coalescable increments first and flag a resync second.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: plugin queue bounds; merge then resync</td>
+</tr>
+<tr>
+<td>HST-122</td>
+<td>A client whose queued plugin data exceeds 16 MiB MUST be disconnected with <code>ipc.client-too-slow</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Integration test: 16 MiB queued disconnects with ipc.client-too-slow</td>
+</tr>
+<tr>
+<td>HST-123</td>
+<td>Plugin traffic MUST NOT delay a PTY frame by more than the time to write one plugin envelope.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Benchmark B19: PTY frame delay under plugin load</td>
+</tr>
+<tr>
+<td>HST-124</td>
+<td>The sender MUST check the caps above and refuse an oversized item with <code>ipc.payload-too-large</code> before it is encoded.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: payload caps checked before encoding</td>
+</tr>
+<tr>
+<td>HST-125</td>
+<td>A receiver MUST drop an envelope above 17 MiB and close the connection with <code>ipc.payload-too-large</code>.</td>
+<td><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></td>
+<td>Unit test in ilium-plugin-host: envelope above 17 MiB closes connection</td>
+</tr>
+<tr>
+<td>HST-150</td>
+<td>The host MUST start one helper per T2 or T3 plugin side and per hosting process, and MUST NOT host two plugins in one helper.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: two plugins never share a helper</td>
+</tr>
+<tr>
+<td>HST-151</td>
+<td>The helper binary MUST be <code>ilium-plugin-helper</code> in the same directory as the <code>ilium</code> executable, MUST use the same <code>runtime_config()</code> as the host, and MUST refuse to start if the host passes a different Wasmtime fingerprint.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: helper uses same runtime_config; fingerprint mismatch refused</td>
+</tr>
+<tr>
+<td>HST-152</td>
+<td>A helper MUST start only at the first activation of its plugin side.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: helper not started until first activation</td>
+</tr>
+<tr>
+<td>HST-153</td>
+<td>The dispatcher channel MUST be an inherited <code>socketpair</code>. The helper MUST NOT create sockets or open any path outside its mounts to receive work.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: dispatcher channel inherited socketpair; helper cannot create sockets</td>
+</tr>
+<tr>
+<td>HST-154</td>
+<td>The host MUST treat a missing <code>Hello</code>, a wrong fingerprint or a <code>Ready</code> later than 5,000 ms after <code>Instantiate</code> as <code>helper.spawn-failed</code>, kill the helper, and count one failure only when the plugin had already started once.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: Hello missing or Ready late gives helper.spawn-failed</td>
+</tr>
+<tr>
+<td>HST-155</td>
+<td>Messages MUST be length-prefixed <code>bincode</code>, MUST NOT exceed the sizes above, and a message of an unknown kind, a bad length or a schema violation MUST end the helper and count as a failure.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>IPC round-trip test: helper message framing; unknown kind ends helper</td>
+</tr>
+<tr>
+<td>HST-156</td>
+<td>The host MUST derive the plugin identity from the channel and MUST drop any message that names another plugin (see <a href="/pages/reference-sandbox/">Sandbox reference</a>).</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: message naming other plugin dropped</td>
+</tr>
+<tr>
+<td>HST-157</td>
+<td>A <code>CallResult</code>, <code>HostCall</code> or <code>HostReply</code> MUST carry a call id that the host issued. A message with an unknown or finished call id MUST be dropped and logged <code>helper.stale-call</code>.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Unit test in ilium-plugin-host: unknown call id dropped with helper.stale-call</td>
+</tr>
+<tr>
+<td>HST-158</td>
+<td>Bulk data MUST travel in chunks of at most 4 MiB over the dispatcher channel. The host MUST NOT pass file descriptors or shared memory to a helper.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: bulk data chunked 4 MiB; no fd passing</td>
+</tr>
+<tr>
+<td>HST-159</td>
+<td>Only the pure-compute imports MAY run in the helper without a round trip. Every other import MUST be forwarded and checked by the host.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Conformance fixture: pure-compute imports local; others forwarded and grant-checked</td>
+</tr>
+<tr>
+<td>HST-160</td>
+<td>A forwarded import round trip MUST take at most 0.2 ms median and 0.5 ms at the 99th percentile on an idle reference machine (benchmark B18).</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Benchmark B18: forwarded import round trip 0.2 ms median 0.5 ms p99</td>
+</tr>
+<tr>
+<td>HST-161</td>
+<td>The deadline of a helper call MUST include the time of every <code>HostCall</code> round trip made during that call.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: HostCall round trips inside deadline</td>
+</tr>
+<tr>
+<td>HST-162</td>
+<td>The helper MUST set its own epoch deadline from the <code>CallExport</code> deadline. The host MUST kill a helper that has not answered 500 ms after that deadline and MUST count one failure.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: helper epoch deadline; kill 500 ms after deadline</td>
+</tr>
+<tr>
+<td>HST-163</td>
+<td>The host MUST kill a helper after three missed heartbeats (a ping every 1 s).</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: three missed heartbeats kill helper</td>
+</tr>
+<tr>
+<td>HST-164</td>
+<td>The host MUST charge <code>memory_mib + 32</code> MiB per helper to <code>session_memory_mib</code> at spawn and release it at exit.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Unit test in ilium-plugin-host: helper memory charge memory_mib+32</td>
+</tr>
+<tr>
+<td>HST-165</td>
+<td>An activation that would exceed <code>session_memory_mib</code> MUST be refused with <code>session.memory-exceeded</code>, MUST NOT count as a failure, and MUST leave the side <code>inactive</code> with the reason <code>host-capacity</code>.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: activation over session_memory_mib refused session.memory-exceeded; no failure; host-capacity</td>
+</tr>
+<tr>
+<td>HST-166</td>
+<td>The host MUST cap live helpers at <code>session_helpers</code> and MUST refuse a further activation with <code>helper.too-many</code>, without counting a failure.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: session_helpers cap gives helper.too-many without failure</td>
+</tr>
+<tr>
+<td>HST-167</td>
+<td>The host SHOULD shut down a helper that has been idle for 60 s, after <code>deactivate</code>, and start it again at the next need.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: idle helper shutdown after 60 s</td>
+</tr>
+<tr>
+<td>HST-168</td>
+<td>A helper that dies during a call MUST count one failure for its plugin, and a helper that dies while idle MUST NOT count one.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: crash during call counts one failure; idle crash none</td>
+</tr>
+<tr>
+<td>HST-169</td>
+<td>After a helper dies, every request pending on it MUST complete as <code>cancelled</code>, and no retained state in the helper MUST be assumed.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: pending requests cancelled after helper death</td>
+</tr>
+<tr>
+<td>HST-170</td>
+<td>The host MUST allow at most 5 helper starts in 10 minutes for a session, and MUST then disable the T2 and T3 plugins of that session with <code>helper.unstable</code>.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: more than 5 helper starts in 10 min disables T2/T3 with helper.unstable</td>
+</tr>
+<tr>
+<td>HST-171</td>
+<td>Termination MUST be SIGTERM followed by SIGKILL after 2 s.</td>
+<td><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></td>
+<td>Integration test: SIGTERM then SIGKILL after 2 s</td>
+</tr>
+<tr>
+<td>HST-180</td>
+<td>Guest code MUST run only on the plugin executor, the scene thread, the job worker bank or (in a helper) the helper call loop. It MUST NOT run on the server main runtime, the client UI thread or the epoch ticker.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: guest never runs on main runtime, UI thread or ticker; thread-name assertion in test hooks</td>
+</tr>
+<tr>
+<td>HST-181</td>
+<td>No plugin call MUST ever run on the client UI thread. The UI thread MUST send work to the plugin executor through a bounded channel and MUST apply results on a later frame.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: client UI thread test double asserts no Wasmtime symbol call; frame loop under slow plugin</td>
+</tr>
+<tr>
+<td>HST-182</td>
+<td>The plugin executor MUST have <code>clamp(cores / 2, 2, 4)</code> threads in the server and <code>clamp(cores / 4, 1, 2)</code> threads in the client. The job worker bank MUST have <code>min(4, cores / 2)</code> threads, at least one.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: executor sizing function over core counts 1,2,4,8,64</td>
+</tr>
+<tr>
+<td>HST-183</td>
+<td>The scene thread MUST be a single dedicated thread per client, and a scene frame MUST NOT occupy a plugin executor thread.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: scene frame does not occupy executor thread</td>
+</tr>
+<tr>
+<td>HST-184</td>
+<td>The host MUST run at most one call at a time in one Store and MUST pick the next call by the priority table, then by arrival order.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: instance queue priority and arrival order</td>
+</tr>
+<tr>
+<td>HST-185</td>
+<td>The dispatcher MUST serve plugin sides round robin and MUST give a side at most 4 calls per 10 ms tick.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: round robin 4 calls per tick fairness</td>
+</tr>
+<tr>
+<td>HST-186</td>
+<td>One plugin's slow call MUST NOT delay another plugin's call by more than the other plugins' calls ahead of it in the round robin, and MUST NOT delay a client frame at all.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Benchmark B12: slow plugin does not delay others</td>
+</tr>
+<tr>
+<td>HST-187</td>
+<td>A queued call with a waiting caller MUST be abandoned, with the same effect as a soft breach, when it has not started within its own deadline measured from the time it was queued.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: queued call with waiting caller abandoned after its deadline</td>
+</tr>
+<tr>
+<td>HST-188</td>
+<td>Every guest call MUST belong to exactly one row of the call-class table and MUST run under that row's default, or under the effective limit after clamping to the ceiling of the plugin's tier.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Conformance fixture: each call class has row; effective limit equals default or clamped</td>
+</tr>
+<tr>
+<td>HST-189</td>
+<td>A hard breach MUST trap the instance. A soft breach MUST discard the late result and count a breach, and a call that passes its soft deadline plus 100 ms MUST be trapped.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Conformance fixture: hard breach traps; soft breach drops result; soft+100ms traps</td>
+</tr>
+<tr>
+<td>HST-190</td>
+<td>The streak limits MUST be 3 for <code>annotate</code>, <code>detector</code>, <code>menu-items</code>, <code>query-catalog</code>, <code>list-virtual-children</code>, <code>tokens</code> and <code>settings-validate</code>, and 30 for scene frames. A timely call MUST reset the streak.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: streak limits 3 and 30, reset on timely call</td>
+</tr>
+<tr>
+<td>HST-191</td>
+<td>A <code>deactivate</code> breach or trap MUST drop the instance, discard its restore bytes, log <code>deactivate.deadline</code>, and MUST NOT count as a failure.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: deactivate breach drops instance, no bytes, no failure counted</td>
+</tr>
+<tr>
+<td>HST-192</td>
+<td>A batch that contains a <code>command-invoked</code> event MUST run under <code>command_deadline_ms</code>, and every other batch under <code>event_deadline_ms</code>.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: command-invoked batch selects command_deadline_ms</td>
+</tr>
+<tr>
+<td>HST-193</td>
+<td>The effective deadline of a call MUST be clamped to the ceiling for the tier, and the clamp MUST be logged once per plugin and key.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: ceiling clamp logged once per plugin and key</td>
+</tr>
+<tr>
+<td>HST-194</td>
+<td>Time spent inside a synchronous host import MUST count toward the deadline of the call that made it, and time after the call returned MUST NOT.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Conformance fixture: synchronous import time counts; post-return time does not</td>
+</tr>
+<tr>
+<td>HST-195</td>
+<td>The deadline clock MUST be monotonic, and a gap of more than one second between two ticks MUST NOT produce a deadline breach.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: tick gap over 1 s ignored</td>
+</tr>
+<tr>
+<td>HST-196</td>
+<td>Only <code>activate</code>, job runs and service calls that wait for an activation MAY yield. All other classes MUST run on one thread without yielding until they return or fail.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: only listed classes yield</td>
+</tr>
+<tr>
+<td>HST-197</td>
+<td>While a plugin side is activating, the host MUST queue its other calls and MUST NOT call into the instance until <code>activate</code> has returned successfully.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: calls queued while activating</td>
+</tr>
+<tr>
+<td>HST-198</td>
+<td>A trap MUST apply none of the call's returned submissions, MUST NOT roll back imports that already acted, and MUST NOT redeliver the in-flight batch except for the surviving event kinds.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Conformance fixture: trap applies no submissions; imports not rolled back</td>
+</tr>
+<tr>
+<td>HST-199</td>
+<td>The surviving event kinds (<code>request-completed</code>, <code>durable-timer-fired</code>, <code>input-uncertain</code>, <code>message</code>) MUST be redelivered at the head of the new instance's queue once, and dropped with the log id <code>events.poison</code> if the redelivery traps again.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: surviving events redelivered once; second trap logs events.poison</td>
+</tr>
+<tr>
+<td>HST-200</td>
+<td>A stuck-queue restart MUST discard the queue except the surviving kinds, MUST complete the calls behind <code>cli-invoked</code>, <code>http-called</code> and <code>client-request</code> as <code>cancelled</code>, and the new instance MUST receive one <code>tree-changed</code> batch for every node.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: stuck-queue restart discards queue except surviving kinds; tree-changed for all nodes</td>
+</tr>
+<tr>
+<td>HST-201</td>
+<td>Retained contributions of a trapped instance MUST stay and be marked stale until the plugin replaces or clears them.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: stale marking of retained contributions after trap</td>
+</tr>
+<tr>
+<td>HST-202</td>
+<td>Each plugin side MUST have one event queue of <code>event_queue</code> entries, and the policy of each event kind (coalesce, drop oldest, never dropped) MUST be the one in <a href="/pages/api-events/">Events</a>.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: queue policy per event kind</td>
+</tr>
+<tr>
+<td>HST-203</td>
+<td>A full queue with a never-dropped event MUST restart the plugin side as a failure.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: full queue with never-dropped event restarts side as failure</td>
+</tr>
+<tr>
+<td>HST-204</td>
+<td>A batch MUST contain at most 256 events, MUST be flushed after 2 ms or at 256 events, and MUST be flushed at once when it contains a latency-critical kind.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: batch flush rules 256 / 2 ms / latency-critical</td>
+</tr>
+<tr>
+<td>HST-205</td>
+<td>Streams MUST use a credit window of 256 KiB, chunks of at most 64 KiB, and the host MUST stop reading the socket or pipe at a full window and resume at half.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: credit window 256 KiB, resume at half</td>
+</tr>
+<tr>
+<td>HST-206</td>
+<td>Rate limits MUST be applied before an event is enqueued.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: rate limit applied before enqueue</td>
+</tr>
+<tr>
+<td>HST-207</td>
+<td>The host MUST maintain one <code>ilium-execution</code> bucket per plugin side with capacity 2,000 ms and refill 500 ms per second, MUST charge thread CPU time and payload bytes as above, and MUST refuse submissions with <code>quota-exceeded</code> and <code>retry-after-ms</code> = max(100, ceil_10(-balance_ms * 2)) when the balance is 0 or less.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: ilium-execution bucket 2,000 ms capacity 500 ms/s; balance -100 ms gives retry-after 200</td>
+</tr>
+<tr>
+<td>HST-208</td>
+<td>An empty bucket MUST NOT hold <code>on-events</code>, <code>views.render</code>, <code>activate</code>, <code>deactivate</code> or provider calls.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: empty bucket never holds on-events, render, activate, deactivate or provider calls</td>
+</tr>
+<tr>
+<td>HST-209</td>
+<td>Each cancellation cause MUST produce the outcome in the table, and a completed request MUST NOT be changed by a later cancel.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: cancellation cause to outcome table</td>
+</tr>
+<tr>
+<td>HST-210</td>
+<td>Cancelled HTTP and file work MUST stop within 100 ms, child processes MUST receive SIGTERM then SIGKILL after 2 s, and a job that ignores the cancel flag MUST be trapped 1,000 ms after the flag is set.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: teardown bounds 100 ms, SIGTERM then SIGKILL 2 s, job trap 1000 ms</td>
+</tr>
+<tr>
+<td>HST-211</td>
+<td><code>run-hook</code> MUST NOT block the owner's call, handlers of one chain MUST run strictly sequentially, and the 100 ms chain cap MUST be measured from the first handler's start.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: run-hook async; sequential handlers; chain cap from first start</td>
+</tr>
+<tr>
+<td>HST-212</td>
+<td>A handler MUST be skipped as <code>pass</code> when it cannot start within its own deadline, and a skipped or late handler MUST count a breach.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: handler skipped as pass when cannot start in deadline</td>
+</tr>
+<tr>
+<td>HST-213</td>
+<td>A hook chain MUST run only handlers hosted by the process that owns the point.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Integration test: hook never crosses process</td>
+</tr>
+<tr>
+<td>HST-214</td>
+<td>A grabbed key MUST flush its batch at once, and the 99th percentile from the dispatcher channel to the start of the plugin call MUST be at most 1 ms for T1 and 1.5 ms for T2 and T3 on an idle reference machine.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Benchmark B16: key to call start p99 1 ms T1, 1.5 ms T2/T3</td>
+</tr>
+<tr>
+<td>HST-215</td>
+<td>The 99th percentile from key press to bytes at the PTY through a plugin handler of 0.1 ms MUST be at most 5 ms on an idle reference machine.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Benchmark B17: key to PTY bytes p99 5 ms</td>
+</tr>
+<tr>
+<td>HST-216</td>
+<td>A call that is abandoned in the queue MUST log <code>host.queue-timeout</code> and count a breach of its class.</td>
+<td><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></td>
+<td>Unit test in ilium-plugin-host: host.queue-timeout logged and breach counted</td>
+</tr>
+<tr>
+<td>HST-250</td>
+<td>The client MUST paint every frame from held data only, and a frame MUST NOT be late because a plugin call is pending.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: frame paint with blocked plugin executor stays on time</td>
+</tr>
+<tr>
+<td>HST-251</td>
+<td>A plugin MUST NOT be asked to render per frame. It is asked when its view opens, after <code>ui.invalidate</code>, after a change of the view's area (a resize), after a theme change, and after a user action in the view.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: views.render only on listed triggers</td>
+</tr>
+<tr>
+<td>HST-252</td>
+<td>Retained contributions MUST be held by the owner of the point (server registry or client store) and drawn from a copy in the client.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: contributions held by owner, copy drawn in client</td>
+</tr>
+<tr>
+<td>HST-253</td>
+<td>The host MUST enforce the contribution caps above and MUST keep the previous contributions on refusal.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: contribution caps and refusals keep previous list</td>
+</tr>
+<tr>
+<td>HST-254</td>
+<td>The host MUST mark the contributions of a stopped plugin side as stale and MUST clear them at the end of 60 s without a scheduled restart, at uninstall, and at user disable.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: stale marking and 60 s clearing</td>
+</tr>
+<tr>
+<td>HST-255</td>
+<td>A stale contribution MUST NOT accept user actions that would call the plugin; the action shows "plugin is restarting" instead.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: stale contribution action shows restarting notice</td>
+</tr>
+<tr>
+<td>HST-256</td>
+<td><code>views.render</code> MUST be called only on the triggers above, and MUST have at most one call in flight and one queued per view.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: one render in flight one queued per view</td>
+</tr>
+<tr>
+<td>HST-257</td>
+<td>The client MUST draw the previous tree until a valid new tree arrives, and MUST swap trees only between frames.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: previous tree drawn until valid new tree; swap between frames</td>
+</tr>
+<tr>
+<td>HST-258</td>
+<td>A tree over a cap, or any other invalid tree, MUST trap the instance with <code>trap.invalid-ui-tree</code>, whose logged detail reason is the named <code>ui.*</code> code (<code>ui.invalid-tree</code>, <code>ui.duplicate-key</code>, <code>ui.too-deep</code>, <code>ui.too-large</code>, <code>ui.widget-not-allowed</code>, <code>ui.render-timeout</code>), MUST NOT be shown, and the previous tree MUST stay on screen, marked stale.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: ui-tree over caps traps with named error; previous tree stays stale</td>
+</tr>
+<tr>
+<td>HST-259</td>
+<td>Several <code>ui.invalidate</code> calls before a render starts MUST produce one render, and a render MUST be at least 16 ms after the previous render of the same view.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: invalidate coalescing; 16 ms spacing</td>
+</tr>
+<tr>
+<td>HST-260</td>
+<td>The host MUST call <code>annotate</code> and <code>tokens</code> only for visible rows plus 20 lines and at most once per 100 ms per view.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: annotate and tokens visible rows plus 20, 100 ms spacing</td>
+</tr>
+<tr>
+<td>HST-261</td>
+<td>A late <code>annotate</code> or <code>tokens</code> result MUST be discarded, and spans above 2,048 per call MUST be cut.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: late annotate result dropped; span cut 2,048</td>
+</tr>
+<tr>
+<td>HST-262</td>
+<td>Scene frames MUST be rendered on the scene thread into a back buffer, and the UI thread MUST read only a complete front buffer.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: scene double buffer; no partial frame</td>
+</tr>
+<tr>
+<td>HST-263</td>
+<td>A late scene frame MUST be skipped without delaying the UI, and the host MUST apply the shared look to each presented frame.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: late scene frame skipped; shared look applied</td>
+</tr>
+<tr>
+<td>HST-264</td>
+<td>The host MUST NOT call <code>render</code> for a pre-rendered clip while the clip is valid.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: pre-rendered clip not re-rendered</td>
+</tr>
+<tr>
+<td>HST-265</td>
+<td>Only one scene MUST be active per client, and the host MUST stop the scene thread work when the background is off or the window is hidden.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: one scene per client; stops when hidden</td>
+</tr>
+<tr>
+<td>HST-266</td>
+<td>A change made by a server plugin to a decoration MUST reach the client mirror in at most 5 ms at the 99th percentile on an idle local connection (benchmark B20).</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Benchmark B20: server decoration change to client mirror p99 5 ms</td>
+</tr>
+<tr>
+<td>HST-267</td>
+<td>A detached client MUST mark mirrored server contributions stale until a snapshot arrives.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: detached client marks mirror stale</td>
+</tr>
+<tr>
+<td>HST-268</td>
+<td>A theme or font change MUST repaint the last tree of every open view at once, deliver theme-changed, and trigger exactly one render per open view, coalesced within a 16 ms window; the client MUST recolour retained contributions without calling the plugin.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: theme change repaints at once, then triggers exactly one render per view</td>
+</tr>
+<tr>
+<td>HST-269</td>
+<td>The client MUST reconcile trees by <code>key</code> across the whole view, MUST keep view state for matched nodes, and MUST keep the state of a removed key for 2 seconds.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: key reconciliation keeps view state; removed key kept 2 s</td>
+</tr>
+<tr>
+<td>HST-270</td>
+<td>The client MUST resolve hits on the UI thread in the order popups, overlays, content, frame, MUST skip disabled and inert nodes, and MUST NOT call the plugin to resolve a hit.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: hit test order and inert skipping on UI thread</td>
+</tr>
+<tr>
+<td>HST-271</td>
+<td>The client MUST own focus and scroll state, MUST apply them in the frame in which the input arrives, and MUST grant a focus request from a plugin only for a view the user has focused or opened.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Integration test: focus and scroll applied in same frame; focus request rule</td>
+</tr>
+<tr>
+<td>HST-272</td>
+<td>Two nodes in one tree with the same <code>key</code> MUST trap the instance with <code>ui.duplicate-key</code>.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: duplicate key traps with ui.duplicate-key</td>
+</tr>
+<tr>
+<td>HST-300</td>
+<td>Each benchmark MUST run at least 1,000 measured iterations after at least 100 warm-up iterations, on one pinned core, with the CPU governor set to a fixed frequency where the platform allows it.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark: benchmark iteration and warm-up counts enforced by harness</td>
+</tr>
+<tr>
+<td>HST-301</td>
+<td>Each result MUST record the median and the 99th percentile, the Wasmtime version, the Wasmtime <code>Config</code> (as the output of <code>runtime_config()</code>), the CPU model, the core count, the operating system and the commit.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark: result record fields present in output schema</td>
+</tr>
+<tr>
+<td>HST-302</td>
+<td>A benchmark MUST fail the run when the budget is missed, except where the table says "record" (a result without a target).</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark: harness exits non-zero on missed budget</td>
+</tr>
+<tr>
+<td>HST-303</td>
+<td>Benchmarks MUST run on a release build with the target features of the shipped binary, and MUST NOT use a debug build.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>CI check: bench built in release with shipped target features</td>
+</tr>
+<tr>
+<td>HST-304</td>
+<td>A result more than twice the budget on B1, B3 or B4 MUST be reported as a plan stop, not as an ordinary failure.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B1: more than 2x on B1, B3 or B4 reported as plan stop</td>
+</tr>
+<tr>
+<td>HST-305</td>
+<td><code>ilium-plugin-bench</code> MUST contain one program for each of B1 to B24, with the id in its name.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>CI check: bench crate has one program per B1..B24</td>
+</tr>
+<tr>
+<td>HST-306</td>
+<td>The release gate MUST include B1 to B9, B16 to B20 and B23 on the reference machine, and MUST fail when any budget is missed.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>CI check: release gate includes B1-B9, B16-B20 and B23</td>
+</tr>
+<tr>
+<td>HST-307</td>
+<td>HOST-START MUST be at most 150 ms on the reference machine for the 40 bundled plugins, measured by B6.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B6: HOST-START 150 ms with 40 bundled plugins</td>
+</tr>
+<tr>
+<td>HST-308</td>
+<td>CLI-COLD MUST be at most 60 ms, measured by B23, and MUST NOT start the server or any plugin that does not contribute the subcommand.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B23: CLI-COLD 60 ms; no server or unrelated plugin started</td>
+</tr>
+<tr>
+<td>HST-309</td>
+<td>The resident memory that the host adds with the bundled plugins registered MUST be under 120 MiB.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B22: added RSS under 120 MiB</td>
+</tr>
+<tr>
+<td>HST-310</td>
+<td>The Rust wasm scenes MUST be within 1.3x of native Rust at the 99th percentile on B3.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B3: Rust wasm within 1.3x native p99</td>
+</tr>
+<tr>
+<td>HST-311</td>
+<td>The epoch overhead on B3 MUST be at most 5 % (B7).</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B7: epoch overhead at most 5 percent</td>
+</tr>
+<tr>
+<td>HST-312</td>
+<td>The pooling allocator MUST be enabled only when B6 shows that on-demand misses HOST-START or B2, that pooling meets both, and that pooling adds at most 16 MiB of RSS.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Benchmark B6: pooling allocator enable rule</td>
+</tr>
+<tr>
+<td>HST-313</td>
+<td>The host MUST count a call as a near-miss when it ends in time but took at least 80 % of its deadline, and MUST use that count for the <code>degraded</code> health condition.</td>
+<td><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></td>
+<td>Integration test: near-miss counted at 80 percent of deadline and feeds degraded health</td>
+</tr>
+<tr>
+<td>HST-350</td>
+<td>The host MUST NOT send telemetry over the network.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Integration test: no network socket opened by telemetry; egress test</td>
+</tr>
+<tr>
+<td>HST-351</td>
+<td>Recording one call MUST take at most 200 ns at the 99th percentile and MUST NOT take a lock.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Benchmark: record cost per call 200 ns p99, lock-free</td>
+</tr>
+<tr>
+<td>HST-352</td>
+<td>Telemetry memory MUST be at most 64 KiB per plugin side.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: telemetry memory per side at most 64 KiB</td>
+</tr>
+<tr>
+<td>HST-353</td>
+<td>Telemetry MUST NOT contain payloads, paths, URLs, terminal text or prompts.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: counter schema contains no payload fields</td>
+</tr>
+<tr>
+<td>HST-354</td>
+<td>The host MUST keep the counters above for each plugin side, and the histogram buckets MUST be the ones listed.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: counter set and histogram buckets</td>
+</tr>
+<tr>
+<td>HST-355</td>
+<td><code>near_misses</code> MUST count a call that ends in time and took at least 80 % of its deadline.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: near-miss at 80 percent</td>
+</tr>
+<tr>
+<td>HST-356</td>
+<td>A counter MUST NOT be readable by another plugin. Only the kernel, the CLI and the user interface read them.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Integration test: plugin cannot read counters of another plugin</td>
+</tr>
+<tr>
+<td>HST-357</td>
+<td>The host MUST keep hourly buckets for 24 hours and MUST discard older buckets. The summary line at the end of an instance MUST be written once.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: hourly buckets 24 h; one summary line</td>
+</tr>
+<tr>
+<td>HST-358</td>
+<td>The host MUST write the lines above under the plugin id, MUST include the stable condition id, and MUST rate limit them to 20 per minute per side and kind.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: host log lines with stable ids; rate limit 20 per minute</td>
+</tr>
+<tr>
+<td>HST-359</td>
+<td>The host MUST write <code>host.slow-calls</code> at most once per minute per side and only when a call took over 50 % of its deadline.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: host.slow-calls once per minute above 50 percent</td>
+</tr>
+<tr>
+<td>HST-360</td>
+<td>Tracing MUST be off by default and MUST record no payloads.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Unit test in ilium-plugin-host: tracing off by default; no payloads</td>
+</tr>
+<tr>
+<td>HST-361</td>
+<td><code>ilium plugin stats &lt;id&gt; --json</code> MUST print every counter for the retained buckets as JSON lines with a <code>type</code> field, and MUST exit with code 0 when the plugin exists.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Integration test: ilium plugin stats --json output</td>
+</tr>
+<tr>
+<td>HST-362</td>
+<td>A plugin MUST be able to read its own summary through <code>plugin-info</code> without a grant.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Integration test: plugin-info self summary without grant</td>
+</tr>
+<tr>
+<td>HST-363</td>
+<td>The host MUST show the signal that put a plugin in <code>degraded</code> as a "Why" line with the counter values in the detail view.</td>
+<td><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></td>
+<td>Integration test: degraded Why line with counter values</td>
+</tr>
+<tr>
+<td>HST-380</td>
+<td>On Windows and macOS the host MUST refuse to load T2 and T3 plugins with <code>sandbox.unavailable</code>, naming the platform, and MUST NOT run a third-party plugin without the helper confinement on any platform.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Platform CI lane: T2/T3 refused with sandbox.unavailable on macOS and Windows</td>
+</tr>
+<tr>
+<td>HST-381</td>
+<td>The plugin host MUST work for T1 plugins on every shipped platform with the same Wasmtime version and the same <code>runtime_config()</code>, except for the platform switches in this page.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Platform CI lane: T1 conformance identical across shipped platforms</td>
+</tr>
+<tr>
+<td>HST-382</td>
+<td>A package for a platform that is not shipped MUST NOT be reported as supported in any user interface.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Manual check: unsupported platform never shown as supported</td>
+</tr>
+<tr>
+<td>HST-383</td>
+<td>The release MUST embed the <code>.wasm</code> and one <code>.cwasm</code> per shipped triple for each T1 plugin, and the host MUST fall back to <code>Component::new</code> when no <code>.cwasm</code> matches.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Integration test: cwasm per triple embedded; fallback to Component::new</td>
+</tr>
+<tr>
+<td>HST-384</td>
+<td>The host MUST present paths to plugins with <code>/</code> separators on every platform, and MUST document case sensitivity per platform as above.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Platform CI lane: paths presented with / on all platforms</td>
+</tr>
+<tr>
+<td>HST-385</td>
+<td>The host MUST terminate child processes with SIGTERM then SIGKILL after 2 s on Linux and macOS, and with a job object after 2 s on Windows. Children MUST run inside the job object so that closing the job ends the whole tree.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Platform CI lane: child termination per OS; Windows job object</td>
+</tr>
+<tr>
+<td>HST-386</td>
+<td>A deadline MUST NOT be reported as breached because a suspend gap passed on Windows. The host MUST ignore a tick gap of more than one second.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Platform CI lane: suspend gap not reported as breach</td>
+</tr>
+<tr>
+<td>HST-387</td>
+<td>The conformance suite MUST pass on every shipped platform for T1 and, on Linux, for T2 and T3.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>Platform CI lane: conformance suite on every shipped platform</td>
+</tr>
+<tr>
+<td>HST-388</td>
+<td>The performance gate MUST apply to the Linux x86_64 reference machine, and other platforms MUST record results without a gate.</td>
+<td><a href="/pages/reference-platform-support/">Platform support</a></td>
+<td>CI check: performance gate on Linux x86_64 reference machine only</td>
+</tr>
+<tr>
+<td>HST-400</td>
+<td>The host MUST apply the restart rule per plugin per side: 1 s after the first failure, 5 s after the second, disabled at the third failure inside 10 minutes, and MUST NOT insert any other step.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: restart vectors 0/2/4 min; 0/11 min; no 30 s step</td>
+</tr>
+<tr>
+<td>HST-401</td>
+<td>The host MUST count as failures exactly the list above and MUST NOT count the listed non-failures.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: failure list table-driven: each cause counts or not</td>
+</tr>
+<tr>
+<td>HST-402</td>
+<td>A failure MUST expire 10 minutes after it happened, and a successful run MUST NOT clear it sooner.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: failure expiry at 10 minutes with advance_clock</td>
+</tr>
+<tr>
+<td>HST-403</td>
+<td>A breach or trap in <code>deactivate</code> MUST drop the instance, discard its restore bytes, and MUST NOT count as a failure.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Integration test: deactivate breach drops instance, no failure</td>
+</tr>
+<tr>
+<td>HST-404</td>
+<td>The host MUST clamp each manifest limit to the ceiling of the plugin's tier, log the clamp once, and never fail the install because of a limit request.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: limit clamp to tier ceiling logged once</td>
+</tr>
+<tr>
+<td>HST-405</td>
+<td>The defaults MUST be the same for all tiers. The T1 values in brackets on other pages MUST be read as T1 ceilings.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: defaults equal across tiers</td>
+</tr>
+<tr>
+<td>HST-406</td>
+<td>The host MUST enforce the five session keys <code>session_memory_mib</code>, <code>session_helpers</code>, <code>session_processes</code>, <code>session_http_streams</code> and <code>session_decorations</code>, and MUST apply a user value under <code>[plugins.limits]</code> for them only when it is lower than the default.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: session keys enforced; user value lowers default</td>
+</tr>
+<tr>
+<td>HST-407</td>
+<td>A refusal because of <code>session_memory_mib</code> or <code>session_helpers</code> MUST leave the side <code>inactive</code> with the reason <code>host-capacity</code> and MUST retry the activation when capacity returns.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Integration test: session refusal leaves side inactive host-capacity and retries</td>
+</tr>
+<tr>
+<td>HST-408</td>
+<td><code>event_queue</code> MUST default to 1,024 with a ceiling of 4,096 for T1 and 1,024 for T2 and T3.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: event_queue default 1,024 ceiling 4,096 T1</td>
+</tr>
+<tr>
+<td>HST-409</td>
+<td><code>detector_deadline_ms</code> MUST default to 20 ms with ceilings of 50 ms for T1 and 20 ms for T2 and T3.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: detector_deadline_ms default and ceilings</td>
+</tr>
+<tr>
+<td>HST-410</td>
+<td>A function of a never-requested capability in a linked interface MUST trap with <code>host.capability-not-requested</code>, an interface that no requested capability unlocks MUST be refused at install with <code>manifest.import-not-requested</code>, and a declined grant MUST return <code>not-permitted</code>.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Conformance fixture: two-level import rule: install refusal, trap, not-permitted</td>
+</tr>
+<tr>
+<td>HST-411</td>
+<td>The client and the server MUST keep independent failure counts for the same plugin.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Integration test: client and server failure counts independent</td>
+</tr>
+<tr>
+<td>HST-412</td>
+<td>The user turning a plugin on again MUST reset the failure count of that side to zero.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Integration test: re-enable resets failure count</td>
+</tr>
+<tr>
+<td>HST-450</td>
+<td>Detector calls MUST run on the plugin executor and MUST NOT run on the detection loop thread.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Integration test: detector call thread name is plugin executor</td>
+</tr>
+<tr>
+<td>HST-451</td>
+<td>The loop MUST make one detector call per pane and MUST NOT wait for a call inside its tick.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Integration test: loop tick does not wait for detector call</td>
+</tr>
+<tr>
+<td>HST-452</td>
+<td>For an unidentified pane the loop MUST ask T1 detectors first, then others by plugin id, and MUST stop at the first signature id.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Unit test in ilium-plugin-host: detector order T1 first then plugin id; first id wins</td>
+</tr>
+<tr>
+<td>HST-453</td>
+<td>One poll cycle MUST spend at most 50 ms of detector call time, MUST start at a rotating pane, and MUST leave unserved panes with their last activity.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Unit test in ilium-plugin-host: poll budget 50 ms, rotating start, unserved panes keep activity</td>
+</tr>
+<tr>
+<td>HST-454</td>
+<td>A missed <code>detector_deadline_ms</code> MUST keep the previous classification, emit no event and count a breach, and the third breach in a row MUST trap the side.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Unit test in ilium-plugin-host: missed detector deadline keeps classification; third traps</td>
+</tr>
+<tr>
+<td>HST-455</td>
+<td>A slow detector MUST NOT delay another plugin's detector or the detection loop.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Integration test: slow detector does not delay other detector or loop</td>
+</tr>
+<tr>
+<td>HST-456</td>
+<td><code>detector_deadline_ms</code> MUST default to 20 ms with a ceiling of 50 ms for T1 and 20 ms for T2 and T3.</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Unit test in ilium-plugin-host: detector_deadline_ms default and ceilings</td>
+</tr>
+<tr>
+<td>HST-457</td>
+<td><code>classify</code> for 30 panes through a plugin detector MUST cost under 0.5 ms per pane at the 99th percentile (benchmark B8).</td>
+<td><a href="/pages/capability-agent-signatures/">agent.signatures</a></td>
+<td>Benchmark B8: classify 30 panes under 0.5 ms per pane p99</td>
+</tr>
+<tr>
+<td>HST-470</td>
+<td><code>run-hook</code> MUST NOT block the owner's current call. It MUST return a request id at once and complete as <code>request-completed</code>.</td>
+<td><a href="/pages/api-extension-points/">extension points</a></td>
+<td>Integration test: run-hook returns request id at once; owner call not blocked</td>
+</tr>
+<tr>
+<td>HST-471</td>
+<td>Handlers of one chain MUST run strictly one after another, and a handler that cannot start within its own deadline MUST be skipped as <code>pass</code> and count a breach. A handler whose instance is still activating MUST be skipped as <code>pass</code> without a breach.</td>
+<td><a href="/pages/api-extension-points/">extension points</a></td>
+<td>Integration test: handlers sequential; busy handler skipped as pass with a breach; activating handler without</td>
+</tr>
+<tr>
+<td>HST-472</td>
+<td>The 100 ms chain cap MUST be measured from the start of the first handler. A handler that started before the cap MUST run until its own deadline, and handlers not started at the cap MUST be skipped as <code>pass</code>, logged <code>extension.chain-cap</code> and not counted as breaches.</td>
+<td><a href="/pages/api-extension-points/">extension points</a></td>
+<td>Unit test in ilium-plugin-host: chain cap from first handler start; extension.chain-cap</td>
+</tr>
+<tr>
+<td>HST-473</td>
+<td>The helper round trip of a T2 or T3 handler MUST count inside the handler deadline.</td>
+<td><a href="/pages/api-extension-points/">extension points</a></td>
+<td>Integration test: T2 handler helper round trip inside deadline</td>
+</tr>
+<tr>
+<td>HST-474</td>
+<td>A hook MUST run only the handlers hosted by the process that owns the point.</td>
+<td><a href="/pages/api-extension-points/">extension points</a></td>
+<td>Integration test: client-owned point runs only handlers in that client</td>
+</tr>
+<tr>
+<td>HST-475</td>
+<td>A chain started inside a handler MUST be limited to depth 3 (extension.depth-exceeded at depth 3) and MUST run after the handler returns, outside the outer handler's deadline.</td>
+<td><a href="/pages/api-extension-points/">extension points</a></td>
+<td>Unit test in ilium-plugin-host: nested chain depth 3</td>
+</tr>
+<tr>
+<td>HST-476</td>
+<td>The client MUST call all menu providers of one opening at once, MUST open the menu when all have answered or after 20 ms, and MUST drop the entries of a late provider for that opening.</td>
+<td><a href="/pages/api-menu-provider/">menu provider</a></td>
+<td>Integration test: menu providers called in parallel; 20 ms wait; late entries dropped</td>
+</tr>
+<tr>
+<td>HST-477</td>
+<td>The static entries MUST be in the first frame of the menu, and a menu MUST NOT change after its first frame is drawn.</td>
+<td><a href="/pages/api-menu-provider/">menu provider</a></td>
+<td>Integration test: menu has static entries in first frame and does not change after</td>
+</tr>
+<tr>
+<td>HST-478</td>
+<td>An opening MUST NOT wait for the activation of a provider that is not running.</td>
+<td><a href="/pages/api-menu-provider/">menu provider</a></td>
+<td>Integration test: menu does not wait for provider activation</td>
+</tr>
+<tr>
+<td>HST-490</td>
+<td>Every intent MUST be applied by exactly one side as listed above, and an intent applied by the server MUST be forwarded when the submitter is a client plugin half.</td>
+<td><a href="/pages/api-intents/">intents</a></td>
+<td>Conformance fixture: every intent applied by listed side; forwarded when submitter is client half</td>
+</tr>
+<tr>
+<td>HST-491</td>
+<td>The outcome of a forwarded submission MUST be delivered only to the submitting client.</td>
+<td><a href="/pages/api-intents/">intents</a></td>
+<td>Integration test: outcome only to submitting client</td>
+</tr>
+<tr>
+<td>HST-492</td>
+<td>The added latency of a forwarded submission MUST be at most 3 ms at the 99th percentile on an idle local connection (B15).</td>
+<td><a href="/pages/api-intents/">intents</a></td>
+<td>Benchmark B15: forwarded submission added latency p99 3 ms</td>
+</tr>
+<tr>
+<td>HST-493</td>
+<td>A client plugin half MUST read the tree from the client mirror, and the mirror MUST be updated before the matching <code>tree-changed</code> event is delivered.</td>
+<td><a href="/pages/api-tree/">tree</a></td>
+<td>Integration test: client reads tree from mirror; mirror updated before event delivery</td>
+</tr>
+<tr>
+<td>HST-494</td>
+<td>The tree change caused by a forwarded submission MUST reach the client mirror before the <code>request-completed</code> of that submission.</td>
+<td><a href="/pages/api-tree/">tree</a></td>
+<td>Integration test: tree change precedes request-completed of forwarded submission</td>
+</tr>
+<tr>
+<td>HST-495</td>
+<td>A popup id is the <code>key</code> of a popup or dialog node and MUST be unique across all open views of one plugin instance. <code>open-popup</code> MUST search the last committed tree of each open view, MUST return not-found for no match and invalid-argument for two matches, and a fifth open popup in one view MUST return quota-exceeded. <code>close-popup</code> on an id that is not open MUST return ok. A popup whose node is missing from the next tree MUST close and send closed.</td>
+<td><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></td>
+<td>Unit test in ilium-plugin-host: popup id resolution, duplicate, fifth popup, close of an unopened id</td>
+</tr>
+<tr>
+<td>HST-496</td>
+<td><code>retry-after-ms</code> on a <code>quota-exceeded</code> from the <code>ilium-execution</code> group MUST equal max(100, ceil_10(-balance_ms * 2)), where <code>ceil_10</code> rounds up to the next 10 ms, as in [HST-207].</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: drain the bucket, read retry-after-ms: balance -100 ms gives 200, balance 0 gives 100</td>
+</tr>
+<tr>
+<td>HST-497</td>
+<td><code>session_processes</code> MUST allow 16 children per session, counting <code>process.run</code> and <code>process.spawn</code> children together; when it is full <code>process.run</code> MUST return <code>busy</code> and <code>process.spawn</code> MUST return <code>quota-exceeded</code>.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Integration test: start 16 children, then call each function</td>
+</tr>
+<tr>
+<td>HST-498</td>
+<td>A soft deadline breach MUST trap and count as a failure when it reaches the streak limit of its call class (3, or 30 for scene frames) or runs 100 ms past its deadline; a hook-handler breach MUST NOT count as a failure and MUST disable that extension handler.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Unit test in ilium-plugin-host: breach a soft deadline 3 times, then once by 100 ms</td>
+</tr>
+<tr>
+<td>HST-499</td>
+<td>The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, sessions send reply 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns <code>timed-out</code> to the caller.</td>
+<td><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></td>
+<td>Integration test with a silent provider for each reply kind</td>
+</tr>
+</tbody>
+</table>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a>, <a href="/pages/reference-host-runtime/">Host runtime</a>, <a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a>, <a href="/pages/reference-host-helper/">Sandbox helper protocol</a>, <a href="/pages/reference-host-scheduling/">Scheduling</a>, <a href="/pages/reference-host-rendering/">Rendering</a>, <a href="/pages/reference-host-budgets/">Budgets</a>, <a href="/pages/reference-host-telemetry/">Telemetry</a>, <a href="/pages/reference-platform-support/">Platform support</a>.</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-requirements-extension-points/"><small>Previous</small>Requirements for extension points</a><a class="next" href="/pages/reference-requirements-lifecycle-ops/"><small>Next</small>Requirements, lifecycle and operations</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#words-and-ids">Words and ids</a></li><li class="l2"><a href="#table">Table</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -47,10 +47,12 @@ mod animation_visibility;
 pub mod antigravity_model_statusline;
 pub mod app;
 pub mod ascii_chart;
+pub mod attention;
 #[cfg(test)]
 mod background_acceptance;
 pub mod background_animation;
 pub mod background_composition;
+mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
@@ -63,6 +65,7 @@ pub mod compaction_ui;
 pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
+mod connection_health;
 mod context_menu_layout;
 pub mod control;
 pub mod cost_app;
@@ -72,6 +75,8 @@ pub mod cost_overlay;
 pub mod cost_settings;
 pub mod cost_settings_ui;
 pub mod cost_tracker;
+pub mod custom_agent_editor;
+mod custom_agent_settings;
 pub mod debug_logging;
 pub mod document_preparation;
 mod editor_capture_budget;
@@ -96,6 +101,7 @@ mod ipc_preparation;
 pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;
+pub mod last_prompt_toolbar;
 pub mod layout;
 pub mod location_picker;
 pub mod markdown;
@@ -110,18 +116,30 @@ mod normal_voice;
 pub mod onboarding;
 pub mod open_target;
 pub mod outbound_requests;
+pub mod padding;
+pub mod padding_app;
+pub mod padding_dialog;
+pub mod padding_ui;
 pub mod pane_title;
 pub mod paths;
+pub mod plugin_host;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
 pub mod progress_guard;
+pub mod progress_popover;
+pub mod progress_time;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
+pub mod recap;
+pub mod recap_state;
+pub mod recap_ui;
+pub mod recap_worker;
+mod redraw_schedule;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;
@@ -133,11 +151,13 @@ pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
 pub mod render_cache;
 pub mod reset_planning;
+pub mod resource_queue;
 pub mod restructure;
 pub mod scheduled_input;
 pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
+pub mod section_frame;
 mod semantic_animation;
 pub mod session_conversion;
 mod session_models;
@@ -159,6 +179,7 @@ pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
 };
 pub mod agent_message_dialog;
+pub(crate) mod diagnostic;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
@@ -291,7 +312,7 @@ const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
-const MAX_PENDING_SERVER_EVENTS: usize = 256;
+pub(crate) const MAX_PENDING_SERVER_EVENTS: usize = 256;
 /// Byte ceiling for a same-pane raw-output run merged in one client turn.
 /// Event count alone is insufficient because a server frame can itself carry
 /// a large burst.
@@ -301,25 +322,13 @@ const MAX_MERGED_SCREEN_BYTES_PER_BATCH: usize = 64 * 1024;
 /// bounded so a key-repeat or pointer flood cannot starve incoming terminal
 /// frames forever.
 const MAX_INPUT_EVENTS_PER_BATCH: usize = 64;
+/// Counts alone cannot bound expensive projections or input actions. Check
+/// between originals so yielding never loses or splits an admitted event.
+const MAX_EVENT_BATCH_TIME: Duration = Duration::from_millis(4);
 /// Maximum character-oriented key events replayed from one admitted paste in
 /// one UI turn. The original input lease stays with the continuation between
 /// turns, and later input cannot overtake it.
 const MAX_PASTE_KEYS_PER_TURN: usize = 128;
-/// Terminal output is visual state, not input acknowledgement. Capping its
-/// redraw cadence at 30 Hz leaves CPU for parsing and input while every
-/// keyboard/pointer-driven change still bypasses this limit immediately.
-const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
-
-/// Remaining delay before output-only damage may trigger another draw.
-fn output_redraw_delay(now: Instant, last_draw_at: Instant) -> Duration {
-    OUTPUT_FRAME_INTERVAL.saturating_sub(now.saturating_duration_since(last_draw_at))
-}
-
-/// Input and semantic state changes bypass output-only frame limiting.
-fn output_redraw_is_due(needs_immediate_redraw: bool, now: Instant, last_draw_at: Instant) -> bool {
-    needs_immediate_redraw || output_redraw_delay(now, last_draw_at).is_zero()
-}
-
 /// Event count and byte count are independent fairness limits.
 #[cfg(test)]
 fn screen_updates_fit(current_bytes: usize, incoming_bytes: usize) -> bool {
@@ -423,12 +432,13 @@ fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEvent
                 needs_immediate_redraw: is_visible,
             }
         }
-        ServerEvent::TerminalReplay { pane_id, .. } | ServerEvent::ScreenUpdate { pane_id, .. } => {
-            ServerEventDamage {
-                needs_redraw: app.is_pane_displayed(*pane_id),
-                needs_immediate_redraw: false,
-            }
-        }
+        ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. }
+        | ServerEvent::TerminalHistory { pane_id, .. }
+        | ServerEvent::ScreenUpdate { pane_id, .. } => ServerEventDamage {
+            needs_redraw: app.is_pane_displayed(*pane_id),
+            needs_immediate_redraw: false,
+        },
         // Per-pane state that background panes report continuously. With
         // hundreds of agents these arrive many times a second; each one used
         // to force an immediate full redraw, bypassing the output frame cap.
@@ -630,6 +640,89 @@ struct PreparedStartup {
     startup_dialog: crate::startup_dialog::StartupDialog,
 }
 
+fn apply_presented_frame(
+    app: &mut App,
+    mut presented: crate::presentation::PresentedFrame,
+    animation_presentations: &mut std::collections::VecDeque<(u64, crate::app::EmittedGeometry)>,
+) -> Result<bool, ClientError> {
+    if let Some(health) = &app.presentation_health {
+        health.acknowledge(presented.frame.frame_id);
+    }
+
+    let mut redraw = false;
+    if let Some((frame_id, geometry)) = animation_presentations.pop_front() {
+        if frame_id != presented.frame.frame_id {
+            return Err(ClientError::TerminalSetup(std::io::Error::other(
+                "animation presentation identity mismatch",
+            )));
+        }
+        if let Some(reason) = &presented.uncertainty {
+            drop(geometry);
+            if let Some(animation) = presented.frame.take_animation() {
+                app.animation_frame.uncertain_output(animation, reason);
+            }
+            redraw = true;
+        } else if let Some(reason) = &presented.rejection {
+            drop(geometry);
+            drop(presented.frame.take_animation());
+            app.animation_frame.reject_output(reason);
+            redraw = true;
+        } else {
+            redraw |= app.commit_emitted_geometry(geometry);
+            if let Some(press) = app.take_deferred_pointer_press() {
+                crate::mouse::handle_mouse_event(app, press);
+                redraw = true;
+            }
+            if let Some(animation) = presented.frame.take_animation() {
+                let snapshot = animation.snapshot();
+                tracing::trace!(
+                    frame_id,
+                    animation_revision = snapshot.revision,
+                    animation_sequence = snapshot.sequence,
+                    composition_to_emission_us = presented
+                        .emitted_at
+                        .saturating_duration_since(animation.composed_at())
+                        .as_micros() as u64,
+                    request_to_emission_us = presented
+                        .emitted_at
+                        .saturating_duration_since(snapshot.requested_at)
+                        .as_micros() as u64,
+                    completed_frame_age_us = presented
+                        .emitted_at
+                        .saturating_duration_since(snapshot.completed_at)
+                        .as_micros() as u64,
+                    "animation frame emitted"
+                );
+                app.animation_frame
+                    .acknowledge(animation, presented.flush_proof.take());
+            }
+        }
+    }
+    if presented.rejection.is_none() && presented.uncertainty.is_none() {
+        for (pane_id, sequence) in presented.frame.terminal_sequences.into_iter().flatten() {
+            ilium_platform::startup_timing::record_at(
+                "frame_emitted",
+                0,
+                pane_id,
+                0,
+                sequence,
+                presented.emitted_at,
+            );
+        }
+        tracing::trace!(
+            frame_id = presented.frame.frame_id,
+            layout_revision = presented.frame.layout_revision,
+            frame_age_us = presented
+                .emitted_at
+                .duration_since(presented.frame.prepared_at)
+                .as_micros() as u64,
+            emission_us = presented.emission_duration.as_micros() as u64,
+            "terminal frame emitted"
+        );
+    }
+    Ok(redraw)
+}
+
 async fn run_inner(
     options: &RunOptions,
     startup: PreparedStartup,
@@ -653,11 +746,13 @@ async fn run_inner(
     let execution = crate::execution::ClientExecution::start_async()
         .await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
-    let ambient_resources = execution.ambient_resources().map_err(|error| {
-        ClientError::TerminalSetup(std::io::Error::other(format!(
-            "ambient resources startup: {error:?}"
-        )))
-    })?;
+    let ambient_resources = crate::execution::retry_startup_busy(|| execution.ambient_resources())
+        .await
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "ambient resources startup: {error:?}"
+            )))
+        })?;
     // Probe asynchronously under the same bounded quota as animation work.
     let mut gpu_probe = ilium_gpu::start_probe(ambient_resources.clone());
     startup_dialog.show(
@@ -666,7 +761,8 @@ async fn run_inner(
         Some(0.75),
     );
     let audio_client = execution
-        .client(crate::startup_audio::limits())
+        .client_when_ready(crate::startup_audio::limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "startup audio client admission: {error:?}"
@@ -684,7 +780,8 @@ async fn run_inner(
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     app.configure_paste_retirement(execution.retirement());
     let text_trigger_preview_client = execution
-        .client(crate::text_trigger_dialog::preview_limits())
+        .client_when_ready(crate::text_trigger_dialog::preview_limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "text trigger preview startup: {error:?}"
@@ -693,7 +790,8 @@ async fn run_inner(
     let text_trigger_preview_notification =
         app.configure_text_trigger_preview(text_trigger_preview_client);
     let sound_preview_client = execution
-        .client(crate::onboarding::sound_preview::limits())
+        .client_when_ready(crate::onboarding::sound_preview::limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "sound studio preview startup: {error:?}"
@@ -702,7 +800,8 @@ async fn run_inner(
     let sound_preview_notification = app.configure_sound_studio_preview(sound_preview_client);
 
     let outbound_admission = execution
-        .client(crate::ipc_preparation::request_limits())
+        .client_when_ready(crate::ipc_preparation::request_limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "outbound admission startup: {error:?}"
@@ -711,12 +810,13 @@ async fn run_inner(
     app.outbound_admission = Some(outbound_admission.clone());
     app.location_search_client = Some(execution.location_search());
     let catalogue_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: 4 * 1024 * 1024,
             result_bytes: 64 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "animation catalogue startup: {error:?}"
@@ -726,19 +826,22 @@ async fn run_inner(
         crate::animation_plugins::preparation::CataloguePreparation::new(catalogue_client);
     let catalogue_notification = catalogue_preparation.notification();
     app.plugin_catalogue_preparation = Some(catalogue_preparation);
-    let documents = execution.documents().map_err(|error| {
-        ClientError::TerminalSetup(std::io::Error::other(format!(
-            "document preparation startup: {error:?}"
-        )))
-    })?;
+    let documents = crate::execution::retry_startup_busy(|| execution.documents())
+        .await
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "document preparation startup: {error:?}"
+            )))
+        })?;
     let document_notification = app.configure_document_preparation(documents);
     let context_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 4,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 256 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "context preparation startup: {error:?}"
@@ -748,25 +851,26 @@ async fn run_inner(
         crate::terminal_context_preparation::TerminalContextPreparation::new(context_client);
     let context_notification = context_preparation.notification();
     app.terminal_context_preparation = Some(context_preparation);
-    let external_open_client =
-        execution
-            .client(crate::external_open::limits())
-            .map_err(|error| {
-                ClientError::TerminalSetup(std::io::Error::other(format!(
-                    "external opening client startup: {error:?}"
-                )))
-            })?;
+    let external_open_client = execution
+        .client_when_ready(crate::external_open::limits())
+        .await
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "external opening client startup: {error:?}"
+            )))
+        })?;
     let external_open = crate::external_open::ExternalOpenService::start(external_open_client)
         .map_err(ClientError::TerminalSetup)?;
     let external_open_notification = external_open.notification();
     app.external_open = Some(external_open);
     let clipboard_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 8,
             service_jobs: 0,
             input_bytes: 64 * 1024 * 1024 + 64 * 1024,
             result_bytes: 128 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "clipboard client startup: {error:?}"
@@ -777,7 +881,8 @@ async fn run_inner(
     let clipboard_notification = clipboard.notification();
     app.terminal_clipboard = Some(clipboard);
     let selection_client = execution
-        .client(crate::smart_copy_selection::limits())
+        .client_when_ready(crate::smart_copy_selection::limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "Light selection admission: {error:?}"
@@ -787,11 +892,13 @@ async fn run_inner(
     let selection_notification = selection.notification();
     app.light_copy_selection = Some(selection);
     let parsing = crate::terminal_parsing::TerminalParsing::start_with_storage(
-        execution.terminal_parser().map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "terminal parser client: {error:?}"
-            )))
-        })?,
+        crate::execution::retry_startup_busy(|| execution.terminal_parser())
+            .await
+            .map_err(|error| {
+                ClientError::TerminalSetup(std::io::Error::other(format!(
+                    "terminal parser client: {error:?}"
+                )))
+            })?,
         execution.terminal_storage(),
         usize::try_from(app.terminal_settings.engine_memory_budget_mib)
             .unwrap_or(usize::MAX / (1024 * 1024))
@@ -801,24 +908,26 @@ async fn run_inner(
     let terminal_notification = parsing.notification();
     app.terminal_parsing = Some(parsing);
     let filesystem_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 16,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 256 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "filesystem startup: {error:?}"
             )))
         })?;
     let statistics_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 24,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 384 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "statistics startup: {error:?}"
@@ -885,12 +994,13 @@ async fn run_inner(
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let provider_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let provider_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 16,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 256 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "provider work startup: {error:?}"
@@ -900,8 +1010,8 @@ async fn run_inner(
     let provider_client = provider_client.with_completion_wake(move || provider_wake.notify_one());
     app.model_catalog_preparation
         .configure(provider_client.clone());
-    let mut naming_workers =
-        NamingWorkers::new(naming_events_tx, &config.inference).map_err(|reason| {
+    let mut naming_workers = NamingWorkers::new(naming_events_tx.clone(), &config.inference)
+        .map_err(|reason| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "naming settings startup: {reason:?}"
             )))
@@ -917,11 +1027,16 @@ async fn run_inner(
     app.animation_frame.configure_resources(ambient_resources);
     let keyboard_enhancement_pushed = guard._guard.keyboard_enhancement_state();
     // The presenter does not emit a frame until the owned query resolves.
-    let backend =
-        CrosstermBackend::new(crate::presentation::TerminalOutput::new(std::io::stdout()));
-    let mut presenter = crate::presentation::Presenter::start_with_cleanup(
+    let presentation_health = crate::presentation::PresentationHealth::new();
+    app.presentation_health = Some(std::sync::Arc::clone(&presentation_health));
+    let backend = CrosstermBackend::new(crate::presentation::TerminalOutput::with_health(
+        std::io::stdout(),
+        std::sync::Arc::clone(&presentation_health),
+    ));
+    let mut presenter = crate::presentation::Presenter::start_with_health_cleanup(
         backend,
         &crate::execution::process_quota(),
+        std::sync::Arc::clone(&presentation_health),
         move || drop(guard),
     )
     .map_err(ClientError::TerminalSetup)?;
@@ -964,6 +1079,7 @@ async fn run_inner(
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
 
+    app.custom_agents = config.custom_agents;
     app.apply_ui_settings(config.ui);
     app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
@@ -999,6 +1115,8 @@ async fn run_inner(
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
     app.kanban_board_settings = config.kanban_board;
+    app.padding_settings = config.padding;
+    app.sync_padding();
     app.apply_sound_settings(config.sound);
     app.apply_notification_settings(config.notifications);
     app.apply_inference_settings(config.inference);
@@ -1011,6 +1129,7 @@ async fn run_inner(
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
     app.apply_reset_planning_settings(config.reset_planning);
+    app.apply_attention_settings(config.attention);
     app.apply_cost_settings(config.cost);
     app.apply_remote_compaction_settings(config.remote_compaction);
     app.apply_debug_settings(config.debug);
@@ -1050,6 +1169,10 @@ async fn run_inner(
             ),
         }
     };
+    // Wait registry revisions are scoped to this server transport incarnation.
+    app.resources.wait_revision=None;
+    app.resources.waits.clear();
+    app.connection_health = Some(std::sync::Arc::clone(&connection.health));
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
     // Tells the server this connection hosts the voice session, so
     // `ilium voice say` can offer typed sentences to it. One-shot CLI
@@ -1064,12 +1187,12 @@ async fn run_inner(
     let conversion_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let conversion_wake = std::sync::Arc::clone(&conversion_notification);
     let conversion_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: crate::session_conversion::CONVERSION_WORKING_BYTES,
             result_bytes: crate::session_conversion::CONVERSION_RESULT_BYTES,
-        })
+        }).await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "session conversion worker startup: {error:?}"
@@ -1083,12 +1206,12 @@ async fn run_inner(
     let compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let remote_compaction_wake = std::sync::Arc::clone(&compaction_notification);
     let remote_compaction_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: 512 * 1024 * 1024,
             result_bytes: 2 * 1024 * 1024,
-        })
+        }).await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "remote compaction worker startup: {error:?}"
@@ -1105,12 +1228,12 @@ async fn run_inner(
     let reset_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let reset_wake = std::sync::Arc::clone(&reset_notification);
     let reset_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: 16 * 1024 * 1024,
             result_bytes: 64 * 1024,
-        })
+        }).await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "reset planning worker startup: {error:?}"
@@ -1119,7 +1242,7 @@ async fn run_inner(
         .with_completion_wake(move || {
             reset_wake.notify_one();
         });
-    let search_client = execution.client(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 })
+    let search_client = execution.client_when_ready(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 }).await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("workspace search startup: {error:?}"))))?;
     let mut search_workers = SearchWorkers::new(search_client);
     let search_notification = search_workers.notification();
@@ -1133,9 +1256,9 @@ async fn run_inner(
         reset_client,
         reset_notification,
     );
-    let control_client = execution.client(ilium_execution::ClientLimits {
+    let control_client = execution.client_when_ready(ilium_execution::ClientLimits {
         jobs: 20, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 256 * 1024 * 1024,
-    }).map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
+    }).await.map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
     let mut control_plane = crate::control::ControlPlane::new(control_client);
     let control_notification = control_plane.notification().ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("control preparation notification unavailable")))?;
     let demonstration_media = media_owner.demonstration();
@@ -1202,6 +1325,9 @@ async fn run_inner(
     // has arrived; start from blank cells.
     startup_dialog.clear();
     app.startup_progress_path = Some(ilium_ipc::startup_progress_path(&options.socket_path));
+    // Pane ids are session-local, so the queue file is keyed by the session's socket.
+    app.attach_attention_store(attention::store::store_path_for_session(&options.socket_path));
+    app.attach_attention_events(naming_events_tx.clone());
 
     // Set so the very first pass through the loop always draws (there's
     // nothing on screen yet); every branch below that actually changes
@@ -1210,14 +1336,47 @@ async fn run_inner(
     // every iteration was wasted work under load.
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
-    let mut last_draw_at = Instant::now();
+    let mut redraw_schedule = redraw_schedule::RedrawSchedule::new(Instant::now());
+    let mut detection_freshness_checked_at = crate::scheduled_input::unix_millis_now();
     let mut last_animation_frame_bucket = None;
     let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
     let mut last_recorded_surface = None;
     let mut last_streamed_pane_order: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
+    let mut presentation_warning_logged = false;
+    let mut next_presentation_health_check = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut next_presentation_warning_refresh = tokio::time::Instant::now();
     'event_loop: while app.exit_reason.is_none() {
+        // Independent of redraw/ACK progress. Never write diagnostic output to
+        // the stalled terminal: logging has its own bounded sink owner.
+        let presentation_check_now = tokio::time::Instant::now();
+        if presentation_check_now >= next_presentation_health_check {
+            next_presentation_health_check = presentation_check_now + Duration::from_secs(5);
+        }
+        if presentation_health.stalled() {
+            if !presentation_warning_logged || presentation_check_now >= next_presentation_warning_refresh {
+            next_presentation_warning_refresh = presentation_check_now + Duration::from_secs(5);
+            let report = format!("Terminal presentation has made no phase progress for at least 5 seconds: {}", presentation_health.report());
+            app.presentation_warning = Some(report.clone());
+            if !presentation_warning_logged {
+                tracing::warn!(presentation = %report, "terminal presentation stalled; UI event loop remains active");
+                presentation_warning_logged = true;
+            }
+            }
+        } else {
+            app.presentation_warning = None;
+            presentation_warning_logged = false;
+        }
+        // A ready ACK proves which geometry reached the terminal. Consume it
+        // before routing native or deferred input against the previous frame.
+        while let Ok(acknowledgement) = presenter.acknowledgements.try_recv() {
+            needs_redraw |= apply_presented_frame(
+                &mut app,
+                acknowledgement.map_err(ClientError::TerminalSetup)?,
+                &mut animation_presentations,
+            )?;
+        }
         if remote_compaction_workers
             .as_mut()
             .expect("remote compaction owner is initialized before the event loop")
@@ -1285,9 +1444,11 @@ async fn run_inner(
                 if let Some(failure) = dispatch_ready_input_events(
                     &mut app,
                     &mut empty_input,
-                    &mut naming_workers,
-                    &mut icon_search_workers,
-                    home_dir.as_deref(),
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
                     queued.original,
                     &mut no_deferred,
                     &mut editor_deferred_input,
@@ -1306,11 +1467,21 @@ async fn run_inner(
         if app.pending_native_paste.is_none()
             && app.pending_key_paste.is_none()
             && deferred_event_fits_editor_custody
+            && deferred_input.front().is_none_or(|event| native_input_geometry_ready(&app, event))
+            && !app.board_input_backpressured()
         {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
-                    &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
-                    home_dir.as_deref(), event, &mut deferred_input, &mut editor_deferred_input,
+                    &mut app,
+                    &mut input_rx,
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
+                    event,
+                    &mut deferred_input,
+                    &mut editor_deferred_input,
                 ) {
                     input_failure = Some(failure);
                     break;
@@ -1361,8 +1532,14 @@ async fn run_inner(
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
         }
-        if needs_redraw && !needs_immediate_redraw && presenter.outstanding_frames() == 0 {
-            tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
+        // A running recap advances its phase bar from worker-side state, which posts no
+        // event, so redraw on a bounded tick until the worker finishes.
+        if app.recap_is_running() {
+            needs_redraw = true;
+            tick_delay = tick_delay.min(Duration::from_millis(250));
+        }
+        if needs_redraw && presenter.outstanding_frames() == 0 {
+            tick_delay = tick_delay.min(redraw_schedule.delay(needs_immediate_redraw, now));
         }
         if let Some(interval) = app
             .reset_monitor_state
@@ -1379,6 +1556,9 @@ async fn run_inner(
 
         let onboarding_actor_notification = onboarding_voice.actor_notification();
         tokio::select! {
+            // A blocked presenter need not produce an ACK or another event.
+            // This timer is owned by the existing loop, with no helper task.
+            _ = tokio::time::sleep_until(next_presentation_health_check) => {}
             () = async {
                 match &onboarding_actor_notification {
                     Some(notification) => notification.notified().await,
@@ -1421,46 +1601,9 @@ async fn run_inner(
                 needs_immediate_redraw = true;
             }
             acknowledgement = presenter.acknowledgements.recv() => {
-                let mut presented = acknowledgement.ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation owner exited")))?
+                let presented = acknowledgement.ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation owner exited")))?
                     .map_err(ClientError::TerminalSetup)?;
-                if let Some((frame_id, geometry)) = animation_presentations.pop_front() {
-                    if frame_id != presented.frame.frame_id {
-                        return Err(ClientError::TerminalSetup(std::io::Error::other("animation presentation identity mismatch")));
-                    }
-                    if let Some(reason) = &presented.uncertainty {
-                        drop(geometry);
-                        if let Some(animation) = presented.frame.take_animation() {
-                            app.animation_frame.uncertain_output(animation, reason);
-                        }
-                        needs_redraw = true;
-                    } else if let Some(reason) = &presented.rejection {
-                        drop(geometry);
-                        drop(presented.frame.take_animation());
-                        app.animation_frame.reject_output(reason);
-                        needs_redraw = true;
-                    } else {
-                        needs_redraw |= app.commit_emitted_geometry(geometry);
-                        if let Some(press) = app.take_deferred_pointer_press() {
-                            crate::mouse::handle_mouse_event(&mut app, press);
-                            needs_redraw = true;
-                        }
-                        if let Some(animation) = presented.frame.take_animation() {
-                            let snapshot = animation.snapshot();
-                            tracing::trace!(frame_id, animation_revision = snapshot.revision,
-                                animation_sequence = snapshot.sequence,
-                                composition_to_emission_us = presented.emitted_at.saturating_duration_since(animation.composed_at()).as_micros() as u64,
-                                request_to_emission_us = presented.emitted_at.saturating_duration_since(snapshot.requested_at).as_micros() as u64,
-                                completed_frame_age_us = presented.emitted_at.saturating_duration_since(snapshot.completed_at).as_micros() as u64,
-                                "animation frame emitted");
-                            app.animation_frame.acknowledge(animation, presented.flush_proof.take());
-                        }
-                    }
-                }
-                if presented.rejection.is_none() && presented.uncertainty.is_none() {
-                    tracing::trace!(frame_id = presented.frame.frame_id, layout_revision = presented.frame.layout_revision,
-                        frame_age_us = presented.emitted_at.duration_since(presented.frame.prepared_at).as_micros() as u64,
-                        emission_us = presented.emission_duration.as_micros() as u64, "terminal frame emitted");
-                }
+                needs_redraw |= apply_presented_frame(&mut app, presented, &mut animation_presentations)?;
             }
             _ = animation_notification.notified() => {
                 needs_redraw |= app.animation_frame.collect();
@@ -1468,16 +1611,18 @@ async fn run_inner(
             _ = animation_admission_notification.notified() => {
                 needs_redraw |= app.animation_frame.collect();
             }
-            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() => {}
-            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
+            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() && !app.board_input_backpressured() => {}
+            input_event = input_rx.recv(), if !app.board_input_backpressured() && app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
                 match input_event {
                     Some(event) => {
                         if let Some(failure) = dispatch_ready_input_events(
                             &mut app,
                             &mut input_rx,
-                            &mut naming_workers,
-                            &mut icon_search_workers,
-                            home_dir.as_deref(),
+                            ReadyInputWorkers {
+                                naming_workers: &mut naming_workers,
+                                icon_search_workers: &mut icon_search_workers,
+                                home_dir: home_dir.as_deref(),
+                            },
                             event,
                             &mut deferred_input,
                             &mut editor_deferred_input,
@@ -1680,11 +1825,9 @@ async fn run_inner(
         dispatch_pending_smart_copy_work(&mut app, &mut smart_copy_workers); // Cancellation precedes the dated App-original retry gate.
         smart_copy_workers.collect();
         needs_redraw |= app.collect_terminal_parsing();
-        if app.projection_admission_wake.is_none() {
-        if let Some(event)=app.pending_terminal_events.pop_front() {
+        if let Some(event)=take_pending_server_event(&mut app) {
             let damage=apply_server_events(&mut app,&mut connection.events,event,&mut naming_workers,&mut icon_search_workers,&mut trigger_execution_lease,home_dir.as_deref());
             needs_redraw|=damage.needs_redraw;needs_immediate_redraw|=damage.needs_immediate_redraw;
-        }
         }
         needs_redraw |= app.collect_document_preparation();
         needs_redraw |= app.collect_terminal_context_preparation();
@@ -1893,14 +2036,25 @@ async fn run_inner(
         if animation_frame_bucket != last_animation_frame_bucket {
             needs_redraw = true;
         }
-        let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
+        let freshness_now = crate::scheduled_input::unix_millis_now();
+        needs_redraw |= crate::status_icons::detection_freshness_expired_since(
+            &app.pane_detection_evidence,
+            detection_freshness_checked_at,
+            freshness_now,
+        );
+        detection_freshness_checked_at = freshness_now;
+        let can_draw = redraw_schedule.delay(needs_immediate_redraw, Instant::now()).is_zero();
         // Reserve before composition: graphics uploads and exact animation
         // receipts must follow the ordered frame that really reaches output.
         if needs_redraw && can_draw && presenter.outstanding_frames() == 0 {
+            let mut refusal_reason = "presentation_slots";
             let reservation = match presenter.try_reserve() {
-                Some(reservation) => app.admit_composition_metadata()
-                    .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?
-                    .then_some(reservation),
+                Some(reservation) => {
+                    refusal_reason = "composition_metadata";
+                    app.admit_composition_metadata()
+                        .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?
+                        .then_some(reservation)
+                },
                 None => None,
             };
             if let Some(reservation) = reservation {
@@ -1922,13 +2076,26 @@ async fn run_inner(
                 let mut prepared = crate::presentation::PreparedFrame::new(reservation, buffer, cursor,
                     presentation_frame_id, presentation_layout_revision).map_err(ClientError::TerminalSetup)?;
                 prepared.attach_animation(animation);
+                // Use the immutable sources returned by the actual draw: a
+                // progress preview can be newer than the live view, and a
+                // settings screen can omit an otherwise selected terminal.
+                for (slot, (pane_id, source)) in prepared.terminal_sequences.iter_mut()
+                    .zip(app.composed_terminal_sources.iter()) {
+                    *slot = Some((pane_id.0, source.output_sequence()));
+                }
                 let geometry = app.capture_emitted_geometry(presentation_layout_revision);
                 presenter.submit(prepared).map_err(|failure| ClientError::TerminalSetup(failure.error))?;
                 animation_presentations.push_back((presentation_frame_id, geometry));
             needs_redraw = false;
             needs_immediate_redraw = false;
-            last_draw_at = Instant::now();
+            if let Some(waited) = redraw_schedule.submitted(Instant::now()) {
+                tracing::info!(wait_ms = waited.as_millis() as u64, "client frame storage admission recovered");
+            }
             last_animation_frame_bucket = animation_frame_bucket;
+            } else if let Some(waited) = redraw_schedule.admission_refused(Instant::now()) {
+                tracing::warn!(reason = refusal_reason, wait_ms = waited.as_millis() as u64,
+                    retry_ms = redraw_schedule::FRAME_INTERVAL.as_millis() as u64,
+                    "client redraw waiting for frame storage admission");
             }
         }
     }
@@ -1995,11 +2162,11 @@ async fn run_inner(
             app.collect_terminal_baselines();
             dispatch_pending_app_work(&mut app, &mut naming_workers, &mut icon_search_workers, home_dir.as_deref());
             if let Some(reason) = app.projection_admission_failure {
-                return Err(ClientError::TerminalSetup(std::io::Error::other(format!("unrecoverable incoming projection admission failure: {reason:?}"))));
+                return Err(ClientError::TerminalSetup(std::io::Error::other(app.projection_admission_details.clone().unwrap_or_else(|| format!("unrecoverable incoming projection admission failure: {reason:?}")))));
             }
-            let event = if app.projection_admission_wake.is_none() {
-                app.pending_terminal_events.pop_front().or_else(|| connection.events.try_recv().ok())
-            } else { None };
+            let event = take_pending_server_event(&mut app).or_else(|| {
+                app.projection_admission_wake.is_none().then(|| connection.events.try_recv().ok()).flatten()
+            });
             if let Some(event) = event {
                 apply_server_events(&mut app, &mut connection.events, event,
                     &mut naming_workers, &mut icon_search_workers,
@@ -2087,8 +2254,9 @@ async fn run_inner(
                 _ = tokio::time::sleep(Duration::from_millis(1)), if owner.is_none() || app.has_pending_exact_prompt_reports() || app.terminal_baselines.as_ref().is_some_and(|files| files.needs_retry()) => {},
             }
         }
-        connection.finish_read_shutdown().await.map_err(|error|
-            ClientError::TerminalSetup(std::io::Error::other(error)))
+        // The reader task ends with the error that closed the connection; it
+        // is a lost server connection, not a terminal setup failure.
+        connection.finish_read_shutdown().await.map_err(ClientError::ServerConnectionLost)
     };
     tokio::time::timeout(Duration::from_secs(5), terminal_drain).await
         .map_err(|_| {
@@ -2112,8 +2280,10 @@ async fn run_inner(
 
     // Finish logging transitions while the connection still owns its writer.
     // The local file receipt alone cannot prove the server request was emitted.
+    // File publication is an accepted local side effect. Its warning deadline
+    // must not be cancelled by the separate bounded network-request drain.
+    app.drain_filesystem().await.map_err(ClientError::TerminalSetup)?;
     let request_drain = async {
-        app.drain_filesystem().await.map_err(|error| crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(error)))?;
         reconcile_debug_logging(&mut app);
         while app.debug_logging.is_pending() {
             let completion = app.debug_logging.next_completion().await;
@@ -2150,6 +2320,14 @@ async fn run_inner(
     while let Some(event) = deferred_input.take_front() {
         match event {
             Ok(event) => {
+                if app.exit_click_release.as_ref().is_some_and(|press| {
+                    terminal_input_owner::is_exit_click_release(event.view(), press)
+                }) {
+                    event.dispatch(|_| ());
+                    app.exit_click_release = None;
+                    continue;
+                }
+                app.exit_click_release = None;
                 input_failure = Some(terminal_input_owner::InputFailure::undispatched(
                     event,
                     input_failure.take(),
@@ -2166,6 +2344,14 @@ async fn run_inner(
     while let Some(queued) = editor_deferred_input.pop() {
         match queued.original {
             Ok(event) => {
+                if app.exit_click_release.as_ref().is_some_and(|press| {
+                    terminal_input_owner::is_exit_click_release(event.view(), press)
+                }) {
+                    event.dispatch(|_| ());
+                    app.exit_click_release = None;
+                    continue;
+                }
+                app.exit_click_release = None;
                 input_failure = Some(terminal_input_owner::InputFailure::undispatched(
                     event,
                     input_failure.take(),
@@ -2188,6 +2374,13 @@ async fn run_inner(
     while let Some(event) = app.take_undelivered_native_paste() {
         input_failure = Some(terminal_input_owner::InputFailure::undispatched(
             event,
+            input_failure.take(),
+        ));
+    }
+    while let Some(key) = app.take_undelivered_terminal_key() {
+        input_failure = Some(terminal_input_owner::InputFailure::terminal_key(
+            key,
+            None,
             input_failure.take(),
         ));
     }
@@ -2371,7 +2564,9 @@ async fn run_inner(
         .await
         .map_err(ClientError::TerminalSetup);
     let input_shutdown_result = match input_retirement {
-        Some(retirement) => finish_input_retirement(retirement, input_deadline).await,
+        Some(retirement) => {
+            finish_input_retirement(retirement, input_deadline, &mut app.exit_click_release).await
+        }
         None => Ok(()),
     };
     let media_shutdown_result = media_owner
@@ -2569,9 +2764,11 @@ async fn run_inner(
 async fn finish_input_retirement(
     mut retirement: terminal_input_owner::InputRetirement,
     deadline: tokio::time::Instant,
+    exit_click_release: &mut Option<crossterm::event::MouseEvent>,
 ) -> Result<(), crate::error::InputRetirementError> {
     loop {
-        if let Some(report) = retirement.try_complete() {
+        if let Some(mut report) = retirement.try_complete() {
+            report.complete_exit_click_release(exit_click_release);
             return report
                 .into_result()
                 .map_err(crate::error::InputRetirementError::Failed);
@@ -3864,6 +4061,18 @@ fn voice_text_offer_result_with_fifo(
 ) -> Option<ilium_ipc::VoiceTextResult> {
     use ilium_ipc::{VoiceTextAccepted, VoiceTextRejection, VoiceTextRejectionCode};
     let Some(commands) = commands else {
+        // --start owns an asynchronous preparation request. Preserve the
+        // original offer until startup either creates the actor or reports its
+        // real failure; absence of a handle during preparation is not failure.
+        if app.voice_settings.enabled
+            && app.voice_preparation.is_pending()
+            && !matches!(
+                app.voice_connection_state,
+                ilium_voice::VoiceConnectionState::Failed(_)
+            )
+        {
+            return None;
+        }
         return Some(Err(if app.voice_settings.enabled {
             let reason = match &app.voice_connection_state {
                 ilium_voice::VoiceConnectionState::Failed(error) => error.clone(),
@@ -4003,24 +4212,10 @@ fn voice_text_phase(state: &ilium_voice::VoiceConnectionState) -> ilium_ipc::Voi
     }
 }
 
-/// Applies `first` (already received) and then drains + applies a bounded
-/// batch of queued `ServerEvent`s without waiting for more --
-/// coalescing consecutive `ScreenUpdate`s for the *same* `pane_id` into one
-/// concatenated feed instead of applying each queued chunk individually.
-/// Bytes are concatenated, never dropped: `ScreenUpdate` carries raw PTY
-/// output that a `vt100::Parser` must see byte-for-byte and in order (see
-/// `ilium_ipc::ServerEvent::ScreenUpdate`'s doc comment) -- unlike a
-/// cell-diff or full-screen snapshot, an intermediate chunk can't simply be
-/// discarded once a newer one for the same pane arrives, since it may hold
-/// the other half of a split escape sequence or output a later chunk
-/// doesn't repeat. Concatenating still gets the win this coalescing is for:
-/// N queued chunks for one busy pane become one `vt100::Parser::process`
-/// call and one dirty frame instead of N of each. Events of any other kind,
-/// or a `ScreenUpdate` for a *different* pane, are applied immediately in
-/// arrival order -- only a same-pane_id run of consecutive `ScreenUpdate`s
-/// is ever merged, so no ordering between different panes or event kinds
-/// changes. The batch limit is deliberately applied only between complete
-/// events, so it preserves the stream order while allowing input to run.
+/// Apply a bounded server-event batch. Refused payloads retain their original
+/// allocation guards in the pending queue. Active-pane payloads may bypass only
+/// the terminal-only prefix for other panes; lifecycle barriers and each pane's
+/// own byte/snapshot/history order remain intact.
 fn apply_server_events(
     app: &mut App,
     events_rx: &mut mpsc::Receiver<crate::connection::Received<ilium_ipc::ServerEvent>>,
@@ -4032,17 +4227,21 @@ fn apply_server_events(
 ) -> ServerEventDamage {
     let mut next = Some(first);
     let mut damage = ServerEventDamage::default();
-    for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
-        let received = match next
-            .take()
-            .or_else(|| app.pending_terminal_events.pop_front())
-        {
+    let batch_started = Instant::now();
+    for index in 0..MAX_SERVER_EVENTS_PER_BATCH {
+        if index != 0 && batch_started.elapsed() >= MAX_EVENT_BATCH_TIME {
+            break;
+        }
+        let received = match next.take().or_else(|| take_pending_server_event(app)) {
             Some(event) => event,
             None => match events_rx.try_recv() {
                 Ok(event) => event,
                 Err(_) => break,
             },
         };
+        // Terminal payloads cannot remove a node or evict debug-log entries.
+        // Avoid scanning every retained projection for each output chunk.
+        let needs_projection_prune = terminal_event_pane(received.view()).is_none();
         let event_damage = server_event_damage(app, received.view());
         damage.needs_redraw |= event_damage.needs_redraw;
         damage.needs_immediate_redraw |= event_damage.needs_immediate_redraw;
@@ -4059,19 +4258,24 @@ fn apply_server_events(
                 retention.as_ref(),
             ) {
                 Ok(update) => update,
-                Err(reason) => {
+                Err(error) => {
+                    let reason = error.reason();
                     app.pending_terminal_events.push_front(
                         crate::connection::Received::with_retention(event, retention),
                     );
-                    if matches!(
-                        reason,
-                        ilium_execution::RejectReason::Closed
-                            | ilium_execution::RejectReason::InvalidCost
-                            | ilium_execution::RejectReason::AccountingPoisoned
-                    ) {
+                    if error.is_permanent()
+                        || matches!(
+                            reason,
+                            ilium_execution::RejectReason::Closed
+                                | ilium_execution::RejectReason::InvalidCost
+                                | ilium_execution::RejectReason::AccountingPoisoned
+                        )
+                    {
                         app.status_message = Some(format!(
-                            "Incoming projection cannot be admitted: {reason:?}"
+                            "Incoming projection cannot be admitted: {error:?}; original event retained; stream delivery stopped"
                         ));
+                        tracing::error!(?error, ?reason, "incoming projection admission is permanently impossible; original event retained");
+                        app.projection_admission_details = app.status_message.clone();
                         app.projection_admission_failure = Some(reason);
                         app.exit_reason = Some(crate::app::ClientExitReason::Quit);
                     } else {
@@ -4105,13 +4309,16 @@ fn apply_server_events(
             .commit(projection_update, app.processing_event_retention.as_ref());
         app.processing_event_retention = None;
         app.processing_derivation_retention = None;
-        if app.status_message.as_deref()
-            == Some("Incoming projection is waiting for bounded UI storage credit")
+        if app.projection_admission_wake.is_none()
+            && app.status_message.as_deref()
+                == Some("Incoming projection is waiting for bounded UI storage credit")
         {
             app.status_message = None;
         }
-        app.incoming_projection
-            .prune(&app.tree, &app.agent_debug_logs);
+        if needs_projection_prune {
+            app.incoming_projection
+                .prune(&app.tree, &app.agent_debug_logs);
+        }
         if !app.pending_terminal_events.is_empty() {
             break;
         }
@@ -4129,8 +4336,61 @@ fn apply_server_events(
     damage
 }
 
-/// Network intake appends to the original FIFO. Callers which already popped
-/// its oldest member pass that member directly to `apply_server_events`.
+/// Only terminal payloads for distinct panes commute. Everything else is a
+/// global barrier: tree snapshots, pane removal, resize and lifecycle events
+/// must retain their arrival order relative to *every* terminal stream.
+fn terminal_event_pane(event: &ilium_ipc::ServerEvent) -> Option<ilium_core::NodeId> {
+    use ilium_ipc::ServerEvent;
+    match event {
+        ServerEvent::ScreenUpdate { pane_id, .. }
+        | ServerEvent::TerminalSnapshot { pane_id, .. }
+        | ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::TerminalHistory { pane_id, .. } => Some(*pane_id),
+        _ => None,
+    }
+}
+
+/// Select the first payload for the active terminal within the terminal-only
+/// prefix. Selecting its earliest event preserves snapshot/live/history order.
+/// This scan borrows retained payloads; it neither clones bytes nor expands the
+/// bounded pending queue or its shared allocation budget.
+fn focused_terminal_event_index(
+    pending: &std::collections::VecDeque<crate::connection::Received<ilium_ipc::ServerEvent>>,
+    focused: Option<ilium_core::NodeId>,
+) -> Option<usize> {
+    let focused = focused?;
+    for (index, event) in pending.iter().enumerate() {
+        let pane_id = terminal_event_pane(event.view())?;
+        if pane_id == focused {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn take_pending_server_event(
+    app: &mut App,
+) -> Option<crate::connection::Received<ilium_ipc::ServerEvent>> {
+    // A projection wake belongs to the refused head. An independent active
+    // pane may still have enough credit, but retrying that same head waits for
+    // notification instead of spinning. Keyboard focus may be in the tree or
+    // a menu while the active terminal still needs its first visible screen.
+    if let Some(index) =
+        focused_terminal_event_index(&app.pending_terminal_events, app.active_pane_id())
+    {
+        if index != 0 || app.projection_admission_wake.is_none() {
+            return app.pending_terminal_events.remove(index);
+        }
+    }
+    if app.projection_admission_wake.is_none() {
+        app.pending_terminal_events.pop_front()
+    } else {
+        None
+    }
+}
+
+/// Intake retains FIFO custody; admission may bypass only unrelated terminal
+/// payloads preceding the active pane, never a lifecycle barrier.
 fn queue_server_event_in_order(
     app: &mut App,
     event: crate::connection::Received<ilium_ipc::ServerEvent>,
@@ -4140,11 +4400,7 @@ fn queue_server_event_in_order(
     }
     app.pending_terminal_events.push_back(event);
     confirm_suspended_panes_from_pending_snapshots(app);
-    if app.projection_admission_wake.is_some() {
-        None
-    } else {
-        app.pending_terminal_events.pop_front()
-    }
+    take_pending_server_event(app)
 }
 
 /// Lookahead proves only cancellation of a suspended instance absent from an
@@ -4188,16 +4444,35 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
     mark_debug_logging_pending(app);
 }
 
+/// The workers and launch context that `dispatch_ready_input_events` forwards
+/// to `dispatch_pending_app_work`, grouped to keep the dispatcher's argument
+/// list short.
+struct ReadyInputWorkers<'a> {
+    naming_workers: &'a mut NamingWorkers,
+    icon_search_workers: &'a mut IconSearchWorkers,
+    home_dir: Option<&'a std::path::Path>,
+}
+
+/// Retain the original mouse event until its live interaction surface has an
+/// actual matching output acknowledgement. Keeping it in native FIFO custody
+/// also preserves a drag's later motion/release instead of replaying only Down.
+fn native_input_geometry_ready(
+    app: &App,
+    event: &Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
+) -> bool {
+    !matches!(event, Ok(input) if matches!(input.view(), Event::Mouse(_)))
+        || app.pointer_geometry_is_current()
+}
+
 /// Applies one received input event and any immediately queued successors.
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
+#[allow(clippy::too_many_arguments)] // Keep the event-loop owners explicit at this dispatch boundary.
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
-    naming_workers: &mut NamingWorkers,
-    icon_search_workers: &mut IconSearchWorkers,
-    home_dir: Option<&std::path::Path>,
+    workers: ReadyInputWorkers<'_>,
     first: Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     deferred: &mut input_backlog::InputBacklog<
         Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
@@ -4209,6 +4484,11 @@ where
         Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     >,
 {
+    let ReadyInputWorkers {
+        naming_workers,
+        icon_search_workers,
+        home_dir,
+    } = workers;
     let mut failure = None;
     let mut overflow = None;
     let lookahead = {
@@ -4217,6 +4497,27 @@ where
             upstream: input_rx,
         };
         for_each_ready_input_event_until(&mut ready, first, |event| {
+            if let Some(press) = app.exit_click_release.as_ref() {
+                if event.as_ref().is_ok_and(|event| {
+                    terminal_input_owner::is_exit_click_release(event.view(), press)
+                }) {
+                    if let Ok(event) = event {
+                        event.dispatch(|_| ());
+                        app.exit_click_release = None;
+                    }
+                    // Later input belongs to another action and stays in
+                    // upstream custody; Restart does not authorize losing it.
+                    return false;
+                }
+                overflow = Some(event);
+                return false;
+            }
+            if !native_input_geometry_ready(app, &event)
+                || (event.is_ok() && app.board_input_backpressured())
+            {
+                overflow = Some(event);
+                return false;
+            }
             if app.has_editor_model_loan() {
                 let classification = event.as_ref().ok().and_then(|input| {
                     let event = input.view();
@@ -4247,7 +4548,7 @@ where
                     ) {
                         Ok(()) => true,
                         Err(original) => {
-                            overflow = Some(original);
+                            overflow = Some(*original);
                             false
                         }
                     };
@@ -4255,6 +4556,15 @@ where
             }
             match event {
                 Ok(event) => {
+                    let exit_was_unrequested = app.exit_reason.is_none();
+                    let mouse_press = match event.view() {
+                        Event::Mouse(mouse)
+                            if matches!(mouse.kind, crossterm::event::MouseEventKind::Down(_)) =>
+                        {
+                            Some(*mouse)
+                        }
+                        _ => None,
+                    };
                     let is_paste = matches!(event.view(), Event::Paste(_));
                     let destination = if is_paste {
                         app.native_terminal_paste_destination()
@@ -4292,6 +4602,9 @@ where
                                     crate::paste_cursor::PasteReplay::new_animation_text_prompt(
                                         event,
                                     )
+                                }
+                                Mode::AgentSetupPathPrompt(..) => {
+                                    crate::paste_cursor::PasteReplay::new_setup_path_prompt(event)
                                 }
                                 _ => crate::paste_cursor::PasteReplay::new(event),
                             };
@@ -4332,6 +4645,11 @@ where
                             )
                         });
                     }
+                    if exit_was_unrequested
+                        && app.exit_reason == Some(ClientExitReason::RestartRequested)
+                    {
+                        app.exit_click_release = mouse_press;
+                    }
                 }
                 Err(error) => failure = Some(error),
             }
@@ -4370,12 +4688,38 @@ fn advance_pending_key_paste(
     icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
 ) -> bool {
+    if app.board_input_backpressured() {
+        return false;
+    }
     let Some(mut replay) = app.pending_key_paste.take() else {
         return false;
     };
 
+    // Pasted text is data, not commands. A replayed key may open a dialog or
+    // enter the leader state (Enter/Tab can be the leader on some bases); the
+    // remaining characters would then drive shortcut handlers such as Quit or
+    // Detach. Stop the replay the moment the mode changes.
+    let starting_mode = std::mem::discriminant(&app.mode);
+    let mut mode_changed = false;
     for key in replay.next_keys(MAX_PASTE_KEYS_PER_TURN) {
+        if std::mem::discriminant(&app.mode) != starting_mode {
+            mode_changed = true;
+            break;
+        }
         app.handle_event(Event::Key(key));
+    }
+    if !mode_changed && std::mem::discriminant(&app.mode) != starting_mode {
+        mode_changed = true;
+    }
+    if mode_changed {
+        app.status_message =
+            Some("Paste stopped: it changed the interface mode, remaining text discarded".into());
+        replay.retire_original();
+        dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+        return true;
+    }
+    if replay.path_rejected() {
+        app.status_message = Some("The instruction-file path must be one line".into());
     }
     dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
 
@@ -4465,8 +4809,8 @@ impl InputBatchItem for Event {
 }
 
 #[cfg(test)]
-impl ReadyInput for mpsc::Receiver<Event> {
-    type Item = Event;
+impl<T: InputBatchItem> ReadyInput for mpsc::Receiver<T> {
+    type Item = T;
 
     fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError> {
         self.try_recv()
@@ -4511,6 +4855,7 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
 ) -> Option<S::Item> {
     let mut next = Some(first);
     let mut received = 1;
+    let batch_started = Instant::now();
     loop {
         let event = match next.take() {
             Some(event) => event,
@@ -4556,6 +4901,11 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
             event
         };
         if !dispatch(event) {
+            return next;
+        }
+        if batch_started.elapsed() >= MAX_EVENT_BATCH_TIME {
+            // Return a consumed lookahead; leave every other original in its
+            // receiver. The next UI turn resumes at this exact boundary.
             return next;
         }
         if received == MAX_INPUT_EVENTS_PER_BATCH && next.is_none() {
@@ -4672,6 +5022,10 @@ fn reject_naming_original(
         ),
         NamingKind::Restructure(request, _) => {
             app.fail_project_restructure(request.project_id, anyhow::anyhow!(message.clone()))
+        }
+        NamingKind::Recap(request) => {
+            app.recap.finish_manual(request.pane_id);
+            app.recap_failed(request.pane_id, message.clone());
         }
         #[cfg(test)]
         NamingKind::LastPrompt(_) => {}
@@ -4892,6 +5246,20 @@ fn dispatch_pending_app_work(
         }
     }
 
+    for mut request in app.take_pending_recap_requests() {
+        let pane_id = request.pane_id;
+        let Some(home_dir) = home_dir else {
+            app.recap_failed(pane_id, "home directory unavailable".to_string());
+            continue;
+        };
+        if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
+            app.recap_failed(pane_id, "AI is not allowed yet".to_string());
+            continue;
+        }
+        request.home = home_dir.to_path_buf();
+        handle_naming_admission(naming_workers.spawn_recap_worker(request), app);
+    }
+
     for request in app.take_pending_restructure_requests() {
         if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
             app.cancel_project_restructure_after_ai_decision(request.project_id);
@@ -4917,11 +5285,343 @@ mod responsiveness_tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+    fn queued_output(
+        pane_id: ilium_core::NodeId,
+        sequence: u64,
+    ) -> crate::connection::Received<ilium_ipc::ServerEvent> {
+        crate::connection::Received::with_retention(
+            ilium_ipc::ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: sequence,
+                sequence,
+                bytes: vec![b'x'],
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn focused_delivery_bypasses_unrelated_stalled_output() {
+        let mut app = App::new("focused-delivery".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let background = app
+            .tree
+            .add_pane(group, "background", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let focused = app
+            .tree
+            .add_pane(group, "focused", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.focus_pane(focused);
+        app.pending_terminal_events
+            .push_back(queued_output(background, 1));
+        let received = queue_server_event_in_order(&mut app, queued_output(focused, 1)).unwrap();
+        assert!(
+            matches!(received.view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == focused),
+            "unrelated backlog must not be selected ahead of focused output"
+        );
+        assert_eq!(app.pending_terminal_events.len(), 1);
+        assert!(
+            matches!(app.pending_terminal_events.front().unwrap().view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == background)
+        );
+    }
+
+    #[test]
+    fn focused_delivery_retains_lifecycle_and_same_pane_order() {
+        let mut app = App::new("focused-order".into(), std::env::temp_dir());
+        app.pending_terminal_events
+            .push_back(queued_output(ilium_core::NodeId(11), 1));
+        let first = queue_server_event_in_order(&mut app, queued_output(ilium_core::NodeId(11), 2))
+            .unwrap();
+        assert!(matches!(
+            first.view(),
+            ilium_ipc::ServerEvent::ScreenUpdate { sequence: 1, .. }
+        ));
+        app.pending_terminal_events.clear();
+        app.pending_terminal_events
+            .push_back(crate::connection::Received::with_retention(
+                ilium_ipc::ServerEvent::DebugLoggingChanged { enabled: false },
+                None,
+            ));
+        let first = queue_server_event_in_order(&mut app, queued_output(ilium_core::NodeId(11), 3))
+            .unwrap();
+        assert!(matches!(
+            first.view(),
+            ilium_ipc::ServerEvent::DebugLoggingChanged { .. }
+        ));
+    }
+
+    #[test]
+    fn focused_delivery_prefix_stops_at_lifecycle_and_keeps_same_pane_head() {
+        let background = ilium_core::NodeId(11);
+        let focused = ilium_core::NodeId(12);
+        let mut queue = std::collections::VecDeque::from([
+            queued_output(background, 1),
+            queued_output(focused, 1),
+            queued_output(focused, 2),
+        ]);
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), Some(1));
+        queue.remove(1);
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), Some(1));
+        queue.push_front(crate::connection::Received::with_retention(
+            ilium_ipc::ServerEvent::TreeSnapshot(ilium_core::Tree::new()),
+            None,
+        ));
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), None);
+        assert_eq!(focused_terminal_event_index(&queue, None), None);
+        let queue = std::collections::VecDeque::from([
+            queued_output(focused, 1),
+            queued_output(focused, 2),
+        ]);
+        assert_eq!(focused_terminal_event_index(&queue, Some(focused)), Some(0));
+    }
+
+    #[test]
+    fn focused_delivery_keeps_bounded_queue_and_waits_on_its_own_refused_head() {
+        let mut app = App::new("focused-credit".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let background = app
+            .tree
+            .add_pane(group, "background", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let focused = app
+            .tree
+            .add_pane(group, "focused", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.focus_pane(focused);
+        for sequence in 1..MAX_PENDING_SERVER_EVENTS as u64 {
+            app.pending_terminal_events
+                .push_back(queued_output(background, sequence));
+        }
+        app.projection_admission_wake = Some(Box::pin(
+            crate::execution::admission_notification().notified_owned(),
+        ));
+        let event = queue_server_event_in_order(&mut app, queued_output(focused, 1)).unwrap();
+        assert!(
+            matches!(event.view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == focused)
+        );
+        assert_eq!(
+            app.pending_terminal_events.len(),
+            MAX_PENDING_SERVER_EVENTS - 1
+        );
+        assert!(take_pending_server_event(&mut app).is_none());
+        app.pending_terminal_events.pop_back();
+        app.pending_terminal_events
+            .push_front(queued_output(focused, 1));
+        app.pending_terminal_events
+            .push_back(queued_output(focused, 2));
+        assert_eq!(app.pending_terminal_events.len(), MAX_PENDING_SERVER_EVENTS);
+        assert!(take_pending_server_event(&mut app).is_none());
+        app.projection_admission_wake = None;
+        let first = take_pending_server_event(&mut app).unwrap();
+        assert!(
+            matches!(first.view(), ilium_ipc::ServerEvent::ScreenUpdate { pane_id, sequence: 1, .. } if *pane_id == focused)
+        );
+    }
+
     #[test]
     fn merged_screen_updates_respect_the_byte_ceiling() {
         assert!(screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH - 1, 1));
         assert!(!screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH, 1));
         assert!(!screen_updates_fit(usize::MAX, usize::MAX));
+    }
+
+    #[test]
+    fn stale_mouse_geometry_keeps_press_drag_and_release_originals_until_ack() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new("mouse-custody".into(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let kinds = [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ];
+        let mut originals = Vec::new();
+        for kind in kinds {
+            let (input, quota) = terminal_input_owner::mouse_fixture(MouseEvent {
+                kind,
+                column: 10,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            });
+            let input = Ok(input);
+            assert!(!native_input_geometry_ready(&app, &input));
+            assert!(quota.snapshot().worker_bytes > 0);
+            originals.push((input, quota));
+        }
+        app.commit_emitted_geometry(app.capture_emitted_geometry(2));
+        for ((input, quota), kind) in originals.into_iter().zip(kinds) {
+            assert!(native_input_geometry_ready(&app, &input));
+            let input = input.unwrap();
+            assert!(matches!(input.view(), Event::Mouse(mouse) if mouse.kind == kind));
+            assert!(quota.snapshot().worker_bytes > 0);
+            drop(input);
+            assert_eq!(quota.snapshot().worker_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn accepted_restart_click_release_finishes_before_geometry_and_keeps_later_keys() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new("restart-release-custody".into(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let press = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 12,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(app.request_client_exit(ClientExitReason::RestartRequested));
+        app.exit_click_release = Some(press);
+        let (release, quota) = terminal_input_owner::mouse_fixture(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            ..press
+        });
+        let release = Ok(release);
+        assert!(!native_input_geometry_ready(&app, &release));
+        let (key, key_quota) = terminal_input_owner::key_fixture(KeyEvent::new(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+        ));
+        let (tx, mut rx) = mpsc::channel(2);
+        tx.try_send(Ok(key)).unwrap();
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+        let mut editor = crate::editor_input_backlog::EditorInputBacklog::begin(
+            crate::execution::test_client().quota_group(),
+        )
+        .unwrap();
+        let mut deferred = input_backlog::InputBacklog::default();
+        assert!(dispatch_ready_input_events(
+            &mut app,
+            &mut rx,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
+            release,
+            &mut deferred,
+            &mut editor
+        )
+        .is_none());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        assert!(app.exit_click_release.is_none());
+        assert!(deferred.is_empty());
+        assert_eq!(
+            rx.len(),
+            1,
+            "the later key stays in original upstream custody"
+        );
+        assert!(key_quota.snapshot().worker_bytes > 0);
+    }
+
+    #[test]
+    fn stale_mouse_dispatch_restores_press_and_lookahead_before_upstream_release() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new("mouse-dispatch-custody".into(), std::env::temp_dir());
+        app.project_name = Some("fixture".into());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+        let mut editor = crate::editor_input_backlog::EditorInputBacklog::begin(
+            crate::execution::test_client().quota_group(),
+        )
+        .unwrap();
+        let (tx, mut rx) = mpsc::channel(2);
+        let make = |kind| {
+            terminal_input_owner::mouse_fixture(MouseEvent {
+                kind,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        let (press, press_quota) = make(MouseEventKind::Down(MouseButton::Left));
+        let (drag, drag_quota) = make(MouseEventKind::Drag(MouseButton::Left));
+        let (release, release_quota) = make(MouseEventKind::Up(MouseButton::Left));
+        tx.try_send(Ok(drag)).unwrap();
+        tx.try_send(Ok(release)).unwrap();
+        let mut deferred = input_backlog::InputBacklog::default();
+        assert!(dispatch_ready_input_events(
+            &mut app,
+            &mut rx,
+            ReadyInputWorkers {
+                naming_workers: &mut naming,
+                icon_search_workers: &mut icons,
+                home_dir: None,
+            },
+            Ok(press),
+            &mut deferred,
+            &mut editor
+        )
+        .is_none());
+        let press = deferred.take_front().expect("original press retained");
+        assert!(
+            matches!(press.as_ref().unwrap().view(), Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left))
+        );
+        let lookahead = deferred.take_front();
+        assert!(
+            lookahead.is_none(),
+            "a stopped press does not read ahead into its gesture"
+        );
+        assert_eq!(
+            rx.len(),
+            2,
+            "drag and release retain their upstream FIFO order"
+        );
+        assert!(deferred.restore(Some(press), lookahead).is_ok());
+        assert!(press_quota.snapshot().worker_bytes > 0);
+        assert!(drag_quota.snapshot().worker_bytes > 0);
+        assert!(release_quota.snapshot().worker_bytes > 0);
+        assert!(
+            !rx.is_empty(),
+            "release remains upstream behind the retained gesture prefix"
+        );
+        // A UI turn may yield after the unchanged 4 ms budget, even with a
+        // ready gesture suffix. Resume backlog before upstream on later turns;
+        // custody, FIFO order, and eventual release are the contract here.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut emission = 2;
+        let mut next = Some(deferred.take_front().unwrap());
+        while let Some(first) = next {
+            assert!(Instant::now() < deadline, "retained gesture did not drain");
+            app.commit_emitted_geometry(app.capture_emitted_geometry(emission));
+            emission += 1;
+            assert!(dispatch_ready_input_events(
+                &mut app,
+                &mut rx,
+                ReadyInputWorkers {
+                    naming_workers: &mut naming,
+                    icon_search_workers: &mut icons,
+                    home_dir: None,
+                },
+                first,
+                &mut deferred,
+                &mut editor
+            )
+            .is_none());
+            next = deferred.take_front().or_else(|| rx.try_recv().ok());
+        }
+        assert!(deferred.is_empty());
+        assert!(rx.is_empty());
+        for quota in [press_quota, drag_quota, release_quota] {
+            assert_eq!(
+                quota.snapshot().worker_bytes,
+                0,
+                "every original released only after dispatch"
+            );
+        }
     }
 
     #[test]
@@ -4950,6 +5650,43 @@ mod responsiveness_tests {
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn key_paste_stops_when_a_pasted_key_changes_the_mode() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "paste-mode-change-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        // With Ctrl+M as leader, a pasted Enter enters the leader state and a
+        // following `q` would otherwise kill the whole session.
+        app.keyboard_settings.shortcut_base = crate::keymap::ShortcutBase::parse("m").unwrap();
+        let (original, _quota) = terminal_input_owner::paste_fixture("\nqqq".to_owned());
+        let client = crate::execution::test_client();
+        let mut replay = crate::paste_cursor::PasteReplay::new(original);
+        replay.reserve_retirement(&client.retirement()).unwrap();
+        app.pending_key_paste = Some(replay);
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+
+        while app.pending_key_paste.is_some() {
+            advance_pending_key_paste(&mut app, &mut naming, &mut icons, None);
+        }
+
+        assert!(app.exit_reason.is_none());
+        assert!(app.pending_key_paste.is_none());
+        // The guard, not luck, ended the replay: it reports the discarded rest.
+        assert!(
+            app.status_message
+                .as_deref()
+                .is_some_and(|message| message.starts_with("Paste stopped")),
+            "status was {:?}, mode {:?}",
+            app.status_message,
+            std::mem::discriminant(&app.mode)
+        );
     }
 
     #[test]
@@ -5076,19 +5813,55 @@ mod responsiveness_tests {
 
     #[test]
     fn output_redraws_are_limited_but_input_redraws_are_immediate() {
-        let last_draw_at = Instant::now();
-        let early = last_draw_at + Duration::from_millis(5);
+        let started = Instant::now();
+        let schedule = redraw_schedule::RedrawSchedule::new(started);
+        let early = started + Duration::from_millis(5);
+        assert_eq!(schedule.delay(false, early), Duration::from_millis(28));
+        assert_eq!(schedule.delay(true, early), Duration::ZERO);
         assert_eq!(
-            output_redraw_delay(early, last_draw_at),
-            Duration::from_millis(28)
+            schedule.delay(false, started + redraw_schedule::FRAME_INTERVAL),
+            Duration::ZERO
         );
-        assert!(!output_redraw_is_due(false, early, last_draw_at));
-        assert!(output_redraw_is_due(true, early, last_draw_at));
-        assert!(output_redraw_is_due(
-            false,
-            last_draw_at + OUTPUT_FRAME_INTERVAL,
-            last_draw_at,
-        ));
+    }
+
+    #[test]
+    fn metadata_pressure_preserves_emitted_geometry_until_scheduled_retry() {
+        let mut app = App::new("synthetic-redraw-pressure".into(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 80, 24));
+        assert!(app.admit_composition_metadata().unwrap());
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        let revision = app.emitted_layout_revision();
+        assert!(app.pointer_geometry_is_current());
+        let quota = crate::execution::process_quota();
+        let before = quota.snapshot();
+        let pressure = quota
+            .reserve_external_storage(before.limits.worker_bytes - before.worker_bytes)
+            .unwrap();
+        let now = Instant::now();
+        let mut schedule = crate::redraw_schedule::RedrawSchedule::new(now);
+        assert!(!app.admit_composition_metadata().unwrap());
+        let _ = schedule.admission_refused(now);
+        assert_eq!(app.emitted_layout_revision(), revision);
+        assert!(app.pointer_geometry_is_current());
+        assert_eq!(quota.snapshot().worker_bytes, before.limits.worker_bytes);
+        drop(pressure);
+        for immediate in [false, true] {
+            assert_eq!(
+                schedule.delay(immediate, now + Duration::from_millis(32)),
+                Duration::from_millis(1)
+            );
+        }
+        let retry_at = now + crate::redraw_schedule::FRAME_INTERVAL;
+        assert!(schedule.delay(false, retry_at).is_zero());
+        assert!(app.admit_composition_metadata().unwrap());
+        // Admission alone cannot acknowledge a newer emitted frame.
+        assert_eq!(app.emitted_layout_revision(), revision);
+        assert!(app.pointer_geometry_is_current());
+        let metadata_bytes = usize::from(app.layout.tree_area.height) * (64 * 1024) + 4096;
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            before.worker_bytes + metadata_bytes
+        );
     }
 
     #[test]
@@ -5499,6 +6272,35 @@ mod responsiveness_tests {
         assert!(received.try_recv().is_err());
     }
 
+    #[test]
+    fn typed_voice_offer_waits_for_owned_startup_preparation() {
+        let mut app = voice_text_app();
+        app.voice_settings.enabled = true;
+        app.voice_preparation
+            .configure(crate::execution::test_client());
+        let kind = crate::voice_preparation::PreparationKind::NormalStartup {
+            target: crate::control::VoiceTargetContext::capture(&app),
+        };
+        app.voice_preparation
+            .request(&app.voice_settings, kind)
+            .expect("owned startup preparation");
+        assert!(app.voice_preparation.is_pending());
+        let mut original = offer(&["hi"], true);
+        assert!(voice_text_offer_result(&mut app, None, &mut original).is_none());
+        assert_eq!(original.sentences, ["hi"]);
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+            "synthetic startup failure".into(),
+        ));
+        let failure = voice_text_offer_result(&mut app, None, &mut original)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            failure.code,
+            ilium_ipc::VoiceTextRejectionCode::VoiceUnavailable
+        );
+        assert_eq!(failure.message, "synthetic startup failure");
+    }
+
     #[tokio::test]
     async fn typed_sentences_are_refused_with_the_reason_when_no_session_can_take_them() {
         use ilium_ipc::VoiceTextRejectionCode::{VoiceOff, VoiceUnavailable};
@@ -5604,3 +6406,7 @@ mod responsiveness_tests {
         assert_eq!(app.status_message.as_deref(), Some("Voice (typed): second"));
     }
 }
+
+pub mod tree_layout_settings;
+
+pub mod tree_row_layout;

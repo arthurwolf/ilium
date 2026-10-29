@@ -20,6 +20,7 @@ use crate::voxel_landscape::assets::{
     pixels::{ImageExpectations, PixelImage},
 };
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 const MANIFEST: &str = include_str!("native_climate_1193.json");
 const CLIMATE_ROWS: usize = 63;
@@ -31,7 +32,7 @@ const REGISTRY_CHARGE: u64 = MANIFEST.len() as u64 * 4 + 64 * 1024;
 const MAP_PIXELS: usize = 256 * 256;
 const NATIVE_DATA_VERSION: i32 = 3218;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ColorKind {
     Grass,
     Foliage,
@@ -527,14 +528,7 @@ impl NativeTint {
         request: NativeRequest,
         cancel: Cancel<'_>,
     ) -> Result<NativeBlend<'a>, Error> {
-        let seed = request.world_seed.ok_or(Error::MissingSeed)?;
-        if request.blend_radius > 7 {
-            return Err(Error::BlendRadius);
-        }
-        if map.source() != request.source {
-            return Err(Error::StaleSource);
-        }
-        let radius = i32::from(request.blend_radius);
+        let (seed, radius) = self.validate_request(map, &request)?;
         let width = (radius * 2 + 1) as usize;
         let count = width * width;
         let reservation = self.budget.reserve(
@@ -549,81 +543,12 @@ impl NativeTint {
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 cancel.check()?;
-                let position = [
-                    request.java_position[0]
-                        .checked_add(dx)
-                        .ok_or(Error::Coordinate)?,
-                    request.java_position[1],
-                    request.java_position[2]
-                        .checked_add(dz)
-                        .ok_or(Error::Coordinate)?,
-                ];
-                let quart = native_biome::choose_quart(seed, position)?;
-                // Pinned ChunkAccess.getNoiseBiome clamps quart Y before both
-                // section indexing and local palette lookup. The selected
-                // fiddled corner remains separately recorded for provenance.
-                let lookup_quart = lookup_quart(quart);
-                let stored_position = [
-                    lookup_quart[0].checked_mul(4).ok_or(Error::Coordinate)?,
-                    lookup_quart[1].checked_mul(4).ok_or(Error::Coordinate)?,
-                    lookup_quart[2].checked_mul(4).ok_or(Error::Coordinate)?,
-                ];
-                let stored = stored_biome(
-                    map,
-                    Request {
-                        source: request.source,
-                        java_position: stored_position,
-                        kind: request.kind,
-                        climate_policy: request.climate_policy,
-                    },
-                )?;
-                let row = self
-                    .registry
-                    .climate(render_climate_identity(stored.name, stored.relation))?;
-                let (color, colormap) = match request.kind {
-                    ColorKind::Grass => {
-                        let base = match row.effects.grass_color {
-                            Some(value) => value,
-                            None => packed(self.grass.sample(row)?),
-                        };
-                        let value = match row.effects.grass_color_modifier.as_deref() {
-                            None | Some("none") => base,
-                            Some("dark_forest") => ((base & 0xfe_fe_fe) + 0x28_34_0a) >> 1,
-                            Some("swamp") => packed(self.swamp.grass_rgb(position[0], position[2])),
-                            Some(_) => return Err(Error::GrassModifier(GrassModifier::Other)),
-                        };
-                        (
-                            rgb(value),
-                            row.effects
-                                .grass_color
-                                .is_none()
-                                .then_some(&self.grass.evidence),
-                        )
-                    }
-                    ColorKind::Foliage => match row.effects.foliage_color {
-                        Some(value) => (rgb(value), None),
-                        None => (self.foliage.sample(row)?, Some(&self.foliage.evidence)),
-                    },
-                    ColorKind::Water => (rgb(row.effects.water_color), None),
-                };
-                for (sum, channel) in channels.iter_mut().zip(color) {
+                let position = window_position(request.java_position, dx, dz)?;
+                let contribution = self.contribution_at(map, &request, seed, position)?;
+                for (sum, channel) in channels.iter_mut().zip(contribution.sample.rgb) {
                     *sum += u32::from(channel);
                 }
-                contributions.push(NativeContribution {
-                    selected_quart: quart,
-                    lookup_quart,
-                    sample: Sample {
-                        source: request.source,
-                        java_position: position,
-                        kind: request.kind,
-                        rgb: color,
-                        biome: stored.name,
-                        climate_source: &row.source,
-                        climate_sha256: row.sha256,
-                        version_relation: stored.relation,
-                        colormap,
-                    },
-                });
+                contributions.push(contribution);
             }
         }
         let denominator = count as u32;
@@ -634,7 +559,153 @@ impl NativeTint {
             _reservation: reservation,
         })
     }
+
+    /// RGB mean of the same window `sample_native` averages, without the
+    /// per-cell provenance. Block tinting needs only the color, so contributions
+    /// are memoized per position: neighbouring blocks share most of their
+    /// window, and a contribution depends only on seed, kind and position.
+    pub fn sample_native_rgb(
+        &self,
+        map: &PreparedMap,
+        request: NativeRequest,
+        memo: &mut NativeTintMemo,
+        cancel: Cancel<'_>,
+    ) -> Result<[u8; 3], Error> {
+        let (seed, radius) = self.validate_request(map, &request)?;
+        let denominator = ((radius * 2 + 1) * (radius * 2 + 1)) as u32;
+        let mut channels = [0_u32; 3];
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                cancel.check()?;
+                let position = window_position(request.java_position, dx, dz)?;
+                let color = match memo.colors.get(&(request.kind, position)) {
+                    Some(color) => *color,
+                    None => {
+                        let color = self
+                            .contribution_at(map, &request, seed, position)?
+                            .sample
+                            .rgb;
+                        if memo.colors.len() < NATIVE_TINT_MEMO_LIMIT {
+                            memo.colors.insert((request.kind, position), color);
+                        }
+                        color
+                    }
+                };
+                for (sum, channel) in channels.iter_mut().zip(color) {
+                    *sum += u32::from(channel);
+                }
+            }
+        }
+        Ok(channels.map(|sum| (sum / denominator) as u8))
+    }
+
+    fn validate_request(
+        &self,
+        map: &PreparedMap,
+        request: &NativeRequest,
+    ) -> Result<(i64, i32), Error> {
+        let seed = request.world_seed.ok_or(Error::MissingSeed)?;
+        if request.blend_radius > 7 {
+            return Err(Error::BlendRadius);
+        }
+        if map.source() != request.source {
+            return Err(Error::StaleSource);
+        }
+        Ok((seed, i32::from(request.blend_radius)))
+    }
+
+    /// One blend-window cell: the quart choice, stored biome, climate row and
+    /// tint color for the block at `position`.
+    fn contribution_at<'a>(
+        &'a self,
+        map: &'a PreparedMap,
+        request: &NativeRequest,
+        seed: i64,
+        position: [i32; 3],
+    ) -> Result<NativeContribution<'a>, Error> {
+        let quart = native_biome::choose_quart(seed, position)?;
+        // Pinned ChunkAccess.getNoiseBiome clamps quart Y before both
+        // section indexing and local palette lookup. The selected
+        // fiddled corner remains separately recorded for provenance.
+        let lookup_quart = lookup_quart(quart);
+        let stored_position = [
+            lookup_quart[0].checked_mul(4).ok_or(Error::Coordinate)?,
+            lookup_quart[1].checked_mul(4).ok_or(Error::Coordinate)?,
+            lookup_quart[2].checked_mul(4).ok_or(Error::Coordinate)?,
+        ];
+        let stored = stored_biome(
+            map,
+            Request {
+                source: request.source,
+                java_position: stored_position,
+                kind: request.kind,
+                climate_policy: request.climate_policy,
+            },
+        )?;
+        let row = self
+            .registry
+            .climate(render_climate_identity(stored.name, stored.relation))?;
+        let (color, colormap) = match request.kind {
+            ColorKind::Grass => {
+                let base = match row.effects.grass_color {
+                    Some(value) => value,
+                    None => packed(self.grass.sample(row)?),
+                };
+                let value = match row.effects.grass_color_modifier.as_deref() {
+                    None | Some("none") => base,
+                    Some("dark_forest") => ((base & 0xfe_fe_fe) + 0x28_34_0a) >> 1,
+                    Some("swamp") => packed(self.swamp.grass_rgb(position[0], position[2])),
+                    Some(_) => return Err(Error::GrassModifier(GrassModifier::Other)),
+                };
+                (
+                    rgb(value),
+                    row.effects
+                        .grass_color
+                        .is_none()
+                        .then_some(&self.grass.evidence),
+                )
+            }
+            ColorKind::Foliage => match row.effects.foliage_color {
+                Some(value) => (rgb(value), None),
+                None => (self.foliage.sample(row)?, Some(&self.foliage.evidence)),
+            },
+            ColorKind::Water => (rgb(row.effects.water_color), None),
+        };
+        Ok(NativeContribution {
+            selected_quart: quart,
+            lookup_quart,
+            sample: Sample {
+                source: request.source,
+                java_position: position,
+                kind: request.kind,
+                rgb: color,
+                biome: stored.name,
+                climate_source: &row.source,
+                climate_sha256: row.sha256,
+                version_relation: stored.relation,
+                colormap,
+            },
+        })
+    }
 }
+
+/// Position of one cell in a blend window centred on `center`.
+fn window_position(center: [i32; 3], dx: i32, dz: i32) -> Result<[i32; 3], Error> {
+    Ok([
+        center[0].checked_add(dx).ok_or(Error::Coordinate)?,
+        center[1],
+        center[2].checked_add(dz).ok_or(Error::Coordinate)?,
+    ])
+}
+
+/// Contribution colors shared by overlapping blend windows of one tile. Capped so
+/// a tile cannot grow it without bound; positions past the cap are sampled
+/// directly, which gives the same means, only slower.
+#[derive(Default)]
+pub struct NativeTintMemo {
+    colors: BTreeMap<(ColorKind, [i32; 3]), [u8; 3]>,
+}
+const NATIVE_TINT_MEMO_LIMIT: usize = 262_144;
 fn lookup_quart(selected: [i32; 3]) -> [i32; 3] {
     [selected[0], selected[1].clamp(-16, 79), selected[2]]
 }

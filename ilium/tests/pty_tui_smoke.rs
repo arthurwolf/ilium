@@ -80,6 +80,13 @@ fn settings_tab_keys(
     vec![b'\t'; (end + tabs.len() - start) % tabs.len()]
 }
 
+fn ambient_choice_options(control: &ilium_ambient::Control) -> &[&'static str] {
+    let ilium_ambient::ControlKind::Choice { options } = &control.kind else {
+        panic!("{} should be a choice control", control.id);
+    };
+    options
+}
+
 use ilium_core::Tree;
 use ilium_core::{RestructureNode, RestructurePlan};
 use ilium_ipc::ClientRequest;
@@ -117,6 +124,50 @@ const PROJECT_NAME: &str = "Smoketest";
 /// `ilium-server`'s own integration test helper of the same name.
 async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
     wait_until_polling(condition, timeout, Duration::from_millis(20)).await
+}
+
+// Capture current parser state without waiting for a frame or changing input.
+fn compact_reload_probe(
+    session: &PtySession,
+    started: std::time::Instant,
+    phase: &str,
+    presentation_match: Option<&str>,
+) -> serde_json::Value {
+    let owner_status = format!("{:?}", session.input_handle().status());
+    let current = session.try_with_screen(|screen| {
+        let (rows, columns) = screen.size();
+        let generation = session.screen_generation();
+        let journal = session.output_replay_estimate();
+        serde_json::json!({
+            "size_rows_columns": [rows, columns],
+            "cursor": screen.cursor_position(),
+            "generation": generation,
+            "through_sequence": journal.through_sequence,
+            "journal_complete": journal.is_complete,
+            "numbered_rows": screen.rows(0, columns).enumerate().collect::<Vec<_>>(),
+        })
+    });
+    serde_json::json!({
+        "phase": phase,
+        "elapsed_ms": started.elapsed().as_millis(),
+        "pid": session.process_id(),
+        "owner_status_separate_sample": owner_status,
+        "presentation_match": presentation_match,
+        "current": current,
+    })
+}
+
+fn compact_reload_report(
+    session: &PtySession,
+    started: std::time::Instant,
+    observations: &[serde_json::Value],
+    phase: &str,
+) -> serde_json::Value {
+    let current = compact_reload_probe(session, started, phase, None);
+    serde_json::json!({
+        "observations": observations,
+        "final_observation": current,
+    })
 }
 
 /// Waits for a condition that is only true for one *transient* frame, such as
@@ -224,14 +275,11 @@ impl IsolatedXdgDirs {
         // Matches what `XDG_CONFIG_HOME` implies on Linux, so both levers name
         // the same directory and a seeded `config.toml` is found either way.
         let ilium_config_dir = config_home.join("ilium");
-        let debug_log_dir = root.join("debug-logs");
-        let mouse_trace_file = root.join("mouse-events.log");
         let agent_setup_home = root.join("agent-home");
         for dir in [
             &data_home,
             &config_home,
             &ilium_config_dir,
-            &debug_log_dir,
             &agent_setup_home,
         ] {
             std::fs::create_dir_all(dir)?;
@@ -250,17 +298,29 @@ impl IsolatedXdgDirs {
         // own: macOS hands out paths like
         // `/var/folders/df/djsxfhc17x95674wsm_g8s980000gn/T/.tmpR6qv4y/`, which
         // leaves no room for even an empty readable slug. A short prefix
-        // directly under `/tmp` keeps the derived socket short while staying
-        // unique per test, which parallel tests require.
+        // directly under the configured runtime root keeps the derived socket
+        // short while staying unique per test, which parallel tests require.
+        // Release acceptance can put this test-owned state under an approved
+        // scratch mount; ordinary runs retain the established `/tmp` default.
         // Unix only: the length budget is a Unix concern. Windows session
         // endpoints are named pipes, which have no `sockaddr_un` limit and no
         // `/tmp` to be short under, so there the ordinary temporary root is
         // both correct and the only one that exists.
         #[cfg(unix)]
-        let runtime_root = tempfile::Builder::new().prefix("il").tempdir_in("/tmp")?;
+        let runtime_root = {
+            let root = std::env::var_os("ILIUM_PTY_SMOKE_RUNTIME_ROOT")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"));
+            tempfile::Builder::new().prefix("il").tempdir_in(root)?
+        };
         #[cfg(windows)]
         let runtime_root = tempfile::Builder::new().prefix("il").tempdir()?;
         let runtime_dir = runtime_root.path().to_path_buf();
+        // Logging owns a Unix relay socket too; it needs the same short root
+        // as IPC when release acceptance uses a mounted scratch directory.
+        let debug_log_dir = runtime_dir.join("logs");
+        std::fs::create_dir_all(&debug_log_dir)?;
+        let mouse_trace_file = runtime_dir.join("mouse-events.log");
         // Under the same short root, for the same `sockaddr_un` reason, and
         // named `ilium` to match what `XDG_RUNTIME_DIR` would have produced.
         let socket_dir = runtime_dir.join("ilium");
@@ -315,6 +375,27 @@ impl IsolatedXdgDirs {
             // `~/.codex/AGENTS.md`.
             (ilium_client::AGENT_SETUP_HOME_ENV, &self.agent_setup_home),
         ]
+    }
+}
+
+impl Drop for IsolatedXdgDirs {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        if let Ok(trace) = std::fs::read(&self.mouse_trace_file) {
+            let tail = &trace[trace.len().saturating_sub(65_536)..];
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "type": "artifact",
+                    "kind": "owned_mouse_trace",
+                    "path": self.mouse_trace_file,
+                    "bytes": trace.len(),
+                    "tail": String::from_utf8_lossy(tail),
+                })
+            );
+        }
     }
 }
 
@@ -432,7 +513,7 @@ fn new_idle_pane_arguments() -> Vec<&'static str> {
 
 /// Resolves the `ilium` binary under test. Cargo's adjacent test binary is
 /// the default, while `ILIUM_PTY_SMOKE_BINARY` lets the same isolated flow
-/// prove a release-installed client and its sibling server after deployment.
+/// exercise a verified release artifact and its sibling server without installing it.
 fn ilium_binary() -> String {
     std::env::var_os("ILIUM_PTY_SMOKE_BINARY")
         .map(|binary_path| binary_path.to_string_lossy().into_owned())
@@ -526,6 +607,12 @@ async fn run_one_shot(xdg: &IsolatedXdgDirs, cwd: &Path, args: &[&str]) -> std::
         })
         .unwrap_or_else(|error| panic!("failed to spawn `ilium {args:?}`: {error}"));
 
+    if !status.success() {
+        eprintln!(
+            "failed one-shot command {args:?}: {}",
+            session_state_report(xdg)
+        );
+    }
     std::process::Output {
         status,
         stdout: captured().into_bytes(),
@@ -1033,6 +1120,28 @@ fn write_change_only_fake_codex(directory: &Path) -> PathBuf {
     .path
 }
 
+/// Installs a bounded `codex`-named PTY fixture that captures one complete
+/// toolbar model-selection sequence, including keys that do not end a cooked
+/// terminal line. The explicit executable name keeps process detection on
+/// the same path as the product while the raw-mode read records literal bytes.
+#[cfg(unix)]
+fn install_raw_codex_stage_recorder(directory: &Path, transcript_path: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let executable = directory.join("codex");
+    let quoted_transcript = format!(
+        "'{}'",
+        transcript_path.to_string_lossy().replace('\'', "'\\''")
+    );
+    let script = format!(
+        "#!/bin/sh\nprintf '\\033[2J\\033[H› '\nstty raw -echo\ndd bs=1 count=9 of={quoted_transcript} 2>/dev/null\nstty sane\nprintf '\\r\\nFAKE CODEX MODEL STAGES CAPTURED\\r\\n'\nwhile :; do sleep 1; done\n"
+    );
+    std::fs::write(&executable, script).expect("write raw Codex stage recorder");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+        .expect("make raw Codex stage recorder executable");
+    executable
+}
+
 /// A real client's expiry must advance even when output repeatedly wins its
 /// select loop. The authoritative server result remains available afterward.
 #[cfg(unix)]
@@ -1198,13 +1307,16 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
     let counter = |screen: String| {
         screen
             .split("busy-expiry-output-")
-            .nth(1)
-            .unwrap()
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>()
-            .parse::<u64>()
-            .unwrap()
+            .skip(1)
+            .filter_map(|tail| {
+                tail.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .ok()
+            })
+            .max()
+            .expect("visible busy output counter")
     };
     let busy_before = counter(tui.screen_text());
     let footer_expired = wait_until(
@@ -1215,6 +1327,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
                 let text = screen.contents();
                 text.contains("busy-expiry-output-")
                     && !text.contains("unique completed footer evidence")
+                    && counter(text) > busy_before
             })
             .unwrap_or(false)
         },
@@ -1495,8 +1608,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("OpenAI API key")
                 && screen.contains("Reasoning effort")
                 && screen.contains("VAD eagerness")
-                && screen.contains("Confirm terminal submissions")
-                && screen.contains("Custom prompt")
         },
         WAIT_TIMEOUT,
     )
@@ -1515,6 +1626,33 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| screen.size()),
         tui.with_screen(|screen| rows_containing(screen, "VOICE")),
         tui.with_screen(|screen| bottom_rows(screen, 3)),
+    );
+
+    // Wrapped explanations can put later controls below the viewport. Walk
+    // the actual selectable rows and require both later controls, then return
+    // to row zero so the API-key child-dialog interaction remains unchanged.
+    tui.write(b"jjjjjjjjjjjj")
+        .expect("navigate to the lower Voice control settings");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Confirm terminal submissions") && screen.contains("Custom prompt")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected lower Voice control settings to remain reachable, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"kkkkkkkkkkkk")
+        .expect("return to the first Voice control setting");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("OpenAI API key"),
+            WAIT_TIMEOUT
+        )
+        .await
     );
 
     // Open the API-key child dialog from the real Settings screen. Both the
@@ -1571,11 +1709,16 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b")
         .expect("closing mouse-opened Settings with Esc");
     assert!(
-        wait_until(|| !tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
-        "expected mouse-opened Settings to close before continuing"
-    );
-    assert!(
-        tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                !screen.contains("⚙ Settings")
+                    && screen.contains("VOICE OFF")
+                    && screen.contains("F8")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
         "expected the global voice control after Settings closed, got: {:?}",
         tui.screen_text()
     );
@@ -1703,9 +1846,18 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // hosts disagree about that for icons carrying a variation selector -- the
     // menu's own right border lands on two different columns on Windows for
     // exactly that reason.
-    let order_label_column = tui
-        .with_screen(|screen| column_of_text_in_row(screen, order_rows[0], "Order by"))
-        .expect("the Order by label should have a rendered column");
+    let (order_label_column, order_rows) = tui
+        .with_screen(|screen| {
+            let rows = rows_containing(screen, "Order by");
+            let row = *rows.first()?;
+            column_of_text_in_row(screen, row, "Order by").map(|column| (column, rows))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the Order by label should have a rendered coordinate: {:?}",
+                tui.screen_text()
+            )
+        });
     // A complete click, press and release. Sending only a press is what a
     // terminal that reports button transitions makes look sufficient; a
     // Windows console reports button *state* per event, so the two halves are
@@ -1724,11 +1876,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 // the adjacent pair would break on any icon change.
                 screen.contains('✓')
                     && screen.contains("Manual")
-                    && screen.contains("Type")
-                    && screen.contains("Age up (newest first)")
-                    && screen.contains("Age down (oldest first)")
-                    && screen.contains("Name A-Z")
-                    && screen.contains("Name Z-A")
+                    && screen.contains("Item type")
+                    && screen.contains("Newest first")
+                    && screen.contains("Oldest first")
+                    && screen.contains("Name (A–Z)")
+                    && screen.contains("Name (Z–A)")
             },
             WAIT_TIMEOUT,
         )
@@ -1832,15 +1984,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("Focused width")
                 && screen.contains("Tree order")
                 && screen.contains("Age down (oldest first)")
-                && screen.contains("Agent identifier")
-                && screen.contains("Full name")
         },
         WAIT_TIMEOUT,
     )
     .await;
     assert!(
         agent_controls_shown,
-        "expected agent identifier controls in User Appearance, got: {:?}",
+        "expected sizing controls in User Interface, got: {:?}",
         tui.screen_text()
     );
     tui.write(b"?")
@@ -1863,8 +2013,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("closing Settings help back to the same Settings screen");
     assert!(
         wait_until(
-            || tui.screen_text().contains("Agent identifier")
-                && tui.screen_text().contains("Full name"),
+            || tui.screen_text().contains("Left panel sizing")
+                && tui.screen_text().contains("Focused width"),
             WAIT_TIMEOUT,
         )
         .await,
@@ -1929,7 +2079,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         || {
             let screen = tui.screen_text();
             screen.contains("Icon assignments")
-                && screen.contains("Sidebar preview")
+                && screen.contains("Sidebar prev")
+                && screen.contains("Workspace")
+                && screen.contains("Notes")
                 && screen.contains("Terminal")
                 && screen.contains("[+]")
         },
@@ -1961,7 +2113,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 screen.contains("Icon catalogue")
                     && screen.contains("Quick picks")
                     && screen.contains("Official UTF-8 chapters first")
-                    && screen.contains("12372 total")
+                    && screen.contains("12372 icons")
                     && screen.contains("Multi-column")
             },
             WAIT_TIMEOUT,
@@ -2002,9 +2154,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let keyboard_tab_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("Shortcut base")
+            screen.contains("General prefix")
+                && screen.contains("Tree prefix")
                 && screen.contains("Ctrl+B")
-                && screen.contains("Recommended")
         },
         WAIT_TIMEOUT,
     )
@@ -2015,13 +2167,32 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
-    tui.write(b"2").expect("restoring the Ctrl+B preset");
-    let preset_restored = wait_until(
-        || tui.screen_text().contains("Recommended: Ctrl+B"),
-        WAIT_TIMEOUT,
-    )
-    .await;
-    assert!(preset_restored, "expected Ctrl+B preset to restore");
+    tui.write(b"l")
+        .expect("changing the general prefix to Ctrl+C");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config
+                    .lines()
+                    .any(|line| line.trim() == "shortcut_base = \"c\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the general prefix change to persist"
+    );
+    tui.write(b"h")
+        .expect("restoring the Ctrl+B general prefix");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config
+                    .lines()
+                    .any(|line| line.trim() == "shortcut_base = \"b\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the Ctrl+B general prefix to restore and persist"
+    );
     let persisted_config =
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
             .expect("read settings-persisted keyboard config");
@@ -2147,7 +2318,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
 
     // Titles follows Voice control and Inference. Exercise both its keyboard
-    // and mouse radio paths through the real rendered Settings screen.
+    // and mouse selector paths through the real rendered Settings screen.
     tui.write(&settings_tab_keys(
         ilium_client::app::SettingsTab::Sound,
         ilium_client::app::SettingsTab::Titles,
@@ -2167,8 +2338,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the Titles comparison, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"k\r")
-        .expect("selecting Labeling with the keyboard");
+    tui.write(b"\x1b[D")
+        .expect("selecting Labeling with the keyboard selector");
     assert!(
         wait_until(
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
@@ -2180,11 +2351,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     let (summary_column, summary_row) = tui
         .with_screen(|screen| {
-            let row = rows_containing(screen, "Summarization").first().copied()?;
-            let column = column_of_text_in_row(screen, row, "Summarization")?;
+            let row = rows_containing(screen, "Title style")
+                .into_iter()
+                .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
+            let column = column_of_text_in_row(screen, row, "→")?;
             Some((column, row))
         })
-        .expect("Summarization radio row should be visible");
+        .expect("Title style next control should be visible");
     tui.write(&sgr_mouse_down(0, summary_column, summary_row))
         .expect("clicking Summarization");
     tui.write(&sgr_mouse_up(summary_column, summary_row))
@@ -2263,8 +2436,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 let screen = tui.screen_text();
                 screen.contains("Debug")
                     && screen.contains("File logging")
-                    && screen.contains("‹ Off ›")
-                    && screen.contains("LLM requests/responses")
+                    && screen.contains("[○ OFF]")
+                    && screen.contains("full text LLM")
+                    && screen.contains("requests/responses")
             },
             WAIT_TIMEOUT,
         )
@@ -2297,9 +2471,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 let log = std::fs::read_to_string(&active_log_path).unwrap_or_default();
                 config.contains("[debug]")
                     && config.contains("file_logging_enabled = true")
-                    && log.contains("client file logging enabled from Debug settings")
                     && log.contains("server file logging enabled from Debug settings")
-                    && log.contains("client file logging synchronized from server")
+                    && log
+                        .contains("INFO ilium_client: client file logging transition acknowledged")
             },
             WAIT_TIMEOUT,
         )
@@ -2360,6 +2534,1483 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         attached_process_exited,
         "the pty-attached `ilium` process should exit on its own once `kill-session` \
          closes the connection, not need a force kill"
+    );
+}
+
+/// Exercises a complete selector catalog and exact numeric entry through the
+/// real PTY client, then starts a fresh client against the same isolated
+/// session to verify that both settings reload from their authoritative file.
+#[tokio::test]
+async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload() {
+    let temp_root = tempfile::tempdir().expect("create universal-selector tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("universal-selectors-project");
+    std::fs::create_dir_all(&project_dir).expect("create project dir");
+    seed_project_config(&xdg, &project_dir);
+    let animation_home = xdg.ilium_config_dir.join("animation");
+    let mut seeded_config = ilium_client::config::load(&xdg.ilium_config_dir)
+        .expect("read isolated config before seeding Padding baseline");
+    seeded_config.padding.mode = ilium_client::padding::PaddingMode::WidthDependent;
+    seeded_config.padding.width_threshold = 200;
+    ilium_client::config::save_padding_settings(&xdg.ilium_config_dir, &seeded_config.padding)
+        .expect("seed saved width-dependent Padding threshold");
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating the isolated PTY fixture failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+    let attach = |restart_server: bool, rows: u16, columns: u16| {
+        let mut command = PtyCommand::new(ilium_binary(), &project_dir, rows, columns);
+        if restart_server {
+            command = command.arg("--restart-server");
+        }
+        let command = command
+            .arg("--cwd")
+            .arg(project_dir.to_string_lossy().to_string());
+        xdg.as_pairs()
+            .into_iter()
+            .fold(command, |command, (key, value)| {
+                command.env(key, value.to_string_lossy().to_string())
+            })
+    };
+    let mut first_client = PtySession::spawn(attach(false, 44, 120))
+        .expect("spawn first universal-selector TUI under PTY");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains(PROJECT_NAME),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "first client did not render the isolated project: {:?}",
+        first_client.screen_text()
+    );
+
+    first_client
+        .write(b"\x02:")
+        .expect("open Settings with the default Tmux leader binding");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("⚙ Settings"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected Settings to open, got: {:?}",
+        first_client.screen_text()
+    );
+
+    // Sizing controls precede Tree order and depend on the saved mode.
+    let appearance_rows =
+        ilium_client::app::AppearanceRow::visible(seeded_config.ui.left_panel_sizing.mode);
+    let tree_order_row = appearance_rows
+        .iter()
+        .position(|row| *row == ilium_client::app::AppearanceRow::TreeOrder)
+        .expect("Tree order is present after the visible sizing controls");
+    first_client
+        .write(&b"\x1b[B".repeat(tree_order_row))
+        .expect("focus Tree order after the sizing controls");
+    // The full catalog has six identities; cross several options.
+    first_client
+        .write(b"+")
+        .expect("open the Tree order catalog");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Manual")
+                    && screen.contains("Type")
+                    && screen.contains("Age up (newest first)")
+                    && screen.contains("Age down (oldest first)")
+                    && screen.contains("Name A-Z")
+                    && screen.contains("Name Z-A")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the PTY catalog should render all six Tree order choices: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r")
+        .expect("choose Name Z-A, several entries beyond the current value");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                ilium_client::config::load(&xdg.ilium_config_dir).is_ok_and(|config| {
+                    config.ui.tree_order == ilium_client::config::TreeOrder::NameDescending
+                }) && !screen.contains("Search:")
+                    && !screen.contains("Saving; wait for disk receipt")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "the complete Tree order catalog selection did not persist: {:?}",
+        ilium_client::config::load(&xdg.ilium_config_dir)
+    );
+
+    first_client
+        .write(&settings_tab_keys(
+            ilium_client::app::SettingsTab::Appearance,
+            ilium_client::app::SettingsTab::RemoteCompaction,
+        ))
+        .expect("open Remote compaction numeric settings");
+    let settings = ilium_client::config::load(&xdg.ilium_config_dir)
+        .expect("read isolated config before numeric validation");
+    let rows = ilium_client::remote_compaction_settings::RemoteCompactionRow::rows(
+        &settings.remote_compaction,
+    );
+    let tail_tokens_row = rows
+        .iter()
+        .position(|row| {
+            *row == ilium_client::remote_compaction_settings::RemoteCompactionRow::TailTokens
+        })
+        .expect("Tail tokens is present in Remote compaction settings");
+    first_client
+        .write(b"\x1b[B".repeat(tail_tokens_row).as_slice())
+        .expect("select the Tail tokens numeric row");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Verbatim tail"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected the selected numeric row, got: {:?}",
+        first_client.screen_text()
+    );
+
+    // Zero is outside the 2,000..100,000 domain. It must leave the dialog
+    // open with validation feedback; cancelling must preserve the saved 20k.
+    first_client
+        .write(b"*")
+        .expect("open exact entry for Tail tokens");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 20000"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected Tail tokens direct-entry dialog, got: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\x7f\x7f\x7f\x7f\x7f0\r")
+        .expect("submit an invalid Tail tokens value");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Value: 0") && screen.contains("number between")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "invalid value should remain in the entry dialog: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\x1b")
+        .expect("cancel invalid numeric entry");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Verbatim tail")
+                    && !screen.contains("Value:")
+                    && !screen.contains("number between")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected cancellation to return to Remote compaction settings"
+    );
+    assert_eq!(
+        ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("read config after invalid/cancelled entry")
+            .remote_compaction
+            .tail_tokens,
+        20_000,
+        "invalid or cancelled input must not change saved Tail tokens"
+    );
+
+    first_client
+        .write(b"*")
+        .expect("reopen exact Tail tokens entry");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 20000"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "reopened Tail tokens editor must load the saved value before editing"
+    );
+    first_client
+        .write(b"\x7f\x7f\x7f\x7f\x7f23456\r")
+        .expect("enter a valid value between the step-ladder entries");
+    assert!(
+        wait_until(
+            || ilium_client::config::load(&xdg.ilium_config_dir)
+                .is_ok_and(|config| { config.remote_compaction.tail_tokens == 23_456 }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "exact off-ladder value was not persisted: {:?}",
+        ilium_client::config::load(&xdg.ilium_config_dir)
+    );
+
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Verbatim tail") && !screen.contains("Value: 23456")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Tail token save acknowledgement did not close the editor"
+    );
+
+    first_client
+        .write(&settings_tab_keys(
+            ilium_client::app::SettingsTab::RemoteCompaction,
+            ilium_client::app::SettingsTab::Padding,
+        ))
+        .expect("open the Padding settings tab");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Terminal columns:"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected the Padding threshold control, got: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"j*")
+        .expect("open width-dependent Padding draft");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 200"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Padding editor must load the saved threshold before editing"
+    );
+    first_client
+        .write(b"\x7f\x7f\x7f150")
+        .expect("enter a valid unsaved threshold");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 150"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the valid padding draft should remain visible before cancellation: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\x1b")
+        .expect("cancel the valid but unsaved padding draft");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Terminal columns:") && !screen.contains("Value:")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Padding cancellation must close the exact editor: {:?}",
+        first_client.screen_text()
+    );
+    assert_eq!(
+        ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("read config after cancelling the valid padding draft")
+            .padding
+            .width_threshold,
+        200,
+        "cancelling the valid draft must retain the saved threshold"
+    );
+    first_client
+        .write(b"*")
+        .expect("reopen the exact width-dependent threshold");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 200"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "reopened Padding editor must load the saved threshold before editing"
+    );
+    first_client
+        .write(b"\x7f\x7f\x7f150\r")
+        .expect("enter and accept the exact width-dependent threshold");
+    assert!(
+        wait_until(
+            || ilium_client::config::load(&xdg.ilium_config_dir)
+                .is_ok_and(|config| config.padding.width_threshold == 150),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "accepted exact padding threshold was not persisted: {:?}",
+        ilium_client::config::load(&xdg.ilium_config_dir)
+    );
+    assert_eq!(
+        ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("read config after accepting exact Padding threshold")
+            .padding
+            .mode,
+        ilium_client::padding::PaddingMode::WidthDependent,
+        "threshold entry must retain the seeded Width-dependent mode"
+    );
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Terminal columns:") && !screen.contains("Value: 150")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Padding save acknowledgement did not close the editor"
+    );
+    first_client
+        .write(b"h")
+        .expect("step the focused Padding threshold down");
+    assert!(
+        wait_until(
+            || ilium_client::config::load(&xdg.ilium_config_dir)
+                .is_ok_and(|config| config.padding.width_threshold == 149),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Padding's preserved h alias should step without changing modes"
+    );
+    first_client
+        .write(b"l")
+        .expect("step the focused Padding threshold back up");
+    assert!(
+        wait_until(
+            || ilium_client::config::load(&xdg.ilium_config_dir)
+                .is_ok_and(|config| config.padding.width_threshold == 150),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Padding's preserved l alias should restore the exact threshold"
+    );
+    assert_eq!(
+        ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("read Padding mode after keyboard stepping")
+            .padding
+            .mode,
+        ilium_client::padding::PaddingMode::WidthDependent,
+        "keyboard stepping a threshold must not force another Padding mode"
+    );
+
+    // Exercise the shared animation look through the attached client. Derive
+    // row and catalog positions from the authoritative control definitions so
+    // this reaches a non-adjacent real option without hard-coding display text.
+    let default_animation = ilium_client::background_animation::AnimationSettings::default();
+    let appearance_controls = default_animation.appearance.controls();
+    let palette_control_index = appearance_controls
+        .iter()
+        .position(|control| control.id == "look_palette")
+        .expect("Color mode includes the shared palette choice");
+    let palette_options = ambient_choice_options(&appearance_controls[palette_control_index]);
+    assert!(
+        palette_options.len() > 2,
+        "palette catalog must have alternatives"
+    );
+    let chosen_palette_index = palette_options.len() - 1;
+    let chosen_palette_label = palette_options[chosen_palette_index];
+
+    first_client
+        .write(&settings_tab_keys(
+            ilium_client::app::SettingsTab::Padding,
+            ilium_client::app::SettingsTab::Animations,
+        ))
+        .expect("open Animations settings");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Palette"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the shared palette row should be visible: {:?}",
+        first_client.screen_text()
+    );
+    // The scene list previews and saves on keyboard focus. Click the actual
+    // shared catalog button so reaching Palette does not activate every scene.
+    let (palette_column, palette_screen_row) = first_client
+        .with_screen(|screen| catalog_cell_after_label(screen, "Palette"))
+        .expect("rendered Palette catalog button");
+    first_client
+        .write(&sgr_mouse_click(0, palette_column, palette_screen_row))
+        .expect("open full palette catalog through its rendered button");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Search:") && screen.contains(palette_options[0])
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the palette catalog should show its first option: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(chosen_palette_label.as_bytes())
+        .expect("filter the complete catalog to a non-adjacent palette");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains(chosen_palette_label)
+                    && screen.contains(&format!("1 of {} options", palette_options.len()))
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the palette catalog should uniquely select the filtered option: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\r")
+        .expect("select the final palette option");
+    assert!(
+        wait_until(
+            || {
+                !first_client.screen_text().contains("Search:")
+                    && ilium_client::project_config::load(&animation_home).is_ok_and(|config| {
+                        config.animation.appearance.palette == chosen_palette_index
+                    })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "shared palette selection did not persist: saved={:?}, expected={chosen_palette_index}, screen={:?}",
+        ilium_client::project_config::load(&animation_home)
+            .map(|config| config.animation.appearance.palette),
+        first_client.screen_text()
+    );
+
+    // Select OpenStreetMap from its scene position, then navigate into its
+    // actual city and duration controls. The bundled default catalog is
+    // offline; the test makes no service/provider call or agent request.
+    let osm_label = ilium_client::background_animation::AnimationKind::OpenStreetMap.label();
+    let (scene_column, scene_row) = first_client
+        .with_screen(|screen| animation_scene_label_cell(screen, default_animation.kind.label()))
+        .expect("initial scene is visible in the scene list");
+    for _ in 0..ilium_client::background_animation::AnimationKind::ALL.len() {
+        if first_client
+            .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
+            .is_some()
+        {
+            break;
+        }
+        let scene_line = |screen: &vt100::Screen| {
+            (scene_column..scene_column.saturating_add(20).min(screen.size().1))
+                .filter_map(|column| screen.cell(scene_row, column))
+                .map(vt100::Cell::contents)
+                .collect::<String>()
+        };
+        let before = first_client.with_screen(scene_line);
+        first_client
+            .write(&sgr_mouse_down(65, scene_column, scene_row))
+            .expect("scroll the scene list without activating intervening scenes");
+        assert!(
+            wait_until(
+                || first_client.with_screen(scene_line) != before,
+                WAIT_TIMEOUT
+            )
+            .await,
+            "scene list did not scroll: {:?}",
+            first_client.screen_text()
+        );
+    }
+    let (osm_column, osm_row) = first_client
+        .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
+        .expect("OpenStreetMap label after scrolling the actual scene list");
+    first_client
+        .write(&sgr_mouse_click(0, osm_column, osm_row))
+        .expect("select the actual OpenStreetMap scene row");
+    assert!(
+        wait_until(
+            || {
+                first_client.with_screen(|screen| {
+                    animation_scene_label_cell(screen, osm_label)
+                        .and_then(|(column, row)| screen.cell(row, column))
+                        .is_some_and(vt100::Cell::inverse)
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "the OpenStreetMap list row should show pointer selection before persistence is checked: {:?}",
+        first_client.screen_text()
+    );
+    assert!(
+        wait_until(
+            || ilium_client::project_config::load(&animation_home).is_ok_and(|config| {
+                config.animation.kind
+                    == ilium_client::background_animation::AnimationKind::OpenStreetMap
+            }),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "OpenStreetMap scene selection did not persist: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\r")
+        .expect("select OpenStreetMap and focus its controls");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("OpenStreetMap"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "OpenStreetMap scene controls did not render: {:?}",
+        first_client.screen_text()
+    );
+
+    let osm_defaults = ilium_client::background_animation::AnimationSettings {
+        kind: ilium_client::background_animation::AnimationKind::OpenStreetMap,
+        ..Default::default()
+    };
+    let osm_controls = osm_defaults.scene_controls();
+    let place_offset = osm_controls
+        .iter()
+        .position(|control| control.id == "place")
+        .expect("offline OpenStreetMap controls include Place");
+    let place_control = &osm_controls[place_offset];
+    let city_options = ambient_choice_options(place_control);
+    assert!(city_options.len() > 2, "city catalog is complete");
+    let chosen_city_index = city_options.len() - 1;
+    let chosen_city_label = city_options[chosen_city_index];
+    let scene_controls_start = ilium_client::background_animation::AnimationKind::ALL.len()
+        + 2
+        + appearance_controls.len()
+        + 4
+        + default_animation.appearance.pattern_controls().len();
+    let place_row = scene_controls_start + place_offset;
+    first_client
+        .write(
+            b"\x1b[B"
+                .repeat(place_row - scene_controls_start)
+                .as_slice(),
+        )
+        .expect("focus the Place selector");
+    first_client
+        .write(b"+")
+        .expect("open the complete OpenStreetMap city catalog");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Search:"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "city catalog did not open: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(chosen_city_label.as_bytes())
+        .expect("filter the full catalog to a non-adjacent city");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains(chosen_city_label)
+                    && screen.contains(&format!("1 of {} options", city_options.len()))
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the city catalog should scroll its final option into view: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\r")
+        .expect("select a non-adjacent offline city");
+    assert!(
+        wait_until(
+            || ilium_client::project_config::load(&animation_home)
+                .ok()
+                .and_then(|config| {
+                    config
+                        .animation
+                        .scene_controls()
+                        .into_iter()
+                        .find(|control| control.id == "place")
+                })
+                .is_some_and(|control| {
+                    control.value == ilium_ambient::ControlValue::Index(chosen_city_index)
+                }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "city choice did not persist its stable index"
+    );
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                // Disk persistence precedes the client save receipt. The
+                // saving catalog still owns keys until it visibly closes.
+                screen.contains(chosen_city_label) && !screen.contains("Search:")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "selected city label should be applied in the settings row: {:?}",
+        first_client.screen_text()
+    );
+
+    let dwell_offset = osm_controls
+        .iter()
+        .position(|control| control.id == "dwell_seconds")
+        .expect("OpenStreetMap has an exact numeric place duration");
+    let dwell_row = scene_controls_start + dwell_offset;
+    first_client
+        .write(b"\x1b[B".repeat(dwell_row - place_row).as_slice())
+        .expect("focus the numeric Place duration row");
+    first_client
+        .write(b"*")
+        .expect("open exact entry for the numeric OSM duration");
+    let initial_dwell = match osm_controls[dwell_offset].value {
+        ilium_ambient::ControlValue::Number(value) => value,
+        _ => panic!("Place duration should be numeric"),
+    };
+    assert!(
+        wait_until(
+            || first_client
+                .screen_text()
+                .contains(&format!("Value: {initial_dwell}")),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "numeric scene editor should show the saved duration: {:?}",
+        first_client.screen_text()
+    );
+    let exact_dwell_keys = vec![0x7f; initial_dwell.to_string().len()]
+        .into_iter()
+        .chain(b"137\r".iter().copied())
+        .collect::<Vec<_>>();
+    first_client
+        .write(&exact_dwell_keys)
+        .expect("enter exact off-step duration 137 seconds");
+    assert!(
+        wait_until(
+            || ilium_client::project_config::load(&animation_home)
+                .ok()
+                .and_then(|config| {
+                    config
+                        .animation
+                        .scene_controls()
+                        .into_iter()
+                        .find(|control| control.id == "dwell_seconds")
+                })
+                .is_some_and(|control| control.value == ilium_ambient::ControlValue::Number(137)),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "exact off-step duration did not persist"
+    );
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("Place duration")
+                    && screen.contains("137s")
+                    && !screen.contains("Value: 137")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "the saved duration editor must close before reopening: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"*")
+        .expect("reopen the saved exact duration");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Value: 137"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "exact duration should survive closing and reopening: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\x1b")
+        .expect("close the unchanged duration editor");
+
+    // A second real client loads its own settings from disk while the first
+    // client and its isolated server remain alive. No provider or agent CLI is
+    // started by this interaction.
+    let fresh_command = attach(false, 24, 80);
+    let mut fresh_client = PtySession::spawn(fresh_command)
+        .expect("spawn fresh client against the same isolated server");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains(PROJECT_NAME),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "fresh client did not attach to the isolated project: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(b"\x02:")
+        .expect("open Settings in fresh client");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("⚙ Settings"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "fresh client should open Settings before row navigation"
+    );
+    fresh_client
+        .write(&b"\x1b[B".repeat(tree_order_row))
+        .expect("scroll the reloaded Tree order row into the compact viewport");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("Name Z-A"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "fresh client did not reload the selected tree order: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(&settings_tab_keys(
+            ilium_client::app::SettingsTab::Appearance,
+            ilium_client::app::SettingsTab::RemoteCompaction,
+        ))
+        .expect("open Remote compaction in fresh client");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Remote compaction") && !screen.contains("Verbatim tail")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the Tail tokens row should begin outside the compact page viewport: {:?}",
+        fresh_client.screen_text()
+    );
+    let persisted_remote_settings = ilium_client::config::load(&xdg.ilium_config_dir)
+        .expect("read compact-client row registry from persisted settings");
+    let compact_tail_tokens_row =
+        ilium_client::remote_compaction_settings::RemoteCompactionRow::rows(
+            &persisted_remote_settings.remote_compaction,
+        )
+        .iter()
+        .position(|row| {
+            *row == ilium_client::remote_compaction_settings::RemoteCompactionRow::TailTokens
+        })
+        .expect("Tail tokens remains in the compact settings row registry");
+    fresh_client
+        .write(b"\x1b[B".repeat(compact_tail_tokens_row).as_slice())
+        .expect("scroll to and focus Tail tokens in the compact client");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Verbatim tail") && screen.contains("23456 tokens")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "compact client did not scroll the exact Tail tokens row into view: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(b"*")
+        .expect("open the focused compact Tail tokens editor");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("Value: 23456"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "compact row focus did not dispatch to the exact reloaded number: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(b"\x1b")
+        .expect("close the compact Tail tokens editor without changing it");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Verbatim tail")
+                    && screen.contains("23456 tokens")
+                    && !screen.contains("Value: 23456")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Tail tokens editor must close before the next settings-tab keys: {:?}",
+        fresh_client.screen_text()
+    );
+
+    fresh_client
+        .write(&settings_tab_keys(
+            ilium_client::app::SettingsTab::RemoteCompaction,
+            ilium_client::app::SettingsTab::Padding,
+        ))
+        .expect("open Padding in the compact fresh client");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Columns:") && screen.contains("150")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "compact fresh client did not reload the exact padding threshold: {:?}",
+        fresh_client.screen_text()
+    );
+    assert_eq!(
+        ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("authoritative config read after fresh-client reload")
+            .remote_compaction
+            .tail_tokens,
+        23_456
+    );
+    fresh_client
+        .write(b"j*")
+        .expect("open Padding exact entry at 80 columns");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("Value: 150"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "compact Padding editor must show its reloaded value: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(b"\x7f\x7f\x7f151\r")
+        .expect("commit a new exact Padding value in the compact client");
+    assert!(
+        wait_until(
+            || ilium_client::config::load(&xdg.ilium_config_dir)
+                .is_ok_and(|config| config.padding.width_threshold == 151)
+                && fresh_client.screen_text().contains("Columns:"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "compact Padding edit must persist and close on its receipt: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(b"*")
+        .expect("reopen saved compact Padding value");
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("Value: 151"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "compact Padding editor must reopen the exact saved value: {:?}",
+        fresh_client.screen_text()
+    );
+    fresh_client
+        .write(b"\x1b")
+        .expect("cancel unchanged compact Padding entry");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("Columns:") && !screen.contains("Value: 151")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Padding editor must close before continuing the fresh-client reload: {:?}",
+        fresh_client.screen_text()
+    );
+    let reloaded_padding = ilium_client::config::load(&xdg.ilium_config_dir)
+        .expect("authoritative Padding read after fresh-client reload")
+        .padding;
+    assert_eq!(
+        reloaded_padding.mode,
+        ilium_client::padding::PaddingMode::WidthDependent
+    );
+    assert_eq!(reloaded_padding.width_threshold, 151);
+
+    assert_eq!(
+        ilium_client::project_config::load(&animation_home)
+            .expect("read animation settings after attaching compact client")
+            .animation
+            .appearance
+            .palette,
+        chosen_palette_index,
+        "fresh client attachment must retain the selected full-catalog palette"
+    );
+    fresh_client
+        .write(&settings_tab_keys(
+            ilium_client::app::SettingsTab::Padding,
+            ilium_client::app::SettingsTab::Animations,
+        ))
+        .expect("open Animations in compact fresh client");
+    // Inspect the global look with room for its pane, then return to the
+    // supported compact size for the persisted scene controls. Crossing scene
+    // rows with arrows would preview and save unrelated animations.
+    let compact_started = std::time::Instant::now();
+    let mut compact_observations: Vec<serde_json::Value> = Vec::with_capacity(8);
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "before_wide_resize",
+        None,
+    ));
+    fresh_client
+        .resize(44, 120)
+        .expect("show the global look pane for the fresh-client palette check");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "wide_resize_receipt",
+        None,
+    ));
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains(chosen_palette_label),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "fresh client should render the reloaded full-catalog palette: {:?}\nresize23={}",
+        fresh_client.screen_text(),
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "palette_timeout",
+        )
+    );
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "palette_predicate_passed",
+        None,
+    ));
+    let (loaded_scene_column, loaded_scene_row) = fresh_client
+        .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
+        .expect("persisted OpenStreetMap scene is visible");
+    fresh_client
+        .write(&sgr_mouse_click(0, loaded_scene_column, loaded_scene_row))
+        .expect("focus the persisted scene without visiting unrelated scenes");
+    fresh_client
+        .write(b"\r")
+        .expect("open persisted OpenStreetMap controls in compact client");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "before_compact_resize",
+        None,
+    ));
+    fresh_client
+        .resize(24, 80)
+        .expect("restore compact size for city and duration reload acceptance");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "compact_resize_receipt",
+        None,
+    ));
+    fresh_client
+        .write(b"\x1b[B".repeat(place_offset).as_slice())
+        .expect("scroll to the persisted city selector in compact client");
+    let mut city_presentation_match: Option<String> = None;
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                if !screen.contains(chosen_city_label) {
+                    return false;
+                }
+                city_presentation_match = Some(screen);
+                true
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "compact client should render the saved city after reload: {:?}\nresize23={}",
+        fresh_client.screen_text(),
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "city_timeout",
+        )
+    );
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "city_predicate_passed",
+        city_presentation_match.as_deref(),
+    ));
+    fresh_client
+        .write(b"\x1b[B".repeat(dwell_offset - place_offset).as_slice())
+        .expect("scroll to the exact numeric duration in compact client");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "before_dwell_star",
+        None,
+    ));
+    fresh_client
+        .write(b"*")
+        .expect("open persisted exact duration in compact client");
+    compact_observations.push(compact_reload_probe(
+        &fresh_client,
+        compact_started,
+        "dwell_star_written",
+        None,
+    ));
+    assert!(
+        wait_until(
+            || fresh_client.screen_text().contains("Value: 137"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "compact client should reload the exact off-step scene number: {:?}\nresize23={}",
+        fresh_client.screen_text(),
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "number_timeout",
+        )
+    );
+    eprintln!(
+        "resize23={}",
+        compact_reload_report(
+            &fresh_client,
+            compact_started,
+            &compact_observations,
+            "number_visible",
+        )
+    );
+    fresh_client
+        .write(b"\x1b")
+        .expect("close unchanged compact scene-number dialog");
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(
+        kill_output.status.success(),
+        "isolated kill-session failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        String::from_utf8_lossy(&kill_output.stderr)
+    );
+    cleanup_guard.already_cleaned_up = true;
+    let both_clients_exited = wait_until(
+        || first_client.has_exited() && fresh_client.has_exited(),
+        WAIT_TIMEOUT * 4,
+    )
+    .await;
+    if !both_clients_exited {
+        if !first_client.has_exited() {
+            first_client
+                .kill()
+                .expect("stop task-owned first PTY client");
+        }
+        if !fresh_client.has_exited() {
+            fresh_client
+                .kill()
+                .expect("stop task-owned fresh PTY client");
+        }
+    }
+    assert!(
+        both_clients_exited,
+        "both clients should exit after isolated session cleanup"
+    );
+}
+
+/// Exercises the onboarding keyboard prefix catalog in the real PTY client,
+/// then verifies the selected prefix is read from disk by a fresh client.
+#[tokio::test]
+async fn onboarding_keyboard_prefix_catalog_survives_fresh_client_reload() {
+    use ilium_client::onboarding::{
+        progress::OnboardingProgress,
+        state::{AiChoice, KeyboardChoice, SoundChoice, Step},
+    };
+
+    let temp_root = tempfile::tempdir().expect("create onboarding-selector tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_keyboard_config(&xdg);
+    let project_dir = temp_root.path().join("onboarding-selector-project");
+    std::fs::create_dir_all(&project_dir).expect("create isolated project dir");
+    seed_project_config(&xdg, &project_dir);
+
+    let mut pending = OnboardingProgress::default();
+    pending.begin();
+    pending.wizard.ai = Some(AiChoice::Disabled);
+    pending.wizard.sound = Some(SoundChoice::Custom);
+    pending.wizard.keyboard = Some(KeyboardChoice::Custom);
+    pending.wizard.step = Step::KeyboardPractice;
+    ilium_client::config::save_onboarding_progress(&xdg.ilium_config_dir, &pending)
+        .expect("seed a pending KeyboardPractice onboarding state");
+
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating isolated idle pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+    let attach = |restart_server: bool, rows: u16, columns: u16| {
+        let mut command = PtyCommand::new(ilium_binary(), &project_dir, rows, columns);
+        if restart_server {
+            command = command.arg("--restart-server");
+        }
+        let command = command
+            .arg("--cwd")
+            .arg(project_dir.to_string_lossy().to_string());
+        xdg.as_pairs()
+            .into_iter()
+            .fold(command, |command, (key, value)| {
+                command.env(key, value.to_string_lossy().to_string())
+            })
+    };
+    let mut first_client =
+        PtySession::spawn(attach(false, 44, 120)).expect("spawn onboarding PTY client");
+    assert!(
+        wait_until(
+            || {
+                let screen = first_client.screen_text();
+                screen.contains("General prefix") && screen.contains("Ctrl+B")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "pending keyboard onboarding should open its prefix editor: {:?}",
+        first_client.screen_text()
+    );
+
+    first_client
+        .write(b"+")
+        .expect("open the full General prefix catalog");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("General prefix"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the onboarding prefix choice dialog should render: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(&b"\x1b[B".repeat(24))
+        .expect("navigate from Ctrl+B to the non-adjacent Ctrl+Z choice");
+    assert!(
+        wait_until(
+            || first_client.screen_text().contains("Ctrl+Z"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the last of all 26 prefix choices should scroll into view: {:?}",
+        first_client.screen_text()
+    );
+    first_client
+        .write(b"\r")
+        .expect("accept the non-adjacent Ctrl+Z prefix choice");
+    assert!(
+        wait_until(
+            || ilium_client::config::load(&xdg.ilium_config_dir).is_ok_and(|config| config
+                .keyboard
+                .shortcut_base
+                .letter()
+                == 'z')
+                && first_client.screen_text().contains("General prefix"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "accepted onboarding prefix must reach config and stay on KeyboardPractice: {:?}",
+        first_client.screen_text()
+    );
+
+    let mut fresh_client = PtySession::spawn(attach(false, 24, 80))
+        .expect("spawn compact client against the same isolated session");
+    assert!(
+        wait_until(
+            || {
+                let screen = fresh_client.screen_text();
+                screen.contains("General prefix") && screen.contains("Ctrl+Z")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "fresh 80x24 client must reload and render the saved onboarding prefix: {:?}",
+        fresh_client.screen_text()
+    );
+    assert_eq!(
+        ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("authoritative keyboard config read after reload")
+            .keyboard
+            .shortcut_base
+            .letter(),
+        'z'
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(
+        kill_output.status.success(),
+        "isolated kill-session failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        String::from_utf8_lossy(&kill_output.stderr)
+    );
+    cleanup_guard.already_cleaned_up = true;
+    let both_clients_exited = wait_until(
+        || first_client.has_exited() && fresh_client.has_exited(),
+        WAIT_TIMEOUT * 4,
+    )
+    .await;
+    if !both_clients_exited {
+        if !first_client.has_exited() {
+            first_client
+                .kill()
+                .expect("stop task-owned onboarding client");
+        }
+        if !fresh_client.has_exited() {
+            fresh_client.kill().expect("stop task-owned fresh client");
+        }
+    }
+    assert!(
+        both_clients_exited,
+        "both onboarding clients should exit after cleanup"
+    );
+}
+
+/// Exercises Codex model-strength selection and Claude's complete toolbar
+/// effort catalog against named fake provider fixtures only.
+#[cfg(unix)]
+#[tokio::test]
+async fn toolbar_model_strength_and_effort_catalog_use_only_fake_providers() {
+    let temp_root = tempfile::tempdir().expect("create fake-toolbar tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_keyboard_config(&xdg);
+    update_isolated_ui_settings(&xdg, |ui| ui.show_toolbar_labels = true);
+    let project_dir = temp_root.path().join("fake-toolbar-project");
+    std::fs::create_dir_all(&project_dir).expect("create isolated project dir");
+    seed_project_config(&xdg, &project_dir);
+
+    let codex_dir = temp_root.path().join("fake-codex");
+    let claude_dir = temp_root.path().join("fake-claude");
+    std::fs::create_dir_all(&codex_dir).expect("create fake Codex fixture dir");
+    std::fs::create_dir_all(&claude_dir).expect("create fake Claude fixture dir");
+    let codex_transcript = temp_root.path().join("codex-toolbar-stages.bin");
+    let codex_command_path = install_raw_codex_stage_recorder(&codex_dir, &codex_transcript);
+    let claude_command_path = ilium_test_fixtures::install(
+        &claude_dir,
+        "claude",
+        &ilium_test_fixtures::FixtureBehavior::EchoSubmittedLine {
+            prefix: "fake-claude-command".into(),
+        },
+    )
+    .path;
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+    for command_path in [&codex_command_path, &claude_command_path] {
+        let command = command_path.to_string_lossy().to_string();
+        let output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", &command]).await;
+        assert!(
+            output.status.success(),
+            "creating named fake provider pane failed: stdout={:?} stderr={:?}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 200)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn fake-provider PTY client");
+    assert!(
+        wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await,
+        "fake-provider project should render before selecting panes: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x02w")
+        .expect("focus the tree containing the fake provider fixtures");
+    tui.write(b"j").expect("select the default fixture group");
+    tui.write(b"l")
+        .expect("expand the fake provider fixture group");
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+                        && !rows_containing_before_column(screen, "Claude:", 60).is_empty()
+                })
+            },
+            DETECTION_TIMEOUT,
+        )
+        .await,
+        "both absolute-path fake providers should be detected: {:?}",
+        tui.screen_text()
+    );
+
+    let codex_row =
+        tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60)[0]);
+    tui.write(&sgr_mouse_down(0, 8, codex_row))
+        .expect("focus the fake Codex pane row");
+    tui.write(&sgr_mouse_up(8, codex_row))
+        .expect("release fake Codex pane row");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Astra"), WAIT_TIMEOUT).await,
+        "Codex toolbar should display its visible model-strength choices: {:?}",
+        tui.screen_text()
+    );
+    let (astra_column, astra_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Astra").first()?;
+            column_of_text_in_row(screen, row, "Astra").map(|column| (column, row))
+        })
+        .expect("visible Astra model button");
+    tui.write(&sgr_mouse_click(0, astra_column, astra_row))
+        .expect("open the Astra reasoning-strength choices");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("MODEL STRENGTH") && tui.screen_text().contains("High"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Astra strength submenu should expose High: {:?}",
+        tui.screen_text()
+    );
+    let (high_column, high_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "High").first()?;
+            column_of_text_in_row(screen, row, "High").map(|column| (column, row))
+        })
+        .expect("High choice in model submenu");
+    tui.write(&sgr_mouse_click(0, high_column, high_row))
+        .expect("select Astra High through the visible toolbar submenu");
+    assert!(
+        wait_until(
+            || std::fs::read(&codex_transcript).is_ok_and(|bytes| bytes.len() == 9),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "all staged model/strength bytes should reach the raw fake Codex reader before switching panes"
+    );
+    assert_eq!(
+        std::fs::read(&codex_transcript).expect("read complete fake Codex model stages"),
+        b"/model\r23",
+        "Astra High should dispatch `/model`, Enter, model index 2, and High index 3 in order"
+    );
+
+    let claude_row =
+        tui.with_screen(|screen| rows_containing_before_column(screen, "Claude:", 60)[0]);
+    tui.write(&sgr_mouse_down(0, 8, claude_row))
+        .expect("focus the fake Claude pane row");
+    tui.write(&sgr_mouse_up(8, claude_row))
+        .expect("release fake Claude pane row");
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| {
+                column_of_text_in_row(screen, 0, "fake-claude/claude").is_some()
+                    && column_of_text_in_row(screen, 1, "auto").is_some()
+            }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Claude toolbar should display its effort control: {:?}",
+        tui.screen_text()
+    );
+    let (effort_open_column, effort_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "auto").first()?;
+            let value_column = column_of_text_in_row(screen, row, "auto")?;
+            let open_column =
+                (value_column + "auto".len() as u16 + 1..screen.size().1).find(|column| {
+                    screen
+                        .cell(row, *column)
+                        .is_some_and(|cell| cell.contents() == "+")
+                })?;
+            Some((open_column, row))
+        })
+        .expect("locate the effort control's open-choice button");
+    tui.write(&sgr_mouse_click(0, effort_open_column, effort_row))
+        .expect("open the complete Claude effort catalog");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Requested reasoning effort")
+                    && screen.contains("Automatic")
+                    && screen.contains("Ultracode")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "effort catalog should render its complete choice range: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\x1b[B\x1b[B")
+        .expect("select non-adjacent High from the effort catalog");
+    assert!(
+        wait_until(|| tui.screen_text().contains("High"), WAIT_TIMEOUT).await,
+        "High should be reachable in the effort catalog: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\r").expect("accept High requested effort");
+    assert!(
+        wait_until(
+            || tui
+                .screen_text()
+                .contains("fake-claude-command:</effort high>")
+                && tui.screen_text().contains("high"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "effort choice should update the toolbar and reach only the fake Claude fixture: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "isolated kill-session failed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT * 4).await;
+    if !exited {
+        tui.kill()
+            .expect("stop task-owned fake-provider PTY client");
+    }
+    assert!(
+        exited,
+        "fake-provider TUI should exit after isolated cleanup"
     );
 }
 
@@ -2547,12 +4198,25 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     );
     let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
     assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
-    tui.write(&sgr_mouse_click(0, menu_column + 1, restart_rows[0]))
+    // Restart owns exactly one press/release gesture. The general helper also
+    // sends a second legacy release, which is unrelated input after exit and
+    // must correctly remain in custody rather than silently disappearing.
+    let mut restart_click = sgr_mouse_down(0, menu_column + 1, restart_rows[0]);
+    restart_click.extend_from_slice(
+        format!("\x1b[<0;{};{}m", menu_column + 2, restart_rows[0] + 1).as_bytes(),
+    );
+    tui.write(&restart_click)
         .expect("click Restart context action");
 
     assert!(
         wait_until(|| restart_marker.is_file(), WAIT_TIMEOUT).await,
-        "replacement executable path was not loaded after Restart"
+        "replacement executable path was not loaded after Restart; exit={:?}; screen={:?}; output_tail={:?}",
+        tui.child_exit(),
+        tui.screen_text(),
+        {
+            let replay = tui.output_replay();
+            String::from_utf8_lossy(&replay.bytes[replay.bytes.len().saturating_sub(16384)..]).into_owned()
+        }
     );
     // Unix-only, and genuinely so: replacing a process's own image is what
     // `exec` does, and Windows has no equivalent. There the replacement runs
@@ -3053,29 +4717,26 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
         .collect()
 }
 
-/// Which of the icon catalogue's two view entries carries the selection dot.
-///
-/// The entries render as `[● Multi-column]  [ Single column ]` and its mirror,
-/// but matching that text whole asserts the host's cell-width model as much as
-/// the client's state: `\u{25cf}` is East Asian Ambiguous, and a host that
-/// gives it two cells shifts the rest of the row, so the brackets no longer sit
-/// where the string says. The order of the dot and the two labels survives
-/// that, and is what the selection actually means.
+/// The shared View control renders only its currently selected value.
 fn selected_catalogue_view(screen: &vt100::Screen) -> Option<&'static str> {
     let columns = screen.size().1;
-    let row = screen
-        .rows(0, columns)
-        .find(|text| text.contains("Multi-column") && text.contains("Single column"))?;
-    let dot = row.find('\u{25cf}')?;
-    let multi = row.find("Multi-column")?;
-    let single = row.find("Single column")?;
-    if dot < multi {
-        Some("Multi-column")
-    } else if dot < single {
-        Some("Single column")
-    } else {
-        None
+    let row = screen.rows(0, columns).find(|text| text.contains("View"))?;
+    let value = row.split_once("View")?.1;
+    ["Multi-column", "Single column"]
+        .into_iter()
+        .find(|label| value.contains(label))
+}
+
+#[test]
+fn rendered_catalogue_view_reads_the_current_shared_control_value() {
+    for label in ["Multi-column", "Single column"] {
+        let mut terminal = vt100::Parser::new(2, 80, 0);
+        terminal.process(format!("View  ← {label} …………… + →").as_bytes());
+        assert_eq!(selected_catalogue_view(terminal.screen()), Some(label));
     }
+    let mut terminal = vt100::Parser::new(2, 80, 0);
+    terminal.process("Single column outside a control".as_bytes());
+    assert_eq!(selected_catalogue_view(terminal.screen()), None);
 }
 
 /// The column where `needle`'s first character is rendered on `row`.
@@ -3085,25 +4746,52 @@ fn selected_catalogue_view(screen: &vt100::Screen) -> Option<&'static str> {
 /// an offset silently depends on how wide the host rendered the icon before
 /// it, which the hosts do not agree on.
 fn column_of_text_in_row(screen: &vt100::Screen, row: u16, needle: &str) -> Option<u16> {
-    let columns = screen.size().1;
-    let rendered: String = screen.rows(0, columns).nth(usize::from(row))?;
-    let byte_offset = rendered.find(needle)?;
-    let prefix_columns = rendered[..byte_offset]
-        .chars()
-        .map(|character| u16::try_from(unicode_width_of(character)).unwrap_or(1))
-        .sum::<u16>();
-    Some(prefix_columns)
+    let mut rendered = String::new();
+    let mut columns_by_byte = Vec::new();
+    for column in 0..screen.size().1 {
+        let cell = screen.cell(row, column)?;
+        if cell.is_wide_continuation() {
+            continue;
+        }
+        let contents = if cell.contents().is_empty() {
+            " "
+        } else {
+            cell.contents()
+        };
+        rendered.push_str(contents);
+        columns_by_byte.extend(std::iter::repeat_n(column, contents.len()));
+    }
+    columns_by_byte.get(rendered.find(needle)?).copied()
 }
 
-/// The cell width the renderer assigns one character. Zero-width joiners and
-/// variation selectors take no cell of their own, which is exactly where the
-/// hosts disagree, so they are counted as zero here to match what `vt100`
-/// reports back.
-fn unicode_width_of(character: char) -> usize {
-    match character {
-        '\u{fe0f}' | '\u{fe0e}' | '\u{200d}' => 0,
-        _ => unicode_width::UnicodeWidthChar::width(character).unwrap_or(0),
-    }
+#[test]
+fn rendered_text_coordinates_use_terminal_cells_after_wide_icons() {
+    let mut parser = vt100::Parser::new(2, 60, 0);
+    parser.process("🗂️   Order by → 📂 tail".as_bytes());
+    let screen = parser.screen();
+    let actual_order_column = (0..60)
+        .find(|&column| {
+            screen
+                .cell(0, column)
+                .is_some_and(|cell| cell.contents() == "O")
+        })
+        .expect("terminal stores the first label character");
+    assert_eq!(
+        column_of_text_in_row(screen, 0, "Order by"),
+        Some(actual_order_column)
+    );
+    assert_eq!(column_of_text_in_row(screen, 0, "not present"), None);
+    let folder_column = (0..60)
+        .find(|&column| {
+            screen
+                .cell(0, column)
+                .is_some_and(|cell| cell.contents() == "📂")
+        })
+        .expect("terminal stores the wide folder icon");
+    assert_eq!(
+        column_of_text_in_row(screen, 0, "📂 tail"),
+        Some(folder_column)
+    );
 }
 
 /// Finds the first terminal cell whose grapheme payload contains `needle`.
@@ -3123,6 +4811,69 @@ fn first_cell_containing(screen: &vt100::Screen, needle: &str) -> Option<(u16, u
         }
     }
     None
+}
+
+/// Locate literal ASCII label ink by terminal cells, never UTF-8 byte offsets.
+fn ascii_label_cell(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
+    assert!(label.is_ascii() && !label.is_empty());
+    let (rows, columns) = screen.size();
+    let length = u16::try_from(label.len()).ok()?;
+    if length > columns {
+        return None;
+    }
+    for row in 0..rows {
+        for column in 0..=columns - length {
+            if label.bytes().enumerate().all(|(offset, byte)| {
+                screen
+                    .cell(row, column + offset as u16)
+                    .is_some_and(|cell| cell.contents().as_bytes() == [byte])
+            }) {
+                return Some((column, row));
+            }
+        }
+    }
+    None
+}
+
+/// Scene labels also appear as right-pane titles. Restrict pointer targets to
+/// the actual list between its Native/Plugin heading and pagination controls.
+fn animation_scene_label_cell(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
+    let (left, heading_row) = ascii_label_cell(screen, "Native")?;
+    let (next_column, pager_row) = ascii_label_cell(screen, "Next")?;
+    for row in heading_row + 1..pager_row {
+        if let Some(column) = column_of_text_in_row(screen, row, label) {
+            if (left..next_column).contains(&column) {
+                return Some((column, row));
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn animation_scene_pointer_ignores_duplicate_settings_title() {
+    let mut terminal = vt100::Parser::new(12, 100, 0);
+    terminal.process(b"\x1b[2;61HOpenStreetMap settings\x1b[3;11HNative    Plugin\x1b[4;16HOther scene\x1b[5;16HOpenStreetMap\x1b[9;31HNext");
+    assert_eq!(
+        animation_scene_label_cell(terminal.screen(), "OpenStreetMap"),
+        Some((15, 4))
+    );
+    assert_eq!(
+        animation_scene_label_cell(terminal.screen(), "Missing"),
+        None
+    );
+}
+
+/// Select the painted catalog glyph following a form label, not its leader gap.
+fn catalog_cell_after_label(screen: &vt100::Screen, label: &str) -> Option<(u16, u16)> {
+    let (column, row) = ascii_label_cell(screen, label)?;
+    (column + label.len() as u16..screen.size().1)
+        .find(|column| {
+            screen
+                .cell(row, *column)
+                .is_some_and(|cell| cell.contents() == "+")
+        })
+        .map(|column| (column, row))
 }
 
 /// True if any cell in `row` is currently rendered in inverse video --
@@ -3725,7 +5476,6 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
                 let screen = tui.screen_text();
                 screen.contains("Create agent from line")
                     && screen.contains("Claude")
-                    && screen.contains("Codex")
                     && screen.contains("Task prompt")
             },
             WAIT_TIMEOUT,
@@ -3736,14 +5486,30 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     );
 
     let dialog = ilium_client::agent_from_line::dialog_layout_for_size(120, 40);
-    tui.write(&sgr_mouse_click(
-        0,
-        dialog.agent_row.x + 24,
-        dialog.agent_row.y,
-    ))
-    .expect("select Codex in the modal");
+    // The shared provider control cycles through the registry with its
+    // right-hand arrow; options are no longer simultaneous radio buttons.
+    let (provider_next_column, provider_row) = tui
+        .with_screen(|screen| {
+            rows_containing(screen, "Agent")
+                .into_iter()
+                .find_map(|row| {
+                    (0..screen.size().1).rev().find_map(|column| {
+                        screen
+                            .cell(row, column)
+                            .filter(|cell| cell.contents() == "→")
+                            .map(|_| (column, row))
+                    })
+                })
+        })
+        .expect("rendered create-agent provider next button");
+    tui.write(&sgr_mouse_click(0, provider_next_column, provider_row))
+        .expect("select Codex with the provider selector");
     assert!(
-        wait_until(|| tui.screen_text().contains("(●) Codex"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui.screen_text().contains("Agent") && tui.screen_text().contains("Codex"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected Codex selection, got: {:?}",
         tui.screen_text()
     );
@@ -3960,11 +5726,13 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let context_card_border = tui.with_screen(|screen| {
         let border_row = context_card_row.saturating_sub(1);
         let columns = screen.size().1;
+        // The theme draws rounded panel corners (`BorderType::Rounded`), so the
+        // card's top-left corner is `╭`, not the square `┌`.
         let border_start = (25..columns)
             .find(|column| {
                 screen
                     .cell(border_row, *column)
-                    .is_some_and(|cell| cell.contents() == "┌")
+                    .is_some_and(|cell| cell.contents() == "╭")
             })
             .expect("find Context task card border");
         (border_start..border_start.saturating_add(20).min(columns))
@@ -4079,7 +5847,9 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
             WAIT_TIMEOUT,
         )
         .await,
-        "body keystrokes should save immediately"
+        "body keystrokes should save immediately; document={:?}, screen={:?}",
+        std::fs::read_to_string(&context_path),
+        tui.screen_text()
     );
     tui.write(b"\x1b").expect("close card details with Escape");
     assert!(
@@ -4355,8 +6125,35 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         external_source,
         "stale board mutation must not overwrite the external edit"
     );
-    tui.write(b"r\x1b[CnReloaded task\r")
-        .expect("reload external revision and commit a new card");
+    // A rejected write retains its authored draft. Cancel that draft explicitly
+    // before issuing the normal-mode reload command.
+    assert!(
+        tui.screen_text().contains("Stale task"),
+        "rejected stale publication must retain the authored card draft, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b")
+        .expect("cancel the refused stale card draft");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("NEW CARD"), WAIT_TIMEOUT).await,
+        "cancelled stale draft should leave card entry, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"r").expect("reload the external board revision");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("External task") && !screen.contains("press r to reload")
+            },
+            WAIT_TIMEOUT,
+        ).await,
+        "the external card must render before editing its reloaded revision, source: {:?}; screen: {:?}",
+        std::fs::read_to_string(&dialog_path),
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[CnReloaded task\r")
+        .expect("commit a new card after the external revision is loaded");
     assert!(
         wait_until(
             || std::fs::read_to_string(&dialog_path)
@@ -4478,9 +6275,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("Chatroom")
-                    && screen.contains(TERMINAL_ICON)
-                    && screen.contains(IDLE_PANE_LABEL)
+                screen.contains(TERMINAL_ICON) && screen.contains(IDLE_PANE_LABEL)
             },
             WAIT_TIMEOUT
         )
@@ -4508,14 +6303,20 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         .expect("right-click terminal row");
     assert!(
         wait_until(
-            || tui.screen_text().contains("Hit key(s) X time from now"),
+            || tui.screen_text().contains("Schedule keystrokes…"),
             WAIT_TIMEOUT
         )
         .await,
         "expected scheduled-input context action, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_click(0, menu_column + 1, terminal_row + 2))
+    let (schedule_column, schedule_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Schedule keystrokes…").first()?;
+            column_of_text_in_row(screen, row, "Schedule keystrokes…").map(|column| (column, row))
+        })
+        .expect("rendered scheduled-input context action");
+    tui.write(&sgr_mouse_click(0, schedule_column, schedule_row))
         .expect("click scheduled-input context action");
     assert!(
         wait_until(
@@ -4687,6 +6488,19 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     // Hover reveals the action overlay and expands the tree horizontally.
     // Read the Up icon's actual terminal cell rather than duplicating the
     // renderer's animated width or fixed-slot geometry in this PTY test.
+    let shell_row_before = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"])
+                    .first()
+                    .copied()
+            })
+        },
+        SETTLED_LAYOUT_DURATION,
+        WAIT_TIMEOUT,
+    )
+    .await
+    .expect("nested shell row must settle before its hover action");
     tui.write(&sgr_mouse_move(8, shell_row_before))
         .expect("hover boundary pane row");
     // The icon is only as settled as the widening tree it sits in: sampled
@@ -4823,7 +6637,11 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
     // project's persisted expanded state when that snapshot arrives.
     assert!(
         wait_until(
-            || tui.with_screen(|screen| rows_containing(screen, "folder-project").len() >= 2),
+            || tui.with_screen(|screen| {
+                rows_containing(screen, "folder-project")
+                    .into_iter()
+                    .any(|row| column_of_text_in_row(screen, row, "📂").is_some())
+            }),
             WAIT_TIMEOUT,
         )
         .await,
@@ -4834,13 +6652,22 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
     // Locate rows after each render so indentation never becomes a guessed
     // coordinate; each click follows the same hit-test and expansion path a
     // real user uses.
-    let root_rows = tui.with_screen(|screen| rows_containing(screen, "folder-project"));
-    let folder_row = *root_rows
-        .last()
-        .expect("expected persisted folder-root row");
-    tui.write(&sgr_mouse_down(0, 8, folder_row))
-        .expect("expand folder root");
-    tui.write(&sgr_mouse_up(8, folder_row))
+    let (folder_column, folder_row) = tui.with_screen(|screen| {
+        let folder_row = *rows_containing(screen, "folder-project")
+            .last()
+            .expect("expected persisted folder-root row");
+        let folder_column = column_of_text_in_row(screen, folder_row, "folder-project")
+            .expect("rendered folder-root label");
+        eprintln!("{}", serde_json::json!({
+            "type": "artifact", "kind": "mouse_target", "target": "folder_root",
+            "unix_millis": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("fixture clock").as_millis(),
+            "column": folder_column, "row": folder_row, "screen": screen.contents(),
+        }));
+        (folder_column, folder_row)
+    });
+    tui.write(&sgr_mouse_down(0, folder_column, folder_row))
+        .expect("expand folder root through its label");
+    tui.write(&sgr_mouse_up(folder_column, folder_row))
         .expect("release folder-root click");
     assert!(
         wait_until(|| tui.screen_text().contains("alpha"), WAIT_TIMEOUT).await,
@@ -4848,11 +6675,16 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
     for (directory, next_entry) in [("alpha", "beta"), ("beta", "gamma"), ("gamma", "deep.rs")] {
-        let rows = tui.with_screen(|screen| rows_containing(screen, directory));
-        assert_eq!(rows.len(), 1, "expected one {directory:?} row");
-        tui.write(&sgr_mouse_down(0, 8, rows[0]))
+        let (column, row) = tui.with_screen(|screen| {
+            let rows = rows_containing(screen, directory);
+            assert_eq!(rows.len(), 1, "expected one {directory:?} row");
+            let column = column_of_text_in_row(screen, rows[0], directory)
+                .expect("rendered nested-directory label");
+            (column, rows[0])
+        });
+        tui.write(&sgr_mouse_down(0, column, row))
             .unwrap_or_else(|error| panic!("expand {directory}: {error}"));
-        tui.write(&sgr_mouse_up(8, rows[0]))
+        tui.write(&sgr_mouse_up(column, row))
             .unwrap_or_else(|error| panic!("release {directory} click: {error}"));
         assert!(
             wait_until(|| tui.screen_text().contains(next_entry), WAIT_TIMEOUT).await,
@@ -4866,11 +6698,16 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
 
-    let file_rows = tui.with_screen(|screen| rows_containing(screen, "deep.rs"));
-    assert_eq!(file_rows.len(), 1, "expected one deep file row");
-    tui.write(&sgr_mouse_down(0, 8, file_rows[0]))
+    let (file_column, file_row) = tui.with_screen(|screen| {
+        let rows = rows_containing(screen, "deep.rs");
+        assert_eq!(rows.len(), 1, "expected one deep file row");
+        let column =
+            column_of_text_in_row(screen, rows[0], "deep.rs").expect("rendered deep-file label");
+        (column, rows[0])
+    });
+    tui.write(&sgr_mouse_down(0, file_column, file_row))
         .expect("open deep file in editor");
-    tui.write(&sgr_mouse_up(8, file_rows[0]))
+    tui.write(&sgr_mouse_up(file_column, file_row))
         .expect("release deep-file click");
     assert!(
         wait_until(
@@ -5024,7 +6861,18 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         "expected detected-agent context action, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_click(0, menu_column + 1, menu_row + 1))
+    let (debug_action_column, debug_action_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Show debug log").first()?;
+            (0..screen.size().1).find_map(|column| {
+                screen
+                    .cell(row, column)
+                    .filter(|cell| cell.contents() == "S")
+                    .map(|_| (column, row))
+            })
+        })
+        .expect("locate the rendered Show debug log action");
+    tui.write(&sgr_mouse_click(0, debug_action_column, debug_action_row))
         .expect("open agent debug log");
     tui.write(b"\x1b[H")
         .expect("jump to the oldest retained debug events");
@@ -5390,21 +7238,6 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
         .expect("deliver bracketed paste to the fake Codex PTY");
     tui.write(b"\r").expect("submit the pasted prompt");
 
-    assert!(
-        wait_until(
-            || {
-                let screen = tui.screen_text();
-                screen.contains("first line")
-                    && screen.contains("second line")
-                    && screen.contains("fifth line")
-                    && screen.contains("sixth line")
-            },
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "expected the last-prompt banner to show all four kept rows: {:?}",
-        tui.screen_text()
-    );
     // The banner sits in its own reserved rows directly below the toolbar --
     // distinct from the pane's own terminal content further down, which the
     // pty's normal input echo (now legitimately reproducing the whole raw
@@ -5412,29 +7245,46 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     // "third line"/"fourth line" without that being the banner. Scope the
     // middle-truncation assertion to the banner's own four rows so echoed
     // content in the pane body below can't produce a false pass or fail.
-    let (banner_rows_ok, screen_for_diagnostics) = tui.with_screen(|screen| {
-        let toolbar_rows = rows_containing(screen, "⏹ Stop");
-        let Some(&toolbar_row) = toolbar_rows.first() else {
-            return (false, String::new());
-        };
-        let cols = screen.size().1;
-        let banner_texts: Vec<String> = (1..=4)
-            .map(|offset| {
-                screen
-                    .rows(0, cols)
-                    .nth((toolbar_row + offset) as usize)
-                    .unwrap_or_default()
-                    .trim_end()
-                    .to_string()
-            })
-            .collect();
-        let matches = banner_texts.len() == 4
-            && banner_texts[0].contains("first line")
-            && banner_texts[1].contains("second line")
-            && banner_texts[2].contains("fifth line")
-            && banner_texts[3].contains("sixth line");
-        (matches, format!("{banner_texts:?}"))
-    });
+    // Wait for these exact reserved rows, not the same words echoed earlier
+    // by the terminal body before the server's prompt update is rendered.
+    let mut screen_for_diagnostics = String::new();
+    let banner_rows_ok = wait_until(
+        || {
+            let (matches, diagnostics) = tui.with_screen(|screen| {
+                let prompt_header_rows = rows_containing(screen, "last prompt");
+                let Some(&prompt_header_row) = prompt_header_rows.first() else {
+                    return (
+                        false,
+                        format!(
+                            "last-prompt header not yet rendered: {:?}",
+                            screen.contents()
+                        ),
+                    );
+                };
+                let cols = screen.size().1;
+                let banner_texts: Vec<String> = (1..=4)
+                    .map(|offset| {
+                        screen
+                            .rows(0, cols)
+                            .nth((prompt_header_row + offset) as usize)
+                            .unwrap_or_default()
+                            .trim_end()
+                            .to_string()
+                    })
+                    .collect();
+                let matches = banner_texts.len() == 4
+                    && banner_texts[0].contains("first line")
+                    && banner_texts[1].contains("second line")
+                    && banner_texts[2].contains("fifth line")
+                    && banner_texts[3].contains("sixth line");
+                (matches, format!("{banner_texts:?}"))
+            });
+            screen_for_diagnostics = diagnostics;
+            matches
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
     assert!(
         banner_rows_ok,
         "expected the banner's four reserved rows to read exactly \
@@ -5559,7 +7409,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
                     let cols = screen.size().1;
                     screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 5) as usize)
+                        .nth((toolbar_row + 7) as usize)
                         .unwrap_or_default()
                         .contains("Pursuing goal")
                 })
@@ -5596,9 +7446,22 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
     let (socket_path, _) = isolated_server_identity(&xdg, &project_dir).await;
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     let observed_last_prompt = loop {
-        let mut connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
-            .await
-            .expect("attach typed-prompt control connection");
+        let mut connection = match Connection::connect(&socket_path, SESSION_NAME.to_string()).await
+        {
+            Ok(connection) => connection,
+            Err(ilium_client::connection::ConnectionError::CodecBootstrap(
+                ilium_ipc::IpcError::Io(error),
+            )) if error.to_string() == "codec admission: Busy"
+                && tokio::time::Instant::now() < deadline =>
+            {
+                // A previous control connection's asynchronous codec retirement
+                // may briefly hold admission. Retry only that transient refusal;
+                // the original observation deadline and all real failures remain.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                continue;
+            }
+            Err(error) => panic!("attach typed-prompt control connection: {error:?}"),
+        };
         let tree = receive_initial_tree(&mut connection, "typed-prompt verification").await;
         let pane_ids = tree.pane_ids_in_tree_order();
         assert_eq!(pane_ids.len(), 1, "expected the one fake Codex pane");
@@ -5713,17 +7576,18 @@ async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    let Some(&toolbar_row) = rows_containing(screen, "⏹ Stop").first() else {
+                    let Some(&prompt_header_row) = rows_containing(screen, "last prompt").first()
+                    else {
                         return false;
                     };
                     let cols = screen.size().1;
                     let banner_row = screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 1) as usize)
+                        .nth((prompt_header_row + 1) as usize)
                         .unwrap_or_default();
                     let next_row = screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 5) as usize)
+                        .nth((prompt_header_row + 6) as usize)
                         .unwrap_or_default();
                     banner_row.contains("hi") && next_row.contains("Pursuing goal")
                 })
@@ -6025,7 +7889,13 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
     let fake_bin = temp_root.path().join("fake-bin");
     std::fs::create_dir_all(&fake_bin).expect("create fake provider directory");
     let fake_codex = fake_bin.join("codex");
-    std::fs::write(&fake_codex, "#!/bin/sh\nsleep 30\n").expect("write fake codex");
+    // Keep the isolated provider alive until session cleanup; wall-clock expiry
+    // can remove its workspace owner while this real TUI scenario is still running.
+    std::fs::write(
+        &fake_codex,
+        "#!/bin/sh\nwhile IFS= read -r line; do :; done\n",
+    )
+    .expect("write fake codex");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755))
         .expect("make fake codex executable");
@@ -6042,7 +7912,13 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         already_cleaned_up: false,
     };
     let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
-    assert!(new_pane_output.status.success(), "create isolated pane");
+    assert!(
+        new_pane_output.status.success(),
+        "create isolated pane: status={:?}, stdout={}, stderr={}",
+        new_pane_output.status,
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
     let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
         .arg("--restart-server")
         .arg("--cwd")
@@ -6225,20 +8101,36 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "repository facts missing from popover dialog: {:?}",
         tui.screen_text()
     );
-    let codex_row = tui.with_screen(|screen| rows_containing(screen, "Codex"))[0];
-    let codex_column = tui
-        .with_screen(|screen| column_of_text_in_row(screen, codex_row, "Codex"))
-        .expect("Codex selector column");
-    tui.write(&sgr_mouse_down(0, codex_column, codex_row))
+    // The worktree dialog uses the shared provider selector. Cycle its
+    // rendered next arrow rather than looking for an unselected radio label.
+    let (provider_next_column, provider_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Agent").first()?;
+            (0..screen.size().1).rev().find_map(|column| {
+                screen
+                    .cell(row, column)
+                    .filter(|cell| cell.contents() == "→")
+                    .map(|_| (column, row))
+            })
+        })
+        .expect("worktree provider next button");
+    tui.write(&sgr_mouse_click(0, provider_next_column, provider_row))
         .expect("select fake Codex provider");
-    tui.write(&sgr_mouse_up(codex_column, codex_row))
-        .expect("release provider selector");
     assert!(
-        wait_until(|| tui.screen_text().contains("[Codex]"), WAIT_TIMEOUT).await,
+        wait_until(|| tui.screen_text().contains("Codex"), WAIT_TIMEOUT).await,
         "Codex provider was not selected: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\r").expect("submit worktree agent dialog");
+    // Enter on the provider row opens its choices. Submit through the drawn
+    // Create action rather than accidentally dismissing a choice picker.
+    let (create_column, create_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "[ Create agent ]").first()?;
+            column_of_text_in_row(screen, row, "[ Create agent ]").map(|column| (column, row))
+        })
+        .expect("rendered worktree Create action");
+    tui.write(&sgr_mouse_click(0, create_column + 2, create_row))
+        .expect("submit worktree agent dialog");
     assert!(
         wait_until(
             || !tui.screen_text().contains("New agent in a worktree"),
@@ -6261,13 +8153,43 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "worktree branch line did not render: {:?}",
         tui.screen_text()
     );
-    let branch_row = tui.with_screen(|screen| rows_containing(screen, "agent/task"))[0];
-    tui.write(&sgr_mouse_down(2, 8, branch_row))
+    assert!(
+        wait_until(
+            || tui.with_screen(
+                |screen| !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+            ),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "created worktree agent did not reach detected tree row: {:?}",
+        tui.screen_text()
+    );
+    // The branch label is a metadata line below the pane, not a tree node.
+    // Open the worktree actions on the detected agent's actual tree row.
+    let (branch_column, branch_row) = tui.with_screen(|screen| {
+        let row = rows_containing_before_column(screen, "Codex:", 60)[0];
+        let column = column_of_text_in_row(screen, row, "Codex:")
+            .expect("rendered worktree agent label");
+        eprintln!("{}", serde_json::json!({
+            "type": "artifact", "kind": "mouse_target", "target": "worktree_agent",
+            "unix_millis": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("fixture clock").as_millis(),
+            "column": column, "row": row, "screen": screen.contents(),
+        }));
+        (column, row)
+    });
+    tui.write(&sgr_mouse_down(2, branch_column, branch_row))
         .expect("open worktree pane context menu");
-    tui.write(&sgr_mouse_release(2, 8, branch_row))
+    tui.write(&sgr_mouse_release(2, branch_column, branch_row))
         .expect("release worktree pane context click");
     assert!(
-        wait_until(|| tui.screen_text().contains("Worktree  ▸"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui
+                .screen_text()
+                .lines()
+                .any(|row| row.contains("Worktree") && row.contains("▸")),
+            WAIT_TIMEOUT,
+        )
+        .await,
         "worktree context entry missing: {:?}",
         tui.screen_text()
     );
@@ -6299,10 +8221,16 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "worktree manager did not close: {:?}",
         tui.screen_text()
     );
-    let branch_row = tui.with_screen(|screen| rows_containing(screen, "agent/task"))[0];
-    tui.write(&sgr_mouse_down(2, 8, branch_row))
+    // The branch label is a metadata line below the pane, not a tree node.
+    // Open the worktree actions on the detected agent's actual tree row.
+    let branch_row =
+        tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60))[0];
+    let branch_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, branch_row, "Codex:"))
+        .expect("rendered worktree agent label");
+    tui.write(&sgr_mouse_down(2, branch_column, branch_row))
         .expect("reopen worktree pane context menu");
-    tui.write(&sgr_mouse_release(2, 8, branch_row))
+    tui.write(&sgr_mouse_release(2, branch_column, branch_row))
         .expect("release reopened worktree pane context click");
     assert!(
         wait_until(|| tui.screen_text().contains("Settings…"), WAIT_TIMEOUT).await,
@@ -6390,6 +8318,7 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
         assert!(pane.status.success(), "create isolated pane: {pane:?}");
 
         let attach = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
+            .automatic_terminal_query_replies(false)
             .arg("--restart-server")
             .arg("--cwd")
             .arg(project_dir.to_string_lossy().to_string())

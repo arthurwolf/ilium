@@ -1,0 +1,37 @@
+package ilium:primitives@0.1.0;
+
+interface agent {
+  use ilium:types/ids@0.1.0.{node-id, request-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/tree@0.1.0.{agent-view, agent-model, agent-activity};
+
+  record agent-pane { pane: node-id, view: agent-view }
+  /// A path inside the scope agent-sessions:<agent>.
+  record session-ref { scope: string, path: string, session-id: string }
+  record signature-action { id: string, keys: string, allowed-when: option<list<agent-activity>> }
+  record signature-spec {
+    id: string, process-names: list<string>, aliases: list<string>, icon: option<string>,
+    resume: option<list<string>>, actions: list<signature-action>,
+    session-scope: option<string>, submit-keys: option<string>,
+  }
+  enum turn-role { user, assistant, tool, system }
+  record transcript-turn { role: turn-role, text: string, tool: option<string>, at: option<epoch-ms>, tokens: option<u32> }
+  /// last-turns at most 512. max-bytes at most 4 MiB.
+  record transcript-query { pane: node-id, last-turns: u32, max-bytes: u32 }
+
+  agents: func() -> list<agent-pane>;
+  view: func(pane: node-id) -> option<agent-view>;
+  session: func(pane: node-id) -> option<session-ref>;
+  /// agent.read-prompts.
+  last-prompt: func(pane: node-id) -> option<string>;
+  /// agent.signatures. Runtime signatures come from settings.
+  register-signature: func(spec: signature-spec) -> result<_, plugin-error>;
+  /// agent.control.
+  set-toolbar-state: func(button: string, pane: option<node-id>, enabled: bool, label: option<string>) -> result<_, plugin-error>;
+  model: func(pane: node-id) -> option<agent-model>;
+  /// The epoch that send-input compares against.
+  prompt-epoch: func(pane: node-id) -> option<u64>;
+  /// agent.transcript. Async, take-transcript.
+  transcript: func(query: transcript-query) -> result<request-id, plugin-error>;
+  take-transcript: func(request: request-id) -> option<list<transcript-turn>>;
+}

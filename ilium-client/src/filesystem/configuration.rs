@@ -5,17 +5,36 @@ use ilium_execution::{Job, JobContext, JobCost};
 use ilium_ipc::{TextTrigger, TextTriggerSettings};
 use std::path::PathBuf;
 
+pub enum NumberReadTarget {
+    Settings(crate::value_settings::SettingsNumber),
+    Cost(crate::value_cost::CostValueTarget),
+}
+impl NumberReadTarget {
+    fn value(&self, config: &crate::config::ClientConfig) -> Result<String, String> {
+        match self {
+            Self::Settings(field) => Ok(field.persisted_snapshot(config)),
+            Self::Cost(target) => match target.dialog(&config.cost)? {
+                crate::value_dialog::ValueDialogState::Number(number) => Ok(number.draft.buf),
+                _ => Err("The saved cost setting is no longer numeric; reopen this dialog".into()),
+            },
+        }
+    }
+}
+
 pub enum ConfigurationChange {
+    NumberRead(NumberReadTarget),
     Ui(Box<crate::config::UiSettings>),
     Terminal(crate::config::TerminalSettings),
     Git(crate::config::GitSettings),
     ResetPlanning(crate::reset_planning::ResetPlanningSettings),
+    Attention(crate::attention::AttentionSettings),
     Cost(crate::cost_settings::CostSettings),
     RemoteCompaction(crate::remote_compaction_settings::RemoteCompactionSettings),
     Editor(crate::config::EditorSettings),
     Onboarding(crate::onboarding::progress::OnboardingProgress),
     Keyboard(crate::config::KeyboardSettings),
     Kanban(crate::config::KanbanBoardSettings),
+    Padding(crate::padding::PaddingSettings),
     Sound(ilium_sound::SoundSettings),
     Notifications(ilium_sound::NotificationSettings),
     Inference(Box<ilium_inference::InferenceSettings>),
@@ -43,6 +62,10 @@ pub enum ConfigurationChange {
         previous: Option<TextTrigger>,
         desired: Option<TextTrigger>,
     },
+    CustomAgents {
+        previous: crate::config::CustomAgentSettings,
+        desired: crate::config::CustomAgentSettings,
+    },
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
     ProjectName {
@@ -51,10 +74,12 @@ pub enum ConfigurationChange {
     },
 }
 pub enum ConfigurationSaved {
+    NumberRead(String),
     Plain,
     Session(SessionSettings),
     AgentSetup(AgentSetupSettings),
     TextTriggers(TextTriggerSettings),
+    CustomAgents(crate::config::CustomAgentSettings),
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
     ProjectName(crate::project_naming::ProjectNameBootstrap),
@@ -83,6 +108,16 @@ impl Job for ConfigurationWrite {
         use ConfigurationChange::*;
         let directory = &self.directory;
         let result = match self.change {
+            NumberRead(field) => {
+                return read_number(directory, field)
+                    .map(ConfigurationSaved::NumberRead)
+                    .map_err(|message| ConfigurationFailure {
+                        message,
+                        observed_session: None,
+                        observed_agent_setup: None,
+                    });
+            }
+
             Ui(value) => crate::config::save_ui_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Terminal(value) => crate::config::save_terminal_settings(directory, &value)
@@ -90,6 +125,8 @@ impl Job for ConfigurationWrite {
             Git(value) => crate::config::save_git_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             ResetPlanning(value) => crate::config::save_reset_planning_settings(directory, &value)
+                .map(|()| ConfigurationSaved::Plain),
+            Attention(value) => crate::config::save_attention_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Cost(value) => crate::config::save_cost_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -104,6 +141,8 @@ impl Job for ConfigurationWrite {
             Keyboard(value) => crate::config::save_keyboard_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Kanban(value) => crate::config::save_kanban_board_settings(directory, &value)
+                .map(|()| ConfigurationSaved::Plain),
+            Padding(value) => crate::config::save_padding_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Sound(value) => crate::config::save_sound_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -141,6 +180,10 @@ impl Job for ConfigurationWrite {
                 desired.as_ref(),
             )
             .map(ConfigurationSaved::TextTriggers),
+            CustomAgents { previous, desired } => {
+                crate::config::update_custom_agent_settings(directory, &previous, &desired)
+                    .map(ConfigurationSaved::CustomAgents)
+            }
             Animation(settings) => {
                 return crate::project_config::set_animation(directory, (*settings).clone())
                     .map(|()| ConfigurationSaved::Animation(settings))
@@ -267,6 +310,7 @@ impl ConfigurationChange {
                     + value.icons.agent_toolbar_exit.capacity()
                     + value.icons.agent_toolbar_fast.capacity()
                     + value.icons.agent_toolbar_selection.capacity()
+                    + value.icons.chrome_recap.capacity()
                     + value.icons.task_progress_frames.capacity() * std::mem::size_of::<String>()
                     + value
                         .icons
@@ -282,7 +326,14 @@ impl ConfigurationChange {
                 serialized_bound(value)?
                     + std::mem::size_of::<crate::background_animation::AnimationSettings>()
             }
-            Terminal(_) | Editor(_) | Session { .. } | Keyboard(_) | Kanban(_) | Separators(_) => 0,
+            Terminal(_)
+            | Editor(_)
+            | Session { .. }
+            | Keyboard(_)
+            | Kanban(_)
+            | Padding(_)
+            | Separators(_)
+            | NumberRead(_) => 0,
             ProjectName {
                 proposal: value, ..
             } => {
@@ -292,6 +343,7 @@ impl ConfigurationChange {
             }
             Git(value) => serialized_bound(value)?,
             ResetPlanning(value) => serialized_bound(value)?,
+            Attention(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
             RemoteCompaction(value) => serialized_bound(value)?,
             Onboarding(value) => serialized_bound(value)?,
@@ -309,6 +361,9 @@ impl ConfigurationChange {
                 serialized_bound(previous)? + serialized_bound(desired)?
             }
             TextTriggerEdit { previous, desired } => {
+                serialized_bound(previous)? + serialized_bound(desired)?
+            }
+            CustomAgents { previous, desired } => {
                 serialized_bound(previous)? + serialized_bound(desired)?
             }
         };
@@ -349,6 +404,7 @@ impl ConfigurationChange {
         Ok(match self {
             Git(value) => Git(normalize(&value)?),
             ResetPlanning(value) => ResetPlanning(normalize(&value)?),
+            Attention(value) => Attention(normalize(&value)?.normalized()),
             Cost(mut value) => {
                 value.prices = value
                     .prices
@@ -396,6 +452,10 @@ impl ConfigurationChange {
                 previous: normalize(&previous)?,
                 desired: normalize(&desired)?,
             },
+            CustomAgents { previous, desired } => CustomAgents {
+                previous: normalize(&previous)?,
+                desired: normalize(&desired)?,
+            },
             value => value,
         })
     }
@@ -408,6 +468,13 @@ fn normalize<T: serde::Serialize + serde::de::DeserializeOwned>(value: &T) -> Re
         .map_err(|_| "Could not encode configuration command".to_owned())?;
     serde_json::from_slice(&bytes)
         .map_err(|_| "Could not normalize configuration command".to_owned())
+}
+
+/// Read and validate the shared document without changing runtime state.
+fn read_number(directory: &std::path::Path, field: NumberReadTarget) -> Result<String, String> {
+    crate::config::load(directory)
+        .map_err(|error| format!("Saved value unavailable: {error}"))
+        .and_then(|config| field.value(&config))
 }
 
 pub struct ProjectRead {

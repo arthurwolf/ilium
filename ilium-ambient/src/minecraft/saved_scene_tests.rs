@@ -4,23 +4,6 @@ use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 #[test]
-fn partly_generated_allocated_chunks_are_eligible_for_route_decode() {
-    let support = BTreeSet::from([[-18, -7], [-18, -6]]);
-    let allocated = BTreeSet::from([[-18, -7], [-18, -6]]);
-    assert!(route_support_is_eligible(&support, &allocated).is_ok());
-}
-
-#[test]
-fn unallocated_support_chunks_are_rejected_with_the_exact_chunk() {
-    let support = BTreeSet::from([[-18, -7], [-18, -6]]);
-    let absent = route_support_is_eligible(&support, &BTreeSet::from([[-18, -6]])).unwrap_err();
-    assert!(
-        absent.contains("[-18, -7]") && absent.contains("not allocated"),
-        "missing allocation should identify the exact chunk: {absent}"
-    );
-}
-
-#[test]
 fn saved_scene_status_exposes_phase_elapsed_time_and_unknown_eta_while_preparing() {
     let env = SceneEnv::for_test(
         std::env::temp_dir().join("saved-status-progress"),
@@ -1123,6 +1106,7 @@ fn catalog_retained_fixture() -> Bundle {
         jar: PathBuf::from("/synthetic/client.jar"),
         selected: None,
         native_jar: None,
+        prepared_cache: None,
         warnings: vec![String::from("synthetic warning")],
         _catalog_reservation: Arc::new(
             budget

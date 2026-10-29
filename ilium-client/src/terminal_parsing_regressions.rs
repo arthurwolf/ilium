@@ -199,8 +199,17 @@ impl ParserFixture {
         }
     }
 
-    fn wait_until(&mut self, label: &str, mut ready: impl FnMut(&Self) -> bool) {
-        let deadline = Instant::now() + TEST_WAIT;
+    fn wait_until(&mut self, label: &str, ready: impl FnMut(&Self) -> bool) {
+        self.wait_until_within(label, TEST_WAIT, ready);
+    }
+
+    fn wait_until_within(
+        &mut self,
+        label: &str,
+        timeout: Duration,
+        mut ready: impl FnMut(&Self) -> bool,
+    ) {
+        let deadline = Instant::now() + timeout;
         loop {
             self.drain();
             if ready(self) {
@@ -218,8 +227,12 @@ impl ParserFixture {
     }
 
     fn wait_sequence(&mut self, pane_id: NodeId, sequence: u64) {
+        self.wait_sequence_within(pane_id, sequence, TEST_WAIT);
+    }
+
+    fn wait_sequence_within(&mut self, pane_id: NodeId, sequence: u64, timeout: Duration) {
         let label = format!("terminal {pane_id:?} sequence {sequence}");
-        self.wait_until(&label, |fixture| {
+        self.wait_until_within(&label, timeout, |fixture| {
             fixture
                 .snapshots
                 .get(&pane_id)
@@ -663,10 +676,13 @@ fn intact_large_output_publishes_visible_progress_before_its_final_snapshot() {
     drop(results_guard);
 
     fixture.wait_sequence(pane, 2);
+    // The later 234 KiB legitimately scroll the early preview out of the
+    // visible viewport. Its bytes must still survive in the final history.
     assert!(fixture.snapshots[&pane]
-        .visible
-        .contents()
-        .contains("PREVIEW-AT-QUANTUM"));
+        .history
+        .to_vec()
+        .windows(marker.len())
+        .any(|window| window == marker));
     assert_eq!(
         fixture
             .completed
@@ -823,4 +839,117 @@ fn parser_receipt_must_be_released_before_execution_shutdown_completes() {
         .join_until_background(Instant::now() + TEST_WAIT)
         .unwrap();
     assert!(released.shutdown_complete, "{:?}", released.health.lanes);
+}
+
+#[test]
+fn replay_shows_its_current_screen_before_the_full_history_is_parsed() {
+    let mut fixture = ParserFixture::start();
+    let pane = NodeId(8304);
+    fixture.attach(pane, 24, 80);
+    // About 840 KiB of history: above the backlog trigger and longer than the
+    // 256 KiB tail the preview parses, so the first line must be absent.
+    let mut replay = Vec::new();
+    for line in 0..40_000 {
+        replay.extend_from_slice(format!("history line {line:06}\r\n").as_bytes());
+    }
+    replay.extend_from_slice(b"CURRENT-SCREEN-MARKER");
+
+    // Hold the final result mailbox so the preview is observed before completion.
+    let shared = fixture.parsing.shared.clone();
+    let results_guard = shared.results.lock().unwrap();
+    fixture.offer(
+        pane,
+        PaneCommand::Replay {
+            sequence: 1,
+            bytes: replay,
+            complete: true,
+        },
+    );
+    fixture.wait_until("replay tail preview", |fixture| {
+        fixture.views[&pane]
+            .frontend
+            .as_ref()
+            .and_then(PaneFrontend::progress_preview)
+            .is_some_and(|preview| preview.visible.contents().contains("CURRENT-SCREEN-MARKER"))
+    });
+    let preview = fixture.views[&pane]
+        .frontend
+        .as_ref()
+        .and_then(PaneFrontend::progress_preview)
+        .unwrap();
+    assert!(
+        !preview.visible.contents().contains("history line 000000"),
+        "the preview must not wait for the start of the replay"
+    );
+    drop(results_guard);
+
+    fixture.wait_sequence(pane, 1);
+    assert!(fixture.snapshots[&pane]
+        .visible
+        .contents()
+        .contains("CURRENT-SCREEN-MARKER"));
+}
+
+#[test]
+fn thirty_two_mib_replay_previews_its_current_screen_before_its_history() {
+    let mut fixture = ParserFixture::start();
+    let pane = NodeId(8305);
+    fixture.attach(pane, 24, 80);
+    fixture.wait_idle();
+    // A selected pane is displayed. Hidden panes get no storage headroom for previews,
+    // so this test models the selected case that the 200-pane gate measures.
+    fixture.views[&pane]
+        .frontend
+        .as_ref()
+        .unwrap()
+        .set_displayed(true);
+    // 131 072 lines of 257 bytes: the same 32 MiB journal shape the 200-pane gate uses.
+    let mut replay = Vec::with_capacity(32 * 1024 * 1024 + 64);
+    for line in 0..131_072 {
+        replay.extend_from_slice(format!("{line:08} {}\r\n", "x".repeat(246)).as_bytes());
+    }
+    replay.extend_from_slice(b"CURRENT-SCREEN-MARKER");
+    // Admission charges the buffer's capacity, not its length: an over-reserved Vec
+    // would be charged as 64 MiB and refused by the queue's 64 MiB byte limit.
+    replay.shrink_to_fit();
+
+    // No results lock is held here: the parser must publish results while this test waits.
+    fixture.offer(
+        pane,
+        PaneCommand::Replay {
+            sequence: 1,
+            bytes: replay,
+            complete: true,
+        },
+    );
+    let deadline = Instant::now() + TEST_WAIT;
+    loop {
+        fixture.drain();
+        let preview = fixture.views[&pane]
+            .frontend
+            .as_ref()
+            .and_then(PaneFrontend::progress_preview);
+        if preview
+            .as_ref()
+            .is_some_and(|preview| preview.visible.contents().contains("CURRENT-SCREEN-MARKER"))
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "32 MiB replay tail preview absent; preview={:?}; completed={:?}; errors={:?}",
+            preview.map(|preview| preview
+                .visible
+                .contents()
+                .chars()
+                .take(120)
+                .collect::<String>()),
+            fixture.completed,
+            fixture.errors
+        );
+        std::thread::yield_now();
+    }
+    // The 32 MiB parse takes about 10.3 s on this path, so the final snapshot needs more
+    // than the default 10 s harness wait. The 5 s selection gate is not relaxed here.
+    fixture.wait_sequence_within(pane, 1, Duration::from_secs(60));
 }

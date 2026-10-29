@@ -1,4 +1,4 @@
-//! Geometry regressions: metadata changes must never resize the child PTY.
+//! Geometry regressions for visible terminal metadata and child resizing.
 use super::*;
 use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
 use ilium_ipc::ServerEvent;
@@ -21,82 +21,216 @@ fn terminal_app() -> (App, NodeId) {
     (app, pane_id)
 }
 
-#[test]
-fn slots_are_reserved_before_agent_detection_or_first_prompt() {
-    let (app, pane_id) = terminal_app();
-    let viewport = app.pane_viewport(pane_id).unwrap();
-    assert_eq!(
-        viewport.last_prompt_area.unwrap().height,
-        u16::from(app.ui_settings.last_prompt_max_lines)
-    );
-    assert_eq!(
-        viewport.progress_area.unwrap().height,
-        1 + u16::from(app.ui_settings.progress_max_lines)
-    );
+
+fn show_prompt(app: &mut App, pane_id: NodeId) {
+    app.tree.set_pane_status(pane_id, ilium_core::PaneStatus::from_activity(
+        ilium_core::AgentClass::Codex, ilium_core::AgentActivity::Working, None,
+    )).unwrap();
+    crate::render_cache::apply(app, ServerEvent::PaneLastPromptChanged {
+        pane_id, last_prompt: Some("a prompt".into()),
+    });
+    app.take_outbound_requests();
+}
+
+fn show_progress(app: &mut App, pane_id: NodeId) {
+    let progress = PaneProgress::new(1, ProgressTaskReport {
+        job_id: "geometry".into(), status: ProgressTaskStatus::Running,
+        percent: 50.0, message: "working".into(), details: String::new(),
+        error: None, eta_seconds: None, indeterminate: false,
+    }, 1000).unwrap();
+    crate::render_cache::apply(app, ServerEvent::PaneProgressChanged {
+        pane_id, progress_monitors: vec![progress],
+    });
+    app.take_outbound_requests();
 }
 
 #[test]
-fn prompt_and_progress_content_changes_do_not_resize_the_terminal() {
+fn empty_metadata_does_not_reserve_terminal_rows() {
+    let (app, pane_id) = terminal_app();
+    let viewport = app.pane_viewport(pane_id).unwrap();
+    assert!(viewport.last_prompt_area.is_none());
+    assert!(viewport.progress_area.is_none());
+}
+
+#[test]
+fn disabling_visible_metadata_reclaims_rows_and_empty_toggles_do_not_resize() {
     let (mut app, pane_id) = terminal_app();
-    let before = app.pane_viewport(pane_id).unwrap().content_area;
-    for last_prompt in [
-        Some("short".to_string()),
-        Some("wrapped text ".repeat(300)),
-        Some(String::new()),
-        None,
-    ] {
-        crate::render_cache::apply(
-            &mut app,
-            ServerEvent::PaneLastPromptChanged {
-                pane_id,
-                last_prompt,
-            },
-        );
-        assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, before);
-        assert!(!app
-            .take_outbound_requests()
-            .iter()
-            .any(|r| matches!(r, ClientRequest::ResizePane { .. })));
-    }
-    for message in ["short".to_string(), "long progress message ".repeat(80)] {
-        let progress = PaneProgress::new(
-            1,
-            ProgressTaskReport {
-                job_id: "geometry".into(),
-                status: ProgressTaskStatus::Running,
-                percent: 50.0,
-                message,
-                details: String::new(),
-                error: None,
-            },
-            1000,
-        )
-        .unwrap();
+    let empty = app.pane_viewport(pane_id).unwrap().content_area.height;
+    app.ui_settings.last_prompt_enabled = false;
+    app.ui_settings.progress_monitor_enabled = false;
+    app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area.height, empty);
+    assert!(!app.take_outbound_requests().iter().any(|r| matches!(r, ClientRequest::ResizePane { .. })));
+    app.ui_settings.last_prompt_enabled = true;
+    app.ui_settings.progress_monitor_enabled = true;
+    show_prompt(&mut app, pane_id);
+    show_progress(&mut app, pane_id);
+    app.ui_settings.last_prompt_enabled = false;
+    app.ui_settings.progress_monitor_enabled = false;
+    app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area.height, empty);
+    assert!(app.take_outbound_requests().iter().any(|r| matches!(r, ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == empty)));
+}
+
+#[test]
+fn resource_wait_alone_allocates_and_releases_footer() {
+    let (mut app, pane_id) = terminal_app();
+    let empty = app.pane_viewport(pane_id).unwrap().content_area.height;
+    crate::render_cache::apply(&mut app, ServerEvent::ResourceWaitChanged {
+        pane_id, reservation_id: Some(ilium_core::resource_queue::ReservationId::from("wait")), wait_revision: 1,
+    });
+    assert!(app.pane_viewport(pane_id).unwrap().content_area.height < empty);
+    app.take_outbound_requests();
+    crate::render_cache::apply(&mut app, ServerEvent::ResourceWaitChanged {
+        pane_id, reservation_id: None, wait_revision: 2,
+    });
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area.height, empty);
+    assert!(app.take_outbound_requests().iter().any(|r| matches!(r, ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == empty)));
+}
+
+#[test]
+fn native_wait_shares_existing_footer_without_resizing_and_retains_saturated_monitor_hit_routes() {
+    for detail_lines in [1, 4] {
+        let (mut app, pane_id) = terminal_app();
+        app.ui_settings.progress_max_lines = detail_lines;
+        let monitors = (1..=8)
+            .map(|monitor_id| {
+                PaneProgress::new(
+                    monitor_id,
+                    ProgressTaskReport {
+                        job_id: format!("ordinary-{monitor_id}"),
+                        status: ProgressTaskStatus::Running,
+                        percent: 50.0,
+                        message: "Synthetic saturated monitor".into(),
+                        details: String::new(),
+                        error: None,
+                        eta_seconds: None,
+                        indeterminate: false,
+                    },
+                    1000,
+                )
+                .unwrap()
+            })
+            .collect();
         crate::render_cache::apply(
             &mut app,
             ServerEvent::PaneProgressChanged {
                 pane_id,
-                progress_monitors: vec![progress],
+                progress_monitors: monitors,
             },
         );
-        assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, before);
+        app.take_outbound_requests();
+        let before = app.pane_viewport(pane_id).unwrap();
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::ResourceWaitChanged {
+                pane_id,
+                reservation_id: Some(ilium_core::resource_queue::ReservationId::from(
+                    "synthetic-wait",
+                )),
+                wait_revision: 1,
+            },
+        );
+        assert_eq!(before, app.pane_viewport(pane_id).unwrap());
         assert!(!app
             .take_outbound_requests()
             .iter()
-            .any(|r| matches!(r, ClientRequest::ResizePane { .. })));
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        let area = before.progress_area.unwrap();
+        let native_rows = app.resource_wait_footer_rows(pane_id, area.height);
+        assert_eq!(native_rows, if detail_lines == 1 { 1 } else { 2 });
+        let ordinary = Rect::new(
+            area.x,
+            area.y + native_rows,
+            area.width,
+            area.height - native_rows,
+        );
+        assert!(ordinary.height >= 1);
+        assert!(app
+            .progress_monitor_at(
+                pane_id,
+                area,
+                ratatui::layout::Position::new(area.x, area.y)
+            )
+            .is_none());
+        assert_eq!(
+            app.progress_monitor_at(
+                pane_id,
+                area,
+                ratatui::layout::Position::new(ordinary.x, ordinary.y)
+            )
+            .unwrap()
+            .monitor_id,
+            1
+        );
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                app.resource_wait_footer(
+                    frame,
+                    Rect::new(area.x, area.y, area.width, native_rows),
+                    pane_id,
+                );
+                crate::progress_bar::render_monitors(
+                    frame,
+                    ordinary,
+                    &app.visible_progress_monitors(pane_id),
+                    detail_lines.into(),
+                    app.ui_settings.color_scheme,
+                    1000,
+                );
+            })
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Resource wait"));
+        assert!(rendered.contains(if detail_lines == 1 {
+            "+7 more"
+        } else {
+            "+6 more"
+        }));
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::ResourceWaitChanged {
+                pane_id,
+                reservation_id: None,
+                wait_revision: 2,
+            },
+        );
+        assert_eq!(before, app.pane_viewport(pane_id).unwrap());
     }
-    crate::render_cache::apply(
-        &mut app,
-        ServerEvent::PaneProgressChanged {
-            pane_id,
-            progress_monitors: Vec::new(),
-        },
-    );
-    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, before);
-    assert!(!app
-        .take_outbound_requests()
-        .iter()
-        .any(|r| matches!(r, ClientRequest::ResizePane { .. })));
+}
+
+#[test]
+fn metadata_appearance_and_removal_resize_the_terminal() {
+    let (mut app, pane_id) = terminal_app();
+    let empty = app.pane_viewport(pane_id).unwrap().content_area.height;
+    show_prompt(&mut app, pane_id);
+    let prompt = app.pane_viewport(pane_id).unwrap().content_area.height;
+    assert!(prompt < empty);
+    show_progress(&mut app, pane_id);
+    let both = app.pane_viewport(pane_id).unwrap().content_area.height;
+    assert!(both < prompt);
+    crate::render_cache::apply(&mut app, ServerEvent::PaneProgressChanged {
+        pane_id, progress_monitors: Vec::new(),
+    });
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area.height, prompt);
+    assert!(app.take_outbound_requests().iter().any(|request| matches!(request,
+        ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == prompt
+    )));
+    crate::render_cache::apply(&mut app, ServerEvent::PaneLastPromptChanged {
+        pane_id, last_prompt: None,
+    });
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area.height, empty);
+    assert!(app.take_outbound_requests().iter().any(|request| matches!(request,
+        ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == empty
+    )));
 }
 
 #[test]
@@ -124,7 +258,7 @@ fn detection_and_exit_do_not_change_the_preallocated_terminal_rectangle() {
 }
 
 #[test]
-fn hiding_a_completed_footer_preserves_its_slot_and_result() {
+fn hiding_a_completed_footer_reclaims_its_slot_and_preserves_result() {
     let (mut app, pane_id) = terminal_app();
     let progress = PaneProgress::new(
         2,
@@ -135,6 +269,8 @@ fn hiding_a_completed_footer_preserves_its_slot_and_result() {
             message: "finished marker".into(),
             details: String::new(),
             error: None,
+            eta_seconds: None,
+            indeterminate: false,
         },
         1000,
     )
@@ -151,21 +287,25 @@ fn hiding_a_completed_footer_preserves_its_slot_and_result() {
     assert!(app.shows_progress_footer(pane_id));
     assert!(app.tick_completed_progress_display(61_000));
     assert!(!app.shows_progress_footer(pane_id));
-    assert_eq!(app.pane_viewport(pane_id).unwrap(), before);
+    assert!(app.pane_viewport(pane_id).unwrap().content_area.height > before.content_area.height);
     assert!(!app.tree.pane_progress(pane_id).is_empty());
-    assert!(app.take_outbound_requests().is_empty());
+    assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
 }
 
 #[test]
 fn an_explicit_slot_setting_change_still_resizes_the_child() {
     let (mut app, pane_id) = terminal_app();
+    show_prompt(&mut app, pane_id);
     let before = app.pane_viewport(pane_id).unwrap().content_area.height;
     app.ui_settings.last_prompt_enabled = false;
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     let after = app.pane_viewport(pane_id).unwrap();
     assert_eq!(
         after.content_area.height,
-        before + u16::from(app.ui_settings.last_prompt_max_lines)
+        // The banner's bottom rule row is released together with the banner.
+        before
+            + u16::from(app.ui_settings.last_prompt_max_lines)
+            + u16::from(crate::theme::section_frames_enabled())
     );
     assert!(app.take_outbound_requests().iter().any(|r| matches!(r,
         ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == after.content_area.height
@@ -175,6 +315,7 @@ fn an_explicit_slot_setting_change_still_resizes_the_child() {
 #[test]
 fn rejected_resize_preserves_geometry_and_can_be_retried_after_admission_returns() {
     let (mut app, pane_id) = terminal_app();
+    show_prompt(&mut app, pane_id);
     // A shared general test client lets unrelated parallel tests consume the
     // credits needed by this retry assertion. Give this fixture its own tenant.
     app.outbound_admission = Some(crate::execution::test_document_client());
@@ -223,6 +364,7 @@ fn rejected_resize_preserves_geometry_and_can_be_retried_after_admission_returns
 #[test]
 fn exhausted_outbound_credits_preserve_resize_geometry_until_release() {
     let (mut app, pane_id) = terminal_app();
+    show_prompt(&mut app, pane_id);
     // Exhaust only this test's tenant, leaving parallel tests independent.
     app.outbound_admission = Some(crate::execution::test_document_client());
     let before = app.requested_pane_sizes[&pane_id];
@@ -282,6 +424,7 @@ fn local_geometry_rejection_does_not_reserve_outbound_credit() {
 #[test]
 fn a_server_confirmed_feature_setting_changes_geometry_once() {
     let (mut app, pane_id) = terminal_app();
+    show_progress(&mut app, pane_id);
     let before = app.pane_viewport(pane_id).unwrap().content_area.height;
     crate::render_cache::apply(
         &mut app,
@@ -290,7 +433,11 @@ fn a_server_confirmed_feature_setting_changes_geometry_once() {
     let after = app.pane_viewport(pane_id).unwrap();
     assert_eq!(
         after.content_area.height,
-        before + 1 + u16::from(app.ui_settings.progress_max_lines)
+        // The footer's rule row is released with the footer.
+        before
+            + 1
+            + u16::from(app.ui_settings.progress_max_lines)
+            + u16::from(crate::theme::section_frames_enabled())
     );
     assert!(app.take_outbound_requests().iter().any(
         |request| matches!(request, ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id)
@@ -312,9 +459,9 @@ fn metadata_reservation_preserves_one_terminal_row_in_a_small_split() {
     for viewport in viewports {
         assert!(viewport.content_area.height > 0);
         let with_slots = viewport
-            .with_agent_toolbar_reserved()
-            .with_last_prompt_reserved(4)
-            .with_progress_reserved(5);
+            .with_agent_toolbar_reserved(false)
+            .with_last_prompt_reserved(4, 0, false)
+            .with_progress_reserved(5, false);
         assert!(with_slots.content_area.height >= 1);
         assert!(with_slots
             .outer_area
@@ -328,6 +475,8 @@ fn metadata_reservation_preserves_one_terminal_row_in_a_small_split() {
 #[test]
 fn small_terminal_keeps_both_metadata_displays_and_a_terminal_row() {
     let (mut app, pane_id) = terminal_app();
+    show_prompt(&mut app, pane_id);
+    show_progress(&mut app, pane_id);
     app.set_screen_area(Rect::new(0, 0, 120, 9));
     let viewport = app.pane_viewport(pane_id).unwrap();
     assert!(viewport.last_prompt_area.is_some());
@@ -379,6 +528,7 @@ fn refused_resize_event(pane_id: NodeId, size: (u16, u16)) -> ServerEvent {
 #[test]
 fn a_server_refused_resize_can_be_explicitly_retried_without_replaying_input() {
     let (mut app, pane_id) = terminal_app();
+    show_prompt(&mut app, pane_id);
     app.ui_settings.last_prompt_enabled = false;
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     let requested = app.requested_pane_sizes[&pane_id];
@@ -412,6 +562,7 @@ fn a_server_refused_resize_can_be_explicitly_retried_without_replaying_input() {
 #[test]
 fn an_old_resize_refusal_does_not_invalidate_a_newer_requested_geometry() {
     let (mut app, pane_id) = terminal_app();
+    show_prompt(&mut app, pane_id);
     let old = app.requested_pane_sizes[&pane_id];
     app.ui_settings.last_prompt_enabled = false;
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
@@ -438,4 +589,23 @@ fn an_unrelated_server_error_does_not_cause_terminal_resize_churn() {
     assert_eq!(app.requested_pane_sizes[&pane_id], requested);
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     assert!(app.take_outbound_requests().is_empty());
+}
+
+#[test]
+fn padding_insets_only_the_terminal_content_not_the_metadata_bars() {
+    let (mut app, pane_id) = terminal_app();
+    let plain = app.pane_viewport(pane_id).unwrap();
+    app.padding_settings.mode = crate::padding::PaddingMode::Enabled;
+    let padded = app.pane_viewport(pane_id).unwrap();
+    // Every bar keeps its unpadded geometry, edge to edge.
+    assert_eq!(padded.toolbar_area, plain.toolbar_area);
+    assert_eq!(padded.last_prompt_area, plain.last_prompt_area);
+    assert_eq!(padded.progress_area, plain.progress_area);
+    assert_eq!(padded.toolbar_rule, plain.toolbar_rule);
+    assert_eq!(padded.progress_rule, plain.progress_rule);
+    // Only the terminal itself moves in by the default one cell per side.
+    assert_eq!(padded.content_area.x, plain.content_area.x + 1);
+    assert_eq!(padded.content_area.y, plain.content_area.y + 1);
+    assert_eq!(padded.content_area.width, plain.content_area.width - 2);
+    assert_eq!(padded.content_area.height, plain.content_area.height - 2);
 }

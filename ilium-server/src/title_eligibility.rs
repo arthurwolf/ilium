@@ -93,7 +93,8 @@ impl TitleRuntimeSnapshot {
         let has_launch_intent = [&runtime.origin]
             .into_iter()
             .chain(runtime.deferred_workspace_origin.as_ref())
-            .any(|origin| matches!(origin, TerminalOrigin::Command(command) if BuiltinAgentProvider::from_command_line(command).is_some()))
+            .any(|origin| matches!(origin, TerminalOrigin::Command(command) if BuiltinAgentProvider::from_command_line(command).is_some())
+                || matches!(origin, TerminalOrigin::CustomAgent { .. }))
             || runtime.pending_generated_session_id.is_some();
         let kind = if class.is_some() || historical.is_some() {
             TerminalTitleKind::Agent
@@ -655,9 +656,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_transcript_line_fails_closed_without_partial_authorization() {
+    async fn request_larger_than_discovery_line_limit_retains_exact_title_evidence() {
         const SESSION_ID: &str = "33333333-3333-4333-8333-333333333333";
-        const MAX_LINE_BYTES: usize = 1024 * 1024;
+        let discovery_line_bytes = crate::session_id::TRANSCRIPT_READ_LIMITS.line_bytes;
 
         let home = tempfile::tempdir().unwrap();
         let project = home.path().join("project");
@@ -676,12 +677,12 @@ mod tests {
             "type": "event_msg",
             "payload": {
                 "type": "user_message",
-                "message": "x".repeat(MAX_LINE_BYTES),
+                "message": "x".repeat(discovery_line_bytes),
             },
         });
         let path = transcript_dir.join(format!("rollout-2026-10-08T00-00-00-{SESSION_ID}.jsonl"));
         std::fs::write(
-            path,
+            &path,
             format!(
                 "{}\n{}\n{}\n",
                 serde_json::to_string(&metadata).unwrap(),
@@ -691,6 +692,7 @@ mod tests {
         )
         .unwrap();
 
+        let last_record_end = std::fs::metadata(&path).unwrap().len();
         let (_, runtime, mut evidence) = fixture();
         let mut runtime = runtime;
         runtime.observation.session_id = Some(SESSION_ID.to_owned());
@@ -709,8 +711,8 @@ mod tests {
         assert_eq!(collected.len(), 1);
         assert_eq!(
             collected[0].transcript,
-            GenuineRequestEvidence::Unavailable,
-            "an oversized real transcript must not authorize from its readable prefix",
+            GenuineRequestEvidence::Present { last_record_end },
+            "evidence scanning must parse the full request beyond the discovery line limit",
         );
     }
 

@@ -1,0 +1,1952 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Input | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/" aria-current="page">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Input</h1>
+
+<p>Input widgets let the user change a value or start an action. The family has eleven widgets, and this page documents eight of them in full: <code>button</code>, <code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text-input</code>, <code>text-area</code>, <code>schema-form</code> and <code>key-capture</code>. The three pickers, <code>color-picker</code>, <code>path-field</code> and <code>location-picker</code>, have their own page, <a href="/pages/widgets-pickers/">Pickers</a>, because each of them opens a host dialog. The inputs that edit a list of values (<code>check-list</code> and <code>list-editor</code>) belong to <a href="/pages/widgets-collections/">Collections</a>.</p>
+<p>Every input widget is a copy of a control that the Ilium client already draws in its Settings screen and its dialogs. The plugin never draws a field itself. It describes the widget in its <code>ui-tree</code>, and the host draws it with the same glyphs, the same dotted leaders and the same keys as the native controls. A user who knows the Settings screen already knows how these widgets behave.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Edits</th>
+<th>Event value</th>
+<th>Documented</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>button</code></td>
+<td>nothing, it starts an action</td>
+<td>none</td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>toggle</code></td>
+<td>a flag, or a tri-state flag</td>
+<td><code>flag</code> or <code>item-state</code></td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td>one option of a list or catalogue</td>
+<td><code>index</code> or <code>text</code></td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>number</code></td>
+<td>a bounded number</td>
+<td><code>number</code></td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>text-input</code></td>
+<td>one line of text, optionally secret</td>
+<td><code>text</code></td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>text-area</code></td>
+<td>several lines of text</td>
+<td><code>text</code></td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>schema-form</code></td>
+<td>the rows of one settings section</td>
+<td>none</td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>key-capture</code></td>
+<td>one key chord</td>
+<td><code>text</code></td>
+<td>this page</td>
+</tr>
+<tr>
+<td><code>color-picker</code></td>
+<td>a colour <code>#rrggbb</code></td>
+<td><code>text</code></td>
+<td><a href="/pages/widgets-pickers/">Pickers</a></td>
+</tr>
+<tr>
+<td><code>path-field</code></td>
+<td>a file or folder</td>
+<td><code>text</code></td>
+<td><a href="/pages/widgets-pickers/">Pickers</a></td>
+</tr>
+<tr>
+<td><code>location-picker</code></td>
+<td>a point on the world map</td>
+<td><code>geo</code></td>
+<td><a href="/pages/widgets-pickers/">Pickers</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>The <code>ui.panels</code> grant on the client side for a panel, popup or settings page. A pane kind needs <code>panes.provide-kind</code> instead. See <a href="/pages/capability-ui-panels/">ui.panels</a>.</li>
+<li>A view declared in the manifest: a <code>panels</code> or <code>onboarding_steps</code> entry, or a <code>settings</code> tab with <code>"render": "view"</code>, plus <code>"views"</code> in <code>exports</code>. A <code>schema-form</code> also needs its section under <code>contributes.settings</code>.</li>
+<li>A client entry module. Rust uses the <code>ilium-plugin-sdk</code> crate with <code>side = "client"</code>. TypeScript uses <code>@ilium/plugin-sdk</code> and its <code>ui/build</code> subpath.</li>
+<li>The <a href="/pages/widgets-index/">widget catalogue</a> for the rules that every widget shares, and <a href="/pages/ui-model/">UI model</a> for keys and host-owned state.</li>
+</ul>
+<h3 id="how-to-read-the-renders">How to read the renders</h3>
+<p>Every render on this page is built from the glyphs that the real client draws. The host frame is always rounded (<code>╭ ╮ ╰ ╯ ─ │</code>) and carries the chrome title <code>≡ ● ·</code> on its top edge, as defined under <a href="/pages/widgets-layout-and-containers/#host-frame">Host frame</a>. A plugin <code>block</code> defaults to rounded and may use any of the six border types. A form row is a label, one space, grey dotted leaders made of <code>…</code>, one space and a value that is right-aligned to the area edge. The host draws no dots when the gap is shorter than five cells; the gap is then blank. When the row is too narrow, the leaders go first. Then the label is cut to keep at least one cell plus <code>…</code>. Only when the value alone exceeds the area width minus 2 is the value cut from the left with a leading <code>…</code>. The leaders are not part of any hit target. In the captures the accent colour of a focused widget appears as the highlighted text, a disabled widget is dimmed, and an invalid value uses the error colour.</p>
+<h3 id="keys-are-action-ids">Keys are action ids</h3>
+<p>Give every input widget a <code>key</code>. The host copies that key into each <code>ui-action</code> event, and the handler matches on it. A widget without a key still draws, but the plugin cannot tell its actions apart, and the host loses the widget's typed text and cursor on every render. Keys are unique across the whole view, not only among siblings. A duplicate key anywhere in the <code>ui-tree</code> traps the instance with <code>ui.duplicate-key</code>.</p>
+<h3 id="props-every-input-widget-accepts">Props every input widget accepts</h3>
+<p>These props live on the node, not on the widget, so they work the same for all eleven input widgets.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>The action id. Required for any widget the plugin wants to hear from.</td>
+</tr>
+<tr>
+<td><code>tooltip</code></td>
+<td><code>option&lt;tooltip&gt;</code></td>
+<td>none</td>
+<td>Help text of at most 200 Unicode scalar values, shown after 500 ms of hover or when the widget has focus and the user presses F1.</td>
+</tr>
+<tr>
+<td><code>disabled-reason</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>Draws the widget dimmed, makes it ignore input, and shows the reason as its tooltip.</td>
+</tr>
+<tr>
+<td><code>tab-index</code></td>
+<td><code>option&lt;s16&gt;</code></td>
+<td>tree order</td>
+<td>The focus order. Values from 1 come first, in ascending order; none and 0 follow in tree order; a negative value is skipped by Tab. See <a href="/pages/ui-model/#focus-order">Focus order</a>.</td>
+</tr>
+<tr>
+<td><code>hover-events</code></td>
+<td>flag</td>
+<td>off</td>
+<td>Sends <code>hover-enter</code> and <code>hover-leave</code> to the plugin.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let save = tree.button(&quot;Save&quot;).key(&quot;save&quot;).tooltip(&quot;Writes the file&quot;).tab_index(1);
+let locked = tree.toggle(&quot;Dry run&quot;, true).key(&quot;dry-run&quot;).disabled_reason(&quot;Set by policy&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const save = button('Save', { key: 'save', tooltip: 'Writes the file', tabIndex: 1 });
+const locked = toggle('Dry run', true, { key: 'dry-run', disabledReason: 'Set by policy' });
+</code></pre>
+<h3 id="when-the-plugin-hears-about-a-change">When the plugin hears about a change</h3>
+<p>Every action arrives as a <code>ui-action</code> event with five fields: <code>view</code> (the view target), <code>key</code> (the widget key), <code>action-id</code> (in 0.1.0 always a copy of <code>key</code>), <code>kind</code> (what happened) and <code>value</code> (the payload, an option; <code>none</code> below means the option is empty). Every focusable widget also sends <code>focus-gained</code> and <code>focus-lost</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Kind</th>
+<th>Value</th>
+<th>When it is sent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>button</code></td>
+<td><code>activated</code></td>
+<td><code>none</code></td>
+<td>At once, on press.</td>
+</tr>
+<tr>
+<td><code>toggle</code></td>
+<td><code>changed</code></td>
+<td><code>flag(bool)</code>, or <code>item-state("", tri-state)</code> with <code>tri-state</code></td>
+<td>At once.</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td><code>changed</code></td>
+<td><code>index(u32)</code>, or <code>text(item id)</code> for a catalogue</td>
+<td>At once, on each change.</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td><code>filter-changed</code></td>
+<td><code>text(string)</code></td>
+<td>150 ms after the user stops typing in the dialog filter.</td>
+</tr>
+<tr>
+<td><code>number</code></td>
+<td><code>changed</code></td>
+<td><code>number(f64)</code></td>
+<td>At once for steps and drags. After <code>debounce-ms</code> for typed digits.</td>
+</tr>
+<tr>
+<td><code>text-input</code></td>
+<td><code>changed</code></td>
+<td><code>text(string)</code></td>
+<td>After <code>debounce-ms</code> (default 600 ms) from the last key.</td>
+</tr>
+<tr>
+<td><code>text-input</code></td>
+<td><code>submitted</code></td>
+<td><code>text(string)</code></td>
+<td>On Enter, when <code>submit-on-enter</code> is true.</td>
+</tr>
+<tr>
+<td><code>text-area</code></td>
+<td><code>changed</code></td>
+<td><code>text(string)</code></td>
+<td>After <code>debounce-ms</code>; unset, 600 ms while the text is at most 10,000 bytes (UTF-8) and 1 s above that, re-evaluated at each keystroke.</td>
+</tr>
+<tr>
+<td><code>key-capture</code></td>
+<td><code>changed</code></td>
+<td><code>text(chord)</code></td>
+<td>When a chord is taken or cleared.</td>
+</tr>
+<tr>
+<td><code>key-capture</code></td>
+<td><code>closed</code></td>
+<td><code>none</code></td>
+<td>When the user cancels a capture with Escape.</td>
+</tr>
+<tr>
+<td><code>schema-form</code></td>
+<td>none</td>
+<td>none</td>
+<td>Never. The owning plugin receives <code>settings-changed</code> instead.</td>
+</tr>
+</tbody>
+</table>
+<p><code>text-area</code> never sends <code>submitted</code>, because Enter inserts a line. A secret <code>text-input</code> sends its value in both events, because the plugin needs the value. The host redacts secret values from logs and from <code>widget-state</code> reads, and never stores them in the snapshot.</p>
+<figure>
+<svg viewBox="0 0 400 140" role="img" aria-label="Key presses at 0, 200 and 400 ms restart a 600 ms debounce, so changed fires at 1000 ms" width="600" height="210">
+  <defs>
+    <marker id="input-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="20" y="18" font-size="11" fill="currentColor">Key presses restart a 600 ms debounce</text>
+  <rect x="160" y="40" width="180" height="14" rx="3" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="250" y="36" font-size="10" text-anchor="middle" fill="currentColor">600 ms debounce</text>
+  <line x1="20" y1="110" x2="380" y2="110" stroke="currentColor" marker-end="url(#input-arrow)"/>
+  <line x1="40" y1="106" x2="40" y2="114" stroke="currentColor"/>
+  <line x1="160" y1="106" x2="160" y2="114" stroke="currentColor"/>
+  <line x1="340" y1="106" x2="340" y2="114" stroke="currentColor"/>
+  <circle cx="40" cy="110" r="4" fill="currentColor"/>
+  <circle cx="100" cy="110" r="4" fill="currentColor"/>
+  <circle cx="160" cy="110" r="4" fill="currentColor"/>
+  <text x="100" y="96" font-size="11" text-anchor="middle" fill="currentColor">key presses</text>
+  <line x1="340" y1="104" x2="340" y2="70" stroke="currentColor" marker-end="url(#input-arrow)"/>
+  <text x="346" y="88" font-size="11" fill="currentColor">changed</text>
+  <text x="40" y="132" font-size="10" text-anchor="middle" fill="currentColor">0 ms</text>
+  <text x="160" y="132" font-size="10" text-anchor="middle" fill="currentColor">400 ms</text>
+  <text x="340" y="132" font-size="10" text-anchor="middle" fill="currentColor">1000 ms</text>
+</svg>
+<figcaption>Keys at 0, 200 and 400 ms. Each key restarts the 600 ms debounce, so changed fires at 1000 ms. Steps, toggles and choices are not debounced.</figcaption>
+</figure>
+
+<h3 id="widget-surface">Widget surface</h3>
+<p>Each table lists the props with their type, default and meaning. A required prop is a constructor argument of the builder. Other props are chained setters in Rust (<code>Tree</code> in <code>ilium_plugin_sdk::ui::build</code>) or fields of a props object in TypeScript (<code>@ilium/plugin-sdk/ui/build</code>). Rust setters are snake_case and TypeScript fields are camelCase.</p>
+<h4 id="button">button</h4>
+<p><strong>Purpose.</strong> Starts an action: save, run, delete. It is a copy of the dialog buttons of the client. The <code>role</code> sets the look and the host never confirms anything for the plugin, so a destructive action needs a <code>dialog</code> of its own.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The text of the button.</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>A host icon name drawn before the label.</td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>When false, the button cannot be pressed.</td>
+</tr>
+<tr>
+<td><code>role</code></td>
+<td><code>button-role</code></td>
+<td><code>secondary</code></td>
+<td><code>primary</code>, <code>secondary</code> or <code>danger</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activated</code></td>
+<td><code>none</code></td>
+<td>Enter or Space with focus, or a left click.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enter or Space</td>
+<td>Presses the focused button.</td>
+</tr>
+<tr>
+<td>Left click</td>
+<td>Focuses the button and presses it.</td>
+</tr>
+<tr>
+<td>Tab</td>
+<td>Moves focus to the next focusable widget.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Drawing.</strong> A button whose area height is 1 or 2 draws <code>[ label ]</code> on the first row, left-aligned. With an icon it draws <code>[ icon label ]</code>. A button with height 3 or more draws a rounded box filling its area, with the label centred on the middle row and the odd cell going right. A label wider than the space is cut with <code>…</code>. The focused button draws bold, with its label in the <code>selection</code> role.</p>
+<p>Theme roles: <code>accent</code> for a primary button, <code>danger</code> for a danger button, <code>foreground</code> for a secondary button and <code>muted</code> for a disabled one.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Buttons───────────────────────────────────────────────────────────╮
+│                                                                          │
+│  <span class="t-hi">[ Save ]</span>   [ Cancel ]   [ Delete ]   <span class="t-dim">[ Apply ]</span>                          │
+│                                                                          │
+│  primary (focused)  secondary  danger        disabled                    │
+│                                                                          │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The four button states in a one-row area. The first button holds focus and uses the accent colours, the last one is disabled and dimmed. The second line is a note and not part of the render.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭───────╮
+│ Save  │
+╰───────╯
+</pre>
+<figcaption>The same button in an area of height 3 and width 9. The label is centred, and the odd cell goes right.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let save = tree.button(&quot;Save&quot;).key(&quot;save&quot;).role(ButtonRole::Primary);
+// in on_events: (&quot;save&quot;, ActionKind::Activated, _) =&gt; self.save(),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const save = button('Save', { key: 'save', role: 'primary' });
+// in onEvents: if (key === 'save' &amp;&amp; kind === 'activated') save();
+</code></pre>
+<h4 id="toggle">toggle</h4>
+<p><strong>Purpose.</strong> Switches a flag. It is the toggle row of the Settings screen. Three styles cover three uses: <code>switch</code> for a row with leaders, <code>checkbox</code> for a list of flags, and <code>icon</code> for a toolbar. With <code>tri-state</code> the toggle also has a mixed state for a flag that is true for some members of a group.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The text of the row.</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td><code>bool</code></td>
+<td>required</td>
+<td>The state the row shows.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>toggle-style</code></td>
+<td><code>switch</code></td>
+<td><code>switch</code> draws <code>[ On ]</code> and <code>[ Off ]</code>, <code>checkbox</code> draws <code>[x]</code> and <code>[ ]</code>, <code>icon</code> draws one glyph.</td>
+</tr>
+<tr>
+<td><code>tri-state</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Adds the mixed state <code>[-]</code>. The event value is then an <code>item-state</code>.</td>
+</tr>
+<tr>
+<td><code>icon-on</code>, <code>icon-off</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>The glyphs of the <code>icon</code> style, for example <code>★</code> and <code>☆</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>flag(bool)</code></td>
+<td>The user flips the toggle.</td>
+</tr>
+<tr>
+<td><code>changed</code></td>
+<td><code>item-state("", tri-state)</code></td>
+<td>The user cycles a <code>tri-state</code> toggle. The id is the empty string.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Space or Enter</td>
+<td>Flips the focused toggle. A tri-state toggle cycles off, on, mixed.</td>
+</tr>
+<tr>
+<td>Left click</td>
+<td>Focuses and flips.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>success</code> for on, <code>muted</code> for off, <code>accent</code> for the focused row.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Toggles───────────────────────────────────────────────────────────╮
+│ <span class="t-hi">Show background</span> <span class="t-dim">…………………………………………………………………………………………………………………………………</span> <span class="t-hi">[ On ]</span> │
+│ Reverse colours <span class="t-dim">………………………………………………………………………………………………………………………………</span> [ Off ] │
+│ <span class="t-dim">Natural placement</span> <span class="t-dim">……………………………………………………………………………………………………………………………</span> <span class="t-dim">[ On ]</span> │
+│ [x] Enabled                                                              │
+│ [ ] Dry run                                                              │
+│ [-] Some agents selected                                                 │
+│ Bookmark <span class="t-dim">…………………………………………………………………………………………………………………………………………………………………</span> <span class="w2">★</span> │
+│ Bookmark <span class="t-dim">…………………………………………………………………………………………………………………………………………………………………</span> <span class="w2">☆</span> │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rows of the toggle widget. Switch style on rows one to three (focused, idle, disabled), checkbox style and tri-state on rows four to six, icon style with the icon-on and icon-off glyphs at the end.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let dry = tree.toggle(&quot;Dry run&quot;, self.dry_run).key(&quot;dry-run&quot;);
+let agents = tree.toggle(&quot;All agents&quot;, false).key(&quot;all&quot;).style(ToggleStyle::Checkbox).tri_state(true);
+let star = tree.toggle(&quot;Bookmark&quot;, self.starred).key(&quot;star&quot;)
+    .style(ToggleStyle::Icon).icon_on(&quot;★&quot;).icon_off(&quot;☆&quot;);
+// (&quot;dry-run&quot;, ActionKind::Changed, ActionValue::Flag(on)) =&gt; self.dry_run = on,
+// (&quot;all&quot;, ActionKind::Changed, ActionValue::ItemState(_, state)) =&gt; self.all = state,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const dry = toggle('Dry run', state.dryRun, { key: 'dry-run' });
+const agents = toggle('All agents', false, { key: 'all', style: 'checkbox', triState: true });
+const star = toggle('Bookmark', state.starred, { key: 'star', style: 'icon', iconOn: '★', iconOff: '☆' });
+// if (value.tag === 'flag') state.dryRun = value.val;
+// if (value.tag === 'item-state') state.all = value.val[1];
+</code></pre>
+<h4 id="choice">choice</h4>
+<p><strong>Purpose.</strong> Picks one option out of a fixed list or out of a catalogue. This is the widget behind most rows of the Settings screen: palette, dither, colour filter, theme, model. It has three styles. <code>stepper</code> is the compact row with the <code>←</code> <code>→</code> <code>+</code> buttons and fits a handful of options. <code>list</code> draws every option as its own row. <code>dialog</code> shows the current value and opens the filterable choice dialog, which suits long lists such as the 38 palettes or about 12,000 icons.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The text of the row.</td>
+</tr>
+<tr>
+<td><code>options</code></td>
+<td><code>list&lt;string&gt;</code></td>
+<td>required</td>
+<td>The options in order. Ignored when <code>items</code> or <code>source</code> is set.</td>
+</tr>
+<tr>
+<td><code>selected</code></td>
+<td><code>u32</code></td>
+<td>required</td>
+<td>The index of the option shown. 0 is the first option.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>choice-style</code></td>
+<td><code>stepper</code></td>
+<td><code>stepper</code>, <code>list</code> or <code>dialog</code>.</td>
+</tr>
+<tr>
+<td><code>items</code></td>
+<td><code>list&lt;catalog-item&gt;</code></td>
+<td>empty</td>
+<td>Option records. Replaces <code>options</code> when not empty.</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>A catalogue id such as <code>ilium.palettes</code>. Items page in as the user scrolls.</td>
+</tr>
+<tr>
+<td><code>selected-id</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>The current item id for <code>items</code> and <code>source</code>.</td>
+</tr>
+<tr>
+<td><code>filter</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Shows the Search line in the dialog.</td>
+</tr>
+<tr>
+<td><code>view-modes</code></td>
+<td><code>list&lt;view-mode&gt;</code></td>
+<td>none</td>
+<td><code>list</code> and <code>grid</code>, adds the View switch of the icon picker.</td>
+</tr>
+<tr>
+<td><code>disabled-marker</code></td>
+<td><code>disabled-marker</code></td>
+<td><code>reason</code></td>
+<td><code>reason</code> draws <code>(reason)</code>, <code>cross</code> draws <code>✗</code>.</td>
+</tr>
+<tr>
+<td><code>allow-custom</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Lets the user type a value that is not in the list.</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>catalog-item</code> has <code>id</code>, <code>title</code>, <code>description</code> (up to 120 characters), <code>preview</code>, <code>group</code> (a heading in the dialog), <code>keywords</code> (up to 8, matched by the filter) and <code>disabled-reason</code> (up to 40 characters). A <code>preview</code> is one of <code>glyph(string)</code>, <code>swatch(list&lt;u32&gt;)</code> (1 to 16 colours, drawn as half blocks) or <code>pattern(list&lt;string&gt;)</code> (1 to 4 lines of at most 8 cells).</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>index(u32)</code></td>
+<td>A fixed list changes.</td>
+</tr>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(item id)</code></td>
+<td>A catalogue or <code>items</code> choice changes.</td>
+</tr>
+<tr>
+<td><code>filter-changed</code></td>
+<td><code>text(string)</code></td>
+<td>The dialog filter text changes, debounced 150 ms.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Left or Right</td>
+<td>Steps to the previous or next option. It never wraps and skips disabled options.</td>
+</tr>
+<tr>
+<td>Enter, or a click on <code>+</code> or on the value</td>
+<td>Opens the dialog (<code>dialog</code> style, or the full list from a stepper).</td>
+</tr>
+<tr>
+<td>Mouse wheel</td>
+<td>Steps, like the arrow keys.</td>
+</tr>
+<tr>
+<td>In the dialog</td>
+<td>Up, Down, PageUp, PageDown move the highlight. Typing filters. Enter applies. Escape cancels. A click on a row applies it, a click outside cancels.</td>
+</tr>
+<tr>
+<td>Click on a disabled option</td>
+<td>Nothing changes. The reason stays on screen.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>accent</code> for the value, <code>muted</code> for disabled options.</p>
+<p><strong>Stepper.</strong> The stepper is the row <code>Label …… ← value → +</code>. A click on the value or on <code>→</code> goes forward, a right click on the value goes back, a click on <code>+</code> opens the list. A disabled button is dimmed and inert.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Choice rows───────────────────────────────────────────────────────╮
+│ <span class="t-hi">Palette</span> <span class="t-dim">………………………………………………………………………………………………………………………………………</span> <span class="t-hi">← Sunset → +</span> │
+│ Dither <span class="t-dim">…………………………………………………………………………………………………………………………………</span> ← Bayer 4x4 → + │
+│ <span class="t-dim">Colour filter</span> <span class="t-dim">…………………………………………………………………………………………………………………………</span> <span class="t-dim">← Sepia → +</span> │
+│ Colour source <span class="t-dim">………………………………………………………………………………………………………………………</span> <span class="t-err">← Banana → +</span> │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Stepper style. Left and right step through the options, the value and the arrow to its right go forward, and the plus opens the full list. Row one has focus, row three is disabled, row four shows an invalid stored value in the error colour.</figcaption>
+</figure>
+
+<p><strong>List.</strong> The list style draws one row per option and marks the current one with the same <code>●</code> as the dialog.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Choice list───────────────────────────────────────────────────────╮
+│ Theme                                                                    │
+│   ● Dark                                                                 │
+│     Light                                                                │
+│     Auto                                                                 │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>List style: every option is a row and the current one carries the same ● marker as the choice dialog.</figcaption>
+</figure>
+
+<p><strong>Dialog.</strong> The dialog is the choice popover of the Settings screen, drawn by the host. Its parts, from the top, are the title, the <code>Search:</code> line, the option rows, the status line and the <code>Enter applies · Esc cancels</code> hint. The status line reads <code>N of M options · Current: X</code>, where N counts the options left by the filter. A disabled option keeps its place, carries the suffix <code>[unavailable]</code> and shows <code>Unavailable: &lt;reason&gt;</code> under it, and typing a word of the reason finds it. The host revalidates the chosen id on commit, so a stale id cannot be applied.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Palette───────────────────────────────────────╮
+│ Search: sun_                                         │
+│   Sunburst                                           │
+│ <span class="t-hi">● Sunset</span>                                             │
+│   Sunrise                                            │
+│   Sunken garden <span class="t-dim">[unavailable]</span>                        │
+│ <span class="t-dim">    Unavailable: needs Color mode</span>                    │
+│                                                      │
+│ 4 of 38 options · Current: Sunset                    │
+│ Enter applies · Esc cancels                          │
+│                                                      │
+╰──────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The choice dialog as the Settings screen draws it. The Search line filters while the user types. The highlighted row is drawn in the selection colours, ● marks the current value, a disabled option carries the [unavailable] suffix and an indented reason line. The status line counts the filtered options. With more rows than fit, the last column of the list's area becomes a scrollbar with the ┃ thumb on the │ track.</figcaption>
+</figure>
+
+<p>With more rows than the dialog can show, the last column of the list's area becomes a scrollbar, drawn by the <a href="/pages/widgets-layout-and-containers/#scrollbar">scrollbar rule</a>: <code>│</code> is the track and <code>┃</code> is the thumb. A catalogue source is read in pages of up to 256 items as the user scrolls, so a list of 12,000 icons opens at once.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Icon─────────────────────────────────────────────╮
+│ Search: _                                               │
+│<span class="t-hi"> ● Rocket</span>                                              ┃ │
+│   Satellite                                           │ │
+│   Saturn                                              │ │
+│   Scroll                                              │ │
+│   Seedling                                            │ │
+│ 6 of 12041 options · Current: Rocket                    │
+│ Enter applies · Esc cancels                             │
+╰─────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A long catalogue. The track is the last column of the list's area. The list holds 12,041 rows and shows 5, so the thumb is the minimum length of one row. Further pages load as the user scrolls.</figcaption>
+</figure>
+
+<p>The same dialog serves the palette, dither and icon pickers, which differ only in their previews. They are shown in <a href="/pages/widgets-pickers/">Pickers</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{ChoiceStyle, ViewMode, DisabledMarker, CatalogItem}; types::text::Preview
+let theme = tree.choice(&quot;Theme&quot;, vec![&quot;Light&quot;, &quot;Dark&quot;, &quot;Auto&quot;], 1).key(&quot;theme&quot;);
+
+// A catalogue with a filter: items page in from the host.
+let palette = tree.choice(&quot;Palette&quot;, Vec::&lt;String&gt;::new(), 0)
+    .source(&quot;ilium.palettes&quot;).style(ChoiceStyle::Dialog).filter(true).key(&quot;palette&quot;);
+
+// Own options with previews and a disabled option.
+let items = vec![
+    CatalogItem::new(&quot;slow&quot;, &quot;Slow&quot;).description(&quot;Every 10 s&quot;),
+    CatalogItem::new(&quot;live&quot;, &quot;Live&quot;).preview(Preview::Glyph(&quot;●&quot;.into())).disabled_reason(&quot;needs a key&quot;),
+];
+let rate = tree.choice(&quot;Refresh&quot;, Vec::&lt;String&gt;::new(), 0)
+    .items(items).selected_id(&quot;slow&quot;).style(ChoiceStyle::Dialog).key(&quot;refresh&quot;);
+
+// (&quot;theme&quot;, ActionKind::Changed, ActionValue::Index(i)) =&gt; self.theme = i,
+// (&quot;palette&quot;, ActionKind::Changed, ActionValue::Text(id)) =&gt; self.palette = id,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const theme = choice('Theme', ['Light', 'Dark', 'Auto'], 1, { key: 'theme' });
+
+const palette = choice('Palette', [], 0, {
+  key: 'palette', source: 'ilium.palettes', style: 'dialog', filter: true,
+});
+
+const rate = choice('Refresh', [], 0, {
+  key: 'refresh', style: 'dialog', selectedId: 'slow',
+  items: [
+    { id: 'slow', title: 'Slow', description: 'Every 10 s', keywords: [] },
+    { id: 'live', title: 'Live', preview: { tag: 'glyph', val: '●' }, disabledReason: 'needs a key', keywords: [] },
+  ],
+});
+
+// if (value.tag === 'index') state.theme = value.val;
+// if (value.tag === 'text') state.palette = value.val;
+</code></pre>
+<h4 id="number">number</h4>
+<p><strong>Purpose.</strong> Edits a bounded number. It is the number row of the Settings screen, with two styles. The <code>stepper</code> style is <code>- 42 cm + *</code>: minus and plus step the value and the star opens the entry dialog. The <code>slider</code> style adds a track <code>─</code> with a thumb <code>●</code> in front of the same buttons.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The text of the row.</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td><code>f64</code></td>
+<td>required</td>
+<td>The current value.</td>
+</tr>
+<tr>
+<td><code>minimum</code></td>
+<td><code>f64</code></td>
+<td><code>0</code></td>
+<td>The lower bound. A typed value below it is clamped to it.</td>
+</tr>
+<tr>
+<td><code>maximum</code></td>
+<td><code>f64</code></td>
+<td><code>100</code></td>
+<td>The upper bound. A typed value above it is clamped to it.</td>
+</tr>
+<tr>
+<td><code>step</code></td>
+<td><code>f64</code></td>
+<td><code>1</code></td>
+<td>The change per step.</td>
+</tr>
+<tr>
+<td><code>unit</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>A unit shown after the value.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>number-style</code></td>
+<td><code>stepper</code></td>
+<td><code>stepper</code> or <code>slider</code>.</td>
+</tr>
+<tr>
+<td><code>steps</code></td>
+<td><code>list&lt;f64&gt;</code></td>
+<td>none</td>
+<td>A ladder of values. A step moves to the next rung instead of adding <code>step</code>.</td>
+</tr>
+<tr>
+<td><code>special-values</code></td>
+<td><code>list&lt;tuple&lt;f64, string&gt;&gt;</code></td>
+<td>none</td>
+<td>A value drawn as a word, for example <code>0</code> as <code>Off</code>.</td>
+</tr>
+<tr>
+<td><code>scale</code></td>
+<td><code>u32</code></td>
+<td><code>1</code></td>
+<td>Typed digits are divided by it, so <code>1.7</code> entered with scale 10 means 17 in the stored unit.</td>
+</tr>
+<tr>
+<td><code>debounce-ms</code></td>
+<td><code>u32</code></td>
+<td><code>600</code></td>
+<td>The delay for typed digits. Steps and drags are not debounced.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>number(f64)</code></td>
+<td>A step, a drag, a wheel turn, or a valid typed value.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Left or Right, <code>-</code> or <code>+</code></td>
+<td>Steps by <code>step</code>, or to the next rung of <code>steps</code>. A value never wraps.</td>
+</tr>
+<tr>
+<td>Home or End</td>
+<td>Goes to the minimum or the maximum.</td>
+</tr>
+<tr>
+<td>Enter or <code>*</code></td>
+<td>Opens the entry dialog.</td>
+</tr>
+<tr>
+<td>Left click on <code>-</code> or <code>+</code></td>
+<td>Steps.</td>
+</tr>
+<tr>
+<td>Click or drag on the slider track</td>
+<td>Sets the value at the pointer, see the slider rule below.</td>
+</tr>
+<tr>
+<td>Mouse wheel</td>
+<td>Steps.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Slider rule.</strong> The track is the area width minus the label column, minus the stepper part (<code>- value unit + *</code>), minus 2 gap cells. When the track is narrower than 12 cells, the slider falls back to the stepper style. Let W be the track width. The thumb cell is <code>round((value-minimum)/(maximum-minimum)*(W-1))</code>. A click at track cell x sets <code>value = minimum + x/(W-1)*(maximum-minimum)</code>, snapped to the nearest step and clamped. Track cells are <code>─</code> (<code>muted</code>) and the thumb is <code>●</code> (<code>accent</code>). In stable-glyph mode they are <code>-</code> and <code>o</code>.</p>
+<p>Theme roles: <code>accent</code> for the value and the thumb, <code>muted</code> for the track and for a disabled step button.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Number rows───────────────────────────────────────────────────────╮
+│ <span class="t-hi">Scroll speed</span> <span class="t-dim">………………………………………………………………………………………………………………………………………</span> <span class="t-hi">- 3 + *</span> │
+│ Width <span class="t-dim">………………………………………………………………………………………………………………………………………………</span> - 42 cm + * │
+│ Retention <span class="t-dim">………………………………………………………………………………………………………………………………</span> - 30 days + * │
+│ Timeout <span class="t-dim">………………………………………………………………………………………………………………………………………………………………</span> Off │
+│ <span class="t-dim">Port</span> <span class="t-dim">……………………………………………………………………………………………………………………………………………………</span> <span class="t-dim">- 8080 + *</span> │
+│ Port <span class="t-dim">…………………………………………………………………………………………………………………………………………………</span> <span class="t-err">- 99999 + *</span> │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Stepper style. The minus and plus buttons step, the star opens the entry dialog. A special value (row four, zero shown as Off) replaces the number. The error row shows a stored value outside the bounds.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭  ≡ ● · Slider rows───────────────────────────────────────────────────────╮
+│ <span class="t-hi">Density</span>         <span class="t-dim">────────</span><span class="t-hi">●</span><span class="t-dim">────────────</span>  - 60 % + *                        │
+│ Speed           <span class="t-dim">───</span><span class="t-hi">●</span><span class="t-dim">─────────────────</span>  - 25 % + *                        │
+│ Frame rate cap  <span class="t-dim">────────────────────</span><span class="t-hi">●</span>  - 30 fps + *                      │
+│ <span class="t-dim">Hue shift</span>       <span class="t-dim">──────────</span><span class="t-hi">●</span><span class="t-dim">──────────</span>  - 0 deg + *                       │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Slider style. The track is a row of ─ and the thumb is ●. The same row carries the stepper buttons, so keyboard users can step and mouse users can drag the thumb. Below 12 cells the host falls back to the stepper.</figcaption>
+</figure>
+
+<p>The entry dialog opens on Enter or <code>*</code>. It is the number dialog of the client: a <code>Value:</code> line, an error line and the <code>Enter applies · Esc cancels</code> hint. The host parses the exact draft against the bounds and shows its own message, so the plugin only ever receives a valid number. A step button stops at the bound and is drawn dimmed there. Areas narrower than 12 cells fall back from the slider to the stepper, and the stepper keeps single-cell <code>-</code> and <code>+</code> targets so the unit stays visible at 80 columns.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Speed───────────────────────────────╮
+│ Value: 4x_                                 │
+│ <span class="t-err">Enter a number between 25 and 300</span>          │
+│                                            │
+│ Enter applies · Esc cancels                │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>The number entry dialog opened by Enter or the star. The host parses the exact draft and shows its message on the error line. Nothing reaches the plugin until the draft is valid.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let density = tree.number(&quot;Density&quot;, self.density).key(&quot;density&quot;)
+    .style(NumberStyle::Slider).minimum(25.0).maximum(100.0).step(5.0).unit(&quot;%&quot;);
+let timeout = tree.number(&quot;Timeout&quot;, self.timeout).key(&quot;timeout&quot;)
+    .minimum(0.0).maximum(300.0).special_values(vec![(0.0, &quot;Off&quot;.into())]);
+// (&quot;density&quot;, ActionKind::Changed, ActionValue::Number(v)) =&gt; self.density = v,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const density = number('Density', state.density, {
+  key: 'density', style: 'slider', minimum: 25, maximum: 100, step: 5, unit: '%',
+});
+const timeout = number('Timeout', state.timeout, {
+  key: 'timeout', minimum: 0, maximum: 300, specialValues: [[0, 'Off']],
+});
+// if (value.tag === 'number') state.density = value.val;
+</code></pre>
+<h4 id="text-input">text-input</h4>
+<p><strong>Purpose.</strong> Edits one line of text. It is the text row of the Settings screen, drawn as <code>Label …… [ value ]</code>. The host owns the contents and the cursor after the first render, so <code>initial</code> sets only the starting text. The terminal cursor is the real cursor and no cursor glyph is drawn. A secret field shows one <code>•</code> per hidden character and can keep the last characters visible, like the API key rows (<code>••••a1b2</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The text before the field.</td>
+</tr>
+<tr>
+<td><code>initial</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The starting text. An empty string gives an empty field.</td>
+</tr>
+<tr>
+<td><code>placeholder</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>Text shown while the field is empty.</td>
+</tr>
+<tr>
+<td><code>secret</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Hides the text.</td>
+</tr>
+<tr>
+<td><code>reveal-last</code></td>
+<td><code>u8</code></td>
+<td><code>0</code></td>
+<td>With <code>secret</code>, how many trailing characters stay visible (0 to 8).</td>
+</tr>
+<tr>
+<td><code>reveal</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Lets the user hold Ctrl+R to show a secret.</td>
+</tr>
+<tr>
+<td><code>max-length</code></td>
+<td><code>u32</code></td>
+<td><code>0</code></td>
+<td>The longest allowed value in characters. <code>0</code> means the 64 KiB cap.</td>
+</tr>
+<tr>
+<td><code>submit-on-enter</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether Enter sends <code>submitted</code>.</td>
+</tr>
+<tr>
+<td><code>debounce-ms</code></td>
+<td><code>u32</code></td>
+<td><code>600</code></td>
+<td>Delay of <code>changed</code>, from 0 to 2,000.</td>
+</tr>
+<tr>
+<td><code>validation</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>A regular expression. A value that does not match is drawn in the error colour.</td>
+</tr>
+<tr>
+<td><code>suggestions</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>A catalogue id that offers completions while typing.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(string)</code></td>
+<td>After the debounce.</td>
+</tr>
+<tr>
+<td><code>submitted</code></td>
+<td><code>text(string)</code></td>
+<td>On Enter, when <code>submit-on-enter</code> is true.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Typing, Backspace, Delete, arrows, Home, End</td>
+<td>Edit the text natively, with paste support.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Sends <code>submitted</code>.</td>
+</tr>
+<tr>
+<td>Ctrl+R held</td>
+<td>Shows a secret while <code>reveal</code> is true.</td>
+</tr>
+<tr>
+<td>Left click</td>
+<td>Places the cursor. Dragging selects.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>foreground</code> for the text, <code>muted</code> for the placeholder and for the leaders, <code>danger</code> for an invalid value.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Text rows─────────────────────────────────────────────────────────╮
+│ <span class="t-hi">Title</span> <span class="t-dim">………………………………………………………………………………………………………………………………………</span> <span class="t-hi">[ My session ]</span> │
+│ Folders <span class="t-dim">………………………………………………………</span> [ ~/Pictures;/data/*/wallpapers/**/*.jpg ] │
+│ <span class="t-dim">Name</span> <span class="t-dim">……………………………………………………………………………………………………………………………………</span> <span class="t-dim">[ Type a name… ]</span> │
+│ Host <span class="t-dim">………………………………………………………………………………………………………………………………</span> <span class="t-err">[ photon..komoot ]</span> │
+│ API key <span class="t-dim">………………………………………………………………………………………………………………………………………</span> [ ••••a1b2 ] │
+│ API key (revealed) <span class="t-dim">………………………………………………………………………………………</span> [ sk-live-9f3a1b2 ] │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Single-line text. The focused field uses the real terminal cursor, no cursor glyph is drawn. An empty field shows its placeholder, an invalid value uses the error colour, a secret shows one dot per hidden character and keeps the last characters selected by reveal-last. Holding the reveal key shows the full value.</figcaption>
+</figure>
+
+<p>A longer prompt, for example the rename dialog, is the same field inside a <code>dialog</code>. Put the field in a nested block with the title <code>Value</code>, or <code>Protected value</code> with the hint <code>The stored value remains hidden</code> for a secret.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let name = tree.text_input(&quot;Name&quot;, self.name.clone()).key(&quot;name&quot;)
+    .placeholder(&quot;Type a name…&quot;).submit_on_enter(true);
+let key = tree.text_input(&quot;API key&quot;, String::new()).key(&quot;api-key&quot;)
+    .secret(true).reveal_last(4).reveal(true).validation(&quot;^sk-[a-z0-9-]+$&quot;);
+// (&quot;name&quot;, ActionKind::Submitted, ActionValue::Text(t)) =&gt; self.rename(t),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const name = textInput('Name', state.name, { key: 'name', placeholder: 'Type a name…', submitOnEnter: true });
+const apiKey = textInput('API key', '', {
+  key: 'api-key', secret: true, revealLast: 4, reveal: true, validation: '^sk-[a-z0-9-]+$',
+});
+// if (kind === 'submitted' &amp;&amp; value.tag === 'text') rename(value.val);
+</code></pre>
+<h4 id="text-area">text-area</h4>
+<p><strong>Purpose.</strong> Edits several lines of text, for example a note, a prompt or a list of commands. Enter adds a line. The <code>max-bytes</code> cap counts bytes, not characters, so a multi-byte character uses more of the cap.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>initial</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The starting text.</td>
+</tr>
+<tr>
+<td><code>placeholder</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>Text shown while the area is empty.</td>
+</tr>
+<tr>
+<td><code>wrap</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Whether long lines wrap.</td>
+</tr>
+<tr>
+<td><code>line-numbers</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Whether line numbers are shown.</td>
+</tr>
+<tr>
+<td><code>max-bytes</code></td>
+<td><code>u32</code></td>
+<td><code>0</code></td>
+<td>The largest allowed value in bytes. <code>0</code> means 1 MiB.</td>
+</tr>
+<tr>
+<td><code>debounce-ms</code></td>
+<td><code>u32</code></td>
+<td>unset</td>
+<td>Delay of <code>changed</code>, from 0 to 2,000. Unset means 600 ms while the text is at most 10,000 bytes and 1,000 ms above that, re-evaluated at each keystroke. An explicit value always wins.</td>
+</tr>
+<tr>
+<td><code>tab-moves-focus</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>When true, Tab leaves the area. Otherwise Tab inserts a tab.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(string)</code></td>
+<td>After the debounce.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Typing, Enter, arrows, Home, End, PageUp, PageDown</td>
+<td>Edit natively.</td>
+</tr>
+<tr>
+<td>Left click, drag</td>
+<td>Place the cursor, select.</td>
+</tr>
+<tr>
+<td>Mouse wheel</td>
+<td>Scrolls the area.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>foreground</code> for the text, <code>muted</code> for line numbers and for the placeholder.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Notes─────────────────────────────────────────╮
+│ 1  Fix the tree crash                                │
+│ 2  Add the chatroom pane                             │
+│ 3                                                    │
+│ <span class="t-dim">Enter adds a line · Tab inserts a tab</span>                │
+╰──────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A multi-line text area with line numbers. The cursor is the real terminal cursor on line three.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let notes = tree.text_area(self.notes.clone()).key(&quot;notes&quot;).line_numbers(true).max_bytes(4096);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const notes = textArea(state.notes, { key: 'notes', lineNumbers: true, maxBytes: 4096 });
+</code></pre>
+<h4 id="schema-form">schema-form</h4>
+<p><strong>Purpose.</strong> Draws the rows of one settings section from the manifest. The host validates each change and saves it, and the plugin only names the section. It is the generic settings renderer of the client, so the rows, the leaders, the keys and the help anchors are exactly those of the Settings screen. All 18 row types work, including the rows documented in <a href="/pages/settings-screens/">Settings rows</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin</code></td>
+<td><code>plugin-id</code></td>
+<td>required</td>
+<td>The plugin that owns the settings: its own id.</td>
+</tr>
+<tr>
+<td><code>section</code></td>
+<td><code>string</code></td>
+<td>required</td>
+<td>The id of one of the plugin's own sections, or of its own tab, from <code>contributes.settings</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>schema-form</code> sends no <code>ui-action</code>. The host saves each change, and the owning plugin receives <code>settings-changed</code> with the changed keys. Read the values through the <a href="/pages/api-settings/">settings API</a>. Keyboard and mouse follow the rows: each row behaves like the control it shows (a <code>choice</code> row steps with Left and Right, a <code>number</code> row steps with <code>-</code> and <code>+</code>). A <code>schema-form</code> for a section of another plugin is drawn only when the rendering plugin holds <code>settings.write-all</code>. See <a href="/pages/settings-extension/">Plugin settings extension</a>.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Cleanup settings──────────────────────────────────────────────────╮
+│ Enabled <span class="t-dim">………………………………………………………………………………………………………………………………………………………</span> [ On ] │
+│ <span class="t-hi">Port</span> <span class="t-dim">……………………………………………………………………………………………………………………………………………………</span> <span class="t-hi">- 8080 + *</span> │
+│ Mode <span class="t-dim">……………………………………………………………………………………………………………………………………………</span> ← Dry run → + │
+│ Token <span class="t-dim">……………………………………………………………………………………………………………………………………………</span> [ ••••a1b2 ] │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A schema form built from four settings rows. It uses the same rows, leaders and keys as the Settings screen.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let form = tree.schema_form(&quot;com.example.demo&quot;, &quot;badges&quot;).key(&quot;settings&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const form = schemaForm('com.example.demo', 'badges', { key: 'settings' });
+</code></pre>
+<h4 id="key-capture">key-capture</h4>
+<p><strong>Purpose.</strong> Records one key chord, for example a shortcut for a plugin command. The user presses Enter on the field, then presses the chord, and the field takes it. The chord is a string such as <code>Ctrl+Shift+K</code>. The field looks up the chord in the kernel keymap when <code>reserved-check</code> is on, and shows <code>! used by &lt;command&gt;</code> for a chord that the kernel already binds. The kernel's own prefix chooser, which offers only the 26 <code>Ctrl+letter</code> choices, is not this widget. The global chord registry stays with the kernel, so a captured chord is a value that the plugin stores and applies itself, for example through <code>contributes.commands</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>chord</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>The current chord. None shows <code>not set</code>.</td>
+</tr>
+<tr>
+<td><code>allow-modifier-only</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Accepts a chord that is only a modifier, such as <code>Shift</code>.</td>
+</tr>
+<tr>
+<td><code>reserved-check</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Warns about chords the kernel binds (needs <code>keymap.read</code>).</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(chord)</code></td>
+<td>A chord is taken, or cleared with an empty string.</td>
+</tr>
+<tr>
+<td><code>closed</code></td>
+<td><code>none</code></td>
+<td>The user cancels a capture with Escape.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enter</td>
+<td>Starts a capture. The field shows <code>⌨ press keys…</code>.</td>
+</tr>
+<tr>
+<td>Any chord during a capture</td>
+<td>Takes the chord as the value and ends the capture.</td>
+</tr>
+<tr>
+<td>Escape during a capture</td>
+<td>Cancels and sends <code>closed</code>.</td>
+</tr>
+<tr>
+<td>Backspace on the field</td>
+<td>Clears the chord.</td>
+</tr>
+<tr>
+<td>Left click</td>
+<td>Starts a capture.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>accent</code> while capturing, <code>warning</code> for a conflict, <code>muted</code> when disabled.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Shortcuts─────────────────────────────────────────────────────────╮
+│ <span class="t-hi">Split pane</span> <span class="t-dim">……………………………………………………………………………………………………………………</span> <span class="t-hi">[ Ctrl+Shift+K ]</span> │
+│ Rename pane <span class="t-dim">………………………………………………………………………………………………………………</span> [ ⌨ press keys… ] │
+│ Toggle tree <span class="t-dim">……………………………………………………………………</span> [ Ctrl+B ]  <span class="t-warn">! used by tree.toggle</span> │
+│ <span class="t-dim">Zoom</span> <span class="t-dim">…………………………………………………………………………………………………………………………………………………</span> <span class="t-dim">[ not set ]</span> │
+╰──────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The key-capture widget in four states: a bound chord with focus, capturing, a chord that the kernel keymap already uses, and a disabled field. While capturing, the next chord is taken as the value.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let chord = tree.key_capture().chord(self.chord.clone()).reserved_check(true).key(&quot;chord&quot;);
+// (&quot;chord&quot;, ActionKind::Changed, ActionValue::Text(c)) =&gt; self.chord = Some(c).filter(|c| !c.is_empty()),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const chordField = keyCapture({ key: 'chord', chord: state.chord, reservedCheck: true });
+// if (key === 'chord' &amp;&amp; value.tag === 'text') state.chord = value.val || undefined;
+</code></pre>
+<h3 id="changing-a-widget-from-the-plugin">Changing a widget from the plugin</h3>
+<p>The host applies a user's change at once. To set a value from the plugin, call <code>set-widget-state(view, key, state)</code> with the state case that matches the widget. In Rust that is <code>ilium_plugin_sdk::host::ui::set_widget_state</code>, in TypeScript <code>setWidgetState</code> from <code>@ilium/plugin-sdk/host/ui</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>State case</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toggle</code></td>
+<td><code>checked(bool)</code></td>
+<td>The flag.</td>
+</tr>
+<tr>
+<td><code>toggle</code> with <code>tri-state</code></td>
+<td><code>tri(list&lt;tuple&lt;string, tri-state&gt;&gt;)</code></td>
+<td>One entry under the id <code>""</code>.</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td><code>selected(option&lt;u32&gt;)</code></td>
+<td>The index. On a catalogue choice use <code>text(item id)</code>; <code>selected(n)</code> returns <code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td><code>text-input</code>, <code>text-area</code></td>
+<td><code>text(string)</code></td>
+<td>The text.</td>
+</tr>
+<tr>
+<td><code>number</code></td>
+<td><code>number(f64)</code></td>
+<td>The value.</td>
+</tr>
+<tr>
+<td><code>location-picker</code></td>
+<td><code>geo(option&lt;geo-point&gt;)</code></td>
+<td>The point. See <a href="/pages/widgets-pickers/">Pickers</a>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">ilium_plugin_sdk::host::ui::set_widget_state(ViewTarget::Panel(&quot;cleanup&quot;.into()), &quot;dry-run&quot;, WidgetState::Checked(true))?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">setWidgetState({ tag: 'panel', val: 'cleanup' }, 'dry-run', { tag: 'checked', val: true });
+</code></pre>
+<h3 id="worked-example-a-cleanup-panel">Worked example: a cleanup panel</h3>
+<p>The manifest declares the panel. The <code>views</code> export draws it, and the handler stores each change.</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;com.example.cleanup&quot;,
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;ui.panels&quot;] },
+  &quot;exports&quot;: [&quot;views&quot;],
+  &quot;contributes&quot;: {
+    &quot;panels&quot;: [{ &quot;id&quot;: &quot;cleanup&quot;, &quot;title&quot;: &quot;Clean up&quot;, &quot;modal&quot;: true }]
+  }
+}
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::types::layout::{Area, Constraint, Direction};
+use ilium_plugin_sdk::types::ui::{ActionKind, ActionValue, ButtonRole, NumberStyle, UiTree, ViewTarget};
+use ilium_plugin_sdk::ui::build::Tree;
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;])]
+#[derive(Default)]
+struct Cleanup {
+    target_name: String,
+    dry_run: bool,
+    keep_days: f64,
+    shortcut: Option&lt;String&gt;,
+}
+
+impl Lifecycle for Cleanup {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        self.keep_days = 30.0;
+        Ok(())
+    }
+}
+
+impl Handler for Cleanup {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            match (action.key.as_str(), action.kind, action.value) {
+                (&quot;target-name&quot;, ActionKind::Changed, ActionValue::Text(name)) =&gt; self.target_name = name,
+                (&quot;dry-run&quot;, ActionKind::Changed, ActionValue::Flag(on)) =&gt; self.dry_run = on,
+                (&quot;keep-days&quot;, ActionKind::Changed, ActionValue::Number(days)) =&gt; self.keep_days = days,
+                (&quot;shortcut&quot;, ActionKind::Changed, ActionValue::Text(chord)) =&gt; {
+                    self.shortcut = Some(chord).filter(|chord| !chord.is_empty());
+                }
+                (&quot;run&quot;, ActionKind::Activated, ActionValue::None) =&gt; {
+                    let mode = if self.dry_run { &quot;dry run&quot; } else { &quot;real run&quot; };
+                    log::log(Level::Info, &amp;format!(&quot;cleanup of {} as {mode}&quot;, self.target_name));
+                }
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Views for Cleanup {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let name = tree.text_input(&quot;Name&quot;, self.target_name.clone()).key(&quot;target-name&quot;);
+        let dry_run = tree.toggle(&quot;Dry run&quot;, self.dry_run).key(&quot;dry-run&quot;);
+        let keep = tree.number(&quot;Keep days&quot;, self.keep_days).key(&quot;keep-days&quot;)
+            .style(NumberStyle::Slider).minimum(1.0).maximum(365.0).unit(&quot;days&quot;);
+        let shortcut = tree.key_capture().chord(self.shortcut.clone()).key(&quot;shortcut&quot;);
+        let run = tree.button(&quot;Run cleanup&quot;).key(&quot;run&quot;).role(ButtonRole::Primary);
+        let rows = tree
+            .layout(Direction::Vertical)
+            .constraints(vec![Constraint::Length(3), Constraint::Length(1), Constraint::Length(1),
+                              Constraint::Length(1), Constraint::Length(3)])
+            .child(name).child(dry_run).child(keep).child(shortcut).child(run);
+        tree.finish(rows)
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event } from '@ilium/plugin-sdk';
+import type { Submission } from '@ilium/plugin-sdk/types';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { button, keyCapture, layout, number, textInput, toggle, tree } from '@ilium/plugin-sdk/ui/build';
+
+const state = { targetName: '', dryRun: false, keepDays: 30, shortcut: undefined as string | undefined };
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag !== 'ui-action') continue;
+      const { key, kind, value } = event.val;
+      if (key === 'target-name' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'text') state.targetName = value.val;
+      else if (key === 'dry-run' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'flag') state.dryRun = value.val;
+      else if (key === 'keep-days' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'number') state.keepDays = value.val;
+      else if (key === 'shortcut' &amp;&amp; kind === 'changed' &amp;&amp; value.tag === 'text') state.shortcut = value.val || undefined;
+      else if (key === 'run' &amp;&amp; kind === 'activated') {
+        log('info', `cleanup of ${state.targetName} as ${state.dryRun ? 'dry run' : 'real run'}`);
+      }
+    }
+    return [];
+  },
+  render() {
+    return tree(
+      layout(
+        { direction: 'vertical', constraints: [
+          { tag: 'length', val: 3 }, { tag: 'length', val: 1 }, { tag: 'length', val: 1 },
+          { tag: 'length', val: 1 }, { tag: 'length', val: 3 } ] },
+        [
+          textInput('Name', state.targetName, { key: 'target-name' }),
+          toggle('Dry run', state.dryRun, { key: 'dry-run' }),
+          number('Keep days', state.keepDays, { key: 'keep-days', style: 'slider', minimum: 1, maximum: 365, unit: 'days' }),
+          keyCapture({ key: 'shortcut', chord: state.shortcut }),
+          button('Run cleanup', { key: 'run', role: 'primary' }),
+        ],
+      ),
+    );
+  },
+});
+</code></pre>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<ul>
+<li>The widgets appear in tree order, top to bottom. Focusable widgets take focus in the <a href="/pages/ui-model/#focus-order">focus order</a>.</li>
+<li>The focused widget uses the accent colour. A text field shows the terminal cursor.</li>
+<li>Typing changes the text on screen at once. The plugin hears nothing until the user pauses for the debounce time.</li>
+<li>A secret field shows dots in place of its text, and the last characters when <code>reveal-last</code> is set.</li>
+<li>A disabled widget is dimmed, ignores input and shows its reason as a tooltip.</li>
+</ul>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Typed text longer than <code>max-length</code></td>
+<td>The host refuses the extra characters. No event is sent.</td>
+</tr>
+<tr>
+<td>Typed number outside <code>minimum</code> and <code>maximum</code></td>
+<td>The entry dialog shows its error line and nothing is sent. A step stops at the bound.</td>
+</tr>
+<tr>
+<td>A <code>validation</code> pattern that is not a valid regular expression</td>
+<td><code>ui.invalid-tree</code>. The instance traps, the previous tree stays (stale) and one error is logged.</td>
+</tr>
+<tr>
+<td>Two widgets with the same key anywhere in one view</td>
+<td><code>ui.duplicate-key</code>. The instance traps.</td>
+</tr>
+<tr>
+<td>A tree with more than 4,096 nodes or 1 MiB</td>
+<td><code>ui.too-large</code>. The instance traps.</td>
+</tr>
+<tr>
+<td><code>choice</code> with <code>selected-id</code> that is not in <code>items</code></td>
+<td>The first option is shown and nothing is sent.</td>
+</tr>
+<tr>
+<td><code>set-widget-state</code> with a key the view does not have</td>
+<td><code>not-found</code></td>
+</tr>
+<tr>
+<td><code>set-widget-state</code> with a state the widget does not take</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>An input widget other than <code>button</code> in a settings page</td>
+<td><code>ui.widget-not-allowed</code>. The instance traps and the previous tree stays. Use <code>schema-form</code>, and <code>location-picker</code> with <code>bind</code>.</td>
+</tr>
+<tr>
+<td>The <code>ui.panels</code> grant is declined</td>
+<td>Every <code>ui</code> import returns <code>not-permitted</code>, and the panel is not registered.</td>
+</tr>
+<tr>
+<td>The grant changes during a call</td>
+<td><code>revoked</code>. The plugin is activated again.</td>
+</tr>
+</tbody>
+</table>
+<p>Requirement ids for this page: [WID-026], [WID-027]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/settings-screens/">Settings screens</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-index/"><small>Previous</small>Widget catalogue</a><a class="next" href="/pages/widgets-layout-and-containers/"><small>Next</small>Layout and containers</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#how-to-read-the-renders">How to read the renders</a></li><li class="l2"><a href="#keys-are-action-ids">Keys are action ids</a></li><li class="l2"><a href="#props-every-input-widget-accepts">Props every input widget accepts</a></li><li class="l2"><a href="#when-the-plugin-hears-about-a-change">When the plugin hears about a change</a></li><li class="l2"><a href="#widget-surface">Widget surface</a></li><li class="l3"><a href="#button">button</a></li><li class="l3"><a href="#toggle">toggle</a></li><li class="l3"><a href="#choice">choice</a></li><li class="l3"><a href="#number">number</a></li><li class="l3"><a href="#text-input">text-input</a></li><li class="l3"><a href="#text-area">text-area</a></li><li class="l3"><a href="#schema-form">schema-form</a></li><li class="l3"><a href="#key-capture">key-capture</a></li><li class="l2"><a href="#changing-a-widget-from-the-plugin">Changing a widget from the plugin</a></li><li class="l2"><a href="#worked-example-a-cleanup-panel">Worked example: a cleanup panel</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

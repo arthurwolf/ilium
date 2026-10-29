@@ -1,0 +1,695 @@
+# Site navigation, in display order. Each entry needs title and url.
+- title: Home
+  url: /
+- title: Your first plugin in five minutes
+  url: /pages/getting-started-first-plugin/
+- title: What a plugin is
+  url: /pages/getting-started-overview/
+- title: Set up a toolchain
+  url: /pages/getting-started-toolchain/
+- title: Plugin manual
+  url: /pages/landing/
+- title: 1. Agent badge
+  url: /pages/tutorial-01-agent-badge/
+- title: 2. Command, keybinding and settings
+  url: /pages/tutorial-02-command-and-settings/
+- title: 3. A panel with a table
+  url: /pages/tutorial-03-panel/
+- title: 4. Finished-agent notice and toolbar button
+  url: /pages/tutorial-04-finished-notice/
+- title: 5. TODO scanner with files and jobs
+  url: /pages/tutorial-05-todo-scanner/
+- title: 6. Notes pane with drag and drop
+  url: /pages/tutorial-06-notes-pane/
+- title: 7. Ambient scene
+  url: /pages/tutorial-07-ambient-scene/
+- title: 8. The same plugin in TypeScript
+  url: /pages/tutorial-08-typescript/
+- title: 9. Package and share
+  url: /pages/tutorial-09-package-and-share/
+- title: Architecture
+  url: /pages/architecture/
+- title: Background jobs
+  url: /pages/background-jobs/
+- title: Capabilities and grants
+  url: /pages/capabilities/
+- title: Debugging
+  url: /pages/debugging/
+- title: Errors and limits
+  url: /pages/errors-and-limits/
+- title: Events and intents
+  url: /pages/events-and-intents/
+- title: File access
+  url: /pages/file-access/
+- title: Layout constraints
+  url: /pages/layout/
+- title: Lifecycle
+  url: /pages/lifecycle/
+- title: Packages and manifests
+  url: /pages/packages/
+- title: Pane primitives
+  url: /pages/primitives/
+- title: Requests and outcomes
+  url: /pages/requests-and-outcomes/
+- title: Retained mode
+  url: /pages/retained-mode/
+- title: Services
+  url: /pages/services/
+- title: Extending core plugins
+  url: /pages/extending-core-plugins/
+- title: Testing plugins
+  url: /pages/testing/
+- title: The UI model
+  url: /pages/ui-model/
+- title: Versioning
+  url: /pages/versioning/
+- title: Worlds and sides
+  url: /pages/worlds-and-sides/
+- title: audio
+  url: /pages/api-audio/
+- title: cli
+  url: /pages/api-cli/
+- title: clipboard
+  url: /pages/api-clipboard/
+- title: clock and timers
+  url: /pages/api-clock-and-timers/
+- title: codec
+  url: /pages/api-codec/
+- title: commands
+  url: /pages/api-commands/
+- title: Events
+  url: /pages/api-events/
+- title: Plugin exports
+  url: /pages/api-exports/
+- title: fs
+  url: /pages/api-fs/
+- title: help and plugins
+  url: /pages/api-help-and-plugins/
+- title: http
+  url: /pages/api-http/
+- title: http-api
+  url: /pages/api-http-api/
+- title: inference
+  url: /pages/api-inference/
+- title: intents
+  url: /pages/api-intents/
+- title: jobs
+  url: /pages/api-jobs/
+- title: keys
+  url: /pages/api-keys/
+- title: location
+  url: /pages/api-location/
+- title: log
+  url: /pages/api-log/
+- title: media
+  url: /pages/api-media/
+- title: Messages and topics
+  url: /pages/api-messages-and-topics/
+- title: Notifications and sounds
+  url: /pages/api-notifications/
+- title: panes
+  url: /pages/api-panes/
+- title: Process control
+  url: /pages/api-process-control/
+- title: Scenes
+  url: /pages/api-scenes/
+- title: services
+  url: /pages/api-services/
+- title: extension points
+  url: /pages/api-extension-points/
+- title: settings
+  url: /pages/api-settings/
+- title: storage
+  url: /pages/api-storage/
+- title: tree
+  url: /pages/api-tree/
+- title: ui
+  url: /pages/api-ui/
+- title: workspace
+  url: /pages/api-workspace/
+- title: Agent primitive
+  url: /pages/primitives-agent/
+- title: Basic primitive
+  url: /pages/primitives-basic/
+- title: Editor primitive
+  url: /pages/primitives-editor/
+- title: Terminal primitive
+  url: /pages/primitives-terminal/
+- title: Collections
+  url: /pages/widgets-collections/
+- title: Data display
+  url: /pages/widgets-data-display/
+- title: Widget catalogue
+  url: /pages/widgets-index/
+- title: Input
+  url: /pages/widgets-input/
+- title: Layout and containers
+  url: /pages/widgets-layout-and-containers/
+- title: Media and embedded views
+  url: /pages/widgets-media-and-embedded/
+- title: Text
+  url: /pages/widgets-text/
+- title: agent.control
+  url: /pages/capability-agent-control/
+- title: agent.read
+  url: /pages/capability-agent-read/
+- title: agent.read-prompts
+  url: /pages/capability-agent-read-prompts/
+- title: agent.signatures
+  url: /pages/capability-agent-signatures/
+- title: Always-granted capabilities
+  url: /pages/capability-always-granted/
+- title: Capability: audio
+  url: /pages/capability-audio/
+- title: Capability: cli.contribute
+  url: /pages/capability-cli-contribute/
+- title: Capability: clipboard
+  url: /pages/capability-clipboard/
+- title: commands.invoke
+  url: /pages/capability-commands-invoke/
+- title: editor.edit
+  url: /pages/capability-editor-edit/
+- title: editor.provide
+  url: /pages/capability-editor-provide/
+- title: editor.read
+  url: /pages/capability-editor-read/
+- title: Capability: fs.pick
+  url: /pages/capability-fs-pick/
+- title: fs.read:<scope>
+  url: /pages/capability-fs-read/
+- title: Capability: fs.watch
+  url: /pages/capability-fs-watch/
+- title: Capability: fs.write
+  url: /pages/capability-fs-write/
+- title: Capability: help.read
+  url: /pages/capability-help-read/
+- title: Capability: http
+  url: /pages/capability-http/
+- title: Capability: http-api.route
+  url: /pages/capability-http-api-route/
+- title: Capability: inference
+  url: /pages/capability-inference/
+- title: Capability: inference.provide
+  url: /pages/capability-inference-provide/
+- title: Capability: jobs.run
+  url: /pages/capability-jobs-run/
+- title: keys.intercept
+  url: /pages/capability-keys-intercept/
+- title: Capability: location.observer
+  url: /pages/capability-location-observer/
+- title: Capability: media.video
+  url: /pages/capability-media-video/
+- title: Capability: messages.peer
+  url: /pages/capability-messages-peer/
+- title: Capability: extensions.provide
+  url: /pages/capability-extensions-provide/
+- title: Capability: extensions.contribute
+  url: /pages/capability-extensions-contribute/
+- title: Capability: notify.desktop
+  url: /pages/capability-notify-desktop/
+- title: panes.create
+  url: /pages/capability-panes-create/
+- title: panes.provide-kind
+  url: /pages/capability-panes-provide-kind/
+- title: panes.read
+  url: /pages/capability-panes-read/
+- title: panes.signal
+  url: /pages/capability-panes-signal/
+- title: Capability: plugins.manage
+  url: /pages/capability-plugins-manage/
+- title: Capability: process.run
+  url: /pages/capability-process-run/
+- title: Capability: services
+  url: /pages/capability-services/
+- title: Capability: settings.read-all and settings.write-all
+  url: /pages/capability-settings-all/
+- title: Capability: sound.play
+  url: /pages/capability-sound-play/
+- title: terminal.output-filter
+  url: /pages/capability-terminal-output-filter/
+- title: terminal.pointer
+  url: /pages/capability-terminal-pointer/
+- title: terminal.read-screen
+  url: /pages/capability-terminal-read-screen/
+- title: terminal.write
+  url: /pages/capability-terminal-write/
+- title: Capability: topics.subscribe
+  url: /pages/capability-topics-subscribe/
+- title: tree.decorate
+  url: /pages/capability-tree-decorate/
+- title: tree.metadata
+  url: /pages/capability-tree-metadata/
+- title: tree.read
+  url: /pages/capability-tree-read/
+- title: tree.write
+  url: /pages/capability-tree-write/
+- title: ui.panels
+  url: /pages/capability-ui-panels/
+- title: Capability: workspace.manage
+  url: /pages/capability-workspace-manage/
+- title: Capability table
+  url: /pages/reference-capabilities/
+- title: Error codes and limits
+  url: /pages/reference-errors-and-limits/
+- title: Event and intent tables
+  url: /pages/reference-events-and-intents/
+- title: Manifest reference
+  url: /pages/reference-manifest/
+- title: Core extension points
+  url: /pages/reference-core-extension-points/
+- title: Theming and readable output
+  url: /pages/accessibility-and-theming/
+- title: Performance
+  url: /pages/performance/
+- title: Moving from .iliumanim to .iliumpkg
+  url: /pages/porting-iliumanim/
+- title: Rust SDK reference
+  url: /pages/rust-sdk/
+- title: Building settings screens
+  url: /pages/settings-screens/
+- title: TypeScript SDK reference
+  url: /pages/typescript-sdk/
+- title: Design decisions
+  url: /pages/design-decisions/
+- title: Glossary
+  url: /pages/glossary/
+- title: Roadmap
+  url: /pages/roadmap/
+- title: Security model
+  url: /pages/security/
+- title: 10. A settings tab of your own
+  url: /pages/tutorial-10-settings-new-tab/
+- title: 11. Add settings to an existing tab
+  url: /pages/tutorial-11-settings-extend-tab/
+- title: 12. Your first CLI subcommand
+  url: /pages/tutorial-12-hello-cli/
+- title: 13. Keybindings, chords and when expressions
+  url: /pages/tutorial-13-keys-and-when/
+- title: 14. A toast and a status-bar segment
+  url: /pages/tutorial-14-toast-and-status/
+- title: 15. A context-menu entry
+  url: /pages/tutorial-15-context-menu/
+- title: 16. Remember a counter in storage
+  url: /pages/tutorial-16-remember-a-counter/
+- title: 17. A help topic and a custom sound
+  url: /pages/tutorial-17-help-and-sound/
+- title: 18. Offer an extension point: a link preview plugin
+  url: /pages/tutorial-18-add-an-extension-point/
+- title: 19. Stop core actions with hooks: quiet hours
+  url: /pages/tutorial-19-stop-core-actions-with-hooks/
+- title: 20. Extend six core plugins from one package: a team pack
+  url: /pages/tutorial-20-extend-six-core-plugins/
+- title: 21. Replace a core plugin: Titles Lite
+  url: /pages/tutorial-21-replace-a-core-plugin/
+- title: 22. A versioned service with fallbacks
+  url: /pages/tutorial-22-versioned-service-with-fallbacks/
+- title: 23. Drive the fleet: a review swarm
+  url: /pages/tutorial-23-review-swarm/
+- title: Extending Settings
+  url: /pages/settings-extension/
+- title: Settings schema reference
+  url: /pages/reference-settings-schema/
+- title: Providing the docs to agents
+  url: /pages/agent-docs/
+- title: llms.txt and Markdown pages
+  url: /pages/agent-docs-llms-txt/
+- title: Project instruction files
+  url: /pages/agent-docs-project-files/
+- title: The Ilium plugin skill
+  url: /pages/agent-docs-skill/
+- title: Keeping the kit current
+  url: /pages/agent-docs-maintenance/
+- title: Toast
+  url: /pages/api-toast/
+- title: Catalogs
+  url: /pages/api-catalogs/
+- title: Client requests
+  url: /pages/api-client-requests/
+- title: Command palette
+  url: /pages/api-command-palette/
+- title: Durable timers and journal
+  url: /pages/api-durable-timers/
+- title: Tree and window chrome
+  url: /pages/api-tree-chrome/
+- title: Pane lifecycle and tree restructuring
+  url: /pages/api-pane-lifecycle/
+- title: Surface v2
+  url: /pages/api-surface-v2/
+- title: Pointer
+  url: /pages/api-pointer/
+- title: Popovers and tooltips
+  url: /pages/api-popovers/
+- title: Menus
+  url: /pages/api-menus/
+- title: Geocode and location picker
+  url: /pages/api-geocode/
+- title: Terminal reads
+  url: /pages/primitives-terminal-reads/
+- title: Terminal pointer
+  url: /pages/primitives-terminal-pointer/
+- title: Terminal input
+  url: /pages/primitives-terminal-input/
+- title: Agent transcript and signals
+  url: /pages/primitives-agent-transcript/
+- title: Editor viewport and tokens
+  url: /pages/primitives-editor-viewport/
+- title: sessions
+  url: /pages/api-sessions/
+- title: 'fs: atomic write, revisions, tail, agent homes'
+  url: /pages/api-fs-atomic-and-tail/
+- title: http streams
+  url: /pages/api-http-streams/
+- title: gpu
+  url: /pages/api-gpu/
+- title: vector and embeddings
+  url: /pages/api-vector/
+- title: kernel settings and keymap reads
+  url: /pages/api-kernel-settings-and-keymap/
+- title: "intent: send-input stages"
+  url: /pages/api-intent-send-input/
+- title: "intents: pane lifecycle"
+  url: /pages/api-intent-pane-lifecycle/
+- title: "intents: tree structure and restructure"
+  url: /pages/api-intent-tree-structure/
+- title: "intents: toast, status segments, open-external"
+  url: /pages/api-intent-chrome/
+- title: menu provider
+  url: /pages/api-menu-provider/
+- title: virtual rows provider
+  url: /pages/api-virtual-rows-provider/
+- title: token provider
+  url: /pages/api-token-provider/
+- title: Status and feedback
+  url: /pages/widgets-status-and-feedback/
+- title: Pickers
+  url: /pages/widgets-pickers/
+- title: "Capability: terminal.read-cells"
+  url: /pages/capability-terminal-read-cells/
+- title: "Capability: terminal.history"
+  url: /pages/capability-terminal-history/
+- title: "Capability: terminal.input-lock"
+  url: /pages/capability-terminal-input-lock/
+- title: "Capability: terminal.raw-input"
+  url: /pages/capability-terminal-raw-input/
+- title: "Capability: panes.lifecycle"
+  url: /pages/capability-panes-lifecycle/
+- title: "Capability: tree.restructure"
+  url: /pages/capability-tree-restructure/
+- title: "Capability: tree.attention"
+  url: /pages/capability-tree-attention/
+- title: "Capability: ui.chrome"
+  url: /pages/capability-ui-chrome/
+- title: "Capability: open-external"
+  url: /pages/capability-open-external/
+- title: "Capability: sessions.cross"
+  url: /pages/capability-sessions-cross/
+- title: "Capability: process.long-lived"
+  url: /pages/capability-process-long-lived/
+- title: "Capability: settings.read-kernel:<kernel-tab-id>"
+  url: /pages/capability-settings-read-kernel/
+- title: "Capability: settings.contribute:<kernel-tab-id>"
+  url: /pages/capability-settings-contribute/
+- title: "Capability: keymap.read"
+  url: /pages/capability-keymap-read/
+- title: "Capability: agent.transcript"
+  url: /pages/capability-agent-transcript/
+- title: "Capability: location.geocode"
+  url: /pages/capability-location-geocode/
+- title: "Capability: inference.embed"
+  url: /pages/capability-inference-embed/
+- title: "Capability: notify.toast"
+  url: /pages/capability-notify-toast/
+- title: "Capability: journal.read"
+  url: /pages/capability-journal-read/
+- title: "Capability: gpu.kernels"
+  url: /pages/capability-gpu-kernels/
+- title: Settings row gallery
+  url: /pages/reference-settings-rows/
+- title: Reference
+  url: /pages/reference/
+- title: Core plugins
+  url: /pages/core-plugins/
+- title: Tree
+  url: /pages/core-plugin-tree/
+- title: Layout
+  url: /pages/core-plugin-layout/
+- title: Terminal
+  url: /pages/core-plugin-terminal/
+- title: Smart Copy
+  url: /pages/core-plugin-smart-copy/
+- title: Editor
+  url: /pages/core-plugin-editor/
+- title: Kanban
+  url: /pages/core-plugin-kanban/
+- title: Agent detection
+  url: /pages/core-plugin-agent-detect/
+- title: Agent toolbar
+  url: /pages/core-plugin-agent-toolbar/
+- title: Fleet
+  url: /pages/core-plugin-fleet/
+- title: Cost
+  url: /pages/core-plugin-cost/
+- title: Titles and organisation
+  url: /pages/core-plugin-titles/
+- title: Inference providers
+  url: /pages/core-plugin-inference/
+- title: Notifications
+  url: /pages/core-plugin-notifications/
+- title: Voice
+  url: /pages/core-plugin-voice/
+- title: Scheduler
+  url: /pages/core-plugin-scheduler/
+- title: Text triggers
+  url: /pages/core-plugin-text-triggers/
+- title: Progress
+  url: /pages/core-plugin-progress/
+- title: Chatroom
+  url: /pages/core-plugin-chatroom/
+- title: Worktrees
+  url: /pages/core-plugin-worktrees/
+- title: Sessions
+  url: /pages/core-plugin-sessions/
+- title: Compaction
+  url: /pages/core-plugin-compaction/
+- title: Settings
+  url: /pages/core-plugin-settings/
+- title: Keys and help
+  url: /pages/core-plugin-keys-and-help/
+- title: Workspace search
+  url: /pages/core-plugin-search/
+- title: Ambient look
+  url: /pages/core-plugin-ambient/
+- title: Scenes
+  url: /pages/core-plugin-scenes/
+- title: Recap
+  url: /pages/core-plugin-recap/
+- title: Session conversion
+  url: /pages/core-plugin-session-convert/
+- title: Agent setup
+  url: /pages/core-plugin-agent-setup/
+- title: Diagnostics
+  url: /pages/core-plugin-diagnostics/
+- title: "Plugin administration guide"
+  url: /pages/guide-administration/
+- title: "CI recipes"
+  url: /pages/guide-ci-recipes/
+- title: "Compatibility and upgrades"
+  url: /pages/guide-compatibility-and-upgrades/
+- title: "Guide, data migration"
+  url: /pages/guide-data-migration/
+- title: "Enterprise deployment"
+  url: /pages/guide-enterprise-deployment/
+- title: "Author FAQ"
+  url: /pages/guide-faq/
+- title: "Internationalisation"
+  url: /pages/guide-internationalisation/
+- title: "Patterns cookbook"
+  url: /pages/guide-patterns-cookbook/
+- title: "Plugin administration"
+  url: /pages/guide-plugin-administration/
+- title: "Plugin documentation guide"
+  url: /pages/guide-plugin-documentation/
+- title: "Porting from other plugin systems"
+  url: /pages/guide-porting-from-other-plugin-systems/
+- title: "Publishing and support"
+  url: /pages/guide-publishing-and-support/
+- title: "Publishing guide"
+  url: /pages/guide-publishing/
+- title: "Quality checklist"
+  url: /pages/guide-quality-checklist/
+- title: "Troubleshooting for authors"
+  url: /pages/guide-troubleshooting/
+- title: "Admin policy reference"
+  url: /pages/reference-admin-policy/
+- title: "Audit log"
+  url: /pages/reference-audit-log/
+- title: "Check and lint rules"
+  url: /pages/reference-check-and-lint-rules/
+- title: "CLI compatibility"
+  url: /pages/reference-cli-compatibility/
+- title: "Config and data migration"
+  url: /pages/reference-config-and-data-migration/
+- title: "Conformance suite"
+  url: /pages/reference-conformance-suite/
+- title: "Debugging tools"
+  url: /pages/reference-debugging-tools/
+- title: "Versions and dependencies reference"
+  url: /pages/reference-dependency-resolution/
+- title: "Extension security"
+  url: /pages/reference-extension-security/
+- title: "Feature traceability"
+  url: /pages/reference-feature-traceability/
+- title: "Grant review and consent"
+  url: /pages/reference-grant-review-and-consent/
+- title: "Reference, health and watchdog"
+  url: /pages/reference-health-and-watchdog/
+- title: "Host architecture"
+  url: /pages/reference-host-architecture/
+- title: "Performance budgets and benchmarks"
+  url: /pages/reference-host-budgets/
+- title: "Sandbox helper protocol"
+  url: /pages/reference-host-helper/
+- title: "Plugin traffic over IPC"
+  url: /pages/reference-host-ipc/
+- title: "Rendering pipeline for plugins"
+  url: /pages/reference-host-rendering/
+- title: "Host runtime"
+  url: /pages/reference-host-runtime/
+- title: "Scheduling, deadlines and cancellation"
+  url: /pages/reference-host-scheduling/
+- title: "Telemetry and plugin health"
+  url: /pages/reference-host-telemetry/
+- title: "Install, update and uninstall reference"
+  url: /pages/reference-install-and-update/
+- title: "Reference, install, update and uninstall"
+  url: /pages/reference-install-update-uninstall/
+- title: "Kernel and boot reference"
+  url: /pages/reference-kernel-and-boot/
+- title: "Manifest schema and error catalogue"
+  url: /pages/reference-manifest-schema/
+- title: "Network egress reference"
+  url: /pages/reference-network-egress/
+- title: "Reference, offline and low disk"
+  url: /pages/reference-offline-and-low-disk/
+- title: "Package format reference"
+  url: /pages/reference-package-format/
+- title: "Reference, persistence and restart"
+  url: /pages/reference-persistence-and-restart/
+- title: "Platform support"
+  url: /pages/reference-platform-support/
+- title: "Plugin command-line reference"
+  url: /pages/reference-plugin-cli/
+- title: "Distribution commands"
+  url: /pages/reference-plugin-distribution-cli/
+- title: "Plugin files on disk"
+  url: /pages/reference-plugin-files/
+- title: "Reference, plugin lifecycle states"
+  url: /pages/reference-plugin-lifecycle-states/
+- title: "Plugin policy"
+  url: /pages/reference-plugin-policy/
+- title: "Reference, plugin scope and sessions"
+  url: /pages/reference-plugin-scope-and-sessions/
+- title: "Project templates"
+  url: /pages/reference-project-templates/
+- title: "Registry reference"
+  url: /pages/reference-registry/
+- title: "Requirements for the host API"
+  url: /pages/reference-requirements-api-host/
+- title: "Requirements for author guides"
+  url: /pages/reference-requirements-author-guides/
+- title: "Requirements for capabilities"
+  url: /pages/reference-requirements-capabilities/
+- title: "Core parity requirements"
+  url: /pages/reference-requirements-core-parity/
+- title: "Requirements for developer tooling"
+  url: /pages/reference-requirements-dev-tooling/
+- title: "Requirements for events and intents"
+  url: /pages/reference-requirements-events-intents/
+- title: "Requirements for extension points"
+  url: /pages/reference-requirements-extension-points/
+- title: "Requirements: kernel and host"
+  url: /pages/reference-requirements-kernel-host/
+- title: "Requirements, lifecycle and operations"
+  url: /pages/reference-requirements-lifecycle-ops/
+- title: "Requirements for manifest and package"
+  url: /pages/reference-requirements-manifest-package/
+- title: "Requirements for panes"
+  url: /pages/reference-requirements-panes/
+- title: "Requirements for pane primitives"
+  url: /pages/reference-requirements-primitives/
+- title: "Requirements for rendering"
+  url: /pages/reference-requirements-rendering/
+- title: "Requirements for requests and outcomes"
+  url: /pages/reference-requirements-requests-outcomes/
+- title: "Security and policy requirements"
+  url: /pages/reference-requirements-security-policy/
+- title: "Requirements for services and topics"
+  url: /pages/reference-requirements-services-topics/
+- title: "Requirements for settings"
+  url: /pages/reference-requirements-settings/
+- title: "User and administrator requirements"
+  url: /pages/reference-requirements-user-admin/
+- title: "Requirements for widgets"
+  url: /pages/reference-requirements-widgets/
+- title: "Requirements index"
+  url: /pages/reference-requirements/
+- title: "Reference, resource accounting"
+  url: /pages/reference-resource-accounting/
+- title: "Runtime model"
+  url: /pages/reference-runtime-model/
+- title: "Sandbox reference"
+  url: /pages/reference-sandbox/
+- title: "Secrets"
+  url: /pages/reference-secrets/
+- title: "Security response"
+  url: /pages/reference-security-response/
+- title: "Security testing"
+  url: /pages/reference-security-testing/
+- title: "Signing and trust reference"
+  url: /pages/reference-signing-and-trust/
+- title: "Test harness reference"
+  url: /pages/reference-test-harness/
+- title: "Threat model"
+  url: /pages/reference-threat-model/
+- title: "Trust and supply chain"
+  url: /pages/reference-trust-and-supply-chain/
+- title: "WIT reference"
+  url: /pages/reference-wit/
+- title: "Core plugins for users"
+  url: /pages/user-core-plugins/
+- title: "The Extensions tab"
+  url: /pages/user-extensions-tab/
+- title: "Plugin FAQ"
+  url: /pages/user-faq/
+- title: "Install and manage plugins"
+  url: /pages/user-install-and-manage/
+- title: "Managing plugins"
+  url: /pages/user-managing-plugins/
+- title: "Permissions explained"
+  url: /pages/user-permissions-explained/
+- title: "Plugin health for users"
+  url: /pages/user-plugin-health/
+- title: "Plugin security and privacy for users"
+  url: /pages/user-plugin-security-and-privacy/
+- title: "Plugin store"
+  url: /pages/user-plugin-store/
+- title: "Plugins for users"
+  url: /pages/user-plugins-overview/
+- title: "Plugin privacy"
+  url: /pages/user-privacy/
+- title: "Safe mode and recovery"
+  url: /pages/user-safe-mode-and-troubleshooting/
+- title: "Troubleshooting plugins"
+  url: /pages/user-troubleshooting/
+- title: "ABI evolution"
+  url: /pages/reference-abi-evolution/
+- title: "Host conformance matrix"
+  url: /pages/reference-host-conformance/
+- title: "Glyph plane and frame receipts"
+  url: /pages/api-surface-glyph-plane/
+- title: "Requirements for WIT and ABI"
+  url: /pages/reference-requirements-wit-abi/
+- title: "Widget input map"
+  url: /pages/reference-widget-input-map/
+- title: "Capability: settings.write-kernel:<kernel-tab-id>"
+  url: /pages/capability-settings-write-kernel/

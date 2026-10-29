@@ -32,12 +32,21 @@ fn main() {
     let behavior = load_behavior();
     match behavior {
         FixtureBehavior::Idle => linger(),
+        FixtureBehavior::StaticScreen { text } => {
+            emit("\x1b[2J\x1b[H");
+            emit(&text);
+            linger();
+        }
         FixtureBehavior::WorkingThenIdle { working_seconds } => {
             run_working_then_idle(working_seconds)
         }
         FixtureBehavior::WorkingUntilMarker { marker_path } => {
-            run_working_until_marker(&marker_path)
+            run_working_until_marker(&marker_path, None)
         }
+        FixtureBehavior::WorkingUntilMarkerWithSize {
+            marker_path,
+            size_path,
+        } => run_working_until_marker(&marker_path, Some(&size_path)),
         FixtureBehavior::HoldArgument { argument_index } => {
             // Bound to a named local, not `_`: `let _ = File::open(..)` drops
             // the handle immediately, which is precisely the opposite of this
@@ -486,9 +495,19 @@ fn run_working_then_idle(working_seconds: u32) {
     linger();
 }
 
-fn run_working_until_marker(marker_path: &std::path::Path) {
+fn run_working_until_marker(marker_path: &std::path::Path, size_path: Option<&std::path::Path>) {
     emit("Cogitating (esc to interrupt)\r\n");
+    let mut sequence = 0u64;
     while !marker_path.exists() {
+        if let Some(path) = size_path {
+            // crossterm queries this child's terminal, independently of Ilium's layout model.
+            let (columns, rows) = crossterm::terminal::size().expect("fixture terminal dimensions");
+            sequence += 1;
+            let temporary = path.with_extension("next");
+            std::fs::write(&temporary, format!("{sequence} {rows} {columns}\n"))
+                .expect("fixture dimension report");
+            std::fs::rename(temporary, path).expect("atomic fixture dimension report");
+        }
         std::thread::sleep(MARKER_POLL_INTERVAL);
     }
     clear_screen();

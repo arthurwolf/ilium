@@ -10,7 +10,7 @@ use super::{
     native_fluid::{self},
     native_fluid_assembly,
     native_render_layer::{self, Layer, RenderLayers},
-    native_tint::{self, ClimatePolicy, NativeRequest, NativeTint},
+    native_tint::{self, ClimatePolicy, NativeRequest, NativeTint, NativeTintMemo},
     saved_binding::SavedBinding,
     tours::PreparedMap,
 };
@@ -274,6 +274,19 @@ pub struct SharedNative {
 impl SharedNative {
     pub fn bank_epoch(&self) -> Digest256 {
         self.imports.bank.identity()
+    }
+
+    /// Shared texture import; restored cache tiles must reference this exact Arc.
+    pub fn imports(&self) -> &Arc<ImportResult> {
+        &self.imports
+    }
+
+    pub fn budget(&self) -> &ByteBudget {
+        &self.budget
+    }
+
+    pub fn provenance(&self) -> &native_assets::Provenance {
+        self.sources.provenance()
     }
 
     pub fn definitions(&self) -> Result<DefinitionSources<'_>, Error> {
@@ -621,6 +634,8 @@ pub fn prepare_native_shared(
         return Err(Error::MissingTextures(missing));
     }
     let mut tint = None::<NativeTint>;
+    // One memo per tile: blend windows of neighbouring blocks overlap heavily.
+    let mut tint_memo = NativeTintMemo::default();
     let mut instances = BTreeMap::<[i32; 3], Arc<BoundModel>>::new();
     let mut bound_cache = BTreeMap::<(ModelStateKey, Vec<(u16, [u8; 3])>), Arc<BoundModel>>::new();
     for (&position, state) in &normalized {
@@ -687,21 +702,19 @@ pub fn prepare_native_shared(
                     if tint.is_none() {
                         tint = Some(NativeTint::load(sources, cancel)?);
                     }
-                    tint.as_ref()
-                        .ok_or(Error::Source)?
-                        .sample_native(
-                            &binding.map,
-                            NativeRequest {
-                                source: binding.map.source(),
-                                java_position,
-                                kind,
-                                climate_policy: ClimatePolicy::RenderEarlierWith1193,
-                                world_seed: Some(world_seed),
-                                blend_radius,
-                            },
-                            cancel,
-                        )?
-                        .rgb
+                    tint.as_ref().ok_or(Error::Source)?.sample_native_rgb(
+                        &binding.map,
+                        NativeRequest {
+                            source: binding.map.source(),
+                            java_position,
+                            kind,
+                            climate_policy: ClimatePolicy::RenderEarlierWith1193,
+                            world_seed: Some(world_seed),
+                            blend_radius,
+                        },
+                        &mut tint_memo,
+                        cancel,
+                    )?
                 }
             };
             tints.insert(index, color.map(|channel| f32::from(channel) / 255.0));

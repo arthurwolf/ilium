@@ -1,0 +1,13 @@
+package ilium:exports@0.1.0;
+
+interface virtual-rows-provider {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{rich-text, tooltip};
+  record virtual-row-child {
+    id: string, label: rich-text, icon: option<string>, expandable: bool, command: option<string>,
+    tooltip: option<tooltip>, accepts-drop: bool,
+  }
+  /// Returns a page and the next cursor. none means the last page.
+  list-virtual-children: func(row-kind: string, parent: string, cursor: option<string>)
+    -> result<tuple<list<virtual-row-child>, option<string>>, plugin-error>;
+}

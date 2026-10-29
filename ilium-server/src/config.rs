@@ -370,9 +370,10 @@ pub fn save_agent_detection_settings(
         }
     })?;
     let mut document = match read_contents(&path) {
-        Ok(contents) => toml::from_str::<toml::Value>(&contents).map_err(|error| {
+        Ok(contents) => toml::from_str::<toml::Value>(&contents).map_err(|_error| {
             ilium_ipc::AgentDetectionSettingsError {
-                message: format!("could not parse config.toml: {error}"),
+                message: "could not parse config.toml; values are omitted from this error"
+                    .to_owned(),
             }
         })?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -572,9 +573,9 @@ pub(crate) fn read_contents(path: &Path) -> std::io::Result<String> {
 
 pub(crate) fn parse_contents(path: &Path, contents: &str) -> Result<ServerConfig, ServerError> {
     let path = path.to_path_buf();
-    let raw: RawConfig = toml::from_str(contents).map_err(|source| ServerError::ConfigLoad {
+    let raw: RawConfig = toml::from_str(contents).map_err(|_source| ServerError::ConfigLoad {
         path: path.clone(),
-        source: Box::new(ConfigLoadError::Parse(source)),
+        source: Box::new(ConfigLoadError::PrivateConfigParse),
     })?;
 
     let detection = DetectionConfig::from_raw(&raw.detection);
@@ -630,6 +631,16 @@ pub(crate) fn parse_contents(path: &Path, contents: &str) -> Result<ServerConfig
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_custom_agent_config_does_not_echo_private_values() {
+        let error = parse_contents(
+            std::path::Path::new("config.toml"),
+            "[[custom_agents.profiles]]\nvalue = 'sensitive-sentinel\n",
+        )
+        .unwrap_err();
+        assert!(!format!("{error:?} {error}").contains("sensitive-sentinel"));
+    }
 
     fn scratch_dir() -> std::path::PathBuf {
         let dir = std::env::temp_dir()

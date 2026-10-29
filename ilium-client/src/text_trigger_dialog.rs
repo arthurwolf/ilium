@@ -270,20 +270,30 @@ impl TextTriggerDialogState {
     pub fn sample_text(&self) -> String {
         self.sample.lines().join("\n")
     }
-    /// Parsed delay; a blank buffer is the default and an oversized one clamps.
-    pub fn delay_seconds(&self) -> u32 {
+    /// Exact delay validation; only a blank buffer selects the native default.
+    pub fn delay_seconds(&self) -> Result<u32, String> {
         let digits = self.delay.buf.trim();
         if digits.is_empty() {
-            return ilium_ipc::DEFAULT_TEXT_TRIGGER_DELAY_SECONDS;
+            return Ok(ilium_ipc::DEFAULT_TEXT_TRIGGER_DELAY_SECONDS);
         }
-        digits
-            .parse::<u64>()
-            .map_or(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS, |seconds| {
-                seconds.min(u64::from(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS)) as u32
-            })
+        let error = || {
+            format!(
+                "Enter a whole delay between 0 and {} seconds",
+                ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
+            )
+        };
+        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(error());
+        }
+        let seconds = digits.parse::<u32>().map_err(|_| error())?;
+        if seconds > ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS {
+            return Err(error());
+        }
+        Ok(seconds)
     }
-    pub fn candidate(&self) -> TextTrigger {
-        TextTrigger {
+    pub fn candidate(&self) -> Result<TextTrigger, String> {
+        let delay_seconds = self.delay_seconds()?;
+        Ok(TextTrigger {
             id: self
                 .editing_id
                 .clone()
@@ -293,8 +303,8 @@ impl TextTriggerDialogState {
             message: self.message.buf.clone(),
             target: self.target,
             sample_text: self.sample_text(),
-            delay_seconds: self.delay_seconds(),
-        }
+            delay_seconds,
+        })
     }
 }
 
@@ -363,14 +373,13 @@ pub(crate) fn draw_save_error(frame: &mut ratatui::Frame<'_>, app: &crate::app::
     let area = layout(frame.area()).preview;
     frame.render_widget(ratatui::widgets::Clear, area);
     let text = format!(
-        "Draft retained. Retry after fixing storage; Esc/reopen to review a conflicting rule.\n{error}"
+        "Draft retained. Correct the value or retry the save; Esc cancels the draft.\n{error}"
     );
     frame.render_widget(
         ratatui::widgets::Paragraph::new(text)
-            .block(
-                crate::theme::block(true)
-                    .title(crate::theme::chrome_title("Text Trigger not saved")),
-            )
+            .block(crate::theme::block(true).title(crate::theme::chrome_title(
+                "Text Trigger not saved · F9 details",
+            )))
             .wrap(ratatui::widgets::Wrap { trim: false }),
         area,
     );
@@ -409,8 +418,10 @@ pub fn delay_control(
             label: "Delay (seconds)",
             value: &state.delay.buf,
             label_width: 16,
-            previous_enabled: seconds > 0,
-            next_enabled: seconds < ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS,
+            previous_enabled: seconds.as_ref().is_ok_and(|seconds| *seconds > 0),
+            next_enabled: seconds
+                .as_ref()
+                .is_ok_and(|seconds| *seconds < ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS),
             open_enabled: true,
         },
     )
@@ -424,9 +435,9 @@ impl TextTriggerDialogState {
     ) -> Result<(), String> {
         use crate::value_control::ControlAction;
         let seconds = match action {
-            ControlAction::Decrement => self.delay_seconds().saturating_sub(1),
+            ControlAction::Decrement => self.delay_seconds()?.saturating_sub(1),
             ControlAction::Increment => self
-                .delay_seconds()
+                .delay_seconds()?
                 .saturating_add(1)
                 .min(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS),
             ControlAction::EditNumber => {
@@ -491,7 +502,7 @@ mod delay_tests {
     fn a_new_trigger_starts_at_sixty_seconds() {
         let state = TextTriggerDialogState::new(None);
         assert_eq!(state.delay.buf, "60");
-        assert_eq!(state.candidate().delay_seconds, 60);
+        assert_eq!(state.candidate().unwrap().delay_seconds, 60);
     }
 
     #[test]
@@ -502,16 +513,16 @@ mod delay_tests {
             ..TextTrigger::default()
         };
         let mut state = TextTriggerDialogState::new(Some((0, &existing)));
-        assert_eq!(state.candidate().delay_seconds, 0);
+        assert_eq!(state.candidate().unwrap().delay_seconds, 0);
         state.delay.buf = "125".into();
-        assert_eq!(state.candidate().delay_seconds, 125);
+        assert_eq!(state.candidate().unwrap().delay_seconds, 125);
         state.delay.buf.clear();
-        assert_eq!(state.candidate().delay_seconds, 60);
-        state.delay.buf = "99999999999999999999".into();
-        assert_eq!(
-            state.candidate().delay_seconds,
-            ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
-        );
+        assert_eq!(state.candidate().unwrap().delay_seconds, 60);
+        for invalid in ["86401", "99999999999999999999", "-1", "+1", "not a number"] {
+            state.delay.buf = invalid.into();
+            assert!(state.candidate().is_err(), "invalid delay {invalid}");
+            assert_eq!(state.delay.buf, invalid);
+        }
     }
 
     #[test]
@@ -522,13 +533,13 @@ mod delay_tests {
         state.message = TextPromptState::new("retain this reply");
         state.target = TextTriggerTarget::Terminals;
         state.enabled = false;
-        let before = state.candidate();
+        let before = state.candidate().unwrap();
         state.apply_delay_control(ControlAction::Decrement).unwrap();
         let mut expected = before.clone();
         expected.delay_seconds = 59;
-        assert_eq!(state.candidate(), expected);
+        assert_eq!(state.candidate().unwrap(), expected);
         state.apply_delay_control(ControlAction::Increment).unwrap();
-        assert_eq!(state.candidate(), before);
+        assert_eq!(state.candidate().unwrap(), before);
 
         state.delay = TextPromptState::new("0");
         let control = delay_control(Rect::new(0, 0, 80, 24), &state);
@@ -559,7 +570,7 @@ mod delay_tests {
         state.apply_delay_control(ControlAction::Increment).unwrap();
         assert_eq!(
             state.delay_seconds(),
-            ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
+            Ok(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS)
         );
     }
 
@@ -569,21 +580,56 @@ mod delay_tests {
         let mut state = TextTriggerDialogState::new(None);
         state.delay = TextPromptState::new("00125");
         state.delay.cursor = 2;
-        let before = state.candidate();
+        let before = state.candidate().unwrap();
         state
             .apply_delay_control(ControlAction::EditNumber)
             .unwrap();
         assert_eq!(state.focus, TextTriggerFocus::Delay);
         assert_eq!(state.delay.buf, "00125");
         assert_eq!(state.delay.cursor, 2);
-        assert_eq!(state.candidate(), before);
+        assert_eq!(state.candidate().unwrap(), before);
         state.delay.buf.clear();
         state.apply_delay_control(ControlAction::Increment).unwrap();
-        assert_eq!(state.delay_seconds(), 61);
-        let before = state.candidate();
+        assert_eq!(state.delay_seconds(), Ok(61));
+        let before = state.candidate().unwrap();
         assert!(state
             .apply_delay_control(ControlAction::PreviousChoice)
             .is_err());
-        assert_eq!(state.candidate(), before);
+        assert_eq!(state.candidate().unwrap(), before);
+    }
+    #[test]
+    fn invalid_delay_disables_only_steps_and_never_replaces_the_authored_draft() {
+        use crate::value_control::{ControlAction, PointerButton};
+        for invalid in ["86401", "99999999999999999999", "-1", "not a number"] {
+            let mut state = TextTriggerDialogState::new(None);
+            state.delay = TextPromptState::new(invalid);
+            state.delay.cursor = invalid.len();
+            state.regexp = TextPromptState::new("authored.*λ");
+            state.message = TextPromptState::new("authored reply");
+            let control = delay_control(Rect::new(0, 0, 100, 30), &state);
+            let geometry = control.geometry();
+            assert_eq!(
+                control.hit(geometry.previous.as_position(), PointerButton::Left),
+                None
+            );
+            assert_eq!(
+                control.hit(geometry.next.as_position(), PointerButton::Left),
+                None
+            );
+            assert_eq!(
+                control.hit(geometry.open.as_position(), PointerButton::Left),
+                Some(ControlAction::EditNumber)
+            );
+            assert!(state.apply_delay_control(ControlAction::Decrement).is_err());
+            assert!(state.apply_delay_control(ControlAction::Increment).is_err());
+            state
+                .apply_delay_control(ControlAction::EditNumber)
+                .unwrap();
+            assert_eq!(state.delay.buf, invalid);
+            assert_eq!(state.delay.cursor, invalid.len());
+            assert_eq!(state.regexp.buf, "authored.*λ");
+            assert_eq!(state.message.buf, "authored reply");
+            assert_eq!(state.focus, TextTriggerFocus::Delay);
+        }
     }
 }

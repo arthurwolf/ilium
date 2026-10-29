@@ -216,10 +216,10 @@ mod tests {
     fn settings_app() -> (tempfile::TempDir, App) {
         let (directory, mut app) = app_with_config_dir();
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 130, 60));
-        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+        app.mode = crate::app::Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::RemoteCompaction,
             ..crate::app::SettingsState::default()
-        });
+        }));
         (directory, app)
     }
 
@@ -514,6 +514,7 @@ mod tests {
                 .expect("threshold uses the shared numeric control");
         let open = control.geometry().open;
         click(&mut app, open.x, open.y);
+        app.settle_filesystem_for_test();
 
         let crate::app::Mode::ValueDialog(host) = &app.mode else {
             panic!("star opens direct numeric entry");

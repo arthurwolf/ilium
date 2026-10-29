@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>agent.signatures | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details open><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/" aria-current="page">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Capabilities</b></p>
+<h1>agent.signatures</h1>
+<p>The <code>agent.signatures</code> grant lets a server-side plugin teach Ilium about an agent CLI that it does not recognise by default. A signature names the processes that run the agent, gives it aliases and an icon, says how to resume a session, and maps action ids to key sequences. A plugin can also export a <code>detector</code>, which names the agent from the process list and turns the screen into an activity. The kernel does the process walk and the screen capture. The plugin supplies the rules.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>The grant <code>agent.signatures</code>, on the <code>server</code> side only. The grant takes no argument.</li>
+<li>The <code>detector</code> export, listed in <code>server.exports</code> of the manifest, only when the plugin identifies or classifies agents itself. The SDK adds the <code>with-detector</code> fragment to the world when that export is listed.</li>
+<li>The grant <a href="/pages/capability-agent-read/">agent.read</a> if the plugin also reads the resulting activity.</li>
+<li>The Rust crate <code>ilium-plugin-sdk</code> or the npm package <code>@ilium/plugin-sdk</code>.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Side</th>
+<th>Risk</th>
+<th>Install of a T2 or T3 plugin</th>
+<th>T1 bundled plugin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent.signatures</code></td>
+<td>server</td>
+<td>normal</td>
+<td>listed and checked by default</td>
+<td>granted up to the manifest ceiling</td>
+</tr>
+</tbody>
+</table>
+<p>A signature only identifies an agent and describes it. It does not allow the plugin to send input or read transcripts. Those need the grants <a href="/pages/capability-agent-control/">agent.control</a> and <code>fs.read:agent-sessions:&lt;agent&gt;</code>.</p>
+<h2 id="three-ways-to-add-a-signature">Three ways to add a signature</h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Where it is declared</th>
+<th>Scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Manifest contribution</td>
+<td><code>contributes.signatures</code> in <code>manifest.json</code></td>
+<td>Registered when the plugin installs.</td>
+</tr>
+<tr>
+<td>Runtime call</td>
+<td><code>primitives::agent::register_signature</code></td>
+<td>Registered by the plugin while it runs.</td>
+</tr>
+<tr>
+<td>Settings value</td>
+<td>A plain JSON value in the plugin settings</td>
+<td>Checked by the same rules as a manifest entry. The error names the field path.</td>
+</tr>
+</tbody>
+</table>
+<p>The id of a manifest or runtime signature is global: <code>&lt;plugin-id&gt;.&lt;id&gt;</code>. A signature with the id <code>example-agent</code> from the plugin <code>example-signatures</code> is <code>example-signatures.example-agent</code>. Built-in signatures keep bare ids (<code>claude</code>, <code>codex</code>, <code>antigravity</code>). If two signatures of different origins match the same process name, the user's settings win over plugins, and plugins win over built-in signatures. The kernel logs the overlap as a warning. It is not an error.</p>
+<h2 id="signature-fields">Signature fields</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Manifest type</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning and limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td><code>id: String</code></td>
+<td><code>id</code></td>
+<td>1 to 64 characters from <code>[a-z0-9-]</code>.</td>
+</tr>
+<tr>
+<td><code>process_names</code></td>
+<td>list of strings</td>
+<td><code>Vec&lt;String&gt;</code></td>
+<td><code>string[]</code></td>
+<td>1 to 32 names. Each is non-empty, at most 255 bytes, and has no <code>/</code> unless it is an absolute path.</td>
+</tr>
+<tr>
+<td><code>aliases</code></td>
+<td>list of strings</td>
+<td><code>Vec&lt;String&gt;</code></td>
+<td><code>string[]</code></td>
+<td>At most 32 names that also identify the agent.</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>string</td>
+<td><code>String</code></td>
+<td><code>string</code></td>
+<td>A Tabler icon name.</td>
+</tr>
+<tr>
+<td><code>resume</code></td>
+<td>list of strings</td>
+<td><code>Vec&lt;String&gt;</code></td>
+<td><code>string[]</code></td>
+<td>Argument list for resuming a session. <code>{session}</code> is replaced by the session id. Without it no resume is offered.</td>
+</tr>
+<tr>
+<td><code>actions</code></td>
+<td>map in the manifest</td>
+<td><code>Vec&lt;SignatureAction&gt;</code></td>
+<td><code>SignatureAction[]</code></td>
+<td>At most 32 actions, sorted by id. Each has <code>keys</code> (at most 1 KiB) and optional <code>allowed_when</code>.</td>
+</tr>
+<tr>
+<td><code>session_scope</code></td>
+<td>string, optional</td>
+<td><code>Option&lt;String&gt;</code></td>
+<td><code>string \| undefined</code></td>
+<td>Scope such as <code>agent-sessions:claude</code>. <code>agent.session</code> returns a value only when it is set.</td>
+</tr>
+<tr>
+<td><code>submit_keys</code></td>
+<td>string, optional</td>
+<td><code>Option&lt;String&gt;</code></td>
+<td><code>string \| undefined</code></td>
+<td>Keys that submit a prompt. The default is <code>"\r"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Each <code>SignatureAction</code> has <code>id</code>, <code>keys</code> and <code>allowed_when</code>. The <code>allowed_when</code> list holds <code>agent-activity</code> values. When it is absent, the action runs only in <code>idle</code>, <code>done</code>, <code>awaiting-approval</code> or <code>menu</code>. A compact action is therefore refused while the agent is <code>working</code>, with <code>refused(conflict)</code> and the message <code>agent is working</code>.</p>
+<h2 id="the-detector-export">The detector export</h2>
+<p>The <code>detector</code> export has two functions. The kernel calls them off the keystroke path.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Input</th>
+<th>Output</th>
+<th>When the kernel calls it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>identify</code></td>
+<td><code>list&lt;detector-process&gt;</code>, each with <code>name</code> and <code>argv</code></td>
+<td>The local signature id, or none</td>
+<td>For each pane that has no identified signature, on every detection tick.</td>
+</tr>
+<tr>
+<td><code>classify</code></td>
+<td>The signature id and a <code>detector-screen</code> (<code>columns</code>, <code>rows</code>, <code>cursor-row</code>, <code>title</code>, <code>revision</code>)</td>
+<td><code>classification</code>: <code>activity</code>, <code>objective</code>, <code>goal</code></td>
+<td>When the screen <code>revision</code> of an identified pane changes.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>activity</code> values are <code>none</code>, <code>working</code>, <code>idle</code>, <code>awaiting-approval</code>, <code>done</code> and <code>menu</code>. Before a pane is identified its activity is <code>none</code>. The <code>classify</code> function must be pure. It reads the snapshot it receives and returns a value, with no file or network access. Each export call has a 20 ms deadline. A missed deadline keeps the previous classification, emits no event and logs a warning. See <a href="#detection-loop">Detection loop</a>.</p>
+<h2 id="example-1-manifest-signature-with-a-rust-detector">Example 1: manifest signature with a Rust detector</h2>
+<p>The manifest declares the signature and the export. The server requests the grant and lists <code>detector</code>. Other manifest keys are omitted.</p>
+<pre><code class="language-json">{
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;agent.signatures&quot;] },
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;detector&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;signatures&quot;: [
+      {
+        &quot;id&quot;: &quot;example-agent&quot;,
+        &quot;process_names&quot;: [&quot;example-agent&quot;],
+        &quot;aliases&quot;: [&quot;example&quot;],
+        &quot;icon&quot;: &quot;robot&quot;,
+        &quot;resume&quot;: [&quot;example-agent&quot;, &quot;--resume&quot;, &quot;{session}&quot;],
+        &quot;session_scope&quot;: &quot;agent-sessions:claude&quot;,
+        &quot;actions&quot;: { &quot;compact&quot;: { &quot;keys&quot;: &quot;/compact\r&quot;, &quot;allowed_when&quot;: [&quot;idle&quot;] } }
+      }
+    ]
+  }
+}
+</code></pre>
+<p>The Rust plugin implements the detector and the two required exports, <code>Lifecycle</code> and <code>Handler</code>. The detector records (<code>DetectorProcess</code>, <code>DetectorScreen</code> and <code>Classification</code>) are the generated types of the detector export: the <code>detector-process</code>, <code>detector-screen</code> and <code>classification</code> records of the <a href="/pages/reference-wit/">WIT reference</a>. <code>AgentActivity</code> is the <code>agent-activity</code> enum in <code>ilium_plugin_sdk::types::tree</code>, the path the agent-events example uses.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::exports::{Detector, Handler, Lifecycle};
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;detector&quot;])]
+#[derive(Default)]
+struct ExampleSignatures;
+
+impl Lifecycle for ExampleSignatures {}
+
+impl Handler for ExampleSignatures {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+
+impl Detector for ExampleSignatures {
+    fn identify(&amp;mut self, processes: Vec&lt;DetectorProcess&gt;) -&gt; Option&lt;String&gt; {
+        let found = processes.iter().any(|process| process.name == &quot;example-agent&quot;);
+        found.then(|| &quot;example-agent&quot;.to_string())
+    }
+
+    fn classify(&amp;mut self, signature: String, screen: DetectorScreen) -&gt; Classification {
+        if signature != &quot;example-agent&quot; {
+            return Classification { activity: AgentActivity::None, objective: None, goal: None };
+        }
+        let mut activity = AgentActivity::Idle;
+        let mut objective = None;
+        for row in &amp;screen.rows {
+            if row.contains(&quot;Allow this command?&quot;) {
+                activity = AgentActivity::AwaitingApproval;
+            } else if let Some(text) = row.strip_prefix(&quot;* Working on &quot;) {
+                activity = AgentActivity::Working;
+                objective = Some(text.trim().to_string());
+            }
+        }
+        Classification { activity, objective, goal: None }
+    }
+}
+</code></pre>
+<p>The <code>identify</code> function returns the local id. The kernel reports the pane's signature as <code>example-signatures.example-agent</code>.</p>
+<h2 id="example-2-runtime-signature-in-typescript">Example 2: runtime signature in TypeScript</h2>
+<p>This plugin registers its signature when it activates, so it needs no <code>signatures</code> entry in the manifest. Registering again with the same id replaces the earlier signature of the same plugin. A manifest entry with that id would return <code>conflict</code> instead.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import { registerSignature } from '@ilium/plugin-sdk/primitives/agent';
+
+export const { lifecycle, handler, detector } = definePlugin({
+  side: 'server',
+  activate() {
+    registerSignature({
+      id: 'other-agent',
+      processNames: ['other-agent', 'other-agent-cli'],
+      aliases: ['other'],
+      icon: 'brain',
+      resume: ['other-agent', '--session', '{session}'],
+      sessionScope: undefined,
+      submitKeys: '\r',
+      actions: [{ id: 'clear', keys: '/clear\r', allowedWhen: ['idle', 'done'] }],
+    });
+  },
+  onEvents() {
+    return [];
+  },
+  identify(processes) {
+    const found = processes.some((process) =&gt; process.name === 'other-agent');
+    return found ? 'other-agent' : undefined;
+  },
+  classify(signature, screen) {
+    if (signature !== 'other-agent') {
+      return { activity: 'none', objective: undefined, goal: undefined };
+    }
+    const waiting = screen.rows.some((row) =&gt; row.includes('Approve? [y/N]'));
+    return {
+      activity: waiting ? 'awaiting-approval' : 'idle',
+      objective: undefined,
+      goal: undefined,
+    };
+  },
+});
+</code></pre>
+<p>The TypeScript record fields are camelCase (<code>processNames</code>, <code>allowedWhen</code>). The <code>undefined</code> value stands for an absent <code>option</code>. The <code>revision</code> field of <code>detector-screen</code> is a <code>bigint</code>, which this example does not read.</p>
+<h2 id="errors-and-edge-cases">Errors and edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The grant is declined in the review dialog</td>
+<td>The manifest signature is not registered, <code>detector</code> is not called for the plugin, and <code>register_signature</code> returns <code>not-permitted</code>. Agents only this plugin recognises stay unidentified.</td>
+</tr>
+<tr>
+<td>A field breaks a limit of the signature fields table</td>
+<td><code>invalid-argument</code>, with the field path, for example <code>process_names[2]: empty name</code>.</td>
+</tr>
+<tr>
+<td>A runtime id equals a manifest id of the same plugin</td>
+<td><code>conflict</code>.</td>
+</tr>
+<tr>
+<td>The grant is revoked while the plugin runs</td>
+<td>The plugin is deactivated with <code>revoked</code> and re-activated without the grant. Its signatures and detector stop.</td>
+</tr>
+<tr>
+<td><code>identify</code> returns an id the plugin did not register</td>
+<td>The id is ignored, the pane stays unidentified and a warning is logged.</td>
+</tr>
+<tr>
+<td><code>classify</code> traps or misses its deadline</td>
+<td>A trap counts as a failure under the restart rule. A missed deadline keeps the last activity.</td>
+</tr>
+<tr>
+<td><code>classify</code> returns an <code>objective</code> or <code>goal</code> over 1,024 bytes</td>
+<td>The value is cut at the last whole UTF-8 character within 1,024 bytes and a warning is logged. The classification is still used.</td>
+</tr>
+<tr>
+<td>An action has no entry in the signature</td>
+<td><code>agent-action</code> returns <code>refused(unsupported)</code>.</td>
+</tr>
+<tr>
+<td>An action is not allowed in the current activity</td>
+<td><code>agent-action</code> returns <code>refused(conflict)</code>, with a message named after the current activity, for example <code>agent is working</code> or <code>agent is awaiting approval</code>.</td>
+</tr>
+<tr>
+<td><code>session_scope</code> is absent</td>
+<td><code>agent.session</code> returns nothing for the pane.</td>
+</tr>
+<tr>
+<td>The plugin has no <code>detector</code> export</td>
+<td>The pane is identified by <code>process_names</code> and <code>aliases</code> only. Its activity stays <code>none</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A runtime signature returns after every restart, because the plugin registers it again in <code>activate</code>.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>A review dialog lists <code>agent.signatures</code> as one checkbox. A user who unchecks it declines the grant. The wording below is from the manifest:</p>
+<figure>
+<pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
+│ com.example.agent 0.1.0 by Example Ltd                                     │
+│                                                                            │
+│ <span class="t-hi">Server side</span>                                                                │
+│ [x] Teaches Ilium to recognise agents <span class="t-dim">…………………………………………………</span> agent.signatures │
+│                                                                            │
+│ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
+╰────────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>The review dialog for a package that requests agent.signatures, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
+</figure>
+
+<p>When the owner revokes the grant later, the terminal reports the withdrawal:</p>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin grants example-signatures --revoke agent.signatures
+<span class="t-ok">ok</span>   agent.signatures revoked for example-signatures (server)
+<span class="t-warn">warn</span> signature example-signatures.example-agent withdrawn from 1 pane
+</pre>
+
+<p>The figure below shows the three sources and the registry. The second figure shows the order of one detection pass.</p>
+<figure>
+<svg viewBox="0 0 410 250" role="img" aria-label="Three signature sources feed the signature registry, which the process walk and screen capture use" width="615" height="375">
+  <defs>
+    <marker id="arrow-sources" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="8" width="150" height="30" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="83" y="27" font-size="11" text-anchor="middle" fill="currentColor">Manifest contributes</text>
+  <rect x="8" y="95" width="150" height="30" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="83" y="114" font-size="11" text-anchor="middle" fill="currentColor">Runtime register call</text>
+  <rect x="8" y="170" width="150" height="30" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="83" y="189" font-size="11" text-anchor="middle" fill="currentColor">Detector export</text>
+  <line x1="158" y1="23" x2="200" y2="75" stroke="currentColor" marker-end="url(#arrow-sources)"/>
+  <line x1="158" y1="110" x2="200" y2="90" stroke="currentColor" marker-end="url(#arrow-sources)"/>
+  <line x1="158" y1="185" x2="200" y2="105" stroke="currentColor" marker-end="url(#arrow-sources)"/>
+  <rect x="200" y="60" width="200" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="300" y="94" font-size="11" text-anchor="middle" fill="currentColor">Signature registry</text>
+  <line x1="300" y1="120" x2="300" y2="170" stroke="currentColor" marker-end="url(#arrow-sources)"/>
+  <text x="306" y="148" font-size="10" fill="currentColor">matches</text>
+  <rect x="200" y="170" width="200" height="50" rx="6" fill="none" stroke="currentColor"/>
+  <text x="300" y="192" font-size="11" text-anchor="middle" fill="currentColor">Process walk and screen capture</text>
+  <text x="8" y="240" font-size="10" fill="currentColor">The classify function is pure: it reads a snapshot.</text>
+</svg>
+<figcaption>A plugin contributes signatures in three places. The kernel keeps the registry and runs the process walk and the screen capture.</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 340 346" role="img" aria-label="Detection pipeline from process walk through identify, signature id, screen capture and classify to the activity event" width="510" height="519">
+  <defs>
+    <marker id="arrow-pipeline" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="10" width="300" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="170" y="32" font-size="11" text-anchor="middle" fill="currentColor">Process walk (kernel)</text>
+  <line x1="170" y1="46" x2="170" y2="70" stroke="currentColor" marker-end="url(#arrow-pipeline)"/>
+  <rect x="20" y="70" width="300" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="170" y="92" font-size="11" text-anchor="middle" fill="currentColor">identify (plugin detector export)</text>
+  <line x1="170" y1="106" x2="170" y2="130" stroke="currentColor" marker-end="url(#arrow-pipeline)"/>
+  <rect x="20" y="130" width="300" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="170" y="152" font-size="11" text-anchor="middle" fill="currentColor">Signature id (plugin prefix added)</text>
+  <line x1="170" y1="166" x2="170" y2="190" stroke="currentColor" marker-end="url(#arrow-pipeline)"/>
+  <rect x="20" y="190" width="300" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="170" y="212" font-size="11" text-anchor="middle" fill="currentColor">Screen snapshot (kernel)</text>
+  <line x1="170" y1="226" x2="170" y2="250" stroke="currentColor" marker-end="url(#arrow-pipeline)"/>
+  <rect x="20" y="250" width="300" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="170" y="272" font-size="11" text-anchor="middle" fill="currentColor">classify (plugin detector export)</text>
+  <line x1="170" y1="286" x2="170" y2="308" stroke="currentColor" marker-end="url(#arrow-pipeline)"/>
+  <rect x="20" y="308" width="300" height="30" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="170" y="327" font-size="11" text-anchor="middle" fill="currentColor">agent-activity-changed event</text>
+</svg>
+<figcaption>The kernel runs the process walk and the capture. The plugin names the agent, then classifies each new screen revision.</figcaption>
+</figure>
+
+<h2 id="detection-loop">Detection loop</h2>
+<p>The poll loop that walks processes and captures screens stays native in the server. It decides when to poll (the adaptive interval) and which panes are due. It does not run plugin code. This section says where detector calls run and what a slow detector costs.</p>
+<ul>
+<li><strong>Where.</strong> The loop posts detector calls to the plugin executor of the server, never to the loop thread. A call is asynchronous: the loop does not wait, and it applies the result at its next tick.</li>
+<li><strong>One call per pane.</strong> <code>identify</code> takes one pane's process list and <code>classify</code> takes one pane's screen, so the loop makes one call per pane. It never batches panes into one call.</li>
+<li><strong>Parallel across plugins, serial inside one.</strong> Calls to one plugin run one after the other, as for every export. Calls to different plugins run in parallel on different executor threads.</li>
+<li><strong>Order between detectors.</strong> For an unidentified pane the loop asks the detectors in this order: bundled (T1) plugins first, then the others by plugin id. The first detector that returns a signature id wins, and the later ones are not asked for that pane. A pane that is identified is classified only by the detector whose signature identified it.</li>
+<li><strong>Per-poll budget.</strong> One poll cycle may spend at most <strong>50 ms</strong> of detector call time in total. The loop starts the cycle at a rotating pane, so every pane gets its turn. When the budget is spent, the remaining panes keep their last activity and are first in line in the next cycle.</li>
+<li><strong>Slow detector.</strong> The deadline of a call is soft (20 ms by default, key <code>detector_deadline_ms</code>, ceiling 50 ms for T1). A call that misses it keeps the previous classification, emits no event and is counted as a breach. The third breach in a row traps the plugin side, which counts as a failure. A slow detector can use the poll budget of one cycle, but it cannot delay another plugin's detector or the loop.</li>
+<li><strong>Expected cost.</strong> With 30 panes and a detector that takes 0.5 ms per pane (benchmark B8), a full cycle costs 15 ms of executor time. A cycle in which only screens that changed are classified costs less.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>30 panes, detector at 0.5 ms</td>
+<td>15 ms per full cycle, inside the budget</td>
+</tr>
+<tr>
+<td>30 panes, detector at 20 ms (the deadline)</td>
+<td>2 panes served per cycle; the others keep their activity and are served in the next cycles in rotation</td>
+</tr>
+<tr>
+<td>Detector traps</td>
+<td>Side restarted under the restart rule; panes keep their last activity during the restart</td>
+</tr>
+<tr>
+<td>Two plugins both identify a pane</td>
+<td>The first in the order above wins; the other is not asked</td>
+</tr>
+<tr>
+<td>No detector plugin is running</td>
+<td>The kernel's built-in table identifies agents as before</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-450]</strong> Detector calls MUST run on the plugin executor and MUST NOT run on the detection loop thread.</li>
+<li><strong>[HST-451]</strong> The loop MUST make one detector call per pane and MUST NOT wait for a call inside its tick.</li>
+<li><strong>[HST-452]</strong> For an unidentified pane the loop MUST ask T1 detectors first, then others by plugin id, and MUST stop at the first signature id.</li>
+<li><strong>[HST-453]</strong> One poll cycle MUST spend at most 50 ms of detector call time, MUST start at a rotating pane, and MUST leave unserved panes with their last activity.</li>
+<li><strong>[HST-454]</strong> A missed <code>detector_deadline_ms</code> MUST keep the previous classification, emit no event and count a breach, and the third breach in a row MUST trap the side.</li>
+<li><strong>[HST-455]</strong> A slow detector MUST NOT delay another plugin's detector or the detection loop.</li>
+<li><strong>[HST-456]</strong> <code>detector_deadline_ms</code> MUST default to 20 ms with a ceiling of 50 ms for T1 and 20 ms for T2 and T3.</li>
+<li><strong>[HST-457]</strong> <code>classify</code> for 30 panes through a plugin detector MUST cost under 0.5 ms per pane at the 99th percentile (benchmark B8).</li>
+</ul>
+<h2 id="limits">Limits</h2>
+<ul>
+<li>A signature has at most 32 actions, and each action's <code>keys</code> is at most 1 KiB.</li>
+<li>Each <code>identify</code> and <code>classify</code> call has a 20 ms soft deadline (<code>detector_deadline_ms</code>, T1 ceiling 50 ms). The rules for a slow detector and the per-poll budget are in the detection loop section above.</li>
+<li>The <code>objective</code> and <code>goal</code> returned by <code>classify</code> are each at most 1,024 bytes of UTF-8. A longer value is cut, not refused.</li>
+<li>The <code>id</code>, <code>process_names</code> and <code>aliases</code> limits are those of the table in the signature fields section.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/capability-agent-read/">agent.read</a> for the activity values and the <code>agent-identified</code> event.</li>
+<li><a href="/pages/capability-agent-control/">agent.control</a> for the actions that a signature declares.</li>
+<li><a href="/pages/primitives-agent/">primitives: agent</a> for the <code>agent-view</code> record and the register call.</li>
+<li><a href="/pages/api-exports/">Exports</a> for the export traits and the <code>definePlugin</code> shape.</li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a> for the <code>contributes.signatures</code> keys.</li>
+</ul>
+<p>Checked against the API version <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p><strong>[SEC-042]</strong> <code>agent.signatures</code> changes how agents are detected, so a wrong signature can hide an agent's state. The grant is normal risk (the constraints of [SEC-042] in the sandbox reference keep it so) and signatures are validated against the regex limits of [SEC-046]. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-agent-read-prompts/"><small>Previous</small>agent.read-prompts</a><a class="next" href="/pages/capability-always-granted/"><small>Next</small>Always-granted capabilities</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#three-ways-to-add-a-signature">Three ways to add a signature</a></li><li class="l2"><a href="#signature-fields">Signature fields</a></li><li class="l2"><a href="#the-detector-export">The detector export</a></li><li class="l2"><a href="#example-1-manifest-signature-with-a-rust-detector">Example 1: manifest signature with a Rust detector</a></li><li class="l2"><a href="#example-2-runtime-signature-in-typescript">Example 2: runtime signature in TypeScript</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#detection-loop">Detection loop</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

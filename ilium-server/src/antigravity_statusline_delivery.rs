@@ -279,6 +279,7 @@ async fn deliver_when_ready(
                         generation: runtime.agent_generation,
                         process: runtime.agent_process_key.clone(),
                         input_cancel_generation,
+                        completion_epoch: None,
                     }
                 };
                 handlers::write_key_input_unlocked_with_screen_marker(

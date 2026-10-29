@@ -1,0 +1,1094 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Text | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/" aria-current="page">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Text</h1>
+
+<p>Text widgets show words. Five widgets make up this family. <code>paragraph</code> wraps and aligns styled lines, and its spans can be clickable. <code>markdown</code> renders a Markdown source with Ilium's own renderer, the same one the help pages use. <code>leader-row</code> puts a label and a value on one line with dotted leaders. <code>key-hints</code> draws a line of key chords. <code>diff-view</code> shows a diff that the plugin supplies.</p>
+<p>The plugin describes the text as data inside a UI tree. The host measures the text, wraps it, aligns it and paints it with the active theme. The plugin never computes a line break or a column position.</p>
+<figure>
+<svg viewBox="0 0 420 210" role="img" aria-label="A plugin sends a ui-tree with text widgets, and the host lays them out and draws them" width="630" height="315">
+  <title>Text widgets and the host</title>
+  <desc>The plugin builds a ui-tree. The host lays out, wraps and draws five text widgets and sends ui-action events back for clicks.</desc>
+  <defs>
+    <marker id="tw-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="110" y="6" width="200" height="42" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="210" y="24" font-size="12" text-anchor="middle" fill="currentColor">Plugin (client side)</text>
+  <text x="210" y="40" font-size="10" text-anchor="middle" fill="currentColor">builds a ui-tree in render</text>
+  <line x1="160" y1="48" x2="160" y2="78" stroke="currentColor" marker-end="url(#tw-arrow)"/>
+  <text x="168" y="66" font-size="10" fill="currentColor">ui-tree</text>
+  <line x1="280" y1="78" x2="280" y2="48" stroke="currentColor" marker-end="url(#tw-arrow)"/>
+  <text x="288" y="66" font-size="10" fill="currentColor">ui-action</text>
+  <rect x="8" y="78" width="404" height="124" rx="8" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="18" y="96" font-size="11" fill="currentColor">Host lays out, wraps and draws the text</text>
+  <rect x="14" y="106" width="74" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="51" y="124" font-size="10" text-anchor="middle" fill="currentColor">paragraph</text>
+  <rect x="94" y="106" width="74" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="131" y="124" font-size="10" text-anchor="middle" fill="currentColor">markdown</text>
+  <rect x="174" y="106" width="74" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="211" y="124" font-size="10" text-anchor="middle" fill="currentColor">leader-row</text>
+  <rect x="254" y="106" width="74" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="291" y="124" font-size="10" text-anchor="middle" fill="currentColor">key-hints</text>
+  <rect x="334" y="106" width="74" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="371" y="124" font-size="10" text-anchor="middle" fill="currentColor">diff-view</text>
+  <text x="20" y="158" font-size="10" fill="currentColor">A clickable span, a markdown link or task and a diff hunk send ui-action.</text>
+  <text x="20" y="176" font-size="10" fill="currentColor">Key hints run commands on the host. Wrapping and leaders belong to the host.</text>
+</svg>
+<figcaption>The plugin describes the text, and the host wraps, aligns and draws it. A clickable span, a markdown link or task and a diff hunk send an action back.</figcaption>
+</figure>
+
+<h2 id="you-need">You need</h2>
+<ul>
+<li>The <code>ui.panels</code> grant on the client side, to show a view. A basic pane uses <code>panes.provide-kind</code> for its view instead. See <a href="/pages/capability-ui-panels/">UI panels</a>.</li>
+<li>The <code>commands.invoke</code> grant only when a link, span or key hint runs a command that the plugin does not own. A plugin's own commands need no grant. See <a href="/pages/capability-commands-invoke/">Commands invoke</a>.</li>
+<li>Rust with the <code>ilium-plugin-sdk</code> crate, or TypeScript with <code>@ilium/plugin-sdk</code>. Both build the tree with the same widget names.</li>
+<li>The <a href="/pages/widgets-index/">widget catalogue</a> for keys and host-owned state.</li>
+</ul>
+<p>Text values are <code>styled-text</code>: a list of spans, and each span holds a string and a style. A <code>styled-lines</code> value is a list of <code>styled-text</code> values, one per line. In Rust, <code>Span::plain("x")</code> builds an unstyled span and <code>Span::styled("x", Style::role(ColorRole::Warning))</code> builds a coloured one. In TypeScript, <code>span('x')</code> and <code>span('x', { role: 'warning' })</code> do the same.</p>
+<p>A <code>rich-span</code> adds two fields to a span: a <code>target</code> that makes the span clickable, and a <code>tooltip</code>. A <code>rich-text</code> is a list of rich spans and a <code>rich-lines</code> is a list of those.</p>
+<pre><code class="language-wit">// Excerpt of ilium:types/text in reference-wit
+record rich-span { text: string, style: style, target: span-target, tooltip: option&lt;string&gt; }
+</code></pre>
+<p>The <code>span-target</code> cases are <code>none</code>, <code>action(string)</code>, <code>command(string)</code> and <code>link(string)</code>. A link opens only through the open-external rules.</p>
+<h2 id="overview">Overview</h2>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Use it for</th>
+<th>Action sent to the plugin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>paragraph</code></td>
+<td>Several styled lines in a block, with clickable spans</td>
+<td><code>scrolled</code> when <code>scrollable</code>; <code>activated</code> for an <code>action</code> span</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td>Help text and rich notes</td>
+<td><code>activated</code> for a link with no <code>link-command</code>; <code>toggled</code> with <code>task-click</code></td>
+</tr>
+<tr>
+<td><code>leader-row</code></td>
+<td>A label and a read-only value</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>key-hints</code></td>
+<td>One line of key chords</td>
+<td>None. A chord runs its command on the host</td>
+</tr>
+<tr>
+<td><code>diff-view</code></td>
+<td>A diff that the plugin supplies</td>
+<td><code>selected</code> and <code>activated</code> with the hunk or line index</td>
+</tr>
+</tbody>
+</table>
+<p>Use a <code>toggle</code>, <code>choice</code> or <code>number</code> widget, not a <code>leader-row</code>, when the user must change a value. See <a href="/pages/widgets-input/">Input</a>.</p>
+<h2 id="paragraph">paragraph</h2>
+<p><code>paragraph</code> mirrors <code>ratatui::widgets::Paragraph</code>. Each entry of <code>lines</code> is one line. Set <code>wrap</code> when long lines must break at the edge of the widget. Set <code>scrollable</code> when the text can be taller than the area. The host then owns the scroll offset.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lines</code></td>
+<td><code>styled-lines</code></td>
+<td>Required</td>
+<td>The lines to show, one entry per line.</td>
+</tr>
+<tr>
+<td><code>rich</code></td>
+<td><code>rich-lines</code></td>
+<td>none</td>
+<td>Lines with clickable spans. When set it replaces <code>lines</code>.</td>
+</tr>
+<tr>
+<td><code>wrap</code></td>
+<td><code>option&lt;bool&gt;</code></td>
+<td><code>none</code></td>
+<td><code>none</code> cuts long lines at the right edge. <code>some(false)</code> wraps. <code>some(true)</code> wraps and removes leading spaces of wrapped lines.</td>
+</tr>
+<tr>
+<td><code>alignment</code></td>
+<td><code>left</code>, <code>center</code> or <code>right</code></td>
+<td><code>left</code></td>
+<td>Horizontal alignment of every line.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>style</code></td>
+<td>Empty, so the theme applies</td>
+<td>Default colours and modifiers.</td>
+</tr>
+<tr>
+<td><code>scrollable</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Whether the host keeps a scroll offset for the widget.</td>
+</tr>
+</tbody>
+</table>
+<p>Keys: Up and Down scroll a scrollable paragraph. Mouse: the wheel scrolls it, and a click on a clickable span activates it. Roles: as styled; a clickable span uses <code>accent</code> and an underline.</p>
+<figure>
+<pre class="term">╭─ Server ───────────────────────────────╮
+│ Connected to the server.               │
+│ Last sync 2026-10-11 14:02:07.         │
+│ <span class="t-warn">2 plugins wait for a grant.</span>            │
+│ Lines longer than the block wrap to    │
+│ the next row.                          │
+╰────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 42 columns. A <code>paragraph</code> with <code>wrap</code> set inside a block. The warning line uses the <code>warning</code> role.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let status = tree
+    .paragraph(vec![
+        vec![Span::plain(&quot;Connected to the server.&quot;)],
+        vec![Span::styled(&quot;2 plugins wait for a grant.&quot;, Style::role(ColorRole::Warning))],
+    ])
+    .key(&quot;status&quot;)
+    .wrap(Some(true));
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const status = paragraph([
+  [span('Connected to the server.')],
+  [span('2 plugins wait for a grant.', { role: 'warning' })],
+], { key: 'status', wrap: true });
+</code></pre>
+<h3 id="clickable-spans">Clickable spans</h3>
+<p>A span with a <code>target</code> becomes clickable. The host draws it in the accent colour with an underline and shows its <code>tooltip</code> after 500 ms. Each target behaves in one way.</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>A click does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>action(id)</code></td>
+<td>Sends <code>ui-action</code> with kind <code>activated</code> and the value <code>text(id)</code> to the paragraph's key.</td>
+</tr>
+<tr>
+<td><code>command(name)</code></td>
+<td>Runs the command through the command registry. The plugin receives <code>command-invoked</code> with the origin <code>text</code>. It needs <code>commands.invoke</code> for commands the plugin does not own.</td>
+</tr>
+<tr>
+<td><code>link(url)</code></td>
+<td>Opens the URL through the open-external rules.</td>
+</tr>
+<tr>
+<td><code>none</code></td>
+<td>Nothing.</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<pre class="term">╭─ Advice ───────────────────────────────────╮
+│ Threshold too low. <span class="t-hi">Apply 180k</span>              │
+│ <span class="t-dim">Hover for details, click to apply.</span>         │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A <code>paragraph</code> with a clickable <code>rich-span</code>. The span is drawn in the accent colour and underlined (shown here as the highlight). A click sends <code>activated</code> with <code>text("apply-180k")</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::text::{RichSpan, SpanTarget}
+let advice = vec![vec![
+    RichSpan::plain(&quot;Threshold too low. &quot;),
+    RichSpan::new(&quot;Apply 180k&quot;, Style::default())
+        .target(SpanTarget::Action(&quot;apply-180k&quot;.into()))
+        .tooltip(&quot;Writes the recommended threshold and keeps a revert point&quot;),
+]];
+let text = tree.paragraph(Vec::new()).rich(advice).key(&quot;advice&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { paragraph, richSpan } from '@ilium/plugin-sdk/ui/build';
+
+const text = paragraph([], {
+  key: 'advice',
+  rich: [[
+    richSpan('Threshold too low. '),
+    richSpan('Apply 180k', {
+      target: { tag: 'action', val: 'apply-180k' },
+      tooltip: 'Writes the recommended threshold and keeps a revert point',
+    }),
+  ]],
+});
+</code></pre>
+<p>A click arrives as <code>ui-action { key: "advice", kind: activated, value: text("apply-180k") }</code>.</p>
+<p>When <code>scrollable</code> is true, every change of the top row sends a <code>ui-action</code> of kind <code>scrolled</code> with <code>index(u32)</code>, the new top row offset. The host coalesces these events, so a fast wheel sends one event with the latest offset. The plugin reads the offset with <code>ui::widget_state(view, key)</code>, which returns <code>offset(n)</code>. It moves the view with <code>ui::set_widget_state(view, key, offset(n))</code>.</p>
+<div class="warn">
+<p>A scrollable paragraph without a <code>key</code> loses its offset on every render. Give each scrollable widget a key that is unique across the whole view.</p>
+</div>
+
+<h2 id="markdown">markdown</h2>
+<p><code>markdown</code> mirrors the Ilium Markdown renderer that the help pages use. The host renders <code>source</code> with the shared theme, so headings, emphasis and links take their colours from the theme. The plugin never styles the Markdown itself.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source</code></td>
+<td><code>string</code></td>
+<td>Required</td>
+<td>The Markdown text to render.</td>
+</tr>
+<tr>
+<td><code>link-command</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td><code>none</code></td>
+<td>The command that runs when the user activates a link.</td>
+</tr>
+<tr>
+<td><code>task-click</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Task list items can be clicked.</td>
+</tr>
+<tr>
+<td><code>images</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Images render as pictures instead of their alt text.</td>
+</tr>
+<tr>
+<td><code>base</code></td>
+<td><code>option&lt;fs-path&gt;</code></td>
+<td><code>none</code></td>
+<td>The folder against which relative image paths are resolved.</td>
+</tr>
+</tbody>
+</table>
+<p>Keys: Up and Down scroll, Tab walks the links and Enter follows one. Mouse: a click on a link or a task box. Roles: the theme's Markdown roles. Bullets are <code>•</code> and task boxes are <code>☐</code> and <code>☑</code>.</p>
+<p>A link behaves in one of two ways.</p>
+<ul>
+<li>With <code>link-command</code> set, the host runs that command through the command registry on activation. It passes the arguments <code>{"target": "&lt;link target&gt;"}</code>. The command must be one of the plugin's own commands or covered by its <code>commands.invoke</code> grant. The plugin then receives <code>command-invoked</code>.</li>
+<li>Without <code>link-command</code>, the plugin receives a <code>ui-action</code> of kind <code>activated</code> whose value is <code>text(&lt;link target&gt;)</code>. The host never opens a browser itself.</li>
+</ul>
+<p>With <code>task-click</code>, a click on a task item sends <code>toggled</code> with <code>text("&lt;line&gt;")</code>, the one-based line number of the item in the source text (the first line is <code>1</code>; lines are split at <code>\n</code>). The plugin rewrites its source, for example <code>- [ ]</code> to <code>- [x]</code>, and renders again. With <code>images</code>, an image written as <code>![alt](asset:path)</code>, or a file inside a granted <code>fs</code> scope, renders through the rules of the <code>image</code> widget. Any other image shows its alt text.</p>
+<figure>
+<pre class="term">╭─ Help: keys ─────────────────────────────────────────╮
+│ <span class="t-hi">Keys</span>                                                 │
+│                                                      │
+│ Ctrl+B is the prefix key.                            │
+│ • Tab moves focus between panes                      │
+│ <span class="w2">☑</span> Read the key list                                  │
+│ <span class="w2">☐</span> Remap one key                                      │
+│ See the <span class="t-hi">command list</span>.                                │
+╰──────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 56 columns. A <code>markdown</code> view with <code>task-click</code>. The heading and the link text use the theme. Bullets are <code>•</code> and task boxes are <code>☐</code> and <code>☑</code>.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let notes = tree
+    .markdown(self.source.clone())
+    .key(&quot;notes&quot;)
+    .task_click(true)
+    .images(true);
+
+// In on_events:
+if let (ActionKind::Toggled, ActionValue::Text(line)) = (action.kind, action.value) {
+    if let Ok(line_number) = line.parse::&lt;usize&gt;() {
+        self.toggle_task(line_number);
+        ui::invalidate(view.clone());
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const notes = markdown(source, { key: 'notes', taskClick: true, images: true });
+
+// In onEvents:
+if (action.key === 'notes' &amp;&amp; action.kind === 'toggled' &amp;&amp; action.value.tag === 'text') {
+  toggleTask(Number(action.value.val));
+  ui.invalidate(view);
+}
+</code></pre>
+<p>The props table has no scroll setting for a source taller than the area, so the host scrolls it with the keys above.</p>
+<h2 id="leader-row">leader-row</h2>
+<p><code>leader-row</code> mirrors the <code>leader_span</code> helper that every settings row uses. The label sits at the left, the value at the right, and grey dotted leaders (the <code>…</code> character) fill the gap between them. The rule has four parts.</p>
+<ul>
+<li>One blank cell is left on each side of the dots.</li>
+<li>A gap shorter than five cells stays blank, with no dots.</li>
+<li>Leaders are never part of a hit target.</li>
+<li>Leaders never overwrite label text, glyphs or the value.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>styled-text</code></td>
+<td>The text at the left.</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td><code>styled-text</code></td>
+<td>The text at the right.</td>
+</tr>
+</tbody>
+</table>
+<p>Roles: <code>foreground</code> for the label, <code>muted</code> for the leaders, and the value as styled. The widget sends no actions and takes no keys.</p>
+<figure>
+<pre class="term">╭─ Settings ───────────────────────────╮
+│ Font size <span class="t-dim">……………………………………………………………</span> 14 │
+│ Restore previous sessions on boot on │
+│ Save every <span class="t-dim">………………………………………</span> 5 minutes │
+╰──────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 40 columns. Three <code>leader-row</code> widgets. The first and third gaps are five cells or more, so they draw grey <code>…</code> leaders with one blank cell on each side. The second gap is shorter than five cells and stays blank.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let font = tree
+    .leader_row(vec![Span::plain(&quot;Font size&quot;)], vec![Span::plain(&quot;14&quot;)])
+    .key(&quot;font-size&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const font = leaderRow([span('Font size')], [span('14')], { key: 'font-size' });
+</code></pre>
+<p>When the label and the value together are wider than the row, the label is cut at its right edge first. The value is cut only when it does not fit on its own.</p>
+<h2 id="key-hints">key-hints</h2>
+<p><code>key-hints</code> mirrors the status-line hints of the Ilium client. Each hint is a record with three fields: <code>keys</code> (the chord text), <code>label</code> (the short description) and <code>command</code> (an optional command name). The host draws the chords in the accent colour and keeps the whole list on one line, joined by the separator <code>·</code>.</p>
+<pre><code class="language-text">record key-hint { keys: string, label: string, command: option&lt;string&gt; }
+</code></pre>
+<p>Pressing a hint's chord while the view has focus runs its <code>command</code> through the command registry, and so does a click on the hint. The same grant rule as a markdown link applies. No <code>ui-action</code> is sent. A hint with no <code>command</code>, or with an empty string, is a label only, and the host draws it in the muted colour. Arrow keys appear as <code>↑ ↓ ← →</code> and the page keys as <code>Pg↑ Pg↓</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hints</code></td>
+<td><code>list&lt;key-hint&gt;</code></td>
+<td>The hints to show, in display order.</td>
+</tr>
+</tbody>
+</table>
+<p>Roles: <code>accent</code> for the keys and <code>muted</code> for the labels.</p>
+<figure>
+<pre class="term"><span class="t-hi">Enter</span> open · <span class="t-hi">q</span> close · <span class="t-dim">? keys</span>
+
+<span class="t-hi">Enter</span> open · <span class="t-hi">q</span> close · <span class="t-hi">/</span> filter · <span class="t-dim">… 3 more</span>
+</pre>
+<figcaption>Two <code>key-hints</code> lines. The chords use the <code>accent</code> role and the labels use <code>muted</code>. When the row is too narrow the host cuts the list and appends <code>… N more</code>, as in the second line. The last hint of the first line has no command and is a label only.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let hints = tree
+    .key_hints(vec![
+        KeyHint::new(&quot;Enter&quot;, &quot;open&quot;).command(&quot;my.plugin/open&quot;),
+        KeyHint::new(&quot;q&quot;, &quot;close&quot;).command(&quot;my.plugin/close&quot;),
+        KeyHint::new(&quot;?&quot;, &quot;keys&quot;),
+    ])
+    .key(&quot;hints&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const hints = keyHints([
+  { keys: 'Enter', label: 'open', command: 'my.plugin/open' },
+  { keys: 'q', label: 'close', command: 'my.plugin/close' },
+  { keys: '?', label: 'keys' },
+], { key: 'hints' });
+</code></pre>
+<h2 id="diff-view">diff-view</h2>
+<p><code>diff-view</code> shows a diff that the plugin supplies. The plugin builds the hunks and the host colours the lines, highlights changed words and draws the tokens of a language.</p>
+<pre><code class="language-wit">// Excerpt of ilium:types/ui in reference-wit
+record diff-hunk { header: string, lines: list&lt;diff-line&gt; }
+record diff-line { kind: diff-line-kind, old-line: option&lt;u32&gt;, new-line: option&lt;u32&gt;, text: string }
+enum diff-line-kind { added, removed, context }
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hunks</code></td>
+<td><code>list&lt;diff-hunk&gt;</code></td>
+<td>The hunks to show.</td>
+</tr>
+<tr>
+<td><code>layout</code></td>
+<td><code>unified</code> or <code>split</code></td>
+<td>One column, or old and new side by side.</td>
+</tr>
+<tr>
+<td><code>language</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>The language whose tokens the host highlights.</td>
+</tr>
+<tr>
+<td><code>word-diff</code></td>
+<td><code>bool</code></td>
+<td>Highlight the changed words inside a changed line.</td>
+</tr>
+</tbody>
+</table>
+<p>Actions: <code>selected</code> with <code>index(u32)</code> (the hunk) and <code>activated</code> with <code>index(u32)</code>. Keys: Up and Down move by line, <code>n</code> and <code>p</code> jump to the next and the previous hunk, and Enter activates. Mouse: a click on a line. Roles: <code>success</code> for added lines, <code>danger</code> for removed lines, and <code>muted</code> for context and the gutter. The gutter shows <code>+</code>, <code>-</code> or a blank.</p>
+<figure>
+<pre class="term">╭─ Config diff ──────────────────────────────╮
+│<span class="t-dim">@@ -11,3 +11,3 @@ [budget]</span>                  │
+│<span class="t-dim"> 11  11   [budget]</span>                          │
+│<span class="t-err"> 12     - threshold = 150000</span>                │
+│<span class="t-ok">     12 + threshold = 180000</span>                │
+│<span class="t-dim"> 13  13   unit = "tokens"</span>                   │
+╰────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 46 columns. A unified <code>diff-view</code>. Added lines use <code>success</code>, removed lines use <code>danger</code>, and context and the gutter use <code>muted</code>. The gutter shows the old and new line numbers and the mark <code>+</code>, <code>-</code> or a blank.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Config diff ───────────────────────────────────────╮
+│<span class="t-dim">@@ -11,3 +11,3 @@                                    </span>│
+│<span class="t-dim"> 11   [budget]            </span>│<span class="t-dim"> 11   [budget]            </span>│
+│<span class="t-err"> 12 - threshold = 150000  </span>│<span class="t-ok"> 12 + threshold = 180000  </span>│
+│<span class="t-dim"> 13   unit = "tokens"     </span>│<span class="t-dim"> 13   unit = "tokens"     </span>│
+╰─────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 55 columns. The same diff with <code>layout: split</code>. The old text is on the left and the new text on the right, with one <code>│</code> divider between them.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// types::ui::{DiffHunk, DiffLine, DiffLineKind, DiffLayout}
+let hunk = DiffHunk {
+    header: &quot;@@ -11,3 +11,3 @@ [budget]&quot;.into(),
+    lines: vec![
+        DiffLine::context(11, 11, &quot;[budget]&quot;),
+        DiffLine::removed(12, &quot;threshold = 150000&quot;),
+        DiffLine::added(12, &quot;threshold = 180000&quot;),
+        DiffLine::context(13, 13, &quot;unit = \&quot;tokens\&quot;&quot;),
+    ],
+};
+let diff = tree
+    .diff_view(vec![hunk])
+    .layout(DiffLayout::Split)
+    .language(&quot;toml&quot;)
+    .word_diff(true)
+    .key(&quot;diff&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { diffView } from '@ilium/plugin-sdk/ui/build';
+
+const hunk = {
+  header: '@@ -11,3 +11,3 @@ [budget]',
+  lines: [
+    { kind: 'context', oldLine: 11, newLine: 11, text: '[budget]' },
+    { kind: 'removed', oldLine: 12, text: 'threshold = 150000' },
+    { kind: 'added', newLine: 12, text: 'threshold = 180000' },
+    { kind: 'context', oldLine: 13, newLine: 13, text: 'unit = &quot;tokens&quot;' },
+  ],
+};
+const diff = diffView([hunk], { key: 'diff', layout: 'split', language: 'toml', wordDiff: true });
+</code></pre>
+<h2 id="worked-example-in-rust-a-server-status-panel">Worked example in Rust: a server status panel</h2>
+<p>A client view with a status paragraph, a clickable fix, a settings-style row and a hint line.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::ui;
+use ilium_plugin_sdk::types::layout::{Area, Constraint, Direction};
+use ilium_plugin_sdk::types::text::{RichSpan, SpanTarget};
+use ilium_plugin_sdk::types::ui::{ActionKind, ActionValue, UiTree, ViewTarget};
+use ilium_plugin_sdk::ui::build::{KeyHint, Tree};
+
+const PANEL: &amp;str = &quot;server-status&quot;;
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;])]
+#[derive(Default)]
+struct ServerStatus {
+    threshold: u32,
+}
+
+impl Handler for ServerStatus {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            let (ActionKind::Activated, ActionValue::Text(id)) = (action.kind, action.value) else { continue };
+            if action.key == &quot;advice&quot; &amp;&amp; id == &quot;apply-180k&quot; {
+                self.threshold = 180_000;
+                ui::invalidate(ViewTarget::Panel(PANEL.to_string()));
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Views for ServerStatus {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let advice = vec![vec![
+            RichSpan::plain(&quot;Threshold too low. &quot;),
+            RichSpan::new(&quot;Apply 180k&quot;, Style::default())
+                .target(SpanTarget::Action(&quot;apply-180k&quot;.into()))
+                .tooltip(&quot;Writes the recommended threshold&quot;),
+        ]];
+        let text = tree.paragraph(Vec::new()).rich(advice).key(&quot;advice&quot;);
+        let value = format!(&quot;{}&quot;, self.threshold);
+        let row = tree.leader_row(vec![Span::plain(&quot;Threshold&quot;)], vec![Span::plain(value)]).key(&quot;threshold&quot;);
+        let hints = tree
+            .key_hints(vec![KeyHint::new(&quot;Enter&quot;, &quot;apply&quot;).command(&quot;server-status/apply&quot;)])
+            .key(&quot;hints&quot;);
+        let body = tree
+            .layout(Direction::Vertical, [Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
+            .child(text)
+            .child(row)
+            .child(hints);
+        let root = tree.block().title(&quot;Server&quot;).child(body);
+        tree.finish(root)
+    }
+}
+</code></pre>
+<h2 id="worked-example-in-typescript-a-help-view-with-tasks">Worked example in TypeScript: a help view with tasks</h2>
+<p>A help view that renders a Markdown checklist and rewrites the source when a task is clicked.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+import * as ui from '@ilium/plugin-sdk/host/ui';
+import { block, keyHints, layout, markdown, tree } from '@ilium/plugin-sdk/ui/build';
+import { fill, length } from '@ilium/plugin-sdk/ui/build';
+
+const PANEL = 'help';
+let source = ['# Keys', '', 'Ctrl+B is the prefix key.', '- [x] Read the key list', '- [ ] Remap one key'].join('\n');
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag !== 'ui-action') continue;
+      const action = event.val;
+      if (action.key !== 'help-text' || action.kind !== 'toggled' || action.value.tag !== 'text') continue;
+      const lines = source.split('\n');
+      const index = Number(action.value.val);
+      lines[index] = lines[index].includes('[ ]')
+        ? lines[index].replace('[ ]', '[x]')
+        : lines[index].replace('[x]', '[ ]');
+      source = lines.join('\n');
+      ui.invalidate({ tag: 'panel', val: PANEL });
+    }
+    return [];
+  },
+  render() {
+    const body = markdown(source, { key: 'help-text', taskClick: true });
+    const hints = keyHints([{ keys: 'Esc', label: 'close' }], { key: 'hints' });
+    const page = layout({ direction: 'vertical', constraints: [fill(1), length(1)] }, [body, hints]);
+    return tree(block({ titles: [{ text: 'Help: keys', position: 'top', alignment: 'left' }] }, [page]));
+  },
+});
+</code></pre>
+<p>The <code>toggled</code> value is the one-based line number of the task item in the source text: the first line of the source is <code>"1"</code>. Convert it with <code>lines[Number(value) - 1]</code> when you index an array.</p>
+<h2 id="width-and-language">Width and language</h2>
+<p>Every text widget lays out text by cell width, and a wide character takes two cells. A plugin MUST measure text with <code>display-width</code> and MUST NOT size a column by character count. [AUT-617] See <a href="/pages/guide-internationalisation/">Internationalisation</a>.</p>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<p>The text widgets return no error codes of their own. The errors below come from the state calls, the command registry and the tree validator.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Two widgets with the same <code>key</code> in one view</td>
+<td>The tree is invalid and the instance traps.</td>
+</tr>
+<tr>
+<td>A tree with more than 4,096 nodes, or a child index out of range</td>
+<td>The tree is invalid and the instance traps.</td>
+</tr>
+<tr>
+<td>A scrollable paragraph with no <code>key</code></td>
+<td>Its offset resets on every render.</td>
+</tr>
+<tr>
+<td>A tooltip longer than 200 characters</td>
+<td>The host cuts it at 199 Unicode scalar values and appends an ellipsis. There is no error.</td>
+</tr>
+<tr>
+<td><code>set-widget-state</code> with an unknown key</td>
+<td><code>not-found</code>.</td>
+</tr>
+<tr>
+<td><code>set-widget-state</code> with <code>offset</code> on a <code>leader-row</code></td>
+<td><code>invalid-argument</code>, because the state kind does not fit the widget.</td>
+</tr>
+<tr>
+<td>A link, span or hint whose command the plugin may not invoke</td>
+<td><code>not-permitted</code>. The command does not run.</td>
+</tr>
+<tr>
+<td>A hint with an empty <code>command</code></td>
+<td>A label only, drawn muted, with no action.</td>
+</tr>
+<tr>
+<td><code>rich</code> and <code>lines</code> both set on a paragraph</td>
+<td><code>rich</code> is used.</td>
+</tr>
+<tr>
+<td>Wrap off, and a line wider than the area</td>
+<td>The line is cut at the right edge.</td>
+</tr>
+<tr>
+<td>A paragraph line below the area, and <code>scrollable</code> false</td>
+<td>The line is not drawn.</td>
+</tr>
+<tr>
+<td>A leader row with a gap under five cells</td>
+<td>The gap is blank and no dots are drawn.</td>
+</tr>
+<tr>
+<td>Key hints wider than the row</td>
+<td>The list is cut and ends with <code>… N more</code>.</td>
+</tr>
+<tr>
+<td>A markdown image outside a granted scope</td>
+<td>The alt text shows.</td>
+</tr>
+</tbody>
+</table>
+<p>The limits of the whole tree are in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. Trap behaviour is in the <a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> pages.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>Text takes its colours from the active theme. A clickable span or link is accent coloured and underlined, so it reads as a target; a task box toggles under the pointer; key hints look the same as the hints in the status bar; and a diff is coloured red and green on a muted gutter, like the diff views of the client.</p>
+<p>Requirement ids for this page: [WID-025]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded</a> for <code>code-view</code>, the text editor</li>
+<li><a href="/pages/widgets-input/">Input</a> for editable values</li>
+<li><a href="/pages/capability-commands-invoke/">Commands invoke</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+</ul>
+<p>API version: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-media-and-embedded/"><small>Previous</small>Media and embedded views</a><a class="next" href="/pages/widgets-status-and-feedback/"><small>Next</small>Status and feedback</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#overview">Overview</a></li><li class="l2"><a href="#paragraph">paragraph</a></li><li class="l3"><a href="#clickable-spans">Clickable spans</a></li><li class="l2"><a href="#markdown">markdown</a></li><li class="l2"><a href="#leader-row">leader-row</a></li><li class="l2"><a href="#key-hints">key-hints</a></li><li class="l2"><a href="#diff-view">diff-view</a></li><li class="l2"><a href="#worked-example-in-rust-a-server-status-panel">Worked example in Rust: a server status panel</a></li><li class="l2"><a href="#worked-example-in-typescript-a-help-view-with-tasks">Worked example in TypeScript: a help view with tasks</a></li><li class="l2"><a href="#width-and-language">Width and language</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

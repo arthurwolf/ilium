@@ -259,7 +259,8 @@ fn requested_square_uses_floor_coordinates_and_has_no_generation_semantics() {
 
 #[test]
 fn requested_square_rejects_large_or_unaddressable_windows() {
-    assert!(matches!(requested_square([0, 0], 6), Err(Error::Limit)));
+    assert!(requested_square([0, 0], 9).is_ok());
+    assert!(matches!(requested_square([0, 0], 10), Err(Error::Limit)));
     assert!(matches!(requested_square([0, 0], 255), Err(Error::Limit)));
     assert!(matches!(
         requested_square([i32::MIN, 0], 1),
@@ -388,10 +389,18 @@ fn projected_ceiling_admits_a_larger_request_but_never_invents_missing_chunks() 
     let requested = (0..=128).map(|x| [x, 0]).collect::<BTreeSet<_>>();
     let calls = Cell::new(0);
     assert!(matches!(
-        load_with(&requested, Limits::default(), &|| false, |_| {
-            calls.set(calls.get() + 1);
-            Ok(None)
-        }),
+        load_with(
+            &requested,
+            Limits {
+                max_chunks: 128,
+                ..Limits::default()
+            },
+            &|| false,
+            |_| {
+                calls.set(calls.get() + 1);
+                Ok(None)
+            }
+        ),
         Err(Error::Limit)
     ));
     assert_eq!(calls.get(), 0);

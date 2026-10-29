@@ -17,7 +17,7 @@ use ilium_execution::{
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Condvar, Mutex, Weak,
     },
     time::Duration,
@@ -26,6 +26,12 @@ use tokio::sync::Notify;
 const MIB: usize = 1024 * 1024;
 const MAX_COMMAND_BYTES: usize = 64 * MIB;
 const MAX_COMMANDS: usize = 256;
+/// Sentinel for "no server screen preview is held" (see `PaneTarget`).
+const NO_SCREEN_PREVIEW_HOLD: u64 = u64::MAX;
+/// Extra admission slots kept for the focused, displayed pane. Other panes'
+/// backlogs can fill `MAX_COMMANDS`; without this reserve the pane the user is
+/// reading is refused while the parser is still busy with those panes.
+const FOCUSED_PANE_RESERVED_COMMANDS: usize = 8;
 const MAX_RESULT_METADATA_BYTES: usize = 2 * MIB;
 pub(crate) const MAX_STATE_BYTES: usize = 128 * MIB;
 #[cfg(test)]
@@ -34,6 +40,11 @@ const MAX_PIN_BYTES: usize = 128 * MIB;
 const MAX_CAPTURE_BYTES: usize = 128 * MIB;
 const OUTPUT_QUANTUM_BYTES: usize = 16 * 1024;
 const REPLAY_PREVIEW_INTERVAL_BYTES: usize = 256 * 1024;
+// A replay's current screen is parsed from its last bytes alone, so it shows
+// before the (much slower) full history replay finishes.
+const REPLAY_TAIL_PREVIEW_BYTES: usize = 256 * 1024;
+// A backlog this large is slow to parse (about 85 ms per 256 KiB), so its newest bytes are previewed first.
+const REPLAY_TAIL_PREVIEW_TRIGGER_BYTES: usize = 2 * REPLAY_TAIL_PREVIEW_BYTES;
 
 /// App-owned parser accounting with charged headroom for current and replacement
 /// frames in each of four visible panes. Ordinary allocations cannot consume it.
@@ -41,6 +52,8 @@ pub(crate) struct ParserMemoryGovernor {
     quota: QuotaGroup,
     normal_bytes: Arc<AtomicUsize>,
     normal_limit: usize,
+    #[cfg(test)]
+    frame_busy_once: AtomicBool,
 }
 
 impl ParserMemoryGovernor {
@@ -58,6 +71,8 @@ impl ParserMemoryGovernor {
             }),
             normal_bytes: Arc::new(AtomicUsize::new(0)),
             normal_limit: total_limit - replacement_headroom,
+            #[cfg(test)]
+            frame_busy_once: AtomicBool::new(false),
         })
     }
 
@@ -78,6 +93,10 @@ impl ParserMemoryGovernor {
         bytes: usize,
         allow_replacement_headroom: bool,
     ) -> Result<ParserStorageLease, RejectReason> {
+        #[cfg(test)]
+        if self.frame_busy_once.swap(false, Ordering::AcqRel) {
+            return Err(RejectReason::Busy);
+        }
         self.reserve(bytes, allow_replacement_headroom)
     }
 
@@ -142,6 +161,27 @@ impl Drop for ParserStorageLease {
     fn drop(&mut self) {
         if let Some(normal_bytes) = &self.normal_bytes {
             normal_bytes.fetch_sub(self.bytes, Ordering::AcqRel);
+        }
+    }
+}
+
+/// Admission contends with other accounting briefly (a worker releasing a
+/// retired engine holds the ledger gate for a few instructions). A single
+/// `try_lock` miss is not pressure, so retry briefly before reporting it;
+/// otherwise a pane fails admission and waits for a later retry, which shows
+/// as delayed terminal content when many panes attach at once.
+const STORAGE_BUSY_RETRY_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn reserve_engine_storage_retrying_busy(
+    storage: &Arc<ParserMemoryGovernor>,
+) -> Result<ParserStorageLease, RejectReason> {
+    let deadline = std::time::Instant::now() + STORAGE_BUSY_RETRY_WINDOW;
+    loop {
+        match storage.reserve_external_storage(MAX_STATE_BYTES) {
+            Err(RejectReason::Busy) if std::time::Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            result => return result,
         }
     }
 }
@@ -212,6 +252,11 @@ pub(crate) struct PaneTarget {
     confirmed_removed: Arc<AtomicBool>,
     pressure: Arc<AtomicUsize>,
     progress_preview: Arc<ProgressPreview>,
+    /// Journal sequence the server's current-screen preview reflects, or
+    /// `NO_SCREEN_PREVIEW_HOLD`. While set, parser previews wait and the
+    /// displayed preview is kept until the parsed state reaches this sequence.
+    screen_preview_hold_through: Arc<AtomicU64>,
+    backlog_preview_ordinal: Arc<std::sync::atomic::AtomicU64>, // Newest queued ordinal already previewed for this generation.
     _claim: Arc<EngineClaim>,
 }
 struct ProgressPreview(Mutex<Option<Arc<TerminalSnapshot>>>);
@@ -273,6 +318,21 @@ pub(crate) enum PaneCommand {
         bytes: Vec<u8>,
         complete: bool,
     },
+    /// A complete screen at `sequence`, from attach. Applied like a replay, but
+    /// it also starts the older-history chain that `PrependHistory` extends.
+    Snapshot {
+        sequence: u64,
+        bytes: Vec<u8>,
+        complete: bool,
+    },
+    /// Older journal output that continues the engine's history exactly where
+    /// `before_sequence` points. Stale replies are ignored by the engine.
+    PrependHistory {
+        before_sequence: u64,
+        first_sequence: u64,
+        bytes: Vec<u8>,
+        reaches_journal_start: bool,
+    },
     Resize(u16, u16),
     Budget(u16),
     ScrollUp(u16),
@@ -284,6 +344,8 @@ pub(crate) enum PaneCommand {
         origin: Arc<()>,
     },
     Fingerprint,
+    #[cfg(test)]
+    SeedRetainedHistory(usize),
     // Production captures use the exact acknowledged immutable source.
     // Keep the parser-copy path only for its allocation/ordering regressions.
     #[cfg(test)]
@@ -297,7 +359,10 @@ pub(crate) enum PaneCommand {
 impl PaneCommand {
     fn bytes(&self) -> usize {
         match self {
-            Self::Output { bytes, .. } | Self::Replay { bytes, .. } => bytes.capacity(),
+            Self::Output { bytes, .. }
+            | Self::Replay { bytes, .. }
+            | Self::Snapshot { bytes, .. }
+            | Self::PrependHistory { bytes, .. } => bytes.capacity(),
             _ => std::mem::size_of::<Self>(),
         }
     }
@@ -653,6 +718,59 @@ impl PaneFrontend {
     pub(crate) fn clear_progress_preview(&self) {
         self.target.progress_preview.clear();
     }
+    /// Shows the server's live screen while its history replay is still
+    /// parsing. The preview is charged like any other and is replaced by the
+    /// next installed snapshot, so it never changes the retained history.
+    pub(crate) fn show_screen_preview(
+        &self,
+        rows: u16,
+        columns: u16,
+        screen_bytes: &[u8],
+        through_sequence: u64,
+    ) -> bool {
+        if validate_geometry(rows, columns).is_err() {
+            return false;
+        }
+        let snapshot = TerminalState::tail_preview(rows, columns, screen_bytes);
+        let published = publish_preview_snapshot_unchecked(
+            &self.shared,
+            &self.target,
+            snapshot,
+            geometry_peak(rows, columns),
+        );
+        if published {
+            self.target
+                .screen_preview_hold_through
+                .store(through_sequence, Ordering::Release);
+        }
+        published
+    }
+    pub(crate) fn screen_preview_hold_active(&self) -> bool {
+        self.target
+            .screen_preview_hold_through
+            .load(Ordering::Acquire)
+            != NO_SCREEN_PREVIEW_HOLD
+    }
+    /// Releases the hold once the parsed state has reached the sequence the
+    /// held screen reflects. Returns true when this call released it.
+    pub(crate) fn release_screen_preview_hold_if_reached(&self, parsed_sequence: u64) -> bool {
+        let through = self
+            .target
+            .screen_preview_hold_through
+            .load(Ordering::Acquire);
+        if through == NO_SCREEN_PREVIEW_HOLD || parsed_sequence < through {
+            return false;
+        }
+        self.target
+            .screen_preview_hold_through
+            .compare_exchange(
+                through,
+                NO_SCREEN_PREVIEW_HOLD,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
     pub(crate) fn is_confirmed_removed(&self) -> bool {
         self.target.confirmed_removed.load(Ordering::Acquire)
     }
@@ -682,7 +800,10 @@ impl PaneFrontend {
     pub(crate) fn submit(&mut self, body: PaneCommand) -> Result<u64, PaneCommand> {
         let output = matches!(
             body,
-            PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+            PaneCommand::Output { .. }
+                | PaneCommand::Replay { .. }
+                | PaneCommand::Snapshot { .. }
+                | PaneCommand::PrependHistory { .. }
         );
         if !(self.pending.is_empty()
             || output && self.output_backpressure && self.older_intents == 0)
@@ -707,8 +828,25 @@ impl PaneFrontend {
         let Ok(mut queue) = self.shared.queue.try_lock() else {
             return Err(body);
         };
+        let command_limit = if self.target.focused.load(Ordering::Acquire)
+            && self.target.displayed.load(Ordering::Acquire)
+        {
+            MAX_COMMANDS + FOCUSED_PANE_RESERVED_COMMANDS
+        } else {
+            MAX_COMMANDS
+        };
+        let is_control = !matches!(
+            body,
+            PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+        );
+        // Control commands (registration, resize, budget, scroll, capture) are
+        // fixed-size and sent at attach or on user action, so they are exempt
+        // from the count limit. Otherwise a pane whose attach-time command is
+        // refused keeps its output queued behind it and never shows content.
+        // The byte limit still bounds their memory.
         if queue.closed
-            || queue.commands.len().saturating_add(queue.active_commands) >= MAX_COMMANDS
+            || (!is_control
+                && queue.commands.len().saturating_add(queue.active_commands) >= command_limit)
             || queue
                 .bytes
                 .saturating_add(queue.active_bytes)
@@ -872,6 +1010,30 @@ impl TerminalParsing {
     pub(crate) fn engine_claims(&self) -> usize {
         self.shared.engine_claims.load(Ordering::Acquire)
     }
+    /// Drops queued commands whose pane was released. Their output is discarded anyway,
+    /// and each one keeps its engine claim alive until the worker reaches it.
+    pub(crate) fn purge_released_commands(&self) {
+        let mut purged: Vec<Command> = Vec::new();
+        {
+            let mut queue = self
+                .shared
+                .queue
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let mut index = 0;
+            while index < queue.commands.len() {
+                if queue.commands[index].target.alive.load(Ordering::Acquire) {
+                    index += 1;
+                    continue;
+                }
+                let command = queue.commands.remove(index).expect("index is in range");
+                queue.bytes -= command.bytes;
+                purged.push(command);
+            }
+        }
+        // Dropping a command releases its engine claim; do it outside the queue lock.
+        drop(purged);
+    }
     pub(crate) fn attach(&self, pane_id: NodeId, view: &mut TerminalView) -> Result<(), String> {
         if view.frontend.is_some() {
             return Ok(());
@@ -881,11 +1043,7 @@ impl TerminalParsing {
             view.admission_pressure = Some(ParserPressure::PaneLimit);
             return Err(error);
         }
-        let storage = match self
-            .shared
-            .storage
-            .reserve_external_storage(MAX_STATE_BYTES)
-        {
+        let storage = match reserve_engine_storage_retrying_busy(&self.shared.storage) {
             Ok(storage) => storage,
             Err(error) => {
                 view.admission_pressure = Some(match error {
@@ -912,6 +1070,8 @@ impl TerminalParsing {
             confirmed_removed: Arc::new(AtomicBool::new(false)),
             pressure: Arc::new(AtomicUsize::new(0)), // A newly attached generation starts with no owner-reported pressure.
             progress_preview: Arc::new(ProgressPreview(Mutex::new(None))),
+            screen_preview_hold_through: Arc::new(AtomicU64::new(NO_SCREEN_PREVIEW_HOLD)),
+            backlog_preview_ordinal: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             _claim: claim,
         };
         let mut frontend = PaneFrontend {
@@ -1050,10 +1210,29 @@ impl Job for ParserJob {
                 return cancellation_report(&shared);
             }
             retire_dropped_engines(&mut engines, &shared);
+            // Declared before the guard so swept commands drop after the queue lock is released.
+            let mut swept_commands: Vec<Command> = Vec::new();
             let mut queue = shared
                 .queue
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
+            // Deferred commands keep their active debit and their engine claim; a released
+            // pane's deferred command is never selected, so sweep it here.
+            let mut deferred_index = 0;
+            while deferred_index < deferred.len() {
+                if deferred[deferred_index]
+                    .target
+                    .alive
+                    .load(Ordering::Acquire)
+                {
+                    deferred_index += 1;
+                    continue;
+                }
+                let command = deferred.remove(deferred_index).expect("index is in range");
+                queue.active_bytes -= command.bytes;
+                queue.active_commands -= 1;
+                swept_commands.push(command);
+            }
             let eligible = |queue: &Queue, deferred: &VecDeque<Command>| {
                 best_priority_index(
                     queue
@@ -1108,6 +1287,7 @@ impl Job for ParserJob {
                 position.map(|index| command_display_priority(&queue.commands[index]));
             let run_deferred = retry_remaining != 0
                 && should_run_deferred(deferred_priority, queued_priority, retry_deferred);
+            let mut backlog_preview: Option<BacklogPreview> = None;
             let mut command = if run_deferred {
                 // Alternate fresh work with bounded deferred sweeps.
                 retry_deferred = false;
@@ -1127,6 +1307,7 @@ impl Job for ParserJob {
                 queue.bytes -= command.bytes;
                 queue.active_bytes += command.bytes;
                 queue.active_commands += 1;
+                backlog_preview = backlog_tail_preview(&queue.commands, &command);
                 command
             } else {
                 continue;
@@ -1159,21 +1340,11 @@ impl Job for ParserJob {
                 queue.active_commands -= 1;
                 continue;
             }
-            if command.reported_blocked == Some(ParserPressure::PaneLimit)
-                && !matches!(
-                    &command.body,
-                    PaneCommand::Output { .. } | PaneCommand::Replay { .. }
-                )
-            {
-                // Output copy-on-write peaks can improve when retained history owners release.
-                deferred.push_back(command); // Other fenced operations have unchanged geometry and allocation peaks until cancellation.
-                continue;
-            }
             let mut evidence = None;
             let result: Result<(), String> = (|| {
                 if command.publication_pending {
                     // A completed mutation must only retry immutable publication.
-                    return publish_command(&shared, &engines, &mut command, &context);
+                    return publish_command(&shared, &mut engines, &mut command, &context);
                     // Preserve its exact ordinal, cursor, and saved semantic evidence.
                 }
                 if let PaneCommand::Register { rows, cols, budget } = &command.body {
@@ -1202,6 +1373,9 @@ impl Job for ParserJob {
                         engines.insert(engine.target.pane_id, engine);
                         return Err("stale terminal pane instance".into());
                     }
+                    if let Some(preview) = backlog_preview.take() {
+                        publish_backlog_tail_preview(&shared, &engine, &preview, &command.target);
+                    }
                     let operation: Result<(), String> = (|| {
                         match &command.body {
                             PaneCommand::Output {
@@ -1224,6 +1398,12 @@ impl Job for ParserJob {
                                                     .into(),
                                             );
                                         }
+                                        let available = state_operation_allowance(
+                                            &mut engines,
+                                            &shared,
+                                            state.input_peak_bytes(chunk),
+                                        );
+                                        state.prepare_input(chunk, available);
                                         try_state_budget(
                                             &mut engines,
                                             state.input_peak_bytes(chunk),
@@ -1239,23 +1419,12 @@ impl Job for ParserJob {
                             }
                             PaneCommand::Replay {
                                 sequence, bytes, ..
+                            }
+                            | PaneCommand::Snapshot {
+                                sequence, bytes, ..
                             } => {
-                                if !command.cursor.replay_started
-                                    && *sequence > engine.state.output_sequence()
-                                {
-                                    let (rows, columns) = engine.state.live_size();
-                                    try_state_budget(
-                                        &mut engines,
-                                        engine
-                                            .state
-                                            .retained_allocation_bytes()
-                                            .saturating_add(geometry_peak(rows, columns)),
-                                        &shared,
-                                        &context,
-                                        &command.target,
-                                        &mut command.blocked,
-                                    )?;
-                                }
+                                let is_snapshot =
+                                    matches!(&command.body, PaneCommand::Snapshot { .. });
                                 engine.state.apply_ordered_replay(
                                     bytes,
                                     *sequence,
@@ -1268,6 +1437,12 @@ impl Job for ParserJob {
                                                     .into(),
                                             );
                                         }
+                                        let available = state_operation_allowance(
+                                            &mut engines,
+                                            &shared,
+                                            state.input_peak_bytes(chunk),
+                                        );
+                                        state.prepare_input(chunk, available);
                                         try_state_budget(
                                             &mut engines,
                                             state.input_peak_bytes(chunk),
@@ -1280,9 +1455,44 @@ impl Job for ParserJob {
                                         Ok(())
                                     },
                                 )?;
+                                engine.state.set_history_base(
+                                    is_snapshot.then(|| sequence.saturating_add(1)),
+                                );
+                            }
+                            PaneCommand::PrependHistory {
+                                before_sequence,
+                                first_sequence,
+                                bytes,
+                                ..
+                            } => {
+                                // Stale replies (base moved since the request) are dropped here.
+                                if engine.state.history_base_sequence() == Some(*before_sequence) {
+                                    let peak = engine.state.prepend_peak_bytes(bytes.len());
+                                    try_state_budget(
+                                        &mut engines,
+                                        peak,
+                                        &shared,
+                                        &context,
+                                        &command.target,
+                                        &mut command.blocked,
+                                    )?;
+                                    engine.state.prepend_history(bytes, *first_sequence);
+                                }
                             }
                             PaneCommand::Resize(rows, cols) => {
                                 validate_geometry(*rows, *cols)?;
+                                let extra = engine
+                                    .state
+                                    .resize_peak_bytes(*rows, *cols)
+                                    .saturating_sub(engine.state.retained_allocation_bytes());
+                                let available = state_operation_allowance(
+                                    &mut engines,
+                                    &shared,
+                                    engine.state.resize_peak_bytes(*rows, *cols),
+                                );
+                                engine
+                                    .state
+                                    .fit_to_allocation_limit(available.saturating_sub(extra));
                                 let peak = engine.state.resize_peak_bytes(*rows, *cols);
                                 try_state_budget(
                                     &mut engines,
@@ -1298,6 +1508,7 @@ impl Job for ParserJob {
                                 engine.state.set_scrollback_budget_mib(*budget)
                             }
                             PaneCommand::ScrollUp(lines) => {
+                                engine.state.fit_to_allocation_limit(MAX_STATE_BYTES / 2);
                                 try_state_budget(
                                     &mut engines,
                                     engine.state.retained_allocation_bytes().saturating_mul(2),
@@ -1326,6 +1537,13 @@ impl Job for ParserJob {
                                     &mut command.blocked,
                                 )?;
                                 engine.state.jump_to_history_byte(*byte);
+                            }
+                            #[cfg(test)]
+                            PaneCommand::SeedRetainedHistory(bytes) => {
+                                let chunk = [0u8; 65536];
+                                for _ in 0..bytes.div_ceil(chunk.len()) {
+                                    engine.state.append_history_for_benchmark(&chunk);
+                                }
                             }
                             PaneCommand::Fingerprint => {
                                 engine.state.synchronize_visible_text_fingerprint()
@@ -1381,6 +1599,8 @@ impl Job for ParserJob {
                 let has_separate_result = match command.body {
                     PaneCommand::InputBarrier { .. } => true,
                     #[cfg(test)]
+                    PaneCommand::SeedRetainedHistory(_) => true,
+                    #[cfg(test)]
                     PaneCommand::Capture { .. } => true,
                     _ => false,
                 };
@@ -1398,7 +1618,7 @@ impl Job for ParserJob {
                 }
                 command.evidence = evidence; // Keep the completed operation's bounded semantic samples while its snapshot waits.
                 command.publication_pending = true; // Every retry after this point must skip all mutable terminal operations.
-                publish_command(&shared, &engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
+                publish_command(&shared, &mut engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
             })();
             if voluntarily_yielded {
                 // A consumed byte quantum retains its original command without reporting memory pressure.
@@ -1408,21 +1628,34 @@ impl Job for ParserJob {
                     .target
                     .suspended_output
                     .store(true, Ordering::Release);
-                if matches!(
+                let preview_due = matches!(
                     &command.body,
-                    PaneCommand::Replay { .. } | PaneCommand::Output { .. }
+                    PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
+                        | PaneCommand::Output { .. }
                 ) && (command.previewed_bytes == 0
                     || command
                         .cursor
                         .consumed
                         .saturating_sub(command.previewed_bytes)
-                        >= REPLAY_PREVIEW_INTERVAL_BYTES)
-                {
+                        >= REPLAY_PREVIEW_INTERVAL_BYTES);
+                // Output and snapshot previews show the consumed prefix. A replay's preview is its
+                // tail, so a prefix screen never replaces the newer tail preview.
+                if preview_due && !matches!(&command.body, PaneCommand::Replay { .. }) {
                     if let Some(engine) = engines.get(&command.target.pane_id) {
                         if publish_progress_preview(&shared, engine, &command.target) {
                             command.previewed_bytes = command.cursor.consumed;
                         }
                     }
+                } else if preview_due {
+                    // A replay refused while its pane was hidden is retried at the next
+                    // interval, so the tail is ready when the pane is selected.
+                    if let (Some(engine), PaneCommand::Replay { bytes, .. }) =
+                        (engines.get(&command.target.pane_id), &command.body)
+                    {
+                        publish_replay_tail_preview(&shared, engine, bytes, &command.target);
+                    }
+                    command.previewed_bytes = command.cursor.consumed;
                 }
                 let made_progress = command.cursor.consumed > consumed_before; // Only real byte progress can replenish runnable retry credit.
                 deferred.push_back(command); // Keep the same byte/count debit and fence later commands for this target.
@@ -1432,6 +1665,20 @@ impl Job for ParserJob {
                 }
                 continue; // Return to retirement and cross-pane scheduling without publishing partial output.
             }
+            if command
+                .blocked
+                .is_some_and(|blocked| blocked.pressure == ParserPressure::PaneLimit)
+                && !matches!(
+                    command.body,
+                    PaneCommand::Output { .. }
+                        | PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
+                        | PaneCommand::PrependHistory { .. }
+                        | PaneCommand::Resize(..)
+                )
+            {
+                command.blocked = None;
+            }
             if let Some(blocked) = command.blocked {
                 command
                     .target
@@ -1439,12 +1686,23 @@ impl Job for ParserJob {
                     .store(blocked.pressure as usize, Ordering::Release);
                 if matches!(
                     command.body,
-                    PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+                    PaneCommand::Output { .. }
+                        | PaneCommand::Replay { .. }
+                        | PaneCommand::Snapshot { .. }
                 ) {
                     command
                         .target
                         .suspended_output
                         .store(true, Ordering::Release);
+                }
+                if blocked.pressure == ParserPressure::StorageBusy {
+                    // A contested admission mutex holds no capacity. The
+                    // retained command retries on the owner's bounded sweep;
+                    // publishing an error here would report an ordinary race
+                    // as a failed terminal operation.
+                    command.reported_blocked = None;
+                    deferred.push_back(command);
+                    continue;
                 }
                 if command.reported_blocked != Some(blocked.pressure) {
                     // Report each changed admission class once while preserving the original command.
@@ -1516,12 +1774,136 @@ impl Job for ParserJob {
     }
 }
 fn publish_progress_preview(shared: &Shared, engine: &Engine, target: &PaneTarget) -> bool {
-    if !target.alive.load(Ordering::Acquire) {
-        return false;
-    }
     let bytes = engine.state.retained_allocation_bytes();
     if bytes > MAX_STATE_BYTES {
         return false; // Leave the final publication path to report the normal per-pane limit.
+    }
+    publish_preview_snapshot(shared, target, engine.state.publish(), bytes)
+}
+/// Shows the replay's current screen before its full history is parsed. The
+/// tail parse is charged like any preview; the final replay replaces it.
+fn publish_replay_tail_preview(
+    shared: &Shared,
+    engine: &Engine,
+    replay: &[u8],
+    target: &PaneTarget,
+) -> bool {
+    let (rows, columns) = engine.state.live_size();
+    let snapshot = TerminalState::tail_preview(rows, columns, replay_tail_preview_input(replay));
+    publish_preview_snapshot(shared, target, snapshot, geometry_peak(rows, columns))
+}
+fn publish_backlog_tail_preview(
+    shared: &Shared,
+    engine: &Engine,
+    preview: &BacklogPreview,
+    target: &PaneTarget,
+) -> bool {
+    let (rows, columns) = engine.state.live_size();
+    let snapshot =
+        TerminalState::tail_preview(rows, columns, replay_tail_preview_input(&preview.tail));
+    target
+        .backlog_preview_ordinal
+        .store(preview.newest_ordinal, Ordering::Release);
+    publish_preview_snapshot(shared, target, snapshot, geometry_peak(rows, columns))
+}
+/// Newest bytes of a pane's queued output, taken while the queue is locked.
+/// Only a fresh command with a large backlog qualifies, and each backlog is
+/// previewed once (by its newest queued ordinal), so live output is not parsed twice.
+struct BacklogPreview {
+    tail: Vec<u8>,
+    newest_ordinal: u64,
+}
+fn output_bytes(body: &PaneCommand) -> &[u8] {
+    match body {
+        PaneCommand::Output { bytes, .. } | PaneCommand::Replay { bytes, .. } => bytes,
+        _ => &[],
+    }
+}
+fn backlog_tail_preview(queued: &VecDeque<Command>, command: &Command) -> Option<BacklogPreview> {
+    if command.cursor.consumed != 0 || output_bytes(&command.body).is_empty() {
+        return None;
+    }
+    let trailing: Vec<&Command> = queued
+        .iter()
+        .filter(|other| {
+            other.target.pane_id == command.target.pane_id
+                && Arc::ptr_eq(&other.target.identity, &command.target.identity)
+                && matches!(
+                    other.body,
+                    PaneCommand::Output { .. } | PaneCommand::Replay { .. }
+                )
+        })
+        .collect();
+    let newest_ordinal = trailing.last().map_or(command.ordinal, |last| last.ordinal);
+    if newest_ordinal
+        <= command
+            .target
+            .backlog_preview_ordinal
+            .load(Ordering::Acquire)
+    {
+        return None;
+    }
+    let queued_bytes = output_bytes(&command.body).len()
+        + trailing
+            .iter()
+            .map(|other| output_bytes(&other.body).len())
+            .sum::<usize>();
+    if queued_bytes < REPLAY_TAIL_PREVIEW_TRIGGER_BYTES {
+        return None;
+    }
+    // Copy only the final window: walk back from the newest queued command.
+    let mut pieces: Vec<&[u8]> = Vec::new();
+    let mut tail_len = 0;
+    for other in trailing.iter().rev() {
+        let piece = output_bytes(&other.body);
+        pieces.push(piece);
+        tail_len += piece.len();
+        if tail_len >= REPLAY_TAIL_PREVIEW_BYTES {
+            break;
+        }
+    }
+    if tail_len < REPLAY_TAIL_PREVIEW_BYTES {
+        pieces.push(output_bytes(&command.body));
+    }
+    let mut tail = Vec::with_capacity(tail_len.min(REPLAY_TAIL_PREVIEW_BYTES) + 1);
+    for piece in pieces.iter().rev() {
+        tail.extend_from_slice(piece);
+    }
+    Some(BacklogPreview {
+        tail,
+        newest_ordinal,
+    })
+}
+/// The replay's final bytes, starting after a line break so the window never
+/// begins inside an escape sequence.
+fn replay_tail_preview_input(replay: &[u8]) -> &[u8] {
+    let Some(start) = replay.len().checked_sub(REPLAY_TAIL_PREVIEW_BYTES) else {
+        return replay;
+    };
+    match replay[start..].iter().position(|byte| *byte == b'\n') {
+        Some(offset) => &replay[start + offset + 1..],
+        None => &replay[start..],
+    }
+}
+fn publish_preview_snapshot(
+    shared: &Shared,
+    target: &PaneTarget,
+    snapshot: TerminalSnapshot,
+    bytes: usize,
+) -> bool {
+    if target.screen_preview_hold_through.load(Ordering::Acquire) != NO_SCREEN_PREVIEW_HOLD {
+        return false; // The held server screen is newer than any parser preview.
+    }
+    publish_preview_snapshot_unchecked(shared, target, snapshot, bytes)
+}
+fn publish_preview_snapshot_unchecked(
+    shared: &Shared,
+    target: &PaneTarget,
+    mut snapshot: TerminalSnapshot,
+    bytes: usize,
+) -> bool {
+    if !target.alive.load(Ordering::Acquire) {
+        return false;
     }
     let Ok(Some(charge)) = SnapshotCharge::reserve_checked(
         shared,
@@ -1532,7 +1914,6 @@ fn publish_progress_preview(shared: &Shared, engine: &Engine, target: &PaneTarge
         return false; // A preview is optional; the immutable final publication retains exact pressure reporting.
     };
     let charge = Arc::new(charge);
-    let mut snapshot = engine.state.publish();
     snapshot.history.retain_charge(charge.clone());
     snapshot.allocation_charge = Some(charge);
     target.progress_preview.replace(Arc::new(snapshot));
@@ -1541,17 +1922,23 @@ fn publish_progress_preview(shared: &Shared, engine: &Engine, target: &PaneTarge
 }
 fn publish_command(
     shared: &Shared,
-    engines: &HashMap<NodeId, Engine>,
+    engines: &mut HashMap<NodeId, Engine>,
     command: &mut Command,
     context: &JobContext,
 ) -> Result<(), String> {
     // Publication gets one nonblocking admission attempt for this exact completed command.
-    if context.stop_requested() || !command.target.alive.load(Ordering::Acquire) {
+    if context.stop_requested() {
         return Err("terminal publication cancelled before acknowledgement".into());
     }
+    if !command.target.alive.load(Ordering::Acquire) {
+        // The owner dropped this pane after the command was admitted; there is no view left to show it, so this is not an error.
+        return Ok(());
+    }
     let engine = engines
-        .get(&command.target.pane_id)
+        .get_mut(&command.target.pane_id)
         .ok_or("terminal state disappeared")?; // The deferred command fences later mutations of this engine.
+    engine.state.fit_to_allocation_limit(MAX_STATE_BYTES); // Shed oldest history now: a deferral is never retried and would stall every pane.
+    let engine = &*engine;
     let bytes = engine.state.retained_allocation_bytes(); // Charge the conservative immutable allocation before cloning it.
     if bytes > MAX_STATE_BYTES {
         // Preserve the independent per-generation bound in both parser modes.
@@ -1695,6 +2082,52 @@ fn push_result(shared: &Shared, result: ParseResult, context: &JobContext) -> Re
     }
 }
 
+/// Compute this engine's actual share of the aggregate pool. When optional
+/// retention consumes the remaining share, reclaim it in one bounded pass
+/// rather than waiting for idle panes to produce output of their own.
+fn state_operation_allowance(
+    engines: &mut HashMap<NodeId, Engine>,
+    shared: &Shared,
+    peak: usize,
+) -> usize {
+    let limit = shared.state_limit.load(Ordering::Acquire);
+    if limit == 0 {
+        return MAX_STATE_BYTES;
+    }
+    retire_dropped_engines(engines, shared);
+    let mut used = engines
+        .values()
+        .map(|engine| engine.state.retained_allocation_bytes())
+        .sum::<usize>();
+    if used.saturating_add(peak) > limit {
+        let mut candidates: Vec<_> = engines
+            .iter()
+            .map(|(pane_id, engine)| {
+                let displayed = engine.target.displayed.load(Ordering::Acquire);
+                let focused = engine.target.focused.load(Ordering::Acquire);
+                (*pane_id, displayed || focused, focused)
+            })
+            .collect();
+        candidates.sort_by_key(|(pane_id, displayed, focused)| (*displayed, *focused, pane_id.0));
+        for (pane_id, _, _) in candidates {
+            let Some(engine) = engines.get_mut(&pane_id) else {
+                continue;
+            };
+            let before = engine.state.retained_allocation_bytes();
+            // Stop as soon as one peer releases enough optional retention;
+            // unaffected panes keep their journals and frozen history intact.
+            engine.state.fit_to_allocation_limit(0);
+            used = used
+                .saturating_sub(before)
+                .saturating_add(engine.state.retained_allocation_bytes());
+            if used.saturating_add(peak) <= limit {
+                break;
+            }
+        }
+    }
+    MAX_STATE_BYTES.min(limit.saturating_sub(used))
+}
+
 fn try_state_budget(
     engines: &mut HashMap<NodeId, Engine>,
     peak: usize,
@@ -1721,6 +2154,7 @@ fn try_state_budget(
         return Ok(());
     }
     retire_dropped_engines(engines, shared); // Pooled admission retires stale engines; unpooled retirement already runs once per owner quantum.
+    state_operation_allowance(engines, shared, peak);
     let used = engines
         .values()
         .map(|engine| engine.state.retained_allocation_bytes())
@@ -1936,6 +2370,9 @@ mod tests {
         drop(first);
         let deadline = Instant::now() + Duration::from_secs(5);
         while parsing.engine_claims() != 0 && Instant::now() < deadline {
+            // A published mailbox result owns its exact PaneTarget claim until
+            // collected, even after the frontend and mutable engine retire.
+            drop(parsing.collect());
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(
@@ -1944,7 +2381,14 @@ mod tests {
             "retired engine must release its storage lease"
         );
         parsing.attach(NodeId(2), &mut waiting).unwrap();
-        assert_eq!(waiting.parser_pressure(), None);
+        assert!(
+            waiting.frontend.is_some(),
+            "released engine capacity is reusable"
+        );
+        // Reattachment clears the synchronous engine-admission refusal. The
+        // owner may already report snapshot pressure: this fixture's normal
+        // storage allowance is occupied by the admitted engine itself.
+        assert_eq!(waiting.admission_pressure, None);
     }
 
     fn attach(parsing: &TerminalParsing, id: NodeId, view: &mut TerminalView) {
@@ -2089,7 +2533,58 @@ mod tests {
         }
     }
     #[test]
-    fn osc_pressure_retains_original_cursor_and_other_panes_continue() {
+    fn transient_frame_accounting_busy_retries_without_error_or_cursor_loss() {
+        let (_bank, parsing) = Bank::start_with_budget(0);
+        let pane_id = NodeId(103);
+        let mut view = TerminalView::new(4, 40);
+        attach(&parsing, pane_id, &mut view);
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 1,
+                sequence: 1,
+                bytes: b"ready".to_vec(),
+                track: false,
+            },
+        );
+        result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 1)
+        });
+
+        parsing
+            .shared
+            .storage
+            .frame_busy_once
+            .store(true, Ordering::Release);
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 2,
+                sequence: 2,
+                bytes: b" after".to_vec(),
+                track: false,
+            },
+        );
+        let publication = result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 2)
+        });
+        let ParseResult::Published { snapshot, .. } = publication else {
+            unreachable!()
+        };
+        assert_eq!(snapshot.history.to_vec(), b"ready after");
+        assert!(snapshot.visible.contents().contains("ready after"));
+        assert!(!parsing
+            .shared
+            .storage
+            .frame_busy_once
+            .load(Ordering::Acquire));
+        assert_eq!(view.parser_pressure(), None);
+    }
+
+    #[test]
+    fn oversized_osc_remains_bounded_and_other_panes_continue() {
         let (_bank, parsing) = Bank::start();
         let mut first = TerminalView::new(4, 40);
         let mut second = TerminalView::new(4, 40);
@@ -2127,7 +2622,6 @@ mod tests {
         let mut bytes = b"\x1b]0;".to_vec();
         bytes.extend(std::iter::repeat_n(b'x', 512 * 1024));
         bytes.push(7);
-        let expected_bytes = bytes.clone();
         offer(
             &mut first,
             PaneCommand::Output {
@@ -2137,19 +2631,10 @@ mod tests {
                 track: false,
             },
         );
-        result(
-            &parsing,
-            |result| matches!(result, ParseResult::Error { target, message } if target.pane_id == NodeId(101) && message.contains("cursor")),
-        );
-        offer(
-            &mut first,
-            PaneCommand::Output {
-                first: 3,
-                sequence: 3,
-                bytes: b"after".to_vec(),
-                track: false,
-            },
-        );
+        result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == NodeId(101) && snapshot.sequence == 2)
+        });
         offer(
             &mut second,
             PaneCommand::Output {
@@ -2167,14 +2652,15 @@ mod tests {
             unreachable!()
         };
         assert!(snapshot.visible.contents().contains("independent pane"));
-        let (pending, bytes) = parsing.pending_work().unwrap();
-        assert!(pending >= 2);
-        assert!(bytes >= expected_bytes.len());
-        parsing
-            .shared
-            .state_limit
-            .store(MAX_STATE_BYTES, Ordering::Release);
-        parsing.shared.changed.notify_one();
+        offer(
+            &mut first,
+            PaneCommand::Output {
+                first: 3,
+                sequence: 3,
+                bytes: b"after".to_vec(),
+                track: false,
+            },
+        );
         let resumed = result(
             &parsing,
             |result| matches!(result, ParseResult::Published { target, snapshot, .. } if target.pane_id == NodeId(101) && snapshot.sequence == 3),
@@ -2182,10 +2668,8 @@ mod tests {
         let ParseResult::Published { snapshot, .. } = resumed else {
             unreachable!()
         };
-        let mut expected = b"ready".to_vec();
-        expected.extend_from_slice(&expected_bytes);
-        expected.extend_from_slice(b"after");
-        assert_eq!(snapshot.history.to_vec(), expected);
+        assert!(snapshot.history.to_vec().ends_with(b"after"));
+        assert!(snapshot.history.len() <= MIB);
         assert!(snapshot.visible.contents().contains("after"));
     }
     #[test]
@@ -2235,7 +2719,9 @@ mod tests {
             &parsing,
             |result| matches!(result, ParseResult::Published { target, snapshot, .. } if target.pane_id == second_id && snapshot.sequence == 1),
         );
-        parsing.shared.state_limit.store(MIB, Ordering::Release);
+        // Force genuine fixed-state exhaustion; OSC accumulation is bounded
+        // and optional raw history now reclaims itself instead of suspending.
+        parsing.shared.state_limit.store(1, Ordering::Release);
         let mut source = b"\x1b]0;".to_vec();
         source.extend(std::iter::repeat_n(b'x', 512 * 1024));
         offer(
@@ -2546,6 +3032,81 @@ mod tests {
         assert!(snapshot.screen.contents().contains("hello red"));
     }
     #[test]
+    fn snapshot_cutover_keeps_live_output_and_rejects_duplicate_history_page() {
+        let (_bank, parsing) = Bank::start();
+        let pane_id = NodeId(209);
+        let mut view = TerminalView::new(4, 30);
+        attach(&parsing, pane_id, &mut view);
+        offer(
+            &mut view,
+            PaneCommand::Snapshot {
+                sequence: 10,
+                bytes: b"\x1b[2J\x1b[Hcurrent".to_vec(),
+                complete: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 10,
+                sequence: 10,
+                bytes: b"DUPLICATE".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 11,
+                sequence: 11,
+                bytes: b"\r\nlive".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::PrependHistory {
+                before_sequence: 11,
+                first_sequence: 1,
+                bytes: b"old\r\n".to_vec(),
+                reaches_journal_start: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::PrependHistory {
+                before_sequence: 11,
+                first_sequence: 1,
+                bytes: b"STALE".to_vec(),
+                reaches_journal_start: true,
+            },
+        );
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 12,
+                sequence: 12,
+                bytes: b"\r\ntail".to_vec(),
+                track: false,
+            },
+        );
+        let publication = result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 12)
+        });
+        let ParseResult::Published { snapshot, .. } = publication else {
+            unreachable!()
+        };
+        assert_eq!(
+            snapshot.history.to_vec(),
+            b"old\r\n\x1b[2J\x1b[Hcurrent\r\nlive\r\ntail"
+        );
+        assert!(snapshot.visible.contents().contains("current"));
+        assert!(snapshot.visible.contents().contains("live"));
+        assert!(snapshot.visible.contents().contains("tail"));
+    }
+
+    #[test]
     fn replay_resize_and_historical_capture_keep_exact_order() {
         let (_bank, parsing) = Bank::start();
         let mut view = TerminalView::new(3, 20);
@@ -2665,9 +3226,45 @@ mod tests {
             },
         );
         offer(&mut new, PaneCommand::Capture { generation: 14 });
-        let capture = result(&parsing, |result| {
-            matches!(result, ParseResult::Capture { generation: 14, .. })
-        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let capture = loop {
+            let mut capture = None;
+            for outcome in parsing.collect() {
+                match outcome {
+                    outcome @ ParseResult::Capture { generation: 14, .. } => {
+                        assert!(capture.replace(outcome).is_none(), "duplicate capture");
+                    }
+                    ParseResult::Error { target, message } => {
+                        // The old frontend may close after its command was selected.
+                        // Only that exact retired generation may report cancellation.
+                        assert!(
+                            Arc::ptr_eq(&old_identity, &target.identity)
+                                && !target.alive.load(Ordering::Acquire)
+                                && matches!(
+                                    message.as_str(),
+                                    "terminal command cancelled by pane closure/shutdown"
+                                        | "terminal publication cancelled before acknowledgement"
+                                ),
+                            "unexpected parser error: {message}"
+                        );
+                    }
+                    ParseResult::CaptureFailed {
+                        generation: 14,
+                        message,
+                        ..
+                    } => panic!("replacement capture failed: {message}"),
+                    _ => {}
+                }
+            }
+            if let Some(capture) = capture {
+                break capture;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "replacement capture did not arrive"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        };
         let ParseResult::Capture {
             snapshot, target, ..
         } = capture
@@ -2675,6 +3272,7 @@ mod tests {
             unreachable!()
         };
         assert!(!Arc::ptr_eq(&old_identity, &target.identity));
+        assert!(new.accepts_parser_target(&target));
         assert!(snapshot.screen.contents().contains("new"));
         assert!(!snapshot.screen.contents().contains("old"));
     }
@@ -3074,6 +3672,258 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_reclamation_stops_after_one_hidden_peer_frees_enough() {
+        let (_bank, parsing) =
+            Bank::start_with_storage(64, crate::execution::terminal_storage_quota());
+        let mut panes = [
+            (NodeId(1), TerminalView::new(4, 80)),
+            (NodeId(2), TerminalView::new(4, 80)),
+            (NodeId(3), TerminalView::new(4, 80)),
+        ];
+        for (id, view) in &mut panes {
+            attach(&parsing, *id, view);
+        }
+        wait_installed(&parsing, &mut panes);
+        let mut engines = HashMap::new();
+        for (id, view) in &panes {
+            let target = view.frontend.as_ref().unwrap().target.clone();
+            target.displayed.store(id.0 != 1, Ordering::Release);
+            let mut state = TerminalState::with_scrollback_budget_mib(4, 80, 16);
+            for _ in 0..20 {
+                state.feed(b"frozen historical row\r\n");
+            }
+            state.scroll_up(5);
+            for _ in 0..128 {
+                state.append_history_for_benchmark(&[0; 65536]);
+            }
+            engines.insert(*id, Engine { target, state });
+        }
+        let before: Vec<_> = [NodeId(2), NodeId(3)]
+            .iter()
+            .map(|id| {
+                let state = &engines[id].state;
+                (
+                    state.retained_allocation_bytes(),
+                    state.searchable_history_snapshot().to_vec(),
+                    state.with_screen(vt100::Screen::contents),
+                    state.scrollback_position(),
+                )
+            })
+            .collect();
+        let used = engines
+            .values()
+            .map(|engine| engine.state.retained_allocation_bytes())
+            .sum::<usize>();
+        let peak = 8 * MIB;
+        parsing
+            .shared
+            .state_limit
+            .store(used + peak - 4 * MIB, Ordering::Release);
+        assert!(state_operation_allowance(&mut engines, &parsing.shared, peak) >= peak);
+        assert!(engines[&NodeId(1)]
+            .state
+            .searchable_history_snapshot()
+            .is_empty());
+        for (index, id) in [NodeId(2), NodeId(3)].iter().enumerate() {
+            let state = &engines[id].state;
+            assert_eq!(state.retained_allocation_bytes(), before[index].0);
+            assert_eq!(
+                state.searchable_history_snapshot().to_vec(),
+                before[index].1
+            );
+            assert_eq!(state.with_screen(vt100::Screen::contents), before[index].2);
+            assert_eq!(state.scrollback_position(), before[index].3);
+        }
+    }
+
+    #[test]
+    fn pooled_output_reclaims_idle_other_pane_history_without_waiting_for_owner_activity() {
+        let (_bank, parsing) =
+            Bank::start_with_storage(64, crate::execution::terminal_storage_quota());
+        let mut panes = [
+            (
+                NodeId(1),
+                TerminalView::with_scrollback_budget_mib(4, 80, 96),
+            ),
+            (
+                NodeId(2),
+                TerminalView::with_scrollback_budget_mib(4, 80, 96),
+            ),
+        ];
+        for (id, view) in &mut panes {
+            attach(&parsing, *id, view);
+        }
+        wait_installed(&parsing, &mut panes);
+        offer(&mut panes[0].1, PaneCommand::SeedRetainedHistory(48 * MIB));
+        offer(&mut panes[1].1, PaneCommand::SeedRetainedHistory(48 * MIB));
+        offer(
+            &mut panes[0].1,
+            PaneCommand::Output {
+                first: 1,
+                sequence: 1,
+                bytes: b"active pane remains usable".to_vec(),
+                track: false,
+            },
+        );
+        offer(
+            &mut panes[0].1,
+            PaneCommand::InputBarrier { generation: 993 },
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut ready = false;
+        while !ready {
+            for result in parsing.collect() {
+                match result {
+                    ParseResult::Error { message, .. } => {
+                        panic!("optional idle history blocked progress: {message}")
+                    }
+                    ParseResult::InputBarrier {
+                        generation: 993,
+                        sequence,
+                        ..
+                    } => {
+                        assert_eq!(sequence, 1);
+                        ready = true;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pooled retention deadlocked active output"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn saturated_history_is_reclaimed_by_worker_before_output_and_input_admission() {
+        for budget in [0, 512] {
+            let (_bank, parsing) =
+                Bank::start_with_storage(budget, crate::execution::terminal_storage_quota());
+            let mut panes = [(
+                NodeId(1),
+                TerminalView::with_scrollback_budget_mib(4, 80, 192),
+            )];
+            attach(&parsing, panes[0].0, &mut panes[0].1);
+            wait_installed(&parsing, &mut panes);
+            // Populate only retention, bypassing publication's own recovery so
+            // the next ordinary output must execute the real admission repair.
+            offer(
+                &mut panes[0].1,
+                PaneCommand::SeedRetainedHistory(MAX_STATE_BYTES),
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 1,
+                    sequence: 1,
+                    bytes: b"\x1b[999999".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 2,
+                    sequence: 2,
+                    bytes: b"S\x1b[?2004h\xe2\x82".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 3,
+                    sequence: 3,
+                    bytes: b"\xacstill usable".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::InputBarrier { generation: 992 },
+            );
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let mut ready = false;
+            while !ready {
+                for result in parsing.collect() {
+                    match result {
+                        ParseResult::Error { message, .. } => {
+                            panic!("history saturation rejected output: {message}")
+                        }
+                        ParseResult::Published { snapshot, .. } if snapshot.sequence == 3 => {
+                            assert!(snapshot.visible.contents().contains("€still usable"));
+                            assert!(snapshot.paste);
+                        }
+                        ParseResult::InputBarrier {
+                            generation: 992,
+                            sequence,
+                            paste,
+                            ..
+                        } => {
+                            assert_eq!(sequence, 3);
+                            assert!(paste);
+                            ready = true;
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "retention saturation fenced subsequent input"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
+    fn impossible_resize_completes_and_does_not_fence_later_output_or_input() {
+        for budget in [0, 512] {
+            let (_bank, parsing) =
+                Bank::start_with_storage(budget, crate::execution::terminal_storage_quota());
+            let mut panes = [(NodeId(1), TerminalView::new(4, 80))];
+            attach(&parsing, panes[0].0, &mut panes[0].1);
+            wait_installed(&parsing, &mut panes);
+            offer(&mut panes[0].1, PaneCommand::Resize(255, 4096));
+            offer(
+                &mut panes[0].1,
+                PaneCommand::Output {
+                    first: 1,
+                    sequence: 1,
+                    bytes: b"still usable".to_vec(),
+                    track: false,
+                },
+            );
+            offer(
+                &mut panes[0].1,
+                PaneCommand::InputBarrier { generation: 991 },
+            );
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut ready = false;
+            while !ready {
+                for result in parsing.collect() {
+                    if let ParseResult::InputBarrier {
+                        generation: 991,
+                        sequence,
+                        ..
+                    } = result
+                    {
+                        assert_eq!(sequence, 1);
+                        ready = true;
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "impossible resize fenced subsequent input"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    #[test]
     fn retiring_an_engine_wakes_the_client_loop() {
         let (_bank, parsing) = Bank::start();
         let mut panes = [(NodeId(1), TerminalView::new(24, 80))];
@@ -3107,12 +3957,12 @@ mod tests {
     }
 
     #[test]
-    fn default_unpooled_parser_admits_128_panes_with_distinct_contents_and_revisits() {
+    fn default_unpooled_parser_admits_256_panes_with_distinct_contents_and_revisits() {
         let (_bank, parsing) =
             Bank::start_with_storage(0, crate::execution::terminal_storage_quota());
         assert!(!parsing.pool_enabled());
-        let mut panes = Vec::with_capacity(128);
-        for index in 0..128 {
+        let mut panes = Vec::with_capacity(256);
+        for index in 0..256 {
             let id = NodeId(index as u64 + 1);
             let mut view = TerminalView::new(24, 80);
             attach(&parsing, id, &mut view);
@@ -3127,7 +3977,7 @@ mod tests {
             );
             panes.push((id, view));
         }
-        // Admit the full 128-pane registration/output burst before waiting so
+        // Admit the full 256-pane registration/output burst before waiting so
         // this exercises queued parser work instead of serial pane visits.
         wait_installed(&parsing, &mut panes);
         let original_sources: Vec<_> = panes
@@ -3142,14 +3992,14 @@ mod tests {
             .iter()
             .map(|(_, view)| view.frontend.as_ref().unwrap().target.alive.clone())
             .collect();
-        assert_eq!(parsing.engine_claims(), 128);
+        assert_eq!(parsing.engine_claims(), 256);
         assert_eq!(
             parsing.shared.snapshot_bytes.load(Ordering::Acquire),
             original_bytes
         );
         assert_eq!(
             parsing.shared.storage.snapshot().worker_bytes,
-            128 * MAX_STATE_BYTES + original_bytes
+            256 * MAX_STATE_BYTES + original_bytes
         );
         for (index, (_, view)) in panes.iter_mut().enumerate() {
             assert_eq!(view.last_output_sequence(), 1);
@@ -3192,14 +4042,14 @@ mod tests {
                 format!("pane-{index:03} ready")
             );
         }
-        assert_eq!(parsing.engine_claims(), 128);
+        assert_eq!(parsing.engine_claims(), 256);
         assert_eq!(
             parsing.shared.snapshot_bytes.load(Ordering::Acquire),
             original_bytes + current_bytes
         );
         assert_eq!(
             parsing.shared.storage.snapshot().worker_bytes,
-            128 * MAX_STATE_BYTES + original_bytes + current_bytes
+            256 * MAX_STATE_BYTES + original_bytes + current_bytes
         );
         drop(original_sources);
         assert_eq!(
@@ -3344,7 +4194,7 @@ mod tests {
         let mut panes = [(NodeId(9), TerminalView::new(3, 20))];
         attach(&parsing, panes[0].0, &mut panes[0].1);
         let mut initial = b"original\x1b]0;".to_vec();
-        initial.extend(std::iter::repeat_n(b'x', 256 * 1024));
+        initial.extend(std::iter::repeat_n(b'x', 2 * MIB));
         initial.push(7);
         offer(
             &mut panes[0].1,

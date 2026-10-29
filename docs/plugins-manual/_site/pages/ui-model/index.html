@@ -1,0 +1,1592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>The UI model | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/" aria-current="page">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>The UI model</h1>
+
+<p>A plugin describes its interface as a flat list of widgets. The kernel lays the list out, draws it with the Ilium theme, keeps the state of each widget and reports what the user did. The plugin never draws, and it never stores a scroll position, a selection, a hover state or a focus. Each render call returns a fresh description, and the host merges it with the state it holds under each widget key.</p>
+<p>This page covers the render function, the flat tree and its flags, the fields a node can carry (tooltip, tab index and disabled reason), host-owned state, the 17 action kinds and 12 value cases, the pointer model, hover and tooltips, popups and their anchors, focus order, drag and drop, the widened widget set of settings views and the theme extras. Every code example is given in Rust and in TypeScript.</p>
+<h2 id="what-you-need">What you need</h2>
+<ul>
+<li>A client-side component. The <code>views</code> export exists only on the client side.</li>
+<li>The <code>ui.panels</code> grant, or <code>panes.provide-kind</code> for pane views. See <a href="/pages/capability-ui-panels/">UI panels</a>.</li>
+<li>The <code>views</code> export in the manifest. Every component also has a <code>handler</code> export.</li>
+<li>Rust: the <code>ilium-plugin-sdk</code> crate. TypeScript: <code>@ilium/plugin-sdk</code>.</li>
+</ul>
+<p>Read <a href="/pages/retained-mode/">Retained mode</a> and <a href="/pages/accessibility-and-theming/">Accessibility and theming</a> before you build a view.</p>
+<h2 id="the-render-function">The render function</h2>
+<table>
+<thead>
+<tr>
+<th>Language</th>
+<th>Signature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WIT</td>
+<td><code>render: func(view: view-target, area: area) -&gt; ui-tree;</code></td>
+</tr>
+<tr>
+<td>Rust</td>
+<td><code>fn render(&amp;mut self, view: ViewTarget, area: Area) -&gt; UiTree</code></td>
+</tr>
+<tr>
+<td>TypeScript</td>
+<td><code>render(view: ViewTarget, area: Area): UiTree</code> inside <code>definePlugin</code></td>
+</tr>
+</tbody>
+</table>
+<p>The kernel calls <code>render</code> when the view first opens, after <code>ui.invalidate</code> for that view, when the view's area changes, and after a theme or font change. It never runs on every frame. Every change of the view's area triggers one render with the new area, coalesced to at most one per 16 ms; until it returns, the host lays out the previous tree in the new area through the same constraint solver. <code>area</code> gives the <code>columns</code> and <code>rows</code> the view may use. The host clips every widget to that area. <a href="/pages/layout/">Layout constraints</a> shows how a plugin uses <code>area</code>.</p>
+<h3 id="view-targets">View targets</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Payload</th>
+<th>Where the view appears</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>panel</code></td>
+<td><code>string</code>, the panel id</td>
+<td>A workspace panel</td>
+</tr>
+<tr>
+<td><code>pane</code></td>
+<td><code>node-id</code></td>
+<td>The body of a pane whose kind the plugin provides</td>
+</tr>
+<tr>
+<td><code>popup</code></td>
+<td><code>string</code>, the popup id</td>
+<td>A popup opened with <code>open-popup</code></td>
+</tr>
+<tr>
+<td><code>settings-page</code></td>
+<td><code>string</code>, the page id</td>
+<td>A Settings page</td>
+</tr>
+<tr>
+<td><code>onboarding-step</code></td>
+<td><code>string</code>, the step id</td>
+<td>A first-run onboarding step</td>
+</tr>
+</tbody>
+</table>
+<p>In Rust these are <code>ViewTarget::Panel(String)</code>, <code>ViewTarget::Pane(NodeId)</code>, <code>ViewTarget::Popup(String)</code>, <code>ViewTarget::SettingsPage(String)</code> and <code>ViewTarget::OnboardingStep(String)</code>. In TypeScript they are tagged objects such as <code>{ tag: 'panel', val: 'notes' }</code>.</p>
+<h2 id="the-ui-tree">The ui-tree</h2>
+<p>WIT has no recursive types, so a tree is a flat list of nodes, and each node names its children by index.</p>
+<pre><code class="language-wit">// Excerpt of ilium:types/ui in reference-wit
+record ui-node {
+  key: option&lt;string&gt;, widget: widget, children: list&lt;u32&gt;, %flags: node-flags,
+  tooltip: option&lt;tooltip&gt;,          // hover help
+  tab-index: option&lt;s16&gt;,            // focus order
+  disabled-reason: option&lt;string&gt;,   // at most 40 characters
+}
+flags node-flags { focusable, draggable, drop-target, hidden, hover-events, pointer-events }
+record ui-tree { version: u32, nodes: list&lt;ui-node&gt;, root: u32 }
+</code></pre>
+<ul>
+<li><code>root</code> must be 0. The field stays for the shape of later versions and must equal 0. Every child index must be greater than its parent's index and less than <code>nodes.len()</code>. Every node except the root must appear exactly once, in exactly one <code>children</code> list. A nonzero root, an out-of-range index, an unreachable node, a node with two parents or a backward index traps the instance with <code>ui.invalid-tree</code>.</li>
+<li>Each <code>key</code> must be unique across the whole view, not only among siblings. A duplicate key anywhere in one <code>ui-tree</code> traps with <code>ui.duplicate-key</code>. The host matches nodes by key across the whole view, so a keyed node that moves to another parent keeps its host-owned state.</li>
+<li>The depth is at most 32, and the root is depth 1. A node at depth 33 traps with <code>ui.too-deep</code>.</li>
+<li>A <code>layout</code> needs one child per constraint, and a <code>ratio</code> with denominator 0 is invalid (<code>ui.invalid-tree</code>).</li>
+<li><code>views.render</code> returns a <code>ui-tree</code>, not a <code>result</code>, so it cannot return <code>invalid-argument</code>. There is one outcome for every invalid tree: the host keeps the previous tree (marked stale), logs one error, and the instance traps with <code>trap.invalid-ui-tree</code>, whose logged detail reason is a <code>ui.*</code> code. The trap counts as one failure under the restart rule (see <a href="/pages/reference-errors-and-limits/">Errors and limits</a>). The codes are <code>ui.invalid-tree</code> (structure, a prop out of range, more than 256 check-list items, more items than <code>max-items</code>, a bad validation regex), <code>ui.duplicate-key</code> (two nodes with the same key, or two items with the same item <code>id</code> in one widget), <code>ui.too-deep</code>, <code>ui.too-large</code> (more than 4,096 nodes or 1 MiB) and <code>ui.widget-not-allowed</code> (a <code>menu</code>, <code>list-editor</code> or other input widget in a settings page). A render over its deadline traps with <code>ui.render-timeout</code>.</li>
+</ul>
+<p>The Rust and TypeScript builders fill <code>version</code>, the widget defaults and the child indices. A wrong layout stops the render before the tree leaves the plugin, and the message names the layout key.</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default, every tier</th>
+<th>T1 ceiling (requested in <code>limits</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nodes in one tree</td>
+<td>4,096</td>
+<td>16,384</td>
+</tr>
+<tr>
+<td>Encoded size</td>
+<td>1 MiB</td>
+<td>4 MiB</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>focusable</code></td>
+<td>The node can take keyboard focus. Widgets in <a href="#inherently-focusable-widgets">Inherently focusable widgets</a> take it without the flag; every other widget, such as a <code>surface</code> that reports clicks, needs it.</td>
+</tr>
+<tr>
+<td><code>draggable</code></td>
+<td>The node can be dragged onto a <code>drop-target</code>.</td>
+</tr>
+<tr>
+<td><code>drop-target</code></td>
+<td>The node accepts a drop and receives one <code>dropped</code> action.</td>
+</tr>
+<tr>
+<td><code>hidden</code></td>
+<td>The node is not drawn. Its state is kept.</td>
+</tr>
+<tr>
+<td><code>hover-events</code></td>
+<td>The node sends <code>hover-enter</code> and <code>hover-leave</code>.</td>
+</tr>
+<tr>
+<td><code>pointer-events</code></td>
+<td>The node sends <code>pointer</code> actions. It also needs <code>focusable</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Node field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tooltip</code></td>
+<td><code>option&lt;tooltip&gt;</code></td>
+<td>Help shown after a delay on hover, or on focus with F1. It needs no flag.</td>
+</tr>
+<tr>
+<td><code>tab-index</code></td>
+<td><code>option&lt;s16&gt;</code></td>
+<td>Focus order, see <a href="#focus-order">Focus order</a>. Values from 1 come first, in ascending order. None and 0 follow in tree order. A negative value is skipped by Tab.</td>
+</tr>
+<tr>
+<td><code>disabled-reason</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>The node is drawn muted and ignores input. It stays in the focus order. The reason, at most 40 characters, shows as its tooltip.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let search = tree
+    .text_input(&quot;Search&quot;)
+    .key(&quot;search&quot;)
+    .tab_index(1)
+    .tooltip(&quot;Filters the list as you type&quot;)
+    .hover_events(true);
+let export = tree
+    .button(&quot;Export&quot;)
+    .key(&quot;export&quot;)
+    .disabled_reason(&quot;No sessions selected&quot;);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const search = textInput('Search', {
+  key: 'search',
+  tabIndex: 1,
+  tooltip: 'Filters the list as you type',
+  flags: { hoverEvents: true },
+});
+const exportButton = button('Export', {
+  key: 'export',
+  disabledReason: 'No sessions selected',
+});
+</code></pre>
+<h2 id="widgets">Widgets</h2>
+<p>Each node carries one <code>widget</code> variant. There are 51 widgets in seven families. The <a href="/pages/widgets-index/">widget catalogue</a> lists all of them with their pages. The table lists what each family sends back; a blank cell means it sends nothing.</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Widgets</th>
+<th>Sends to the plugin</th>
+<th>Page</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Layout and containers</td>
+<td><code>layout</code>, <code>block</code>, <code>clear</code>, <code>separator</code></td>
+<td>nothing</td>
+<td><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></td>
+</tr>
+<tr>
+<td>Layout and containers</td>
+<td><code>tabs</code></td>
+<td><code>selected</code> with <code>index(u32)</code></td>
+<td><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></td>
+</tr>
+<tr>
+<td>Layout and containers</td>
+<td><code>popup</code></td>
+<td><code>closed</code> with <code>none</code></td>
+<td><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></td>
+</tr>
+<tr>
+<td>Layout and containers</td>
+<td><code>split</code></td>
+<td><code>resized</code> with <code>number(f64)</code></td>
+<td><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></td>
+</tr>
+<tr>
+<td>Layout and containers</td>
+<td><code>dialog</code></td>
+<td><code>activated</code> with <code>text(button id)</code>, <code>closed</code></td>
+<td><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></td>
+</tr>
+<tr>
+<td>Layout and containers</td>
+<td><code>scroll-view</code>, <code>scrollbar</code></td>
+<td><code>scrolled</code> with <code>index(u32)</code></td>
+<td><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>paragraph</code></td>
+<td><code>scrolled</code> when scrollable; <code>activated</code> for clickable spans</td>
+<td><a href="/pages/widgets-text/">Text</a></td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>markdown</code></td>
+<td><code>activated</code> with <code>text(target)</code> without <code>link-command</code></td>
+<td><a href="/pages/widgets-text/">Text</a></td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>leader-row</code>, <code>key-hints</code></td>
+<td>nothing; <code>key-hints</code> runs its command on the host</td>
+<td><a href="/pages/widgets-text/">Text</a></td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>diff-view</code></td>
+<td><code>selected</code>, <code>activated</code> with <code>index(u32)</code> (hunk or line)</td>
+<td><a href="/pages/widgets-text/">Text</a></td>
+</tr>
+<tr>
+<td>Collections</td>
+<td><code>%list</code>, <code>table</code>, <code>tree-list</code>, <code>menu</code>, <code>check-list</code>, <code>list-editor</code></td>
+<td><code>selected</code>, <code>activated</code>, <code>toggled</code>, <code>changed</code>, <code>context-requested</code>, <code>closed</code></td>
+<td><a href="/pages/widgets-collections/">Collections</a></td>
+</tr>
+<tr>
+<td>Data display</td>
+<td><code>gauge</code>, <code>line-gauge</code>, <code>sparkline</code>, <code>bar-chart</code>, <code>canvas</code>, <code>calendar</code>, <code>minimap</code></td>
+<td>nothing</td>
+<td><a href="/pages/widgets-data-display/">Data display</a></td>
+</tr>
+<tr>
+<td>Data display</td>
+<td><code>chart</code>, <code>progress-row</code>, <code>meter</code></td>
+<td><code>selected</code> (focusable chart), <code>activated</code> (progress row)</td>
+<td><a href="/pages/widgets-data-display/">Data display</a></td>
+</tr>
+<tr>
+<td>Input</td>
+<td><code>button</code>, <code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text-input</code>, <code>text-area</code>, <code>key-capture</code>, <code>color-picker</code>, <code>path-field</code>, <code>location-picker</code></td>
+<td><code>activated</code>, <code>changed</code>, <code>submitted</code>, <code>filter-changed</code></td>
+<td><a href="/pages/widgets-input/">Input</a></td>
+</tr>
+<tr>
+<td>Input</td>
+<td><code>schema-form</code></td>
+<td>nothing; the owning plugin receives <code>settings-changed</code></td>
+<td><a href="/pages/widgets-input/">Input</a></td>
+</tr>
+<tr>
+<td>Status and feedback</td>
+<td><code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code></td>
+<td>nothing; <code>notice</code> may send <code>closed</code></td>
+<td><a href="/pages/widgets-index/">Widget catalogue</a></td>
+</tr>
+<tr>
+<td>Media and embedded</td>
+<td><code>surface</code>, <code>terminal-view</code>, <code>code-view</code></td>
+<td><code>activated</code> with <code>cell</code>, <code>pointer</code>, <code>changed</code></td>
+<td><a href="/pages/widgets-media-and-embedded/">Media and embedded</a></td>
+</tr>
+<tr>
+<td>Media and embedded</td>
+<td><code>image</code>, <code>video</code></td>
+<td>nothing</td>
+<td><a href="/pages/widgets-media-and-embedded/">Media and embedded</a></td>
+</tr>
+</tbody>
+</table>
+<p>The <a href="/pages/reference-widget-input-map/">widget input map</a> gives the exact focus behaviour, keys, mouse actions, events, colour roles and stable-glyph substitutes of every widget. The family pages repeat it for their widgets.</p>
+<h2 id="keys-and-host-owned-state">Keys and host-owned state</h2>
+<p>The host keeps each widget's state under its key. A key must stay the same across renders. Without one, a widget loses its state on every render: a text cursor jumps to the start and a list drops its selection.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Host-owned state</th>
+<th><code>widget-state</code> case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%list</code>, <code>table</code></td>
+<td>selected row, scroll offset</td>
+<td><code>selected(option&lt;u32&gt;)</code>, <code>offset(u32)</code></td>
+</tr>
+<tr>
+<td><code>%list</code>, <code>table</code>, <code>tree-list</code></td>
+<td>multi-selection</td>
+<td><code>ids(list&lt;string&gt;)</code></td>
+</tr>
+<tr>
+<td><code>tree-list</code></td>
+<td>selected item</td>
+<td>read as <code>ids(list&lt;string&gt;)</code> with one id; set with <code>ids([id])</code></td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td>selected option</td>
+<td><code>selected(option&lt;u32&gt;)</code>; a catalogue choice is set with <code>text(item id)</code> and <code>selected(n)</code> on it returns <code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td>active tab</td>
+<td><code>tab(u32)</code></td>
+</tr>
+<tr>
+<td><code>text-input</code>, <code>text-area</code></td>
+<td>text and cursor</td>
+<td><code>text(string)</code></td>
+</tr>
+<tr>
+<td><code>tree-list</code></td>
+<td>expanded items</td>
+<td><code>expanded(list&lt;string&gt;)</code> (read and set)</td>
+</tr>
+<tr>
+<td><code>toggle</code></td>
+<td>on or off</td>
+<td><code>checked(bool)</code></td>
+</tr>
+<tr>
+<td><code>check-list</code>, tri-state <code>toggle</code></td>
+<td>the state of each item</td>
+<td><code>tri(list&lt;tuple&lt;string, tri-state&gt;&gt;)</code></td>
+</tr>
+<tr>
+<td><code>location-picker</code></td>
+<td>the chosen point</td>
+<td><code>geo(option&lt;geo-point&gt;)</code></td>
+</tr>
+<tr>
+<td><code>number</code> (also the slider)</td>
+<td>the value</td>
+<td><code>number(f64)</code></td>
+</tr>
+<tr>
+<td><code>split</code></td>
+<td>the divider position in per mille</td>
+<td><code>split(u16)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Read the state with <code>ui.widget-state(view, key)</code> when <code>render</code> needs it, and change it with <code>ui.set-widget-state(view, key, state)</code>. Setting state for an unknown key returns <code>not-found</code>. A state kind that does not fit the widget returns <code>invalid-argument</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// Select the third row of a list and open the second tab.
+ui::set_widget_state(view.clone(), &quot;notes-list&quot;, WidgetState::Selected(Some(2)))?;
+ui::set_widget_state(view, &quot;views&quot;, WidgetState::Tab(1))?;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">ui.setWidgetState(view, 'notes-list', { tag: 'selected', val: 2 });
+ui.setWidgetState(view, 'views', { tag: 'tab', val: 1 });
+</code></pre>
+<h2 id="actions-back-to-the-plugin">Actions back to the plugin</h2>
+<p>When the user acts on a widget, the kernel sends one <code>ui-action</code> event with the payload <code>UiAction { view, key, action-id, kind, value }</code>. In 0.1.0 <code>action-id</code> is always a copy of <code>key</code>; no widget has a separate action id prop. The <code>key</code> is the widget that sent it, and for a drop it is the drop target. A widget without a key sends nothing.</p>
+<p>There are 17 kinds: <code>activated</code>, <code>changed</code>, <code>submitted</code>, <code>selected</code>, <code>toggled</code>, <code>scrolled</code>, <code>dropped</code>, <code>context-requested</code>, <code>closed</code>, <code>focus-gained</code>, <code>focus-lost</code>, <code>hover-enter</code>, <code>hover-leave</code>, <code>pointer</code>, <code>drag-over</code>, <code>resized</code> and <code>filter-changed</code>. The last six (<code>hover-enter</code>, <code>hover-leave</code>, <code>pointer</code>, <code>drag-over</code>, <code>resized</code>, <code>filter-changed</code>) report hover, pointer, drag, resize and filter changes. Every focusable widget also sends <code>focus-gained</code> and <code>focus-lost</code>.</p>
+<table>
+<thead>
+<tr>
+<th><code>action-value</code> case</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>none</code></td>
+<td><code>button</code> (<code>activated</code>), <code>popup</code>, <code>dialog</code>, <code>menu</code> and <code>key-capture</code> (<code>closed</code>), hover and focus kinds. The docs write <code>none</code> for the option case <code>none</code> of <code>value: option&lt;action-value&gt;</code></td>
+</tr>
+<tr>
+<td><code>text(string)</code></td>
+<td><code>text-input</code>, <code>text-area</code>, <code>markdown</code>, <code>tree-list</code> (item id), a catalogue <code>choice</code> (item id), <code>menu</code>, <code>dialog</code> (button id), <code>filter-changed</code></td>
+</tr>
+<tr>
+<td><code>index(u32)</code></td>
+<td><code>%list</code>, <code>table</code>, <code>tabs</code>, <code>choice</code>, <code>scrolled</code> of every scrolling widget (always the first visible row)</td>
+</tr>
+<tr>
+<td><code>number(f64)</code></td>
+<td><code>number</code>, <code>split</code> (<code>resized</code>)</td>
+</tr>
+<tr>
+<td><code>flag(bool)</code></td>
+<td><code>toggle</code></td>
+</tr>
+<tr>
+<td><code>cell(cell-position)</code></td>
+<td><code>surface</code> (column and row, relative to the surface)</td>
+</tr>
+<tr>
+<td><code>drop(drop-value)</code></td>
+<td><code>drop-target</code> nodes (<code>dropped</code>)</td>
+</tr>
+<tr>
+<td><code>pointer(view-pointer)</code></td>
+<td>nodes with <code>pointer-events</code></td>
+</tr>
+<tr>
+<td><code>drag-over(drag-over-value)</code></td>
+<td><code>drop-target</code> nodes during a drag</td>
+</tr>
+<tr>
+<td><code>item-state(tuple&lt;string, tri-state&gt;)</code></td>
+<td><code>check-list</code>, tri-state <code>toggle</code> (state read with the <code>tri</code> case)</td>
+</tr>
+<tr>
+<td><code>geo(geo-point)</code></td>
+<td><code>location-picker</code></td>
+</tr>
+<tr>
+<td><code>ids(list&lt;string&gt;)</code></td>
+<td>multi-selection in <code>%list</code>, <code>table</code>, <code>tree-list</code></td>
+</tr>
+</tbody>
+</table>
+<p>The host coalesces <code>scrolled</code>, <code>pointer</code> and <code>drag-over</code>. The others are never dropped.</p>
+<p>Typing never reaches the plugin key by key. A <code>text-input</code> sends <code>changed</code> after 600 ms. A <code>text-area</code> with <code>debounce-ms</code> unset waits 600 ms while its current text is at most 10,000 bytes (UTF-8) and 1,000 ms above that, re-evaluated at each keystroke; an explicit <code>debounce-ms</code> (0 to 2,000) always wins. This rule covers <code>text-area</code> widgets in plugin views; a text-area row of a settings tab is written to the config 1 s after the last keystroke whatever its size, per <a href="/pages/reference-settings-schema/#validation-and-saving">validation and saving</a>. 64 KiB stays only as the <code>text-input</code> <code>max-length</code> cap. A <code>text-input</code> with <code>submit-on-enter</code> sends <code>submitted</code> on Enter. A <code>toggle</code> and a <code>choice</code> send <code>changed</code> at once. <code>filter-changed</code> is debounced by 150 ms.</p>
+<p>The handler changes its own state and calls <code>ui.invalidate</code> for the view. The next <code>render</code> reads the new state.</p>
+<h3 id="context-requests">Context requests</h3>
+<p><code>context-requested</code> is sent for a right click on any node that has a key, and for Shift+F10 or the Menu key on the focused node. The node does not need <code>pointer-events</code>. A mouse trigger carries <code>pointer</code> data with the cell relative to the node, button <code>right</code> and <code>clicks</code> 1. A keyboard trigger carries <code>pointer</code> data with column 0, row 0, button <code>none</code> and <code>clicks</code> 0. In a collection the item under the pointer (or the selected item, for the keyboard) is selected first, and the <code>selected</code> event is delivered before <code>context-requested</code> in the same batch.</p>
+<h2 id="the-pointer-model">The pointer model</h2>
+<p>By default the host turns mouse input into the widget's own actions: a click on a button sends <code>activated</code>, a click on a tab sends <code>selected</code>. A plugin that draws its own surface can ask for raw pointer input. Set the <code>pointer-events</code> and <code>focusable</code> flags on the node. The node then sends <code>pointer</code> actions whose value is a <code>view-pointer</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td><code>down</code>, <code>up</code>, <code>move</code>, <code>drag</code>, <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> or <code>wheel-right</code></td>
+</tr>
+<tr>
+<td><code>button</code></td>
+<td><code>none</code>, <code>left</code>, <code>middle</code> or <code>right</code></td>
+</tr>
+<tr>
+<td><code>modifiers</code></td>
+<td>flags <code>shift</code>, <code>control</code>, <code>alt</code></td>
+</tr>
+<tr>
+<td><code>column</code>, <code>row</code></td>
+<td>The cell inside the widget's area, 0-based</td>
+</tr>
+<tr>
+<td><code>sub-x</code>, <code>sub-y</code></td>
+<td>The position inside the cell, 0 to 255, from left and top to right and bottom. The value is 128 when the terminal reports cells only</td>
+</tr>
+<tr>
+<td><code>clicks</code></td>
+<td>1, 2 or 3 for <code>down</code> events; 0 for the others</td>
+</tr>
+</tbody>
+</table>
+<p><code>move</code> is sent only while a button is held, and the host coalesces it to the frame rate. A plain hover does not produce <code>move</code>; use <code>hover-events</code> for that.</p>
+<figure>
+<svg viewBox="0 0 400 190" role="img" aria-label="A pointer position inside a cell: column, row and the sub-cell offset from 0 to 255" width="600" height="285">
+  <title>A view-pointer inside one cell</title>
+  <desc>A grid of cells. The pointer is in column 3, row 1, at sub-x 192 and sub-y 64, that is three quarters from the left and a quarter from the top of the cell.</desc>
+  <g fill="none" stroke="currentColor" stroke-opacity="0.5">
+    <rect x="20" y="20" width="40" height="40"/><rect x="60" y="20" width="40" height="40"/><rect x="100" y="20" width="40" height="40"/><rect x="140" y="20" width="40" height="40"/>
+    <rect x="20" y="60" width="40" height="40"/><rect x="60" y="60" width="40" height="40"/><rect x="100" y="60" width="40" height="40"/><rect x="140" y="60" width="40" height="40" stroke-opacity="1" stroke-width="2"/>
+    <rect x="20" y="100" width="40" height="40"/><rect x="60" y="100" width="40" height="40"/><rect x="100" y="100" width="40" height="40"/><rect x="140" y="100" width="40" height="40"/>
+  </g>
+  <circle cx="170" cy="70" r="4" fill="currentColor"/>
+  <text x="22" y="160" font-size="11" fill="currentColor">columns 0 to 3, rows 0 to 2</text>
+  <text x="210" y="50" font-size="12" fill="currentColor">column = 3, row = 1</text>
+  <text x="210" y="72" font-size="12" fill="currentColor">sub-x = 192 (three quarters)</text>
+  <text x="210" y="94" font-size="12" fill="currentColor">sub-y = 64 (one quarter)</text>
+  <text x="210" y="116" font-size="12" fill="currentColor">clicks = 1, kind = down</text>
+</svg>
+<figcaption>The pointer marks column 3 and row 1. The sub-cell fields tell a plugin where in the cell the pointer is, which matters for the half-block and Braille graphics of a canvas or surface.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// ilium_plugin_sdk::types::ui::{ActionKind, ActionValue, PointerKind}
+for event in batch {
+    let Event::UiAction(action) = event else { continue };
+    if action.key != &quot;plot&quot; || action.kind != ActionKind::Pointer {
+        continue;
+    }
+    let ActionValue::Pointer(pointer) = action.value else { continue };
+    if pointer.kind == PointerKind::Down &amp;&amp; pointer.clicks == 2 {
+        // Double click: zoom to the cell, using the sub-cell offset for half-cell accuracy.
+        let x = f64::from(pointer.column) + f64::from(pointer.sub_x) / 255.0;
+        let y = f64::from(pointer.row) + f64::from(pointer.sub_y) / 255.0;
+        self.zoom_to(x, y);
+        ui::invalidate(view.clone());
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">for (const event of batch) {
+  if (event.tag !== 'ui-action') continue;
+  const action = event.val;
+  if (action.key !== 'plot' || action.kind !== 'pointer') continue;
+  if (action.value.tag !== 'pointer') continue;
+  const pointer = action.value.val;
+  if (pointer.kind === 'down' &amp;&amp; pointer.clicks === 2) {
+    // Double click: zoom to the cell, using the sub-cell offset for half-cell accuracy.
+    const x = pointer.column + pointer.subX / 255;
+    const y = pointer.row + pointer.subY / 255;
+    zoomTo(x, y);
+    ui.invalidate(view);
+  }
+}
+</code></pre>
+<p>The node that draws the plot sets the flags: <code>focusable</code> and <code>pointer-events</code> (<code>flags: { focusable: true, pointerEvents: true }</code> in TypeScript, <code>.focusable(true).pointer_events(true)</code> in Rust).</p>
+<h2 id="hover-and-tooltips">Hover and tooltips</h2>
+<p>Hover tracking belongs to the host. A node with <code>hover-events</code> sends <code>hover-enter</code> and <code>hover-leave</code>. Tooltips need no flag: any node with a <code>tooltip</code> field shows it.</p>
+<figure>
+<svg viewBox="0 0 420 130" role="img" aria-label="Hover timeline: enter, 500 milliseconds to the tooltip, leave, 150 milliseconds grace" width="630" height="195">
+  <title>The hover timeline</title>
+  <desc>The pointer enters a node and hover-enter is sent. After 500 ms the tooltip appears. When the pointer leaves, hover-leave is sent and a popup with dismiss-on-leave closes after a 150 ms grace time.</desc>
+  <defs>
+    <marker id="hover-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+  </defs>
+  <line x1="20" y1="70" x2="400" y2="70" stroke="currentColor" marker-end="url(#hover-arrow)"/>
+  <circle cx="40" cy="70" r="4" fill="currentColor"/><text x="40" y="52" font-size="11" text-anchor="middle" fill="currentColor">enter</text><text x="40" y="95" font-size="10" text-anchor="middle" fill="currentColor">hover-enter</text>
+  <circle cx="190" cy="70" r="4" fill="currentColor"/><text x="190" y="52" font-size="11" text-anchor="middle" fill="currentColor">500 ms</text><text x="190" y="95" font-size="10" text-anchor="middle" fill="currentColor">tooltip shows</text>
+  <circle cx="290" cy="70" r="4" fill="currentColor"/><text x="290" y="52" font-size="11" text-anchor="middle" fill="currentColor">leave</text><text x="290" y="95" font-size="10" text-anchor="middle" fill="currentColor">hover-leave</text>
+  <circle cx="365" cy="70" r="4" fill="currentColor"/><text x="365" y="52" font-size="11" text-anchor="middle" fill="currentColor">150 ms</text><text x="365" y="95" font-size="10" text-anchor="middle" fill="currentColor">popup closes</text>
+</svg>
+<figcaption>The host owns the timing. A tooltip delay of 500 ms is the default and a plugin may choose 0 to 2000 ms. The 150 ms leave grace applies to a popup with dismiss-on-leave.</figcaption>
+</figure>
+
+<p>A tooltip is text of at most 200 Unicode scalar values in total, given as <code>styled-lines</code>. Beyond that the host cuts it to 199 plus <code>…</code>. The box is a rounded border with an inner width of min(40, view width - 4) cells, word-wrapped, and at most 8 inner lines (the 8th line is cut with <code>…</code>). On hover its top-left corner sits one row below the pointer cell. For F1 it sits one row below the node's top-left cell. It flips above when it does not fit below, then shifts left to stay inside the view. The text uses the foreground role on the info background role. It shows after the tooltip delay (default 500 ms, 0 to 2,000 ms) and hides when the pointer leaves the node or on any key. Keyboard users get the same text with F1 while the node has focus. A disabled node shows its <code>disabled-reason</code> as the tooltip.</p>
+<figure>
+<pre class="term">Threshold too low. <span class="t-hi">Apply 180k</span><span class="t-dim">  (hover)</span>
+            ╭──────────────────────────────╮
+            │ Writes the recommended       │
+            │ threshold                    │
+            ╰──────────────────────────────╯
+</pre>
+<figcaption>Rendered below the hovered span after 500 ms. A tooltip is a rounded block with one cell of horizontal padding, placed one row below the pointer cell, or above it when there is no room.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let apply = tree
+    .button(&quot;Apply 180k&quot;)
+    .key(&quot;apply&quot;)
+    .tooltip(Tooltip::new(&quot;Writes the recommended threshold&quot;).delay_ms(300));
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const apply = button('Apply 180k', {
+  key: 'apply',
+  tooltip: { lines: [[span('Writes the recommended threshold')]], delayMs: 300 },
+});
+</code></pre>
+<p>Inside text, a <code>rich-span</code> can carry its own <code>tooltip</code>, and a span with a <code>target</code> becomes clickable (see <a href="/pages/widgets-text/">Text</a>). To react to hover, set the <code>hover-events</code> flag and handle the two kinds:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">match (action.kind, action.key.as_str()) {
+    (ActionKind::HoverEnter, &quot;session-row&quot;) =&gt; self.preview_open = true,
+    (ActionKind::HoverLeave, &quot;session-row&quot;) =&gt; self.preview_open = false,
+    _ =&gt; {}
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">if (action.key === 'session-row') {
+  if (action.kind === 'hover-enter') previewOpen = true;
+  if (action.kind === 'hover-leave') previewOpen = false;
+}
+</code></pre>
+<h2 id="popups-and-anchors">Popups and anchors</h2>
+<p>A <code>popup</code> node is drawn only while <code>ui.open-popup</code> or <code>ui.open-popup-with</code> has it open. The popup id is the <code>key</code> of the popup or dialog node. Popup ids must be unique across all open views of one plugin instance. <code>open-popup</code> searches the last committed tree of each open view. It returns <code>not-found</code> when it finds no match and <code>invalid-argument</code> when it finds two. A view may have at most 4 popups open (<code>quota-exceeded</code> for a fifth). <code>close-popup</code> on an id that is not open is a no-op that returns <code>ok</code>, and a popup whose node disappears from the next tree closes and sends <code>closed</code>. Open popups form a stack: the topmost takes input first, Escape closes it and sends <code>closed</code>, and focus moves into an opened popup and returns to the anchor on close.</p>
+<table>
+<thead>
+<tr>
+<th>Anchor</th>
+<th>Placement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>centered((width, height))</code></td>
+<td>In the middle of the view. Its size overrides the spec width and height.</td>
+</tr>
+<tr>
+<td><code>at-cell((column, row))</code></td>
+<td>Top-left corner on that cell.</td>
+</tr>
+<tr>
+<td><code>below-key("key")</code></td>
+<td>Under the widget with that key.</td>
+</tr>
+<tr>
+<td><code>at-key({ key, side })</code></td>
+<td>Next to a widget, on the <code>below</code>, <code>above</code>, <code>right</code> or <code>left</code> side.</td>
+</tr>
+<tr>
+<td><code>at-tree-node(node)</code></td>
+<td>Next to a tree row. Used for toolbar popovers and row actions.</td>
+</tr>
+<tr>
+<td><code>at-pointer</code></td>
+<td>At the last pointer position. Used for context menus in own views.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>modal</code></td>
+<td>true</td>
+<td>Input stays in the popup, and the view behind takes none. Options passed to <code>open-popup-with</code> override the spec fields <code>modal</code> and <code>close-on-escape</code>.</td>
+</tr>
+<tr>
+<td><code>pinnable</code></td>
+<td>false</td>
+<td>Adds a pin glyph to the title. A pinned popup stays open until Escape or a click on the pin.</td>
+</tr>
+<tr>
+<td><code>dismiss-on-leave</code></td>
+<td>false</td>
+<td>The popup closes when the pointer leaves both the popup and its anchor for longer than 150 ms.</td>
+</tr>
+<tr>
+<td><code>close-on-escape</code></td>
+<td>true</td>
+<td>Escape closes the popup.</td>
+</tr>
+</tbody>
+</table>
+<p>Size and placement follow the rules in <a href="/pages/widgets-layout-and-containers/#popup-size-and-placement">Popup size and placement</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// ilium_plugin_sdk::types::ui::{PopupAnchor, PopupOptions, KeyAnchor, AnchorSide}; host::log::{self, Level}
+let anchor = PopupAnchor::AtKey(KeyAnchor { key: &quot;stats-button&quot;.into(), side: AnchorSide::Below });
+let options = PopupOptions { modal: false, pinnable: true, dismiss_on_leave: true, close_on_escape: true };
+if let Err(error) = ui::open_popup_with(&quot;session-stats&quot;, anchor, options) {
+    log::log(Level::Warn, &amp;format!(&quot;open_popup_with failed: {error:?}&quot;));
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">try {
+  ui.openPopupWith(
+    'session-stats',
+    { tag: 'at-key', val: { key: 'stats-button', side: 'below' } },
+    { modal: false, pinnable: true, dismissOnLeave: true, closeOnEscape: true },
+  );
+} catch (error) {
+  log('warn', String(error));
+}
+</code></pre>
+<figure>
+<pre class="term">▼ Ilium
+›   ⠋ Fix auth
+›     Shell
+    ╭─ Session stats ──────────────────╮
+    │ <span class="t-hi">Overview</span>  Tokens  Activity       │
+    │                                  │
+    │ Tokens today <span class="t-dim">………………</span> 41,200       │
+    │ Cost today <span class="t-dim">…………………</span> $4.20         │
+    ╰──────────────────────────────────╯
+</pre>
+<figcaption>Rendered below a tree row. A non-modal popup anchored <code>at-tree-node</code>. With <code>dismiss-on-leave</code> it closes when the pointer leaves both the popup and its anchor; with <code>pinnable</code> the user can pin it open, and Escape then closes it.</figcaption>
+</figure>
+
+<p>A context menu in an own view is a <code>menu</code> widget in a popup opened <code>at-pointer</code>. The host draws it with the same layout as its own menus.</p>
+<figure>
+<pre class="term">  Meeting notes
+  Shopping list
+  ╭──────────────────────╮
+  │                      │
+  │   Open               │
+  │   Rename             │
+  │ <span class="t-dim">────────────────────</span> │
+  │ <span class="w2">✓</span> Pin to top         │
+  │   Move to          ▸ │
+  │   <span class="t-err">Delete</span>             │
+  │                      │
+  ╰──────────────────────╯
+</pre>
+<figcaption>A context menu opened <code>at-pointer</code> on a right click. The host draws one padding row above and below, a separator, the checked marker <code>✓</code> and the submenu marker <code>▸</code>.</figcaption>
+</figure>
+
+<h2 id="focus">Focus</h2>
+<p>Left and Right, Up and Down and the other keys belong to the focused widget. Focus moves into an opened popup and returns to the anchor when it closes.</p>
+<h3 id="focus-order">Focus order</h3>
+<p>Tab order works as follows.</p>
+<ol>
+<li>First come the focusable nodes with <code>tab-index</code> of 1 or more, in ascending value. Ties are broken by pre-order position.</li>
+<li>Then come the nodes with <code>tab-index</code> none or 0, in pre-order.</li>
+<li>Nodes with a negative <code>tab-index</code> take focus by click and by <code>set-focus</code> but are skipped by Tab and Shift+Tab.</li>
+<li>Tab wraps from the last node to the first within the view, and Shift+Tab wraps the other way.</li>
+<li>Hidden nodes are skipped. A disabled node (<code>disabled-reason</code> set) stays in the focus order but ignores input.</li>
+</ol>
+<h3 id="inherently-focusable-widgets">Inherently focusable widgets</h3>
+<p>These widgets take focus without the <code>focusable</code> flag.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>button</code>, <code>toggle</code>, <code>choice</code>, <code>number</code>, <code>text-input</code>, <code>text-area</code>, <code>key-capture</code>, <code>color-picker</code>, <code>path-field</code>, <code>location-picker</code></td>
+<td>always</td>
+</tr>
+<tr>
+<td><code>%list</code>, <code>table</code>, <code>tree-list</code>, <code>menu</code>, <code>check-list</code>, <code>list-editor</code>, <code>tabs</code>, <code>scroll-view</code></td>
+<td>always</td>
+</tr>
+<tr>
+<td><code>split</code> divider</td>
+<td><code>resizable</code> is true</td>
+</tr>
+<tr>
+<td><code>paragraph</code></td>
+<td><code>scroll</code> is set</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td>the text contains a link or a task item</td>
+</tr>
+<tr>
+<td><code>diff-view</code>, <code>code-view</code></td>
+<td>always</td>
+</tr>
+<tr>
+<td><code>terminal-view</code></td>
+<td><code>interactive</code> is set</td>
+</tr>
+<tr>
+<td><code>schema-form</code></td>
+<td>one stop per row</td>
+</tr>
+</tbody>
+</table>
+<p>Every other widget is focusable only with <code>flags.focusable</code>.</p>
+<h3 id="escape">Escape</h3>
+<p>Escape is resolved in this order, and the first step that applies consumes it.</p>
+<ol>
+<li>A focused <code>key-capture</code> that is capturing cancels the capture and sends <code>closed</code>.</li>
+<li>A focused text widget with a non-empty selection clears the selection.</li>
+<li>The topmost open popup or dialog in the view closes (<code>close-on-escape</code> true), sending <code>closed</code> or the cancel activation of a dialog.</li>
+<li>A modal panel closes.</li>
+<li>A non-modal panel or pane view returns focus to the session tree.</li>
+</ol>
+<figure>
+<pre class="term">╭────────────────╮  ╭────────────────╮  ╭────────────────╮
+│<span class="t-hi"> Search  [1]    </span>│  │ Filter  [2]    │  │ List  [3]      │
+╰────────────────╯  ╰────────────────╯  ╰────────────────╯
+<span class="t-dim">Tab moves 1, 2, 3 and back. Shift+Tab goes the other way.</span>
+</pre>
+<figcaption>Focus order with <code>tab-index</code> 1, 2 and 3. The focused widget is drawn in the highlight colours; the numbers are shown only to explain the order.</figcaption>
+</figure>
+
+<p>The host draws focus on the widget: a focused frame is cyan and bold, a focused row uses the selection colours. The plugin hears <code>focus-gained</code> and <code>focus-lost</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let search = tree.text_input(&quot;Search&quot;).key(&quot;search&quot;).tab_index(1);
+let filter = tree.choice([&quot;All&quot;, &quot;Running&quot;, &quot;Done&quot;]).key(&quot;filter&quot;).tab_index(2);
+let list = tree.list(items).key(&quot;list&quot;).tab_index(3);
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const search = textInput('Search', { key: 'search', tabIndex: 1 });
+const filter = choice(['All', 'Running', 'Done'], { key: 'filter', tabIndex: 2 });
+const list = listWidget(items, { key: 'list', tabIndex: 3 });
+</code></pre>
+<h2 id="drag-and-drop">Drag and drop</h2>
+<p>A <code>draggable</code> node dropped on a <code>drop-target</code> node produces one <code>dropped</code> action. Its value is <code>drop(drop-value)</code> (a record with <code>source-key</code>, <code>target-key</code> and <code>index</code>), with <code>index</code> as the insertion position. The event <code>key</code> is the target key. The host does not move data; the plugin moves its own.</p>
+<p>While a drag hovers a drop target, the host sends <code>drag-over</code> with <code>drag-over-value { source-key, target-key, index, accept }</code> once each time the target changes. The host decides the position from the pointer row inside the target's area, and <code>accept</code> carries the result: <code>before</code>, <code>after</code>, <code>inside</code> or <code>none</code>. For a <code>tree-item</code> with <code>expandable</code> set, the top third is <code>before</code>, the middle third is <code>inside</code> and the bottom third is <code>after</code>, with rows rounded down. For any other target, the top half is <code>before</code> and the bottom half is <code>after</code>. A target with <code>drop-target</code> unset accepts nothing. A drop sends <code>dropped</code> to the target key with the position in the <code>drop</code> value, and for a <code>tree-list</code> the target item id as <code>text</code>. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.</p>
+<h2 id="settings-views">Settings views</h2>
+<p>A <code>settings-page</code> tree uses a subset of the widgets. The subset is: <code>block</code>, <code>paragraph</code>, <code>tabs</code>, <code>separator</code>, <code>leader-row</code>, <code>%list</code>, <code>table</code>, <code>button</code> and <code>schema-form</code>, and also <code>layout</code>, <code>split</code>, <code>scroll-view</code>, <code>markdown</code>, <code>key-hints</code>, <code>diff-view</code>, <code>tree-list</code>, <code>check-list</code>, <code>gauge</code>, <code>line-gauge</code>, <code>sparkline</code>, <code>bar-chart</code>, <code>chart</code>, <code>canvas</code>, <code>progress-row</code>, <code>meter</code>, <code>minimap</code>, <code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code>, <code>image</code>, <code>surface</code>, <code>location-picker</code> and <code>code-view</code> with <code>read-only: true</code>.</p>
+<p>These trap the instance in a settings page with <code>ui.widget-not-allowed</code>, and the host keeps the previous tree and logs one error: <code>popup</code>, <code>dialog</code>, <code>menu</code>, <code>video</code>, <code>terminal-view</code>, an editable <code>code-view</code>, and the input widgets other than <code>button</code>, <code>schema-form</code> and <code>location-picker</code>. Values are still edited through <code>schema-form</code>, and the host validates and saves them.</p>
+<h2 id="theme-extras">Theme extras</h2>
+<p><code>ui.theme-extras()</code> returns the motion, density and icon settings that a view should respect, next to the colours of <code>ui.theme()</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reduced-motion</code></td>
+<td>When true, a view should avoid animation. The host also stops its own spinners.</td>
+</tr>
+<tr>
+<td><code>density</code></td>
+<td><code>compact</code>, <code>normal</code> or <code>comfortable</code>. Use it to choose margins and spacing.</td>
+</tr>
+<tr>
+<td><code>icon-mode</code></td>
+<td><code>normal</code> or <code>stable</code>. Stable icons are used only when the user opted in.</td>
+</tr>
+<tr>
+<td><code>info</code>, <code>selection</code>, <code>border</code></td>
+<td>RGB colours for the roles that <code>theme-tokens</code> lacks.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let extras = ui::theme_extras();
+let margin = match extras.density {
+    Density::Compact =&gt; 0,
+    Density::Normal =&gt; 1,
+    Density::Comfortable =&gt; 2,
+};
+let animate = !extras.reduced_motion;
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const extras = ui.themeExtras();
+const margin = { compact: 0, normal: 1, comfortable: 2 }[extras.density];
+const animate = !extras.reducedMotion;
+</code></pre>
+<h2 id="worked-example-in-rust-a-filtered-notes-panel">Worked example in Rust: a filtered notes panel</h2>
+<p>This component renders a panel with a filter field and a list. It filters the rows when the filter text changes. The host keeps the text, the cursor and the selected row.</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::ui;
+use ilium_plugin_sdk::types::layout::{Area, Constraint, Direction};
+use ilium_plugin_sdk::types::ui::{ActionKind, ActionValue, UiTree, ViewTarget};
+use ilium_plugin_sdk::ui::build::{ListItem, Tree};
+
+const PANEL: &amp;str = &quot;notes&quot;;
+const FILTER_KEY: &amp;str = &quot;filter&quot;;
+const LIST_KEY: &amp;str = &quot;notes-list&quot;;
+const NOTES: [&amp;str; 3] = [&quot;Meeting notes&quot;, &quot;Shopping list&quot;, &quot;Release checklist&quot;];
+
+#[ilium_plugin(side = &quot;client&quot;, exports = [&quot;views&quot;])]
+#[derive(Default)]
+struct NotesPanel {
+    filter: String,
+}
+
+impl Handler for NotesPanel {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            if action.key != FILTER_KEY {
+                continue;
+            }
+            if let (ActionKind::Changed, ActionValue::Text(text)) = (action.kind, action.value) {
+                self.filter = text;
+                ui::invalidate(ViewTarget::Panel(PANEL.to_string()));
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Views for NotesPanel {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let needle = self.filter.to_lowercase();
+        let items: Vec&lt;ListItem&gt; = NOTES
+            .iter()
+            .filter(|name| name.to_lowercase().contains(&amp;needle))
+            .map(|name| ListItem::plain(*name))
+            .collect();
+
+        let mut tree = Tree::new();
+        let filter = tree.text_input(&quot;Filter&quot;).key(FILTER_KEY).tab_index(1);
+        let notes = tree.list(items).key(LIST_KEY).tab_index(2);
+        let body = tree
+            .layout(Direction::Vertical, [Constraint::Length(1), Constraint::Min(1)])
+            .child(filter)
+            .child(notes);
+        let root = tree.block().title(&quot;Notes&quot;).child(body);
+        tree.finish(root)
+    }
+}
+</code></pre>
+<p>The panel id <code>notes</code> must be declared in the manifest. The plugin keeps the filter text only because it needs that text to filter.</p>
+<figure>
+<pre class="term">╭─ Notes ────────────────────────────────────╮
+│ Filter                                     │
+│<span class="t-hi">› Meeting notes                             </span>│
+│  Shopping list                             │
+│  Release checklist                         │
+╰────────────────────────────────────────────╯
+<span class="t-dim">Enter opens a note. Esc closes the panel.</span>
+</pre>
+<figcaption>The notes panel before a filter is typed. The host selects the first row and draws the selected row in the selection colours.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭─ Notes ────────────────────────────────────╮
+│ Filter meeting                             │
+│<span class="t-hi">› Meeting notes                             </span>│
+╰────────────────────────────────────────────╯
+<span class="t-dim">1 of 3 notes shown. Enter opens a note.</span>
+</pre>
+<figcaption>The same panel after the plugin filtered the rows on a <code>changed</code> action. The selection stayed on the same row.</figcaption>
+</figure>
+
+<h2 id="worked-example-in-typescript-reordering-rows">Worked example in TypeScript: reordering rows</h2>
+<p>Each note is a draggable row. A drop moves the dragged row to the insertion index, and <code>drag-over</code> tells the host where the row would land.</p>
+<pre><code class="language-ts">import { definePlugin } from '@ilium/plugin-sdk';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+import * as ui from '@ilium/plugin-sdk/host/ui';
+import { block, layout, paragraph, span, tree } from '@ilium/plugin-sdk/ui/build';
+
+const PANEL = 'notes';
+const ROW_PREFIX = 'row:';
+let order = ['Meeting notes', 'Shopping list', 'Release checklist'];
+
+export const { lifecycle, handler, views } = definePlugin({
+  side: 'client',
+  activate() {},
+  deactivate() { return undefined; },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag !== 'ui-action') continue;
+      const action = event.val;
+      if (action.kind !== 'dropped' || action.value.tag !== 'drop') continue;
+      const { sourceKey, index } = action.value.val;
+      const moved = sourceKey.slice(ROW_PREFIX.length);
+      order = order.filter((name) =&gt; name !== moved);
+      order.splice(index, 0, moved);
+      ui.invalidate({ tag: 'panel', val: PANEL });
+    }
+    return [];
+  },
+  render() {
+    const rows = order.map((name) =&gt;
+      paragraph([[span(name)]], {
+        key: ROW_PREFIX + name,
+        flags: { draggable: true, dropTarget: true },
+      }),
+    );
+    const body = layout(
+      { direction: 'vertical', constraints: rows.map(() =&gt; ({ tag: 'length', val: 1 })) },
+      rows,
+    );
+    return tree(block({ titles: [{ text: 'Notes', position: 'top', alignment: 'left' }] }, [body]));
+  },
+});
+</code></pre>
+<p>The row keys carry the note name, so the drop handler reads the source from <code>sourceKey</code> without a lookup.</p>
+<p>The same example in Rust marks the row as <code>draggable</code> and <code>drop_target</code>:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let row = tree
+    .paragraph(vec![vec![Span::plain(name)]])
+    .key(format!(&quot;row:{name}&quot;))
+    .draggable(true)
+    .drop_target(true);
+</code></pre>
+<h2 id="cell-width">Cell width</h2>
+<p>The host measures every plugin string in cells, and plugins never pass widths. The width is the sum, over extended grapheme clusters (UAX #29, Unicode 15.1), of these values.</p>
+<ul>
+<li>2 when the base of the cluster has East Asian Width W or F, when the cluster contains U+FE0F, or when it is an emoji ZWJ sequence.</li>
+<li>0 for a cluster made only of controls, ZWJ or default-ignorable code points.</li>
+<li>1 otherwise. This includes East Asian Ambiguous characters.</li>
+</ul>
+<p>Nerd Font private-use glyphs count as 1. Text that overflows a cell boundary at the right edge is replaced by spaces, never by half of a wide glyph. <code>ui.display-width</code> returns this value.</p>
+<h2 id="text-sanitising">Text sanitising</h2>
+<p>Before layout, the host removes the following from every plugin string. It applies to labels, spans, titles, tooltips and items alike.</p>
+<ol>
+<li>The complete ECMA-48 sequences: <code>ESC [</code> up to its final byte, <code>ESC ]</code>, <code>ESC P</code>, <code>ESC X</code>, <code>ESC ^</code> and <code>ESC _</code> up to a terminating BEL or <code>ESC \</code> (or the end of the string), and two-byte <code>ESC Fe</code> sequences.</li>
+<li>The remaining C0 controls except TAB and LF, DEL, and the C1 controls U+0080 to U+009F.</li>
+</ol>
+<p>TAB expands to spaces up to the next multiple of 4 cells. LF splits lines in multi-line widgets. In single-line fields (labels, titles, items and the first line of a tooltip) CR, LF and CRLF each become one space. Each view logs at most one warn line per render with the code <code>ui.text-sanitized</code>. [RND-019]</p>
+<h2 id="host-functions">Host functions</h2>
+<p>These live in <code>ilium_plugin_sdk::host::ui</code> (Rust) and <code>@ilium/plugin-sdk/host/ui</code> (TypeScript).</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Signature (WIT)</th>
+<th>Errors</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalidate</code></td>
+<td><code>(view: view-target)</code></td>
+<td>none; a view the plugin does not declare is ignored with one warn line</td>
+</tr>
+<tr>
+<td><code>open-panel</code></td>
+<td><code>(panel: string) -&gt; result</code></td>
+<td><code>not-found</code> (panel not declared)</td>
+</tr>
+<tr>
+<td><code>close-panel</code></td>
+<td><code>(panel: string)</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>open-popup</code></td>
+<td><code>(popup: string, anchor: popup-anchor) -&gt; result</code></td>
+<td><code>not-found</code> (no such <code>popup</code> in the last committed tree of any open view), <code>invalid-argument</code> (two matches), <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>open-popup-with</code></td>
+<td><code>(popup: string, anchor: popup-anchor, options: popup-options) -&gt; result</code></td>
+<td>as <code>open-popup</code></td>
+</tr>
+<tr>
+<td><code>close-popup</code></td>
+<td><code>(popup: string)</code></td>
+<td>none; an id that is not open is a no-op</td>
+</tr>
+<tr>
+<td><code>widget-state</code></td>
+<td><code>(view, key: string) -&gt; option&lt;widget-state&gt;</code></td>
+<td>none; <code>none</code> for an unknown key</td>
+</tr>
+<tr>
+<td><code>set-widget-state</code></td>
+<td><code>(view, key, state) -&gt; result</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>display-width</code></td>
+<td><code>(text: string) -&gt; u16</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>theme</code></td>
+<td><code>() -&gt; theme-tokens</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>theme-extras</code></td>
+<td><code>() -&gt; theme-extras</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>write-surface</code></td>
+<td><code>(view, key, first-row: u32, format, data: list&lt;u8&gt;) -&gt; result</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code> (format mismatch, partial row, over 16 MiB)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="edge-cases-and-errors">Edge cases and errors</h2>
+<ul>
+<li><strong>Escape</strong> is reserved by the host and follows the order in <a href="#escape">Escape</a>. A modal popup cannot refuse the close, and the plugin receives <code>closed</code>.</li>
+<li><strong>Popups</strong> draw only while an <code>open-popup</code> call has them open. A fifth open popup in one view fails with <code>quota-exceeded</code>.</li>
+<li><strong>Traps.</strong> A duplicate key, a bad child index, a broken layout, a tree over a limit or a widget outside the allowed subset traps the instance with <code>trap.invalid-ui-tree</code> (detail reason a <code>ui.*</code> code) (see <a href="#the-ui-tree">The ui-tree</a>).</li>
+<li><strong>Permissions.</strong> A <code>code-view</code> on a buffer the plugin did not create needs <code>editor.read</code>. A <code>terminal-view</code> needs <code>terminal.read-screen</code>, and an <code>interactive</code> one also needs <code>terminal.raw-input</code>. Without the grant the widget draws an empty frame with the text <code>not permitted</code>.</li>
+<li><strong>Pointer without focusable.</strong> A node with <code>pointer-events</code> but not <code>focusable</code> sends no pointer actions.</li>
+<li><strong>Render-time caps.</strong> <code>views.render</code> has no result type, so a widget outside the allowed subset, or a <code>check-list</code> or <code>list-editor</code> over its item cap, cannot return <code>invalid-argument</code>. The host traps the instance (one failure under the restart rule) with <code>ui.invalid-tree</code> or <code>ui.widget-not-allowed</code> and logs the widget key [WID-014].</li>
+<li><strong>Tooltip length.</strong> A tooltip is limited to 200 Unicode scalar values. A longer text is cut at 199 characters and ends with <code>…</code>; it is not an error.</li>
+<li><strong>Settings views.</strong> A widget outside the allowed subset traps with <code>ui.widget-not-allowed</code>.</li>
+</ul>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>The user sees the widgets drawn by the host. The plugin sees the filtered list only after the debounce, when the host asks for a new render. The two panels above show the notes panel before and after a filter is typed. The diagram below shows the split between plugin and host: the plugin returns keyed content, the host draws it and keeps the state, and user actions return as events.</p>
+<figure>
+<svg viewBox="0 0 400 200" role="img" aria-label="Plugin returns a flat ui-tree, the host keeps widget state and sends ui-action events back" width="600" height="300">
+  <title>Plugin and host</title>
+  <desc>The plugin returns a flat list of keyed nodes. The host keeps the state of each node and returns each user action as an event.</desc>
+  <defs>
+    <marker id="ui-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="20" width="150" height="160" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="85" y="40" font-size="12" text-anchor="middle" fill="currentColor">Plugin</text>
+  <text x="22" y="62" font-size="10" fill="currentColor">0 block [1]</text>
+  <text x="22" y="78" font-size="10" fill="currentColor">1 layout [2, 3]</text>
+  <text x="22" y="94" font-size="10" fill="currentColor">2 text-input</text>
+  <text x="22" y="110" font-size="10" fill="currentColor">3 %list</text>
+  <text x="22" y="150" font-size="10" fill="currentColor">content, no state</text>
+  <rect x="240" y="20" width="150" height="160" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="315" y="40" font-size="12" text-anchor="middle" fill="currentColor">Host</text>
+  <text x="252" y="62" font-size="10" fill="currentColor">filter: "meet"</text>
+  <text x="252" y="78" font-size="10" fill="currentColor">notes: selected 0</text>
+  <text x="252" y="94" font-size="10" fill="currentColor">notes: offset 0</text>
+  <text x="252" y="110" font-size="10" fill="currentColor">focus, hover, popups</text>
+  <text x="252" y="150" font-size="10" fill="currentColor">state, keyed by key</text>
+  <line x1="162" y1="90" x2="236" y2="90" stroke="currentColor" marker-end="url(#ui-arrow)"/>
+  <text x="200" y="82" font-size="10" text-anchor="middle" fill="currentColor">render</text>
+  <line x1="238" y1="130" x2="164" y2="130" stroke="currentColor" marker-end="url(#ui-arrow)"/>
+  <text x="200" y="122" font-size="10" text-anchor="middle" fill="currentColor">ui-action</text>
+</svg>
+<figcaption>The plugin returns keyed, indexed content. The host draws it, keeps the state of each widget and returns each user action as an event.</figcaption>
+</figure>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li><strong>Colour as the only signal.</strong> Add a word or glyph to every status. See <a href="/pages/accessibility-and-theming/">Accessibility and theming</a>. A view MUST show state in text as well as in colour. [AUT-507]</li>
+<li><strong>Missing keys on interactive widgets.</strong> State is lost on every render, and actions cannot be matched.</li>
+<li><strong>Expecting a per-key event.</strong> A text input sends <code>changed</code> after the debounce, not once per key press.</li>
+<li><strong>Forgetting <code>ui.invalidate</code>.</strong> The host does not render again after a state change. Call <code>invalidate</code> for every view whose content changed.</li>
+<li><strong>Pointer events without focus.</strong> Set both <code>pointer-events</code> and <code>focusable</code>.</li>
+<li><strong>Storing hover state in the tree.</strong> Hover belongs to the host. Keep only what the plugin needs to react to.</li>
+</ul>
+<p>Requirement ids for this page: [WID-002], [WID-003], [WID-017], [WID-018], [WID-019], [WID-008], [WID-009], [WID-010], [WID-011], [WID-012], [WID-013], [WID-014], [WID-015], [WID-016]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="wit">WIT</h3>
+<p>The <code>widget</code> variant has 51 cases, and the order is the ABI. The owner is the <a href="/pages/reference-wit/">WIT reference</a>.</p>
+<pre><code class="language-wit">// Excerpt of ilium:types/ui in reference-wit
+variant widget {
+  // layout (10)
+  layout(layout-spec), block(block-spec), tabs(tabs-spec), popup(popup-spec), clear,
+  scrollbar(scrollbar-spec), split(split-spec), separator(separator-spec), dialog(dialog-spec),
+  scroll-view(scroll-view-spec),
+  // text (5)
+  paragraph(paragraph-spec), markdown(markdown-spec), leader-row(leader-spec), key-hints(list&lt;key-hint&gt;),
+  diff-view(diff-view-spec),
+  // collections (6)
+  %list(list-spec), table(table-spec), tree-list(tree-list-spec), menu(menu-spec),
+  check-list(check-list-spec), list-editor(list-editor-spec),
+  // data (10)
+  gauge(gauge-spec), line-gauge(line-gauge-spec), sparkline(sparkline-spec), bar-chart(bar-chart-spec),
+  chart(chart-spec), canvas(canvas-spec),
+  // @unstable(feature = ui-calendar)
+  calendar(calendar-spec),
+  progress-row(progress-row-spec), meter(meter-spec), minimap(minimap-spec),
+  // input (11)
+  button(button-spec), toggle(toggle-spec), choice(choice-spec), number(number-spec),
+  text-input(text-input-spec), text-area(text-area-spec), schema-form(schema-form-spec),
+  key-capture(key-capture-spec), color-picker(color-picker-spec), path-field(path-field-spec),
+  location-picker(location-picker-spec),
+  // status (4)
+  badge(badge-spec), spinner(spinner-spec), notice(notice-spec), icon(icon-spec),
+  // media (5)
+  image(image-spec), surface(surface-spec), code-view(code-view-spec), terminal-view(terminal-view-spec),
+  video(video-spec),
+}
+</code></pre>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/accessibility-and-theming/">Accessibility and theming</a></li>
+<li><a href="/pages/capability-ui-panels/">UI panels</a></li>
+<li><a href="/pages/tutorial-03-panel/">Tutorial: a panel</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">Tutorial: a notes pane</a></li>
+</ul>
+<p>API version: <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Kernel security UI is always on top and never imitated ([SEC-377]); plugin text is sanitised ([SEC-380]). See <a href="/pages/reference-extension-security/">Extension security</a>.</p>
+<p>Requirements for this page: <a href="/pages/reference-requirements-rendering/">Rendering requirements</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/testing/"><small>Previous</small>Testing plugins</a><a class="next" href="/pages/versioning/"><small>Next</small>Versioning</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#the-render-function">The render function</a></li><li class="l3"><a href="#view-targets">View targets</a></li><li class="l2"><a href="#the-ui-tree">The ui-tree</a></li><li class="l2"><a href="#widgets">Widgets</a></li><li class="l2"><a href="#keys-and-host-owned-state">Keys and host-owned state</a></li><li class="l2"><a href="#actions-back-to-the-plugin">Actions back to the plugin</a></li><li class="l3"><a href="#context-requests">Context requests</a></li><li class="l2"><a href="#the-pointer-model">The pointer model</a></li><li class="l2"><a href="#hover-and-tooltips">Hover and tooltips</a></li><li class="l2"><a href="#popups-and-anchors">Popups and anchors</a></li><li class="l2"><a href="#focus">Focus</a></li><li class="l3"><a href="#focus-order">Focus order</a></li><li class="l3"><a href="#inherently-focusable-widgets">Inherently focusable widgets</a></li><li class="l3"><a href="#escape">Escape</a></li><li class="l2"><a href="#drag-and-drop">Drag and drop</a></li><li class="l2"><a href="#settings-views">Settings views</a></li><li class="l2"><a href="#theme-extras">Theme extras</a></li><li class="l2"><a href="#worked-example-in-rust-a-filtered-notes-panel">Worked example in Rust: a filtered notes panel</a></li><li class="l2"><a href="#worked-example-in-typescript-reordering-rows">Worked example in TypeScript: reordering rows</a></li><li class="l2"><a href="#cell-width">Cell width</a></li><li class="l2"><a href="#text-sanitising">Text sanitising</a></li><li class="l2"><a href="#host-functions">Host functions</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#common-mistakes">Common mistakes</a></li><li class="l3"><a href="#wit">WIT</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

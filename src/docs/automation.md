@@ -88,7 +88,7 @@ Triggers are matched on the server, on the output path, so they work for hidden 
 | **Regexp** | A Rust `regex` pattern (not PCRE: no look-around or back-references). Must not be empty and must compile. |
 | **Message** | The literal text to send. Must be a single line; Enter is added by Ilium. Not interpreted as a template. |
 | **Target** (arrows select) | **Agents** (panes classified as a known agent), **Terminals** (panes classified as a plain shell) or **Both** (default). Detected agents are deliberately separate from shells so a broad shell rule does not type into an agent session. |
-| **Delay (seconds)** | Whole seconds between detecting the match and sending the message. Default 60. `0` sends immediately. Maximum 86400 (24 hours); larger numbers are clamped. A blank field means the default of 60. |
+| **Delay (seconds)** | Whole seconds between detecting the match and sending the message. Default 60. `0` sends immediately. Maximum 86400 (24 hours). Invalid or out-of-range input stays in the editor with an error when you save; correct it or cancel. A blank field means the default of 60. |
 | **Sample text** | A multi-line scratch area kept with the rule. The **Live preview** below it marks which sample lines match the regexp. |
 | **Enabled** | A disabled rule is kept and previewable but never fires. |
 
@@ -214,6 +214,14 @@ The progress monitor lets a long-running job report percentage and status to the
 
 How it works in one paragraph: the job (or an agent on its behalf) registers a **probe**, a shell command that prints one JSON object describing the job. The **server** runs the probe on an interval, validates the output and updates a footer in that pane. When the job reaches `done` or `error`, the result goes to whoever is waiting for it: an `ilium progress wait` command that is still running gets it as its output and exit status; otherwise Ilium types a short result message into the pane when its composer is ready. After registration nobody needs to poll.
 
+### Timing box and popover
+
+To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units. The ETA blends whole-run pace with the last ten minutes; it reads `ETA —` until progress has been measured. After ten configured probe intervals and at least ten minutes without any accepted probe report, the marker reads **no probe report**. An unchanged but successful report is not silence: a healthy probe can keep reporting the same compilation phase for hours without a warning. A probe may set `"indeterminate": true` when the task has no measurable progress; the gauge and ETA are hidden and the hover popover says progress is not measurable. A zero percentage without an ETA is also treated as unavailable until the probe reports progress or an estimate. On narrow panes the box drops lower-priority information to preserve the warning when it fits.
+
+Hovering the footer opens a split popover. The left side retains timing, rate, health and owner diagnostics. The right side shows the **latest successful check data** as a structured UTF-8 tree, including the check timestamp and every accepted report field. An observation failure retains that successful report and timestamp; its failure appears separately in health and check history. Compact terminals stack the sections.
+
+The adaptive timeline distinguishes successful unchanged checks, reported progress and failed observations, with gaps where no check was recorded. Its time window is at least ten minutes and expands for slow probe intervals; a separate strip shows the last ten checks. History is bounded to the latest 64 checks and survives snapshots. Older snapshots start with unavailable history rather than invented activity. A successful check proves that the probe ran and returned an accepted report; it does not independently verify job liveness.
+
 ### Requirements
 
 - The `ilium progress` commands must be run **from inside an Ilium terminal pane**. Ilium sets `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME` and `ILIUM_SESSION_SOCKET` in each pane's environment and the command uses them to find the right pane and server. Outside a pane the command fails with a message naming the missing variable.
@@ -230,7 +238,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
 | `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
 | `ilium progress status` | Every monitor of this pane: registration, latest report and monitor health (`monitor_count`, `running`, `monitors`). | `progress_status` |
-| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
+| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor, refused with `monitor-running` while its task still runs unless `--running` is given. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
 
 
 ### Waiting for a monitor
@@ -249,7 +257,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 
 The record also carries `composer_notice`: `suppressed` means the server did not, and will not, type a result message for this monitor, because this command delivered it. `may-also-arrive` means a message was already typed (or may be) and is a duplicate of this record. If the wait command is killed or the agent stops it, the server falls back to typing the message, so nothing is lost.
 
-Without `--timeout-seconds` the command waits as long as the job takes. Agent tools that limit a command's run time either move it to the background (Claude Code) or need a timeout that fits the tool: pick a `--timeout-seconds` below the tool's limit and run the command again on exit status 6.
+Without `--timeout-seconds` the command waits as long as the job takes, which is what agents should use: one wait that ends only when the task ends. Agent tools that limit a command's run time should run it with their longest wait (Claude Code: as a background command; Codex: `yield_time_ms` equal to `background_terminal_max_timeout`) instead of looping on short timeouts.
 
 The usual way to run a long job is one command that registers the monitor and waits for it:
 
@@ -288,9 +296,11 @@ The probe is any command line. On Linux and macOS Ilium runs it as `$SHELL -c "<
 | --- | --- | --- |
 | `job_id` | string | Required, non-empty, at most 256 bytes. **Must be identical on every run**; a changed id is rejected as a job identity change. |
 | `status` | string | Required. One of `not-started-yet`, `running`, `error`, `done`. |
-| `percent` | number | Required, finite, 0 to 100. For `done` Ilium forces exactly 100. |
+| `percent` | number | Optional; when supplied it must be finite and from 0 to 100. Omit it when progress is unavailable. For `done` Ilium forces exactly 100. |
+| `indeterminate` | boolean | Optional; set to `true` when progress cannot be measured. Ilium hides the gauge and ETA. |
 | `message` | string | Optional, may be empty, at most 2048 bytes, no control characters. The compact line always shown in the pane footer. |
 | `details` | string | Optional, at most 8192 bytes. Multi-line; newline, carriage return and tab are allowed, other control characters are not. Shown when you hover the footer. |
+| `eta_seconds` | integer | Optional, whole seconds the task still needs, at most 315360000 (ten years). Measured from this report; the footer ETA counts down from it, and the measured pace only supplies the confidence range in the hover popover. Omit it when the task cannot know; Ilium then estimates from the measured pace. |
 | `error` | string | **Required when `status` is `error`** (at most 4096 bytes); **forbidden otherwise**. An empty string counts as absent. |
 
 Unknown fields are rejected, so a typo cannot be silently ignored.
@@ -317,23 +327,15 @@ Probes run with no stdin, and descendants left behind by the probe are killed wh
 
 **Use absolute paths.** The probe is started by the Ilium **server**, not by your shell. It does not inherit your pane's current directory, your shell's `cd`, exported variables or aliases. It starts in the server's working directory, which is the session's project root, for the lifetime of the server. A relative path that works in your shell silently reads the wrong place (the classic symptom is a monitor stuck at 0 percent while the job is fine). Use absolute paths or begin the command with an explicit `cd /absolute/path &&`.
 
+**Report the real phase.** Use `not-started-yet` while queued and describe compilation, linking or waiting in the message. When no measurable total exists, say progress is indeterminate in `details` and omit the percentage. Use actual completed/total counters when available. Do not add clocks or heartbeat counters to the message to hide a no-reported-progress warning; changes to details or ETA alone do not reset it.
+
+**Verify the actual job.** Read its final exit/result record first. Local checks need boot identity plus process start/command identity to guard PID reuse. Recheck the result after finding a vanished process, before reporting an error. Remote probes must verify the remote worker and result source: a live local SSH wrapper cannot prove a remote compiler is running. An inaccessible job is an observation failure, not evidence of success or a known task failure. Ilium cannot infer these facts from an arbitrary shell command; the probe owns this contract.
+
 **Keep it cheap.** A new shell is started on every tick. Prefer reading a small state or log file the job writes, over recursive directory scans, network calls or heavy subprocesses. If the check is inherently expensive, raise `--interval-seconds`.
 
 **Write for a stranger.** The person glancing at the footer has not read your session. Make `message` stand alone: what is being done, to which thing, and the current step with a count, for example `Building the release binaries of the ilium terminal app - compiling crate 14 of 22`. On `done` or `error` it states the outcome. Use `details` (3 to 8 short lines, with labels such as `What:`, `Why:`, `Now:`, `Next:`, `Watch:`) for the longer explanation, and update both on every poll so they track the real step.
 
-A minimal probe script that reads a state file the job maintains:
-
-```sh
-#!/bin/sh
-# /home/me/bin/build-progress.sh - cheap, absolute paths only.
-state=/home/me/build/.progress
-done_count=$(cat "$state/done" 2>/dev/null || echo 0)
-total=$(cat "$state/total" 2>/dev/null || echo 1)
-percent=$(( done_count * 100 / total ))
-if [ -f "$state/finished" ]; then status=done; else status=running; fi
-printf '{"job_id":"release-build-2026-10-04","status":"%s","percent":%s,"message":"Building the release binaries - crate %s of %s","details":"What: release build of the project\\nNow: compiling crate %s of %s\\nNext: install and verify"}\n' \
-  "$status" "$percent" "$done_count" "$total" "$done_count" "$total"
-```
+The job should atomically publish its accepted report to a small state file after checking actual work counters and process/result identity. A probe that simply reads that file is suitable only when the producer's disappearance is checked too. A fixed `running` file or a missing completion file alone can otherwise report running forever. Test a probe against successful completion, failed completion, a vanished worker and an inaccessible remote host before registering it.
 
 Check it, then register it:
 
@@ -450,7 +452,7 @@ The guidance deliberately discourages chatter. Agents are told to read recent co
 
 ## Agent setup
 
-Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, and never poll). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
+Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, never poll, and treat each monitor result as one attempt: verify a success, inspect and retry a failure, check the task directly when the outcome is unknown, then continue the request; after a reboot or Ilium restart, find the restored monitor by its job id and check the task once). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
 
 ### What gets edited
 
@@ -468,7 +470,7 @@ Edits are **marker-delimited blocks**, so only text between Ilium's own markers 
 <!-- /ilium-agent-feature: chatroom -->
 ```
 
-The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=9 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
+The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=13 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
 
 Ilium installs and refreshes the global blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. The global files already apply to every project, so Ilium never adds project copies on its own: they would repeat the same text, and a new project `AGENTS.md` would stop Codex from reading that project's `CLAUDE.md`. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
 
@@ -544,6 +546,12 @@ The request waits until the agent's prompt is ready, then submits the prompt, so
 
 ---
 
+### Remote control routes
+
+Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pane, and apply any operation `ilium ctl` offers. See [`ilium ctl`](cli-reference.md#ilium-ctl) for the commands; the routes mirror them one to one (`GET /v1/tree`, `GET /v1/panes/{id}`, `POST /v1/ops`, `POST /v1/panes/{id}/input`, `POST /v1/voice`, ...). `GET /v1/guide` returns the essentials.
+
+To close a worktree agent's pane from outside it, the same route as `ilium close-pane` is `POST /v1/ops` with `{"op":"close","pane":12,"worktree":"remove"}` (`keep`, `remove` or `remove-and-branch`). A refused removal returns HTTP 409 with `"code":"worktree-removal-refused"` and the server's reasons in `"error"`; the worktree is then left for you to inspect. A removal the server does not confirm in time returns HTTP 409 with the code `unconfirmed`; check the worktree before retrying. See [Wrap up a worktree agent](worktrees.md#wrap-up-a-worktree-agent).
+
 ## Reset forecasts
 
 The status bar can show when the providers' public, discretionary usage resets are announced. These come from public announcement feeds, not from your account.
@@ -579,3 +587,9 @@ Stored under `[reset_planning]` as `monitor_claude`, `monitor_codex` and `time_s
 | `ilium chat send` says the project does not have a chatroom | Run `ilium chat init` there, or add the room from the project menu. |
 | Agents ignore Chatroom or Progress rules | Check Settings, Setup for the target status; start a new agent session so it re-reads its instruction files. |
 | `curl` to port 8872 is refused | Server started with another `[api] port`; the port was in use when the server started (see the server log); the server has not been restarted since you changed the port. |
+
+## Shared resource coordination
+
+Project resources provide exclusive FIFO reservations for a GPU or individual USB board, shared with any project that links the same resource. Creating or linking one installs catalog-driven managed instructions in the project's supported agent files. These blocks are independent of the global Chatroom and Progress setup switches; unlinking removes only the resource projection. Failed instruction synchronization is reported as repair debt rather than undoing a committed resource.
+
+An agent reserves once and uses `ilium resource wait RESERVATION` when queued. The command blocks and displays a native segmented queue strip; it requires no shell probe and consumes none of the eight generic progress-monitor slots. Interrupting the command retains the reservation. Acquisition notifications remain pending until authenticated status/wait readback. See [Resource queues](resource-queues.md) for commands, safe release and guarded recovery.

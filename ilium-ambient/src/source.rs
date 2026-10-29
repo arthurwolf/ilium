@@ -666,12 +666,8 @@ pub fn fetch_cached(
     max_bytes: usize,
     timeout: Duration,
 ) -> Result<Vec<u8>, FetchError> {
-    let provider_state_dir = default_cache_dir().join("provider-admission");
     fetch_cached_with(
-        FetchDirectories {
-            cache_dir,
-            provider_state_dir: &provider_state_dir,
-        },
+        cache_dir,
         url,
         extension,
         max_age,
@@ -681,15 +677,8 @@ pub fn fetch_cached(
     )
 }
 
-/// Directories a cached fetch uses: entries, and host admission state shared
-/// across processes. Split so tests can isolate admission from the user's cache.
-struct FetchDirectories<'a> {
-    cache_dir: &'a Path,
-    provider_state_dir: &'a Path,
-}
-
 fn fetch_cached_with(
-    directories: FetchDirectories<'_>,
+    cache_dir: &Path,
     url: &str,
     extension: &str,
     max_age: Duration,
@@ -697,19 +686,35 @@ fn fetch_cached_with(
     timeout: Duration,
     fetch: impl FnOnce(&str, usize, Instant) -> Result<Vec<u8>, FetchError>,
 ) -> Result<Vec<u8>, FetchError> {
-    let cache_dir = directories.cache_dir;
+    fetch_cached_with_admission(
+        cache_dir,
+        &default_cache_dir().join("provider-admission"),
+        url,
+        extension,
+        max_age,
+        max_bytes,
+        timeout,
+        fetch,
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // Same explicit cache limits as fetch_cached_with, plus the admission directory tests inject.
+fn fetch_cached_with_admission(
+    cache_dir: &Path,
+    admission_dir: &Path,
+    url: &str,
+    extension: &str,
+    max_age: Duration,
+    max_bytes: usize,
+    timeout: Duration,
+    fetch: impl FnOnce(&str, usize, Instant) -> Result<Vec<u8>, FetchError>,
+) -> Result<Vec<u8>, FetchError> {
     let path = cache_dir.join(cache_file_name(url, extension));
     if let Some(bytes) = read_fresh_cache(&path, max_age, max_bytes)? {
         return Ok(bytes);
     }
     let deadline = Instant::now() + timeout;
-    let _lease = match provider_host_lease(
-        url,
-        directories.provider_state_dir,
-        MIN_HOST_SPACING,
-        deadline,
-        None,
-    ) {
+    let _lease = match provider_host_lease(url, admission_dir, MIN_HOST_SPACING, deadline, None) {
         Ok(lease) => lease,
         Err(error) => {
             return match read_bounded_file(&path, max_bytes) {
@@ -972,16 +977,10 @@ mod tests {
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let first_dir = cache.clone();
-        // Host admission state is process-wide; the test keeps its own copy.
-        let state = directory.path().join("provider-admission");
-        let first_state = state.clone();
-        let second_state = state;
         let first = std::thread::spawn(move || {
-            fetch_cached_with(
-                FetchDirectories {
-                    cache_dir: &first_dir,
-                    provider_state_dir: &first_state,
-                },
+            fetch_cached_with_admission(
+                &first_dir,
+                &first_dir.join("provider-admission"),
                 "https://cache-race.invalid/data",
                 "json",
                 Duration::from_secs(30),
@@ -997,11 +996,9 @@ mod tests {
         entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let second_dir = cache.clone();
         let second = std::thread::spawn(move || {
-            fetch_cached_with(
-                FetchDirectories {
-                    cache_dir: &second_dir,
-                    provider_state_dir: &second_state,
-                },
+            fetch_cached_with_admission(
+                &second_dir,
+                &second_dir.join("provider-admission"),
                 "https://cache-race.invalid/data",
                 "json",
                 Duration::from_secs(30),

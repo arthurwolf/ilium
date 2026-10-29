@@ -40,6 +40,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 #[path = "ui_openstreetmap_tests.rs"]
 mod osm_attribution_tests;
 
+#[cfg(test)]
+#[path = "ui_polish_tests.rs"]
+mod polish_tests;
+
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
     draw_at_with_cursor(frame, app, animation_elapsed);
@@ -53,6 +57,11 @@ pub(crate) fn draw_at_with_cursor(
 ) -> Option<Position> {
     app.composed_tree_rows = None;
     app.composed_terminal_sources.clear();
+    // The attention button's row is part of the tree panel's geometry, so the
+    // reservation must match the mode before anything is measured or drawn.
+    tree_ui::set_attention_button_reserved(app.attention_enabled());
+    tree_ui::set_attention_button_large(app.attention_settings.large_buttons);
+    tree_ui::set_tree_toolbar_always_visible(app.ui_settings.tree_toolbar_always_visible);
     app.reconcile_animation_presentation();
     app.composed_editor_sources.clear();
     let area = frame.area();
@@ -85,6 +94,8 @@ pub(crate) fn draw_at_with_cursor(
             || app.hovered_goal_resume.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
+            || app.recap_popover.is_some()
+            || app.hovered_recap_refresh.is_some()
             || popover_visible
         {
             // These late overlays own arbitrary blank pixels inside computed
@@ -96,6 +107,7 @@ pub(crate) fn draw_at_with_cursor(
         draw_goal_resume_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
+        draw_recap_tooltips(frame, app);
         if popover_visible {
             if let Some(popover) = &app.agent_popover {
                 if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
@@ -149,8 +161,17 @@ pub(crate) fn draw_at_with_cursor(
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
     if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
         app.animation_frame.discard_composed_receipt();
+        if let Some(view) = &mut app.diagnostic_view {
+            crate::diagnostic::render(frame, view);
+        }
         return None;
     }
+    if let Some(view) = &mut app.diagnostic_view {
+        crate::diagnostic::render(frame, view);
+        app.animation_frame.discard_composed_receipt();
+        return None;
+    }
+    app.resource_overlay(frame);
     cursor
 }
 
@@ -232,7 +253,18 @@ fn draw_smart_copy_preview(frame: &mut Frame, area: Rect, app: &App) {
         height,
     );
     frame.render_widget(Clear, dialog);
-    let block = theme::block(true).title(theme::chrome_title("Preview"));
+    let chrome = theme::chrome_title("Preview");
+    // At the supported twelve-cell minimum, the title and decorative chrome
+    // cannot both fit. Keep the identifying label first; retain the ordinary
+    // UTF-8 chrome after it, where the border renderer can clip decoration.
+    let title = if chrome.width() > usize::from(dialog.width.saturating_sub(2)) {
+        let mut title = Line::from(" Preview ");
+        title.spans.extend(theme::chrome_title("").spans);
+        title
+    } else {
+        chrome
+    };
+    let block = theme::block(true).title(title);
     let inner = block.inner(dialog);
     frame.render_widget(block, dialog);
     if inner.height < 2 {
@@ -406,8 +438,15 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
     let Some(progress) = app.progress_monitor_at(pane_id, progress_area, anchor) else {
         return;
     };
-    let content = crate::progress_bar::details_tooltip(progress);
-    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+    let owner = app.progress_owner_label(pane_id);
+    crate::progress_popover::render(
+        frame,
+        app.layout.screen_area,
+        anchor,
+        progress,
+        app.progress_display_now_unix_millis(),
+        owner.as_deref(),
+    );
 }
 
 fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
@@ -425,6 +464,7 @@ fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
     crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
+#[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
 fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
     let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 1) else {
         return;
@@ -434,21 +474,28 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
         if let Some(explanation) = app.emitted_worktree_tooltip(hit.id) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(workspace) = app.tree.pane_workspace(hit.id) {
-        let explanation = crate::status_icons::workspace_explanation(
-            workspace,
-            app.workspace_git_statuses.get(&hit.id),
-        );
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
+    if app.emitted_geometry.is_none() {
+        if let Some(workspace) = app.tree.pane_workspace(hit.id) {
+            let explanation = crate::status_icons::workspace_explanation(
+                workspace,
+                app.workspace_git_statuses.get(&hit.id),
+            );
+            crate::status_icons::render_tooltip(
+                frame,
+                app.layout.screen_area,
+                anchor,
+                &explanation,
+            );
+        }
     }
 }
 
 /// Explains the tree-row state glyph under the pointer. The slot's signal is
 /// retained with the actually emitted row; newer server evidence cannot
 /// change its explanation until that row's next frame is acknowledged.
+#[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
 fn draw_status_tooltip(frame: &mut Frame, app: &App) {
     let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
         return;
@@ -457,11 +504,12 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         if let Some(tooltip) = app.emitted_status_tooltip(node_id, slot) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, tooltip);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+    if app.emitted_geometry.is_none() {
+        if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+        }
     }
 }
 fn status_tooltip_content(
@@ -473,6 +521,11 @@ fn status_tooltip_content(
         identity_explanation, now_explanation, objective_explanation, StatusSlot,
     };
 
+    if slot == StatusSlot::Now {
+        if let Some(error) = app.blocking_error_tooltip(node_id) {
+            return Some(error);
+        }
+    }
     let node = app.tree.get(node_id)?;
     if slot == StatusSlot::Identity {
         let structural = match &node.kind {
@@ -480,6 +533,7 @@ fn status_tooltip_content(
                 let (title, kind) = match &container.kind {
                     ilium_core::ContainerKind::Project { .. } => ("Project", "project"),
                     ilium_core::ContainerKind::Group => ("Group", "group"),
+                    ilium_core::ContainerKind::Worktree { .. } => ("Worktree", "fixed worktree"),
                     ilium_core::ContainerKind::SplitView { .. } => ("Split view", "split view"),
                 };
                 Some((title, kind))
@@ -527,6 +581,23 @@ fn status_tooltip_content(
     // The tree row shows one glyph for all of the pane's monitors; explain
     // the monitor that glyph represents.
     let progress = ilium_core::representative_progress(progress_monitors);
+    if slot == StatusSlot::Now {
+        if let Some(warning) = crate::status_icons::detection_freshness_warning(
+            status,
+            app.pane_detection_evidence.get(&node_id),
+            crate::scheduled_input::unix_millis_now(),
+        ) {
+            let last_activity = now_explanation(signals.now).map_or(
+                "Not shown by the current monitoring preference",
+                |explanation| explanation.title,
+            );
+            return Some(crate::status_icons::TooltipContent {
+                title: "Agent activity needs a fresh check".to_string(),
+                body: format!("{warning} Last known activity: {last_activity}."),
+                reason: Some("Why: observation freshness affects only this display; the server's activity, goal and unread completion are retained.".to_string()),
+            });
+        }
+    }
     let explanation = match slot {
         StatusSlot::Identity => Some(identity_explanation(status)),
         StatusSlot::Objective => objective_explanation(signals.objective),
@@ -660,6 +731,47 @@ fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
     app.stats_popover = Some(popover);
 }
 
+/// Draws the recap popover and the refresh-icon tooltip. Both show cached
+/// text and the phase bar of a running recap.
+fn draw_recap_tooltips(frame: &mut Frame, app: &App) {
+    for (anchor, content) in [app.recap_popover_tooltip(), app.recap_refresh_tooltip()]
+        .into_iter()
+        .flatten()
+    {
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+    }
+}
+
+/// Styles the third header dot of an agent pane as the recap handle: accent
+/// while a recap is cached or running, filled while its popover is open.
+fn draw_recap_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
+    if viewport.outer_area.width < 12 || !app.is_known_agent_pane(viewport.pane_id) {
+        return;
+    }
+    let is_open = app
+        .recap_popover
+        .as_ref()
+        .is_some_and(|popover| popover.pane_id == viewport.pane_id);
+    let style = if is_open {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD)
+    };
+    let cell = theme::chrome_recap_cell(viewport.outer_area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            app.ui_settings
+                .icons
+                .glyph(IconTarget::ChromeRecap)
+                .to_string(),
+            style,
+        )),
+        Rect::new(cell.x, cell.y, 1, 1),
+    );
+}
+
 /// Styles the second header icon of an agent pane as the popover's handle:
 /// accent-coloured when idle, filled while its popover is open.
 fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
@@ -734,12 +846,54 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let focused_pane_id = app.focused_pane_id();
     let tree_order = app.effective_tree_order();
     let agent_models = app.current_tree_models();
+    // Read before `render` takes `&mut app.tree_state`; the hover state only needs the mask.
+    let pending_toolbar = app.pending_toolbar_mask();
+    let mut custom_toolbar_pending: std::collections::HashSet<String> = app
+        .pending_pane_creations
+        .values()
+        .filter(|pending| !pending.uncertainty_reported)
+        .filter_map(|pending| pending.custom_profile_id.clone())
+        .collect();
+    if app.active_workspace_create_request_id.is_some() {
+        if let Mode::CreateAgentWorkspace(state) = &app.mode {
+            if let Some(identity) = &state.custom_agent {
+                custom_toolbar_pending.insert(identity.profile_id.clone());
+            }
+        }
+    }
+    let profiles_by_id: std::collections::HashMap<_, _> = app
+        .custom_agents
+        .profiles
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect();
+    let custom_agent_labels: std::collections::HashMap<_, _> = app
+        .custom_agent_panes
+        .iter()
+        .map(|(pane_id, identity)| {
+            let label = profiles_by_id
+                .get(identity.profile_id.as_str())
+                .map(|profile| (profile.icon.clone(), profile.name.clone()))
+                .unwrap_or_else(|| {
+                    (
+                        "?".to_string(),
+                        format!("Missing profile ({})", identity.profile_id),
+                    )
+                });
+            (*pane_id, label)
+        })
+        .collect();
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
         &app.tree,
         &mut app.tree_state,
         tree_ui::TreeRenderOptions {
+            custom_toolbar_profiles: Some(&app.custom_agents.profiles),
+            custom_toolbar_selected: app.custom_toolbar_selected.as_deref(),
+            custom_toolbar_hovered: app.custom_toolbar_hovered.as_deref(),
+            custom_toolbar_pending: Some(&custom_toolbar_pending),
+            custom_agent_labels: Some(&custom_agent_labels),
             focused: tree_focused,
             elapsed_ms: if matches!(
                 app.ui_settings.motion_level,
@@ -751,6 +905,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
+            detection_evidence: Some(&app.pane_detection_evidence),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
@@ -762,6 +917,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             agent_identifiers: &app.ui_settings.agent_identifiers,
             agent_models: &agent_models,
             icons: &app.ui_settings.icons,
+            row_layout: &app.ui_settings.tree_row_layout,
             workspace_git_statuses: &app.workspace_git_statuses,
             show_worktree_branch_line: app.git_settings.branch_line
                 != crate::config::GitBranchLine::Off,
@@ -779,13 +935,26 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
+                pending_toolbar,
                 show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
             sidebar_files: &app.sidebar_snapshot,
             chatroom_projects: &app.chatroom_projects,
+            resources: Some(&app.resources),
             panes: &app.panes,
         },
     );
+    if let Some(button_area) = app.attention_button_rect() {
+        let (main_area, plus_area) = crate::attention::dialog::split_button(button_area);
+        crate::attention::panel::render_button(frame, main_area, app.attention_count());
+        if let Some(plus_area) = plus_area {
+            crate::attention::dialog::render_plus(
+                frame,
+                plus_area,
+                app.is_attention_plus_hovered(),
+            );
+        }
+    }
     let values = painted_rows
         .node_ids()
         .map(|node_id| {
@@ -819,6 +988,11 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         })
         .collect();
     painted_rows.retain_values(values);
+    let blocked = painted_rows
+        .node_ids()
+        .filter(|node_id| app.blocking_error_tooltip(*node_id).is_some())
+        .collect();
+    painted_rows.paint_blocking_errors(frame, &blocked);
     app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
@@ -907,6 +1081,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
         Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
+        Mode::LastPromptDialog(state) => draw_last_prompt_dialog(frame, area, state),
         Mode::AgentDebugSavePath(_, state) => {
             cursor = modal::render_text_prompt_cursor(
                 frame,
@@ -1113,6 +1288,17 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                     frame,
                     crate::session_conversion::dialog_area(pane_area, area),
                     state,
+                );
+            }
+        }
+        Mode::AttentionOverview => {
+            if let Some(state) = &app.attention.dialog {
+                crate::attention::dialog::render(
+                    frame,
+                    area,
+                    state,
+                    &app.attention_overview_cards(),
+                    app.ui_settings.color_scheme,
                 );
             }
         }
@@ -1583,7 +1769,7 @@ fn draw_context_menu(
         let item = &submenu.items[index];
         let checked = if matches!(submenu.parent, crate::app::ContextMenuAction::OrderBy) {
             Some(
-                matches!(item.action, SubmenuItemAction::SetTreeOrder(order) if order == current_tree_order),
+                matches!(&item.action, SubmenuItemAction::SetTreeOrder(order) if *order == current_tree_order),
             )
         } else {
             None
@@ -2404,6 +2590,49 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) -> 
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
     let _ = draw_pane_sources(frame, area, app);
 }
+/// Centred dialog with the full, wrapped text of a pane's last prompt and
+/// Copy / Close buttons on its bottom border.
+fn draw_last_prompt_dialog(
+    frame: &mut Frame,
+    screen: Rect,
+    state: &crate::last_prompt_toolbar::LastPromptDialogState,
+) {
+    let dialog = crate::last_prompt_toolbar::dialog_area(screen);
+    frame.render_widget(Clear, dialog);
+    let block = theme::block(true).title(theme::chrome_title("Last prompt"));
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+    let total_lines = u16::try_from(
+        crate::last_prompt_banner::wrap_lines(&state.text, inner.width.saturating_sub(2)).len(),
+    )
+    .unwrap_or(u16::MAX);
+    let max_scroll = total_lines.saturating_sub(inner.height);
+    let text_area = Rect::new(
+        inner.x + 1,
+        inner.y,
+        inner.width.saturating_sub(2),
+        inner.height,
+    );
+    frame.render_widget(
+        Paragraph::new(state.text.as_str())
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((state.scroll.min(max_scroll), 0)),
+        text_area,
+    );
+    for (rect, label) in [
+        (
+            crate::last_prompt_toolbar::dialog_copy_button(dialog),
+            crate::last_prompt_toolbar::dialog_copy_label(),
+        ),
+        (
+            crate::last_prompt_toolbar::dialog_close_button(dialog),
+            crate::last_prompt_toolbar::dialog_close_label(),
+        ),
+    ] {
+        frame.render_widget(Paragraph::new(label), rect);
+    }
+}
+
 fn draw_pane_sources(
     frame: &mut Frame,
     area: Rect,
@@ -2414,8 +2643,22 @@ fn draw_pane_sources(
         crate::agent_debug_ui::render(frame, area, app, state);
         return Vec::new();
     }
+    if matches!(app.right_panel_target, RightPanelTarget::Resource { .. }) {
+        app.resource_detail(frame, area);
+        return Vec::new();
+    }
     if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
         crate::chatroom_ui::render(frame, area, app, *project_id);
+        return Vec::new();
+    }
+    if matches!(app.right_panel_target, RightPanelTarget::Attention) {
+        crate::attention::panel::render_panel(
+            frame,
+            area,
+            &app.attention_panel_rows(),
+            app.attention.panel_selected,
+            matches!(app.focus, FocusTarget::Pane),
+        );
         return Vec::new();
     }
     let viewports = app.pane_viewports();
@@ -2430,8 +2673,14 @@ fn draw_pane_sources(
             ),
             _ => ("Terminal", "no pane selected"),
         };
-        let placeholder =
-            Paragraph::new(message).block(theme::block(false).title(theme::chrome_title(title)));
+        // Placeholder copy gets the same inner breathing room as the pane frames.
+        let placeholder = Paragraph::new(message)
+            .block(
+                theme::block(false)
+                    .title(theme::chrome_title(title))
+                    .padding(ratatui::widgets::Padding::new(2, 1, 1, 0)),
+            )
+            .style(Style::new().add_modifier(Modifier::DIM));
         frame.render_widget(placeholder, area);
         return Vec::new();
     }
@@ -2465,6 +2714,26 @@ fn draw_screen_transfer_controls(frame: &mut Frame, app: &App) {
     }
 }
 
+fn blocking_terminal_error(error: &crate::status_icons::TooltipContent) -> String {
+    match error.reason.as_deref() {
+        Some(reason) => format!("{}\n{reason}", error.body),
+        None => error.body.clone(),
+    }
+}
+
+fn initial_terminal_error(
+    term: &terminal_view::TerminalView,
+    blocking_error: Option<&crate::status_icons::TooltipContent>,
+) -> Option<String> {
+    if let Some(error) = blocking_error {
+        return Some(blocking_terminal_error(error));
+    }
+    term.admission_error.clone().or_else(|| {
+        (term.frontend.is_some() && !term.has_initial_display())
+            .then(|| "waiting for initial terminal state".to_string())
+    })
+}
+
 fn draw_pane_runtime(
     frame: &mut Frame,
     app: &App,
@@ -2476,10 +2745,16 @@ fn draw_pane_runtime(
     let pane_title = pane_title(app, viewport.pane_id);
     let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
+        let blocking_error = app
+            .blocking_error_tooltip(viewport.pane_id)
+            .map(|error| blocking_terminal_error(&error));
         let placeholder = Paragraph::new(
-            app.editor_load_error(viewport.pane_id)
+            blocking_error
+                .as_deref()
+                .or_else(|| app.editor_load_error(viewport.pane_id))
                 .unwrap_or("pane is loading"),
         )
+        .wrap(ratatui::widgets::Wrap { trim: true })
         .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
         frame.render_widget(placeholder, viewport.outer_area);
         if let Some(action) = completed_agent_close_action {
@@ -2542,11 +2817,11 @@ fn draw_pane_runtime(
                 });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
-                let display_error = term.admission_error.as_deref().or_else(|| {
-                    (term.frontend.is_some() && !term.has_initial_display())
-                        .then_some("waiting for initial terminal state")
-                });
-                if let Some(error) = display_error {
+                let blocking_error = (!term.has_initial_display())
+                    .then(|| app.blocking_error_tooltip(viewport.pane_id))
+                    .flatten();
+                let display_error = initial_terminal_error(term, blocking_error.as_ref());
+                if let Some(error) = display_error.as_deref() {
                     use crate::terminal_parsing::ParserPressure;
 
                     let message = match term.parser_pressure() {
@@ -2681,6 +2956,7 @@ fn draw_pane_runtime(
     }
 
     draw_stats_icon(frame, app, viewport);
+    draw_recap_icon(frame, app, viewport);
 
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
@@ -2719,11 +2995,16 @@ fn draw_pane_runtime(
                             .unwrap_or_default(),
                         show_labels: app.ui_settings.show_toolbar_labels,
                         selection_enabled: app.ui_settings.terminal_text_selection_enabled,
+                        show_prompt_reopen: app.last_prompt_reopen_available(viewport.pane_id),
                     },
                     hovered,
                 );
             }
         }
+    }
+
+    if matches!(runtime, PaneRuntime::Terminal(_)) {
+        draw_section_rules(frame, app, viewport, pane_focused);
     }
 
     if let Some(last_prompt_area) = viewport.last_prompt_area {
@@ -2736,7 +3017,39 @@ fn draw_pane_runtime(
                 app.display_last_agent_prompt(viewport.pane_id),
                 app.ui_settings.last_prompt_max_lines.into(),
                 app.ui_settings.color_scheme,
+                crate::last_prompt_toolbar::has_toolbar(last_prompt_area.width)
+                    .then(|| app.last_prompt_toolbar_visibility(viewport.pane_id)),
+                app.hovered_last_prompt_button
+                    .and_then(|(pane_id, button)| (pane_id == viewport.pane_id).then_some(button)),
             );
+        }
+    }
+
+    if let Some(briefing_area) = viewport.briefing_area {
+        if matches!(runtime, PaneRuntime::Terminal(_)) {
+            if let Some(view) = app.briefing_view(viewport.pane_id) {
+                crate::attention::briefing::render(
+                    frame,
+                    briefing_area,
+                    &view,
+                    app.ui_settings.color_scheme,
+                    app.hovered_briefing_button(viewport.pane_id),
+                );
+            }
+        }
+    }
+
+    // A newly arrived attention item announces itself on the focused pane's
+    // rule beside the last-prompt banner; never over terminal content.
+    if pane_focused && matches!(runtime, PaneRuntime::Terminal(_)) {
+        if let (Some(rule), Some((kind, title, reason))) = (
+            viewport
+                .last_prompt_bottom_rule
+                .or(viewport.toolbar_rule)
+                .or(viewport.progress_rule),
+            app.attention_arrival_view(),
+        ) {
+            crate::attention::panel::render_arrival(frame, rule, kind, &title, &reason);
         }
     }
 
@@ -2744,18 +3057,83 @@ fn draw_pane_runtime(
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_progress_footer(viewport.pane_id)
         {
+            let native_rows = app.resource_wait_footer_rows(viewport.pane_id, progress_area.height);
+            let native_wait = native_rows > 0;
+            let ordinary_area = if native_wait {
+                Rect::new(
+                    progress_area.x,
+                    progress_area.y.saturating_add(native_rows),
+                    progress_area.width,
+                    progress_area.height.saturating_sub(native_rows),
+                )
+            } else {
+                progress_area
+            };
+            if native_wait {
+                app.resource_wait_footer(
+                    frame,
+                    Rect::new(
+                        progress_area.x,
+                        progress_area.y,
+                        progress_area.width,
+                        native_rows,
+                    ),
+                    viewport.pane_id,
+                );
+            }
             crate::progress_bar::render_monitors(
                 frame,
-                progress_area,
+                ordinary_area,
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,
+                app.progress_display_now_unix_millis(),
             );
         }
     }
 
     if let Some(action) = completed_agent_close_action {
         draw_completed_agent_close_action(frame, action.button_area);
+    }
+}
+
+/// Frame rules around the toolbar, prompt banner and progress footer. Each
+/// rule is drawn only when its section has something to show; an empty
+/// reserved slot stays blank, exactly as it did before frames existed.
+fn draw_section_rules(
+    frame: &mut Frame,
+    app: &App,
+    viewport: crate::split_layout::PaneViewport,
+    focused: bool,
+) {
+    let pane_id = viewport.pane_id;
+    let prompt_shown = app.shows_last_prompt_banner(pane_id);
+    if let Some(rule) = viewport.toolbar_rule {
+        if app.shows_agent_toolbar(pane_id) {
+            let title = prompt_shown.then_some("\u{276f} last prompt");
+            crate::section_frame::render_rule(frame, rule, title, focused);
+        }
+    }
+    if let Some(rule) = viewport.last_prompt_bottom_rule {
+        if prompt_shown {
+            crate::section_frame::render_rule(frame, rule, None, focused);
+        }
+    }
+    if let Some(rule) = viewport.briefing_bottom_rule {
+        if app.briefing_view(pane_id).is_some() {
+            crate::section_frame::render_rule(frame, rule, None, focused);
+        }
+    }
+    if let Some(rule) = viewport.progress_rule {
+        let monitors = app.visible_progress_monitors(pane_id).len();
+        if monitors > 0 {
+            let title = if monitors == 1 {
+                "progress".to_string()
+            } else {
+                format!("progress \u{b7} {monitors} tasks")
+            };
+            crate::section_frame::render_rule(frame, rule, Some(&title), focused);
+        }
     }
 }
 
@@ -3010,15 +3388,14 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.textarea.selection_range(),
                     current,
                 );
-                draw_source_scrollbar(frame, chrome.content_area, editor);
+                draw_source_scrollbar(frame, chrome.scrollbar_area, editor);
             } else {
                 frame.render_widget(
-                    Paragraph::new(
-                        editor
-                            .preparation_error
-                            .as_deref()
-                            .unwrap_or("Preparing source…"),
-                    ),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Preparing source…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3032,11 +3409,21 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.rendered_scroll,
                     editor.line_display,
                 );
-                draw_rendered_scrollbar(frame, chrome.content_area, document, editor);
+                draw_rendered_scrollbar(
+                    frame,
+                    chrome.content_area,
+                    chrome.scrollbar_area,
+                    document,
+                    editor,
+                );
             }
             None => {
                 frame.render_widget(
-                    Paragraph::new(editor.preparation_error.as_deref().unwrap_or("Rendering…")),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Rendering…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3096,12 +3483,14 @@ fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 /// that already fits" rule.
 fn draw_rendered_scrollbar(
     frame: &mut Frame,
-    area: Rect,
+    text_area: Rect,
+    scrollbar_area: Rect,
     document: &markdown::render::RenderedDocument,
     editor: &EditorPane,
 ) {
-    let total_height = markdown::view::content_height(document, area.width, editor.line_display);
-    if total_height <= area.height {
+    let total_height =
+        markdown::view::content_height(document, text_area.width, editor.line_display);
+    if total_height <= text_area.height {
         return;
     }
     let mut scrollbar_state = ScrollbarState::new(usize::from(total_height))
@@ -3110,7 +3499,7 @@ fn draw_rendered_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(Some("│"));
-    frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
 }
 
 /// The source line the minimap should mark as "you are here": the cursor
@@ -3216,6 +3605,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
         Mode::SmartCopy => "SMART COPY",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
+        Mode::LastPromptDialog(..) => "LAST PROMPT",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
@@ -3240,6 +3630,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         Mode::ConvertSession => "CONVERTING SESSION",
         Mode::RemoteCompaction => "REMOTE COMPACTION",
+        Mode::AttentionOverview => "NEEDS YOU",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",
@@ -3272,15 +3663,26 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::raw("  —  "));
         spans.push(Span::raw(status));
     }
+    if let Some(activity) = app.pending_menu_activity_text(std::time::Instant::now()) {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(
+            activity,
+            bar_style.add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(notice) = app.request_refusal_notice(std::time::Instant::now()) {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(notice, bar_style.add_modifier(Modifier::BOLD)));
+    }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));
         // Borrow rather than `message.clone()` -- `app` outlives this
         // function's local `spans`, so there is no need to allocate a new
         // `String` copy of the status message on every render frame.
-        spans.push(Span::raw(message.as_str()));
+        spans.push(Span::raw(format!("F9 details · {message}")));
     } else if let Some(error) = app.semantic_animation_error() {
         spans.push(Span::raw("  —  "));
-        spans.push(Span::raw(error));
+        spans.push(Span::raw(format!("F9 details · {error}")));
     }
 
     let cap_style = theme::statusbar_cap_style();
@@ -3549,6 +3951,25 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn terminal_placeholder_prioritizes_concrete_blocking_failure() {
+        let mut term = TerminalView::new(24, 80);
+        term.admission_error = Some("parser allocation unavailable".into());
+        let error = crate::status_icons::TooltipContent {
+            title: "Cannot start terminal".into(),
+            body: "villainess-study: start agent: git exited 128".into(),
+            reason: Some("fatal: malformed gitfile\nFix the repository metadata".into()),
+        };
+        let placeholder = initial_terminal_error(&term, Some(&error)).unwrap();
+        assert!(placeholder.contains("git exited 128"));
+        assert!(placeholder.contains("fatal: malformed gitfile"));
+        assert!(!placeholder.contains("waiting for initial terminal state"));
+        assert_eq!(
+            initial_terminal_error(&term, None).as_deref(),
+            Some("parser allocation unavailable")
+        );
+    }
+
+    #[test]
     fn status_tooltip_values_advance_only_after_the_original_row_is_emitted() {
         let mut app = App::new("painted-tooltip".into(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -3613,16 +4034,37 @@ mod tests {
             .tree
             .add_pane(group, "waiting agent", PaneContentKind::Terminal)
             .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(
-                    AgentClass::Codex,
-                    AgentActivity::WaitingApproval,
-                    Some(GoalState::Blocked),
-                ),
-            )
-            .unwrap();
+        let status = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::WaitingApproval,
+            Some(GoalState::Blocked),
+        );
+        app.tree.set_pane_status(pane_id, status.clone()).unwrap();
+        // This test exercises the fresh approval projection; unchecked agents
+        // intentionally display a freshness warning instead of live approval.
+        app.pane_detection_evidence.insert(
+            pane_id,
+            ilium_ipc::PaneDetectionEvidence {
+                applied_status: status,
+                observed_at_unix_millis: crate::scheduled_input::unix_millis_now(),
+                stale_after_millis: 30_000,
+                identity: None,
+                activity: Some(ilium_ipc::DetectionReason {
+                    rule: "approval prompt".to_string(),
+                    observed: Some(
+                        include_str!(
+                            "../../ilium-detect/tests/fixtures/codex_awaiting_approval.txt"
+                        )
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .to_string(),
+                    ),
+                    context: "Captured Codex approval fixture".to_string(),
+                }),
+                goal: None,
+            },
+        );
         app.ui_settings.agent_monitoring_mode =
             crate::agent_monitoring::AgentMonitoringMode::Attention;
         app.set_screen_area(Rect::new(0, 0, 100, 24));
@@ -3667,7 +4109,12 @@ mod tests {
         let rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(rendered.contains("Needs your approval"));
         assert!(rendered.contains("Attention selection rule:"));
-        assert!(rendered.contains("Attention priority 1:"));
+        // Terminal wrapping can split a word inside the provenance text.
+        let unwrapped: String = rendered
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && *ch != '│')
+            .collect();
+        assert!(unwrapped.contains("Attentionpriority1:"), "{rendered}");
     }
 
     #[test]
@@ -4275,11 +4722,11 @@ mod tests {
     fn stacked_voice_credential_prompt_renders_over_live_settings() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::VoiceControl,
             selected_row: 1,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::ApiKey, 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
 
@@ -4798,7 +5245,14 @@ pub(crate) fn test_source_window_pixels(
     height: u16,
 ) -> ratatui::buffer::Buffer {
     editor.show_minimap = false;
-    let area = Rect::new(0, 0, width, height + crate::editor_chrome::TOOLBAR_HEIGHT);
+    // One extra column: the editor reserves it for the scrollbar, so the
+    // text window keeps the requested width.
+    let area = Rect::new(
+        0,
+        0,
+        width + 1,
+        height + crate::editor_chrome::TOOLBAR_HEIGHT,
+    );
     let content = crate::editor_chrome::compute(area, false).content_area;
     assert_eq!(content.width, width);
     assert_eq!(content.height, height);

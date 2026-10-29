@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Design decisions | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details open><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/" aria-current="page">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Project</b></p>
+<h1>Design decisions</h1>
+
+<p>The user made seven decisions on 2026-10-11 about the plugin platform, D1 to D7. On the same day the user overrode one earlier rule so that plugins can add tabs and sections to Settings, recorded as SE1 to SE20. On 2026-10-12 the user asked that the API and the widget catalogue express everything Ilium has. That work added 42 additions (AX1 to AX42) and raised eighteen open questions, D8 to D25. This page records each decision: the question it answered, the decision, the reason and the effect on plugin authors.</p>
+<p>D1 to D27 and SE1 to SE20 are decided (D3 is superseded in part by D27, D9 is replaced by D13). Most entries state the choice and the alternative that was not taken. Where a decision differs from the original recommendation, the page says so.</p>
+<p>In plain terms, a plugin is a WebAssembly component. Rust and TypeScript both compile to that form and run under one contract, one set of limits and one set of capability grants. Third-party code runs in a separate helper process. First-party code runs inside the Ilium process. The decisions set these boundaries, and the other pages apply them.</p>
+<h3 id="you-will-need">You will need</h3>
+<p>Nothing to install or grant. This page explains design choices and asks nothing of you. Read it when a rule in another page looks strict, for example when a T2 package is refused on Windows, when a timer refuses an interval under 50 ms, or when a high-risk grant is off by default even for a bundled plugin. The <a href="/pages/glossary/">Glossary</a> defines the terms tier, side and grant that this page uses.</p>
+<h3 id="summary">Summary</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Decision</th>
+<th>Status</th>
+<th>What it means for you</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td>JavaScript and TypeScript compile to WebAssembly components</td>
+<td>Decided</td>
+<td>Both languages share one contract, one set of limits and one set of grants</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>Saved-world and file-reading scenes are plugins</td>
+<td>Decided</td>
+<td>Scenes read files through scoped grants; editor and basic primitives exist to build on</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>Local and signed packages first, a registry later</td>
+<td>Superseded in part by D27</td>
+<td>You can always distribute a file; a T2 package needs a signature from a key the user trusts</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>Editors and boards are native in version 1</td>
+<td>Decided</td>
+<td>Use the editor primitive; a plugin that provides the editor is a post-v1 feature</td>
+</tr>
+<tr>
+<td>D5</td>
+<td>A separate-process sandbox is mandatory for T2 and T3</td>
+<td>Decided</td>
+<td>Third-party code runs in a helper process; Windows and macOS refuse it</td>
+</tr>
+<tr>
+<td>D6</td>
+<td>Bundled plugins are precompiled and start lazily</td>
+<td>Decided</td>
+<td>Activation triggers decide when your plugin first runs</td>
+</tr>
+<tr>
+<td>D7</td>
+<td>One <code>.iliumpkg</code> format replaces <code>.iliumanim</code></td>
+<td>Decided</td>
+<td>Rebuild old packages; the <code>limits</code> object gains five fields</td>
+</tr>
+<tr>
+<td>SE1 to SE20</td>
+<td>Plugins add tabs and sections to Settings</td>
+<td>Decided</td>
+<td>Rows are declared in the manifest, labelled by the kernel and stored under your plugin id</td>
+</tr>
+<tr>
+<td>D8</td>
+<td><code>path</code> rows store a string only</td>
+<td>Decided</td>
+<td>A path picked in Settings gives no file scope</td>
+</tr>
+<tr>
+<td>D9</td>
+<td>Reading built-in values</td>
+<td>Replaced by D13</td>
+<td>See D13</td>
+</tr>
+<tr>
+<td>D10</td>
+<td>No user reordering of plugin sections</td>
+<td>Decided</td>
+<td>Section order is fixed</td>
+</tr>
+<tr>
+<td>D11</td>
+<td>Kernel rows keep their own reset and debounce behaviour</td>
+<td>Decided</td>
+<td>Only plugin rows have the <code>r</code> reset and the <code>•</code> modified mark</td>
+</tr>
+<tr>
+<td>D12</td>
+<td>First-party limits tier only for bundled <code>ilium.*</code> plugins</td>
+<td>Decided</td>
+<td><code>limits_tier: "first-party"</code> is refused for anyone else</td>
+</tr>
+<tr>
+<td>D13</td>
+<td>Kernel settings are readable; the tab owner may write</td>
+<td>Decided</td>
+<td>Any plugin can read a kernel value. Only the one owner plugin of a tab can write it</td>
+</tr>
+<tr>
+<td>D14</td>
+<td>The host owns geocoding</td>
+<td>Decided</td>
+<td>You never call a geocoder through <code>http</code></td>
+</tr>
+<tr>
+<td>D15</td>
+<td>Embeddings only through the selected inference provider</td>
+<td>Decided</td>
+<td><code>vector.embed</code> can return <code>unsupported</code></td>
+</tr>
+<tr>
+<td>D16</td>
+<td>Cross-session commands are high risk and same-plugin only</td>
+<td>Decided</td>
+<td>You can reach only your own commands in other sessions</td>
+</tr>
+<tr>
+<td>D17</td>
+<td>Raw input and the input lock are high risk</td>
+<td>Decided</td>
+<td>The lock lasts at most 2 s</td>
+</tr>
+<tr>
+<td>D18</td>
+<td>GPU access is <code>@unstable</code> and host kernels only</td>
+<td>Decided</td>
+<td>You cannot ship shader code</td>
+</tr>
+<tr>
+<td>D19</td>
+<td>No <code>preview</code> rows in kernel tabs</td>
+<td>Decided</td>
+<td>Previews live in your own tab</td>
+</tr>
+<tr>
+<td>D20</td>
+<td>Toasts need a grant and a rate limit</td>
+<td>Decided</td>
+<td>3 toasts per 10 s per plugin</td>
+</tr>
+<tr>
+<td>D21</td>
+<td>Durable timers fire late once; journaled input never replays</td>
+<td>Decided</td>
+<td>You may get <code>input-uncertain</code> after a crash</td>
+</tr>
+<tr>
+<td>D22</td>
+<td>Agent transcripts are typed turns from the host</td>
+<td>Decided</td>
+<td>No raw transcript files</td>
+</tr>
+<tr>
+<td>D23</td>
+<td>A host taken from a setting is confirmed by the user</td>
+<td>Decided</td>
+<td>The first request to a new host waits for the user</td>
+</tr>
+<tr>
+<td>D24</td>
+<td>Package assets: 64 MiB, 256 MiB for T1</td>
+<td>Decided</td>
+<td>Video and font assets must fit</td>
+</tr>
+<tr>
+<td>D25</td>
+<td><code>open-external</code> asks once per target origin</td>
+<td>Decided</td>
+<td>The first open of a site waits for the user</td>
+</tr>
+<tr>
+<td>D26</td>
+<td>One uniform mechanism for extension points, hooks fail open, replacement needs a declared surface, no wildcard grants</td>
+<td>Decided</td>
+<td>Any plugin can offer a slot and any plugin can fill it, one point at a time</td>
+</tr>
+<tr>
+<td>D27</td>
+<td>An optional static registry protocol, no central store</td>
+<td>Decided</td>
+<td>Anyone can host a signed registry or mirror; Ilium ships with none configured</td>
+</tr>
+</tbody>
+</table>
+<h2 id="d1-javascript-and-typescript-compiled-to-components">D1: JavaScript and TypeScript compiled to components</h2>
+<p><strong>Question.</strong> How does JavaScript or TypeScript run in the platform? The original draft proposed generated V8 glue. The alternative is to compile the code to WebAssembly components.</p>
+<p><strong>Decision.</strong> JavaScript and TypeScript are compiled to a WebAssembly component with <code>componentize-js</code>. <code>componentize-qjs</code> is not used. The SDK pins <code>@bytecodealliance/componentize-js</code> and <code>@bytecodealliance/jco</code> as exact dependencies of <code>@ilium/plugin-sdk</code>, and Bun 1.2 or later is the only global tool. V8 stays only for the existing animation packages until the animation migration (Phase 4c).</p>
+<p><strong>Reason.</strong> The contract is synchronous by design, so it fits a component build exactly. One host, one linker and one conformance suite then cover both languages. The alternative would need a WIT-to-V8 generator with no upstream, a second dispatcher and a doubled conformance matrix. This decision replaces the original recommendation of generated V8 glue.</p>
+<p><strong>Effect on authors.</strong> A TypeScript plugin faces the same limits, grants and error codes as a Rust plugin. <code>ilium plugin build</code> detects the language from the files in the project folder. A <code>Cargo.toml</code> means Rust, and a <code>package.json</code> means TypeScript. If both are present and <code>--lang</code> is absent, the build fails. See the <a href="/pages/typescript-sdk/">TypeScript SDK reference</a> and the <a href="/pages/rust-sdk/">Rust SDK reference</a>.</p>
+<h2 id="d2-scope-of-plugins">D2: Scope of plugins</h2>
+<p><strong>Question.</strong> Which built-in features must be native, and which can be plugins?</p>
+<p><strong>Decision.</strong> The user disagreed with native-by-default for several areas. Saved-world scenes are plugins. They read their files through scoped <code>fs.read:&lt;scope&gt;</code> grants and use the codec helpers. File-reading scenes also use scoped reads. Editors get an editor primitive, a host-provided pane kind that plugins extend or build on. The basic primitive is a generic pane kind from which a plugin can build a kanban board, for example. Plugins get a UI-building API that mirrors the ratatui widget model, and that API is enough to build settings screens.</p>
+<p><strong>Reason.</strong> Saved-world and file-reading scenes can be plugins once the ABI gives scoped file access and processing helpers. The primitives let editors and boards be built on the same contract that plugins use, so a later move needs no ABI change.</p>
+<p><strong>Effect on authors.</strong> A scene that reads a folder declares a grant such as <code>fs.read:&lt;scope&gt;</code> in its manifest. The user approves that grant in the review dialog. Build screens with <code>ilium_plugin_sdk::ui::build</code> in Rust or <code>@ilium/plugin-sdk/ui/build</code> in TypeScript. Each widget is listed in the <a href="/pages/widgets-index/">widget pages</a>. The <a href="/pages/primitives/">primitives</a> and <a href="/pages/settings-screens/">settings screens</a> pages show the rest of the surface.</p>
+<h2 id="d3-third-party-scope-for-version-1">D3: Third-party scope for version 1</h2>
+<p><strong>Question.</strong> Should version 1 include a marketplace?</p>
+<p><strong>Decision.</strong> Local and signed packages are the base of the system. A package is a file that users pass on, and <code>ilium plugin install &lt;file.iliumpkg&gt;</code> installs it. Ilium ships no central marketplace and no default registry. Decision D27 adds an optional, self-hostable registry protocol on top of the file; it replaces the earlier wording "no registry and no download".</p>
+<p><strong>Reason.</strong> A marketplace costs signing infrastructure, index hosting and a review policy. Local signed files need none of those to be loaded and verified.</p>
+<p><strong>Effect on authors.</strong> A T2 package is signed with Ed25519. The signature covers the canonical bytes of <code>manifest.json</code>, and the manifest's <code>publisher</code> must match the key's recorded publisher. You create a key with <code>ilium plugin keygen --publisher "&lt;name&gt;" --out &lt;dir&gt;</code>. A T3 package is unsigned. It installs only with <code>--allow-unsigned</code>, or through <code>ilium plugin dev</code>, and it carries a dev badge. The <a href="/pages/security/">Security model</a> page lists every tier.</p>
+<h2 id="d4-editors-and-boards-native-in-version-1">D4: Editors and boards native in version 1</h2>
+<p><strong>Question.</strong> Are the editor and boards native pane kinds, or plugins?</p>
+<p><strong>Decision.</strong> Native in version 1. Plugin support for them is a planned phase after v1. The primitives are shaped so that moving the editor and boards later needs no ABI break.</p>
+<p><strong>Reason.</strong> The editor would be the first user of a pane-body contract that needs keymap arbitration, cursor, selection and clipboard semantics. The user chose native in v1 and a planned post-v1 phase, so the primitives are designed to make that move cheap.</p>
+<p><strong>Effect on authors.</strong> The editor primitive exists in v1, and a plugin can use it. A plugin that provides the editor needs the <code>editor.provide</code> grant, which only T1 bundled plugins can receive, and it arrives after v1. A calling plugin names the primitive, not a provider, so it does not change when the provider moves. See the <a href="/pages/roadmap/">Roadmap</a>.</p>
+<figure>
+<svg viewBox="0 0 360 150" role="img" aria-label="Editor primitive routed to a provider" width="540" height="225">
+  <title>Provider routing for the editor primitive</title>
+  <desc>A caller plugin calls the editor primitive. The kernel router sends the call to the registered provider. In version 1 that provider is native. After v1, a T1 plugin may register as the provider, and the caller does not change.</desc>
+  <defs>
+    <marker id="arrow-editor" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="56" width="96" height="34" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="54" y="77" text-anchor="middle" fill="currentColor" font-size="10">Caller plugin</text>
+  <rect x="132" y="56" width="96" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="180" y="77" text-anchor="middle" fill="currentColor" font-size="10">Kernel router</text>
+  <rect x="240" y="10" width="112" height="34" rx="6" fill="none" stroke="currentColor"/>
+  <text x="296" y="24" text-anchor="middle" fill="currentColor" font-size="10">Native provider</text>
+  <text x="296" y="40" text-anchor="middle" fill="currentColor" font-size="10">version 1</text>
+  <rect x="240" y="106" width="112" height="34" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="296" y="120" text-anchor="middle" fill="currentColor" font-size="10">Plugin provider</text>
+  <text x="296" y="136" text-anchor="middle" fill="currentColor" font-size="10">after v1, T1 only</text>
+  <path d="M104 73 L130 73" stroke="currentColor" fill="none" marker-end="url(#arrow-editor)"/>
+  <path d="M230 66 L238 40" stroke="currentColor" fill="none" marker-end="url(#arrow-editor)"/>
+  <path d="M230 80 L238 116" stroke="currentColor" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow-editor)"/>
+</svg>
+<figcaption>The caller names the editor primitive, not a provider. The kernel router chooses the provider, so moving the editor to a plugin changes the router target and not the caller.</figcaption>
+</figure>
+
+<h2 id="d5-separate-process-sandbox-for-third-party-plugins">D5: Separate-process sandbox for third-party plugins</h2>
+<p><strong>Question.</strong> Should third-party WebAssembly run in the Ilium process?</p>
+<p><strong>Decision.</strong> No. A separate-process sandbox is mandatory for third-party plugins (T2 and T3). The helper process runs the plugin host for those packages inside the sandbox, which opens only the directories the user granted. The sandbox exists on Linux only. Windows and macOS refuse to load third-party packages until a sandbox exists on those platforms.</p>
+<p><strong>Reason.</strong> Running third-party code in-process would rely on Wasmtime alone for isolation. The design record counts twelve Wasmtime advisories in two months, which is the reason for a separate process boundary.</p>
+<p><strong>Effect on authors.</strong> A T2 or T3 plugin runs in the helper and sees only its granted folders. A <code>process.run:sh</code> grant is refused for T2 and T3 at install with <code>manifest.grant-tier</code>. On Windows and macOS, the install is refused with the message below. First-party T1 plugins run in-process on every platform. See the <a href="/pages/security/">Security model</a>.</p>
+<figure>
+<svg viewBox="0 0 360 150" role="img" aria-label="Sandbox placement for each tier" width="540" height="225">
+  <title>Where each tier runs</title>
+  <desc>T0 and T1 run in the Ilium process. T2 and T3 run in a helper process behind the sandbox boundary, which is mandatory for them. Calls from plugins reach the kernel through host imports.</desc>
+  <defs>
+    <marker id="arrow-sandbox" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="6" width="348" height="62" rx="8" fill="none" stroke="currentColor"/>
+  <text x="16" y="22" fill="currentColor" font-size="10">Ilium process: T0 kernel, T1 plugins (any platform)</text>
+  <rect x="22" y="32" width="110" height="26" rx="5" fill="none" stroke="currentColor"/>
+  <text x="77" y="49" text-anchor="middle" fill="currentColor" font-size="10">Kernel (T0)</text>
+  <rect x="180" y="32" width="110" height="26" rx="5" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="235" y="49" text-anchor="middle" fill="currentColor" font-size="10">T1 plugins</text>
+  <rect x="6" y="84" width="348" height="60" rx="8" fill="none" stroke="currentColor" stroke-width="3"/>
+  <text x="180" y="100" fill="currentColor" font-size="10">Helper process: T2, T3</text>
+  <rect x="22" y="110" width="170" height="26" rx="5" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="107" y="127" text-anchor="middle" fill="currentColor" font-size="10">Third-party plugins</text>
+  <text x="200" y="127" fill="currentColor" font-size="10">Windows, macOS: refused</text>
+  <path d="M60 110 L60 58" stroke="currentColor" fill="none" marker-end="url(#arrow-sandbox)"/>
+</svg>
+<figcaption>The helper boundary is mandatory for third-party code. The refusal on Windows and macOS stays until a sandbox exists on those platforms.</figcaption>
+</figure>
+
+<pre class="term"><span class="t-err">err</span>  Cannot install example.notes
+     0.1.0. Third-party plugins need the plugin sandbox,
+     which is not available on Windows yet. Bundled plugins
+     keep working.
+<span class="t-ok">ok</span>   ilium.notes 0.1.0 (T1) listed,
+     starts on first use
+</pre>
+
+<p>Illustrative, not generated. A signed third-party package refused on Windows, next to a first-party plugin that starts on first use.</p>
+<h2 id="d6-bundled-plugins-precompiled-and-lazy">D6: Bundled plugins precompiled and lazy</h2>
+<p><strong>Question.</strong> How are first-party WebAssembly plugins delivered and started?</p>
+<p><strong>Decision.</strong> Bundled plugins are embedded in the release precompiled, as <code>.cwasm</code>, and start lazily on first need. Wasmtime's on-demand allocator is the default. A plugin starts when one of its activation triggers fires. Without an <code>activation</code> list, it starts on the first use of any of its contributions.</p>
+<p><strong>Reason.</strong> Compiling about forty plugins with Cranelift at every start costs time at each launch. The design record notes that Zellij abandoned Wasmtime over that cost. Precompiled components with lazy activation meet the start-time and memory targets of the <a href="/pages/performance/">performance budget</a>: under 5 ms and under 4 MiB resident memory for each precompiled Rust component.</p>
+<p><strong>Effect on authors.</strong> Use <code>activation</code> in the manifest to choose the trigger. The triggers are <code>startup</code>, <code>event:&lt;event-name&gt;</code>, <code>command:&lt;id&gt;</code>, <code>view:&lt;id&gt;</code>, <code>pane-kind:&lt;id&gt;</code>, <code>scene:&lt;id&gt;</code>, <code>cli:&lt;name&gt;</code>, <code>http:&lt;path&gt;</code>, <code>service:&lt;interface&gt;</code>, <code>topic:&lt;topic&gt;</code> and <code>settings:&lt;tab-id&gt;</code>. A plugin that must run at launch declares <code>startup</code>. Start order is in the <a href="/pages/lifecycle/">lifecycle</a> page, and the manifest keys are in the <a href="/pages/reference-manifest/">manifest reference</a>.</p>
+<h2 id="d7-one-package-format">D7: One package format</h2>
+<p><strong>Question.</strong> Should the animation package format stay alongside the plugin format?</p>
+<p><strong>Decision.</strong> One <code>.iliumpkg</code> format replaces <code>.iliumanim</code>, with no compatibility layer. The package is a deterministic ZIP32 archive with stored entries, sorted paths and fixed timestamps. The <code>limits</code> object gains memory, table, event-deadline, render-deadline and command-deadline fields. The loader does not accept the old format.</p>
+<p><strong>Reason.</strong> Keeping both formats would mean two loaders to maintain. The project has no users yet, so a one-time rebuild costs little.</p>
+<p><strong>Effect on authors.</strong> An <code>.iliumanim</code> package must be rebuilt as a <code>.iliumpkg</code>. The <a href="/pages/porting-iliumanim/">Porting from .iliumanim</a> page lists the changes. The <code>limits</code> keys and their ceilings are below. A request above the ceiling is clamped and logged. It is never refused.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>T1 ceiling</th>
+<th>T2 and T3 ceiling</th>
+<th>Exceeded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>memory_mib</code></td>
+<td>32</td>
+<td>256</td>
+<td>128</td>
+<td>instance trapped</td>
+</tr>
+<tr>
+<td><code>table_elements</code></td>
+<td>10,000</td>
+<td>50,000</td>
+<td>20,000</td>
+<td>instance trapped</td>
+</tr>
+<tr>
+<td><code>event_deadline_ms</code></td>
+<td>20</td>
+<td>50</td>
+<td>20</td>
+<td>instance trapped</td>
+</tr>
+<tr>
+<td><code>command_deadline_ms</code></td>
+<td>50</td>
+<td>100</td>
+<td>50</td>
+<td>instance trapped</td>
+</tr>
+<tr>
+<td><code>render_deadline_ms</code></td>
+<td>10</td>
+<td>20</td>
+<td>10</td>
+<td>instance trapped</td>
+</tr>
+</tbody>
+</table>
+<h3 id="worked-example-a-limit-request-above-the-ceiling">Worked example: a limit request above the ceiling</h3>
+<p>A signed T2 plugin asks for a longer event deadline than its tier allows. The manifest excerpt below requests 64 MiB of memory and a 30 ms event deadline.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.notes&quot;,
+  &quot;name&quot;: &quot;Notes&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Labs&quot;,
+  &quot;limits&quot;: {
+    &quot;memory_mib&quot;: 64,
+    &quot;event_deadline_ms&quot;: 30
+  },
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [] }
+}
+</code></pre>
+<p>The memory request fits the T2 ceiling of 128 MiB and is used as given. The 30 ms request is above the T2 ceiling of 20 ms, so the host clamps it and writes one line to the log:</p>
+<pre class="term"><span class="t-warn">warn</span> example.notes:
+     limit event_deadline_ms 30 clamped to 20 (T2 ceiling)
+</pre>
+
+<p>Illustrative, not generated. The log line the host writes when it clamps a manifest limit.</p>
+<h2 id="the-settings-extension-decisions">The Settings extension decisions</h2>
+<p>On 2026-10-11 the user overrode the earlier rule that a plugin cannot attach to a kernel settings page. The twenty decisions SE1 to SE20 follow from that override. The page <a href="/pages/settings-extension/">Plugin settings extension</a> explains them in full. In short:</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SE1, SE2</td>
+<td>A plugin may add tabs to Settings and sections to built-in tabs. A custom page is a plugin tab with <code>"render": "view"</code>, and <code>settings_pages</code> is removed</td>
+</tr>
+<tr>
+<td>SE3, SE4</td>
+<td>Every kernel tab has a frozen kebab-case id. Kernel tabs expose anchors, which are only ever added</td>
+</tr>
+<tr>
+<td>SE5</td>
+<td><code>animations</code>, <code>debug</code>, <code>api</code>, <code>about</code>, <code>setup</code> and the recovery page accept no plugin sections</td>
+</tr>
+<tr>
+<td>SE6</td>
+<td>Plugins add, never alter. Values live only under <code>[plugins."&lt;plugin-id&gt;"]</code></td>
+</tr>
+<tr>
+<td>SE7, SE8</td>
+<td>Rows are declared inline. There are 18 types. Object list items have at most 8 primitive fields</td>
+</tr>
+<tr>
+<td>SE9</td>
+<td>Plugin tabs carry <code>· plugin</code> in the frame title. Plugin blocks in kernel tabs carry one divider per plugin per anchor and a <code>▏</code> gutter on every line. Plugin text is plain and sanitized</td>
+</tr>
+<tr>
+<td>SE10</td>
+<td>Kernel tabs host only static plugin rows plus <code>set-info</code>, <code>set-choices</code> and <code>set-row-note</code>. View-rendered content is allowed only in the plugin's own tab</td>
+</tr>
+<tr>
+<td>SE11</td>
+<td>The grant <code>settings.contribute:&lt;kernel-tab-id&gt;</code> allows sections in that tab and nothing else</td>
+</tr>
+<tr>
+<td>SE12, SE13</td>
+<td>Limits are enforced at load time. Ordering is anchor, then <code>order</code>, then plugin id, then declaration order</td>
+</tr>
+<tr>
+<td>SE14</td>
+<td>Values are never deleted by disable, failure, upgrade or uninstall. Only <code>--purge</code> or "Forget settings" deletes them</td>
+</tr>
+<tr>
+<td>SE15</td>
+<td>Toggles and choices save at once. Number steps and text save 600 ms after the last change, and text areas after 1 s</td>
+</tr>
+<tr>
+<td>SE16, SE17</td>
+<td><code>settings-changed</code> carries <code>keys</code>, <code>origin</code> and <code>side</code>. The optional export <code>settings-validate</code> has a 100 ms deadline</td>
+</tr>
+<tr>
+<td>SE18 to SE20</td>
+<td>Id grammar, a kernel search filter over kernel and plugin rows, and a kernel-owned settings registry</td>
+</tr>
+</tbody>
+</table>
+<p>The extended rows are part of these decisions: SE7's twelve base row types are joined by six more (<code>location</code>, <code>preview</code>, <code>notice</code>, <code>map</code>, <code>multi-choice</code> and <code>meter</code>), SE8's object items may have up to 8 fields, and SE10 still keeps <code>preview</code> rows and every view-rendered content out of kernel tabs (D19).</p>
+<h2 id="decisions-d8-to-d25">Decisions D8 to D25</h2>
+<p>The decisions below are final. Each entry states the choice, and the second half says what the alternative would have changed. The reference for the choices is the design record of the plugin platform; the effect on plugin code is on the pages named in each entry.</p>
+<h3 id="d8-d10-d11-settings-questions">D8, D10, D11: Settings questions</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Question</th>
+<th>Decided</th>
+<th>If the user chooses otherwise</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D8</td>
+<td>Does a <code>path</code> row grant file access to the picked path?</td>
+<td>No. The row stores a string only. A plugin that must open the file asks for an <code>fs.read</code> grant, or uses <code>path-field</code>, which returns a picked scope and never a raw path</td>
+<td>The plugin could open the picked path without a broad grant, at the cost of a persistent file scope created from Settings</td>
+</tr>
+<tr>
+<td>D9</td>
+<td>Reading built-in values</td>
+<td>Replaced by <a href="#d13-kernel-settings-are-readable-and-the-tab-owner-may-write">D13</a>: kernel settings are readable and the tab owner may write</td>
+<td>See D13</td>
+</tr>
+<tr>
+<td>D10</td>
+<td>May the user reorder plugin sections inside a built-in tab?</td>
+<td>No. The order is anchor, then <code>order</code>, then plugin id</td>
+<td>A per-user order that must be stored and reconciled when plugins appear or disappear</td>
+</tr>
+<tr>
+<td>D11</td>
+<td>Do kernel rows adopt the <code>r</code> reset, the <code>•</code> modified mark and the 600 ms debounce of plugin rows?</td>
+<td>No. Kernel rows keep their own reset and debounce behaviour. Only plugin rows have the <code>r</code> reset and the <code>•</code> modified mark</td>
+<td>Kernel and plugin rows would behave the same everywhere</td>
+</tr>
+</tbody>
+</table>
+<h3 id="d12-the-first-party-limits-tier">D12: the first-party limits tier</h3>
+<p><strong>Question.</strong> Who may use <code>limits_tier: "first-party"</code>, which lifts the settings caps to 8 tabs, 2,048 value keys, 64 rows per section, 1,024 list items and 512 choice options?</p>
+<p><strong>Decision.</strong> Only bundled T1 plugins whose id starts with <code>ilium.</code>. Any other package is refused at install with <code>manifest.limits-tier</code>. The tier raises only the settings caps and the <code>list-editor</code> cap. The ceilings of the requestable limits stay as they are.</p>
+<p><strong>Alternative.</strong> Signed T2 plugins could ask for it too, which a settings-heavy third-party plugin might need. The caps would then stop protecting the Settings screen.</p>
+<p><strong>Effect on authors.</strong> Write <code>"limits_tier": "standard"</code> or omit the key. If your package is first-party and bundled, set <code>"first-party"</code>, and keep the id under <code>ilium.</code>.</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin install ./example.notes-1.0.0.iliumpkg
+<span class="t-err">error</span> manifest.limits-tier  limits_tier first-party needs a
+      bundled plugin whose id starts with ilium.
+<span class="t-dim">step</span>  install stopped before any code was loaded
+</pre>
+<figcaption>Illustrative, not generated. A third-party package that asks for the first-party tier stops at the install checks.</figcaption>
+</figure>
+
+<h3 id="d13-kernel-settings-are-readable-and-the-tab-owner-may-write">D13: kernel settings are readable and the tab owner may write</h3>
+<p><strong>Question.</strong> May a plugin read a built-in setting, such as a key that Smart Copy uses?</p>
+<p><strong>Decision.</strong> Yes, read for every plugin, write for one owner per tab. The grant <code>settings.read-kernel:&lt;kernel-tab-id&gt;</code> allows <code>kernel-settings.read</code> for one tab and the event <code>kernel-settings-changed</code>. The argument is required and has no wildcard. Secrets are always returned as <code>&lt;redacted&gt;</code>. The <code>api</code> tab is high risk. The matching <code>keymap.read</code> grant returns the keymap and sends <code>keymap-changed</code>. The grant <code>settings.write-kernel:&lt;kernel-tab-id&gt;</code> allows <code>kernel-settings.write</code> for one tab. It is T1 only and high risk, and at most one plugin holds it for a tab (the core plugin that owns the tab, see <a href="/pages/reference-config-and-data-migration/">config and data migration</a>). No plugin writes the keymap. Every other plugin links to the row with <code>open-external</code>.</p>
+<p><strong>Alternative.</strong> Keep D9's "not provided". A plugin that needs a kernel value would then duplicate it as its own setting and drift from the kernel.</p>
+<p><strong>Effect on authors.</strong> Read a value, and when the user must change it, link to the built-in row with the intent <code>open-external</code> and the target <code>ilium://settings/&lt;tab-id&gt;#&lt;key&gt;</code>. The code below reads one key of one tab. The grant is <code>settings.read-kernel:terminal</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::kernel_settings;
+use ilium_plugin_sdk::prelude::*;
+
+/// Reads one value of a built-in tab. Returns `None` when the grant is missing
+/// or the kernel has no such key.
+fn kernel_value(tab: &amp;str, key: &amp;str) -&gt; Option&lt;serde_json::Value&gt; {
+    let json = kernel_settings::read(tab).ok()?;
+    let values: serde_json::Value = serde_json::from_str(&amp;json).ok()?;
+    values.get(key).cloned()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { PluginError } from '@ilium/plugin-sdk';
+import { read } from '@ilium/plugin-sdk/host/kernel-settings';
+
+/** Reads one value of a built-in tab. Returns undefined when the grant is missing. */
+function kernelValue(tab: string, key: string): unknown {
+  try {
+    const values = JSON.parse(read(tab)) as Record&lt;string, unknown&gt;;
+    return values[key];
+  } catch (error) {
+    if (error instanceof PluginError &amp;&amp; error.code === 'not-permitted') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+</code></pre>
+<h3 id="d14-geocoding">D14: geocoding</h3>
+<p><strong>Question.</strong> Who geocodes place names for <code>location.geocode</code> and the location picker?</p>
+<p><strong>Decision.</strong> The host. It uses Photon, with Nominatim as fallback, asks the user once for consent, limits each plugin to 1 request per second and caches results for 24 h.</p>
+<p><strong>Alternative.</strong> Plugins call geocoders through <code>http</code>. That offers more choice, but every plugin then ships its own politeness and consent, and the user cannot see where place names go.</p>
+<p><strong>Effect on authors.</strong> Use the <code>geocode</code> calls or the <code>location-picker</code> widget. See <a href="/pages/security/">Security model</a> for the consent prompt and for what a declined consent returns.</p>
+<h3 id="d15-embeddings">D15: embeddings</h3>
+<p><strong>Question.</strong> Where do embeddings for <code>vector.embed</code> come from?</p>
+<p><strong>Decision.</strong> Only from the selected inference provider. A provider without embeddings makes the call return <code>unsupported</code>.</p>
+<p><strong>Alternative.</strong> A bundled local embedding model. It works offline but adds tens of megabytes and a native inference path.</p>
+<p><strong>Effect on authors.</strong> Check for <code>unsupported</code> and keep a keyword fallback. The grant is <code>inference.embed</code>.</p>
+<h3 id="d16-cross-session-commands">D16: cross-session commands</h3>
+<p><strong>Question.</strong> May a plugin run commands in the user's other Ilium sessions?</p>
+<p><strong>Decision.</strong> Yes, with the high-risk grant <code>sessions.cross</code>. It is available to T1 and signed T2 plugins only, and only to the same plugin in the other session, which must have the grant too. Kernel commands of another session are never reachable.</p>
+<p><strong>Alternative.</strong> Available to T3 as well. That is simpler, but an unsigned plugin could drive every open session.</p>
+<p><strong>Effect on authors.</strong> Declare the command in your own manifest, ask for <code>sessions.cross</code> on the server side, and expect <code>not-permitted</code> when the other session lacks the plugin or the grant.</p>
+<h3 id="d17-raw-terminal-input-and-the-input-lock">D17: raw terminal input and the input lock</h3>
+<p><strong>Question.</strong> May a plugin send raw bytes or mouse events to a pane, and hold the keyboard while it types?</p>
+<p><strong>Decision.</strong> Both are high risk (<code>terminal.raw-input</code>, <code>terminal.input-lock</code>). The lock lasts at most 2 s, and the user's keys are queued during it.</p>
+<p><strong>Alternative.</strong> No raw input. Plugins then cannot drive TUI programs that need mouse or control bytes, so screen-transfer and agent-control plugins stay partial.</p>
+<p><strong>Effect on authors.</strong> Keep a locked sequence short. See <a href="/pages/security/">Security model</a>.</p>
+<h3 id="d18-gpu-access">D18: GPU access</h3>
+<p><strong>Question.</strong> Can a plugin use the GPU?</p>
+<p><strong>Decision.</strong> Only through <code>gpu.kernels</code>, which is <code>@unstable(feature = gpu-kernels)</code> and appears in development builds only. The host runs its own kernels (blur, threshold, palette map, ordered dither, scale). A plugin never ships a shader.</p>
+<p><strong>Alternative.</strong> <code>wasi:webgpu</code> once it is mature. That gives full shaders, with a large new attack surface and driver-dependent results.</p>
+<p><strong>Effect on authors.</strong> GPU scenes stay native behind the scene adapter. A manifest that names <code>device.gpu</code> is refused with <code>manifest.grant-unknown</code>.</p>
+<h3 id="d19-preview-rows-in-kernel-tabs">D19: <code>preview</code> rows in kernel tabs</h3>
+<p><strong>Decision.</strong> No. A <code>preview</code> row exists in a plugin's own tab only (SE10), because a kernel tab never runs plugin code while it paints.</p>
+<p><strong>Alternative.</strong> Allow it in kernel tabs, which breaks SE10.</p>
+<h3 id="d20-toasts">D20: toasts</h3>
+<p><strong>Question.</strong> May a plugin show an in-app toast?</p>
+<p><strong>Decision.</strong> Yes, with the grant <code>notify.toast</code>, at most 3 per 10 s per plugin and 3 pending. A toast has a title of at most 60 characters, a body of at most 200 characters and up to 2 actions.</p>
+<p><strong>Alternative.</strong> No grant. Any plugin could then cover the screen with toasts.</p>
+<p><strong>Effect on authors.</strong> The code under D25 sends one toast and asks the host to open a status page. A toast and an <code>open-external</code> are submissions, so both can be refused.</p>
+<figure>
+<pre class="term"><span class="t-hi">╭─ Copied 3 regions ───────────────────────╮</span>
+│ Select a pane and press Enter to paste.  │
+│ <span class="t-ok">━━━━━━━━━━━━━━━━</span><span class="t-dim">────────────────────────</span> │
+╰──────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative, not generated. A toast as the client draws it, with the shrinking countdown line below the text. The kernel places the stack.</figcaption>
+</figure>
+
+<h3 id="d25-confirming-open-external">D25: confirming <code>open-external</code></h3>
+<p><strong>Question.</strong> Does the user confirm when a plugin opens a link or file?</p>
+<p><strong>Decision.</strong> The host asks the first time a plugin opens each target origin and remembers the answer per plugin. Only <code>http</code>, <code>https</code> and <code>mailto</code> URLs, files and <code>ilium://settings/...</code> targets are allowed.</p>
+<p><strong>Alternative.</strong> Ask every time, which is safer and tedious for link-heavy panels, or never ask, which lets a plugin open any site.</p>
+<p><strong>Effect on authors.</strong> The first open of a site waits for the user. A decline completes the submission as <code>refused(not-permitted)</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{ExternalTarget, OpenExternalSpec, ToastSpec};
+
+fn status_submissions() -&gt; Vec&lt;Submission&gt; {
+    vec![
+        Submission::new(Intent::Toast(ToastSpec {
+            id: Some(&quot;copied&quot;.into()),
+            tone: Tone::Success,
+            title: &quot;Copied 3 regions&quot;.into(),
+            body: None,
+            actions: vec![],
+            duration_ms: None,
+        })),
+        Submission::new(Intent::OpenExternal(OpenExternalSpec {
+            target: ExternalTarget::Url(&quot;https://status.example.com&quot;.into()),
+        })),
+    ]
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Submission } from '@ilium/plugin-sdk';
+
+function statusSubmissions(): Submission[] {
+  return [
+    {
+      intent: { tag: 'toast', val: { id: 'copied', tone: 'success', title: 'Copied 3 regions', body: undefined, actions: [], durationMs: undefined } },
+      correlation: 1n,
+      dedupKey: undefined,
+    },
+    {
+      intent: { tag: 'open-external', val: { target: { tag: 'url', val: 'https://status.example.com' } } },
+      correlation: 2n,
+      dedupKey: undefined,
+    },
+  ];
+}
+</code></pre>
+<h3 id="d21-timers-and-the-input-journal">D21: timers and the input journal</h3>
+<p><strong>Decision.</strong> Durable timers (<code>timers.at</code>) persist across restarts and fire once, late, with the lateness in <code>durable-timer-fired</code>. A <code>send-input</code> with <code>journal: true</code> that was written to the pane but not confirmed before a crash is reported once as <code>input-uncertain</code> and never replayed.</p>
+<p><strong>Alternative.</strong> Replay unconfirmed input after a restart. No prompt is lost, and a prompt could be sent twice.</p>
+<p><strong>Effect on authors.</strong> Handle <code>input-uncertain</code> by asking the user, not by sending again.</p>
+<h3 id="d22-and-d23-transcripts-and-hosts-from-a-setting">D22 and D23: transcripts and hosts from a setting</h3>
+<ul>
+<li><strong>D22.</strong> Agent transcripts are typed turns that the host parses, behind the high-risk grant <code>agent.transcript</code>. The alternative is raw file access through <code>fs.read:agent-sessions:*</code>, where every plugin parses every agent format and the kernel cannot redact.</li>
+<li><strong>D23.</strong> A host taken from a setting (<code>http:setting:&lt;key&gt;</code>) is confirmed by the user before the first request to each new host. The alternative is to trust the setting, which silently opens a new host when the setting changes.</li>
+</ul>
+<h3 id="d24-package-asset-size">D24: package asset size</h3>
+<p><strong>Decision.</strong> 64 MiB by default and for T2 and T3, up to 256 MiB for T1. A larger package is refused with <code>manifest.asset-size</code>. The alternative is 16 MiB everywhere, which makes packages smaller but does not fit the video and font assets of the media scenes.</p>
+<h2 id="d26-extension-points-hooks-and-replacement">D26: extension points, hooks and replacement</h2>
+<p><strong>Question.</strong> How do plugins add to each other, and how does a third party change a core plugin, without a private API?</p>
+<p><strong>Decision.</strong> One mechanism serves every plugin, core or not. An owner declares a point under <code>contributes.extension_points</code>. A point is either <code>collect</code> (the owner reads data entries) or <code>hook</code> (handlers run inside the owner's flow, in one of four modes: <code>observe</code>, <code>transform</code>, <code>veto</code>, <code>first</code>). A contributor fills it under <code>contributes.extensions</code>. Two grants guard it: <code>extensions.provide:&lt;plugin-id&gt;/&lt;point&gt;</code> and <code>extensions.contribute:&lt;plugin-id&gt;/&lt;point&gt;</code>. A core plugin that can be replaced declares <code>replaceable</code> and a <code>surface</code>, and a package with <code>replaces</code> that provides the whole surface may take its place after the user confirms.</p>
+<p><strong>Why one uniform mechanism.</strong> Core plugins use only the public contract, so everything they can do a third-party plugin can do with the same grants. Services have one provider and topics have no reply. The manual needed a third shape, many contributors to one owner, and building it once keeps one set of limits, one review dialog group and one error table. The existing mechanisms stay.</p>
+<p><strong>Why hooks fail open.</strong> A handler is someone else's code inside the owner's flow. If a timeout, a trap or an error stopped the owner, one slow or broken plugin could freeze text triggers, titles or fleet actions. A failing handler counts as a pass at every point except the high veto points, which fail closed with <code>on_failure: refuse</code> ([SEC-287]), three breaches in a row stop that extension, and the whole chain is capped at 100 ms. Only a <code>veto</code> handler that answers on purpose can stop an action.</p>
+<p><strong>Why replacement needs a surface.</strong> A replacement that provides only part of a core plugin would leave dangling services, commands, pane kinds and topics for other plugins. The <code>surface</code> list is the checklist, and <code>manifest.replaces-surface-incomplete</code> names what is missing. Replacement needs the user's confirmation, not a grant, because the user decides which built-in behaviour to give up. <code>ilium.core.sessions</code> and <code>ilium.core.settings</code> are not replaceable, because they protect saved data and the Plugins screen itself.</p>
+<p><strong>Why no wildcard grants.</strong> A wildcard such as "contribute to any point" would let one package place code in every flow. The user could not read the review dialog and decide. Each point is named, so the dialog can show <code>Text triggers &gt; Before fire: can stop a trigger from sending text (high risk)</code>. The name <code>extensions.contribute-any</code> is not a grant and does not exist.</p>
+<p><strong>Alternative.</strong> Per-plugin special hooks, which give core plugins a private API, or a single global event bus with veto rights, which cannot show the user what a package may stop.</p>
+<p><strong>Effect on authors.</strong> To let others extend your plugin, declare a point and read it with <code>list</code> or <code>run-hook</code>. To extend another plugin, ask for the grant for that exact point and list <code>hook-handler</code> in <code>exports</code> if you add handlers. See <a href="/pages/api-extension-points/">Extension points</a> and <a href="/pages/extending-core-plugins/">Extending core plugins</a>.</p>
+<h2 id="the-api-additions-and-their-decisions">The API additions and their decisions</h2>
+<p>The additions AX1 to AX42 are all additive. "Shape" additions add optional fields to a record that already exists, and they are part of the first frozen contract. After that freeze, the same need is met only by new records and new functions. The table lists every addition.</p>
+<table>
+<thead>
+<tr>
+<th>Addition</th>
+<th>What it adds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AX1</td>
+<td>Hover, <code>tooltip</code> prop, anchored and pinnable non-modal popups</td>
+</tr>
+<tr>
+<td>AX2</td>
+<td>Catalogue <code>choice</code>: option records, typed filter, disabled reasons, previews, paged sources, host catalogues</td>
+</tr>
+<tr>
+<td>AX3</td>
+<td>Settings row semantics: <code>visible_when</code>, step ladders, special values, slider style, project scope, restart marker, per-row debounce, row state, styled info</td>
+</tr>
+<tr>
+<td>AX4</td>
+<td>Terminal cell reads, frozen snapshot, history text, modes, foreground process, <code>screen-changed</code>, <code>user-line-submitted</code></td>
+</tr>
+<tr>
+<td>AX5</td>
+<td>Pane lifecycle intents: freeze, unfreeze, replace command, terminate process, resize with refusal</td>
+</tr>
+<tr>
+<td>AX6</td>
+<td>Tree structure intents and atomic restructure batches with undo</td>
+</tr>
+<tr>
+<td>AX7</td>
+<td>Title provenance (<code>source</code>, expected revision), inferred icon, attention marks</td>
+</tr>
+<tr>
+<td>AX8</td>
+<td><code>open-external</code> intent through the kernel checks: the scheme list and the per-origin consent (no separate target allowlist)</td>
+</tr>
+<tr>
+<td>AX9</td>
+<td>Tree and chrome contribution points; lazy virtual-row children; drops on virtual rows</td>
+</tr>
+<tr>
+<td>AX10</td>
+<td>Rich decorations: styled spans, tooltip, frame animation, trailing segments, hover visibility</td>
+</tr>
+<tr>
+<td>AX11</td>
+<td>Pointer model: view pointer with sub-cell coordinates, drag-over feedback, terminal move and modifier gesture</td>
+</tr>
+<tr>
+<td>AX12</td>
+<td>Settings views may embed display widgets; <code>preview</code> and <code>location</code> rows; <code>location-picker</code> widget; <code>location.geocode</code> service</td>
+</tr>
+<tr>
+<td>AX13</td>
+<td>Picker widgets: <code>color-picker</code>, <code>path-field</code>, icon and glyph choice through catalogues; <code>icon</code> widget</td>
+</tr>
+<tr>
+<td>AX14</td>
+<td>CLI plain text, stderr, bounded stdin, TTY test, caller pane, server-less commands, pane-selector group, cross-session list</td>
+</tr>
+<tr>
+<td>AX15</td>
+<td>Surface v2: glyph plane, owner ids with receipts, font handles, video from bytes or ranges, <code>video</code> widget, pre-rendered loops, larger assets</td>
+</tr>
+<tr>
+<td>AX16</td>
+<td><code>fs</code> atomic write with expected revision, read with revision, tail with cursor, agent home scopes for Gemini and Antigravity</td>
+</tr>
+<tr>
+<td>AX17</td>
+<td>Menu model: dynamic items with click context, submenus, icons, disabled reasons, toolbar submenus</td>
+</tr>
+<tr>
+<td>AX18</td>
+<td>Click targets in styled text; Markdown task clicks and images</td>
+</tr>
+<tr>
+<td>AX19</td>
+<td>Streaming HTTP (SSE, NDJSON, chunked), <code>@unstable</code> WebSocket, politeness; hosts taken from a setting with consent</td>
+</tr>
+<tr>
+<td>AX20</td>
+<td><code>send-input</code> stages with delays, raw bytes, mouse; preconditions; input lock; interactive <code>terminal-view</code></td>
+</tr>
+<tr>
+<td>AX21</td>
+<td>Agent facts: typed transcript, model fact, prompt epoch echo, <code>signal-changed</code>, <code>agent-model-changed</code></td>
+</tr>
+<tr>
+<td>AX22</td>
+<td>Embeddings and a host-held vector index</td>
+</tr>
+<tr>
+<td>AX23</td>
+<td>In-app <code>toast</code>, <code>notice</code> row and widget, <code>notify</code> coalescing</td>
+</tr>
+<tr>
+<td>AX24</td>
+<td><code>chart</code> gains resampling, gaps, text-line rendering (asciichart parity)</td>
+</tr>
+<tr>
+<td>AX25</td>
+<td>Form widgets: tri-state toggle, <code>check-list</code>, <code>key-capture</code>, focus order, secret reveal, slider and stepper styles in views</td>
+</tr>
+<tr>
+<td>AX26</td>
+<td>Table column priority and minimum width, follow-tail, panel placement and mode label</td>
+</tr>
+<tr>
+<td>AX27</td>
+<td>Streaming child processes (<code>process.spawn</code>)</td>
+</tr>
+<tr>
+<td>AX28</td>
+<td>Durable timers and a journaled <code>send-input</code> with <code>uncertain</code> reporting</td>
+</tr>
+<tr>
+<td>AX29</td>
+<td>Read-only kernel settings and keymap reads</td>
+</tr>
+<tr>
+<td>AX30</td>
+<td>Limit tiers (<code>limits_tier: "first-party"</code>)</td>
+</tr>
+<tr>
+<td>AX31</td>
+<td>Editor viewport, pointer, minimap marks, token provider export</td>
+</tr>
+<tr>
+<td>AX32</td>
+<td>Command palette: kernel surface; commands gain <code>category</code> and <code>keywords</code></td>
+</tr>
+<tr>
+<td>AX33</td>
+<td>GPU kernels run by the host, <code>@unstable</code></td>
+</tr>
+<tr>
+<td>AX34</td>
+<td>Server-to-client requests between the two sides of one plugin</td>
+</tr>
+<tr>
+<td>AX35</td>
+<td>Shared cache bucket for a plugin's processes</td>
+</tr>
+<tr>
+<td>AX36</td>
+<td>Record lists: object items of up to 8 fields, item status, remote confirmation</td>
+</tr>
+<tr>
+<td>AX37</td>
+<td>Small items: text debounce, <code>when</code> keys, basic pane activity and dirty flag, <code>map</code> row, pane event journal, reduced motion and density tokens</td>
+</tr>
+<tr>
+<td>AX38</td>
+<td><code>list-editor</code> widget and typed list items (glob, URL, host, path, regex, chord)</td>
+</tr>
+<tr>
+<td>AX39</td>
+<td>Layout additions: <code>split</code> with draggable divider, <code>separator</code>, <code>dialog</code>, <code>scroll-view</code></td>
+</tr>
+<tr>
+<td>AX40</td>
+<td>Data display additions: <code>progress-row</code>, <code>meter</code>, <code>minimap</code>; <code>meter</code> row</td>
+</tr>
+<tr>
+<td>AX41</td>
+<td><code>diff-view</code> widget</td>
+</tr>
+<tr>
+<td>AX42</td>
+<td>Status and feedback family: <code>badge</code>, <code>spinner</code>, <code>notice</code>, <code>icon</code></td>
+</tr>
+</tbody>
+</table>
+<p>The decisions of the extended contract that need explanation are these:</p>
+<ul>
+<li><strong>Kernel keeps the engine, plugins own the choice.</strong> Every addition names the part that stays in the kernel: dithering and the shared look, the vt100 emulation, the tree layout solver, the toast stack, the command palette, the syntax engine and every GPU shader. The plugin supplies content and intent. The kernel draws and decides.</li>
+<li><strong>Intents, not mutations.</strong> Pane lifecycle, tree restructure, attention, status segments, frame slots, toasts and <code>open-external</code> are intents. The kernel checks them against the grant and the current state, and a submission completes with one outcome. A new outcome case, <code>ok-epoch</code>, carries the new prompt epoch for <code>send-input</code> on an agent pane.</li>
+<li><strong>Read paths are typed and redacted.</strong> Terminal cells, scrollback, transcripts, kernel settings and the keymap are read paths, each behind its own grant, and all of them are read only.</li>
+<li><strong>High risk is explicit even for T1.</strong> The ten high-risk grants of the extended set always need an explicit grant, and the dialog shows them in the warning style.</li>
+<li><strong>Streaming, not polling.</strong> HTTP streams, spawned children and screen changes arrive as events whose delivery policy is stated per event: coalesced, or never dropped with back-pressure.</li>
+</ul>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<ul>
+<li>The review dialog lists every capability a plugin requests, before the first run. The user grants or declines each one. High-risk rows start unchecked.</li>
+<li>A T2 package is shown with its publisher and signature status. A T3 package carries a dev badge for as long as it is installed.</li>
+<li>A bundled plugin with high-risk grants is asked at its first start, and again at each later start after Not now, at most three prompts in total. The first open of a site, a new host from a setting, and the first place lookup each ask once.</li>
+<li>A plugin that is disabled after three failures shows a notice in the tree footer. The user re-enables it in settings or on the kernel recovery page.</li>
+<li>A refused install shows the three-line message from D5 and leaves the other plugins running.</li>
+<li>Plugin rows in a built-in Settings tab sit under a divider that names the plugin, with a <code>▏</code> gutter.</li>
+</ul>
+<h2 id="errors-and-edge-cases">Errors and edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Code or text</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T2 or T3 package installed on Windows or macOS</td>
+<td>Install refused</td>
+<td><code>Cannot install &lt;name&gt; &lt;version&gt;.</code></td>
+</tr>
+<tr>
+<td><code>process.run:sh</code> requested by a T2 or T3 package</td>
+<td>Install refused</td>
+<td><code>manifest.grant-tier</code></td>
+</tr>
+<tr>
+<td><code>limits_tier: "first-party"</code> in a package that is not a bundled <code>ilium.*</code> plugin</td>
+<td>Install refused</td>
+<td><code>manifest.limits-tier</code></td>
+</tr>
+<tr>
+<td>Package assets above the tier limit</td>
+<td>Install refused</td>
+<td><code>manifest.asset-size</code></td>
+</tr>
+<tr>
+<td>Limit request above the tier ceiling</td>
+<td>Clamped to the ceiling and logged</td>
+<td>warn line in the plugin log</td>
+</tr>
+<tr>
+<td>Third failure within 10 minutes</td>
+<td>Plugin disabled with a notice</td>
+<td>tree footer notice</td>
+</tr>
+<tr>
+<td>Capability revoked during a call</td>
+<td>Call fails and the plugin is re-activated</td>
+<td><code>revoked</code></td>
+</tr>
+<tr>
+<td>Old <code>.iliumanim</code> package installed</td>
+<td>Refused, rebuild required</td>
+<td>the loader does not accept the format</td>
+</tr>
+<tr>
+<td>Declined <code>open-external</code>, geocoding or a new host from a setting</td>
+<td>The call or submission is refused</td>
+<td><code>not-permitted</code></td>
+</tr>
+<tr>
+<td>Journaled input in flight when the server stops</td>
+<td>Reported once, never replayed</td>
+<td><code>input-uncertain</code></td>
+</tr>
+</tbody>
+</table>
+<div class="note">
+<p>The restart delays after a failure are 1 s, then 5 s; the third failure in the window disables the plugin. A failure counts for 10 minutes. A manual re-enable resets the count to zero. A revocation, a disable, an upgrade or a shutdown never counts as a failure.</p>
+</div>
+
+<div class="warn">
+<p>Do not promise Windows or macOS support for a T2 or T3 plugin. Until a sandbox exists there, a third-party package does not install on those systems at all. Test third-party plugins on Linux, and state the platform limit in the plugin description. Check this page before a release.</p>
+</div>
+
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/security/">Security model</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/porting-iliumanim/">Porting from .iliumanim</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages</a></li>
+<li><a href="/pages/settings-extension/">Plugin settings extension</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+</ul>
+<p>Checked against the API version <code>ilium:plugin@0.1.0</code>. D1 to D27 and SE1 to SE20 are decided.</p>
+<h3 id="security">Security</h3>
+<p><strong>SD1 No unconfined fallback.</strong> If the sandbox cannot be built, the package does not load ([SEC-055]). <strong>SD2 Fail closed for high veto points.</strong> <code>on_failure: refuse</code> is the default ([SEC-287]). <strong>SD3 Project values untrusted by default.</strong> ([SEC-310]). <strong>SD4 Key pinning.</strong> ([SEC-142]).</p>
+<h2 id="d27-an-optional-registry-protocol">D27: an optional registry protocol</h2>
+<p><strong>Question.</strong> D3 said there is no registry and no download. Packages now need discovery, updates and revocation. Does that contradict D3?</p>
+<p><strong>Decision.</strong> Ilium defines a TUF-style static registry: a folder of signed JSON files and package blobs on any HTTPS host or file share. The client verifies the metadata with a root key that the user or administrator pins. Ilium ships with no registry configured and operates no central store. Ratings are out of scope for 0.1. Automatic updates are off by default. A package file install keeps working with no registry. Mirrors and offline bundles serve isolated machines.</p>
+<p><strong>Reason.</strong> Static files need no server code, no database and no account system. A user or company can run one. Revocation and update checks need signed, expiring metadata, and TUF gives these properties in a known form.</p>
+<p><strong>Effect on authors.</strong> You can still pass a file on. You can also publish to a registry with <code>ilium plugin publish</code>. See <a href="/pages/reference-registry/">Registry reference</a>, <a href="/pages/reference-signing-and-trust/">Signing and trust</a> and <a href="/pages/guide-publishing/">Publishing guide</a>. D3 stays valid for its signing and trust-per-key parts.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/user-troubleshooting/"><small>Previous</small>Troubleshooting plugins</a><a class="next" href="/pages/glossary/"><small>Next</small>Glossary</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#summary">Summary</a></li><li class="l2"><a href="#d1-javascript-and-typescript-compiled-to-components">D1: JavaScript and TypeScript compiled to components</a></li><li class="l2"><a href="#d2-scope-of-plugins">D2: Scope of plugins</a></li><li class="l2"><a href="#d3-third-party-scope-for-version-1">D3: Third-party scope for version 1</a></li><li class="l2"><a href="#d4-editors-and-boards-native-in-version-1">D4: Editors and boards native in version 1</a></li><li class="l2"><a href="#d5-separate-process-sandbox-for-third-party-plugins">D5: Separate-process sandbox for third-party plugins</a></li><li class="l2"><a href="#d6-bundled-plugins-precompiled-and-lazy">D6: Bundled plugins precompiled and lazy</a></li><li class="l2"><a href="#d7-one-package-format">D7: One package format</a></li><li class="l3"><a href="#worked-example-a-limit-request-above-the-ceiling">Worked example: a limit request above the ceiling</a></li><li class="l2"><a href="#the-settings-extension-decisions">The Settings extension decisions</a></li><li class="l2"><a href="#decisions-d8-to-d25">Decisions D8 to D25</a></li><li class="l3"><a href="#d8-d10-d11-settings-questions">D8, D10, D11: Settings questions</a></li><li class="l3"><a href="#d12-the-first-party-limits-tier">D12: the first-party limits tier</a></li><li class="l3"><a href="#d13-kernel-settings-are-readable-and-the-tab-owner-may-write">D13: kernel settings are readable and the tab owner may write</a></li><li class="l3"><a href="#d14-geocoding">D14: geocoding</a></li><li class="l3"><a href="#d15-embeddings">D15: embeddings</a></li><li class="l3"><a href="#d16-cross-session-commands">D16: cross-session commands</a></li><li class="l3"><a href="#d17-raw-terminal-input-and-the-input-lock">D17: raw terminal input and the input lock</a></li><li class="l3"><a href="#d18-gpu-access">D18: GPU access</a></li><li class="l3"><a href="#d19-preview-rows-in-kernel-tabs">D19: preview rows in kernel tabs</a></li><li class="l3"><a href="#d20-toasts">D20: toasts</a></li><li class="l3"><a href="#d25-confirming-open-external">D25: confirming open-external</a></li><li class="l3"><a href="#d21-timers-and-the-input-journal">D21: timers and the input journal</a></li><li class="l3"><a href="#d22-and-d23-transcripts-and-hosts-from-a-setting">D22 and D23: transcripts and hosts from a setting</a></li><li class="l3"><a href="#d24-package-asset-size">D24: package asset size</a></li><li class="l2"><a href="#d26-extension-points-hooks-and-replacement">D26: extension points, hooks and replacement</a></li><li class="l2"><a href="#the-api-additions-and-their-decisions">The API additions and their decisions</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li><li class="l2"><a href="#d27-an-optional-registry-protocol">D27: an optional registry protocol</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

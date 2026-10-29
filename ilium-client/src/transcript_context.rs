@@ -73,20 +73,38 @@ struct SequencedEntry {
 /// lands in `earliest` only while it isn't yet full, and every later entry
 /// goes to `recent` instead, so a short transcript's entries all end up in
 /// `earliest` without ever being double-counted in `recent`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct KindEntries {
     earliest: VecDeque<SequencedEntry>,
     recent: VecDeque<SequencedEntry>,
     dropped_count: usize,
+    earliest_cap: usize,
+    recent_cap: usize,
+}
+
+impl Default for KindEntries {
+    fn default() -> Self {
+        Self::with_caps(EARLIEST_ENTRY_COUNT_PER_KIND, RECENT_ENTRY_COUNT_PER_KIND)
+    }
 }
 
 impl KindEntries {
+    fn with_caps(earliest_cap: usize, recent_cap: usize) -> Self {
+        Self {
+            earliest: VecDeque::new(),
+            recent: VecDeque::new(),
+            dropped_count: 0,
+            earliest_cap,
+            recent_cap,
+        }
+    }
+
     fn push(&mut self, sequence: u64, entry: TranscriptEntry) {
-        if self.earliest.len() < EARLIEST_ENTRY_COUNT_PER_KIND {
+        if self.earliest.len() < self.earliest_cap {
             self.earliest.push_back(SequencedEntry { sequence, entry });
             return;
         }
-        if self.recent.len() == RECENT_ENTRY_COUNT_PER_KIND {
+        if self.recent.len() == self.recent_cap {
             self.recent.pop_front();
             self.dropped_count += 1;
         }
@@ -133,6 +151,15 @@ struct RecentEntries {
 }
 
 impl RecentEntries {
+    /// Keeps up to `user_cap` user entries (no gap marker below twice that)
+    /// while assistant and tool entries keep the usual small windows.
+    fn with_user_cap(user_cap: usize) -> Self {
+        Self {
+            user: KindEntries::with_caps(user_cap, user_cap),
+            ..Self::default()
+        }
+    }
+
     fn push(&mut self, kind: TranscriptEntryKind, content: impl Into<String>) {
         let content = content.into();
         let content = content.trim();
@@ -190,6 +217,37 @@ pub fn recent_transcript_entries(
     Ok(extract_transcript_entries(class, lines))
 }
 
+/// Every user prompt of one verified transcript, oldest first, capped at the
+/// newest `max_prompts`. Unlike [`recent_user_prompts`] it keeps no gap
+/// markers, so the result is safe to browse as a prompt history. Agents
+/// without a JSONL user stream (Antigravity, unknown) return an empty list.
+pub fn user_prompt_history(
+    class: &AgentClass,
+    transcript_path: &Path,
+    max_prompts: usize,
+) -> anyhow::Result<Vec<String>> {
+    if !matches!(class, AgentClass::Claude | AgentClass::Codex) {
+        return Ok(Vec::new());
+    }
+    let file = std::fs::File::open(transcript_path)?;
+    #[allow(clippy::lines_filter_map_ok)]
+    let lines = BufReader::new(file).lines().filter_map(Result::ok);
+    let recent = RecentEntries::with_user_cap(max_prompts.max(1));
+    let entries = match class {
+        AgentClass::Claude => claude_entries_into(lines, recent),
+        _ => codex_entries_into(lines, recent),
+    };
+    let mut prompts: Vec<String> = entries
+        .into_iter()
+        .filter(|entry| entry.kind == TranscriptEntryKind::User)
+        .map(|entry| entry.content)
+        .collect();
+    if prompts.len() > max_prompts {
+        prompts.drain(..prompts.len() - max_prompts);
+    }
+    Ok(prompts)
+}
+
 /// Compatibility-shaped projection used by project restructuring, which only
 /// asks for user-authored intent. Session retitling consumes the full typed
 /// stream through `recent_transcript_entries`.
@@ -204,7 +262,7 @@ pub fn recent_user_prompts(
         .collect())
 }
 
-fn extract_transcript_entries(
+pub(crate) fn extract_transcript_entries(
     class: &AgentClass,
     lines: impl Iterator<Item = String>,
 ) -> Vec<TranscriptEntry> {
@@ -220,7 +278,13 @@ fn extract_transcript_entries(
 /// tool-use request blocks are deliberately excluded: they are neither an
 /// answer shown to the user nor tool output.
 fn claude_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
-    let mut recent = RecentEntries::default();
+    claude_entries_into(lines, RecentEntries::default())
+}
+
+fn claude_entries_into(
+    lines: impl Iterator<Item = String>,
+    mut recent: RecentEntries,
+) -> Vec<TranscriptEntry> {
     for entry in lines.filter_map(|line| serde_json::from_str::<Value>(&line).ok()) {
         if entry
             .get("isSidechain")
@@ -282,12 +346,19 @@ fn assistant_content(content: Option<&Value>) -> Option<String> {
 /// results live in `response_item` records; injected user/developer messages,
 /// reasoning, and tool-call requests are excluded.
 fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
-    let mut recent = RecentEntries::default();
+    codex_entries_into(lines, RecentEntries::default())
+}
+
+fn codex_entries_into(
+    lines: impl Iterator<Item = String>,
+    mut recent: RecentEntries,
+) -> Vec<TranscriptEntry> {
     // Codex has used two different user-turn records. Keep their bounded
     // windows separate, then prefer the complete response-item stream when
     // present so duplicate event records cannot evict genuine user turns.
-    let mut event_users = KindEntries::default();
-    let mut response_users = KindEntries::default();
+    let mut event_users = KindEntries::with_caps(recent.user.earliest_cap, recent.user.recent_cap);
+    let mut response_users =
+        KindEntries::with_caps(recent.user.earliest_cap, recent.user.recent_cap);
     let mut has_response_user = false;
     for entry in lines.filter_map(|line| serde_json::from_str::<Value>(&line).ok()) {
         match entry.get("type").and_then(Value::as_str) {

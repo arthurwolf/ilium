@@ -26,6 +26,7 @@ This is the full documentation for Ilium. The [project README](../../README.md) 
 | [Notifications](notifications.md) | Sounds and desktop notifications, per-event switches, merge and skip rules. |
 | [Worktrees](worktrees.md) | Running agents in linked Git worktrees and cleaning them up safely. |
 | [Session recovery](session-recovery.md) | Snapshots, backups, restore after a restart, resuming agent sessions, session conversion. |
+| [Shared resource queues](resource-queues.md) | Cross-project GPU and USB-board reservations, blocking waits, queue views and guarded recovery. |
 | [Automation](automation.md) | Scheduled input, text triggers, prompt queues, progress monitors, Chatroom, the local HTTP API. |
 
 ## Configuration and AI features

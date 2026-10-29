@@ -167,13 +167,68 @@ pub(crate) struct ContextCompletion {
     pub key: ContextKey,
     pub text: Result<Retained<ContextText>, String>,
 }
-pub(crate) struct PreparedCapture {
+pub(crate) struct PreparedCapturePayload {
     pub source: PaintedTerminal,
-    pub snapshot: crate::smart_copy::SmartCopySnapshot,
+    pub session: crate::smart_copy::SmartCopySession,
     pub prompt: String,
     pub charge: Option<Arc<crate::terminal_parsing::SnapshotCharge>>,
+    #[cfg(test)]
+    retirement_probe: Option<tests::CaptureDropProbe>,
+}
+/// The original result debit is installed by the producing job, before any
+/// receipt/owner can disappear. Discarding an output only moves an envelope.
+/// Successful publication transfers custody into the existing session owner.
+pub(crate) struct PreparedCapture {
+    payload: Option<PreparedCapturePayload>,
+    retirement: Option<ilium_execution::RetirementReservation<PreparedCapturePayload>>,
+    session_retirement:
+        Option<ilium_execution::RetirementReservation<crate::smart_copy::SmartCopySession>>,
+    retention: Option<ilium_execution::Retention>,
+}
+impl std::ops::Deref for PreparedCapture {
+    type Target = PreparedCapturePayload;
+    fn deref(&self) -> &Self::Target {
+        // Invariant: only consuming into_payload takes this value.
+        self.payload.as_ref().expect("live capture payload")
+    }
+}
+impl PreparedCapture {
+    pub(crate) fn into_payload(mut self) -> PreparedCapturePayload {
+        // Invariant: output creation installs all three owned custody fields;
+        // consuming this wrapper is the sole successful publication transition.
+        let mut payload = self.payload.take().expect("live capture payload");
+        payload.session.capture_retention = self.retention.take();
+        payload.session.return_retirement = self.session_retirement.take();
+        payload
+    }
+}
+impl Drop for PreparedCapture {
+    fn drop(&mut self) {
+        let Some(payload) = self.payload.take() else {
+            return;
+        };
+        // Invariant: a payload is constructed only with its preadmitted permit.
+        // Its session has no retirement permit until into_payload publishes it,
+        // so CPU destruction cannot recursively queue another session retirement.
+        let permit = self
+            .retirement
+            .take()
+            .expect("capture retirement admitted before submission");
+        let mut retired = permit.attach(payload);
+        if let Some(retention) = self.retention.take() {
+            retired.set_retention(retention);
+        }
+        drop(retired);
+    }
 }
 struct CaptureJob {
+    pane_id: NodeId,
+    generation: u64,
+    paths: crate::smart_copy_tokens::PathContext,
+    session_bytes: usize,
+    retirement: ilium_execution::RetirementReservation<PreparedCapturePayload>,
+    session_retirement: ilium_execution::RetirementReservation<crate::smart_copy::SmartCopySession>,
+    retention: ilium_execution::Retention,
     identity: Arc<()>,
     ordinal: u64,
     source: PreparationSnapshot,
@@ -195,11 +250,30 @@ impl Job for CaptureJob {
         if context.stop_requested() {
             return Err("Smart Copy preparation cancelled".into());
         }
-        Ok(PreparedCapture {
-            source: self.source.painted(self.identity, self.ordinal),
+        if snapshot.prepared_session_bytes()? > self.session_bytes {
+            return Err(
+                "Smart Copy candidate allocations exceed the admitted preparation envelope".into(),
+            );
+        }
+        let session = crate::smart_copy::SmartCopySession::prepare_with_path_context(
+            self.generation,
+            self.pane_id,
             snapshot,
-            prompt,
-            charge: self.charge,
+            &self.paths,
+            || !context.stop_requested(),
+        )?;
+        Ok(PreparedCapture {
+            payload: Some(PreparedCapturePayload {
+                source: self.source.painted(self.identity, self.ordinal),
+                session,
+                prompt,
+                charge: self.charge,
+                #[cfg(test)]
+                retirement_probe: None,
+            }),
+            retirement: Some(self.retirement),
+            session_retirement: Some(self.session_retirement),
+            retention: Some(self.retention),
         })
     }
 }
@@ -214,6 +288,7 @@ struct CaptureSlot {
     identity: Arc<()>,
     generation: u64,
     receipt: Receipt<CaptureJob>,
+    cancelled: bool,
 }
 pub(crate) struct PreparedLink {
     #[cfg(test)]
@@ -428,32 +503,80 @@ impl TerminalContextPreparation {
         pane_id: NodeId,
         generation: u64,
         source: &PaintedTerminal,
+        paths: crate::smart_copy_tokens::PathContext,
     ) -> Result<(), String> {
-        let cost = source.capture_cost()?;
+        // A cancelled metadata syscall can still be running. Keep its receipt
+        // until physical completion; replacing it would multiply blocked jobs.
+        if self.capture.is_some() {
+            return Err("Smart Copy preparation is still settling; retry shortly".into());
+        }
+        let capture_cost = source.capture_cost()?;
+        let (_, columns) = source.with_screen(|screen| screen.size());
+        let path_bytes = paths.preparation_bytes(columns)?;
+        let session_bytes = capture_cost
+            .result_bytes
+            .checked_mul(2)
+            .ok_or_else(|| "Smart Copy session charge overflow".to_string())?;
+        let cost = JobCost {
+            input_bytes: capture_cost
+                .input_bytes
+                .checked_add(path_bytes)
+                .ok_or_else(|| "Smart Copy input charge overflow".to_string())?,
+            result_bytes: capture_cost
+                .result_bytes
+                .checked_add(session_bytes)
+                .and_then(|bytes| bytes.checked_add(path_bytes))
+                .ok_or_else(|| "Smart Copy result charge overflow".to_string())?,
+        };
         let reservation = self
             .client
-            .try_reserve(Lane::Cpu, cost)
+            // Capture is finite CPU work, followed by filesystem verification.
+            // One I/O job avoids a retained CPU job waiting for another lane.
+            .try_reserve(Lane::Io, cost)
             .map_err(|reason| format!("Smart Copy preparation admission: {reason:?}"))?;
+        // Empty envelopes reserve only metadata/slots. No CPU job is awaited,
+        // and heap custody remains on the same original capture reservation.
+        let retirement = self
+            .client
+            .retirement()
+            .try_reserve::<PreparedCapturePayload>(std::mem::size_of::<PreparedCapturePayload>())
+            .map_err(|reason| format!("Smart Copy capture retirement admission: {reason:?}"))?;
+        let session_retirement = self
+            .client
+            .retirement()
+            .try_reserve::<crate::smart_copy::SmartCopySession>(std::mem::size_of::<
+                crate::smart_copy::SmartCopySession,
+            >())
+            .map_err(|reason| format!("Smart Copy session retirement admission: {reason:?}"))?;
+        let retention = reservation.retention();
         let job = CaptureJob {
+            pane_id,
+            generation,
+            paths,
+            session_bytes,
+            retirement,
+            session_retirement,
+            retention,
             identity: source.identity.clone(),
             ordinal: source.ordinal,
             source: source.preparation_snapshot()?,
-            charge: source.capture_charge(cost.result_bytes)?,
+            charge: source.capture_charge(capture_cost.result_bytes)?,
         };
         let receipt = reservation.submit(job).map_err(|rejected| {
             format!("Smart Copy preparation submission: {:?}", rejected.reason)
         })?;
-        self.cancel_capture();
         self.capture = Some(CaptureSlot {
             pane_id,
             identity: source.identity.clone(),
             generation,
             receipt,
+            cancelled: false,
         });
         Ok(())
     }
     pub(crate) fn cancel_capture(&mut self) {
-        if let Some(slot) = self.capture.take() {
+        if let Some(slot) = self.capture.as_mut() {
+            slot.cancelled = true;
             slot.receipt.cancel();
         }
     }
@@ -482,6 +605,13 @@ impl TerminalContextPreparation {
                 }
             }
             JobPoll::Lost | JobPoll::Taken => Err("Smart Copy preparation completion lost".into()),
+        };
+        let result = if slot.cancelled {
+            // Even a completion racing cancellation must not publish a session.
+            drop(result);
+            Err("Smart Copy preparation cancelled".into())
+        } else {
+            result
         };
         Some(CaptureCompletion {
             pane_id: slot.pane_id,
@@ -673,6 +803,117 @@ mod tests {
     use super::*;
     use crate::terminal_view::TerminalView;
     use std::time::{Duration, Instant};
+    pub(super) struct CaptureDropProbe {
+        client: Client,
+        observed: std::sync::mpsc::Sender<(std::thread::ThreadId, usize, usize)>,
+    }
+    impl Drop for CaptureDropProbe {
+        fn drop(&mut self) {
+            let usage = self.client.usage();
+            let _ = self.observed.send((
+                std::thread::current().id(),
+                usage.input_bytes,
+                usage.result_bytes,
+            ));
+        }
+    }
+    fn ready_capture(client: Client) -> Retained<PreparedCapture> {
+        let mut owner = TerminalContextPreparation::new(client);
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"original emitted retirement words");
+        let source = view.painted_source();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match owner.request_capture(
+                NodeId(91),
+                7,
+                &source,
+                crate::smart_copy_tokens::PathContext::default(),
+            ) {
+                Ok(()) => break,
+                Err(error) if error.ends_with("Busy") && Instant::now() < deadline => {
+                    std::thread::yield_now()
+                }
+                Err(error) => panic!("capture fixture admission: {error}"),
+            }
+        }
+        loop {
+            if let Some(completion) = owner.collect_capture() {
+                return completion.result.expect("prepared capture");
+            }
+            assert!(Instant::now() < deadline, "capture completion deadline");
+            std::thread::yield_now();
+        }
+    }
+    #[test]
+    fn discarded_capture_retires_on_cpu_with_full_original_debit() {
+        let client = crate::execution::test_document_client();
+        let baseline = client.usage();
+        let output = ready_capture(client.clone());
+        let (mut prepared, outer_hold) = output.into_parts();
+        let (sent, received) = std::sync::mpsc::channel();
+        prepared.payload.as_mut().expect("payload").retirement_probe = Some(CaptureDropProbe {
+            client: client.clone(),
+            observed: sent,
+        });
+        assert!(
+            prepared.session.return_retirement.is_none(),
+            "discard must not recursively retire a session"
+        );
+        // Model a stale/cancelled completion after every receipt/outer owner has
+        // gone. The producing job already installed the original debit inside.
+        drop(outer_hold);
+        drop(prepared);
+        let (thread, input_bytes, result_bytes) = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("physical payload retirement");
+        assert_ne!(thread, std::thread::current().id());
+        assert!(
+            input_bytes > baseline.input_bytes,
+            "original input debit outlives payload"
+        );
+        assert!(
+            result_bytes > baseline.result_bytes,
+            "original result debit outlives payload"
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while client.usage().input_bytes != baseline.input_bytes
+            || client.usage().result_bytes != baseline.result_bytes
+        {
+            assert!(
+                Instant::now() < deadline,
+                "retirement releases original debit after payload"
+            );
+            std::thread::yield_now();
+        }
+    }
+    #[test]
+    fn published_capture_moves_same_debit_and_preadmitted_session_custody() {
+        let client = crate::execution::test_document_client();
+        let output = ready_capture(client.clone());
+        let (prepared, outer_hold) = output.into_parts();
+        let before = client.usage();
+        let payload = prepared.into_payload();
+        drop(outer_hold);
+        assert!(payload.session.return_retirement.is_some());
+        assert!(payload.session.capture_retention.is_some());
+        assert!(payload.session.output_retention.is_none());
+        assert_eq!(payload.session.generation, 7);
+        assert_eq!(payload.session.pane_id, NodeId(91));
+        assert!(payload.prompt.contains("original emitted retirement words"));
+        assert!(payload
+            .session
+            .snapshot
+            .screen
+            .contents()
+            .contains("original emitted retirement words"));
+        let after = client.usage();
+        assert_eq!(after.input_bytes, before.input_bytes);
+        assert_eq!(after.result_bytes, before.result_bytes);
+        // The existing session Drop now carries candidates, snapshot, geometry
+        // and the original debit onto the preadmitted physical retirement path.
+        drop(payload);
+    }
     // Fixtures share one real execution bank. Busy is its nonblocking quota-lock
     // contention, not a failed snapshot. Admit before mutating the captured view;
     // structural/limit errors remain fatal and the deadline bounds setup.
@@ -775,7 +1016,12 @@ mod tests {
         view.feed(b"\r\nnewer invisible words");
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            match owner.request_capture(NodeId(71), 9, &painted) {
+            match owner.request_capture(
+                NodeId(71),
+                9,
+                &painted,
+                crate::smart_copy_tokens::PathContext::default(),
+            ) {
                 Ok(()) => break,
                 Err(error)
                     if error == "Smart Copy preparation admission: Busy"
@@ -799,11 +1045,13 @@ mod tests {
         let result = completion.result.unwrap();
         let result = result.view();
         assert!(result
+            .session
             .snapshot
             .screen
             .contents()
             .contains("original emitted words"));
         assert!(!result
+            .session
             .snapshot
             .screen
             .contents()
@@ -950,5 +1198,191 @@ mod tests {
         preparation.cancel();
         assert!(preparation.collect().is_none());
         assert!(preparation.slot.is_none());
+    }
+}
+
+#[cfg(test)]
+mod queued_capture_custody_tests {
+    use super::*;
+    use crate::terminal_view::TerminalView;
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
+    };
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    #[derive(Debug)]
+    struct Gate {
+        started: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+    impl Job for Gate {
+        type Output = ();
+        type Error = String;
+        fn run(self, _: JobContext) -> Result<(), String> {
+            self.started.send(()).map_err(|error| error.to_string())?;
+            self.release.recv().map_err(|error| error.to_string())
+        }
+    }
+    struct Release(Option<mpsc::Sender<()>>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            if let Some(sent) = self.0.take() {
+                let _ = sent.send(());
+            }
+        }
+    }
+    #[test]
+    fn cancelled_queued_capture_keeps_physical_slot_until_worker_observes_it() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 4,
+            jobs: 16,
+            service_jobs: 0,
+            input_bytes: 128 * 1024 * 1024,
+            result_bytes: 128 * 1024 * 1024,
+            worker_threads: 2,
+            worker_bytes: 128 * 1024 * 1024,
+        });
+        let lane = LaneConfig {
+            threads: 1,
+            queue_slots: 8,
+            priority: None,
+            resident_bytes_per_thread: 64 * 1024,
+        };
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut bank = Execution::start(
+            quota,
+            ExecutionConfig {
+                cpu: lane,
+                io: lane,
+                service: disabled,
+            },
+        )
+        .expect("isolated bank");
+        let client = bank
+            .client(ClientLimits {
+                jobs: 16,
+                service_jobs: 0,
+                input_bytes: 128 * 1024 * 1024,
+                result_bytes: 128 * 1024 * 1024,
+            })
+            .expect("tenant");
+        let (started, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let release = Release(Some(release));
+        let mut gate = client
+            .try_reserve(
+                Lane::Io,
+                JobCost {
+                    input_bytes: 1024,
+                    result_bytes: 1024,
+                },
+            )
+            .expect("gate admission")
+            .submit(Gate {
+                started,
+                release: wait,
+            })
+            .expect("gate submission");
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .expect("sole I/O worker occupied");
+        let mut owner = TerminalContextPreparation::new(client.clone());
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"original immutable words");
+        let painted = view.painted_source();
+        owner
+            .request_capture(
+                NodeId(77),
+                12,
+                &painted,
+                crate::smart_copy_tokens::PathContext::default(),
+            )
+            .expect("queued capture");
+        owner.cancel_capture();
+        let held = client.usage();
+        for generation in 13..33 {
+            assert!(
+                owner.collect_capture().is_none(),
+                "queued job has not physically completed"
+            );
+            assert!(owner
+                .request_capture(
+                    NodeId(77),
+                    generation,
+                    &painted,
+                    crate::smart_copy_tokens::PathContext::default()
+                )
+                .expect_err("no replacement before physical completion")
+                .contains("still settling"));
+            let usage = client.usage();
+            assert_eq!(
+                (usage.jobs, usage.input_bytes, usage.result_bytes),
+                (held.jobs, held.input_bytes, held.result_bytes)
+            );
+        }
+        drop(release);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let completion = loop {
+            if let Some(done) = owner.collect_capture() {
+                break done;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        };
+        assert!(
+            completion.result.is_err(),
+            "cancelled generation never publishes"
+        );
+        loop {
+            match gate.try_take() {
+                JobPoll::Ready(done) => {
+                    drop(done);
+                    break;
+                }
+                JobPoll::Pending => {}
+                _ => panic!("gate result lost"),
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        // A taken receipt still owns its original debit until it is dropped.
+        // Release the fixture's gate before asserting that capture credit settled.
+        drop(gate);
+        while client.usage().jobs != 0 {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        owner
+            .request_capture(
+                NodeId(77),
+                33,
+                &painted,
+                crate::smart_copy_tokens::PathContext::default(),
+            )
+            .expect("retry after physical completion");
+        let completion = loop {
+            if let Some(done) = owner.collect_capture() {
+                break done;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        };
+        assert_eq!(completion.generation, 33);
+        assert!(completion.result.is_ok());
+        drop(completion);
+        drop(owner);
+        drop(painted);
+        drop(view);
+        drop(client);
+        bank.request_shutdown(ShutdownMode::Drain);
+        bank.join_until_background(Instant::now() + Duration::from_secs(5))
+            .expect("owned bank retires");
     }
 }

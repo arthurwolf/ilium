@@ -803,7 +803,7 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
     assert!(request.support_chunks().contains(&[0, 0]));
     assert!(request.support_chunks().len() > 1);
     // The fixture intentionally has only one chunk. A matching bound root
-    // must reach the ordinary missing-chunk refusal, not fail path identity.
+    // must pass path identity; the other support chunks become holes.
     let expected_missing = request
         .support_chunks()
         .iter()
@@ -812,7 +812,9 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
         .collect::<Vec<_>>();
     assert!(expected_missing.len() > 3);
     let decode_progress = RefCell::new(Vec::new());
-    let error = projected_source::qualify_with_progress(
+    // Missing support chunks are holes under the projected-route policy, so a
+    // matching root must qualify with only the chunks that really decoded.
+    let qualified = projected_source::qualify_with_progress(
         base,
         bound,
         &root,
@@ -821,34 +823,14 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
         cancel,
         &|| false,
         &mut |update| decode_progress.borrow_mut().push(update),
-    );
-    let error_message = match error.as_ref() {
-        Err(error) => error.to_string(),
-        Ok(_) => panic!("expected incomplete decoded source"),
-    };
-    let first_rejection = format!("{:?}=", expected_missing[0]);
-    assert!(
-        error_message.contains(&first_rejection),
-        "projected-source error should identify the first missing chunk: {error_message}"
-    );
+    )
+    .expect("a projected source with holes must qualify when its root matches");
     assert_eq!(
-        error_message.matches('=').count(),
-        3,
-        "projected-source diagnostics should cap rejection examples: {error_message}"
+        qualified.map.loaded().coverage.chunks,
+        BTreeSet::from([[0, 0]]),
+        "only the decoded chunk may enter coverage; the rest are holes"
     );
-    let (missing, first, missing_positions) = match error {
-        Err(projected_source::Error::Unqualified {
-            missing,
-            first,
-            missing_positions,
-            ..
-        }) => (missing, first, missing_positions),
-        Err(error) => panic!("expected incomplete decoded source, got {error}"),
-        Ok(_) => panic!("expected incomplete decoded source"),
-    };
-    assert_eq!(missing_positions, expected_missing);
-    assert_eq!(missing, missing_positions.len());
-    assert_eq!(first, missing_positions.first().copied());
+    assert!(!expected_missing.is_empty());
     let decode_progress = decode_progress.into_inner();
     assert_eq!(decode_progress.len(), request.support_chunks().len());
     for (index, update) in decode_progress.iter().enumerate() {

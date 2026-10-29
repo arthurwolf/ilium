@@ -222,7 +222,8 @@ pub(super) fn decode(
     } = env;
     let fail = |message| super::failure::retain(message, resources, stop, emergency, None);
     let source = Arc::new(source);
-    // Name the file: the header probe's own message does not say which entry failed.
+    // Metadata inspection precedes GenericJob, whose errors already carry
+    // the image name. Add that context before retaining this original error.
     let metadata = inspect_dimensions(source.clone(), limits, resources, stop)
         .map_err(|message| fail(format!("{name}: {message}")))?;
     let dimensions = metadata.dimensions;

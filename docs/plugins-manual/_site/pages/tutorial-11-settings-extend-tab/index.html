@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>11. Add settings to an existing tab | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/" aria-current="page">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>11. Add settings to an existing tab</h1>
+
+<p>Tutorial 10 gave a plugin a tab of its own. This tutorial covers the other case: a plugin adds one section to a tab that the kernel already draws. The example plugin, <code>example.clipboard-history</code> (named "Clipboard history"), adds a block titled "Terminal capture" to the Terminal tab of Settings. The built-in Terminal rows keep their positions and values. The plugin's block sits below them, under a divider that names the plugin.</p>
+<p>The rules are strict on purpose. A plugin can add a section at an anchor. It cannot hide, relabel, reorder or restyle a built-in row, and it cannot write a built-in value. Each step below follows from those rules. The block uses a toggle stored per project, a number that hides itself, and a secret that applies after restart. Every row type is on the <a href="/pages/reference-settings-rows/">row gallery</a>.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li><a href="/pages/tutorial-10-settings-new-tab/">Tutorial 10</a> finished, or any plugin with a working manifest and a client build. This step does not need the tab that tutorial 10 adds. The keys here differ from those of tutorial 10, because keys are unique across the whole plugin.</li>
+<li>The grant <code>settings.contribute:terminal</code>, which step 1 adds. The plugin's own values need no grant.</li>
+<li>The <a href="/pages/settings-extension/">settings extension concept</a> for the rail and the ordering rules, and the <a href="/pages/reference-settings-schema/">settings schema reference</a> for every row field.</li>
+</ul>
+<h3 id="step-1-declare-the-section-in-the-manifest">Step 1: declare the section in the manifest</h3>
+<p>Add one entry to <code>contributes.settings</code> with <code>"kind": "section"</code>, and add the grant to <code>capabilities.client</code>. The <code>tab</code> field names the built-in Terminal tab by its frozen id, <code>terminal</code>. Settings labels and ids are different things: the label is "Terminal", and the manifest uses the id <code>terminal</code>, which never changes even if the label does.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.clipboard-history&quot;,
+  &quot;name&quot;: &quot;Clipboard history&quot;,
+  &quot;version&quot;: &quot;1.3.0&quot;,
+  &quot;publisher&quot;: &quot;Example&quot;,
+  &quot;description&quot;: &quot;Keeps a searchable history of copied text.&quot;,
+  &quot;icon&quot;: &quot;clipboard-list&quot;,
+  &quot;client&quot;: {
+    &quot;entry&quot;: &quot;client.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;client&quot;: [&quot;settings.contribute:terminal&quot;]
+  },
+  &quot;activation&quot;: [&quot;startup&quot;],
+  &quot;contributes&quot;: {
+    &quot;settings&quot;: [
+      {
+        &quot;kind&quot;: &quot;section&quot;,
+        &quot;id&quot;: &quot;terminal-capture&quot;,
+        &quot;tab&quot;: &quot;terminal&quot;,
+        &quot;placement&quot;: &quot;after:main&quot;,
+        &quot;order&quot;: 500,
+        &quot;title&quot;: &quot;Terminal capture&quot;,
+        &quot;scope&quot;: &quot;client&quot;,
+        &quot;rows&quot;: [
+          { &quot;type&quot;: &quot;toggle&quot;, &quot;key&quot;: &quot;record_panes&quot;, &quot;title&quot;: &quot;Record pane copies&quot;,
+            &quot;default&quot;: true, &quot;scope&quot;: &quot;project&quot;,
+            &quot;description&quot;: &quot;Also store text copied from terminal panes.&quot; },
+          { &quot;type&quot;: &quot;number&quot;, &quot;key&quot;: &quot;min_length&quot;, &quot;title&quot;: &quot;Ignore copies under&quot;,
+            &quot;minimum&quot;: 0, &quot;maximum&quot;: 200, &quot;unit&quot;: &quot;chars&quot;, &quot;default&quot;: 3,
+            &quot;visible_when&quot;: { &quot;key&quot;: &quot;record_panes&quot;, &quot;equals&quot;: true },
+            &quot;description&quot;: &quot;Short copies such as a single word are skipped.&quot; },
+          { &quot;type&quot;: &quot;text&quot;, &quot;key&quot;: &quot;capture_token&quot;, &quot;title&quot;: &quot;Capture token&quot;,
+            &quot;secret&quot;: true, &quot;reveal_last&quot;: 4, &quot;max_length&quot;: 128, &quot;default&quot;: &quot;&quot;,
+            &quot;applies&quot;: &quot;restart&quot;,
+            &quot;description&quot;: &quot;Applies after restart.&quot; }
+        ]
+      }
+    ]
+  }
+}
+</code></pre>
+<p>Each field has one job:</p>
+<ul>
+<li><code>kind</code> set to <code>"section"</code> adds rows to a tab that already exists. A <code>"tab"</code> entry would add a new rail entry instead.</li>
+<li><code>tab</code> is <code>terminal</code>. The grant must name the same id. An unknown id fails with <code>manifest.settings-target-unknown</code>. A tab that accepts no plugin sections, such as <code>animations</code>, <code>debug</code>, <code>api</code>, <code>about</code> or <code>setup</code>, fails with <code>manifest.settings-target-closed</code>.</li>
+<li><code>placement</code> chooses the anchor, explained below.</li>
+<li><code>order</code> (0 to 1000, default 500) breaks ties with other plugins at the same anchor.</li>
+<li><code>scope</code> <code>"client"</code> means every key in the section is stored on the client side. The values go to <code>[plugins."example.clipboard-history"]</code> in <code>config.toml</code>. They never go to the <code>[terminal]</code> table.</li>
+<li><code>rows</code> holds up to 24 rows per section. This section has three.</li>
+<li><code>scope: "project"</code> on <code>record_panes</code> stores that one value for the open project. The project value wins while that project is open.</li>
+<li><code>visible_when</code> on <code>min_length</code> hides the row when <code>record_panes</code> is off. The hidden row keeps its value.</li>
+<li><code>secret</code> with <code>reveal_last: 4</code> masks <code>capture_token</code> as <code>••••</code> and shows its last four characters. <code>applies: "restart"</code> adds <code>↻</code> and the note <code>Applies after restart.</code></li>
+</ul>
+<p>The first render shows the Terminal tab before the plugin is installed. Its kernel rows are the starting point that the section must leave unchanged.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal───────────────────────────────────────╮
+│                                                       │
+│  Smart Copy light key …………………………………… ← Control  +  →  │
+│<span class="t-dim">    The modifier that starts Smart Copy light.         </span>│
+│<span class="t-dim">  ──────────────────────                               </span>│
+│  Parser pool ………………………………………………………………… -  0 MiB  + *  │
+│<span class="t-dim">    No aggregate parser memory cap.                    </span>│
+│<span class="t-dim">  ──────────────────────                               </span>│
+╰───────────────────────────────────────────────────────╯</pre>
+<figcaption>Before: the end of the Terminal tab. The kernel rows are the starting point the section must leave unchanged.</figcaption>
+</figure>
+
+<p>An anchor is a named point in a kernel tab. Every tab has <code>main</code>, the block of kernel rows. Terminal exposes only that one anchor, so the placements that work on Terminal are:</p>
+<ul>
+<li><code>"after:main"</code> puts the block after the last kernel row. It is the form used above. Because the anchor is named, the position stays stable if the kernel later adds sections, since kernel anchors are never renamed or removed.</li>
+<li><code>"end"</code>, the default, also puts the block after the last kernel row. On Terminal the two placements give the same result. They differ on a tab with several named anchors. The Remote compaction tab exposes <code>behaviour</code>, <code>technique-per-agent</code>, <code>custom-prompt</code>, <code>input-shaping</code> and <code>model</code>, so <code>after:input-shaping</code> places a block between two kernel sections. The diagram below shows that case.</li>
+</ul>
+<p><code>"before:main"</code> is refused at install with <code>manifest.settings-anchor</code>. Kernel rows always come first, so a plugin cannot push the rows of a one-section tab down.</p>
+<p>To use the second variant, change the placement line to <code>"placement": "end"</code>, or remove the line, since <code>end</code> is the default. The manifest is valid either way, and the Settings screen shows the same block on Terminal.</p>
+<figure>
+<svg viewBox="0 0 400 280" role="img" aria-label="Plugin blocks inserted at named anchors of the Remote compaction tab" width="600" height="420">
+  <defs>
+    <marker id="anchor-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="20" y="14" font-size="11" fill="currentColor">Remote compaction tab, top to bottom</text>
+  <rect x="20" y="24" width="230" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="135" y="41" font-size="11" text-anchor="middle" fill="currentColor">behaviour (kernel)</text>
+  <rect x="20" y="56" width="230" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="135" y="73" font-size="11" text-anchor="middle" fill="currentColor">technique-per-agent (kernel)</text>
+  <rect x="20" y="88" width="230" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="135" y="105" font-size="11" text-anchor="middle" fill="currentColor">custom-prompt (kernel)</text>
+  <rect x="20" y="120" width="230" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="135" y="137" font-size="11" text-anchor="middle" fill="currentColor">input-shaping (kernel)</text>
+  <rect x="20" y="158" width="230" height="30" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
+  <text x="135" y="177" font-size="11" text-anchor="middle" fill="currentColor">Plugin block (dashed)</text>
+  <rect x="20" y="200" width="230" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="135" y="217" font-size="11" text-anchor="middle" fill="currentColor">model (kernel)</text>
+  <rect x="20" y="238" width="230" height="26" rx="4" fill="none" stroke="currentColor" stroke-dasharray="5 3"/>
+  <text x="135" y="255" font-size="11" text-anchor="middle" fill="currentColor">Plugin block (dashed)</text>
+  <line x1="254" y1="173" x2="268" y2="173" stroke="currentColor" marker-end="url(#anchor-arrow)"/>
+  <text x="272" y="177" font-size="11" fill="currentColor">after:input-shaping</text>
+  <line x1="254" y1="251" x2="268" y2="251" stroke="currentColor" marker-end="url(#anchor-arrow)"/>
+  <text x="272" y="255" font-size="11" fill="currentColor">end (after model)</text>
+</svg>
+<figcaption>The kernel lays out its own rows first. Each plugin block is spliced in at its anchor, so kernel rows never move.</figcaption>
+</figure>
+
+<h3 id="step-2-read-the-values-and-react-to-changes">Step 2: read the values and react to changes</h3>
+<p>Section values live in the plugin's own store, so the plugin reads them the same way as values of its own tab. The get call returns every own key of the calling side with defaults filled in, so one call gives the plugin <code>record_panes</code>, <code>min_length</code> and <code>capture_token</code> even before the user changes anything. The section grant gives no access to Terminal's own values, such as the scrollback budget (see "What you cannot do").</p>
+<p>The event <code>settings-changed</code> carries the changed key names, the origin and the receiving side. Reload the values whenever a key of this section is listed. The token applies after restart, so the handler ignores a change of <code>capture_token</code> until the plugin restarts. The origin tells the plugin why the write happened: <code>user</code> means a row on the Settings screen changed, <code>reset</code> means the section's <code>[ Reset ]</code> control ran, <code>plugin</code> means the plugin's own <code>set-json</code> call, and <code>file</code> means <code>config.toml</code> was edited on disk and reloaded. A project value arrives as the same event when the user opens another project.</p>
+<p>The complete client files follow. Parse the JSON with serde in Rust, and check its shape in TypeScript, because parsed JSON is untyped.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs. Client side of clipboard-history 1.3.0: the Terminal section.
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::settings;
+use ilium_plugin_sdk::{ilium_plugin, Event, Handler, SettingsOrigin, Submission};
+use serde::Deserialize;
+
+/// Values of the section `terminal-capture`, keyed as in the manifest.
+#[derive(Deserialize, Default, Clone)]
+pub struct TerminalCapture {
+    pub record_panes: bool,
+    pub min_length: u32,
+    pub capture_token: String,
+}
+
+pub fn load_terminal_capture() -&gt; Result&lt;TerminalCapture, serde_json::Error&gt; {
+    serde_json::from_str(&amp;settings::get_json())
+}
+
+#[ilium_plugin(side = &quot;client&quot;)]
+#[derive(Default)]
+struct ClipboardHistory {
+    capture: TerminalCapture,
+}
+
+impl ClipboardHistory {
+    fn reload(&amp;mut self) {
+        match load_terminal_capture() {
+            Ok(capture) =&gt; self.capture = capture,
+            Err(error) =&gt; log::log(Level::Warn, &amp;error.to_string()),
+        }
+    }
+
+    /// Decides whether one copy from a terminal pane is stored.
+    fn should_store(&amp;self, text: &amp;str) -&gt; bool {
+        self.capture.record_panes &amp;&amp; text.chars().count() as u32 &gt;= self.capture.min_length
+    }
+}
+
+impl Handler for ClipboardHistory {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::SettingsChanged(change) = event else { continue };
+            // capture_token applies after restart, so only the other keys reload.
+            let live = change.keys.iter().any(|key| key == &quot;record_panes&quot; || key == &quot;min_length&quot;);
+            if live {
+                self.reload();
+            }
+            if change.origin == SettingsOrigin::Reset {
+                log::log(Level::Info, &quot;terminal capture reset from the Settings screen&quot;);
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts. Client side of clipboard-history 1.3.0: the Terminal section.
+import { definePlugin, type Event } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { getJson } from '@ilium/plugin-sdk/host/settings';
+
+export type TerminalCapture = {
+  record_panes: boolean;
+  min_length: number;
+  capture_token: string;
+};
+
+function isTerminalCapture(value: unknown): value is TerminalCapture {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record&lt;string, unknown&gt;;
+  return (
+    typeof record.record_panes === 'boolean' &amp;&amp;
+    typeof record.min_length === 'number' &amp;&amp;
+    typeof record.capture_token === 'string'
+  );
+}
+
+export function loadTerminalCapture(): TerminalCapture | null {
+  const parsed: unknown = JSON.parse(getJson());
+  return isTerminalCapture(parsed) ? parsed : null;
+}
+
+let capture: TerminalCapture | null = null;
+
+/** Decides whether one copy from a terminal pane is stored. */
+export function shouldStore(text: string): boolean {
+  if (!capture) return false;
+  return capture.record_panes &amp;&amp; [...text].length &gt;= capture.min_length;
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'client',
+  activate() {
+    capture = loadTerminalCapture();
+  },
+  onEvents(batch: Event[]) {
+    for (const event of batch) {
+      if (event.tag !== 'settings-changed') continue;
+      // capture_token applies after restart, so only the other keys reload.
+      const live = event.val.keys.some((key) =&gt; key === 'record_panes' || key === 'min_length');
+      if (live) capture = loadTerminalCapture();
+      if (event.val.origin === 'reset') log('info', 'terminal capture reset from the Settings screen');
+    }
+    return [];
+  },
+});
+</code></pre>
+<h4 id="what-you-see">What you see</h4>
+<p>The Terminal tab after install, with the plugin block at the bottom. The values match the defaults above.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal───────────────────────────────────────╮
+│  Parser pool ………………………………………………………………… -  0 MiB  + *  │
+│<span class="t-dim">    No aggregate parser memory cap.                    </span>│
+│<span class="t-dim">  ──────────────────────                               </span>│
+│<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ──────────────────────── plugin ─</span>│
+│<span class="t-hi">▏ Terminal capture                                     </span>│
+│▏  Record pane copies ……………………………………………………………… ‹ On ›  │
+│<span class="t-dim">▏    Also store text copied from terminal panes.       </span>│
+│<span class="t-dim">▏  ──────────────────────                              </span>│
+│▏  Ignore copies under …………………………………… -  3 chars  + *  │
+│<span class="t-dim">▏    Short copies are skipped.                         </span>│
+│<span class="t-dim">▏  ──────────────────────                              </span>│
+│▏  Capture token ………………………………………………………………… ••••a1b2 ↻  │
+│<span class="t-dim">▏    Applies after restart.                            </span>│
+╰───────────────────────────────────────────────────────╯</pre>
+<figcaption>After: the plugin block follows the kernel rows at <code>after:main</code>. The <code>▏</code> gutter marks every plugin line, and the divider names the plugin.</figcaption>
+</figure>
+
+<p>Turn <code>Record pane copies</code> off. The dim <code>•</code> marks the changed value. <code>Ignore copies under</code> is hidden: <code>visible_when</code> is false, so it takes no line, keeps its value, and search skips it.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal───────────────────────────────────────╮
+│<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ──────────────────────── plugin ─</span>│
+│<span class="t-hi">▏ Terminal capture                                     </span>│
+│<span class="t-hi">▏  Record pane copies• ………………………………………………………… ‹ Off ›  </span>│
+│<span class="t-dim">▏    Also store text copied from terminal panes.       </span>│
+╰───────────────────────────────────────────────────────╯</pre>
+<figcaption><code>Record pane copies</code> turned off. <code>Ignore copies under</code> is hidden by <code>visible_when</code>; its value is kept.</figcaption>
+</figure>
+
+<p>The secret shows the last four characters, and the restart marker tells the user the new token is not live yet.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal───────────────────────────────────────╮
+│<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ──────────────────────── plugin ─</span>│
+│<span class="t-hi">▏ Terminal capture                                     </span>│
+│▏  Capture token ………………………………………………………………… ••••a1b2 ↻  │
+│<span class="t-dim">▏    Applies after restart.                            </span>│
+╰───────────────────────────────────────────────────────╯</pre>
+<figcaption>The secret row. <code>reveal_last: 4</code> shows the last four characters; <code>↻</code> and the note say the value applies after restart.</figcaption>
+</figure>
+
+<h3 id="step-3-two-plugins-on-the-same-tab">Step 3: two plugins on the same tab</h3>
+<p>Several plugins can add sections to one kernel tab. The kernel orders them by a fixed rule, and install order and enable order never change the result:</p>
+<ol>
+<li>The anchor (kernel rows first, then <code>after:</code> blocks, then <code>end</code> blocks).</li>
+<li>The <code>order</code> value, ascending.</li>
+<li>The plugin id, compared bytewise.</li>
+<li>The declaration order inside the plugin.</li>
+</ol>
+<p>Each plugin's sections at one anchor sit next to each other under one divider. Suppose a second plugin, <code>example.terminal-bell</code>, adds a "Bell" section with <code>"placement": "after:main"</code> and <code>"order": 200</code>. Its block comes first, because 200 is lower than 500:</p>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;section&quot;,
+  &quot;id&quot;: &quot;bell&quot;,
+  &quot;tab&quot;: &quot;terminal&quot;,
+  &quot;placement&quot;: &quot;after:main&quot;,
+  &quot;order&quot;: 200,
+  &quot;title&quot;: &quot;Bell&quot;,
+  &quot;scope&quot;: &quot;client&quot;,
+  &quot;rows&quot;: [
+    { &quot;type&quot;: &quot;toggle&quot;, &quot;key&quot;: &quot;ring_on_copy&quot;, &quot;title&quot;: &quot;Ring on copy&quot;, &quot;default&quot;: false,
+      &quot;description&quot;: &quot;Ring the terminal bell when a pane copy is stored.&quot; }
+  ]
+}
+</code></pre>
+<p>If both plugins used <code>order</code> 500, the clipboard block would come first, because <code>example.clipboard-history</code> sorts before <code>example.terminal-bell</code>.</p>
+<p>Users cannot reorder plugin sections. The rule is the only order, so a plugin author controls its place only through <code>placement</code> and <code>order</code>, and a second plugin cannot push the first one's rows out of its place. Two machines with the same plugins show the same Terminal tab, whatever order the plugins were installed in.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal───────────────────────────────────────╮
+│<span class="t-hi">▏ <span class="w2">♪</span> TERMINAL BELL ──────────────────────────── plugin ─</span>│
+│<span class="t-hi">▏ Bell                                                 </span>│
+│▏  Ring on copy …………………………………………………………………………… ‹ Off ›  │
+│<span class="t-dim">▏    Ring the terminal bell when a copy is stored.     </span>│
+│<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ──────────────────────── plugin ─</span>│
+│<span class="t-hi">▏ Terminal capture                                     </span>│
+│▏  Record pane copies ……………………………………………………………… ‹ On ›  │
+│<span class="t-dim">▏    Also store text copied from terminal panes.       </span>│
+╰───────────────────────────────────────────────────────╯</pre>
+<figcaption>Two plugins at the same anchor. Each block has its own divider, and the lower <code>order</code> (200) comes first.</figcaption>
+</figure>
+
+<h3 id="step-4-limits">Step 4: limits</h3>
+<p>The kernel enforces these limits for sections in built-in tabs. Install refuses a manifest that exceeds a per-plugin limit with <code>manifest.settings-limit</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plugin sections per kernel tab, one plugin</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Plugin sections per kernel tab, all plugins</td>
+<td>6</td>
+</tr>
+<tr>
+<td>Rows per section (a <code>group</code> counts its children)</td>
+<td>24</td>
+</tr>
+<tr>
+<td>Value keys per plugin</td>
+<td>128</td>
+</tr>
+<tr>
+<td>Choice options</td>
+<td>64</td>
+</tr>
+<tr>
+<td>Text value</td>
+<td>4,096 characters</td>
+</tr>
+</tbody>
+</table>
+<p>These limits keep the Terminal tab readable. A plugin that needs more than two sections in one tab merges its rows into fewer sections. A plugin that needs more room gives itself a tab of its own, as tutorial 10 shows.</p>
+<p>A seventh plugin section on one tab is not drawn. The kernel drops the extra sections in ordering order and writes a load warning, so the plugin keeps running and the values stay stored. The render shows the warning as <code>ilium plugin logs</code> prints it.</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.clipboard-history
+<span class="t-warn">2026-10-12 09:14:02 warn  host   example.clipboard-history</span>
+    settings.section-dropped: section
+    "example.clipboard-history/terminal-capture"
+    in tab "terminal" is not shown: the tab
+    already has 6 plugin sections
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The load warning in the log when a tab is full. Nothing is removed from the stored values.</figcaption>
+</figure>
+
+<h3 id="step-5-install-and-the-permission-prompt">Step 5: install and the permission prompt</h3>
+<p>Build the package, then install it with the package command. The install checks the manifest and its grants before it writes the plugin:</p>
+<pre><code class="language-bash">ilium plugin install ./example.clipboard-history.iliumpkg
+</code></pre>
+<p>The review dialog lists the grant in plain words. The grant <code>settings.contribute:terminal</code> appears as one line, normal risk, and the always-granted settings of the plugin's own values need no line. Approving the install lets the plugin draw sections in the Terminal tab and nothing else. It gives no read or write access to Terminal values.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Install Clipboard history 1.3.0?────────────────────╮
+│ By Example. Keeps a searchable history of copied text.     │
+│                                                            │
+│ Permissions                                                │
+│   Adds settings to the Terminal tab            low risk    │
+│   Always granted: settings of this plugin.                 │
+│                                                            │
+│                          [ Cancel ]  [ Install ]           │
+╰────────────────────────────────────────────────────────────╯</pre>
+<figcaption>The review dialog with the grant for the Terminal tab.</figcaption>
+</figure>
+
+<h3 id="step-6-see-it-search-it-reset-it">Step 6: see it, search it, reset it</h3>
+<p>Open Settings, press Tab until the Terminal rail entry is selected, and scroll down past the Parser pool row. The block is drawn after the last kernel row. Press Up or Down to move between rows: the kernel handles those keys, so the plugin rows never see raw key events. A value changes at once for a toggle and after 600 ms for a number step.</p>
+<p>Saving follows the Settings rules. A toggle or a choice writes at once. A number step writes 600 ms after the last step, so several quick presses become one write and one <code>settings-changed</code> event. Closing Settings with Esc or <code>✕ Close</code> flushes any pending write, so nothing is lost on the way out.</p>
+<p>Press <code>/</code> and type part of a name to filter. A match inside a built-in tab shows the plugin divider above the matching row, so the owner stays visible. Esc clears the filter.</p>
+<figure>
+<pre class="term"><span class="w2">⚙</span> Settings                                                               <span class="w2">✕</span> Close
+<span class="t-dim">/ ignore                                                        [ Guided setup ]</span>
+╭  ≡ ● · Navigation╮ ╭  ≡ ● · Terminal─────────────────────────────────────────╮
+<span class="t-hi">│ <span class="w2">❯</span>  Terminal 1    │</span> │                                                         │
+│                  │ │<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ──────────────────────── plugin ─  </span>│
+│                  │ │<span class="t-hi">▏ Terminal capture                                       </span>│
+│                  │ │▏  Ignore copies under …………………………………… -  3 chars  + *    │
+│                  │ │<span class="t-dim">▏    Short copies are skipped.                           </span>│
+│                  │ │                                                         │
+╰──────────────────╯ ╰─────────────────────────────────────────────────────────╯</pre>
+<figcaption>The filter with <code>ignore</code>. The rail keeps the Terminal tab with a count of 1. The content shows the matching row under its section title and the plugin divider.</figcaption>
+</figure>
+
+<p>The <code>[ Reset ]</code> control of the section asks before it acts. A reset sends one patch that sets each key of the section to <code>null</code>, and the event arrives with the origin <code>reset</code>.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Reset─────────────────────────────────╮
+│ Reset 3 settings of Clipboard history?       │
+│                                              │
+│                        [ N ]  [ Y ]          │
+│ Y/N answer · Enter confirm · Esc cancel      │
+╰──────────────────────────────────────────────╯</pre>
+<figcaption>The Reset control of the section asks before it sets each key to its default.</figcaption>
+</figure>
+
+<p>Now turn the plugin off in Settings &gt; Plugins. Its rows stay visible and keep their values, but they are dimmed and read-only, and the divider says <code>plugin · off</code>. Rows remain focusable so that <code>?</code> still opens their help.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Terminal───────────────────────────────────────╮
+│<span class="t-hi">▏ ⎘ CLIPBOARD HISTORY ────────────────── plugin · off ─</span>│
+│<span class="t-hi">▏ Terminal capture                                     </span>│
+│▏  Record pane copies ……………………………………………………………… ‹ On ›  │
+│<span class="t-dim">▏    Read-only while the plugin is turned off.         </span>│
+╰───────────────────────────────────────────────────────╯</pre>
+<figcaption>The plugin turned off. The values are kept, and the rows are dimmed and read-only.</figcaption>
+</figure>
+
+<p>The <code>▏</code> gutter marks every line of the plugin block. The gutter stays on screen when the user scrolls past the divider, so the owner of the rows is always visible.</p>
+<h3 id="before-and-after">Before and after</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Before the plugin</th>
+<th>After the plugin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Terminal rows</td>
+<td>The kernel rows</td>
+<td>The same kernel rows, unchanged</td>
+</tr>
+<tr>
+<td>Lines below Parser pool</td>
+<td>None</td>
+<td>A divider, a title and three plugin rows</td>
+</tr>
+<tr>
+<td>Stored values</td>
+<td><code>[terminal]</code> only</td>
+<td>Plugin values in <code>[plugins."example.clipboard-history"]</code>; <code>record_panes</code> also per project</td>
+</tr>
+<tr>
+<td>Rail</td>
+<td>The kernel tabs</td>
+<td>The same tabs; no new entry</td>
+</tr>
+</tbody>
+</table>
+<p>The built-in rows are the same before and after, and the plugin adds a labelled block with no new rail entry. Users see the plugin's contribution in place, and a plugin cannot take over any part of the Terminal tab that belongs to the kernel.</p>
+<h3 id="what-you-cannot-do">What you cannot do</h3>
+<p>The limits below follow directly from the rule that plugins add and never alter.</p>
+<ul>
+<li><strong>Change, hide, reorder or relabel a built-in row.</strong> The kernel lays out the kernel rows first and splices plugin blocks in afterwards. There is no field that touches a kernel row.</li>
+<li><strong>Place a block before <code>main</code>.</strong> <code>"before:main"</code> is refused, so kernel rows of a one-section tab always come first.</li>
+<li><strong>Write a built-in value.</strong> The grant allows drawing sections only. A patch can only name keys of the plugin's own sections.</li>
+<li><strong>Read a built-in value without its own grant.</strong> <code>settings.contribute</code> gives no read access. Reading needs <code>settings.read-kernel:terminal</code>, shown below. The read is one-way and secrets are redacted.</li>
+<li><strong>Add a section to a closed tab.</strong> <code>animations</code>, <code>debug</code>, <code>api</code>, <code>about</code> and <code>setup</code> accept no plugin sections.</li>
+</ul>
+<p>To read a Terminal value, add <code>settings.read-kernel:terminal</code> to <code>capabilities.client</code>. Changes arrive as the event <code>kernel-settings-changed</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::kernel_settings;
+
+// Needs the grant settings.read-kernel:terminal. Read-only, secrets are redacted.
+fn scrollback_budget() -&gt; Option&lt;u64&gt; {
+    let json = kernel_settings::read(&quot;terminal&quot;).ok()?;
+    let values: serde_json::Value = serde_json::from_str(&amp;json).ok()?;
+    values[&quot;scrollback_mib&quot;].as_u64()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { read } from '@ilium/plugin-sdk/host/kernel-settings';
+
+// Needs the grant settings.read-kernel:terminal. Read-only, secrets are redacted.
+export function scrollbackBudget(): number | undefined {
+  const values = JSON.parse(read('terminal')) as { scrollback_mib?: number };
+  return values.scrollback_mib;
+}
+</code></pre>
+<h3 id="troubleshooting">Troubleshooting</h3>
+<table>
+<thead>
+<tr>
+<th>Symptom or code</th>
+<th>Cause and fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.settings-target-grant</code></td>
+<td>The section targets <code>terminal</code> but the manifest has no <code>settings.contribute:terminal</code> capability. Add the grant to <code>capabilities.client</code>.</td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-unknown</code></td>
+<td>The <code>tab</code> value is not a kernel tab id. Use the lowercase id from the table in the concept page, such as <code>terminal</code>, not the label "Terminal".</td>
+</tr>
+<tr>
+<td><code>manifest.settings-target-closed</code></td>
+<td>The tab accepts no plugin sections, such as <code>debug</code>. Choose a tab that accepts sections.</td>
+</tr>
+<tr>
+<td><code>manifest.settings-anchor</code></td>
+<td>The placement names a section that the tab does not have, for example <code>after:output</code>. Use <code>main</code> on Terminal, or a named anchor of the tab.</td>
+</tr>
+<tr>
+<td><code>manifest.settings-limit</code></td>
+<td>A count is over its limit, such as a third section in one tab. Merge the rows into fewer sections.</td>
+</tr>
+<tr>
+<td><code>manifest.settings-key-clash</code></td>
+<td>Two rows in the plugin use the same <code>key</code>. Keys are unique across all tabs and sections of the plugin.</td>
+</tr>
+<tr>
+<td><code>manifest.settings-default</code></td>
+<td>A <code>default</code> does not match its row, for example a <code>min_length</code> default of 300 with a maximum of 200. Correct the default.</td>
+</tr>
+<tr>
+<td>A row is missing</td>
+<td>Its <code>visible_when</code> is false. Change the controlling row.</td>
+</tr>
+<tr>
+<td><code>settings.section-dropped</code></td>
+<td>The tab already has six plugin sections. This is a warning only. Remove a plugin or move a section to a tab with room.</td>
+</tr>
+<tr>
+<td><code>settings.value-ignored</code></td>
+<td>A stored value no longer matches its row, for example after the maximum was lowered. The default applies, and the stored text stays in the file.</td>
+</tr>
+</tbody>
+</table>
+<p>Kernel anchors are never removed, so a <code>after:main</code> placement keeps working through kernel updates. The <code>settings.anchor-missing</code> warning applies only to an anchor that the plugin itself declared in one of its own sections.</p>
+<h3 id="next-steps">Next steps</h3>
+<ul>
+<li>Read <a href="/pages/settings-extension/">Settings extension</a> for the registry, the anchor table of every kernel tab and the lifecycle states.</li>
+<li>Read <a href="/pages/reference-settings-schema/">Settings schema reference</a> for every row type and field, and the error codes.</li>
+<li>Read <a href="/pages/reference-settings-rows/">Row gallery</a> for every row in every state.</li>
+<li>Read <a href="/pages/capability-settings-all/">Capability: all settings</a> for the difference between <code>settings.contribute</code> and the all-settings grants.</li>
+<li>Return to <a href="/pages/tutorial-10-settings-new-tab/">tutorial 10</a> to give the plugin its own tab next to this section.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-10-settings-new-tab/"><small>Previous</small>10. A settings tab of your own</a><a class="next" href="/pages/tutorial-12-hello-cli/"><small>Next</small>12. Your first CLI subcommand</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#step-1-declare-the-section-in-the-manifest">Step 1: declare the section in the manifest</a></li><li class="l2"><a href="#step-2-read-the-values-and-react-to-changes">Step 2: read the values and react to changes</a></li><li class="l3"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#step-3-two-plugins-on-the-same-tab">Step 3: two plugins on the same tab</a></li><li class="l2"><a href="#step-4-limits">Step 4: limits</a></li><li class="l2"><a href="#step-5-install-and-the-permission-prompt">Step 5: install and the permission prompt</a></li><li class="l2"><a href="#step-6-see-it-search-it-reset-it">Step 6: see it, search it, reset it</a></li><li class="l2"><a href="#before-and-after">Before and after</a></li><li class="l2"><a href="#what-you-cannot-do">What you cannot do</a></li><li class="l2"><a href="#troubleshooting">Troubleshooting</a></li><li class="l2"><a href="#next-steps">Next steps</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

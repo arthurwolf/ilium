@@ -22,25 +22,32 @@ mod antigravity_statusline_delivery;
 mod chatroom_router;
 pub mod config;
 mod config_refresh;
+pub mod custom_agent_config;
 mod detection;
+mod detection_effects;
 pub mod error;
 mod execution;
 mod foreground_observation;
 mod git_status;
 mod http_api;
+mod http_control;
 mod initial_prompt;
 mod ipc;
 mod lifecycle_log;
 mod mouse;
+mod native_terminal_spawn;
 mod notifications;
 mod pane;
 pub mod paths;
 mod persistence;
+pub mod plugin_host;
 mod progress_monitor;
 mod progress_watchdog;
 mod prompt_queue;
 mod ready_log;
 mod recovery;
+mod repo_facts_cache;
+pub mod resources;
 mod scheduled_input;
 mod session_backups;
 mod session_id;
@@ -95,6 +102,9 @@ pub struct ReadyLogMetadata {
 /// by tests with tempdir paths -- either way `run` itself never touches
 /// `directories::ProjectDirs`.
 pub struct ServerOptions {
+    /// Shared durable resource catalog, resolved by the composition root.
+    /// None disables resource coordination for explicitly isolated consumers.
+    pub resource_catalog_path: Option<PathBuf>,
     pub session_name: String,
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
@@ -221,6 +231,9 @@ pub async fn run_with_resources(
     if state.execution.set(execution).is_err() {
         return Err(std::io::Error::other("server execution was already started").into());
     }
+    if let Some(path) = options.resource_catalog_path {
+        let _ = state.resources.set(resources::ResourceService::new(path));
+    }
     let execution = state
         .execution
         .get()
@@ -327,6 +340,7 @@ pub async fn run_with_resources(
     if let Some(phase) = &startup {
         phase.finish().await;
     }
+    let _resource_task = AbortOnDropHandle::new(resources::spawn(Arc::clone(&state)));
     let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
     let workspace_git_requests = state.take_workspace_git_full_receiver().await;
     let git_status_task = AbortOnDropHandle::new(git_status::spawn(
@@ -653,6 +667,7 @@ async fn restore_snapshot_data(
     let pane_count = snapshot.panes.len();
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
+    let persisted_recaps = std::mem::take(&mut snapshot.recaps);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
     #[cfg(test)]
     state.recovery.notify_restore_prepublication();
@@ -685,6 +700,15 @@ async fn restore_snapshot_data(
             }
         }
         drop(preferences);
+        {
+            let mut recaps = state.recaps.write().await;
+            recaps.clear();
+            for recap in persisted_recaps {
+                if tree.get(recap.pane_id).is_some() {
+                    recaps.insert(recap.pane_id, recap);
+                }
+            }
+        }
         // Presentation state contains the previous process's monitor IDs.
         // Clear it before respawning panes; each valid persisted registration
         // below receives a fresh process-local generation and republishes its
@@ -796,7 +820,7 @@ async fn restore_snapshot_data(
             state.session_name,
             failed_panes.len()
         );
-        state.broadcast(ilium_ipc::ServerEvent::Error {
+        state.events.publish(ilium_ipc::ServerEvent::Error {
             message: unrestored::failure_summary(pane_count, &failed_panes),
         });
         unrestored::spawn_retry_task(state);
@@ -986,9 +1010,15 @@ pub(crate) async fn start_snapshot_pane(
         }
     };
     match spawn_result {
-        Ok(()) => SnapshotPaneStart::Started { missing_workspace },
+        Ok(()) => {
+            state.clear_blocking_error(Some(node_id), "launch");
+            SnapshotPaneStart::Started { missing_workspace }
+        }
         Err(ipc::handlers::RegisterPaneError::Spawn(error)) => {
             SnapshotPaneStart::Failed(error.to_string())
+        }
+        Err(ipc::handlers::RegisterPaneError::Admission(reason)) => {
+            SnapshotPaneStart::Failed(reason)
         }
         Err(ipc::handlers::RegisterPaneError::NodeRemoved(_)) => {
             // Admission refuses without removing a node that still has a
@@ -1162,6 +1192,7 @@ mod restore_tests {
                 agent_debug_logs: Vec::new(),
                 progress_monitors: vec![persisted_monitor.clone()],
                 workspace_close_preferences: Vec::new(),
+                recaps: Vec::new(),
             },
         )
         .await;
@@ -1213,6 +1244,125 @@ mod restore_tests {
                 if command == "printf 'unsafe-original-command'"
         ));
 
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+    }
+
+    #[tokio::test]
+    async fn restore_starts_terminals_under_unusable_git_metadata() {
+        let directory = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "admission-reason-test".to_string(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("session.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
+        std::fs::write(directory.path().join(".git"), "invalid gitfile\n").unwrap();
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ROOT_ID, "work").unwrap();
+            tree.add_pane(group, "Saved", PaneContentKind::Terminal)
+                .unwrap()
+        };
+        let result = start_snapshot_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        // A corrupt gitfile cannot describe a managed checkout, so the saved
+        // terminal still acquires a PTY instead of failing every restore.
+        assert!(matches!(result, SnapshotPaneStart::Started { .. }));
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+        // An empty ancestor .git directory is not a repository to Git. It
+        // must not prevent an ordinary saved terminal from acquiring a PTY.
+        std::fs::remove_file(directory.path().join(".git")).unwrap();
+        std::fs::create_dir(directory.path().join(".git")).unwrap();
+        let launch = directory.path().join("project");
+        std::fs::create_dir(&launch).unwrap();
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ROOT_ID, "ordinary project").unwrap();
+            let pane_id = tree
+                .add_pane(group, "Saved", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(
+                pane_id,
+                ilium_platform::paths::canonicalize(&launch).unwrap(),
+            )
+            .unwrap();
+            pane_id
+        };
+        let result = start_snapshot_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        assert!(matches!(result, SnapshotPaneStart::Started { .. }));
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        assert!(matches!(&resource, crate::pane::PaneResource::Terminal(_)));
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+
+        // A repository whose `core.worktree` points elsewhere (a config repo
+        // tracking another folder) used to fail this restore every 5 minutes.
+        std::fs::remove_dir(directory.path().join(".git")).unwrap();
+        let elsewhere = tempfile::tempdir().expect("work tree elsewhere");
+        for arguments in [
+            vec!["init", "-q"],
+            vec![
+                "config",
+                "core.worktree",
+                elsewhere.path().to_str().unwrap(),
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(&arguments)
+                .current_dir(directory.path())
+                .status()
+                .expect("run git");
+            assert!(status.success(), "{arguments:?}");
+        }
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ROOT_ID, "config repo").unwrap();
+            let pane_id = tree
+                .add_pane(group, "Saved", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(
+                pane_id,
+                ilium_platform::paths::canonicalize(&launch).unwrap(),
+            )
+            .unwrap();
+            pane_id
+        };
+        let result = start_snapshot_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        assert!(matches!(result, SnapshotPaneStart::Started { .. }));
         let resource = state.panes.write().await.remove(&pane_id).unwrap();
         crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
     }
@@ -1279,6 +1429,7 @@ mod restore_tests {
                 agent_debug_logs: Vec::new(),
                 progress_monitors: Vec::new(),
                 workspace_close_preferences: Vec::new(),
+                recaps: Vec::new(),
             },
         )
         .await;
@@ -1311,6 +1462,15 @@ mod restore_tests {
                 Some(crate::pane::PaneResource::Terminal(_))
             ));
         }
+        let attached = crate::ipc::handlers::initial_state_events(&state, false, false).await;
+        assert!(
+            attached.iter().any(|event| matches!(event,
+                ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.node_id == Some(failing_pane)
+                        && error.operation == "launch" && error.message.contains("does not exist"))
+            )),
+            "reattaching must retain a failed saved pane's real reason"
+        );
         let input = crate::ipc::handlers::submit_terminal_text(
             &state,
             failing_pane,
@@ -1337,6 +1497,26 @@ mod restore_tests {
         assert!(saved.tree.get(failing_pane).is_some());
 
         state.stop_unrestored_retry_task();
+        std::fs::create_dir(directory.path().join("deleted-directory")).unwrap();
+        let recovered = start_snapshot_pane(
+            &state,
+            failing_pane,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        assert!(matches!(recovered, SnapshotPaneStart::Started { .. }));
+        assert!(!state
+            .blocking_errors_snapshot()
+            .iter()
+            .any(|error| error.node_id == Some(failing_pane) && error.operation == "launch"));
+        let attached = crate::ipc::handlers::initial_state_events(&state, false, false).await;
+        assert!(
+            attached.iter().any(|event| matches!(event,
+                ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty()
+            )),
+            "recovered panes must replay an empty authoritative error snapshot"
+        );
+
         let mut panes = state.panes.write().await;
         for pane_id in [failing_pane, healthy_pane] {
             if let Some(resource) = panes.remove(&pane_id) {
@@ -1469,6 +1649,7 @@ mod restore_tests {
             }],
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
         tokio::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
@@ -1479,6 +1660,7 @@ mod restore_tests {
             .expect("write snapshot fixture");
 
         let options = ServerOptions {
+            resource_catalog_path: None,
             session_name: "restore-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
@@ -1515,12 +1697,55 @@ mod restore_tests {
         .await;
         assert!(bound, "server did not bind its socket in time");
 
+        let mut client = SessionEndpoint::from_path(&socket_path)
+            .connect()
+            .await
+            .expect("connect to the session socket");
+        write_frame(
+            &mut client,
+            &ClientRequest::Attach {
+                session: "restore-test".to_string(),
+                hello: Default::default(),
+            },
+        )
+        .await
+        .expect("write Attach request");
+
+        let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::PaneStateSnapshot { .. })
+        })
+        .await;
+        let ServerEvent::PaneStateSnapshot {
+            tree: restored_tree,
+            ..
+        } = event
+        else {
+            panic!("expected PaneStateSnapshot on attach, got {event:?}");
+        };
+        // Binding the endpoint precedes startup backup capture; a completed
+        // Attach proves capture and restoration have finished.
         let backup_directory = snapshot_path
             .parent()
             .and_then(|path| path.parent())
             .expect("project .ilium directory")
             .join("backups")
             .join("restore-test");
+        // The socket is live before startup writes its backup (`run` binds the
+        // listener first, then captures the backup), so wait for the backup
+        // instead of reading the directory the moment the socket answers.
+        let backup_written = wait_until(
+            || {
+                std::fs::read_dir(&backup_directory)
+                    .map(|mut entries| entries.next().is_some())
+                    .unwrap_or(false)
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            backup_written,
+            "server did not write its startup backup in time"
+        );
         let backups = std::fs::read_dir(&backup_directory)
             .expect("read startup backup directory")
             .map(|entry| entry.expect("backup entry").path())
@@ -1537,28 +1762,6 @@ mod restore_tests {
             json,
             "startup backup must preserve the exact pre-normalization JSON"
         );
-
-        let mut client = SessionEndpoint::from_path(&socket_path)
-            .connect()
-            .await
-            .expect("connect to the session socket");
-        write_frame(
-            &mut client,
-            &ClientRequest::Attach {
-                session: "restore-test".to_string(),
-            },
-        )
-        .await
-        .expect("write Attach request");
-
-        let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
-        let ServerEvent::PaneStateSnapshot {
-            tree: restored_tree,
-            ..
-        } = event
-        else {
-            panic!("expected PaneStateSnapshot on attach, got {event:?}");
-        };
         // Structure, not runtime counters. Restoring a pane starts a real
         // process, and any byte it emits advances that node's activity
         // revision -- on Windows a console app cannot avoid it, because ConPTY
@@ -1718,6 +1921,7 @@ mod restore_tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
 
@@ -1829,6 +2033,7 @@ mod restore_tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
 
@@ -1885,6 +2090,12 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Repository admission uses the finite execution bank before the
+        // node-generation fence, as it does for every production spawn.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
 
         let pane_id = {
             let mut tree = state.tree.write().await;
@@ -1907,7 +2118,7 @@ mod restore_tests {
             .remove_node(pane_id)
             .expect("remove the pane's node, simulating a concurrent close");
 
-        let cwd = dir.path().to_path_buf();
+        let cwd = state.session_cwd.clone();
         let result = crate::ipc::handlers::spawn_and_register_pane_in_directory(
             &state,
             pane_id,
@@ -1936,6 +2147,7 @@ mod restore_tests {
         let socket_path = directory.path().join("restart-test.sock");
         let snapshot_path = directory.path().join("restart-test.snapshot.json");
         let options = ServerOptions {
+            resource_catalog_path: None,
             session_name: "restart-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
@@ -2008,6 +2220,7 @@ mod socket_tests {
         ready_log_metadata: Option<ReadyLogMetadata>,
     ) -> ServerOptions {
         ServerOptions {
+            resource_catalog_path: None,
             session_name: "ready-metadata-test".to_string(),
             socket_path,
             snapshot_path: directory.path().join("session.snapshot.json"),

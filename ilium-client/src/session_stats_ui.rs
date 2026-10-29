@@ -548,7 +548,13 @@ impl Canvas {
     ) {
         let value_width = UnicodeWidthStr::width(value);
         let share_text = share.map_or_else(String::new, percent_label);
-        let trailing = value_width + 2 + share_text.len().max(5) + 1;
+        let trailing = 2
+            + value_width
+            + if share_text.is_empty() {
+                0
+            } else {
+                2 + share_text.len().max(5)
+            };
         let bar_width = usize::from(self.width)
             .saturating_sub(label_width + 2 + trailing)
             .max(6);
@@ -1479,6 +1485,16 @@ fn token_legend(canvas: &mut Canvas, tokens: &TokenTotals) {
     }
 }
 
+fn recorded_cost_label(usd: f64) -> String {
+    if usd > 0.0 && usd < 0.0001 {
+        "<$0.0001".to_owned()
+    } else if usd > 0.0 && usd < 0.01 {
+        format!("${usd:.4}")
+    } else {
+        format!("${usd:.2}")
+    }
+}
+
 fn draw_cost(canvas: &mut Canvas, stats: &SessionStats) {
     let dim = Style::new().fg(canvas.palette.dim);
     let (warn, label) = (canvas.palette.warn, canvas.palette.label);
@@ -1497,7 +1513,7 @@ fn draw_cost(canvas: &mut Canvas, stats: &SessionStats) {
     canvas.heading("Cost", "as recorded by Claude Code");
     canvas.line(Line::from(vec![
         Span::styled(
-            format!("${:.2}", cost.total_usd),
+            recorded_cost_label(cost.total_usd),
             Style::new()
                 .fg(canvas.palette.good)
                 .add_modifier(Modifier::BOLD),
@@ -1521,7 +1537,7 @@ fn draw_cost(canvas: &mut Canvas, stats: &SessionStats) {
                 14,
                 usd / peak,
                 label,
-                &format!("${usd:.2}"),
+                &recorded_cost_label(*usd),
                 (cost.total_usd > 0.0).then(|| usd / cost.total_usd),
             );
         }
@@ -2264,6 +2280,69 @@ mod tests {
                 );
             }
             assert!(layout.close.right() < layout.area.right());
+        }
+    }
+
+    #[test]
+    fn statistics_bar_keeps_value_and_percentage_inside_canvas() {
+        for width in [36, 100] {
+            let mut canvas = Canvas::new(
+                width,
+                Style::default(),
+                palette(ColorScheme::Dark),
+                StatsScale::default(),
+                None,
+            );
+            canvas.bar_row("fresh input", 12, 1.0, Color::Green, "15.0k ", Some(0.74));
+            let row: String = (0..width).map(|x| canvas.buffer[(x, 0)].symbol()).collect();
+            assert!(
+                row.contains("15.0k"),
+                "missing value at width {width}: {row}"
+            );
+            assert!(
+                row.contains("74%"),
+                "missing percentage at width {width}: {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn recorded_subcent_costs_remain_visible_in_total_and_model_rows() {
+        for (usd, expected) in [
+            (0.00132067, "$0.0013"),
+            (0.00001, "<$0.0001"),
+            (0.0, "$0.00"),
+            (12.5, "$12.50"),
+        ] {
+            let mut stats = sample_stats();
+            let cost = stats.cost.as_mut().unwrap();
+            cost.total_usd = usd;
+            cost.model_costs = vec![("claude-haiku-4-5".into(), usd)];
+            let mut canvas = Canvas::new(
+                90,
+                Style::default(),
+                palette(ColorScheme::Dark),
+                StatsScale::default(),
+                None,
+            );
+            draw_cost(&mut canvas, &stats);
+            let rows: Vec<String> = (0..canvas.y)
+                .map(|y| {
+                    (0..canvas.width)
+                        .map(|x| canvas.buffer[(x, y)].symbol())
+                        .collect()
+                })
+                .collect();
+            assert!(
+                rows.iter().any(|row| row.contains(expected)),
+                "missing total {expected}: {rows:?}"
+            );
+            if usd > 0.0 {
+                assert!(
+                    rows.iter().filter(|row| row.contains(expected)).count() >= 2,
+                    "missing model cost {expected}: {rows:?}"
+                );
+            }
         }
     }
 

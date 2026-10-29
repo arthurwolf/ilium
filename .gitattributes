@@ -8,3 +8,6 @@ release/** text eol=lf
 # Binary release inputs (icon, bytecode) must never be line-ending converted.
 release/**/*.png binary
 release/**/*.pyc binary
+
+# Union merge: if two branches both add lines to CHANGELOG.md anyway, keep both sides instead of conflicting.
+CHANGELOG.md merge=union

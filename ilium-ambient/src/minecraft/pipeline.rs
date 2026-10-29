@@ -28,6 +28,7 @@ impl Default for Limits {
             map_attempts: 8,
             windows: windows::Limits {
                 spread_candidates: 4,
+                radius_chunks: windows::MAX_RADIUS_CHUNKS,
                 ..windows::Limits::default()
             },
             loading: loader::Limits::default(),
@@ -330,7 +331,7 @@ fn prepare_catalog_with(
         || limits.map_attempts > 8
         || limits.maps > limits.map_attempts
         || limits.loading.max_storage_charge == 0
-        || limits.loading.max_storage_charge > 32 << 20
+        || limits.loading.max_storage_charge > loader::SAVED_WINDOW_STORAGE_CHARGE
         || limits.preparation.summary_bytes > 2 << 20
         || limits.windows.candidates == 0
         || limits.windows.candidates > 16

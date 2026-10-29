@@ -144,6 +144,8 @@ pub(crate) struct Ledger {
     used: [AtomicUsize; DIMENSIONS],
     admission: Mutex<()>,
     released: Option<Arc<dyn Fn() + Send + Sync>>,
+    // Lives with every debit, including retained results and native workers.
+    _parent_capacity: Option<WorkerAdmission>,
 }
 
 impl Ledger {
@@ -153,6 +155,7 @@ impl Ledger {
             used: std::array::from_fn(|_| AtomicUsize::new(0)),
             admission: Mutex::new(()),
             released: None,
+            _parent_capacity: None,
         }
     }
 
@@ -275,6 +278,29 @@ impl QuotaGroup {
         Self {
             ledger: Arc::new(ledger),
         }
+    }
+
+    /// Bootstrap an isolated bank with guaranteed capacity carved from this
+    /// root's existing worker storage. The child ledger owns the parent lease:
+    /// shutdown cannot release it while any child debit or native worker lives.
+    /// Input/result bytes are subaccounts of the reserved storage, not extra
+    /// process allowances. Child worker slots are also reserved on the parent.
+    pub fn reserved_partition(&self, limits: QuotaLimits) -> Result<Self, RejectReason> {
+        let bytes = limits
+            .input_bytes
+            .checked_add(limits.result_bytes)
+            .and_then(|bytes| bytes.checked_add(limits.worker_bytes))
+            .ok_or(RejectReason::InvalidCost)?;
+        if bytes == 0 || limits.worker_threads == 0 {
+            return Err(RejectReason::InvalidCost);
+        }
+        let capacity = self.reserve_external_worker(limits.worker_threads, bytes)?;
+        let mut ledger = Ledger::new(limits);
+        ledger.released = self.ledger.released.clone();
+        ledger._parent_capacity = Some(capacity);
+        Ok(Self {
+            ledger: Arc::new(ledger),
+        })
     }
 
     /// Charge an existing worker and its native library threads. Keep this
@@ -446,6 +472,25 @@ impl StorageAdmission {
         self._debit.amount[WORKER_BYTES]
     }
 
+    /// Release a conservative preparation surplus after the CPU has measured
+    /// the actual retained backing. Exclusive ownership prevents another holder
+    /// from relying on the old declaration. Growth requires fresh admission.
+    pub fn shrink_to(&mut self, resident_bytes: usize) -> Result<(), RejectReason> {
+        let previous = self.resident_bytes();
+        if resident_bytes == 0 || resident_bytes > previous {
+            return Err(RejectReason::InvalidCost);
+        }
+        let mut released = [0; DIMENSIONS];
+        released[WORKER_BYTES] = previous - resident_bytes;
+        self._debit.amount[WORKER_BYTES] = resident_bytes;
+        if released[WORKER_BYTES] != 0 {
+            // StorageAdmission has no tenant. Releases are subtraction-only and
+            // the wake runs outside admission locks, just as in Debit::drop.
+            self._debit.root.release(&released);
+        }
+        Ok(())
+    }
+
     /// Whether this held allocation debits the exact supplied native root.
     /// Matching limits do not establish provenance. Inspecting never changes usage.
     pub fn shares_root(&self, quota: &QuotaGroup) -> bool {
@@ -528,6 +573,32 @@ pub(crate) struct Debit {
     amount: [usize; DIMENSIONS],
 }
 
+impl Debit {
+    /// Subtraction-only conversion of a completed, exclusively owned result.
+    /// No admission or new allocation can fail after the execution credit ends.
+    pub(crate) fn reduce_to_result_storage(&mut self, bytes: usize) -> Result<(), RejectReason> {
+        if bytes == 0 || bytes > self.amount[RESULT] || self.amount[SERVICES] != 0 {
+            return Err(RejectReason::InvalidCost);
+        }
+        let mut released = [0; DIMENSIONS];
+        released[JOBS] = self.amount[JOBS];
+        released[INPUT] = self.amount[INPUT];
+        released[RESULT] = self.amount[RESULT] - bytes;
+        self.amount[JOBS] = 0;
+        self.amount[INPUT] = 0;
+        self.amount[RESULT] = bytes;
+        if let Some(tenant) = &self.tenant {
+            let mut current = Some(tenant.as_ref());
+            while let Some(tenant) = current {
+                tenant.ledger.release(&released);
+                current = tenant.parent.as_deref();
+            }
+        }
+        self.root.release(&released);
+        Ok(())
+    }
+}
+
 impl Drop for Debit {
     fn drop(&mut self) {
         if let Some(tenant) = &self.tenant {
@@ -601,6 +672,93 @@ mod storage_root_tests {
             worker_bytes: 4096,
         })
     }
+    #[test]
+    fn shrinking_owned_storage_releases_only_the_surplus_and_wakes_admission() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let wake = Arc::clone(&wakes);
+        let quota = QuotaGroup::new_with_admission_wake(quota().snapshot().limits, move || {
+            wake.fetch_add(1, Ordering::SeqCst);
+        });
+        let mut storage = quota.reserve_external_storage(4096).unwrap();
+        assert!(matches!(
+            quota.reserve_external_storage(1),
+            Err(RejectReason::WorkerBytes)
+        ));
+        storage.shrink_to(1024).unwrap();
+        assert_eq!(storage.resident_bytes(), 1024);
+        assert_eq!(quota.snapshot().worker_bytes, 1024);
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        storage.shrink_to(1024).unwrap();
+        assert_eq!(
+            wakes.load(Ordering::SeqCst),
+            1,
+            "no false release for unchanged size"
+        );
+        let remainder = quota.reserve_external_storage(3072).unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, 4096);
+        drop(storage);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            3072,
+            "final drop subtracts only the new size"
+        );
+        drop(remainder);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn shrinking_storage_cannot_grow_or_zero_a_live_declaration() {
+        let quota = quota();
+        let mut storage = quota.reserve_external_storage(1024).unwrap();
+        assert_eq!(storage.shrink_to(1025), Err(RejectReason::InvalidCost));
+        assert_eq!(storage.shrink_to(0), Err(RejectReason::InvalidCost));
+        assert_eq!(storage.resident_bytes(), 1024);
+        assert_eq!(quota.snapshot().worker_bytes, 1024);
+        drop(storage);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn reserved_partition_capacity_follows_last_child_debit() {
+        let parent = quota();
+        let child = parent
+            .reserved_partition(QuotaLimits {
+                clients: 1,
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: 256,
+                result_bytes: 128,
+                worker_threads: 1,
+                worker_bytes: 512,
+            })
+            .unwrap();
+        assert_eq!(parent.snapshot().worker_bytes, 896);
+        assert_eq!(parent.snapshot().worker_threads, 1);
+        let retained = child.reserve_external_storage(512).unwrap();
+        drop(child);
+        assert_eq!(parent.snapshot().worker_bytes, 896);
+        assert!(matches!(
+            parent.reserve_external_worker(1, 1),
+            Err(RejectReason::WorkerLimit)
+        ));
+        drop(retained);
+        assert_eq!(parent.snapshot().worker_bytes, 0);
+        assert_eq!(parent.snapshot().worker_threads, 0);
+    }
+
+    #[test]
+    fn reserved_partition_rejects_overflow_without_debit() {
+        let parent = quota();
+        let mut limits = parent.snapshot().limits;
+        limits.input_bytes = usize::MAX;
+        assert!(matches!(
+            parent.reserved_partition(limits),
+            Err(RejectReason::InvalidCost)
+        ));
+        assert_eq!(parent.snapshot().worker_bytes, 0);
+    }
+
     #[test]
     fn original_storage_admission_recognizes_cloned_root() {
         let original = quota();

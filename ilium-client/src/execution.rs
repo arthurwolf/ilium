@@ -53,48 +53,110 @@ pub(crate) fn admission_notification() -> Arc<tokio::sync::Notify> {
 /// Finite execution owners share this budget; independently retained terminal
 /// allocations use `terminal_storage_quota`. Neither ledger replaces lifecycle.
 pub(crate) fn process_quota() -> QuotaGroup {
-    static QUOTA: OnceLock<QuotaGroup> = OnceLock::new();
-    QUOTA
-        .get_or_init(|| {
-            let wake = admission_notification();
-            QuotaGroup::new_with_admission_wake(
-                QuotaLimits {
-                    clients: 32,
-                    jobs: 64,
-                    service_jobs: 1,
-                    // General children collectively512 MiB; independent
-                    // decoder128 + encoder128 MiB retain dedicated headroom.
-                    input_bytes: 768 * MIB,
-                    result_bytes: 768 * MIB,
-                    worker_threads: PROCESS_WORKER_THREADS
-                        + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
-                    // Shared ceiling for selected charged owners; retiring native
-                    // helpers must retain and compete for their original debit.
-                    // This is a declaration ceiling, not measured process RSS.
-                    worker_bytes: PROCESS_WORKER_BYTES,
-                },
-                move || wake.notify_waiters(),
-            )
-        })
-        .clone()
+    #[cfg(test)]
+    {
+        // Each libtest thread models one process. All owners within it share
+        // the unchanged root limits; unrelated tests cannot consume them.
+        thread_local! { static QUOTA: QuotaGroup = create_process_quota(); }
+        QUOTA.with(Clone::clone)
+    }
+    #[cfg(not(test))]
+    {
+        static QUOTA: OnceLock<QuotaGroup> = OnceLock::new();
+        QUOTA.get_or_init(create_process_quota).clone()
+    }
+}
+
+fn create_process_quota() -> QuotaGroup {
+    let wake = admission_notification();
+    QuotaGroup::new_with_admission_wake(
+        QuotaLimits {
+            clients: 32,
+            jobs: 64,
+            service_jobs: 1,
+            // General children collectively512 MiB; independent
+            // decoder128 + encoder128 MiB retain dedicated headroom.
+            input_bytes: 768 * MIB,
+            // General result capacity grew for ambient replacement overlap;
+            // retain both codec directions' dedicated 128 MiB headroom too.
+            result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB,
+            worker_threads: PROCESS_WORKER_THREADS
+                + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
+            // Shared ceiling for selected charged owners; retiring native
+            // helpers must retain and compete for their original debit.
+            // This is a declaration ceiling, not measured process RSS.
+            worker_bytes: PROCESS_WORKER_BYTES,
+        },
+        move || wake.notify_waiters(),
+    )
+}
+
+/// The admitting composition root owns the cadence identity; the animation
+/// worker only initializes it when an accepted plugin needs a source owner.
+pub(crate) struct NativeSourceCadenceOwner {
+    quota: QuotaGroup,
+    slot: Mutex<Option<Arc<ilium_animation_js::native_source_host::SourceCadence>>>,
 }
 
 /// One cadence ledger for every native source consumer in this client process,
 /// including preview. It owns no bank, thread or independent quota.
+pub(crate) fn native_source_cadence_owner(
+    quota: &QuotaGroup,
+) -> Result<Arc<NativeSourceCadenceOwner>, String> {
+    #[cfg(not(test))]
+    static CADENCE: OnceLock<Arc<NativeSourceCadenceOwner>> = OnceLock::new();
+    #[cfg(not(test))]
+    {
+        let owner = Arc::clone(CADENCE.get_or_init(|| {
+            Arc::new(NativeSourceCadenceOwner {
+                quota: process_quota(),
+                slot: Mutex::new(None),
+            })
+        }));
+        if !owner.quota.shares_root(quota) {
+            return Err("Foreign native source cadence".to_owned());
+        }
+        Ok(owner)
+    }
+    #[cfg(test)]
+    {
+        thread_local! {
+            static CADENCES: std::cell::RefCell<Vec<Arc<NativeSourceCadenceOwner>>> =
+                const { std::cell::RefCell::new(Vec::new()) };
+        }
+        // A libtest thread models one composition root. Explicit isolated
+        // roots keep their own ledger across sequential admitted owners too.
+        Ok(CADENCES.with(|owners| {
+            let mut owners = owners.borrow_mut();
+            if let Some(owner) = owners.iter().find(|owner| owner.quota.shares_root(quota)) {
+                return Arc::clone(owner);
+            }
+            let owner = Arc::new(NativeSourceCadenceOwner {
+                quota: quota.clone(),
+                slot: Mutex::new(None),
+            });
+            owners.push(Arc::clone(&owner));
+            owner
+        }))
+    }
+}
+
 pub(crate) fn native_source_cadence(
+    owner: &NativeSourceCadenceOwner,
+    quota: &QuotaGroup,
 ) -> Result<Arc<ilium_animation_js::native_source_host::SourceCadence>, String> {
-    static CADENCE: OnceLock<
-        Mutex<Option<Arc<ilium_animation_js::native_source_host::SourceCadence>>>,
-    > = OnceLock::new();
-    let mut slot = CADENCE
-        .get_or_init(|| Mutex::new(None))
+    if !owner.quota.shares_root(quota) {
+        return Err("Foreign native source cadence".to_owned());
+    }
+    let mut slot = owner
+        .slot
         .lock()
         .map_err(|_| "Native source cadence lock poisoned".to_owned())?;
     if let Some(cadence) = slot.as_ref() {
         return Ok(Arc::clone(cadence));
     }
     let cadence = Arc::new(
-        ilium_animation_js::native_source_host::SourceCadence::new(process_quota())
+        ilium_animation_js::native_source_host::SourceCadence::new(owner.quota.clone())
             .map_err(|error| error.to_string())?,
     );
     *slot = Some(Arc::clone(&cadence));
@@ -126,59 +188,101 @@ pub fn bootstrap_runtime_admission(
 }
 
 fn shared_admission_group(
+    quota: &QuotaGroup,
     identity: &OnceLock<ilium_execution::AdmissionGroup>,
     limits: ClientLimits,
 ) -> Result<ilium_execution::AdmissionGroup, RejectReason> {
     if let Some(group) = identity.get() {
         return Ok(group.clone());
     }
-    let group = process_quota().admission_group(limits)?;
+    let group = quota.admission_group(limits)?;
     // Losing concurrent registrations never escape as independent identities.
     let _ = identity.set(group);
     identity.get().cloned().ok_or(RejectReason::InvalidCost)
 }
 
 pub(crate) fn general_admission_group() -> Result<ilium_execution::AdmissionGroup, RejectReason> {
-    static GENERAL: OnceLock<ilium_execution::AdmissionGroup> = OnceLock::new();
-    shared_admission_group(
-        &GENERAL,
-        ClientLimits {
-            jobs: 60,
-            service_jobs: 1,
-            input_bytes: 512 * MIB,
-            result_bytes: GENERAL_RESULT_BYTES,
-        },
-    )
+    let limits = ClientLimits {
+        jobs: 60,
+        service_jobs: 1,
+        input_bytes: 512 * MIB,
+        result_bytes: GENERAL_RESULT_BYTES,
+    };
+    #[cfg(test)]
+    {
+        thread_local! { static GENERAL: OnceLock<ilium_execution::AdmissionGroup> = const { OnceLock::new() }; }
+        GENERAL.with(|identity| shared_admission_group(&process_quota(), identity, limits))
+    }
+    #[cfg(not(test))]
+    {
+        static GENERAL: OnceLock<ilium_execution::AdmissionGroup> = OnceLock::new();
+        shared_admission_group(&process_quota(), &GENERAL, limits)
+    }
 }
 
 pub(crate) enum CodecDirection {
     Decoder,
     Encoder,
 }
+struct CodecAdmissionGroups {
+    quota: QuotaGroup,
+    decoder: OnceLock<ilium_execution::AdmissionGroup>,
+    encoder: OnceLock<ilium_execution::AdmissionGroup>,
+}
+impl CodecAdmissionGroups {
+    fn new(quota: QuotaGroup) -> Arc<Self> {
+        Arc::new(Self {
+            quota,
+            decoder: OnceLock::new(),
+            encoder: OnceLock::new(),
+        })
+    }
+    fn group(
+        &self,
+        direction: CodecDirection,
+    ) -> Result<ilium_execution::AdmissionGroup, RejectReason> {
+        let identity = match direction {
+            CodecDirection::Decoder => &self.decoder,
+            CodecDirection::Encoder => &self.encoder,
+        };
+        shared_admission_group(
+            &self.quota,
+            identity,
+            ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 128 * MIB,
+                result_bytes: 128 * MIB,
+            },
+        )
+    }
+}
+fn process_codec_groups() -> Arc<CodecAdmissionGroups> {
+    #[cfg(test)]
+    {
+        thread_local! {
+            static CODECS: Arc<CodecAdmissionGroups> =
+                CodecAdmissionGroups::new(process_quota());
+        }
+        CODECS.with(Arc::clone)
+    }
+    #[cfg(not(test))]
+    {
+        static CODECS: OnceLock<Arc<CodecAdmissionGroups>> = OnceLock::new();
+        Arc::clone(CODECS.get_or_init(|| CodecAdmissionGroups::new(process_quota())))
+    }
+}
 pub(crate) fn codec_admission_group(
     direction: CodecDirection,
 ) -> Result<ilium_execution::AdmissionGroup, RejectReason> {
-    static DECODER: OnceLock<ilium_execution::AdmissionGroup> = OnceLock::new();
-    static ENCODER: OnceLock<ilium_execution::AdmissionGroup> = OnceLock::new();
-    let identity = match direction {
-        CodecDirection::Decoder => &DECODER,
-        CodecDirection::Encoder => &ENCODER,
-    };
-    shared_admission_group(
-        identity,
-        ClientLimits {
-            jobs: 2,
-            service_jobs: 0,
-            input_bytes: 128 * MIB,
-            result_bytes: 128 * MIB,
-        },
-    )
+    process_codec_groups().group(direction)
 }
 
 pub struct ClientExecution {
     execution: Execution,
     general: Client,
     location_search: Client,
+    codec_groups: Arc<CodecAdmissionGroups>,
     terminal_storage: Arc<crate::terminal_parsing::ParserMemoryGovernor>,
 }
 
@@ -196,21 +300,30 @@ struct ClientStartupState {
     execution: Option<Execution>,
     general: Option<Client>,
     location_search: Option<Client>,
+    codec_groups: Option<Arc<CodecAdmissionGroups>>,
     primary: Option<StartError>,
     observation: Option<Result<ilium_execution::JoinReport, ilium_execution::JoinUseError>>,
 }
 impl ClientStartupState {
     fn bootstrap(&mut self) {
+        self.codec_groups = Some(process_codec_groups());
+        self.bootstrap_in(process_quota(), general_admission_group());
+    }
+    fn bootstrap_in(
+        &mut self,
+        quota: QuotaGroup,
+        aggregate: Result<ilium_execution::AdmissionGroup, RejectReason>,
+    ) {
         tokenizers::utils::parallelism::set_parallelism(false);
         // The unchanged aggregate identity requires no physical bank yet.
-        let aggregate = match general_admission_group() {
+        let aggregate = match aggregate {
             Ok(aggregate) => aggregate,
             Err(reason) => {
                 self.primary = Some(StartError::Admission(reason));
                 return;
             }
         };
-        if let Err(error) = self.populate(process_quota(), bank_config(), &aggregate) {
+        if let Err(error) = self.populate(quota, bank_config(), &aggregate) {
             self.primary = Some(error);
             self.observe_cleanup_background(Instant::now() + Duration::from_secs(5));
         }
@@ -396,6 +509,22 @@ fn bank_config() -> ExecutionConfig {
     }
 }
 
+pub(crate) async fn retry_startup_busy<T>(
+    mut admit: impl FnMut() -> Result<T, RejectReason>,
+) -> Result<T, RejectReason> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match admit() {
+            Err(RejectReason::Busy) if tokio::time::Instant::now() < deadline => {
+                // Unlocking a short accounting transaction does not release a
+                // debit or emit a capacity notification. Yield through Tokio.
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            result => return result,
+        }
+    }
+}
+
 impl ClientExecution {
     /// Bootstrap only: creates seven bank threads before interaction.
     /// Production calls bootstrap_process_quota before logging; independent
@@ -410,7 +539,19 @@ impl ClientExecution {
     /// Only completion transfers through the observer; the shared slot owns
     /// all initialized originals even if the observer returns an error.
     pub async fn start_async() -> Result<Self, ClientExecutionStartError> {
-        Self::start_async_with(ClientStartupState::bootstrap, || {}).await
+        // Resolve identities on the caller before transferring bootstrap to
+        // the native observer; that thread must not invent another root.
+        let quota = process_quota();
+        let aggregate = general_admission_group();
+        let codec_groups = process_codec_groups();
+        Self::start_async_with(
+            move |state| {
+                state.codec_groups = Some(codec_groups);
+                state.bootstrap_in(quota, aggregate);
+            },
+            || {},
+        )
+        .await
     }
     async fn start_async_with(
         bootstrap: impl FnOnce(&mut ClientStartupState) + Send + 'static,
@@ -471,15 +612,25 @@ impl ClientExecution {
             .location_search
             .take()
             .expect("completed location admission");
+        let codec_groups = original
+            .codec_groups
+            .take()
+            .expect("originating codec identities captured before bank bootstrap");
         Ok(Self {
             execution,
             general,
             location_search,
+            codec_groups,
             terminal_storage: terminal_storage_quota(),
         })
     }
     pub fn client(&self, limits: ClientLimits) -> Result<Client, RejectReason> {
         self.general.child(limits)
+    }
+    /// Startup can race active workers' short accounting transaction. Preserve
+    /// nonblocking admission and retry only that transient mutex refusal.
+    pub async fn client_when_ready(&self, limits: ClientLimits) -> Result<Client, RejectReason> {
+        retry_startup_busy(|| self.client(limits)).await
     }
     /// Shares the execution bank's bounded CPU disposal owner with adapters
     /// that retain admitted input after interactive processing completes.
@@ -507,8 +658,8 @@ impl ClientExecution {
         if !outbound.is_open() {
             return Err(RejectReason::Closed);
         }
-        let decoder_group = codec_admission_group(CodecDirection::Decoder)?;
-        let encoder_group = codec_admission_group(CodecDirection::Encoder)?;
+        let decoder_group = self.codec_groups.group(CodecDirection::Decoder)?;
+        let encoder_group = self.codec_groups.group(CodecDirection::Encoder)?;
         let decoder = self
             .execution
             .client_in_group(&decoder_group, crate::ipc_preparation::codec_limits())?;
@@ -575,39 +726,43 @@ pub(crate) const DOCUMENT_COST: JobCost = JobCost {
     result_bytes: 32 * MIB,
 };
 
-/// Shared real bank for ordinary fixtures. The process retains its owner;
-/// callers clone one identity and never hold this mutex while driving receipts.
+/// One real bank per fixture thread. Constructors within a test clone its
+/// identity; unrelated tests cannot spend its bounded admission credits.
 #[cfg(test)]
-fn test_bank() -> &'static std::sync::Mutex<(ClientExecution, Client)> {
-    static BANK: std::sync::OnceLock<std::sync::Mutex<(ClientExecution, Client)>> =
-        std::sync::OnceLock::new();
-    BANK.get_or_init(|| {
-        // Nonblocking admission may race another fixture's quota update. Retry
-        // only Busy during bootstrap; limits and structural failures stay fatal.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let execution = loop {
-            match ClientExecution::start() {
-                Ok(execution) => break execution,
-                Err(error) if error.is_retryable_busy() && Instant::now() < deadline => {
-                    std::thread::yield_now();
-                }
-                Err(error) => panic!("shared test bank startup: {error}"),
+fn test_bank() -> Arc<std::sync::Mutex<(ClientExecution, Client)>> {
+    thread_local! {
+        static BANK: Arc<std::sync::Mutex<(ClientExecution, Client)>> = Arc::new(create_test_bank());
+    }
+    BANK.with(Arc::clone)
+}
+
+#[cfg(test)]
+fn create_test_bank() -> std::sync::Mutex<(ClientExecution, Client)> {
+    // Nonblocking admission may race another fixture's quota update. Retry
+    // only Busy during bootstrap; limits and structural failures stay fatal.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let execution = loop {
+        match ClientExecution::start() {
+            Ok(execution) => break execution,
+            Err(error) if error.is_retryable_busy() && Instant::now() < deadline => {
+                std::thread::yield_now();
             }
-        };
-        let client = loop {
-            match execution.client(ClientLimits {
-                jobs: 64,
-                service_jobs: 0,
-                input_bytes: 512 * MIB,
-                result_bytes: 512 * MIB,
-            }) {
-                Ok(client) => break client,
-                Err(RejectReason::Busy) if Instant::now() < deadline => std::thread::yield_now(),
-                Err(error) => panic!("shared test client admission: {error:?}"),
-            }
-        };
-        std::sync::Mutex::new((execution, client))
-    })
+            Err(error) => panic!("shared test bank startup: {error}"),
+        }
+    };
+    let client = loop {
+        match execution.client(ClientLimits {
+            jobs: 64,
+            service_jobs: 0,
+            input_bytes: 512 * MIB,
+            result_bytes: 512 * MIB,
+        }) {
+            Ok(client) => break client,
+            Err(RejectReason::Busy) if Instant::now() < deadline => std::thread::yield_now(),
+            Err(error) => panic!("shared test client admission: {error:?}"),
+        }
+    };
+    std::sync::Mutex::new((execution, client))
 }
 
 #[cfg(test)]
@@ -619,8 +774,29 @@ pub(crate) fn test_client() -> Client {
         .clone()
 }
 
-/// Retention assertions require a distinct tenant, while sharing the same OS
-/// bank. Ordinary fixtures continue to clone the single general identity.
+/// Outbound-request fixtures must not compete with unrelated document jobs.
+/// This bank has no native workers: only the real bounded external admission
+/// path is exercised, with the same per-client limits used in production.
+#[cfg(test)]
+pub(crate) fn test_request_bank() -> (Execution, Client) {
+    let limits = crate::ipc_preparation::request_limits();
+    let quota = QuotaGroup::new(QuotaLimits {
+        // One app identity and one explicitly narrowed test child.
+        clients: 2,
+        jobs: limits.jobs,
+        service_jobs: 0,
+        input_bytes: limits.input_bytes,
+        result_bytes: limits.result_bytes,
+        worker_threads: 0,
+        worker_bytes: MIB,
+    });
+    let execution = Execution::admission_only(quota).expect("isolated request admission bank");
+    let client = execution.client(limits).expect("isolated request tenant");
+    (execution, client)
+}
+
+/// Retention assertions require a distinct tenant within the same test bank.
+/// Ordinary fixtures in that test continue to clone one general identity.
 #[cfg(test)]
 pub(crate) fn test_document_client() -> Client {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -643,6 +819,91 @@ mod composition_tests {
     use super::*;
 
     #[test]
+    fn parallel_fixture_process_credits_are_isolated_but_local_clones_share_limits() {
+        let quota = process_quota();
+        let baseline = quota.snapshot().worker_bytes;
+        let storage = quota.reserve_external_storage(1024).unwrap();
+        assert_eq!(process_quota().snapshot().worker_bytes, baseline + 1024);
+        std::thread::spawn(move || {
+            assert_eq!(process_quota().snapshot().worker_bytes, 0);
+            let local = process_quota().reserve_external_storage(2048).unwrap();
+            assert_eq!(process_quota().snapshot().worker_bytes, 2048);
+            drop(local);
+            assert_eq!(process_quota().snapshot().worker_bytes, 0);
+        })
+        .join()
+        .unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, baseline + 1024);
+        drop(storage);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+    }
+
+    #[tokio::test]
+    async fn startup_retries_only_transient_accounting_busy() {
+        let mut attempts = 0;
+        let admitted = retry_startup_busy(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(RejectReason::Busy)
+            } else {
+                Ok(42)
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(admitted, 42);
+        assert_eq!(attempts, 3);
+        let mut attempts = 0;
+        assert_eq!(
+            retry_startup_busy::<()>(|| {
+                attempts += 1;
+                Err(RejectReason::ClientLimit)
+            })
+            .await,
+            Err(RejectReason::ClientLimit)
+        );
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn outbound_fixture_admission_is_isolated_without_native_workers() {
+        let (mut first_bank, first) = test_request_bank();
+        let (mut second_bank, second) = test_request_bank();
+        assert!(!first.quota_group().shares_root(&second.quota_group()));
+        assert_eq!(first.quota_group().snapshot().worker_threads, 0);
+        assert!(matches!(
+            first.try_reserve(
+                ilium_execution::Lane::Cpu,
+                JobCost {
+                    input_bytes: 4096,
+                    result_bytes: 4096
+                }
+            ),
+            Err(RejectReason::InvalidCost)
+        ));
+        let held: Vec<_> = (0..crate::ipc_preparation::request_limits().jobs)
+            .map(|_| crate::ipc_preparation::reserve_request(&first, 4096).unwrap())
+            .collect();
+        assert!(matches!(
+            crate::ipc_preparation::reserve_request(&first, 4096),
+            Err(RejectReason::JobLimit)
+        ));
+        let other = crate::ipc_preparation::reserve_request(&second, 4096)
+            .expect("another app retains its independent bounded request capacity");
+        drop(other);
+        drop(held);
+        first_bank.request_shutdown(ShutdownMode::Cancel);
+        second_bank.request_shutdown(ShutdownMode::Cancel);
+        assert!(matches!(
+            crate::ipc_preparation::reserve_request(&first, 4096),
+            Err(RejectReason::Closed)
+        ));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        first_bank.join_until_background(deadline).unwrap();
+        second_bank.join_until_background(deadline).unwrap();
+    }
+
+    #[test]
     fn terminal_parser_lane_keeps_inherited_interactive_priority() {
         let config = bank_config();
         assert_eq!(config.service.threads, 1);
@@ -660,7 +921,8 @@ mod composition_tests {
             input_bytes: 768 * MIB,
             result_bytes: 768 * MIB,
             worker_threads: 1,
-            worker_bytes: MIB,
+            // Immutable article storage is charged to the unchanged process worker-byte budget.
+            worker_bytes: PROCESS_WORKER_BYTES,
         });
         let general_limits = ClientLimits {
             jobs: 60,
@@ -704,15 +966,17 @@ mod composition_tests {
             execution,
             general,
             location_search,
+            codec_groups: CodecAdmissionGroups::new(quota.clone()),
             terminal_storage: terminal_storage_quota(),
         };
         let resources = client_execution.ambient_resources().unwrap();
+        let before_storage = quota.snapshot().worker_bytes;
         let charges = [192, 96, 192, 96].map(|mib| {
             resources
                 .reserve_storage(mib * MIB)
                 .unwrap_or_else(|reason| panic!("Wikipedia overlap admission: {reason:?}"))
         });
-        assert_eq!(quota.snapshot().result_bytes, 576 * MIB);
+        assert_eq!(quota.snapshot().worker_bytes, before_storage + 576 * MIB);
         drop(charges);
         drop(resources);
         let ClientExecution { mut execution, .. } = client_execution;
@@ -829,10 +1093,15 @@ mod composition_tests {
         let voice_custody = quota.reserve_external_storage(128 * 1024).unwrap();
         let video = quota.reserve_external_worker(10, 1064 * MIB).unwrap();
         let video_storage = quota.reserve_external_storage(104 * MIB).unwrap();
-        assert_eq!(quota.snapshot().worker_threads, bank_threads + 21);
+        // Match the process declaration above: GPU probe2 MiB stack, and
+        // Spectrum analysis2 MiB plus its largest4 MiB callback declaration
+        // across supported platforms (five roles including analysis).
+        let gpu_probe = quota.reserve_external_worker(1, 2 * MIB).unwrap();
+        let spectrum = quota.reserve_external_worker(5, 6 * MIB).unwrap();
+        assert_eq!(quota.snapshot().worker_threads, bank_threads + 27);
         assert_eq!(
             quota.snapshot().worker_bytes,
-            3191 * MIB + bank_bytes + 128 * 1024
+            3199 * MIB + bank_bytes + 128 * 1024
         );
         // These real bootstrap declarations are additive to the
         // selected census from the constructor configuration. The4096 MiB
@@ -862,7 +1131,7 @@ mod composition_tests {
         assert_eq!(quota.snapshot().worker_threads, PROCESS_WORKER_THREADS);
         assert_eq!(
             quota.snapshot().worker_bytes,
-            3191 * MIB
+            3199 * MIB
                 + bank_bytes
                 + 128 * 1024
                 + supervisor_bytes
@@ -901,6 +1170,8 @@ mod composition_tests {
             voice_custody,
             video,
             video_storage,
+            gpu_probe,
+            spectrum,
             supervisor,
             logger,
             logger_storage,
@@ -915,20 +1186,18 @@ mod composition_tests {
     }
 
     #[test]
-    #[ignore = "run this process-global identity test alone with --ignored --exact --test-threads=1"]
     fn two_interactive_clients_share_one_bank_and_distinct_codec_groups() {
-        let bank = test_bank()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let bank_owner = test_bank();
+        let bank = bank_owner.lock().unwrap_or_else(|error| error.into_inner());
         let execution = &bank.0;
         let root = process_quota();
         let general = general_admission_group().expect("general identity");
         let decoder = codec_admission_group(CodecDirection::Decoder).expect("decoder identity");
         let encoder = codec_admission_group(CodecDirection::Encoder).expect("encoder identity");
         let before_threads = root.snapshot().worker_threads;
-        let before_general = general.usage().clients;
-        let before_decoder = decoder.usage().clients;
-        let before_encoder = encoder.usage().clients;
+        let before_clients = root.snapshot().clients;
+        let before_decoder_jobs = decoder.usage().jobs;
+        let before_encoder_jobs = encoder.usage().jobs;
         let outbound_limits = ClientLimits {
             jobs: 60,
             service_jobs: 0,
@@ -948,9 +1217,40 @@ mod composition_tests {
             before_threads,
             "interactive codecs reuse the existing CPU bank"
         );
-        assert_eq!(general.usage().clients, before_general + 2);
-        assert_eq!(decoder.usage().clients, before_decoder + 2);
-        assert_eq!(encoder.usage().clients, before_encoder + 2);
+        assert_eq!(root.snapshot().clients, before_clients + 6);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // Fill the declared general result allowance without allocating a
+        // payload. Both codec directions must still admit their full envelope.
+        let general_credit = execution
+            .general
+            .try_reserve(
+                ilium_execution::Lane::Cpu,
+                JobCost {
+                    input_bytes: 0,
+                    result_bytes: GENERAL_RESULT_BYTES,
+                },
+            )
+            .expect("general capacity stays available");
+        let decoder_credit = runtime
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), first.reserve_decoder()).await
+            })
+            .expect("general pressure must not starve decoding")
+            .expect("first connection uses the shared decoder identity");
+        let encoder_credit = runtime
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), second.reserve_encoder()).await
+            })
+            .expect("general pressure must not starve encoding")
+            .expect("second connection uses the distinct encoder identity");
+        assert_eq!(decoder.usage().jobs, before_decoder_jobs + 1);
+        assert_eq!(encoder.usage().jobs, before_encoder_jobs + 1);
+        drop((general_credit, decoder_credit, encoder_credit));
+        assert_eq!(decoder.usage().jobs, before_decoder_jobs);
+        assert_eq!(encoder.usage().jobs, before_encoder_jobs);
 
         let before_jobs = general.usage().jobs;
         assert_eq!(before_jobs, 0, "isolated identity test starts without jobs");
@@ -986,9 +1286,10 @@ mod composition_tests {
         drop(reservations);
         assert_eq!(general.usage().jobs, before_jobs);
         drop((first, second));
-        assert_eq!(general.usage().clients, before_general);
-        assert_eq!(decoder.usage().clients, before_decoder);
-        assert_eq!(encoder.usage().clients, before_encoder);
+        drop((first_outbound, second_outbound));
+        assert_eq!(root.snapshot().clients, before_clients);
+        assert_eq!(decoder.usage().jobs, before_decoder_jobs);
+        assert_eq!(encoder.usage().jobs, before_encoder_jobs);
     }
 }
 

@@ -477,11 +477,12 @@ mod tests {
     fn shared_capacity_refusal_retries_an_osm_load() {
         let _lock = TEST_LOCK.lock().unwrap();
         let (mut execution, resources) = crate::resources::isolated_test_resources();
-        // Leave less than one map admission (retained storage + worker bytes) free.
-        let map_admission_bytes = OSM_RETAINED_BYTES + OSM_WORKER_BYTES;
+        let quota = resources.finite().quota_group();
+        let baseline = quota.snapshot();
         let pressure = resources
-            .reserve_storage(resources.free_worker_bytes() - map_admission_bytes + 1)
+            .reserve_storage(baseline.limits.worker_bytes - baseline.worker_bytes)
             .expect("fill the isolated fixture's physical allocation budget");
+        assert_eq!(quota.snapshot().worker_bytes, baseline.limits.worker_bytes);
         let mut scene = OpenStreetMapScene::new(
             &OpenStreetMapSettings::default(),
             &SceneEnv::for_test(std::env::temp_dir(), resources),

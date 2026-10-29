@@ -109,6 +109,8 @@ impl ServerEvent {
 impl HeapBytes for PaneDetectionEvidence {
     fn heap_bytes(&self) -> usize {
         let PaneDetectionEvidence {
+            observed_at_unix_millis: _,
+            stale_after_millis: _,
             applied_status,
             identity,
             activity,
@@ -528,9 +530,66 @@ impl HeapBytes for AgentDebugEventMetadata {
         0usize.saturating_add(pane_resize_cause.heap_bytes())
     }
 }
+domain!(
+    ilium_core::resource_queue::AgentIdentity,
+    ilium_core::resource_queue::ResourceCatalog,
+    ilium_core::resource_queue::ResourceClock,
+    ilium_core::resource_queue::Reservation,
+    ilium_core::resource_queue::ResourceCommandResult,
+    ilium_core::resource_queue::ReservationId
+);
+impl HeapBytes for crate::resource::ResourceError {
+    fn heap_bytes(&self) -> usize {
+        let Self { code, message } = self;
+        code.heap_bytes().saturating_add(message.heap_bytes())
+    }
+}
+impl HeapBytes for crate::resource::ResourceReply {
+    fn heap_bytes(&self) -> usize {
+        let Self {
+            catalog,
+            clock,
+            result,
+            reservation,
+            recovery_token,
+            message,
+            local_invocations,
+            active_waits,
+            wait_revision: _,
+        } = self;
+        active_waits
+            .heap_bytes()
+            .saturating_add(local_invocations.heap_bytes())
+            .saturating_add(catalog.heap_bytes())
+            .saturating_add(clock.heap_bytes())
+            .saturating_add(result.heap_bytes())
+            .saturating_add(reservation.heap_bytes())
+            .saturating_add(recovery_token.heap_bytes())
+            .saturating_add(message.heap_bytes())
+    }
+}
 impl HeapBytes for ServerEvent {
     fn heap_bytes(&self) -> usize {
         match self {
+            Self::ResourceObservationFailed { message } => message.heap_bytes(),
+            Self::ResourceSnapshot {
+                catalog,
+                clock,
+                local_invocations,
+                active_waits,
+                wait_revision: _,
+            } => active_waits.heap_bytes().saturating_add(
+                local_invocations
+                    .heap_bytes()
+                    .saturating_add(catalog.heap_bytes())
+                    .saturating_add(clock.heap_bytes()),
+            ),
+            // Result delegates through Box so the reply allocation and its nested capacities count.
+            Self::ResourceResult { result, .. } => result.heap_bytes(),
+            Self::ResourceWaitChanged { reservation_id, .. } => reservation_id.heap_bytes(),
+            Self::PaneCustomAgentIdentity { identity, .. } => identity
+                .as_ref()
+                .map_or(0, |value| value.profile_id.capacity()),
             Self::TreeSnapshot(value0) => 0usize.saturating_add(value0.heap_bytes()),
             Self::ScreenUpdate {
                 pane_id,
@@ -542,9 +601,19 @@ impl HeapBytes for ServerEvent {
                 .saturating_add(first_sequence.heap_bytes())
                 .saturating_add(sequence.heap_bytes())
                 .saturating_add(bytes.heap_bytes()),
+            Self::ScreenPreview {
+                pane_id,
+                through_sequence,
+                bytes,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(through_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes()),
             Self::PaneStatusChanged { pane_id, status } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(status.heap_bytes()),
+            Self::BlockingErrorsSnapshot { errors } => errors.heap_bytes(),
+            Self::PaneCreateFinished { result, .. } => result.heap_bytes(),
             Self::Error { message } | Self::PaneResizeRejected { message, .. } => {
                 0usize.saturating_add(message.heap_bytes())
             }
@@ -579,6 +648,28 @@ impl HeapBytes for ServerEvent {
                 .saturating_add(through_sequence.heap_bytes())
                 .saturating_add(bytes.heap_bytes())
                 .saturating_add(is_complete.heap_bytes()),
+            Self::TerminalSnapshot {
+                pane_id,
+                through_sequence,
+                bytes,
+                is_complete,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(through_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes())
+                .saturating_add(is_complete.heap_bytes()),
+            Self::TerminalHistory {
+                pane_id,
+                first_sequence,
+                before_sequence,
+                bytes,
+                reaches_journal_start,
+            } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(first_sequence.heap_bytes())
+                .saturating_add(before_sequence.heap_bytes())
+                .saturating_add(bytes.heap_bytes())
+                .saturating_add(reaches_journal_start.heap_bytes()),
             Self::PaneSessionTitleCleared {
                 pane_id,
                 title_generation,
@@ -796,6 +887,23 @@ impl HeapBytes for ServerEvent {
                 0usize.saturating_add(succeeded.heap_bytes())
             }
             Self::PaneNodeChanged(node) => 0usize.saturating_add(node.heap_bytes()),
+            Self::PaneRecapScreen { result, .. } => result.heap_bytes(),
+            Self::RecapUpdated {
+                session_id,
+                short,
+                long,
+                ..
+            } => session_id
+                .heap_bytes()
+                .saturating_add(short.heap_bytes())
+                .saturating_add(long.heap_bytes()),
+            // Plugin traffic is bounded by the plugin IPC limits (HST-104, HST-109); its exact
+            // heap accounting is added with the implementation.
+            Self::Plugin(_) | Self::Contributions(_) => 0,
+            Self::Rejected(rejection) => rejection
+                .code
+                .heap_bytes()
+                .saturating_add(rejection.message.heap_bytes()),
         }
     }
 }
@@ -980,6 +1088,14 @@ impl HeapBytes for PaneResizeCause {
             Self::RightPanelPresentation => 0usize,
             Self::UserInterfaceSettings => 0usize,
         }
+    }
+}
+
+impl HeapBytes for BlockingError {
+    fn heap_bytes(&self) -> usize {
+        self.operation
+            .heap_bytes()
+            .saturating_add(self.message.heap_bytes())
     }
 }
 

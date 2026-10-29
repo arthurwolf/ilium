@@ -1,0 +1,7 @@
+# API gaps of the titles port twins
+
+- `ilium-plugin-testkit`: `TreeNode` has no way to set a node's title ownership (manual/inferred/fixed), session id, agent class or "title loading" state. Needed by the port twins of the eligibility rules (`terminal_title_inference.rs`, `title_inference.rs`, `title_eligibility.rs`; F-041, F-044); they are skipped until fields such as `title_source: Option<TitleSource>` exist.
+- `ilium-plugin-testkit`: no fixture API for agent transcripts and session history (`FakeHost::set_transcript(node, Vec<TranscriptEntry>)`), needed by the transcript-based naming twins (`session_naming.rs`, `session_models.rs`; F-041).
+- `ilium-plugin-testkit`: no way to create protected split views in the fake tree (`NodeClass::SplitView` with ordered children), needed by the protected-split restructure twins (`restructure.rs`; F-043).
+- Assumptions pinned by the twins: restructure replies carrying `command_hint` prefix the title as `[hint] Title` for terminal panes only (`content_kind` `ilium.terminal`); `ilium.editor` panes are the non-terminal case; an unknown `animations.project` value or a title-only reply is rejected; rejected replies are retried up to 3 attempts in all.
+- Unchanged gaps (restructure protected splits, client-UI tests of tree_ui/mouse/instruction_settings/session_models/workers): the remaining twins in `remaining.rs` pin only the plugin-observable behaviour (title, instruction text, inference request count, restructure acceptance); UI-geometry and worker-permit details have no plugin API channel.

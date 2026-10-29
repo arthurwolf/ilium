@@ -25,12 +25,80 @@ enum SelectionReconciliation {
 /// there is one. State is always applied before the occurrence is returned.
 pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
     match event {
+        ServerEvent::ResourceObservationFailed { message } => {
+            app.resources.observation_error = Some(message);
+            app.bump_tree_version();
+            None
+        }
+        ServerEvent::ResourceSnapshot {
+            catalog,
+            clock,
+            local_invocations,
+            active_waits,
+            wait_revision,
+        } => {
+            app.receive_resource_catalog(
+                catalog,
+                clock,
+                local_invocations,
+                active_waits,
+                wait_revision,
+            );
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+            None
+        }
+        ServerEvent::ResourceResult { request_id, result } => {
+            app.receive_resource_reply(request_id, result.map(|reply| *reply));
+            None
+        }
+        ServerEvent::ResourceWaitChanged {
+            pane_id,
+            reservation_id,
+            wait_revision,
+        } => {
+            if app
+                .resources
+                .wait_revision
+                .is_some_and(|revision| wait_revision < revision)
+            {
+                return None;
+            }
+            app.resources.wait_revision = Some(wait_revision);
+            match reservation_id {
+                Some(id) => {
+                    app.resources.waits.insert(pane_id, id);
+                }
+                None => {
+                    app.resources.waits.remove(&pane_id);
+                }
+            }
+            app.bump_tree_version();
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+            None
+        }
+        ServerEvent::PaneCustomAgentIdentity { pane_id, identity } => {
+            if let Some(identity) = identity {
+                app.custom_agent_panes.insert(pane_id, identity);
+            } else {
+                app.custom_agent_panes.remove(&pane_id);
+            }
+            app.bump_tree_version();
+            None
+        }
         ServerEvent::PaneStateSnapshot {
             tree,
             detection_evidence,
         } => {
             apply_tree_snapshot(app, tree);
             app.pane_detection_evidence = detection_evidence.into_iter().collect();
+            None
+        }
+        ServerEvent::BlockingErrorsSnapshot { errors } => {
+            app.replace_blocking_errors(errors);
+            None
+        }
+        ServerEvent::PaneCreateFinished { request_id, result } => {
+            app.receive_pane_create_finished(request_id, result);
             None
         }
         ServerEvent::AgentDetectionSettingsChanged { request_id, result } => {
@@ -138,6 +206,54 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 return None;
             }
             if let Err(event) = app.submit_terminal_event(event) {
+                if !app.release_refused_hidden_terminal_event(&event) {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(
+                            *event,
+                            app.processing_event_retention.clone(),
+                        ),
+                    );
+                }
+            }
+            None
+        }
+        event @ ServerEvent::TerminalSnapshot { .. } => {
+            #[cfg(test)]
+            if app.terminal_parsing.is_none() {
+                if let ServerEvent::TerminalSnapshot {
+                    pane_id,
+                    through_sequence,
+                    bytes,
+                    is_complete,
+                } = event
+                {
+                    if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                        view.apply_replay(&bytes, through_sequence, is_complete);
+                        view.history_paging
+                            .snapshot_applied(through_sequence, bytes.len());
+                    }
+                }
+                return None;
+            }
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
+            }
+            None
+        }
+        event @ ServerEvent::TerminalHistory { .. } => {
+            if let ServerEvent::TerminalHistory { pane_id, .. } = &event {
+                if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(pane_id) {
+                    view.history_paging.reply_arrived();
+                }
+            }
+            #[cfg(test)]
+            app.terminal_parsing.as_ref()?;
+            if let Err(event) = app.submit_terminal_event(event) {
                 app.pending_terminal_events.push_front(
                     crate::connection::Received::with_retention(
                         *event,
@@ -164,12 +280,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 return None;
             }
             if let Err(event) = app.submit_terminal_event(event) {
-                app.pending_terminal_events.push_front(
-                    crate::connection::Received::with_retention(
-                        *event,
-                        app.processing_event_retention.clone(),
-                    ),
-                );
+                if !app.release_refused_hidden_terminal_event(&event) {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(
+                            *event,
+                            app.processing_event_retention.clone(),
+                        ),
+                    );
+                }
             }
             None
         }
@@ -248,6 +366,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     // invalidate structural hit testing when detection changes
                     // that visible rank even though no TreeSnapshot follows.
                     app.bump_tree_version();
+                    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
                     transition_event
                         .or_else(|| {
                             (became_agent && app.agent_session_ids.contains_key(&pane_id))
@@ -531,9 +650,11 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             last_prompt,
         } => {
+            app.record_last_prompt(pane_id, last_prompt.as_deref());
             if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
                 tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
             None
         }
         ServerEvent::PaneProgressChanged {
@@ -543,6 +664,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             if let Err(error) = app.tree.replace_pane_progress(pane_id, progress_monitors) {
                 tracing::warn!("dropping PaneProgressChanged for pane {pane_id:?}: {error}");
             }
+            app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
             None
         }
         ServerEvent::ProgressMonitorEnabledChanged { enabled } => {
@@ -623,7 +745,39 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.receive_workspace_close_offer(request_id, pane_id, can_offer);
             None
         }
+        // One-shot recap consumers own this direct reply; it is not UI state.
+        ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::RecapUpdated {
+            pane_id,
+            session_id,
+            recap_generation,
+            trigger,
+            short,
+            long,
+        } => {
+            app.recap.observe_update(
+                pane_id,
+                crate::recap_state::StoredRecap {
+                    session_id,
+                    recap_generation,
+                    trigger,
+                    short,
+                    long,
+                },
+            );
+            None
+        }
+        // Plugin traffic is consumed by the client plugin host, not by the render cache.
+        ServerEvent::Plugin(_) | ServerEvent::Contributions(_) | ServerEvent::Rejected(_) => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
+        ServerEvent::ScreenPreview {
+            pane_id,
+            through_sequence,
+            bytes,
+        } => {
+            app.apply_screen_preview(pane_id, through_sequence, &bytes);
+            None
+        }
         ServerEvent::VoiceTextOffered {
             request_id,
             sentences,
@@ -667,6 +821,17 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     let selection_reconciliation = selection_reconciliation(app, &tree);
     app.track_tree_snapshot_change(&tree);
     app.tree = tree;
+    // Resource snapshots can arrive before the initial tree. Rebuild their
+    // display projection against the authoritative tree without resetting the
+    // observation clock or changing the retained catalog.
+    if let Some(catalog) = &app.resources.catalog {
+        app.resources.rows.rebuild(
+            &app.tree,
+            catalog,
+            &app.session_name,
+            &app.resources.local_invocations,
+        );
+    }
     if let Some(selected_setup_row) = selected_setup_row {
         let current_rows = app.agent_setup_rows();
         let replacement_index = current_rows
@@ -690,6 +855,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.frozen_panes
         .retain(|pane_id| live_pane_ids.contains(pane_id));
+    app.custom_agent_panes
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.frozen_screens
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.auto_freeze_since
@@ -1024,6 +1191,8 @@ mod tests {
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
         tree.set_pane_status(pane_id, status.clone()).unwrap();
         let evidence = |rule: &str| ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: rule.to_string(),
@@ -1054,6 +1223,17 @@ mod tests {
                 .unwrap()
                 .rule,
             "new process"
+        );
+        let received_evidence = &app.pane_detection_evidence[&pane_id];
+        assert_eq!(received_evidence.observed_at_unix_millis, 1_700_000_000_000);
+        assert!(
+            crate::status_icons::detection_freshness_warning(
+                &status,
+                Some(received_evidence),
+                1_700_000_030_001,
+            )
+            .is_some(),
+            "reattach must preserve the age of a stale server observation"
         );
         apply(
             &mut app,
@@ -1090,6 +1270,48 @@ mod tests {
         let pane = app.tree.get(pane_id).unwrap();
         assert_eq!(pane.parent, Some(first_group));
         assert_eq!(pane.name, "new title");
+    }
+
+    #[test]
+    fn custom_profile_identity_survives_replay_and_is_pruned_with_the_pane() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let first = tree
+            .add_pane(group, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(group, "two", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+        for (pane_id, id) in [(first, "one"), (second, "two")] {
+            apply(
+                &mut app,
+                ServerEvent::PaneCustomAgentIdentity {
+                    pane_id,
+                    identity: Some(ilium_core::custom_agent::CustomAgentIdentity {
+                        profile_id: id.into(),
+                        base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                    }),
+                },
+            );
+        }
+        assert_ne!(
+            app.custom_agent_panes[&first].profile_id,
+            app.custom_agent_panes[&second].profile_id
+        );
+        tree.remove_node(first).unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        assert!(!app.custom_agent_panes.contains_key(&first));
+        assert!(app.custom_agent_panes.contains_key(&second));
+        apply(
+            &mut app,
+            ServerEvent::PaneCustomAgentIdentity {
+                pane_id: second,
+                identity: None,
+            },
+        );
+        assert!(!app.custom_agent_panes.contains_key(&second));
     }
 
     #[test]
@@ -1181,6 +1403,8 @@ mod tests {
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let evidence = ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: "exact codex process".to_string(),
@@ -1720,12 +1944,12 @@ mod tests {
         );
         assert!(app.shows_last_prompt_banner(pane_id));
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(with_prompt, before);
+        assert!(with_prompt.content_area.height < before.content_area.height);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]
@@ -1786,12 +2010,12 @@ mod tests {
             },
         );
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(with_prompt, after_toolbar);
+        assert!(with_prompt.content_area.height < after_toolbar.content_area.height);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]

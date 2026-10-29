@@ -1,0 +1,1486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Collections | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details open><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/" aria-current="page">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Widgets</b></p>
+<h1>Collections</h1>
+
+<p>Collections draw many items and let the user pick, toggle or edit them. The family has six widgets: <code>%list</code>, <code>table</code>, <code>tree-list</code>, <code>menu</code>, <code>check-list</code> and <code>list-editor</code>. The host owns the state of every collection: selection, scroll offset, expansion, filter text and the text being edited. The plugin sends items and hears about changes.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Shows</th>
+<th>Main event</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%list</code></td>
+<td>rows of styled lines</td>
+<td><code>selected</code>, <code>activated</code></td>
+<td><code>index</code>, or <code>ids</code> with <code>multi-select</code></td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>rows and columns with a header</td>
+<td><code>selected</code>, <code>activated</code></td>
+<td><code>index</code>, <code>ids</code>, or <code>text(column id)</code> for a header click</td>
+</tr>
+<tr>
+<td><code>tree-list</code></td>
+<td>an expandable tree</td>
+<td><code>selected</code>, <code>activated</code>, <code>toggled</code></td>
+<td><code>text(item id)</code></td>
+</tr>
+<tr>
+<td><code>menu</code></td>
+<td>commands with submenus</td>
+<td><code>activated</code>, <code>closed</code></td>
+<td><code>text(item id)</code></td>
+</tr>
+<tr>
+<td><code>check-list</code></td>
+<td>boxes with a tri-state</td>
+<td><code>changed</code></td>
+<td><code>item-state(id, state)</code></td>
+</tr>
+<tr>
+<td><code>list-editor</code></td>
+<td>an editable list of strings or objects</td>
+<td><code>changed</code>, <code>selected</code></td>
+<td><code>text(json array)</code>, <code>index</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>A view that can hold the widget: a panel, popup, dialog, pane view or settings page. A <code>menu</code> is refused in a settings page, and so is <code>list-editor</code> (use a <code>list</code> row with <code>schema-form</code> there). See <a href="/pages/ui-model/">UI model</a>.</li>
+<li>The <code>ui.panels</code> grant for panels and popups. See <a href="/pages/capability-ui-panels/">ui.panels</a>.</li>
+<li>Items with stable ids. A collection that sends <code>ids</code> or <code>text(id)</code> needs an <code>id</code> on every item.</li>
+</ul>
+<h3 id="host-owned-state">Host-owned state</h3>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>State the host keeps</th>
+<th>Read with <code>widget-state</code></th>
+<th>Set with <code>set-widget-state</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%list</code></td>
+<td>selected index, scroll offset, filter text, multi-selection</td>
+<td><code>selected</code>, <code>offset</code>, <code>text</code>, <code>ids</code></td>
+<td><code>selected</code>, <code>offset</code>, <code>text</code>, <code>ids</code></td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>selected row, scroll offset, sort, multi-selection</td>
+<td><code>selected</code>, <code>offset</code>, <code>ids</code></td>
+<td><code>selected</code>, <code>offset</code>, <code>ids</code></td>
+</tr>
+<tr>
+<td><code>tree-list</code></td>
+<td>selected item, expansion, scroll offset</td>
+<td><code>selected</code>, <code>ids</code></td>
+<td><code>selected</code>, <code>expanded</code>, <code>ids</code></td>
+</tr>
+<tr>
+<td><code>check-list</code></td>
+<td>the state of each item</td>
+<td><code>tri</code></td>
+<td><code>tri</code></td>
+</tr>
+<tr>
+<td><code>list-editor</code></td>
+<td>the item being edited and its draft text</td>
+<td><code>selected</code></td>
+<td><code>selected</code></td>
+</tr>
+</tbody>
+</table>
+<p>When the plugin renders a new tree, the host keeps this state by key. A selection of an item that is no longer present moves to the nearest row. A widget without a <code>key</code> loses its state on every render.</p>
+<h3 id="props-every-collection-accepts">Props every collection accepts</h3>
+<p><code>key</code>, <code>tooltip</code>, <code>disabled-reason</code>, <code>tab-index</code> and <code>hover-events</code> work as for every input widget, see <a href="/pages/widgets-input/">Input</a>. <code>item-tooltip</code> on <code>%list</code> shows each item's <code>tooltip</code>.</p>
+<h4 id="list">%list</h4>
+<p><strong>Purpose.</strong> A scrolling list of items, each made of one or more styled lines. It is the list of the Agents panel and of the choice dialog. The selected row carries the highlight symbol. The filter row narrows the list while the user types, and <code>follow-tail</code> keeps the newest row visible for logs.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>items</code></td>
+<td><code>list&lt;list-item&gt;</code></td>
+<td>required</td>
+<td>The rows. Item fields: <code>lines</code>, <code>style</code>, <code>id</code>, <code>icon</code>, <code>trailing</code>, <code>tooltip</code>, <code>disabled-reason</code>.</td>
+</tr>
+<tr>
+<td><code>highlight-symbol</code></td>
+<td><code>string</code></td>
+<td><code>▶</code></td>
+<td>Drawn before the selected row (<code>&gt;</code> in stable glyph mode).</td>
+</tr>
+<tr>
+<td><code>highlight-style</code></td>
+<td><code>style</code></td>
+<td>selection</td>
+<td>The style of the selected row.</td>
+</tr>
+<tr>
+<td><code>highlight-spacing</code></td>
+<td><code>highlight-spacing</code></td>
+<td><code>when-selected</code></td>
+<td><code>always</code>, <code>when-selected</code> or <code>never</code>.</td>
+</tr>
+<tr>
+<td><code>repeat-highlight-symbol</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Draws the symbol on each line of a multi-line item.</td>
+</tr>
+<tr>
+<td><code>direction</code></td>
+<td><code>list-direction</code></td>
+<td><code>top-to-bottom</code></td>
+<td>Or <code>bottom-to-top</code>.</td>
+</tr>
+<tr>
+<td><code>filter</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Shows the <code>Filter:</code> row above the list.</td>
+</tr>
+<tr>
+<td><code>filter-placeholder</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>Hint text of the filter row.</td>
+</tr>
+<tr>
+<td><code>multi-select</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Space toggles the row. The value becomes <code>ids</code>.</td>
+</tr>
+<tr>
+<td><code>follow-tail</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Keeps the last item visible until the user scrolls up.</td>
+</tr>
+<tr>
+<td><code>empty</code></td>
+<td><code>option&lt;styled-lines&gt;</code></td>
+<td>none</td>
+<td>Shown when there are no items.</td>
+</tr>
+<tr>
+<td><code>item-tooltip</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Shows each item's tooltip on hover.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>selected</code></td>
+<td><code>index(u32)</code></td>
+<td>The highlight moves.</td>
+</tr>
+<tr>
+<td><code>activated</code></td>
+<td><code>index(u32)</code></td>
+<td>Enter or double click.</td>
+</tr>
+<tr>
+<td><code>changed</code></td>
+<td><code>ids(list&lt;string&gt;)</code></td>
+<td>The multi-selection changes.</td>
+</tr>
+<tr>
+<td><code>filter-changed</code></td>
+<td><code>text(string)</code></td>
+<td>The filter text changes, after 150 ms.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down, PageUp, PageDown, Home, End</td>
+<td>Move the highlight. A disabled item is skipped.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Activates the selected item.</td>
+</tr>
+<tr>
+<td>Space</td>
+<td>Toggles the item in <code>multi-select</code>.</td>
+</tr>
+<tr>
+<td>Typing</td>
+<td>Filters, when <code>filter</code> is true.</td>
+</tr>
+<tr>
+<td>Left click, double click</td>
+<td>Select, activate.</td>
+</tr>
+<tr>
+<td>Mouse wheel</td>
+<td>Scrolls three rows per notch.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>selection</code> for the highlighted row, <code>accent</code> for the highlight symbol, <code>muted</code> for disabled items and trailing text.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Agents────────────────────────────────────────────────╮
+│ Filter: co_                                                  │
+│   Claude Code                                           idle │
+│ <span class="t-hi">▶ Codex</span>                                              <span class="t-hi">working</span> │
+│ <span class="t-dim">  Gemini</span>                                         <span class="t-dim">unavailable</span> │
+│   Aider                                    awaiting approval │
+│                                                              │
+╰──────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A %list with a filter row above it. The highlight symbol is ▶ by default (> in stable glyph mode) and the selected row is drawn in the accent colours. The third item is disabled and shows its reason as the trailing text and as a tooltip.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭  ≡ ● · Search results────────────────────────╮
+│                                              │
+│ <span class="t-dim">No matching sessions</span>                         │
+│                                              │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>The empty prop replaces a list with no items. The text is plain styled lines.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let rows = self.agents.iter().map(|agent| {
+    ListItem::new(vec![agent.name.clone()]).id(&amp;agent.id).trailing(&amp;agent.state)
+        .disabled_reason_opt(agent.unavailable.clone())
+}).collect::&lt;Vec&lt;_&gt;&gt;();
+let list = tree.list(rows).key(&quot;agents&quot;).filter(true).filter_placeholder(&quot;Filter…&quot;)
+    .empty(vec![&quot;No matching sessions&quot;.into()]);
+// (&quot;agents&quot;, ActionKind::Activated, ActionValue::Index(i)) =&gt; self.open(i),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const rows = state.agents.map((agent) =&gt; ({
+  id: agent.id, lines: [agent.name], trailing: agent.state, disabledReason: agent.unavailable,
+}));
+const agents = list(rows, { key: 'agents', filter: true, filterPlaceholder: 'Filter…', empty: ['No matching sessions'] });
+// if (kind === 'activated' &amp;&amp; value.tag === 'index') open(value.val);
+</code></pre>
+<h4 id="table">table</h4>
+<p><strong>Purpose.</strong> Rows and columns with a header. Columns have an id, a title, a width, a minimum width and a priority. When the area is too narrow the host drops the columns with the lowest priority first and never shrinks one below its minimum width. A sortable column shows <code>▲</code> or <code>▼</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>columns</code></td>
+<td><code>list&lt;table-column&gt;</code></td>
+<td>required</td>
+<td><code>id</code>, <code>title</code>, <code>width</code> (a constraint), <code>min-width</code>, <code>priority</code>, <code>align</code>, <code>sortable</code>.</td>
+</tr>
+<tr>
+<td><code>rows</code></td>
+<td><code>list&lt;table-row&gt;</code></td>
+<td>required</td>
+<td><code>cells</code>, <code>height</code>, <code>style</code>, and an optional <code>id</code>.</td>
+</tr>
+<tr>
+<td><code>sort</code></td>
+<td><code>option&lt;tuple&lt;string, bool&gt;&gt;</code></td>
+<td>none</td>
+<td>The sort column id and whether it is ascending.</td>
+</tr>
+<tr>
+<td><code>multi-select</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Space toggles a row.</td>
+</tr>
+<tr>
+<td><code>follow-tail</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Keeps the last row visible.</td>
+</tr>
+<tr>
+<td><code>column-spacing</code></td>
+<td><code>u16</code></td>
+<td><code>2</code></td>
+<td>Cells between columns.</td>
+</tr>
+<tr>
+<td><code>highlight-symbol</code></td>
+<td><code>string</code></td>
+<td><code>▶</code></td>
+<td>Before the selected row.</td>
+</tr>
+<tr>
+<td><code>highlight-spacing</code></td>
+<td><code>highlight-spacing</code></td>
+<td><code>when-selected</code></td>
+<td>As for <code>%list</code>.</td>
+</tr>
+<tr>
+<td><code>widths</code>, <code>header</code></td>
+<td></td>
+<td></td>
+<td>Prefer <code>columns</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>selected</code></td>
+<td><code>index(u32)</code></td>
+<td>The highlight moves.</td>
+</tr>
+<tr>
+<td><code>activated</code></td>
+<td><code>index(u32)</code></td>
+<td>Enter or double click.</td>
+</tr>
+<tr>
+<td><code>activated</code></td>
+<td><code>text(column id)</code></td>
+<td>A click on a sortable header. The plugin sorts and sets <code>sort</code>.</td>
+</tr>
+<tr>
+<td><code>changed</code></td>
+<td><code>ids(list&lt;string&gt;)</code></td>
+<td>The multi-selection changes.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down, PageUp, PageDown, Home, End</td>
+<td>Move the highlight.</td>
+</tr>
+<tr>
+<td>Left, Right</td>
+<td>Scroll hidden columns.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Activates the row.</td>
+</tr>
+<tr>
+<td>Left click on a row, on a header</td>
+<td>Select, sort.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>selection</code>, <code>muted</code> for the header and the rule, <code>border</code> for the rule.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Plugins───────────────────────────────────────────────╮
+│ <span class="t-dim">  Name              Version  State        Size ▼</span>             │
+│ <span class="t-dim">  ────────────────────────────────────────────────────</span>       │
+│   demo-plugin       0.1.0    enabled      1.2 MiB            │
+│ <span class="t-hi">  chatroom          0.4.2    enabled      812 KiB</span>            │
+│   progress-hooks    0.1.1    enabled      96 KiB             │
+│   remote-sound      0.1.0    <span class="t-dim">disabled</span>     2.4 MiB            │
+╰──────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A sortable table. The header is bold in the real client; here it is dimmed. ▼ marks the sort column and its direction (▲ ascending). Rows are plain lines, the selected row uses the accent colours. In narrower areas the Size column goes first, then the others by priority.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let columns = vec![
+    TableColumn::new(&quot;name&quot;, &quot;Name&quot;).width(Constraint::Length(18)).priority(9),
+    TableColumn::new(&quot;state&quot;, &quot;State&quot;).width(Constraint::Length(10)).priority(5),
+    TableColumn::new(&quot;size&quot;, &quot;Size&quot;).width(Constraint::Length(8)).priority(1).sortable(true),
+];
+let table = tree.table(columns, rows).key(&quot;plugins&quot;).sort(Some((&quot;size&quot;.into(), false)));
+// (&quot;plugins&quot;, ActionKind::Activated, ActionValue::Text(column)) =&gt; self.sort_by(&amp;column),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const t = table([
+  { id: 'name', title: 'Name', width: { tag: 'length', val: 18 }, priority: 9 },
+  { id: 'state', title: 'State', width: { tag: 'length', val: 10 }, priority: 5 },
+  { id: 'size', title: 'Size', width: { tag: 'length', val: 8 }, priority: 1, sortable: true },
+], rows, { key: 'plugins', sort: ['size', false] });
+// if (kind === 'activated' &amp;&amp; value.tag === 'text') sortBy(value.val);
+</code></pre>
+<h4 id="tree-list">tree-list</h4>
+<p><strong>Purpose.</strong> An expandable tree, with the glyphs of the session tree: <code>▼</code> expanded, <code>▶</code> collapsed, two blank cells for a leaf and one dim <code>›</code> per depth level. Items can carry an icon, a trailing text and a badge, and can be dragged onto each other.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>items</code></td>
+<td><code>list&lt;tree-item&gt;</code></td>
+<td>required</td>
+<td><code>id</code>, <code>label</code>, <code>depth</code>, <code>expandable</code>, <code>expanded</code>, <code>icon</code>, <code>trailing</code>, <code>badge</code>, <code>tooltip</code>, <code>draggable</code>, <code>drop-target</code>.</td>
+</tr>
+<tr>
+<td><code>multi-select</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>Space toggles an item.</td>
+</tr>
+</tbody>
+</table>
+<p>The items form a flat list in display order. <code>depth</code> places an item, and <code>expandable</code> says whether it has children. The plugin sends only the visible items. The host keeps <code>expanded</code> per item id and sends <code>toggled</code> when it changes.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>selected</code></td>
+<td><code>text(id)</code></td>
+<td>The highlight moves.</td>
+</tr>
+<tr>
+<td><code>activated</code></td>
+<td><code>text(id)</code></td>
+<td>Enter or double click.</td>
+</tr>
+<tr>
+<td><code>toggled</code></td>
+<td><code>text(id)</code></td>
+<td>An item is expanded or collapsed.</td>
+</tr>
+<tr>
+<td><code>changed</code></td>
+<td><code>ids(list&lt;string&gt;)</code></td>
+<td>The multi-selection changes.</td>
+</tr>
+<tr>
+<td><code>dropped</code></td>
+<td><code>text(target id)</code></td>
+<td>A draggable item is dropped on a drop target.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down</td>
+<td>Move the highlight.</td>
+</tr>
+<tr>
+<td>Right</td>
+<td>Expands, or goes to the first child.</td>
+</tr>
+<tr>
+<td>Left</td>
+<td>Collapses, or goes to the parent.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Activates.</td>
+</tr>
+<tr>
+<td>Click on <code>▶</code> or <code>▼</code>, click on the label</td>
+<td>Toggles, selects.</td>
+</tr>
+<tr>
+<td>Drag</td>
+<td>Moves a draggable item.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>selection</code>, <code>muted</code> for the guides and for trailing text.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Project───────────────────────────────╮
+│ <span class="t-hi">▼ <span class="w2">📂</span> src</span>                                     │
+│ <span class="t-dim">›</span>   ▶ <span class="w2">📁</span> ui                                  │
+│ <span class="t-dim">›</span>   ▼ <span class="w2">📂</span> app                                 │
+│ <span class="t-dim">››</span>    <span class="w2">📄</span> main.rs                             │
+│ <span class="t-dim">››</span>    <span class="w2">📄</span> lib.rs                              │
+│ ▶ <span class="w2">📁</span> docs                                    │
+│   <span class="w2">📄</span> README.md                               │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>A tree-list with the glyphs of the session tree: ▼ expanded, ▶ collapsed, two blank cells for a leaf, and one dim › per depth level as indentation. The selected row is reversed. Icons come from the item icon field.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let items = vec![
+    TreeItem::new(&quot;src&quot;, &quot;src&quot;).depth(0).expandable(true).icon(&quot;📂&quot;),
+    TreeItem::new(&quot;main&quot;, &quot;main.rs&quot;).depth(2).icon(&quot;📄&quot;),
+];
+let tree_list = tree.tree_list(items).key(&quot;files&quot;);
+// (&quot;files&quot;, ActionKind::Toggled, ActionValue::Text(id)) =&gt; self.reload_children(&amp;id),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const files = treeList([
+  { id: 'src', label: 'src', depth: 0, expandable: true, icon: '📂' },
+  { id: 'main', label: 'main.rs', depth: 2, icon: '📄' },
+], { key: 'files' });
+// if (kind === 'toggled' &amp;&amp; value.tag === 'text') reloadChildren(value.val);
+</code></pre>
+<h4 id="menu">menu</h4>
+<p><strong>Purpose.</strong> A list of commands in a popup, the same widget as the terminal context menu. Use it inside a <code>popup</code> anchored <code>at-pointer</code> and open it when the host sends <code>context-requested</code>. Entries can have an icon, a shortcut, a check, a submenu, a disabled reason and a danger flag.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>entries</code></td>
+<td><code>list&lt;menu-entry&gt;</code></td>
+<td>required</td>
+<td><code>id</code>, <code>label</code>, <code>icon</code>, <code>shortcut</code>, <code>parent</code>, <code>is-submenu</code>, <code>separator-before</code>, <code>checked</code>, <code>disabled-reason</code> (up to 40 characters), <code>tooltip</code>, <code>danger</code>.</td>
+</tr>
+<tr>
+<td><code>items</code></td>
+<td><code>list&lt;menu-item&gt;</code></td>
+<td>none</td>
+<td><code>entries</code> replaces it when present.</td>
+</tr>
+</tbody>
+</table>
+<p>A menu has at most 64 entries and two levels of submenu. An entry names its submenu with <code>parent</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activated</code></td>
+<td><code>text(id)</code></td>
+<td>An entry runs. The popup then closes.</td>
+</tr>
+<tr>
+<td><code>closed</code></td>
+<td><code>none</code></td>
+<td>The user leaves with Escape or a click outside.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down</td>
+<td>Move the highlight. A disabled entry is skipped.</td>
+</tr>
+<tr>
+<td>Right</td>
+<td>Opens a submenu.</td>
+</tr>
+<tr>
+<td>Left</td>
+<td>Closes the submenu.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Runs the entry.</td>
+</tr>
+<tr>
+<td>Escape</td>
+<td>Closes.</td>
+</tr>
+<tr>
+<td>Click, hover</td>
+<td>Runs, or opens a submenu after 200 ms.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>selection</code>, <code>muted</code> for shortcuts and disabled entries, <code>danger</code> for danger entries.</p>
+<figure>
+<pre class="term">╭  ≡ ● · File────────────────────────╮
+│ <span class="w2">📂</span> Open file                 <span class="t-dim">Enter</span> │
+│ <span class="t-hi"><span class="w2">✎</span> Rename                        F2 </span>│
+│ <span class="w2">✓</span> Show hidden                      │
+│ <span class="w2">🔀</span> Open with                     › │
+│ <span class="t-dim"><span class="w2">⛔</span> Delete  (read-only volume)</span>      │
+│ <span class="t-err"><span class="w2">🚫</span> Move to trash</span>                   │
+╰────────────────────────────────────╯
+</pre>
+<figcaption>A menu in a popup. The selected row is reversed and bold, a check is ✓ (– for mixed), a submenu is marked ›, a disabled entry is dim with its reason, and a danger entry uses the danger colour. The block title uses the chrome icons.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let entries = vec![
+    MenuEntry::new(&quot;open&quot;, &quot;Open file&quot;).shortcut(&quot;Enter&quot;),
+    MenuEntry::new(&quot;hidden&quot;, &quot;Show hidden&quot;).checked(TriState::On),
+    MenuEntry::new(&quot;with&quot;, &quot;Open with&quot;).submenu(true),
+    MenuEntry::new(&quot;delete&quot;, &quot;Delete&quot;).disabled_reason(&quot;read-only volume&quot;),
+    MenuEntry::new(&quot;trash&quot;, &quot;Move to trash&quot;).danger(true),
+];
+let menu = tree.menu(entries).key(&quot;file-menu&quot;);
+// (&quot;file-menu&quot;, ActionKind::Activated, ActionValue::Text(id)) =&gt; self.run(&amp;id),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const fileMenu = menu([
+  { id: 'open', label: 'Open file', shortcut: 'Enter' },
+  { id: 'hidden', label: 'Show hidden', checked: 'on' },
+  { id: 'with', label: 'Open with', isSubmenu: true },
+  { id: 'delete', label: 'Delete', disabledReason: 'read-only volume' },
+  { id: 'trash', label: 'Move to trash', danger: true },
+], { key: 'file-menu' });
+// if (kind === 'activated' &amp;&amp; value.tag === 'text') run(value.val);
+</code></pre>
+<h4 id="check-list">check-list</h4>
+<p><strong>Purpose.</strong> A list of boxes. Each item is <code>[x]</code>, <code>[ ]</code> or <code>[-]</code>. A parent item names its <code>children</code>. Its box is <code>[-]</code> when the children differ, and toggling it sets all of them. With <code>all-toggle</code> the key <code>a</code> toggles every item. The host owns the states and reports them through <code>widget-state::tri</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>items</code></td>
+<td><code>list&lt;check-item&gt;</code></td>
+<td>required</td>
+<td><code>id</code>, <code>label</code>, <code>state</code> (<code>on</code>, <code>off</code>, <code>mixed</code>), <code>disabled-reason</code>, <code>children</code>. At most 256 items.</td>
+</tr>
+<tr>
+<td><code>all-toggle</code></td>
+<td><code>bool</code></td>
+<td><code>false</code></td>
+<td>The <code>a</code> key toggles all items.</td>
+</tr>
+<tr>
+<td><code>max-height</code></td>
+<td><code>u16</code></td>
+<td>none</td>
+<td>Rows shown before the list scrolls.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>item-state(id, state)</code></td>
+<td>An item changes. A parent sends one event per child that changed.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down</td>
+<td>Move the highlight.</td>
+</tr>
+<tr>
+<td>Space</td>
+<td>Toggles the item.</td>
+</tr>
+<tr>
+<td><code>a</code></td>
+<td>Toggles all items, with <code>all-toggle</code>.</td>
+</tr>
+<tr>
+<td>Click on the box or label</td>
+<td>Toggles.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>accent</code> for a checked box, <code>muted</code> for a disabled item.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Group members─────────────────────────────────╮
+│ <span class="t-hi">[-] All agents</span>                                       │
+│     [x] claude: refactor                             │
+│     [ ] codex: tests                                 │
+│     <span class="t-dim">[ ] gemini: docs  (frozen)</span>                       │
+│ [x] Shell                                            │
+│                                                      │
+│ <span class="t-dim">Space toggles · a toggles all · Enter applies</span>        │
+╰──────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A check-list with a parent row. The parent shows [-] because its children differ and toggles all of them. A disabled child is dim and carries its reason. The key line below is a key-hints widget, not part of the check-list.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let items = vec![
+    CheckItem::new(&quot;all&quot;, &quot;All agents&quot;).children(vec![&quot;claude&quot;, &quot;codex&quot;, &quot;gemini&quot;]),
+    CheckItem::new(&quot;claude&quot;, &quot;claude: refactor&quot;).state(TriState::On),
+    CheckItem::new(&quot;codex&quot;, &quot;codex: tests&quot;),
+    CheckItem::new(&quot;gemini&quot;, &quot;gemini: docs&quot;).disabled_reason(&quot;frozen&quot;),
+];
+let list = tree.check_list(items).key(&quot;members&quot;).all_toggle(true);
+// (&quot;members&quot;, ActionKind::Changed, ActionValue::ItemState(id, state)) =&gt; self.set(&amp;id, state),
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const members = checkList([
+  { id: 'all', label: 'All agents', children: ['claude', 'codex', 'gemini'] },
+  { id: 'claude', label: 'claude: refactor', state: 'on' },
+  { id: 'codex', label: 'codex: tests' },
+  { id: 'gemini', label: 'gemini: docs', disabledReason: 'frozen' },
+], { key: 'members', allToggle: true });
+// if (value.tag === 'item-state') set(value.val[0], value.val[1]);
+</code></pre>
+<h4 id="list-editor">list-editor</h4>
+<p><strong>Purpose.</strong> Edits a list of strings, for example globs, URLs, hosts or chords, or a list of objects with up to eight fields. It is the widget behind the <code>list</code> rows of Settings. A checked format (<code>glob</code>, <code>url</code>, <code>host</code>, <code>path</code>, <code>regex</code>, <code>chord</code>) draws an invalid item with <code>✗</code> and the reason, and the item is not written.</p>
+<table>
+<thead>
+<tr>
+<th>Prop</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>items</code></td>
+<td><code>list&lt;string&gt;</code></td>
+<td>required</td>
+<td>The values.</td>
+</tr>
+<tr>
+<td><code>item-format</code></td>
+<td><code>option&lt;item-format&gt;</code></td>
+<td>none</td>
+<td><code>glob</code>, <code>url</code>, <code>host</code>, <code>path</code>, <code>regex</code> or <code>chord</code>. Checked on commit.</td>
+</tr>
+<tr>
+<td><code>object-fields</code></td>
+<td><code>list&lt;list-field&gt;</code></td>
+<td>empty</td>
+<td><code>id</code>, <code>title</code>, <code>kind</code>, <code>width</code>. Up to 8. The items are then objects.</td>
+</tr>
+<tr>
+<td><code>reorderable</code></td>
+<td><code>bool</code></td>
+<td><code>true</code></td>
+<td>Shows the <code>⠿</code> grip and allows Alt+Up and Alt+Down.</td>
+</tr>
+<tr>
+<td><code>max-items</code></td>
+<td><code>u32</code></td>
+<td><code>64</code></td>
+<td>1,024 with the first-party tier.</td>
+</tr>
+<tr>
+<td><code>item-states</code></td>
+<td><code>list&lt;row-state&gt;</code></td>
+<td>empty</td>
+<td>A status per item: <code>checking</code>, <code>ok</code> or <code>error</code>, with a message.</td>
+</tr>
+<tr>
+<td><code>placeholder</code></td>
+<td><code>option&lt;string&gt;</code></td>
+<td>none</td>
+<td>Shown in an empty new item.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Sent when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changed</code></td>
+<td><code>text(json array)</code></td>
+<td>An edit is committed. The whole array is sent.</td>
+</tr>
+<tr>
+<td><code>selected</code></td>
+<td><code>index(u32)</code></td>
+<td>The highlight moves.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up, Down</td>
+<td>Move the highlight.</td>
+</tr>
+<tr>
+<td>Enter</td>
+<td>Edits the item.</td>
+</tr>
+<tr>
+<td>Insert or <code>+</code></td>
+<td>Adds an item.</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>Removes the item.</td>
+</tr>
+<tr>
+<td>Alt+Up, Alt+Down</td>
+<td>Reorders.</td>
+</tr>
+<tr>
+<td>Click on <code>+</code>, <code>✗</code>; drag the <code>⠿</code> grip</td>
+<td>Add, remove, reorder.</td>
+</tr>
+</tbody>
+</table>
+<p>Theme roles: <code>foreground</code> for the items, <code>danger</code> for an invalid item and its message, <code>muted</code> for the grip and the placeholder.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Ignore globs──────────────────────────────────────────────╮
+│ ⠿  node_modules/**                                               │
+│ ⠿  <span class="t-hi">target/**/*.rlib</span>                                        <span class="w2">✗</span>     │
+│ ⠿  <span class="t-err">[unclosed</span>                                              <span class="t-err"><span class="w2">✗</span></span>      │
+│ ⠿  <span class="t-dim">add a pattern…</span>                                                │
+│ +                                                                │
+│ <span class="t-err"><span class="w2">✗</span> Invalid glob: unclosed [</span>                                       │
+╰──────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A list-editor for glob patterns. Each row has a grip ⠿ for dragging, the inline editable text, and ✗ to remove it. The second row is being edited. An invalid item (third row) is drawn in the danger colour and the message is on the last line. The + at the bottom adds an item.</figcaption>
+</figure>
+
+<figure>
+<pre class="term">╭  ≡ ● · Image URLs────────────────────────────────────────────────╮
+│ ⠿  https://example.org/a.jpg                  <span class="t-ok"><span class="w2">✓</span></span>                  │
+│ ⠿  https://example.org/b.jpg                  <span class="t-dim">…</span>                  │
+│ ⠿  ftp://example.org/c.jpg                    <span class="t-err"><span class="w2">✗</span></span>                  │
+│ +                                                                │
+│ <span class="t-err"><span class="w2">✗</span> Only http and https URLs are accepted</span>                          │
+╰──────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A list-editor with item-format url and item states. The check marks that the second item is being checked on a remote host (the ellipsis) and that the first passed. The third item failed the format check.</figcaption>
+</figure>
+
+<p>With <code>object-fields</code> each item is one row with a column per field. The commit sends the whole array of objects as JSON.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Providers─────────────────────────────────────────────╮
+│ <span class="t-dim">⠿  Name         Host                 Port</span>                    │
+│ ⠿  photon       photon.komoot.io     443                     │
+│ ⠿  <span class="t-hi">nominatim</span>    nominatim.local      8080          <span class="w2">✗</span>         │
+│ +                                                            │
+╰──────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>A list-editor with object-fields: up to 8 fields per item, one column each. The commit sends the whole array as JSON objects.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let globs = tree.list_editor(self.globs.clone()).key(&quot;globs&quot;).item_format(ItemFormat::Glob);
+let hosts = tree.list_editor(Vec::new()).key(&quot;providers&quot;).object_fields(vec![
+    ListField::new(&quot;name&quot;, &quot;Name&quot;, FieldKind::Text).width(12),
+    ListField::new(&quot;host&quot;, &quot;Host&quot;, FieldKind::Text).width(20),
+    ListField::new(&quot;port&quot;, &quot;Port&quot;, FieldKind::Number).width(6),
+]);
+// (&quot;globs&quot;, ActionKind::Changed, ActionValue::Text(json)) =&gt; self.globs = serde_json::from_str(&amp;json)?,
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const globs = listEditor(state.globs, { key: 'globs', itemFormat: 'glob' });
+const providers = listEditor([], {
+  key: 'providers',
+  objectFields: [
+    { id: 'name', title: 'Name', kind: 'text', width: 12 },
+    { id: 'host', title: 'Host', kind: 'text', width: 20 },
+    { id: 'port', title: 'Port', kind: 'number', width: 6 },
+  ],
+});
+// if (value.tag === 'text') state.globs = JSON.parse(value.val);
+</code></pre>
+<h3 id="worked-example-an-agents-table">Worked example: an agents table</h3>
+<p>The plugin shows every session in a table, sorts it by the column the user clicks and opens the selected one on Enter.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">impl Views for Agents {
+    fn render(&amp;mut self, _view: ViewTarget, _area: Area) -&gt; UiTree {
+        let mut tree = Tree::new();
+        let columns = vec![
+            TableColumn::new(&quot;name&quot;, &quot;Name&quot;).width(Constraint::Length(18)).priority(9).sortable(true),
+            TableColumn::new(&quot;state&quot;, &quot;State&quot;).width(Constraint::Length(10)).priority(5),
+        ];
+        let rows = self.rows.iter().map(|row| TableRow::new(vec![row.name.clone(), row.state.clone()]).id(&amp;row.id)).collect();
+        let table = tree.table(columns, rows).key(&quot;agents&quot;).sort(Some((self.sort.clone(), self.ascending)));
+        tree.finish(table)
+    }
+}
+
+impl Handler for Agents {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            let Event::UiAction(action) = event else { continue };
+            match (action.key.as_str(), action.kind, action.value) {
+                (&quot;agents&quot;, ActionKind::Activated, ActionValue::Text(column)) =&gt; {
+                    self.ascending = self.sort == column &amp;&amp; !self.ascending;
+                    self.sort = column;
+                }
+                (&quot;agents&quot;, ActionKind::Activated, ActionValue::Index(row)) =&gt; self.open(row as usize),
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export const { handler, views } = definePlugin({
+  side: 'client',
+  render() {
+    const columns = [
+      { id: 'name', title: 'Name', width: { tag: 'length', val: 18 }, priority: 9, sortable: true },
+      { id: 'state', title: 'State', width: { tag: 'length', val: 10 }, priority: 5 },
+    ];
+    const rows = state.rows.map((row) =&gt; ({ id: row.id, cells: [row.name, row.state] }));
+    return tree(table(columns, rows, { key: 'agents', sort: [state.sort, state.ascending] }));
+  },
+  onEvents(batch) {
+    for (const event of batch) {
+      if (event.tag !== 'ui-action' || event.val.key !== 'agents') continue;
+      const { kind, value } = event.val;
+      if (kind === 'activated' &amp;&amp; value.tag === 'text') {
+        state.ascending = state.sort === value.val ? !state.ascending : true;
+        state.sort = value.val;
+      } else if (kind === 'activated' &amp;&amp; value.tag === 'index') open(value.val);
+    }
+    return [];
+  },
+});
+</code></pre>
+<h3 id="edge-cases-and-errors">Edge cases and errors</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>More than 256 <code>check-list</code> items, or more than <code>max-items</code> in a <code>list-editor</code></td>
+<td>The render traps with <code>ui.invalid-tree</code>; the previous tree stays, marked stale.</td>
+</tr>
+<tr>
+<td>More than 64 menu entries, or a submenu deeper than two levels</td>
+<td>The menu is truncated with <code>… N more</code>.</td>
+</tr>
+<tr>
+<td>Two items with the same <code>id</code></td>
+<td>The tree is invalid and the render traps with <code>ui.duplicate-key</code>.</td>
+</tr>
+<tr>
+<td>An invalid item in a <code>list-editor</code></td>
+<td>Drawn with <code>✗</code> and the reason. It is not written and <code>changed</code> is not sent for it.</td>
+</tr>
+<tr>
+<td>A selected item removed by the next render</td>
+<td>The selection moves to the nearest row.</td>
+</tr>
+<tr>
+<td><code>menu</code> or <code>list-editor</code> in a settings page</td>
+<td>The render traps with <code>ui.widget-not-allowed</code>.</td>
+</tr>
+<tr>
+<td><code>set-widget-state</code> with a case the widget does not take</td>
+<td><code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>A <code>disabled-reason</code> longer than 40 characters</td>
+<td>The text is cut at 40 characters and ends with <code>…</code>; the entry stays disabled and the render succeeds.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/ui-model/">UI model</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/primitives-editor-viewport/"><small>Previous</small>Editor viewport and tokens</a><a class="next" href="/pages/widgets-data-display/"><small>Next</small>Data display</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#host-owned-state">Host-owned state</a></li><li class="l2"><a href="#props-every-collection-accepts">Props every collection accepts</a></li><li class="l3"><a href="#list">%list</a></li><li class="l3"><a href="#table">table</a></li><li class="l3"><a href="#tree-list">tree-list</a></li><li class="l3"><a href="#menu">menu</a></li><li class="l3"><a href="#check-list">check-list</a></li><li class="l3"><a href="#list-editor">list-editor</a></li><li class="l2"><a href="#worked-example-an-agents-table">Worked example: an agents table</a></li><li class="l2"><a href="#edge-cases-and-errors">Edge cases and errors</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

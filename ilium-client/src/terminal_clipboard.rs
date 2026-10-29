@@ -836,6 +836,23 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn blocked_owned_child_preserves_fifo_and_shutdown_observes_actual_exit() {
+        fn admit(service: &ClipboardService, mut operation: Operation) -> u64 {
+            let deadline = Instant::now() + Duration::from_millis(100);
+            loop {
+                match service.submit_classified(operation) {
+                    Ok(id) => return id,
+                    Err((original, WriteAdmissionError::Busy(message))) => {
+                        assert!(Instant::now() < deadline, "{message}");
+                        // A nonblocking admission may race the owner's brief
+                        // queue lock. Retry the returned, unaccepted operation;
+                        // the blocked native read must still not delay admission.
+                        operation = original;
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err((_, error)) => panic!("{}", error.message()),
+                }
+            }
+        }
         let fixture = tempfile::tempdir().unwrap();
         let ready = fixture.path().join("ready");
         let release = fixture.path().join("release");
@@ -890,10 +907,7 @@ while True:
             std::path::PathBuf::from("/usr/bin/python3"),
             vec!["-c".into(), script.into()],
         ));
-        let read = service
-            .submit(Operation::Read)
-            .map_err(|(_, error)| error)
-            .unwrap();
+        let read = admit(&service, Operation::Read);
         let deadline = Instant::now() + Duration::from_secs(5);
         while !ready.exists() {
             assert!(
@@ -903,18 +917,12 @@ while True:
             std::thread::sleep(Duration::from_millis(1));
         }
         let began = Instant::now();
-        let write = service
-            .submit(Operation::Write("after".into()))
-            .map_err(|(_, error)| error)
-            .unwrap();
+        let write = admit(&service, Operation::Write("after".into()));
         assert!(
             began.elapsed() < Duration::from_millis(100),
             "producer waited for blocked native I/O"
         );
-        let tail = service
-            .submit(Operation::Read)
-            .map_err(|(_, error)| error)
-            .unwrap();
+        let tail = admit(&service, Operation::Read);
         assert!(service.try_take().is_none());
         assert!(service.pending());
         std::fs::write(&release, b"release").unwrap();

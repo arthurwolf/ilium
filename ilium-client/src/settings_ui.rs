@@ -70,6 +70,20 @@ const TAB_ROW_HEIGHT: u16 = 2;
 const APPEARANCE_TOP_PADDING: u16 = 1;
 const APPEARANCE_ROW_HEIGHT: u16 = 3;
 
+/// Left-panel sizing cards. Each card needs 26 cells to hold its longest
+/// title (`↔  Width-dependent`), the `focus`/`away` bar diagram and the value
+/// line without truncation; three cards plus two gaps is the narrowest
+/// content width at which they still read as a side-by-side choice. Below
+/// it the sizing policy falls back to the compact shared selector row.
+const SIZING_CARD_MINIMUM_WIDTH: u16 = 26;
+const SIZING_CARD_GAP: u16 = 2;
+const SIZING_CARD_HEIGHT: u16 = 7;
+/// Panel widths are drawn against the largest value the settings accept.
+const SIZING_CARD_BAR_SCALE_COLUMNS: u16 = 80;
+/// Content width from which the sizing policy is shown as cards.
+pub const SIZING_CARDS_MINIMUM_CONTENT_WIDTH: u16 =
+    SIZING_CARD_MINIMUM_WIDTH * 3 + SIZING_CARD_GAP * 2;
+
 /// Column where a row's value control (`‹ value ›`) begins -- two leading
 /// spaces plus the padded label column. Shared by rendering and
 /// [`appearance_content_hit`].
@@ -290,19 +304,44 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
     let content_inner = theme::block(true).inner(content_frame_area);
     let scrollbar_width = u16::from(content_inner.width >= 4);
     let help_width = if content_inner.width >= 12 { 3 } else { 0 };
+    let scrollbar_x = content_inner
+        .right()
+        .saturating_sub(scrollbar_width + help_width);
+    // The scrollbar track is painted at `content_area.right()`, so the content
+    // column must end exactly where the reserved scrollbar column starts.
     let content_area = Rect::new(
         content_inner.x,
         content_inner.y,
-        content_inner
-            .width
-            .saturating_sub(scrollbar_width + help_width),
+        scrollbar_x.saturating_sub(content_inner.x),
         content_inner.height,
     );
+    let horizontal_inset = if content_area.width >= 100 {
+        2
+    } else if content_area.width >= 56 {
+        1
+    } else {
+        0
+    };
+    let (vertical_top_inset, vertical_bottom_inset) = if content_area.height >= 34 {
+        (2, 1)
+    } else if content_area.height >= 24 {
+        (1, 0)
+    } else {
+        (0, 0)
+    };
+    let content_area = Rect::new(
+        content_area.x.saturating_add(horizontal_inset),
+        content_area.y.saturating_add(vertical_top_inset),
+        content_area.width.saturating_sub(horizontal_inset),
+        content_area
+            .height
+            .saturating_sub(vertical_top_inset.saturating_add(vertical_bottom_inset)),
+    );
     let content_scrollbar_area = Rect::new(
-        content_area.right(),
-        content_inner.y,
+        scrollbar_x,
+        content_area.y,
         scrollbar_width,
-        content_inner.height,
+        content_area.height,
     );
     let help_rail_area = Rect::new(
         content_scrollbar_area.right(),
@@ -326,6 +365,20 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
 /// header -- see [`close_button_hit`] for its matching hit-test rect. Kept
 /// short so it reads as a button, not a sentence.
 const CLOSE_LABEL: &str = "\u{2715} Close";
+
+/// Share the exact content inset between rendering, pointer dispatch and
+/// geometry checks. Compact Kilo settings reserve space for the privacy notice.
+pub(crate) fn instructions_panel_height(app: &App, tab: SettingsTab, area: Rect) -> u16 {
+    if tab == SettingsTab::Inference
+        && app.inference_settings.selected_provider
+            == ilium_inference::InferenceProviderKind::KiloGateway
+        && area.height <= 8
+    {
+        0
+    } else {
+        crate::instruction_settings::panel_height(tab, area)
+    }
+}
 
 /// Draws the full-screen settings view. Callers must skip drawing anything
 /// else this frame (see `crate::ui::draw`'s `Mode::Settings` branch) -- this
@@ -384,15 +437,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         theme::block(true).title(theme::chrome_title(state.tab.label())),
         layout.content_frame_area,
     );
-    let compact_kilo_privacy = state.tab == SettingsTab::Inference
-        && app.inference_settings.selected_provider
-            == ilium_inference::InferenceProviderKind::KiloGateway
-        && layout.content_area.height <= 8;
-    let instructions_height = if compact_kilo_privacy {
-        0
-    } else {
-        crate::instruction_settings::panel_height(state.tab, layout.content_area)
-    };
+    let instructions_height = instructions_panel_height(app, state.tab, layout.content_area);
     if instructions_height > 0 {
         let panel = Rect {
             height: instructions_height,
@@ -411,6 +456,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     render_header(frame, layout.header_area);
     render_tab_list(frame, layout.tab_list_area, state.tab);
     if state.tab == SettingsTab::Icons {
+        if let Some(editor) = &state.tree_layout_editor {
+            crate::tree_layout_settings::render(frame, layout.content_area, app, editor);
+            return;
+        }
         render_icons_tab(frame, layout.content_area, app, state);
         render_icons_scrollbar(frame, layout.content_area, state.scroll);
         render_settings_help_anchors(frame, &layout, app, state);
@@ -446,6 +495,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             layout.content_area,
             title_style_lines(
                 app.inference_settings.title_style,
+                app.inference_settings.codex_official_thread_names,
                 layout.content_area.width,
                 state.selected_row,
             ),
@@ -462,6 +512,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::TextTriggers => {
             let view = text_trigger_view(app, state.selected_row, layout.content_area.width);
             render_scrollable(frame, layout.content_area, view.lines, state.scroll);
+        }
+        SettingsTab::CustomAgents => {
+            render_scrollable(
+                frame,
+                layout.content_area,
+                custom_agent_lines(app, state),
+                state.scroll,
+            );
         }
         SettingsTab::Appearance => {
             let lines = appearance_view(
@@ -493,6 +551,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             session_lines(&app.session_settings, state.selected_row),
             state.scroll,
         ),
+        SettingsTab::Attention => render_scrollable(
+            frame,
+            layout.content_area,
+            attention_lines(&app.attention_settings, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::Git => render_scrollable(
             frame,
             layout.content_area,
@@ -506,6 +570,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::Keyboard => {
             let lines = keyboard_lines(&app.keyboard_settings, &app.keybindings);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
+        }
+        SettingsTab::Padding => {
+            crate::padding_ui::render(frame, layout.content_area, app, state);
+            if let Some(dialog) = &state.padding.dialog {
+                crate::padding_dialog::render(frame, area, app, dialog);
+            }
         }
         SettingsTab::KanbanBoard => {
             let lines = kanban_board_lines(&app.kanban_board_settings, state.selected_row);
@@ -791,6 +861,18 @@ pub fn settings_help_anchors(
                 );
             }
         }
+        SettingsTab::Attention => {
+            for (i, id) in simple_rows("ATT-", 7) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
         SettingsTab::Session => {
             for (i, id) in simple_rows("SES-", 2) {
                 push_help_anchor(
@@ -810,6 +892,23 @@ pub fn settings_help_anchors(
                     layout,
                     &id,
                     1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Padding => {
+            let lines = [
+                4,
+                crate::padding_ui::CARD_HEIGHT + 2,
+                crate::padding_ui::CARD_HEIGHT + 5,
+            ];
+            for (i, id) in simple_rows("PAD-", 3) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    lines[i],
                     state.scroll,
                     state.selected_row == i,
                 );
@@ -909,19 +1008,29 @@ pub fn settings_help_anchors(
                 state.selected_row == app.text_trigger_settings.triggers.len(),
             );
         }
+        SettingsTab::CustomAgents => push_help_anchor(
+            &mut anchors,
+            layout,
+            "CUSTOMAGENT-01",
+            1,
+            state.scroll,
+            true,
+        ),
         SettingsTab::Appearance => {
-            push_help_anchor(
-                &mut anchors,
-                layout,
-                "AP-01",
-                4,
-                state.scroll,
-                state.selected_row == 0,
-            );
             let view = appearance_view(
                 &app.ui_settings,
                 state.selected_row,
                 layout.content_area.width,
+            );
+            // With cards there is no sizing row line, so anchor on the cards.
+            let sizing_anchor_line = view.card_hits.first().map_or(4, |card| card.start_line);
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "AP-01",
+                sizing_anchor_line,
+                state.scroll,
+                state.selected_row == 0,
             );
             for (row, line) in view.row_lines {
                 let id = match row {
@@ -942,6 +1051,7 @@ pub fn settings_help_anchors(
                     AppearanceRow::ContextMenuIcons => "AP-15",
                     AppearanceRow::AgentToolbar => "AP-16",
                     AppearanceRow::ShowToolbarLabels => "AP-17",
+                    AppearanceRow::SectionFrames => "AP-33",
                     AppearanceRow::LastPrompt => "AP-18",
                     AppearanceRow::LastPromptMaxLines => "AP-19",
                     AppearanceRow::ProgressMonitor => "AP-20",
@@ -950,6 +1060,8 @@ pub fn settings_help_anchors(
                     AppearanceRow::TerminalTextSelection => "AP-23",
                     AppearanceRow::LockClosedEnabled => "AP-24",
                     AppearanceRow::ProjectSeparators => "AP-25",
+                    AppearanceRow::ResourceGrouping => "AP-36",
+                    AppearanceRow::TreeToolbarAlwaysVisible => "AP-34",
                     AppearanceRow::AutoRemoveEmptyGroups => "AP-26",
                     AppearanceRow::AutoFreeze => "AP-27",
                     AppearanceRow::AutoFreezeAfter => "AP-28",
@@ -1055,7 +1167,22 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Titles => {
-            push_help_anchor(&mut anchors, layout, "TITLE-01", 8, state.scroll, true)
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TITLE-01",
+                TITLE_STYLE_CONTROL_LINE as u16,
+                state.scroll,
+                state.selected_row == 0,
+            );
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TITLE-02",
+                CODEX_THREAD_NAME_CONTROL_LINE as u16,
+                state.scroll,
+                state.selected_row == 1,
+            );
         }
         SettingsTab::Triggers => {
             for i in 0..crate::trigger_settings::TriggerEvent::ALL.len() {
@@ -1219,6 +1346,7 @@ pub fn close_button_hit(header_area: Rect, position: Position) -> bool {
 fn tab_icon(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "◐",
+        SettingsTab::Padding => "▢",
         SettingsTab::Icons => "▦",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
@@ -1228,6 +1356,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Terminal => "❯",
         SettingsTab::Editor => "✎",
         SettingsTab::Session => "▣",
+        SettingsTab::Attention => "◎",
         SettingsTab::Git => "⑂",
         SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
@@ -1239,6 +1368,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Titles => "≔",
         SettingsTab::Triggers => "⚑",
         SettingsTab::TextTriggers => "¶",
+        SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
         SettingsTab::Api => "⇄",
         SettingsTab::About => "ⓘ",
@@ -1250,6 +1380,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "Display",
         SettingsTab::AgentMonitoring => "Agents",
+        SettingsTab::Attention => "Queue",
         SettingsTab::Cost => "Cost",
         SettingsTab::Optimization => "Optimize",
         SettingsTab::RemoteCompaction => "Remote",
@@ -1286,24 +1417,15 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
         };
         let icon = tab_icon(tab);
         let icon_padding = " ".repeat(2_usize.saturating_sub(icon.width()));
-        let available_label_width = usize::from(label_area.width).saturating_sub(4);
-        let compact_label = compact_tab_label(tab);
-        let full_label = tab.label();
-        let label_source = if full_label.width() > available_label_width
-            && compact_label.width() <= available_label_width
-        {
-            compact_label
-        } else {
-            full_label
-        };
-        let label = if label_source.width() > available_label_width && available_label_width > 1 {
-            format!(
-                "{}…",
-                truncate_icon_text(label_source, available_label_width - 1)
-            )
-        } else {
-            truncate_icon_text(label_source, available_label_width)
-        };
+        // One cell stays free before the overflow scrollbar so labels never touch it.
+        let scrollbar_gap = usize::from(has_overflow);
+        let available_label_width = usize::from(label_area.width).saturating_sub(4 + scrollbar_gap);
+        // A label is shown whole or not at all: a cut word reads as a defect, while
+        // the icon still identifies the tab when no full label fits the column.
+        let label = [tab.label(), compact_tab_label(tab)]
+            .into_iter()
+            .find(|candidate| candidate.width() <= available_label_width)
+            .unwrap_or("");
         lines.push(Line::from(Span::styled(
             pad_icon_text(
                 &format!(" {icon}{icon_padding} {label}"),
@@ -1484,6 +1606,131 @@ struct TextTriggerView {
     add_line: usize,
 }
 
+fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
+    use crate::custom_agent_editor::EditorRow;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "CUSTOM AGENTS",
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Values are plaintext in Ilium's owner-only configuration file."),
+        Line::from("Changes apply on the next launch or restart."),
+        Line::from(""),
+    ];
+    if let Some(editor) = &state.custom_agent_editor {
+        for (index, row) in editor.rows().into_iter().enumerate() {
+            let (label, value) = match row {
+                EditorRow::Name => ("Name".to_owned(), editor.draft.name.clone()),
+                EditorRow::Icon => ("Icon".to_owned(), editor.draft.icon.clone()),
+                EditorRow::Provider => (
+                    "Base".to_owned(),
+                    format!("{:?}", editor.draft.base_provider),
+                ),
+                EditorRow::EnvironmentKey(index) => (
+                    format!("Variable {} name", index + 1),
+                    editor.draft.environment[index].key.clone(),
+                ),
+                EditorRow::EnvironmentValue(index) => (
+                    format!("Variable {} value", index + 1),
+                    editor.displayed_value(index).unwrap_or_default(),
+                ),
+                EditorRow::RemoveEnvironment(index) => (
+                    format!("Remove variable {}", index + 1),
+                    "[ Remove ]".to_owned(),
+                ),
+                EditorRow::AddEnvironment => ("Add variable".to_owned(), "[ Add ]".to_owned()),
+                EditorRow::RevealValues => (
+                    "Show values".to_owned(),
+                    if editor.reveal_values { "On" } else { "Off" }.to_owned(),
+                ),
+                EditorRow::Save => (
+                    "Save profile".to_owned(),
+                    if state.custom_agent_save_pending {
+                        "Saving…"
+                    } else {
+                        "[ Save ]"
+                    }
+                    .to_owned(),
+                ),
+                EditorRow::Cancel => ("Cancel".to_owned(), "[ Cancel ]".to_owned()),
+            };
+            let value = value
+                .chars()
+                .map(|character| match character {
+                    '\n' => "\\n".to_owned(),
+                    '\r' => "\\r".to_owned(),
+                    '\t' => "\\t".to_owned(),
+                    other if other.is_control() => "�".to_owned(),
+                    other => other.to_string(),
+                })
+                .collect::<String>();
+            let selected = index == state.selected_row;
+            let padding = 30usize.saturating_sub(label.chars().count());
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} {label}", if selected { "›" } else { " " }),
+                    if selected {
+                        theme::selected_style()
+                    } else {
+                        Style::new()
+                    },
+                ),
+                leader_span(padding),
+                Span::raw(value),
+            ]));
+        }
+        lines.push(Line::from(if state.custom_agent_editing {
+            "Type to edit; Enter finishes; Esc cancels editing."
+        } else {
+            "Enter edits or activates; arrows navigate; Esc cancels."
+        }));
+    } else {
+        for (index, profile) in app.custom_agents.profiles.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} {} {}  ({:?}, {} variables)  [Delete]",
+                if index == state.selected_row {
+                    "›"
+                } else {
+                    " "
+                },
+                profile.icon,
+                profile.name,
+                profile.base_provider,
+                profile.environment.len()
+            )));
+        }
+        let missing = crate::custom_agent_settings::missing_profiles(app);
+        for (index, identity) in missing.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} [ Restore missing profile {} ({:?}) ]",
+                if state.selected_row == app.custom_agents.profiles.len() + index {
+                    "›"
+                } else {
+                    " "
+                },
+                identity.profile_id,
+                identity.base_provider
+            )));
+        }
+        lines.push(Line::from(format!(
+            "{} [ Add custom agent ]",
+            if state.selected_row == app.custom_agents.profiles.len() + missing.len() {
+                "›"
+            } else {
+                " "
+            }
+        )));
+        lines.push(Line::from(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." }));
+    }
+    lines
+}
+
+pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Rect) -> u16 {
+    (custom_agent_lines(app, state).len().min(u16::MAX as usize) as u16).saturating_sub(area.height)
+}
+
 /// Readable, measured list surface for server-executed regexp responses.
 /// Each rule has a distinct status/target heading and wrapped match/reply rows.
 fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerView {
@@ -1505,7 +1752,7 @@ fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerV
     let mut row_lines = Vec::with_capacity(app.text_trigger_settings.triggers.len());
     for (index, trigger) in app.text_trigger_settings.triggers.iter().enumerate() {
         let cursor = if index == selected_row { "›" } else { " " };
-        let enabled = if trigger.enabled { "ON" } else { "OFF" };
+        let enabled = on_off(trigger.enabled);
         let row_start = lines.len();
         lines.push(Line::from(vec![
             Span::styled(
@@ -1629,6 +1876,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
+        SettingsTab::Padding => 0,
         SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,
@@ -1647,6 +1895,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         .len() as u16,
         SettingsTab::Titles => title_style_lines(
             app.inference_settings.title_style,
+            app.inference_settings.codex_official_thread_names,
             content_area.width,
             selected_row,
         )
@@ -1663,6 +1912,10 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::TextTriggers => text_trigger_view(app, selected_row, content_area.width)
             .lines
             .len() as u16,
+        SettingsTab::CustomAgents => match &app.mode {
+            crate::app::Mode::Settings(state) => custom_agent_lines(app, state).len() as u16,
+            _ => 0,
+        },
         SettingsTab::Appearance => {
             appearance_view(&app.ui_settings, selected_row, content_area.width)
                 .lines
@@ -1684,6 +1937,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
+        SettingsTab::Attention => {
+            attention_lines(&app.attention_settings, selected_row).len() as u16
+        }
         SettingsTab::Git => git_lines(
             &app.git_settings,
             app.git_settings_error.as_deref(),
@@ -1947,7 +2203,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
         lines.push(Line::from(""));
     }
     let table = Paragraph::new(lines)
-        .block(theme::block(true).title(theme::chrome_title("Icon assignments")));
+        .block(theme::block(true).title(theme::chrome_title("Icon assignments · L Tree layout")));
     frame.render_widget(table, left);
     for (index, target) in crate::agent_monitoring::general_icon_targets()
         .into_iter()
@@ -2012,6 +2268,11 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             &app.tree,
             &mut preview_tree_state,
             crate::tree_ui::TreeRenderOptions {
+                custom_toolbar_profiles: None,
+                custom_toolbar_selected: None,
+                custom_toolbar_hovered: None,
+                custom_toolbar_pending: None,
+                custom_agent_labels: None,
                 focused: false,
                 elapsed_ms: app.started_at.elapsed().as_millis(),
                 terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
@@ -2022,6 +2283,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 titles_loading: &app.titles_loading,
                 recently_created: &app.recently_created,
                 terminal_activity: &app.terminal_activity,
+                detection_evidence: Some(&app.pane_detection_evidence),
                 focused_pane_id: app.focused_pane_id(),
                 transitions: &app.tree_transitions,
                 agent_identifiers: &app.ui_settings.agent_identifiers,
@@ -2031,6 +2293,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 show_worktree_branch_line: app.git_settings.branch_line
                     == crate::config::GitBranchLine::WorktreeOnly,
                 tree_order: app.ui_settings.tree_order,
+                row_layout: &app.ui_settings.tree_row_layout,
                 show_project_separators: app.ui_settings.show_project_separators,
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
@@ -2043,6 +2306,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 hover: crate::tree_ui::TreeHoverState::default(),
                 sidebar_files: &Default::default(),
                 chatroom_projects: &Default::default(),
+                resources: Some(&app.resources),
                 panes: &app.panes,
             },
         );
@@ -2715,7 +2979,7 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     }
 
     let row_offset = usize::from(position.y - table_inner.y - 1);
-    if row_offset % 2 != 0 {
+    if !row_offset.is_multiple_of(2) {
         return None;
     }
     let target_index = row_offset / 2 + usize::from(scroll);
@@ -2796,6 +3060,7 @@ pub fn icons_preview_mode_hit(
 /// rather than abstract promises about what each mode might do.
 fn title_style_lines(
     active: ilium_inference::TitleStyle,
+    use_codex_thread_names: bool,
     width: u16,
     _selected_row: usize,
 ) -> Vec<Line<'static>> {
@@ -2874,8 +3139,31 @@ fn title_style_lines(
             "  Your fixed titles stay yours.",
             Style::new().add_modifier(Modifier::DIM),
         )),
+        Line::from(""),
+        column(
+            "For Codex, use the official thread name",
+            crate::value_control::boolean_switch(use_codex_thread_names),
+            Style::new().add_modifier(Modifier::BOLD),
+        ),
+        Line::from(Span::styled(
+            if is_narrow {
+                "  Codex panes skip the AI call."
+            } else {
+                "  Codex panes read the name Codex saved on disk instead of calling the AI."
+            },
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(Span::styled(
+            "  Panes without a saved Codex name stay untitled for now.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
     ]
 }
+
+/// Line index of the Title style control inside [`title_style_lines`].
+const TITLE_STYLE_CONTROL_LINE: usize = 8;
+/// Line index of the Codex thread-name control inside [`title_style_lines`].
+const CODEX_THREAD_NAME_CONTROL_LINE: usize = 15;
 
 /// Visible settings depend on the selected provider. This keeps Kilo's
 /// no-key configuration honest and prevents irrelevant empty fields.
@@ -3011,7 +3299,11 @@ fn inference_warning_lines(
         } else {
             "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training."
         };
-        let wrapped = wrapped_setting_description(message, inner_width);
+        // The border already separates this notice from surrounding settings.
+        // At narrow widths, an additional four-cell prose indent can push the
+        // final privacy sentence below the smallest supported viewport.
+        let indent = if width < 32 { 0 } else { 4 };
+        let wrapped = wrapped_setting_description_with_indent(message, inner_width, indent);
         let border = theme::border_style(false);
         let preferred_title = if width >= 24 {
             " ⚠ Privacy notice "
@@ -3733,12 +4025,8 @@ fn selected_sound_label(
         .unwrap_or_else(|| format!("{} (unavailable)", path.display()))
 }
 
-fn checkbox_value(is_enabled: bool) -> String {
-    if is_enabled {
-        "[x] Enabled".to_string()
-    } else {
-        "[ ] Disabled".to_string()
-    }
+fn sound_toggle_value(is_enabled: bool) -> String {
+    crate::value_control::boolean_switch(is_enabled).to_owned()
 }
 
 fn sound_row_value(
@@ -3751,9 +4039,9 @@ fn sound_row_value(
         SoundRow::Source => format!("‹ {} ›", settings.source.label()),
         SoundRow::File => format!("‹ {} ›", selected_sound_label(settings, discovery)),
         SoundRow::Preview => "[ Play ]".to_string(),
-        SoundRow::NotifyEnabled => checkbox_value(notifications.enabled),
+        SoundRow::NotifyEnabled => sound_toggle_value(notifications.enabled),
         SoundRow::NotifySuppressRedundant => {
-            checkbox_value(notifications.suppress_redundant_task_outcomes)
+            sound_toggle_value(notifications.suppress_redundant_task_outcomes)
         }
         SoundRow::NotifyCoalesce => {
             if notifications.task_coalesce_seconds == 0 {
@@ -3764,15 +4052,15 @@ fn sound_row_value(
         }
         notify_row if notify_row.notification_event().is_some() => notify_row
             .notification_event()
-            .map(|event| checkbox_value(notifications.event_flag(event)))
+            .map(|event| sound_toggle_value(notifications.event_flag(event)))
             .unwrap_or_default(),
         event_row => event_row
             .event()
             .map(|event| {
                 if settings.events.is_enabled(event) {
-                    "[x] Enabled".to_string()
+                    crate::value_control::boolean_switch(true).to_owned()
                 } else {
-                    "[ ] Disabled".to_string()
+                    crate::value_control::boolean_switch(false).to_owned()
                 }
             })
             .unwrap_or_default(),
@@ -3791,7 +4079,15 @@ struct DescribedSettingsView {
 }
 
 fn wrapped_setting_description(description: &str, width: u16) -> Vec<String> {
-    let indent = usize::from(width.saturating_sub(1).min(4));
+    wrapped_setting_description_with_indent(description, width, 4)
+}
+
+fn wrapped_setting_description_with_indent(
+    description: &str,
+    width: u16,
+    preferred_indent: u16,
+) -> Vec<String> {
+    let indent = usize::from(width.saturating_sub(1).min(preferred_indent));
     let text_width = usize::from(width).saturating_sub(indent).max(1);
     let mut wrapped = Vec::new();
     let mut current = String::new();
@@ -3934,12 +4230,30 @@ pub(crate) fn described_settings_scroll_for_selection(
     area: Rect,
     state: &SettingsState,
 ) -> u16 {
-    let rows = match state.tab {
-        SettingsTab::Sound => sound_description_geometry(area.width).row_lines,
-        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width).row_lines,
+    let line = match state.tab {
+        SettingsTab::Sound => sound_description_geometry(area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::Appearance => {
+            let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                .get(state.selected_row)
+                .copied();
+            let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            view.row_lines
+                .iter()
+                .find(|(row, _)| Some(*row) == selected)
+                .map(|(_, line)| usize::from(*line))
+                // Wide layouts replace the first selector with sizing cards.
+                .or_else(|| (selected == Some(AppearanceRow::LeftPanelSizingMode)).then_some(0))
+        }
         _ => return state.scroll,
     };
-    let Some(line) = rows.get(state.selected_row).copied() else {
+    let Some(line) = line else {
         return state.scroll;
     };
     let line = line.min(usize::from(u16::MAX)) as u16;
@@ -4456,6 +4770,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::MinimumTerminalWidth => "Minimum terminal width",
         AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::ProjectSeparators => "Project separators",
+        AppearanceRow::ResourceGrouping => "Group agents under resources",
+        AppearanceRow::TreeToolbarAlwaysVisible => "Tree toolbar always visible",
         AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
         AppearanceRow::ColorScheme => "Color theme",
@@ -4467,6 +4783,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ContextMenuIcons => "Right-click menu icons",
         AppearanceRow::AgentToolbar => "Agent toolbar",
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
+        AppearanceRow::SectionFrames => "Section frames",
         AppearanceRow::LastPrompt => "Last prompt banner",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::ProgressMonitor => "Progress monitor",
@@ -4485,9 +4802,9 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
 }
 
 fn format_duration(seconds: u64) -> String {
-    if seconds % 86_400 == 0 {
+    if seconds.is_multiple_of(86_400) {
         format!("{} days", seconds / 86_400)
-    } else if seconds % 3_600 == 0 {
+    } else if seconds.is_multiple_of(3_600) {
         format!("{} hours", seconds / 3_600)
     } else {
         format!("{} minutes", seconds / 60)
@@ -4514,8 +4831,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
         }
+        AppearanceRow::ResourceGrouping => "Display owners and FIFO waiters beneath shared resource rows. Pane parents and split layouts stay unchanged.",
         AppearanceRow::ProjectSeparators => {
             "Draw a frame-style line after each project’s full tree, except the last. Saved for this project."
+        }
+        AppearanceRow::TreeToolbarAlwaysVisible => {
+            "Keep the bottom tree action toolbar visible while another panel has focus."
         }
         AppearanceRow::TreeRowManagementControls => {
             "Show rename and move up/down buttons when a tree row is hovered."
@@ -4545,6 +4866,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ShowToolbarLabels => {
             "Show a text label after every agent-toolbar icon, turning the compact icon row into a traditional, easier-to-read text menu."
+        }
+        AppearanceRow::SectionFrames => {
+            "Draw rounded frame rules, joined to the pane border, around the agent toolbar, the last-prompt banner, the progress footer and the left panel's toolbar. Off removes the rules and gives their rows back to the terminal."
         }
         AppearanceRow::LastPrompt => {
             "Show the last prompt you typed or pasted and submitted into a detected agent pane, in a banner below its toolbar. Only an exactly-reconstructed submission updates it -- an unrecognised input leaves the previous prompt showing."
@@ -4601,20 +4925,10 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
         }
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
-        AppearanceRow::ProjectSeparators => {
-            if ui.show_project_separators {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::TreeRowManagementControls => {
-            if ui.show_tree_row_management_controls {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::ResourceGrouping => on_off(ui.resource_queue_grouping),
+        AppearanceRow::ProjectSeparators => on_off(ui.show_project_separators),
+        AppearanceRow::TreeToolbarAlwaysVisible => on_off(ui.tree_toolbar_always_visible),
+        AppearanceRow::TreeRowManagementControls => on_off(ui.show_tree_row_management_controls),
         AppearanceRow::AgentIdentifierMode => ui.agent_identifiers.mode.label().to_string(),
         AppearanceRow::ColorScheme => match ui.color_scheme {
             ColorScheme::Dark => "Dark".to_string(),
@@ -4622,63 +4936,16 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         },
         AppearanceRow::MotionLevel => ui.motion_level.label().to_string(),
         AppearanceRow::SidebarDensity => ui.sidebar_density.label().to_string(),
-        AppearanceRow::UseStableGlyphs => {
-            if ui.use_stable_glyphs {
-                "On".to_string()
-            } else {
-                "Off (normal icons)".to_string()
-            }
-        }
-        AppearanceRow::ShowInferredTitleIcons => {
-            if ui.show_inferred_title_icons {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AgentDebugMenu => {
-            if ui.agent_debug_menu_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::ContextMenuIcons => {
-            if ui.show_context_menu_icons {
-                "On".to_string()
-            } else {
-                "Off (text only)".to_string()
-            }
-        }
-        AppearanceRow::AgentToolbar => {
-            if ui.agent_toolbar_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::ShowToolbarLabels => {
-            if ui.show_toolbar_labels {
-                "On".to_string()
-            } else {
-                "Off (icons only)".to_string()
-            }
-        }
-        AppearanceRow::LastPrompt => {
-            if ui.last_prompt_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::UseStableGlyphs => on_off(ui.use_stable_glyphs),
+        AppearanceRow::ShowInferredTitleIcons => on_off(ui.show_inferred_title_icons),
+        AppearanceRow::AgentDebugMenu => on_off(ui.agent_debug_menu_enabled),
+        AppearanceRow::ContextMenuIcons => on_off(ui.show_context_menu_icons),
+        AppearanceRow::AgentToolbar => on_off(ui.agent_toolbar_enabled),
+        AppearanceRow::ShowToolbarLabels => on_off(ui.show_toolbar_labels),
+        AppearanceRow::SectionFrames => on_off(ui.section_frames_enabled),
+        AppearanceRow::LastPrompt => on_off(ui.last_prompt_enabled),
         AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
-        AppearanceRow::ProgressMonitor => {
-            if ui.progress_monitor_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::ProgressMonitor => on_off(ui.progress_monitor_enabled),
         AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
         AppearanceRow::ProgressFillStyle => {
             let frames = &ui.icons.task_progress_frames;
@@ -4693,63 +4960,15 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 frames.last().map_or("", String::as_str),
             )
         }
-        AppearanceRow::TerminalTextSelection => {
-            if ui.terminal_text_selection_enabled {
-                "On".to_string()
-            } else {
-                "Off (raw mouse forwarded)".to_string()
-            }
-        }
-        AppearanceRow::LockClosedEnabled => {
-            if ui.lock_closed_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoRemoveEmptyGroups => {
-            if ui.auto_remove_empty_groups {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreeze => {
-            if ui.auto_freeze_enabled {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::TerminalTextSelection => on_off(ui.terminal_text_selection_enabled),
+        AppearanceRow::LockClosedEnabled => on_off(ui.lock_closed_enabled),
+        AppearanceRow::AutoRemoveEmptyGroups => on_off(ui.auto_remove_empty_groups),
+        AppearanceRow::AutoFreeze => on_off(ui.auto_freeze_enabled),
         AppearanceRow::AutoFreezeAfter => format_duration(ui.auto_freeze_after_seconds),
-        AppearanceRow::AutoFreezeDone => {
-            if ui.auto_freeze_done {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreezeIdle => {
-            if ui.auto_freeze_idle {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreezeWaitingApproval => {
-            if ui.auto_freeze_waiting_approval {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
-        AppearanceRow::AutoFreezeWaitingBackground => {
-            if ui.auto_freeze_waiting_background {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
-        }
+        AppearanceRow::AutoFreezeDone => on_off(ui.auto_freeze_done),
+        AppearanceRow::AutoFreezeIdle => on_off(ui.auto_freeze_idle),
+        AppearanceRow::AutoFreezeWaitingApproval => on_off(ui.auto_freeze_waiting_approval),
+        AppearanceRow::AutoFreezeWaitingBackground => on_off(ui.auto_freeze_waiting_background),
     }
 }
 
@@ -4777,6 +4996,7 @@ fn settings_control_row(
             let current_row =
                 *AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).get(row)?;
             let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            // Cards replace the shared selector row at wide widths.
             let (_, line) = view
                 .row_lines
                 .iter()
@@ -4820,8 +5040,13 @@ fn settings_control_row(
             )
         }
         SettingsTab::Titles if row == 0 => (
-            8,
+            TITLE_STYLE_CONTROL_LINE,
             "Title style".into(),
+            LABEL_COLUMN_WIDTH.saturating_sub(1),
+        ),
+        SettingsTab::Titles if row == 1 => (
+            CODEX_THREAD_NAME_CONTROL_LINE,
+            "For Codex, use the official thread name".into(),
             LABEL_COLUMN_WIDTH.saturating_sub(1),
         ),
         _ => {
@@ -4854,6 +5079,12 @@ fn settings_control_row(
                     BoardNumber::MinimumColumnWidth,
                 )) => "Minimum column width",
                 Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
+                Some(crate::value_settings::SettingsNumber::AttentionTurboConcurrency) => {
+                    "Turbo parallel calls"
+                }
+                Some(crate::value_settings::SettingsNumber::AttentionExpirySeconds) => {
+                    "Forget stale items after"
+                }
                 _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
             };
             (
@@ -4889,6 +5120,13 @@ pub(crate) fn settings_number_control(
 )> {
     use crate::value_control::{ControlKind, ControlSpec, ValueControl};
     let field = crate::value_settings::SettingsNumber::at(app, state.tab, row)?;
+    if state.tab == SettingsTab::RemoteCompaction {
+        let current = *crate::remote_compaction_settings_ui::rows(app).get(row)?;
+        let view = crate::remote_compaction_settings_ui::view(app, state.selected_row, area.width);
+        let span = view.rows.iter().find(|span| span.row == current)?;
+        return crate::remote_compaction_settings_ui::value_control(area, state.scroll, span, app)
+            .map(|control| (field, control));
+    }
     let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
     let (spec, text) = field.snapshot(app);
     let value = match field {
@@ -4906,7 +5144,8 @@ pub(crate) fn settings_number_control(
             }
         }
         crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
-        crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
+        crate::value_settings::SettingsNumber::NotificationCoalesce
+        | crate::value_settings::SettingsNumber::AttentionExpirySeconds => format!("{text} s"),
         crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::TerminalEngineMemory => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
@@ -4951,6 +5190,13 @@ pub(crate) fn settings_choice_control(
 )> {
     use crate::value_control::{ControlKind, ControlSpec, ValueControl};
     let field = crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?;
+    if state.tab == SettingsTab::RemoteCompaction {
+        let current = *crate::remote_compaction_settings_ui::rows(app).get(row)?;
+        let view = crate::remote_compaction_settings_ui::view(app, state.selected_row, area.width);
+        let span = view.rows.iter().find(|span| span.row == current)?;
+        return crate::remote_compaction_settings_ui::value_control(area, state.scroll, span, app)
+            .map(|control| (field, control));
+    }
     let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
     if matches!(
         field,
@@ -4984,11 +5230,7 @@ pub(crate) fn settings_choice_control(
         let first = models.iter().find(|model| !model.trim().is_empty());
         let can_step = fallback
             || if value.trim().is_empty() {
-                first.is_some_and(|first| {
-                    models
-                        .iter()
-                        .any(|model| !model.trim().is_empty() && model != first)
-                })
+                first.is_some()
             } else {
                 models
                     .iter()
@@ -5041,7 +5283,7 @@ pub(crate) fn settings_choice_control(
 pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
     match tab {
         SettingsTab::Inference => inference_rows(&app.inference_settings).len(),
-        SettingsTab::Titles => 1,
+        SettingsTab::Titles => 2,
         SettingsTab::VoiceControl => crate::voice_settings::VoiceRow::ALL.len(),
         SettingsTab::Sound => SoundRow::ALL.len(),
         SettingsTab::ResetPlanning => 3,
@@ -5051,6 +5293,7 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
         SettingsTab::Session => crate::app::SessionRow::ALL.len(),
+        SettingsTab::Attention => crate::app::AttentionRow::ALL.len(),
         SettingsTab::Git => crate::app::GitRow::ALL.len(),
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
         SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
@@ -5082,7 +5325,7 @@ pub(crate) fn settings_status_icon_control(
         ControlSpec {
             kind: ControlKind::Choice,
             label: &label,
-            value: &value,
+            value,
             label_width,
             previous_enabled: true,
             next_enabled: true,
@@ -5145,7 +5388,7 @@ fn setting_lines(rows: &[(&str, String, &str)], selected_row: usize) -> Vec<Line
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled((*label).to_string(), label_style),
             leader_span(padding),
-            Span::styled(format!("‹ {value} ›"), control_style),
+            Span::styled(setting_control_value(value), control_style),
         ]));
         lines.push(Line::from(Span::styled(
             format!("    {description}"),
@@ -5157,6 +5400,16 @@ fn setting_lines(rows: &[(&str, String, &str)], selected_row: usize) -> Vec<Line
         )));
     }
     lines
+}
+
+fn setting_control_value(value: &str) -> String {
+    if value == crate::value_control::boolean_switch(true)
+        || value == crate::value_control::boolean_switch(false)
+    {
+        value.to_owned()
+    } else {
+        format!("‹ {value} ›")
+    }
 }
 const TERMINAL_HELP_TOPICS: [(usize, &str); 3] = [(0, "TERM-01"), (1, "TERM-02"), (4, "TERM-03")];
 #[cfg(test)]
@@ -5381,6 +5634,69 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
     )
 }
 
+fn attention_lines(
+    settings: &crate::attention::AttentionSettings,
+    selected: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = setting_lines(
+        &[
+            (
+                "Attention mode",
+                settings.mode.label().to_string(),
+                "Instant only calls no LLM and uses only what agent detection already knows; Shared adds the question to Sort; Turbo asks one call per agent.",
+            ),
+            (
+                "Sort refreshes attention",
+                on_off(settings.press_sorts),
+                "Pressing Sort also refreshes the attention queue.",
+            ),
+            (
+                "Turbo parallel calls",
+                settings.turbo_concurrency.to_string(),
+                "Most LLM calls in flight at once in Turbo mode (1 to 64).",
+            ),
+            (
+                "Forget stale items after",
+                format!("{} s", settings.expiry_seconds),
+                "An item the live state no longer supports is dropped after this long (60 to 86400).",
+            ),
+            (
+                "Attention model",
+                settings
+                    .model_override
+                    .clone()
+                    .unwrap_or_else(|| "Same as titles".to_string()),
+                "Model used for attention calls; Same as titles follows the title naming model.",
+            ),
+            (
+                "Show briefing on arrival",
+                on_off(settings.show_briefing),
+                "Reaching an agent from the attention queue shows a box at its top saying why you were brought there.",
+            ),
+            (
+                "Large attention buttons",
+                on_off(settings.large_buttons),
+                "Use three centered rows for Next: needs you and a five-column overview button.",
+            ),
+        ],
+        selected,
+    );
+    if let Some(heading) = lines.first_mut() {
+        *heading = Line::from(Span::styled(
+            "  QUEUE AND ARRIVAL",
+            Style::new().add_modifier(Modifier::BOLD),
+        ));
+    }
+    let divider_line = 1 + 4 * usize::from(APPEARANCE_ROW_HEIGHT) + 2;
+    if let Some(divider) = lines.get_mut(divider_line) {
+        *divider = Line::from(Span::styled(
+            "  ── ARRIVAL PRESENTATION ──",
+            theme::border_style(false),
+        ));
+    }
+    lines
+}
+
 fn git_lines(settings: &GitSettings, error: Option<&str>, selected: usize) -> Vec<Line<'static>> {
     let rows = [
         (
@@ -5444,10 +5760,9 @@ fn debug_view(settings: &DebugSettings, selected: usize, width: u16) -> Describe
         selected,
     );
     let value = on_off(settings.file_logging_enabled);
-    let control_width = usize::from(ROW_LEFT_INSET)
-        + usize::from(LABEL_COLUMN_WIDTH)
-        + 1
-        + format!("‹ {value} ›").width();
+    let control_value = setting_control_value(&value);
+    let control_width =
+        usize::from(ROW_LEFT_INSET) + usize::from(LABEL_COLUMN_WIDTH) + 1 + control_value.width();
     if usize::from(width) < control_width {
         let label_style = if selected == 0 {
             Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -5463,7 +5778,7 @@ fn debug_view(settings: &DebugSettings, selected: usize, width: u16) -> Describe
             Span::raw("  "),
             Span::styled("File logging", label_style),
             Span::raw(" "),
-            Span::styled(format!("‹ {value} ›"), value_style),
+            Span::styled(control_value, value_style),
         ]);
     }
     described_settings_view(lines, 1, width)
@@ -5508,21 +5823,21 @@ fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     let claude_status = &app.reset_monitor_state.claude;
     let status_label = |provider: ResetProvider, enabled: bool| {
         if !enabled {
-            return "Off".to_owned();
+            return on_off(false);
         }
         let status = app.reset_monitor_state.provider(provider);
         if let Some(error) = &status.last_error {
-            return format!("On · check failed: {error}");
+            return format!("{} · F9 details · check failed: {error}", on_off(true));
         }
         if status.last_checked.is_none() {
-            return "On · checking…".to_owned();
+            return format!("{} · checking…", on_off(true));
         }
         if status.scheduled.is_some() {
-            return "On · reset announced".to_owned();
+            return format!("{} · reset announced", on_off(true));
         }
         match provider {
-            ResetProvider::Claude => "On · history only".to_owned(),
-            ResetProvider::Codex => "On · no scheduled reset".to_owned(),
+            ResetProvider::Claude => format!("{} · history only", on_off(true)),
+            ResetProvider::Codex => format!("{} · no scheduled reset", on_off(true)),
         }
     };
     let mut lines = setting_lines(
@@ -5597,9 +5912,9 @@ fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
             (
                 "Voice control",
                 if settings.enabled {
-                    state
+                    format!("{} · {state}", on_off(true))
                 } else {
-                    "Off".to_owned()
+                    on_off(false)
                 },
                 "Starts or stops the owned microphone, Realtime session, and speaker actor.",
             ),
@@ -5681,16 +5996,29 @@ fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     )
 }
 fn on_off(value: bool) -> String {
-    if value {
-        "On".into()
-    } else {
-        "Off".into()
-    }
+    crate::value_control::boolean_switch(value).to_owned()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SizingCardHit {
+    mode: LeftPanelSizingMode,
+    start_x: u16,
+    end_x: u16,
+    start_line: u16,
+    end_line: u16,
 }
 
 struct AppearanceView {
     lines: Vec<Line<'static>>,
+    /// Empty when the content area is too narrow for cards and the shared
+    /// selector row stands in for them.
+    card_hits: Vec<SizingCardHit>,
     row_lines: Vec<(AppearanceRow, u16)>,
+}
+
+/// Whether the left-panel sizing policy renders as cards at this width.
+fn sizing_cards_fit(content_width: u16) -> bool {
+    content_width >= SIZING_CARDS_MINIMUM_CONTENT_WIDTH
 }
 
 fn appearance_control_label_width(content_width: u16) -> u16 {
@@ -5747,6 +6075,183 @@ fn left_panel_policy_summary(ui: &UiSettings) -> String {
     }
 }
 
+fn sizing_card_text(mode: LeftPanelSizingMode) -> (&'static str, &'static str) {
+    match mode {
+        LeftPanelSizingMode::Fixed => ("▣  Fixed", "Always one width"),
+        LeftPanelSizingMode::FocusDependent => ("◉  Focus-dependent", "Grows when you use it"),
+        LeftPanelSizingMode::TerminalWidthDependent => {
+            ("↔  Width-dependent", "Adapts to the terminal")
+        }
+    }
+}
+
+/// `(focused, away)` panel widths a card draws as its two bars.
+fn sizing_card_widths(mode: LeftPanelSizingMode, ui: &UiSettings) -> (u16, u16) {
+    let sizing = &ui.left_panel_sizing;
+    match mode {
+        LeftPanelSizingMode::Fixed => (sizing.fixed_width, sizing.fixed_width),
+        LeftPanelSizingMode::FocusDependent | LeftPanelSizingMode::TerminalWidthDependent => {
+            (sizing.focused_width, sizing.unfocused_width)
+        }
+    }
+}
+
+fn sizing_card_value(mode: LeftPanelSizingMode, ui: &UiSettings) -> String {
+    let sizing = &ui.left_panel_sizing;
+    match mode {
+        LeftPanelSizingMode::Fixed => format!("{} columns", sizing.fixed_width),
+        LeftPanelSizingMode::FocusDependent => {
+            format!(
+                "{} ↔ {} columns",
+                sizing.unfocused_width, sizing.focused_width
+            )
+        }
+        LeftPanelSizingMode::TerminalWidthDependent => format!(
+            "≥{} wide: {} columns",
+            sizing.minimum_terminal_width, sizing.focused_width
+        ),
+    }
+}
+
+/// A proportional bar: `columns` out of the setting maximum, at least one cell.
+fn sizing_card_bar(columns: u16, cells: usize) -> (String, String) {
+    let scale = usize::from(SIZING_CARD_BAR_SCALE_COLUMNS);
+    let filled = ((usize::from(columns) * cells + scale / 2) / scale).clamp(1, cells.max(1));
+    ("█".repeat(filled), "░".repeat(cells.saturating_sub(filled)))
+}
+
+fn pad_card_content(mut spans: Vec<Span<'static>>, inner_width: usize) -> Vec<Span<'static>> {
+    let used: usize = spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum();
+    spans.push(Span::raw(" ".repeat(inner_width.saturating_sub(used))));
+    spans
+}
+
+/// One card as `SIZING_CARD_HEIGHT` lines of styled spans, exactly `width`
+/// cells wide. The active card is accented; it gets a heavy border while the
+/// sizing row has keyboard selection so the focus ring stays visible.
+fn sizing_card_lines(
+    mode: LeftPanelSizingMode,
+    ui: &UiSettings,
+    width: u16,
+    selected_row: usize,
+) -> Vec<Vec<Span<'static>>> {
+    let active = mode == ui.left_panel_sizing.mode;
+    let focused = active && selected_row == 0;
+    let (top, bottom, side, rule) = if focused {
+        (("┏", "┓"), ("┗", "┛"), "┃", "━")
+    } else {
+        (("╭", "╮"), ("╰", "╯"), "│", "─")
+    };
+    let accent = Style::new().fg(theme::accent_bg());
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    let (border_style, text_style, bar_style, empty_style) = if active {
+        (
+            accent.add_modifier(Modifier::BOLD),
+            Style::new().add_modifier(Modifier::BOLD),
+            accent,
+            dim,
+        )
+    } else {
+        (dim, dim, dim, dim)
+    };
+    let width = usize::from(width.max(4));
+    let inner = width - 2;
+    let (title, description) = sizing_card_text(mode);
+    let (focus_columns, away_columns) = sizing_card_widths(mode, ui);
+    let bar_cells = inner.saturating_sub(8).max(1);
+
+    let framed = |content: Vec<Span<'static>>| -> Vec<Span<'static>> {
+        let mut line = vec![Span::styled(side, border_style)];
+        line.extend(pad_card_content(content, inner));
+        line.push(Span::styled(side, border_style));
+        line
+    };
+    let bar_line = |label: &'static str, columns: u16| -> Vec<Span<'static>> {
+        let (filled, empty) = sizing_card_bar(columns, bar_cells);
+        framed(vec![
+            Span::styled(format!(" {label:<6}"), text_style),
+            Span::styled(filled, bar_style),
+            Span::styled(empty, empty_style),
+        ])
+    };
+    let title_text = truncate_icon_text(&format!(" {title}"), inner);
+    // Keep at least one blank cell between title and badge and one before the border;
+    // the long badge falls back to a bare dot, then to nothing (the heavy border remains).
+    let free = inner.saturating_sub(UnicodeWidthStr::width(title_text.as_str()) + 2);
+    let badge = ["● selected", "●"]
+        .into_iter()
+        .filter(|_| active)
+        .find(|text| UnicodeWidthStr::width(*text) <= free);
+    let title_content = if let Some(badge) = badge {
+        let gap = free - UnicodeWidthStr::width(badge) + 1;
+        vec![
+            Span::styled(title_text, text_style),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(badge, accent),
+        ]
+    } else {
+        vec![Span::styled(title_text, text_style)]
+    };
+
+    vec![
+        vec![Span::styled(
+            format!("{}{}{}", top.0, rule.repeat(inner), top.1),
+            border_style,
+        )],
+        framed(title_content),
+        framed(vec![Span::styled(
+            truncate_icon_text(&format!(" {description}"), inner),
+            dim,
+        )]),
+        bar_line("focus", focus_columns),
+        bar_line("away", away_columns),
+        framed(vec![Span::styled(
+            truncate_icon_text(&format!(" {}", sizing_card_value(mode, ui)), inner),
+            text_style,
+        )]),
+        vec![Span::styled(
+            format!("{}{}{}", bottom.0, rule.repeat(inner), bottom.1),
+            border_style,
+        )],
+    ]
+}
+
+fn push_sizing_cards(
+    view: &mut AppearanceView,
+    ui: &UiSettings,
+    selected_row: usize,
+    content_width: u16,
+) {
+    let count = LeftPanelSizingMode::ALL.len() as u16;
+    let card_width = content_width.saturating_sub(SIZING_CARD_GAP * (count - 1)) / count;
+    let start_line = view.lines.len() as u16;
+    let cards =
+        LeftPanelSizingMode::ALL.map(|mode| sizing_card_lines(mode, ui, card_width, selected_row));
+    for line_index in 0..usize::from(SIZING_CARD_HEIGHT) {
+        let mut spans = Vec::new();
+        for (card_index, card) in cards.iter().enumerate() {
+            if card_index > 0 {
+                spans.push(Span::raw(" ".repeat(usize::from(SIZING_CARD_GAP))));
+            }
+            spans.extend(card[line_index].iter().cloned());
+        }
+        view.lines.push(Line::from(spans));
+    }
+    for (card_index, mode) in LeftPanelSizingMode::ALL.into_iter().enumerate() {
+        let start_x = card_index as u16 * (card_width + SIZING_CARD_GAP);
+        view.card_hits.push(SizingCardHit {
+            mode,
+            start_x,
+            end_x: start_x + card_width,
+            start_line,
+            end_line: start_line + SIZING_CARD_HEIGHT,
+        });
+    }
+}
+
 fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> AppearanceView {
     let mut view = AppearanceView {
         lines: vec![
@@ -5756,6 +6261,7 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
                 Style::new().add_modifier(Modifier::BOLD),
             )),
         ],
+        card_hits: Vec::new(),
         row_lines: Vec::new(),
     };
     view.lines.extend(
@@ -5767,7 +6273,18 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
         .map(|line| Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))),
     );
     view.lines.push(Line::from(""));
+    let cards = sizing_cards_fit(content_width);
+    if cards {
+        push_sizing_cards(&mut view, ui, selected_row, content_width);
+        view.lines.push(Line::from(Span::styled(
+            "Click a card or press \u{2190} \u{2192} to switch; + lists them all.",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    }
     view.lines.push(Line::from(""));
+    if !cards {
+        view.lines.push(Line::from(""));
+    }
     view.lines.push(Line::from(Span::styled(
         format!("{} settings", ui.left_panel_sizing.mode.label()),
         Style::new().add_modifier(Modifier::BOLD),
@@ -5782,6 +6299,10 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
     let rows = AppearanceRow::visible(ui.left_panel_sizing.mode);
     let label_width = appearance_control_label_width(content_width);
     for (index, row) in rows.into_iter().enumerate() {
+        // The cards above already are the sizing-mode control.
+        if cards && row == AppearanceRow::LeftPanelSizingMode {
+            continue;
+        }
         if row == AppearanceRow::TreeOrder {
             view.lines.push(Line::from(""));
             view.lines.push(Line::from(Span::styled(
@@ -6050,7 +6571,6 @@ pub fn agent_monitoring_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let virtual_x = position.x.saturating_sub(content_area.x);
     let row = view
         .row_lines
         .into_iter()
@@ -6075,6 +6595,7 @@ pub fn agent_monitoring_content_hit(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceContentHit {
+    Mode(LeftPanelSizingMode),
     Row { row: AppearanceRow, direction: i32 },
 }
 
@@ -6096,6 +6617,12 @@ pub fn appearance_content_hit(
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
     let virtual_x = position.x.saturating_sub(content_area.x);
+    if let Some(card) = view.card_hits.iter().find(|card| {
+        (card.start_line..card.end_line).contains(&virtual_line)
+            && (card.start_x..card.end_x).contains(&virtual_x)
+    }) {
+        return Some(AppearanceContentHit::Mode(card.mode));
+    }
     let row = view
         .row_lines
         .into_iter()
@@ -6208,8 +6735,7 @@ mod number_control_tests {
                 };
                 let mut terminal = Terminal::new(TestBackend::new(140, 180)).unwrap();
                 let mut layout = compute_layout_for_mode(Rect::new(0, 0, 140, 180), &app, &state);
-                let instructions =
-                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                let instructions = instructions_panel_height(&app, state.tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);
@@ -6218,7 +6744,7 @@ mod number_control_tests {
                     .unwrap();
                 let mut count = 0;
                 for row in 0..settings_number_row_count(&app, tab) {
-                    let Some((_, control)) =
+                    let Some((field, control)) =
                         settings_number_control(layout.content_area, &app, &state, row)
                     else {
                         continue;
@@ -6250,7 +6776,18 @@ mod number_control_tests {
                                     Position::new(rectangle.x, rectangle.y),
                                     PointerButton::Left
                                 ),
-                                Some(action),
+                                field
+                                    .stepped(
+                                        &app,
+                                        if action == ControlAction::Decrement {
+                                            -1
+                                        } else {
+                                            1
+                                        }
+                                    )
+                                    .ok()
+                                    .filter(|value| *value != field.snapshot(&app).1)
+                                    .map(|_| action),
                                 "{tab:?}/{row}"
                             );
                         }
@@ -6312,26 +6849,26 @@ mod number_control_tests {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let mut layout =
                     compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
-                let instructions =
-                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                let instructions = instructions_panel_height(&app, state.tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);
                 let mut visible_numbers = 0;
                 for row in 0..settings_number_row_count(&app, tab) {
                     state.selected_row = row;
-                    let control_and_scroll = (0..=128).find_map(|scroll| {
-                        state.scroll = scroll;
-                        settings_number_control(layout.content_area, &app, &state, row)
-                            .map(|result| (result, scroll))
-                    });
+                    let control_and_scroll = (0..=max_scroll(tab, &app, row, layout.content_area))
+                        .find_map(|scroll| {
+                            state.scroll = scroll;
+                            settings_number_control(layout.content_area, &app, &state, row)
+                                .map(|result| (result, scroll))
+                        });
                     let Some((_, scroll)) = control_and_scroll else {
                         continue;
                     };
                     state.scroll = scroll;
                     layout = compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
                     let instructions =
-                        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                        instructions_panel_height(&app, state.tab, layout.content_area);
                     layout.content_area.y += instructions;
                     layout.content_area.height =
                         layout.content_area.height.saturating_sub(instructions);
@@ -6386,7 +6923,7 @@ mod number_control_tests {
             .unwrap();
         let layout = compute_layout_for_mode(Rect::new(0, 0, 160, 80), &app, &state);
         let mut area = layout.content_area;
-        let instructions = crate::instruction_settings::panel_height(state.tab, area);
+        let instructions = instructions_panel_height(&app, state.tab, area);
         area.y += instructions;
         area.height = area.height.saturating_sub(instructions);
 
@@ -6413,7 +6950,7 @@ mod number_control_tests {
     }
 
     #[test]
-    fn empty_model_with_one_distinct_discovered_option_disables_cycle_but_keeps_catalog() {
+    fn empty_model_with_one_distinct_discovered_option_enables_initial_selection() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("synthetic-single-model".into(), directory.path().into());
         app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
@@ -6440,14 +6977,14 @@ mod number_control_tests {
                 Position::new(geometry.previous.x, geometry.previous.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::PreviousChoice)
         );
         assert_eq!(
             control.hit(
                 Position::new(geometry.next.x, geometry.next.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::NextChoice)
         );
         assert_eq!(
             control.hit(
@@ -6456,6 +6993,17 @@ mod number_control_tests {
             ),
             Some(ControlAction::OpenChoices)
         );
+        // Once selected, the single distinct model has nowhere to cycle.
+        app.inference_settings.ollama.model = "synthetic-only-model".into();
+        let (_, selected_control) =
+            settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
+        let selected = selected_control.geometry();
+        for point in [selected.previous, selected.next] {
+            assert_eq!(
+                selected_control.hit(Position::new(point.x, point.y), PointerButton::Left),
+                None
+            );
+        }
         app.ollama_models.push("synthetic-second-model".into());
         let (_, control) =
             settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
@@ -6495,6 +7043,7 @@ mod number_control_tests {
             SettingsTab::Sound,
             SettingsTab::Titles,
             SettingsTab::ResetPlanning,
+            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -6510,10 +7059,9 @@ mod number_control_tests {
                 tab,
                 ..SettingsState::default()
             };
-            let mut terminal = Terminal::new(TestBackend::new(140, 180)).unwrap();
-            let mut layout = compute_layout_for_mode(Rect::new(0, 0, 140, 180), &app, &state);
-            let instructions =
-                crate::instruction_settings::panel_height(state.tab, layout.content_area);
+            let mut terminal = Terminal::new(TestBackend::new(80, 180)).unwrap();
+            let mut layout = compute_layout_for_mode(Rect::new(0, 0, 80, 180), &app, &state);
+            let instructions = instructions_panel_height(&app, state.tab, layout.content_area);
             layout.content_area.y += instructions;
             layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
             terminal
@@ -6599,6 +7147,7 @@ mod number_control_tests {
             SettingsTab::VoiceControl,
             SettingsTab::Sound,
             SettingsTab::ResetPlanning,
+            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -6620,26 +7169,25 @@ mod number_control_tests {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let mut layout =
                     compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
-                let instructions =
-                    crate::instruction_settings::panel_height(tab, layout.content_area);
+                let instructions = instructions_panel_height(&app, tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);
 
                 for row in 0..settings_number_row_count(&app, tab) {
                     state.selected_row = row;
-                    let visible_scroll = (0..=128).find_map(|scroll| {
-                        state.scroll = scroll;
-                        settings_choice_control(layout.content_area, &app, &state, row)
-                            .map(|(field, _)| (field, scroll))
-                    });
+                    let visible_scroll = (0..=max_scroll(tab, &app, row, layout.content_area))
+                        .find_map(|scroll| {
+                            state.scroll = scroll;
+                            settings_choice_control(layout.content_area, &app, &state, row)
+                                .map(|(field, _)| (field, scroll))
+                        });
                     let Some((field, scroll)) = visible_scroll else {
                         continue;
                     };
                     state.scroll = scroll;
                     layout = compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
-                    let instructions =
-                        crate::instruction_settings::panel_height(tab, layout.content_area);
+                    let instructions = instructions_panel_height(&app, tab, layout.content_area);
                     layout.content_area.y += instructions;
                     layout.content_area.height =
                         layout.content_area.height.saturating_sub(instructions);
@@ -6702,6 +7250,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn boolean_switch_states_use_the_same_seven_terminal_cells() {
+        assert_eq!(on_off(false), "[○ OFF]");
+        assert_eq!(on_off(true), "[ON  ●]");
+        assert_eq!(UnicodeWidthStr::width(on_off(false).as_str()), 7);
+        assert_eq!(UnicodeWidthStr::width(on_off(true).as_str()), 7);
+    }
+
+    #[test]
     fn simple_setting_rows_show_dividers_without_moving_click_rows() {
         let lines = setting_lines(
             &[
@@ -6738,19 +7294,53 @@ mod tests {
     }
 
     #[test]
+    fn attention_page_adds_hierarchy_without_changing_row_geometry() {
+        let lines = attention_lines(&crate::attention::AttentionSettings::default(), 0);
+        assert_eq!(
+            lines.len(),
+            1 + crate::app::AttentionRow::ALL.len() * usize::from(APPEARANCE_ROW_HEIGHT)
+        );
+        let heading = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(heading.contains("QUEUE AND ARRIVAL"));
+
+        let arrival_divider = 1 + 4 * usize::from(APPEARANCE_ROW_HEIGHT) + 2;
+        let divider = lines[arrival_divider]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(divider.contains("ARRIVAL PRESENTATION"));
+
+        let content = Rect::new(0, 0, 100, 30);
+        assert_eq!(
+            simple_content_hit(
+                content,
+                0,
+                Position::new(LABEL_COLUMN_WIDTH + ROW_LEFT_INSET + 1, 1),
+                crate::app::AttentionRow::ALL.len(),
+            ),
+            Some((0, -1))
+        );
+    }
+
+    #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙", "↻", "⚡",
-            "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙",
+            "↻", "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
             assert_eq!(tab_icon(tab), expected_icon, "semantic icon for {tab:?}");
         }
 
-        let area = Rect::new(0, 0, 30, 54);
+        let area = Rect::new(0, 0, 30, 56);
         for active in SettingsTab::ALL {
-            let mut terminal = Terminal::new(TestBackend::new(30, 54)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(30, 56)).unwrap();
             terminal
                 .draw(|frame| render_tab_list(frame, area, active))
                 .unwrap();
@@ -6948,7 +7538,7 @@ mod tests {
 
     #[test]
     fn compact_navigation_keeps_distinct_icon_labels_readable() {
-        let area = Rect::new(0, 0, 12, 54);
+        let area = Rect::new(0, 0, 12, 56);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
             .draw(|frame| render_tab_list(frame, area, SettingsTab::Appearance))
@@ -6991,8 +7581,7 @@ mod tests {
                     ..SettingsState::default()
                 };
                 let mut layout = compute_layout_for_mode(screen, &app, &state);
-                let instructions_height =
-                    crate::instruction_settings::panel_height(tab, layout.content_area);
+                let instructions_height = instructions_panel_height(&app, tab, layout.content_area);
                 if instructions_height > 0 && tab != SettingsTab::LlmInstructions {
                     layout.content_area.y += instructions_height;
                     layout.content_area.height = layout
@@ -7064,7 +7653,10 @@ mod tests {
             let screen = Rect::new(0, 0, width, height);
             let layout = compute_layout(screen);
             assert!(layout.tab_list_area.right() <= layout.content_area.x);
-            assert_eq!(layout.content_area.right(), layout.content_scrollbar_area.x);
+            // Adaptive inner padding plus the ordinary gap separate text from
+            // the dedicated scrollbar column.
+            assert!(layout.content_area.right() <= layout.content_scrollbar_area.x);
+            assert!(layout.content_scrollbar_area.x - layout.content_area.right() <= 3);
             assert_eq!(
                 layout.content_scrollbar_area.right(),
                 layout.help_rail_area.x
@@ -7084,6 +7676,17 @@ mod tests {
     }
 
     #[test]
+    fn settings_content_padding_grows_with_available_space() {
+        let roomy = compute_layout(Rect::new(0, 0, 160, 40));
+        let compact = compute_layout(Rect::new(0, 0, 80, 24));
+        assert!(roomy.content_area.x >= roomy.content_frame_area.x + 3);
+        assert!(compact.content_area.x > compact.content_frame_area.x);
+        assert!(roomy.content_area.y >= roomy.content_frame_area.y + 3);
+        assert!(roomy.content_area.height < roomy.content_frame_area.height);
+        assert_eq!(compact.content_area.y, compact.content_frame_area.y + 1);
+    }
+
+    #[test]
     fn settings_screen_frames_navigation_and_content_without_covering_controls() {
         let app = App::new("settings-frames-test".to_owned(), std::env::temp_dir());
         let state = SettingsState::default();
@@ -7098,10 +7701,9 @@ mod tests {
             layout.tab_list_area.x.saturating_sub(1),
             layout.tab_list_area.y,
         );
-        let preceding_content = (
-            layout.content_area.x.saturating_sub(1),
-            layout.content_area.y,
-        );
+        // Content text starts after the frame border and one padding cell, so
+        // the border sits at the content frame's left edge.
+        let preceding_content = (layout.content_frame_area.x, layout.content_area.y);
         assert_eq!(buffer[preceding_navigation].symbol(), "│");
         assert_eq!(buffer[preceding_content].symbol(), "│");
         assert_eq!(
@@ -7119,7 +7721,7 @@ mod tests {
 
     #[test]
     fn title_style_control_row_shows_shared_choice_and_examples() {
-        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, 120, 1);
+        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, false, 120, 1);
         let rendered = lines
             .iter()
             .map(ToString::to_string)
@@ -7140,19 +7742,19 @@ mod tests {
             ),
             Some(crate::value_settings_choice::SettingsChoice::TitleStyle)
         );
-        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, 49, 0);
+        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, true, 49, 0);
         for line in &narrow[4..13] {
             assert!(UnicodeWidthStr::width(line.to_string().as_str()) <= 49);
         }
     }
 
     #[test]
-    fn compute_layout_leaves_no_border_gap_between_tabs_and_content() {
+    fn compute_layout_leaves_one_cell_gap_between_navigation_and_content_frames() {
         let layout = compute_layout(Rect::new(0, 0, 100, 40));
-        assert!(layout.content_area.x > layout.tab_list_area.right());
+        assert!(layout.content_frame_area.x > layout.navigation_frame_area.right());
         assert_eq!(
-            layout.content_area.x - layout.tab_list_area.right(),
-            GAP_WIDTH
+            layout.content_frame_area.x - layout.navigation_frame_area.right(),
+            GAP_WIDTH.saturating_sub(2)
         );
     }
 
@@ -7842,7 +8444,12 @@ mod tests {
         )
         .into_iter()
         .map(|line| line.to_string())
-        .collect::<String>();
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('│', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
         assert!(text.contains("Do not send secrets"));
         assert!(text.contains("LLM training"));
         assert!(text.contains("kilo-auto/free"));
@@ -8127,12 +8734,13 @@ mod tests {
             assert!(rendered.contains(expected), "missing {expected:?}");
         }
 
-        for demo_item in ["demo project", "service", "blocked review", "finished task"] {
-            assert_eq!(
-                rendered.matches(demo_item).count(),
-                2,
-                "each mode must render its own {demo_item:?} example"
-            );
+        // The shared selector replaced the old two preview cards. Keep the
+        // documented slot diagram and both mode explanations covered instead.
+        for explanation in [
+            "Agent identity │ objective / long-term │ current activity / right now │ pane title",
+            "Attention uses one shared status position, left blank when there is no icon.",
+        ] {
+            assert_eq!(rendered.matches(explanation).count(), 1);
         }
 
         for target in crate::agent_monitoring::STATUS_ICON_TARGETS {
@@ -8144,9 +8752,9 @@ mod tests {
         }
         let progress_row = crate::app::AgentMonitoringRow::AttentionProgressReports;
         assert!(view.row_lines.iter().any(|(row, _)| *row == progress_row));
-        assert_eq!(monitoring_row_value(progress_row, &app), "Off");
+        assert_eq!(monitoring_row_value(progress_row, &app), "[○ OFF]");
         app.ui_settings.attention_progress_reports = true;
-        assert_eq!(monitoring_row_value(progress_row, &app), "On");
+        assert_eq!(monitoring_row_value(progress_row, &app), "[ON  ●]");
         let enabled_view = agent_monitoring_view(&app, 0, 160);
         assert!(enabled_view
             .lines
@@ -8158,14 +8766,197 @@ mod tests {
             monitoring_row_label(model_icon_row),
             "Use model icons in the tree"
         );
-        assert_eq!(monitoring_row_value(model_icon_row, &app), "Off");
+        assert_eq!(monitoring_row_value(model_icon_row, &app), "[○ OFF]");
         app.ui_settings.agent_tree_model_icons = true;
-        assert_eq!(monitoring_row_value(model_icon_row, &app), "On");
+        assert_eq!(monitoring_row_value(model_icon_row, &app), "[ON  ●]");
+    }
+
+    fn sizing_text(view: &AppearanceView) -> String {
+        view.lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn appearance_keyboard_selection_keeps_controls_visible_at_compact_heights() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("appearance-scroll-test".into(), directory.path().into());
+        for mode in LeftPanelSizingMode::ALL {
+            app.ui_settings.left_panel_sizing.mode = mode;
+            let rows = AppearanceRow::visible(mode);
+            for width in [38, 56, SIZING_CARDS_MINIMUM_CONTENT_WIDTH, 120] {
+                let area = Rect::new(7, 3, width, 18);
+                let mut state = SettingsState {
+                    tab: SettingsTab::Appearance,
+                    ..SettingsState::default()
+                };
+                for selected in (0..rows.len()).chain((0..rows.len()).rev()) {
+                    state.selected_row = selected;
+                    state.scroll = described_settings_scroll_for_selection(&app, area, &state);
+                    let view = appearance_view(&app.ui_settings, selected, width);
+                    let line = view
+                        .row_lines
+                        .iter()
+                        .find(|(row, _)| *row == rows[selected])
+                        .map(|(_, line)| *line)
+                        .unwrap_or(0);
+                    assert!(
+                        line >= state.scroll,
+                        "{mode:?} width {width} row {selected}"
+                    );
+                    assert!(
+                        line < state.scroll + area.height,
+                        "{mode:?} width {width} row {selected} below viewport"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sizing_cards_replace_the_selector_row_from_the_minimum_width() {
+        let ui = UiSettings::default();
+
+        let narrow = appearance_view(&ui, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH - 1);
+        assert!(narrow.card_hits.is_empty());
+        assert!(narrow
+            .row_lines
+            .iter()
+            .any(|(row, _)| *row == AppearanceRow::LeftPanelSizingMode));
+        assert!(!sizing_text(&narrow).contains("╭"));
+
+        let wide = appearance_view(&ui, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH);
+        assert_eq!(wide.card_hits.len(), 3);
+        assert!(!wide
+            .row_lines
+            .iter()
+            .any(|(row, _)| *row == AppearanceRow::LeftPanelSizingMode));
+        // Mode-specific rows and general options stay reachable.
+        assert!(wide
+            .row_lines
+            .iter()
+            .any(|(row, _)| *row == AppearanceRow::TreeOrder));
+        let text = sizing_text(&wide);
+        for title in [
+            "Fixed",
+            "Focus-dependent",
+            "Width-dependent",
+            "focus",
+            "away",
+        ] {
+            assert!(text.contains(title), "missing {title}");
+        }
+    }
+
+    #[test]
+    fn sizing_cards_are_side_by_side_equal_width_and_exactly_fit() {
+        let ui = UiSettings::default();
+        for width in [
+            SIZING_CARDS_MINIMUM_CONTENT_WIDTH,
+            SIZING_CARDS_MINIMUM_CONTENT_WIDTH + 1,
+            100,
+            140,
+            200,
+        ] {
+            let view = appearance_view(&ui, 0, width);
+            let hits = &view.card_hits;
+            assert_eq!(hits.len(), 3);
+            assert!(hits.iter().all(|hit| hit.start_line == hits[0].start_line));
+            assert!(hits[0].end_x < hits[1].start_x && hits[1].end_x < hits[2].start_x);
+            assert!(hits[2].end_x <= width);
+            let card_width = hits[0].end_x - hits[0].start_x;
+            assert!(card_width >= SIZING_CARD_MINIMUM_WIDTH);
+            assert!(hits.iter().all(|hit| hit.end_x - hit.start_x == card_width));
+            for line in &view.lines[usize::from(hits[0].start_line)..usize::from(hits[0].end_line)]
+            {
+                let rendered = line.to_string();
+                assert_eq!(
+                    UnicodeWidthStr::width(rendered.as_str()),
+                    usize::from(hits[2].end_x),
+                    "card row must be exactly as wide as its hit zones at width {width}: {rendered}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn clicking_a_sizing_card_selects_its_mode() {
+        let area = Rect::new(0, 0, 120, 40);
+        let ui = UiSettings::default();
+        let view = appearance_view(&ui, 0, area.width);
+        for (index, card) in view.card_hits.iter().enumerate() {
+            let middle = Position::new(
+                area.x + (card.start_x + card.end_x) / 2,
+                area.y + card.start_line + 2,
+            );
+            assert_eq!(
+                appearance_content_hit(area, 0, middle, &ui),
+                Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[index]))
+            );
+            // The corners belong to the card too, the gap between cards does not.
+            assert_eq!(
+                appearance_content_hit(
+                    area,
+                    0,
+                    Position::new(area.x + card.start_x, area.y + card.start_line),
+                    &ui
+                ),
+                Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[index]))
+            );
+        }
+        let gap = Position::new(
+            area.x + view.card_hits[0].end_x,
+            area.y + view.card_hits[0].start_line + 2,
+        );
+        assert_eq!(appearance_content_hit(area, 0, gap, &ui), None);
+        // Scrolling moves the hit zone with the content.
+        let scrolled = Position::new(area.x + 5, area.y + view.card_hits[0].start_line + 2 - 1);
+        assert_eq!(
+            appearance_content_hit(area, 1, scrolled, &ui),
+            Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[0]))
+        );
+    }
+
+    #[test]
+    fn sizing_card_bars_show_the_configured_widths() {
+        let mut ui = UiSettings::default();
+        ui.left_panel_sizing.fixed_width = 80;
+        let (filled, empty) = sizing_card_bar(80, 16);
+        assert_eq!((filled.chars().count(), empty.chars().count()), (16, 0));
+        let (filled, empty) = sizing_card_bar(16, 16);
+        assert_eq!((filled.chars().count(), empty.chars().count()), (3, 13));
+        // Never an invisible bar, never wider than the card.
+        let (filled, _) = sizing_card_bar(0, 16);
+        assert_eq!(filled.chars().count(), 1);
+        let (filled, empty) = sizing_card_bar(500, 10);
+        assert_eq!(filled.chars().count() + empty.chars().count(), 10);
+        assert_eq!(
+            sizing_card_widths(LeftPanelSizingMode::Fixed, &ui),
+            (80, 80)
+        );
+    }
+
+    #[test]
+    fn only_the_active_sizing_card_is_marked_and_the_focus_ring_follows_selection() {
+        let mut ui = UiSettings::default();
+        ui.left_panel_sizing.mode = LeftPanelSizingMode::FocusDependent;
+        let selected = sizing_text(&appearance_view(&ui, 0, 120));
+        assert_eq!(selected.matches("● selected").count(), 1);
+        assert!(selected.contains('┏'));
+        // Even at the narrowest card width the selection stays marked.
+        let narrow = sizing_text(&appearance_view(&ui, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH));
+        assert!(narrow.contains('●') && narrow.contains('┏'));
+        let unselected = sizing_text(&appearance_view(&ui, 3, 120));
+        assert_eq!(unselected.matches("● selected").count(), 1);
+        assert!(!unselected.contains('┏'));
     }
 
     #[test]
     fn appearance_content_hit_uses_shared_selector_row_and_mode_specific_controls() {
-        let area = Rect::new(0, 0, 90, 30);
+        // Narrower than SIZING_CARDS_MINIMUM_CONTENT_WIDTH: the selector row stands in.
+        let area = Rect::new(0, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH - 1, 30);
         let ui = UiSettings::default();
         let view = appearance_view(&ui, 0, area.width);
         let control_start_x = area.x + ROW_LEFT_INSET + appearance_control_label_width(area.width);
@@ -8354,7 +9145,13 @@ mod tests {
         assert!(rendered.contains("Project separators"));
         assert_eq!(
             appearance_row_value(AppearanceRow::ProjectSeparators, &ui),
-            "Off"
+            "[○ OFF]"
+        );
+        assert!(rendered.contains("Tree toolbar always visible"));
+        assert!(rendered.contains("Keep the bottom tree action toolbar visible"));
+        assert_eq!(
+            appearance_row_value(AppearanceRow::TreeToolbarAlwaysVisible, &ui),
+            "[ON  ●]"
         );
         assert!(AppearanceRow::visible(LeftPanelSizingMode::Fixed)
             .contains(&AppearanceRow::ProjectSeparators));
@@ -8362,7 +9159,7 @@ mod tests {
         assert!(rendered.contains("Show rename and move up/down buttons"));
         assert_eq!(
             appearance_row_value(AppearanceRow::TreeRowManagementControls, &ui),
-            "Off"
+            "[○ OFF]"
         );
         assert!(rendered.contains("Agent identifier"));
         assert!(rendered.contains("Selected icon"));
@@ -8370,7 +9167,7 @@ mod tests {
         assert!(!rendered.contains("Codex icon"));
         assert!(!rendered.contains("Antigravity icon"));
         assert!(rendered.contains("Use stable glyphs"));
-        assert!(rendered.contains("Off (normal icons)"));
+        assert!(rendered.contains("[○ OFF]"));
         assert!(rendered.contains("Agent debug menu"));
         assert!(rendered.contains("persist prompts, detection evidence, session phases"));
         assert!(rendered.contains("forces fresh detection snapshots"));
@@ -8378,21 +9175,26 @@ mod tests {
     }
 
     #[test]
-    fn appearance_view_uses_one_sizing_selector_at_all_widths() {
+    fn appearance_view_shows_exactly_one_sizing_control_at_every_width() {
         let ui = UiSettings::default();
-        for width in [50, 90, 160] {
+        for width in [50, 70, 90, 160] {
             let view = appearance_view(&ui, 0, width);
-            assert_eq!(
-                view.row_lines
-                    .iter()
-                    .filter(|(row, _)| *row == AppearanceRow::LeftPanelSizingMode)
-                    .count(),
-                1
-            );
-            assert!(!view
+            let selector_rows = view
+                .row_lines
+                .iter()
+                .filter(|(row, _)| *row == AppearanceRow::LeftPanelSizingMode)
+                .count();
+            let cards = view
                 .lines
                 .iter()
-                .any(|line| line.to_string().contains("▣  Fixed")));
+                .any(|line| line.to_string().contains("▣  Fixed"));
+            if sizing_cards_fit(width) {
+                assert_eq!((selector_rows, cards), (0, true), "width {width}");
+                assert_eq!(view.card_hits.len(), 3, "width {width}");
+            } else {
+                assert_eq!((selector_rows, cards), (1, false), "width {width}");
+                assert!(view.card_hits.is_empty(), "width {width}");
+            }
         }
     }
 
@@ -8950,7 +9752,7 @@ mod tests {
         .collect::<Vec<_>>()
         .join("\n");
         assert!(rendered.contains("System beep"));
-        assert!(rendered.contains("[x] Enabled"));
+        assert!(rendered.contains("[ON  ●]"));
         assert!(rendered.contains("Agent needs approval"));
         assert!(rendered.contains("/usr/share/sounds"));
         assert!(rendered.contains("freedesktop / stereo / complete"));
@@ -8969,7 +9771,7 @@ mod tests {
             .join("\n");
 
         assert!(rendered.contains("Confirm terminal submissions"));
-        assert!(rendered.contains("Off"));
+        assert!(rendered.contains("OFF"));
         assert!(rendered.contains("stages dictated text visibly"));
     }
 
@@ -8996,10 +9798,13 @@ mod tests {
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
-            .join("\n");
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
 
         assert!(rendered.contains("File logging"));
-        assert!(rendered.contains("Off"));
+        assert!(rendered.contains("OFF"));
         assert!(rendered.contains("LLM requests/responses"));
         assert!(rendered.contains("Credential headers/URL parameters are redacted"));
         assert!(rendered.contains("binary audio is summarized"));
@@ -9044,7 +9849,8 @@ mod tests {
             .unwrap();
 
         let layout = compute_layout(terminal.backend().buffer().area);
-        assert_eq!(layout.content_area.width, 22);
+        assert!(layout.content_area.right() <= 40);
+        assert!("[○ OFF]".width() <= 7);
         let rows = (0..12)
             .map(|y| {
                 (0..40)
@@ -9053,7 +9859,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(rows.iter().any(|row| row.contains("File logging")));
-        assert!(rows.iter().any(|row| row.contains("‹ Off ›")));
+        assert!(rows.iter().any(|row| row.contains("[○ OFF]")));
         assert!(rows.iter().any(|row| row.contains("Write major")));
     }
 
@@ -9076,12 +9882,17 @@ mod tests {
                         .get(index + 1)
                         .copied()
                         .unwrap_or(view.trailing_line);
-                    // Every wrapped explanation fits, and the blank row between
+                    // Every wrapped explanation fits, and the separator between
                     // settings survives. Controls have their own width policy.
                     assert!(view.lines[line + 1..next - 1]
                         .iter()
                         .all(|line| line.width() <= usize::from(width)));
-                    assert_eq!(view.lines[next - 1].width(), 0);
+                    let separator = if tab == SettingsTab::Sound {
+                        ""
+                    } else {
+                        "  ──────────────────────"
+                    };
+                    assert_eq!(view.lines[next - 1].to_string(), separator);
                     let scroll = line as u16;
                     let x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
                     // At very narrow widths the control lies outside the
@@ -9220,7 +10031,12 @@ mod tests {
                 assert_eq!(close_button_area(area).width, 0);
                 assert!(!close_button_hit(area, Position::new(width - 1, 0)));
                 assert!(!header.contains("Close"), "{width} columns: {header:?}");
-                assert!(hint.contains("Esc/q closes"), "{width} columns: {hint:?}");
+                let expected_hint = if width < "Esc or q to close".width() as u16 {
+                    "Esc/q closes"
+                } else {
+                    "Esc or q to close"
+                };
+                assert!(hint.contains(expected_hint), "{width} columns: {hint:?}");
             } else {
                 let close = close_button_area(area);
                 assert!(close.width > 0);
@@ -9365,8 +10181,10 @@ mod tests {
 
     #[test]
     fn kilo_gateway_wrapped_warning_keeps_inference_rows_clickable() {
-        let mut settings = ilium_inference::InferenceSettings::default();
-        settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            ..Default::default()
+        };
         let project_directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
             "kilo-warning-hit-layout-test".to_owned(),
@@ -9413,8 +10231,10 @@ mod tests {
 
     #[test]
     fn kilo_gateway_warning_wraps_without_dropping_its_privacy_notice() {
-        let mut settings = ilium_inference::InferenceSettings::default();
-        settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            ..Default::default()
+        };
         let expected = "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.";
         for width in [10, 14, 22, 40, 80] {
             let expected = if width < 32 {

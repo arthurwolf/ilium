@@ -15,11 +15,15 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, ExitStatus, PtySize
 use tokio::sync::{broadcast, watch};
 
 use crate::admission::PtyWorkerReservations;
-use crate::error::PtyError;
+use crate::error::{PtyCaptureError, PtyError};
 use crate::owner::{OwnerLimits, PtyInput, PtyOwner, TerminalState};
 use crate::query::TerminalQueryResponder;
 use crate::screen_reader::ScreenReader;
-use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerKind};
+use ilium_platform::owned_worker::OwnedWorker;
+
+#[path = "child_reaper.rs"]
+mod child_reaper;
+use child_reaper::PendingChildReaper;
 use ilium_platform::pty_io::ShellProbe;
 
 /// Terminal identity exported to every application running behind Ilium's
@@ -63,6 +67,63 @@ fn is_environment_variable_filtered_at_pty_boundary(key: &OsStr) -> bool {
         .any(|prefix| normalized_key.starts_with(prefix))
 }
 
+/// Pane identity comes from this server, never from a parent Ilium pane.
+fn is_inherited_ilium_identity(key: &OsStr) -> bool {
+    matches!(
+        key.to_string_lossy().to_ascii_uppercase().as_str(),
+        "ILIUM_PANE_ID"
+            | "ILIUM_SESSION_NAME"
+            | "ILIUM_SESSION_SOCKET"
+            | "ILIUM_WORKTREE"
+            | "ILIUM_BRANCH"
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn custom_agent_terminal_policy_matches_the_pty_filter() {
+    // Include each exact name, each prefix, case variants and ordinary keys;
+    // settings must not promise values the terminal adapter removes.
+    for key in [
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TMUX",
+        "ZELLIJ",
+        "NO_COLOR",
+        "WEZTERM_VERSION",
+        "KITTY_WINDOW_ID",
+        "TMUX_PANE",
+        "ZELLIJ_SESSION_NAME",
+        "no_color",
+        "wezterm_version",
+        "USER",
+        "TERM",
+        "CUSTOM_VALUE",
+        "TMUXED",
+    ] {
+        assert_eq!(
+            ilium_core::custom_agent::is_terminal_filtered_key(key),
+            is_environment_variable_filtered_at_pty_boundary(OsStr::new(key)),
+            "terminal environment policy diverged for {key}",
+        );
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn parent_ilium_pane_identity_is_not_inherited() {
+    for key in [
+        "ILIUM_PANE_ID",
+        "ILIUM_SESSION_NAME",
+        "ILIUM_SESSION_SOCKET",
+        "ILIUM_WORKTREE",
+        "ILIUM_BRANCH",
+    ] {
+        assert!(is_inherited_ilium_identity(OsStr::new(key)));
+    }
+    assert!(!is_inherited_ilium_identity(OsStr::new("ILIUM_CONFIG_DIR")));
+}
+
 /// Applies the terminal-emulation contract after every caller-supplied
 /// environment entry, so a pane cannot accidentally or explicitly advertise
 /// outer-emulator capabilities that are absent at this PTY boundary.
@@ -76,7 +137,9 @@ fn configure_emulated_terminal_environment(
     // including variables introduced by future emulator versions.
     command.env_clear();
     for (key, value) in std::env::vars_os() {
-        if !is_environment_variable_filtered_at_pty_boundary(&key) {
+        if !is_environment_variable_filtered_at_pty_boundary(&key)
+            && !is_inherited_ilium_identity(&key)
+        {
             command.env(key, value);
         }
     }
@@ -106,6 +169,7 @@ pub struct PtyCommand {
     rows: u16,
     cols: u16,
     env: Vec<(String, String)>,
+    automatic_terminal_query_replies: bool,
 }
 
 impl PtyCommand {
@@ -119,7 +183,17 @@ impl PtyCommand {
             rows,
             cols,
             env: Vec::new(),
+            automatic_terminal_query_replies: true,
         }
+    }
+
+    /// Selects whether the emulator answers terminal capability queries.
+    /// Defaults to true. Disable only when the caller owns manual replies or
+    /// intentionally models a silent terminal; parsing and input ordering stay unchanged.
+    #[must_use]
+    pub fn automatic_terminal_query_replies(mut self, enabled: bool) -> Self {
+        self.automatic_terminal_query_replies = enabled;
+        self
     }
 
     /// Appends one argument (builder-style).
@@ -255,7 +329,6 @@ impl PtyShellObserver {
 pub struct PtySession {
     // The actor owns all parser writes, geometry control, and transport writes.
     // This handle only exposes admission and cancellation to other threads.
-    #[cfg(test)]
     parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
     screen_generation: Arc<AtomicU64>,
     screen_reader: ScreenReader,
@@ -338,6 +411,160 @@ pub struct PtyOutputReplay {
     pub is_complete: bool,
 }
 
+/// The live screen rebuilt as escape bytes, with the journal sequence it covers.
+/// See `PtySession::attach_snapshot`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtyScreenSnapshot {
+    pub through_sequence: u64,
+    pub bytes: Vec<u8>,
+    /// False when the retention cap dropped output older than this screen.
+    pub is_complete: bool,
+}
+
+/// Adapter-owned read handle. It cannot resize, mutate or spawn a PTY. Keeping
+/// the handle alive pins its exact parser/journal pair across an async retry.
+#[derive(Clone)]
+pub struct PtyCaptureHandle {
+    parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
+    output_journal: Arc<Mutex<OutputJournal>>,
+    input: PtyInput,
+}
+
+impl PtyCaptureHandle {
+    pub fn input_handle(&self) -> PtyInput {
+        self.input.clone()
+    }
+
+    /// Nonblocking screen capture for async coordination callers. Busy is
+    /// distinct from an unavailable parser: do not fall back to blocking replay
+    /// while a native resize/output operation still owns the parser.
+    pub fn try_attach_snapshot(&self) -> Result<PtyScreenSnapshot, PtyCaptureError> {
+        try_capture_snapshot(&self.parser, &self.output_journal)
+    }
+
+    /// Nonblocking companions preserve the same sequence/retention validation
+    /// as their synchronous counterparts; no bytes are copied on lock refusal.
+    pub fn try_output_replay_estimate(&self) -> Result<PtyOutputReplayEstimate, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, OutputJournal::replay_estimate)
+    }
+
+    pub fn try_output_replay_through_if_retained(
+        &self,
+        expected: PtyOutputReplayEstimate,
+    ) -> Result<Option<PtyOutputReplay>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.replay_through_if_retained(expected)
+        })
+    }
+
+    /// Copies an entire contiguous missing tail, or the same reset replay
+    /// required by `PtySession::output_recovery_after` after retention loss.
+    /// A busy journal is a retryable refusal, never an empty successful tail.
+    pub fn try_output_recovery_after(
+        &self,
+        after_sequence: u64,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_after(after_sequence)
+        })
+    }
+
+    /// Preserves history chunk boundaries and retention metadata without
+    /// blocking an async caller behind the native journal owner.
+    pub fn try_output_history_before(
+        &self,
+        before_sequence: u64,
+        max_bytes: usize,
+    ) -> Result<PtyOutputHistory, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.history_before(before_sequence, max_bytes)
+        })
+    }
+
+    pub fn try_output_recovery_estimate_after(
+        &self,
+        after_sequence: u64,
+    ) -> Result<Option<PtyOutputRecoveryEstimate>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_estimate_after(after_sequence)
+        })
+    }
+
+    pub fn try_output_recovery_if_unchanged(
+        &self,
+        after_sequence: u64,
+        expected: PtyOutputRecoveryEstimate,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_if_unchanged(after_sequence, expected)
+        })
+    }
+
+    pub fn try_output_recovery_prefix_after(
+        &self,
+        after_sequence: u64,
+        max_bytes: usize,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_prefix_after(after_sequence, max_bytes)
+        })
+    }
+
+    pub fn try_output_recovery_prefix_through(
+        &self,
+        after_sequence: u64,
+        through_sequence: u64,
+        max_bytes: usize,
+    ) -> Result<Option<PtyOutputRecovery>, PtyCaptureError> {
+        try_capture_journal(&self.output_journal, |journal| {
+            journal.recovery_prefix_through(after_sequence, through_sequence, max_bytes)
+        })
+    }
+}
+
+/// Capture the same parser/journal pair as `attach_snapshot` without waiting
+/// for either native-owner lock. Parser-before-journal ordering is mandatory:
+/// holding the parser read guard fences every journal publication it covers.
+fn try_capture_snapshot<Callbacks: vt100::Callbacks>(
+    parser: &RwLock<vt100::Parser<Callbacks>>,
+    journal: &Mutex<OutputJournal>,
+) -> Result<PtyScreenSnapshot, PtyCaptureError> {
+    let parser = parser.try_read().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => PtyCaptureError::ParserBusy,
+        std::sync::TryLockError::Poisoned(_) => PtyCaptureError::ParserPoisoned,
+    })?;
+    let estimate = try_capture_journal(journal, OutputJournal::replay_estimate)?;
+    Ok(PtyScreenSnapshot {
+        through_sequence: estimate.through_sequence,
+        bytes: crate::screen_snapshot::snapshot_bytes(parser.screen()),
+        is_complete: estimate.is_complete,
+    })
+}
+
+fn try_capture_journal<T>(
+    journal: &Mutex<OutputJournal>,
+    capture: impl FnOnce(&OutputJournal) -> T,
+) -> Result<T, PtyCaptureError> {
+    let journal = journal.try_lock().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => PtyCaptureError::JournalBusy,
+        std::sync::TryLockError::Poisoned(_) => PtyCaptureError::JournalPoisoned,
+    })?;
+    Ok(capture(&journal))
+}
+
+/// Retained raw output older than some sequence, oldest first.
+/// See `PtySession::output_history_before`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtyOutputHistory {
+    /// Oldest chunk included; equals `before_sequence` when nothing was older.
+    pub first_sequence: u64,
+    /// Exclusive upper bound that was requested.
+    pub before_sequence: u64,
+    pub bytes: Vec<u8>,
+    /// True when nothing older than `first_sequence` was ever dropped.
+    pub reaches_journal_start: bool,
+}
+
 /// Exact size and sequence of a replay before its bytes are copied. A caller
 /// can reserve byte capacity using this value, then call
 /// [`PtySession::output_replay_if_unchanged`] to avoid cloning stale history.
@@ -357,6 +584,13 @@ pub enum PtyOutputRecoveryEstimate {
         byte_len: usize,
     },
     Replay(PtyOutputReplayEstimate),
+    /// A screen snapshot already built for this estimate. The journal never
+    /// reproduces it from a size estimate, so `output_recovery_if_unchanged`
+    /// declines it; the caller holds the bytes itself.
+    Snapshot {
+        through_sequence: u64,
+        byte_len: usize,
+    },
 }
 
 /// Minimal repair for one downstream consumer that last received
@@ -380,10 +614,21 @@ struct OutputJournal {
 }
 
 impl OutputJournal {
+    /// Sequence of the newest chunk appended so far (0 before any output).
+    fn head_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
     /// A hard byte ceiling prevents a pane that streams binary data forever
     /// from consuming unbounded server memory. It is deliberately much larger
     /// than ordinary 10,000-line agent transcripts.
     const MAX_RETAINED_BYTES: usize = 32 * 1024 * 1024;
+
+    /// Full terminal reset (`ESC c`) that opens every replay of a truncated
+    /// journal. The estimate and both replay builders must all use this one
+    /// value: a replay whose length differs from its estimate is rejected as
+    /// "moved", which made every truncated pane impossible to resynchronize.
+    const RESET_PREFIX: &'static [u8] = b"\x1bc";
 
     /// Takes the reader's borrowed slice rather than an owned `Vec` so the
     /// chunk really is allocated once: `Arc<[u8]>` cannot adopt a `Vec`'s
@@ -413,11 +658,17 @@ impl OutputJournal {
         chunk
     }
 
+    /// The reset prefix a replay needs, given whether its journal start is complete.
+    fn reset_prefix(is_complete: bool) -> Option<&'static [u8]> {
+        (!is_complete).then_some(Self::RESET_PREFIX)
+    }
+
     fn replay_estimate(&self) -> PtyOutputReplayEstimate {
         PtyOutputReplayEstimate {
             through_sequence: self.next_sequence,
             first_sequence: self.chunks.front().map(|chunk| chunk.sequence),
-            byte_len: self.retained_bytes + usize::from(!self.is_complete) * 3,
+            byte_len: self.retained_bytes
+                + Self::reset_prefix(self.is_complete).map_or(0, <[u8]>::len),
             is_complete: self.is_complete,
         }
     }
@@ -427,7 +678,7 @@ impl OutputJournal {
         // depend on a mode established before the byte cap. Reset the client
         // parser first in that exceptional case so it never inherits a bogus
         // half-state from bytes that are no longer available.
-        let reset_prefix = (!self.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_prefix = Self::reset_prefix(self.is_complete);
         let mut bytes =
             Vec::with_capacity(self.retained_bytes + reset_prefix.map_or(0, |prefix| prefix.len()));
         if let Some(prefix) = reset_prefix {
@@ -440,6 +691,43 @@ impl OutputJournal {
             through_sequence: self.next_sequence,
             bytes,
             is_complete: self.is_complete,
+        }
+    }
+
+    /// Copies the newest retained chunks older than `before_sequence` while
+    /// they fit in `max_bytes`, always taking at least one chunk so a caller
+    /// makes progress. Chunks are PTY read boundaries, so after a cap-driven
+    /// drop the first byte can sit mid-escape; the caller renders it as-is.
+    fn history_before(&self, before_sequence: u64, max_bytes: usize) -> PtyOutputHistory {
+        let mut selected: Vec<&PtyOutputChunk> = Vec::new();
+        let mut selected_bytes = 0usize;
+        for chunk in self.chunks.iter().rev() {
+            if chunk.sequence >= before_sequence {
+                continue;
+            }
+            if !selected.is_empty() && selected_bytes.saturating_add(chunk.bytes.len()) > max_bytes
+            {
+                break;
+            }
+            selected_bytes = selected_bytes.saturating_add(chunk.bytes.len());
+            selected.push(chunk);
+        }
+        let first_sequence = selected
+            .last()
+            .map_or(before_sequence, |chunk| chunk.sequence);
+        let mut bytes = Vec::with_capacity(selected_bytes);
+        for chunk in selected.iter().rev() {
+            bytes.extend_from_slice(&chunk.bytes);
+        }
+        PtyOutputHistory {
+            first_sequence,
+            before_sequence,
+            bytes,
+            reaches_journal_start: self.is_complete
+                && self
+                    .chunks
+                    .front()
+                    .is_none_or(|oldest| oldest.sequence >= first_sequence),
         }
     }
 
@@ -459,7 +747,7 @@ impl OutputJournal {
         if through_sequence > self.next_sequence {
             return None;
         }
-        let reset_prefix = (!self.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_prefix = Self::reset_prefix(self.is_complete);
         let reset_len = reset_prefix.map_or(0, <[u8]>::len);
         if max_bytes < reset_len {
             return None;
@@ -520,7 +808,7 @@ impl OutputJournal {
             .take_while(|chunk| chunk.sequence <= expected.through_sequence)
             .map(|chunk| chunk.bytes.len())
             .sum();
-        let reset_prefix = (!expected.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_prefix = Self::reset_prefix(expected.is_complete);
         let expected_len = retained_bytes + reset_prefix.map_or(0, |prefix| prefix.len());
         if expected_len != expected.byte_len {
             return None;
@@ -670,6 +958,7 @@ impl OutputJournal {
             PtyOutputRecoveryEstimate::Replay(replay) => self
                 .replay_through_if_retained(replay)
                 .map(PtyOutputRecovery::Replay),
+            PtyOutputRecoveryEstimate::Snapshot { .. } => None,
             PtyOutputRecoveryEstimate::Delta {
                 through_sequence,
                 byte_len,
@@ -725,48 +1014,6 @@ fn clamp_pty_dimension(requested: u16) -> u16 {
     requested.max(MINIMUM_PTY_DIMENSION)
 }
 
-/// Child reaping is independent of PTY output, since a descendant may keep
-/// its inherited slave fd open after the direct child exits.
-///
-/// The reaper starts at the short interval (short-lived commands are reaped
-/// promptly) and backs off to the idle interval for long-running children:
-/// with hundreds of panes a fixed 50 ms poll alone cost thousands of wake-ups
-/// and wait syscalls a second. Exit observation does not depend on this
-/// cadence (`child_exit` queries the child itself), and cancellation wakes the
-/// reaper immediately.
-const CHILD_REAP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-const CHILD_REAP_IDLE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// A wake-up the reaper sleeps on, so cancellation does not wait a full
-/// (backed-off) poll interval.
-#[derive(Default)]
-struct ReaperWake {
-    is_woken: Mutex<bool>,
-    changed: std::sync::Condvar,
-}
-
-impl ReaperWake {
-    fn wake(&self) {
-        *self
-            .is_woken
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = true;
-        self.changed.notify_all();
-    }
-
-    fn sleep(&self, timeout: std::time::Duration) {
-        let is_woken = self
-            .is_woken
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let (mut is_woken, _) = self
-            .changed
-            .wait_timeout_while(is_woken, timeout, |is_woken| !*is_woken)
-            .unwrap_or_else(|error| error.into_inner());
-        *is_woken = false;
-    }
-}
-
 impl PtySession {
     /// Spawns `command` behind a new pty and starts the transport pumps and
     /// the sole state owner that feeds its output into `vt100::Parser`.
@@ -820,88 +1067,43 @@ impl PtySession {
         // monochrome.
         configure_emulated_terminal_environment(&mut cmd, &command.env);
 
+        let child_exit = Arc::new(Mutex::new(None));
+        // Establish physical child custody BEFORE the native spawn can create
+        // a process. Thread-start failure therefore has no child to clean up.
+        let pending_reaper =
+            PendingChildReaper::start(reservations.child_reaper, Arc::clone(&child_exit))
+                .map_err(|error| PtyError::Io(error.into()))?;
         let child = pair.slave.spawn_command(cmd).map_err(PtyError::Spawn)?;
+        let child = Arc::new(Mutex::new(child));
+        // Publish custody with child control locked. The reaper cannot reap a
+        // short-lived child and recycle its PID before birth identity is captured.
+        // On unwind this guard releases before registered cleanup takes over.
+        let child_control = child.lock().unwrap_or_else(|error| error.into_inner());
+        let process_id = child_control.process_id();
+        let child_reaper = pending_reaper.attach(Arc::clone(&child), process_id);
         // Drop our end of the slave once the child has it; keeping it open
         // would prevent the child from ever seeing EOF/HUP on its tty.
         drop(pair.slave);
-
-        // From here on the child is already running and nothing else owns
-        // it yet -- no `PtySession` exists to `kill()` it on a later `Drop`,
-        // and no reaper exists yet. If a later setup step
-        // below fails (e.g. `dup`-equivalent fd exhaustion), we must kill
-        // *and reap* the child explicitly before returning `Err`, or it
-        // leaks as a zombie: dropping portable-pty's child does not prove its
-        // process has exited or been reaped.
-        let process_id = child.process_id();
         let pty_process_identity = process_id.and_then(|process_id| {
             ilium_platform::process_control::capture_pty_process(process_id)
                 .ok()
                 .map(Arc::new)
         });
-        let child = Arc::new(Mutex::new(child));
-        let child_exit = Arc::new(Mutex::new(None));
-        let reaper_exit = Arc::clone(&child_exit);
-        let reaper_child = Arc::clone(&child);
-        let reaper_wake = Arc::new(ReaperWake::default());
-        let cancellation_wake = Arc::clone(&reaper_wake);
-        let child_reaper = match reservations.child_reaper.spawn(
-            "ilium-pty-child-reaper",
-            WorkerKind::Cooperative,
-            StopToken::default(),
-            move || cancellation_wake.wake(),
-            move |stop| {
-                let mut termination_requested = false;
-                let mut poll_interval = CHILD_REAP_POLL_INTERVAL;
-                loop {
-                    let exited = {
-                        let mut child = reaper_child
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
-                        // A status-query failure is not proof that the owned
-                        // child was reaped. Keep custody and retry; shutdown may
-                        // honestly report a pending reaper if the OS never answers.
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                retain_child_exit(&reaper_exit, process_id, status);
-                                true
-                            }
-                            Ok(None) | Err(_) => {
-                                if stop.is_stopped() && !termination_requested {
-                                    termination_requested = true;
-                                    if let Err(error) = child.kill() {
-                                        tracing::warn!(?process_id, %error, "owned PTY child termination failed; reaper custody retained");
-                                    }
-                                }
-                                false
-                            }
-                        }
-                    };
-                    if exited {
-                        break;
-                    }
-                    if stop.is_stopped() {
-                        poll_interval = CHILD_REAP_POLL_INTERVAL;
-                    }
-                    reaper_wake.sleep(poll_interval);
-                    poll_interval = poll_interval
-                        .saturating_mul(2)
-                        .min(CHILD_REAP_IDLE_POLL_INTERVAL);
-                }
-            },
-        ) {
-            Ok(worker) => worker,
-            Err(error) => {
-                let mut child = child.lock().unwrap_or_else(|poison| poison.into_inner());
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(PtyError::Io(error.into()));
-            }
-        };
+        drop(child_control);
+        ilium_platform::startup_timing::record(
+            "process_launched",
+            0,
+            0,
+            process_id.unwrap_or(0),
+            0,
+        );
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
             rows,
             cols,
             0,
-            TerminalQueryResponder::new(),
+            TerminalQueryResponder::with_automatic_replies(
+                command.automatic_terminal_query_replies,
+            ),
         )));
         let screen_generation = Arc::new(AtomicU64::new(0));
         let screen_reader = ScreenReader::new(Arc::clone(&parser), Arc::clone(&screen_generation));
@@ -916,7 +1118,9 @@ impl PtySession {
         }));
         let journal_for_owner = Arc::clone(&output_journal);
         let broadcast_for_owner = output_bytes_tx.clone();
+        let mut first_publication = true;
         let terminal = TerminalState {
+            child_process_id: process_id.unwrap_or(0),
             screen_reader: screen_reader.clone(),
             parser: Arc::clone(&parser),
             generation: Arc::clone(&screen_generation),
@@ -926,35 +1130,32 @@ impl PtySession {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .append_shared(bytes);
+                if first_publication {
+                    first_publication = false;
+                    ilium_platform::startup_timing::record(
+                        "first_parsed_output",
+                        0,
+                        0,
+                        process_id.unwrap_or(0),
+                        chunk.sequence,
+                    );
+                }
                 let _ = broadcast_for_owner.send(chunk);
             }),
         };
-        let cleanup_child = Arc::clone(&child);
-        let cleanup_exit = Arc::clone(&child_exit);
+        let cleanup_reaper = child_reaper.ticket();
         let (owner, shell_probe) = PtyOwner::spawn(
             pair.master,
             terminal,
             OwnerLimits::default(),
             reservations.owner,
-            move || {
-                let mut child = cleanup_child
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                match child.try_wait() {
-                    Ok(Some(status)) => retain_child_exit(&cleanup_exit, process_id, status),
-                    Ok(None) | Err(_) => {
-                        let _ = child.kill();
-                        if let Ok(status) = child.wait() {
-                            retain_child_exit(&cleanup_exit, process_id, status);
-                        }
-                    }
-                }
-            },
+            // Native cleanup stays on the prepaid supervised reaper. In
+            // particular an unsuccessful kill/wait never discards child control.
+            move || cleanup_reaper.cancel(),
         )
         .map_err(|error| PtyError::Io(error.into()))?;
 
         Ok(Self {
-            #[cfg(test)]
             parser,
             screen_generation,
             screen_reader,
@@ -1075,6 +1276,24 @@ impl PtySession {
         self.with_screen(|screen| screen.contents())
     }
 
+    /// The live screen as one self-contained formatted byte stream, without
+    /// any scrollback. Lets a receiver show the current screen while the full
+    /// retained history is still on its way; it carries no history.
+    /// Journal position of the newest output chunk. Read after the screen
+    /// preview, so the screen never reflects output beyond this sequence.
+    pub fn output_head_sequence(&self) -> u64 {
+        // A poisoned journal lock reports 0: the client then releases any
+        // screen-preview hold at once instead of keeping a stale screen.
+        self.output_journal
+            .lock()
+            .map(|journal| journal.head_sequence())
+            .unwrap_or(0)
+    }
+    pub fn current_screen_preview(&self) -> Vec<u8> {
+        self.screen_reader
+            .with_frame(|screen, _| screen.contents_formatted())
+    }
+
     /// Text, cursor, attributes and generation always belong to one frame.
     /// Presentation may receive the retained frame while the parser is busy.
     pub fn screen_snapshot(&self) -> ScreenSnapshot {
@@ -1086,33 +1305,56 @@ impl PtySession {
     /// complete detection evidence. vt100 0.16 cells expose borrowed contents.
     pub fn screen_snapshot_with_limit(&self, limit: usize) -> std::io::Result<ScreenSnapshot> {
         self.screen_reader.with_frame(|screen, generation| {
-            let (rows, columns) = screen.size();
-            let cells = usize::from(rows).saturating_mul(usize::from(columns));
-            // Vec growth may retain twice the populated dim-cell count;
-            // String growth may retain twice the visible text bytes.
-            let mut bytes = cells
-                .saturating_mul(12)
-                .saturating_add(usize::from(rows).saturating_mul(2))
-                .saturating_add(std::mem::size_of::<ScreenSnapshot>());
-            if bytes > limit {
-                return Err(std::io::Error::other(
-                    "terminal evidence frame exceeds retained-byte limit",
-                ));
-            }
-            for row in 0..rows {
-                for column in 0..columns {
-                    if let Some(cell) = screen.cell(row, column) {
-                        bytes = bytes.saturating_add(cell.contents().len().saturating_mul(2));
-                        if bytes > limit {
-                            return Err(std::io::Error::other(
-                                "terminal evidence text exceeds retained-byte limit",
-                            ));
-                        }
+            Self::bounded_snapshot_from_screen(screen, generation, limit)
+        })
+    }
+
+    /// Capture current detection evidence without waiting for parser mutation.
+    /// A busy parser returns `Ok(None)`; retained presentation frames must not
+    /// renew an agent's successful-observation timestamp. Oversized evidence
+    /// returns an error before allocating a snapshot.
+    pub fn current_screen_snapshot_with_limit(
+        &self,
+        limit: usize,
+    ) -> std::io::Result<Option<ScreenSnapshot>> {
+        self.screen_reader
+            .try_with_frame(|screen, generation| {
+                Self::bounded_snapshot_from_screen(screen, generation, limit)
+            })
+            .transpose()
+    }
+
+    fn bounded_snapshot_from_screen(
+        screen: &vt100::Screen,
+        generation: u64,
+        limit: usize,
+    ) -> std::io::Result<ScreenSnapshot> {
+        let (rows, columns) = screen.size();
+        let cells = usize::from(rows).saturating_mul(usize::from(columns));
+        // Vec growth may retain twice the populated dim-cell count;
+        // String growth may retain twice the visible text bytes.
+        let mut bytes = cells
+            .saturating_mul(12)
+            .saturating_add(usize::from(rows).saturating_mul(2))
+            .saturating_add(std::mem::size_of::<ScreenSnapshot>());
+        if bytes > limit {
+            return Err(std::io::Error::other(
+                "terminal evidence frame exceeds retained-byte limit",
+            ));
+        }
+        for row in 0..rows {
+            for column in 0..columns {
+                if let Some(cell) = screen.cell(row, column) {
+                    bytes = bytes.saturating_add(cell.contents().len().saturating_mul(2));
+                    if bytes > limit {
+                        return Err(std::io::Error::other(
+                            "terminal evidence text exceeds retained-byte limit",
+                        ));
                     }
                 }
             }
-            Ok(Self::snapshot_from_screen(screen, generation))
-        })
+        }
+        Ok(Self::snapshot_from_screen(screen, generation))
     }
 
     /// Returns no frame when mutation is underway, instead of stale evidence.
@@ -1145,6 +1387,14 @@ impl PtySession {
     /// Returns the current visible-screen generation without cloning its text.
     pub fn screen_generation(&self) -> u64 {
         self.screen_generation.load(Ordering::Acquire)
+    }
+
+    /// Read the current generation only when the parser can be observed.
+    /// Cached detection evidence may be reused only after this current-frame
+    /// proof succeeds; an atomic generation alone cannot reveal parser mutation.
+    pub fn current_screen_generation(&self) -> Option<u64> {
+        self.screen_reader
+            .try_with_frame(|_, generation| generation)
     }
 
     /// OS pid of the directly-spawned child, `None` if the platform didn't
@@ -1283,6 +1533,51 @@ impl PtySession {
     /// Reserve against `byte_len` before requesting the corresponding replay.
     pub fn output_replay_estimate(&self) -> PtyOutputReplayEstimate {
         self.output_journal.lock().unwrap().replay_estimate()
+    }
+
+    /// Rebuilds the live screen as escape bytes, paired with the journal
+    /// sequence it covers. The owner publishes each output chunk while it
+    /// holds the parser's write lock, so the read lock taken here makes the
+    /// pair consistent: every byte through `through_sequence` is on the
+    /// screen and no later byte is. `None` when the parser cannot be read;
+    /// callers then fall back to a journal replay.
+    ///
+    /// Known edge: if the owner gave up on the parser (`ParserUnavailable`),
+    /// the raw bytes it journaled were never parsed. That session is shutting
+    /// down, and its snapshot must not be trusted.
+    pub fn attach_snapshot(&self) -> Option<PtyScreenSnapshot> {
+        let parser = self.parser.read().ok()?;
+        let estimate = self.output_replay_estimate();
+        Some(PtyScreenSnapshot {
+            through_sequence: estimate.through_sequence,
+            bytes: crate::screen_snapshot::snapshot_bytes(parser.screen()),
+            is_complete: estimate.is_complete,
+        })
+    }
+
+    /// Copies only shared ownership handles, never terminal payloads. Capture
+    /// and retry through this handle after releasing server registry guards.
+    pub fn capture_handle(&self) -> PtyCaptureHandle {
+        PtyCaptureHandle {
+            parser: Arc::clone(&self.parser),
+            output_journal: Arc::clone(&self.output_journal),
+            input: self.input_handle(),
+        }
+    }
+
+    /// Copies up to `max_bytes` of retained output older than
+    /// `before_sequence`, newest chunks first, returned oldest first. A client
+    /// that scrolls past its attach snapshot asks for this in pieces. At least
+    /// one chunk is always returned when any is older, so the walk advances.
+    pub fn output_history_before(
+        &self,
+        before_sequence: u64,
+        max_bytes: usize,
+    ) -> PtyOutputHistory {
+        self.output_journal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .history_before(before_sequence, max_bytes)
     }
 
     /// Copies replay bytes only while the journal still matches a prior
@@ -1494,6 +1789,44 @@ mod tests {
         session.kill().expect("fixture cleanup");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn current_bounded_snapshot_never_renews_retained_evidence_while_parser_busy() {
+        let mut session = PtySession::spawn(
+            PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("isolated PTY");
+        let parser = Arc::clone(&session.parser);
+        let mut writer = parser.write().expect("parser guard");
+        writer.process(b"retained");
+        session.screen_generation.store(7, Ordering::Release);
+        session.screen_reader.retain_before_resize(writer.screen());
+        writer.process(b" current");
+        session.screen_generation.store(8, Ordering::Release);
+        assert_eq!(session.current_screen_generation(), None);
+        assert!(session
+            .current_screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("busy is not an error")
+            .is_none());
+        let retained = session
+            .screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("presentation fallback remains usable");
+        assert_eq!(retained.text, "retained");
+        assert_eq!(retained.generation, 7);
+        drop(writer);
+        let current = session
+            .current_screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("bounded current frame")
+            .expect("parser is available");
+        assert_eq!(current.text, "retained current");
+        assert_eq!(current.generation, 8);
+        assert_eq!(session.current_screen_generation(), Some(8));
+        assert!(session.current_screen_snapshot_with_limit(1).is_err());
+        session.kill().expect("fixture cleanup");
+    }
+
     #[test]
     fn child_exit_receipt_preserves_unsigned_codes_and_the_first_observation() {
         let receipt = Mutex::new(None);
@@ -1570,6 +1903,139 @@ mod tests {
         );
     }
 
+    #[test]
+    fn nonblocking_snapshot_refuses_a_held_native_parser_without_journal_fallback() {
+        let parser = RwLock::new(vt100::Parser::new(24, 80, 0));
+        let journal = Mutex::new(journal());
+        let parser_write = parser.write().unwrap();
+        let journal_write = journal.lock().unwrap();
+        assert_eq!(
+            try_capture_snapshot(&parser, &journal),
+            Err(PtyCaptureError::ParserBusy),
+        );
+        drop(parser_write);
+        assert_eq!(
+            try_capture_snapshot(&parser, &journal),
+            Err(PtyCaptureError::JournalBusy),
+        );
+        drop(journal_write);
+        assert_eq!(
+            try_capture_snapshot(&parser, &journal)
+                .unwrap()
+                .through_sequence,
+            0
+        );
+    }
+
+    #[test]
+    fn nonblocking_snapshot_pairs_the_committed_screen_with_its_journal_sequence() {
+        let parser = RwLock::new(vt100::Parser::new(24, 80, 0));
+        let journal = Mutex::new(journal());
+        {
+            let mut parser = parser.write().unwrap();
+            parser.process(b"committed terminal marker");
+            journal.lock().unwrap().append(b"committed terminal marker");
+        }
+        let snapshot = try_capture_snapshot(&parser, &journal).unwrap();
+        assert_eq!(snapshot.through_sequence, 1);
+        let mut reconstructed = vt100::Parser::new(24, 80, 0);
+        reconstructed.process(&snapshot.bytes);
+        assert!(reconstructed
+            .screen()
+            .contents()
+            .contains("committed terminal marker"));
+    }
+
+    #[test]
+    fn nonblocking_journal_capture_reports_busy_and_poison_separately() {
+        let journal = Mutex::new(journal());
+        let held = journal.lock().unwrap();
+        assert_eq!(
+            try_capture_journal(&journal, OutputJournal::replay_estimate),
+            Err(PtyCaptureError::JournalBusy),
+        );
+        drop(held);
+        let _ = std::panic::catch_unwind(|| {
+            let _held = journal.lock().unwrap();
+            panic!("poison the synthetic journal fixture");
+        });
+        assert_eq!(
+            try_capture_journal(&journal, OutputJournal::replay_estimate),
+            Err(PtyCaptureError::JournalPoisoned),
+        );
+    }
+
+    // Removing either try-lock or changing a busy journal into an empty
+    // successful read must fail this real capture-handle regression.
+    #[cfg(unix)]
+    #[test]
+    fn history_and_full_recovery_capture_never_wait_for_a_busy_journal() {
+        let mut session = PtySession::spawn(
+            PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("spawn isolated journal-capture fixture");
+        let capture = session.capture_handle();
+        let while_locked = {
+            let mut held = session.output_journal.lock().unwrap();
+            *held = journal();
+            held.append(b"first");
+            held.append(b"second");
+            held.append(b"third");
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let capture = capture.clone();
+            let worker = std::thread::spawn(move || {
+                sender
+                    .send((
+                        capture.try_output_history_before(3, 1),
+                        capture.try_output_recovery_after(0),
+                    ))
+                    .unwrap();
+            });
+            let result = receiver.recv_timeout(std::time::Duration::from_secs(1));
+            // Unlock before join even for a blocking regression: the test
+            // reports a bounded failure rather than stranding its worker.
+            drop(held);
+            worker.join().unwrap();
+            result
+        };
+        let history = capture.try_output_history_before(3, 1).unwrap();
+        assert_eq!(history.first_sequence, 2);
+        assert_eq!(history.before_sequence, 3);
+        assert_eq!(history.bytes, b"second");
+        assert!(!history.reaches_journal_start);
+        let recovery = capture.try_output_recovery_after(0).unwrap().unwrap();
+        let PtyOutputRecovery::Delta(chunk) = recovery else {
+            panic!("the complete tiny journal must remain a contiguous delta");
+        };
+        assert_eq!(chunk.sequence, 3);
+        assert_eq!(chunk.bytes.as_ref(), b"firstsecondthird");
+        assert_eq!(capture.try_output_recovery_after(3).unwrap(), None);
+        {
+            let mut held = session.output_journal.lock().unwrap();
+            let removed = held.chunks.pop_front().unwrap();
+            held.retained_bytes -= removed.bytes.len();
+            held.is_complete = false;
+        }
+        let recovery = capture.try_output_recovery_after(0).unwrap().unwrap();
+        let PtyOutputRecovery::Replay(replay) = recovery else {
+            panic!("missing retained bytes require a reset replay, never a partial delta");
+        };
+        assert_eq!(replay.through_sequence, 3);
+        assert_eq!(replay.bytes, b"\x1bcsecondthird");
+        assert!(!replay.is_complete);
+        drop(capture);
+        let report = session
+            .shutdown_blocking(std::time::Duration::from_secs(3))
+            .expect("bounded isolated fixture shutdown");
+        assert!(report.pending.is_empty(), "workers remain: {report:?}");
+        let (history, recovery) = while_locked
+            .expect("both captures must return before the fixture releases the journal");
+        assert_eq!(history, Err(PtyCaptureError::JournalBusy));
+        assert_eq!(recovery, Err(PtyCaptureError::JournalBusy));
+    }
+
     fn journal() -> OutputJournal {
         OutputJournal {
             chunks: VecDeque::new(),
@@ -1622,6 +2088,56 @@ mod tests {
     }
 
     #[test]
+    fn history_walks_newest_chunks_first_within_the_byte_budget() {
+        let mut journal = journal();
+        journal.append(b"aaaa"); // sequence 1
+        journal.append(b"bbbb"); // sequence 2
+        journal.append(b"cccc"); // sequence 3
+
+        let newest_two = journal.history_before(4, 8);
+        assert_eq!(newest_two.first_sequence, 2);
+        assert_eq!(newest_two.bytes, b"bbbbcccc");
+        assert!(!newest_two.reaches_journal_start);
+
+        let oldest = journal.history_before(2, 64);
+        assert_eq!(oldest.first_sequence, 1);
+        assert_eq!(oldest.bytes, b"aaaa");
+        assert!(oldest.reaches_journal_start);
+    }
+
+    #[test]
+    fn history_always_takes_one_chunk_so_the_walk_progresses() {
+        let mut journal = journal();
+        journal.append(b"0123456789"); // sequence 1, larger than the budget
+        journal.append(b"xy"); // sequence 2
+
+        let history = journal.history_before(3, 4);
+        assert_eq!(history.first_sequence, 2);
+        assert_eq!(history.bytes, b"xy");
+        let next = journal.history_before(history.first_sequence, 4);
+        assert_eq!(next.first_sequence, 1);
+        assert_eq!(next.bytes, b"0123456789");
+        assert!(next.reaches_journal_start);
+    }
+
+    #[test]
+    fn history_past_the_retention_cap_does_not_claim_the_journal_start() {
+        let mut journal = journal();
+        journal.is_complete = false;
+        journal.append(b"tail");
+
+        let history = journal.history_before(2, 64);
+        assert_eq!(history.first_sequence, 1);
+        assert_eq!(history.bytes, b"tail");
+        assert!(!history.reaches_journal_start);
+
+        let empty = journal.history_before(1, 64);
+        assert_eq!(empty.first_sequence, 1);
+        assert!(empty.bytes.is_empty());
+        assert!(!empty.reaches_journal_start);
+    }
+
+    #[test]
     fn replay_estimate_fences_copy_when_new_output_arrives() {
         let mut journal = journal();
         journal.append(b"first");
@@ -1648,6 +2164,23 @@ mod tests {
         assert_eq!(replay.through_sequence, current.through_sequence);
         assert_eq!(replay.bytes.len(), current.byte_len);
         assert_eq!(replay.bytes, b"first-later");
+    }
+
+    #[test]
+    fn replay_estimate_of_truncated_journal_matches_retained_replay() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+        discard_oldest_chunk(&mut journal);
+
+        let estimate = journal.replay_estimate();
+        assert!(!estimate.is_complete);
+        assert_eq!(estimate.byte_len, b"\x1bc-second".len());
+        let replay = journal
+            .replay_through_if_retained(estimate)
+            .expect("an unchanged truncated journal must still produce its estimated replay");
+        assert_eq!(replay.bytes, b"\x1bc-second");
+        assert_eq!(replay.bytes.len(), estimate.byte_len);
     }
 
     /// Models the real safety-cap path: the oldest chunk is discarded and only

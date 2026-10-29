@@ -2,7 +2,8 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
-mod direct_events;
+pub(crate) use connection::SERVER_EVENT_RETIREMENT_BYTES;
+pub(crate) mod direct_events;
 pub(crate) use direct_events::DirectEventSender;
 pub(crate) use direct_events::EventReply;
 // `pub(crate)`, not private: `crate::run`'s crash-recovery restore path
@@ -10,6 +11,7 @@ pub(crate) use direct_events::EventReply;
 // same function `handle_new_pane` uses for a live client's `NewPane`
 // request -- see that function's doc comment for why the two share it.
 pub(crate) mod handlers;
+mod recaps;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -188,6 +190,14 @@ mod tests {
                 agent_debug_menu_enabled: false,
                 progress_monitor_enabled: true,
             }));
+            // Production starts the execution bank and ordered journal before
+            // the accept loop. Without them `connection::handle` rejects each
+            // accepted stream before the registry behavior is exercised.
+            let execution = crate::execution::ServerExecution::start()
+                .expect("isolated listener execution bank");
+            let journal_quota = execution.quota_group();
+            assert!(state.execution.set(execution).is_ok());
+            assert!(state.events.initialize_journal(journal_quota));
             let loop_state = Arc::clone(&state);
             // Mirrors `run`'s outer shutdown select: a saturated accept loop
             // must remain cancellable even though it does not call accept.
@@ -231,6 +241,7 @@ mod tests {
             stream,
             &ClientRequest::Attach {
                 session: "admission-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await
@@ -258,8 +269,11 @@ mod tests {
     async fn full_connection_registry_preserves_queued_bytes_then_reaps_and_reaccepts() {
         let listener = TestListener::start(1).await;
         let mut admitted = listener.connect().await;
+        let initial_events = attach(&mut admitted).await;
         assert!(matches!(
-            attach(&mut admitted).await.first(),
+            initial_events
+                .iter()
+                .find(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. })),
             Some(ServerEvent::PaneStateSnapshot { .. })
         ));
 
@@ -272,6 +286,7 @@ mod tests {
                 &mut queued,
                 &ClientRequest::Attach {
                     session: wrong_session.clone(),
+                    hello: Default::default(),
                 },
             )
             .await
@@ -280,6 +295,7 @@ mod tests {
                 &mut queued,
                 &ClientRequest::Attach {
                     session: "admission-test".to_string(),
+                    hello: Default::default(),
                 },
             )
             .await
@@ -298,11 +314,14 @@ mod tests {
             write_frame(&mut admitted, &ClientRequest::Detach)
                 .await
                 .expect("detach admitted connection");
-            let admitted_end =
-                tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
-                    .await
-                    .expect("admitted connection did not close");
-            assert!(admitted_end.is_err(), "Detach must end the prior stream");
+            // Detach drains the captured final broadcast prefix before EOF.
+            // A prior wrong-session request can leave feedback after attach's
+            // sync marker; require closure without discarding that contract.
+            tokio::time::timeout(TEST_DEADLINE, async {
+                while read_frame::<ServerEvent, _>(&mut admitted).await.is_ok() {}
+            })
+            .await
+            .expect("Detach must drain final events and close the prior stream");
 
             let first_reply: ServerEvent =
                 tokio::time::timeout(TEST_DEADLINE, read_frame(&mut queued))
@@ -314,10 +333,27 @@ mod tests {
                 "cycle {cycle} lost or reordered its first request"
             );
             let remaining = read_attach_events(&mut queued).await;
-            assert!(matches!(
-                remaining.first(),
-                Some(ServerEvent::PaneStateSnapshot { .. })
-            ));
+            // The rejected first request also broadcasts retained session
+            // feedback. It may precede the subsequent valid attach snapshot.
+            let snapshot_index = remaining
+                .iter()
+                .position(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. }))
+                .expect("valid attach must establish its authoritative tree");
+            assert!(
+                remaining[..snapshot_index].iter().all(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                        || matches!(event, ServerEvent::ResourceObservationFailed { .. })
+                ),
+                "only refused-request feedback or an independent resource warning may precede attachment"
+            );
+            assert!(
+                remaining[snapshot_index..].iter().any(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "attachment must replay the retained request failure"
+            );
             assert_eq!(
                 listener.tracked_count(),
                 1,
@@ -341,6 +377,7 @@ mod tests {
             &mut queued,
             &ClientRequest::Attach {
                 session: "admission-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await
@@ -352,7 +389,12 @@ mod tests {
             .await
             .expect("shutdown did not cancel saturated accept")
             .expect("accept task panicked");
-        listener.state.abort_all_connection_tasks();
+        // Abort the handles directly: `abort_all_connection_tasks` also closes
+        // the ordered event journal, which this test reuses for the fresh
+        // connection that must be admitted after the aborted handle is reaped.
+        for task in listener.state.connection_tasks.lock().unwrap().iter() {
+            task.abort();
+        }
         let admitted_end =
             tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
                 .await
@@ -368,27 +410,18 @@ mod tests {
             "the aborted owner remains tracked until admission reaps its handle"
         );
 
-        // The old listener is gone, so bind a replacement endpoint with the
-        // same state. The old aborted JoinHandle must be reaped before a new
-        // stream gets the only slot; no test-side registry clearing helps it.
+        // Shutdown closes the ordered journal, so this state cannot serve a
+        // replacement Attach. Reap the aborted original without clearing the
+        // registry by hand. The separate Detach test covers live reacceptance.
         drop(admitted);
         drop(queued);
-        let replacement = listener.endpoint.bind().await.expect("rebind endpoint");
-        let replacement_state = Arc::clone(&listener.state);
-        listener.accept_task = tokio::spawn(async move {
-            accept_loop_with_limit(replacement_state, replacement, 1).await;
-        });
-        let mut fresh = listener.connect().await;
-        let fresh_attach = attach(&mut fresh).await;
-        assert!(matches!(
-            fresh_attach.first(),
-            Some(ServerEvent::PaneStateSnapshot { .. })
-        ));
+        tokio::time::timeout(TEST_DEADLINE, wait_for_connection_slot(&listener.state, 1))
+            .await
+            .expect("aborted connection did not retire");
         assert_eq!(
             listener.tracked_count(),
-            1,
-            "aborted handle was not reaped before replacement admission"
+            0,
+            "aborted connection handle was not reaped"
         );
-        assert!(listener.state.has_terminal_subscribers(NodeId(999)));
     }
 }

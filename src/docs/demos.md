@@ -4,6 +4,7 @@ Recorded demonstrations of Ilium, one per feature. Each demo is an animated GIF 
 
 ## Contents
 
+- [Find the next agent that needs you](#find-the-next-agent-that-needs-you)
 - [AI names agents and organizes the project tree](#ai-names-agents-and-organizes-the-project-tree)
 - [Control Ilium and prompt agents with voice](#control-ilium-and-prompt-agents-with-voice)
 - [Give agent panes automatic titles](#give-agent-panes-automatic-titles)
@@ -36,41 +37,47 @@ Recorded demonstrations of Ilium, one per feature. Each demo is an animated GIF 
 - [Additional file](#additional-file)
 - [Duplicate file names](#duplicate-file-names)
 
+## Find the next agent that needs you
+
+![Real Claude and Codex sessions demonstrate the attention queue, with setup cuts and reading holds](../../assets/demos/27-attention-queue.gif)
+
+The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording uses instant detection and real agent sessions in a fictional museum project. Setup and idle gaps are cut, with frames held for reading. Explained in [Attention queue](attention-queue.md).
+
 ## AI names agents and organizes the project tree
 
-![Ilium names agent panes and organizes the project tree around their work](../../assets/demos/01-ai-tree.gif)
+![A scripted plan regroups current Ilium panes by topic; local fixtures provide no model inference](../../assets/demos/01-ai-tree.gif)
 
-Ilium reads what each agent is working on, gives its pane a name and can regroup the tree around that work. Explained in [Titles and instructions](titles-and-instructions.md).
+A scripted plan regroups current Ilium panes by topic. Local fixture output supplies the plan; no model inference is made. Explained in [Titles and instructions](titles-and-instructions.md).
 
 ## Control Ilium and prompt agents with voice
 
-![Voice commands trigger Ilium actions and send a prompt to Claude](../../assets/demos/02-voice-control.gif)
+![Typed voice commands drive current Ilium through scripted local tools; no microphone or hosted inference is used](../../assets/demos/02-voice-control.gif)
 
-Spoken commands run Ilium actions, and dictated text is sent to an agent as a prompt. Explained in [Voice](voice.md).
+Typed commands pass through a local loopback fixture to real Ilium tools and a real shell. Agent panes are local fixtures; no microphone or hosted inference is shown. Explained in [Voice](voice.md).
 
 ## Give agent panes automatic titles
 
-![Ilium titles agent panes from their content while preserving manual names](../../assets/demos/03-contextual-titles.gif)
+![Current Ilium applies an automatic title from a supplied local response fixture; the manually named Keep pane stays unchanged](../../assets/demos/03-contextual-titles.gif)
 
-Automatic titles follow the pane's content, and a name you typed yourself is never overwritten. Explained in [Titles and instructions](titles-and-instructions.md).
+Current Ilium applies a supplied local response fixture as the automatic title; the manually named Keep pane stays unchanged. Explained in [Titles and instructions](titles-and-instructions.md).
 
 ## Transfer a terminal screen between panes
 
-![Transfer the visible screen to another pane](../../assets/demos/05-screen-transfer.gif)
+![Ilium transfers a complete visible report to a local terminal fixture; the receiver verifies the bytes](../../assets/demos/05-screen-transfer.gif)
 
-The visible screen of one terminal is sent to another pane, for example to hand context to an agent. Explained in [Panes and layout](panes-and-layout.md).
+Screen transfer sends a visible report to the terminal on the right as one bracketed paste. Both terminals use local fixtures; the receiver verifies the bytes. Explained in [Panes and layout](panes-and-layout.md).
 
-## Inspect agent usage and recorded costs
+## Inspect agent usage and recorded costs (historical capture)
 
-![Review an agent's tokens, activity, prompts, and recorded cost](../../assets/demos/06-cost-and-stats.gif)
+![Historical Costs and Stats capture from an older Ilium build; current-build live-resume acceptance remains unverified.](../../assets/demos/06-cost-and-stats.gif)
 
-The statistics view shows an agent's tokens, activity, prompts and the cost Ilium recorded for it. Explained in [Agent cost](agent-cost.md).
+This recording predates the current-build refresh. The current capture has not passed its real-idle check because Codex remained in its resume-directory picker. The existing animation remains a historical illustration. Explained in [Agent cost](agent-cost.md).
 
 ## Track agent status and current goals
 
-![Agent status changes as work progresses, with its goal shown in the tree](../../assets/demos/08-agent-activity.gif)
+![Local scripted fixtures show agent status and a sample goal in the current Ilium tree; no provider session is shown](../../assets/demos/08-agent-activity.gif)
 
-The tree shows each agent's live status and, where the CLI reports one, its current goal. Explained in [Agent monitoring](agent-monitoring.md).
+Local scripted agent fixtures show status changes and a sample goal in the tree. No live provider session is shown. Explained in [Agent monitoring](agent-monitoring.md).
 
 ## Use agents, editors, and terminals side by side
 
@@ -80,21 +87,21 @@ Terminal, editor and board panes share one split view, with the project tree sti
 
 ## Select and copy terminal output
 
-![Select a region of terminal output and copy it](../../assets/demos/11-smart-copy.gif)
+![Ilium Smart Copy selects a lot code from a local fixture ledger; fixture and clipboard readback verify the copied bytes](../../assets/demos/11-smart-copy.gif)
 
-Select a region of terminal output and copy it, with Smart Copy recognising paths, URLs and similar tokens. Explained in [Smart Copy](smart-copy.md).
+Smart Copy highlights and copies a complete source lot code. The terminal and inference use local fixtures; the private clipboard is checked against the source bytes. Explained in [Smart Copy](smart-copy.md).
 
 ## Queue prompts for an agent
 
-![Queued prompts reach the agent in order as its turns finish](../../assets/demos/13-prompt-queue.gif)
+![Queue two prompts for a local Codex-shaped fixture; Ilium sends them in order after each turn. No model; output is synthetic.](../../assets/demos/13-prompt-queue.gif)
 
 Prompts queued for an agent are delivered one by one as each of its turns finishes. Explained in [Automation](automation.md).
 
 ## Get results from background tasks
 
-![A background task reports its result to an agent](../../assets/demos/14-progress-monitor.gif)
+![A local Codex-shaped fixture runs a monitored five-card census task in current Ilium and delivers its result](../../assets/demos/14-progress-monitor.gif)
 
-A progress monitor watches a background task and tells the agent when it finishes or fails. Explained in [Automation](automation.md).
+A local script acts as a Codex-shaped fixture while Ilium registers the monitor, shows progress and posts the completed result. No provider request is made. Explained in [Automation](automation.md).
 
 ## Search agents, files, and terminals
 
@@ -116,15 +123,15 @@ After a restart, Ilium restores the pane layout and resumes the Claude and Codex
 
 ## Choose an animation, then watch it play
 
-![A gallery of 26 recorded animation demos](../../assets/demos/26-animations.gif)
+![Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified](../../assets/demos/26-animations.gif)
 
-A tour of the ambient background animations, picked from Settings and shown full screen. Explained in [Animations](animations.md).
+The current-pinned replacement has not passed visual review: the ready Voxel scene still appears as a faint dot field, even with color enabled and pattern contrast at 200%. This historical asset remains until that scene is recognizable. Explained in [Animations](animations.md).
 
 ## Schedule input for a pane
 
-![A five-second timer sends text to an agent and then to a terminal](../../assets/demos/04-scheduled-input.gif)
+![A five-second countdown sends ping to a labelled local echo-only terminal fixture](../../assets/demos/04-scheduled-input.gif)
 
-A timer sends text to an agent pane and then to a terminal pane after a set delay. Explained in [Automation](automation.md).
+Current Ilium sends ping once after a five-second countdown. The receiving terminal is a labelled local echo-only fixture. Explained in [Automation](automation.md).
 
 ## Set interface and board preferences
 
@@ -146,21 +153,21 @@ The third chapter of the settings tour: automatic titles and setup options. Expl
 
 ## Rearrange panes without stopping their processes
 
-![Move a pane into a group and reorder it while its process keeps running](../../assets/demos/09-pane-tree.gif)
+![Move the Tests fixture pane into Exhibits above Build; the same local fixture process keeps running](../../assets/demos/09-pane-tree.gif)
 
-A pane is moved into a group and reordered while the program inside it keeps running. Explained in [Panes and layout](panes-and-layout.md).
+The real Ilium tree moves a local Tests fixture pane into Exhibits and above Build. Its PID and heartbeat continue through the move; terminal text comes from a disclosed local fixture shell, not an agent. Explained in [Panes and layout](panes-and-layout.md).
 
 ## Request updates from active agents
 
-![Send an update request to active agents](../../assets/demos/12-ask-for-update.gif)
+![Ilium asks two idle local agent fixtures for an update and skips a working fixture](../../assets/demos/12-ask-for-update.gif)
 
-One action sends a status request to every active agent. Explained in [Agent monitoring](agent-monitoring.md).
+Ask for status update sends the built-in prompt to two idle local fixtures. The working fixture receives no input. Explained in [Agent monitoring](agent-monitoring.md).
 
 ## Track work on a Kanban board
 
-![Move a card through the Kanban board](../../assets/demos/15-kanban.gif)
+![Move a Kanban card to Doing, mark it complete, edit its note, then reopen the board and verify the saved Markdown file](../../assets/demos/15-kanban.gif)
 
-A card is moved across the columns of a Kanban board pane. Explained in [Editors and boards](editors-and-boards.md).
+The current Ilium board moves the card into Doing and marks it complete, then edits the board-backed Markdown file and reopens it to verify the saved title and note. The two visible agent panes are idle local CLI-shaped fixtures; the demo makes no provider requests and does not demonstrate live agent classification. Explained in [Editors and boards](editors-and-boards.md).
 
 ## Start a Codex agent from a TODO
 
@@ -182,9 +189,9 @@ A Markdown note is edited in a pane next to the agents. Explained in [Editors an
 
 ## Coordinate Claude and Codex with Chatroom
 
-![Claude and Codex exchange a handoff through Chatroom](../../assets/demos/20-chatroom.gif)
+![The current Ilium Chatroom displays locally scripted Claude and Codex messages; provider agents are not running](../../assets/demos/20-chatroom.gif)
 
-Two agents exchange a handoff through the project's Chatroom. Explained in [Automation](automation.md).
+The current-build Chatroom view shows two local simulation messages. Provider agents are not running. Explained in [Automation](automation.md).
 
 ## Respond to confirmation prompts automatically
 
@@ -200,48 +207,12 @@ Panes are restored from a snapshot and the agents continue from their resumed co
 
 ## Run agents in their own worktrees
 
-![A locally labelled Codex-shaped fixture runs on agent/map-east-side; a terminal shows its worktree path, branch, and file diff](../../assets/demos/25-worktree-agent.gif)
+![Ilium creates agent/map-east-side; a local Codex-shaped fixture runs in that worktree, and a terminal shows the branch and file diff](../../assets/demos/25-worktree-agent.gif)
 
-An agent runs in its own linked worktree on its own branch, with the path, branch and diff visible in a terminal. Explained in [Worktrees](worktrees.md).
+The capture creates a linked Git worktree, then runs a documented local Codex-shaped fixture from its absolute path inside that worktree. It shows the branch and resulting file diff. Typing is shortened, and three editorial captions were added. The built-in provider launch is not intercepted or represented. Explained in [Worktrees](worktrees.md).
 
 ## Convert a session between Claude and Codex
 
 ![A Claude session converts to Codex, which still remembers the secret word, then converts back to Claude](../../assets/demos/26-convert-session.gif)
 
 A session is converted from Claude to Codex and back while keeping its context. Explained in [Session recovery](session-recovery.md).
-
-## Additional file
-
-`14-chatroom-limit-preview.gif` in the same directory is a companion recording to the Chatroom demo above, named for the Chatroom message limit. Chatroom is covered in [Automation](automation.md).
-
-![Chatroom limit preview](../../assets/demos/14-chatroom-limit-preview.gif)
-
-## Duplicate file names
-
-The `assets/demos/` directory also holds copies of several demos under earlier numbering. They are byte-identical to the files shown above (checked by checksum), so they are not repeated in this gallery. Use the names above in links.
-
-| Older name | Same recording as |
-| --- | --- |
-| `01-agent-activity.gif` | `08-agent-activity.gif` |
-| `02-pane-tree.gif` | `09-pane-tree.gif` |
-| `03-mixed-splits.gif` | `10-mixed-splits.gif` |
-| `04-smart-copy.gif` | `11-smart-copy.gif` |
-| `05-ask-for-update.gif` | `12-ask-for-update.gif` |
-| `06-prompt-queue.gif` | `13-prompt-queue.gif` |
-| `07-progress-monitor.gif` | `14-progress-monitor.gif` |
-| `08-kanban.gif` | `15-kanban.gif` |
-| `09-agent-from-line.gif` | `16-agent-from-line.gif` |
-| `10-workspace-search.gif` | `17-workspace-search.gif` |
-| `11-detach-reattach.gif` | `18-detach-reattach.gif` |
-| `12-ai-tree.gif` | `01-ai-tree.gif` |
-| `13-markdown-editor.gif` | `19-markdown-editor.gif` |
-| `14-chatroom.gif` | `20-chatroom.gif` |
-| `15-scheduled-input.gif` | `04-scheduled-input.gif` |
-| `16-text-triggers.gif` | `21-text-triggers.gif` |
-| `17-goal-indicators.gif` | `22-goal-indicators.gif` |
-| `18-screen-transfer.gif` | `05-screen-transfer.gif` |
-| `19-snapshot-resume.gif` | `23-snapshot-resume.gif` |
-| `20-contextual-titles.gif` | `03-contextual-titles.gif` |
-| `21-settings-tour-a / b / c.gif` | `07a / 07b / 07c-settings-tour.gif` |
-| `22-voice-control.gif` | `02-voice-control.gif` |
-| `23-cost-and-stats.gif` | `06-cost-and-stats.gif` |

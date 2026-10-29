@@ -1,0 +1,30 @@
+package ilium:host@0.1.0;
+
+interface process {
+  use ilium:types/ids@0.1.0.{request-id, child-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  /// timeout-millis at most 600,000.
+  record process-spec {
+    program: string, arguments: list<string>, cwd: option<fs-path>, stdin: option<list<u8>>,
+    environment: list<tuple<string, string>>, timeout-millis: u32,
+  }
+  /// status none when the process was killed by a signal. stdout and stderr are each cut at 4 MiB.
+  record process-exit { status: option<s32>, signal: option<string>, stdout: list<u8>, stderr: list<u8> }
+  record spawn-spec { process: process-spec, stdin-open: bool, line-mode: bool }
+  /// Async, take-exit.
+  run: func(spec: process-spec) -> result<request-id, plugin-error>;
+  take-exit: func(request: request-id) -> option<process-exit>;
+  resource child {
+    /// For display only.
+    pid-hint: func() -> u32;
+    write-stdin: func(bytes: list<u8>) -> result<_, plugin-error>;
+    close-stdin: func();
+    /// interrupt, terminate, kill or hangup.
+    signal: func(signal: string) -> result<_, plugin-error>;
+    /// The id carried by child-output and child-exited events.
+    id: func() -> child-id;
+  }
+  /// Delivers child-output and child-exited. At most 2 children per plugin by default, 16 per session.
+  spawn: func(spec: spawn-spec) -> result<child, plugin-error>;
+}

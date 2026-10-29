@@ -82,10 +82,24 @@ pub enum IconTarget {
     AgentToolbarExit,
     AgentToolbarFast,
     AgentToolbarSelection,
+    /// The small dot in a pane's header that opens the recap popover.
+    ChromeRecap,
+    AttentionSnooze,
+    ResourceFree,
+    ResourceTaken,
+    ResourceQueued,
+    ResourcePaused,
+    ResourceUnavailable,
+    ResourceAttention,
+    ResourceOwner,
+    ResourceQueue,
+    SpendingMedalGold,
+    SpendingMedalSilver,
+    SpendingMedalBronze,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 67] = [
+    pub const ALL: [Self; 80] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -153,6 +167,19 @@ impl IconTarget {
         Self::AgentToolbarExit,
         Self::AgentToolbarFast,
         Self::AgentToolbarSelection,
+        Self::ChromeRecap,
+        Self::AttentionSnooze,
+        Self::ResourceFree,
+        Self::ResourceTaken,
+        Self::ResourceQueued,
+        Self::ResourcePaused,
+        Self::ResourceUnavailable,
+        Self::ResourceAttention,
+        Self::ResourceOwner,
+        Self::ResourceQueue,
+        Self::SpendingMedalGold,
+        Self::SpendingMedalSilver,
+        Self::SpendingMedalBronze,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -224,6 +251,19 @@ impl IconTarget {
             Self::AgentToolbarExit => "Agent toolbar: exit",
             Self::AgentToolbarFast => "Agent toolbar: fast",
             Self::AgentToolbarSelection => "Agent toolbar: text selection toggle",
+            Self::ChromeRecap => "Pane header: recap dot",
+            Self::AttentionSnooze => "Attention: snooze",
+            Self::ResourceFree => "Resource: free",
+            Self::ResourceTaken => "Resource: taken",
+            Self::ResourceQueued => "Resource: waiting agent",
+            Self::ResourcePaused => "Resource: paused",
+            Self::ResourceUnavailable => "Resource: unavailable",
+            Self::ResourceAttention => "Resource: needs attention",
+            Self::ResourceOwner => "Resource: owner",
+            Self::ResourceQueue => "Resource: queue count",
+            Self::SpendingMedalGold => "Spending medal: gold",
+            Self::SpendingMedalSilver => "Spending medal: silver",
+            Self::SpendingMedalBronze => "Spending medal: bronze",
         }
     }
 
@@ -296,6 +336,19 @@ impl IconTarget {
             Self::AgentToolbarExit => "agent_toolbar_exit",
             Self::AgentToolbarFast => "agent_toolbar_fast",
             Self::AgentToolbarSelection => "agent_toolbar_selection",
+            Self::ChromeRecap => "chrome_recap",
+            Self::AttentionSnooze => "attention_snooze",
+            Self::ResourceFree => "resource_free",
+            Self::ResourceTaken => "resource_taken",
+            Self::ResourceQueued => "resource_queued",
+            Self::ResourcePaused => "resource_paused",
+            Self::ResourceUnavailable => "resource_unavailable",
+            Self::ResourceAttention => "resource_attention",
+            Self::ResourceOwner => "resource_owner",
+            Self::ResourceQueue => "resource_queue",
+            Self::SpendingMedalGold => "spending_medal_gold",
+            Self::SpendingMedalSilver => "spending_medal_silver",
+            Self::SpendingMedalBronze => "spending_medal_bronze",
         }
     }
 
@@ -372,6 +425,19 @@ impl IconTarget {
             Self::AgentToolbarExit => "🚪",
             Self::AgentToolbarFast => "⚡",
             Self::AgentToolbarSelection => "🖱️",
+            Self::ChromeRecap => "·",
+            Self::AttentionSnooze => "💤",
+            Self::ResourceFree => "✓",
+            Self::ResourceTaken => "🔒",
+            Self::ResourceQueued => "⌛",
+            Self::ResourcePaused => "⏸",
+            Self::ResourceUnavailable => "⊘",
+            Self::ResourceAttention => "⚠",
+            Self::ResourceOwner => "🔑",
+            Self::ResourceQueue => "⇥",
+            Self::SpendingMedalGold => "🥇",
+            Self::SpendingMedalSilver => "🥈",
+            Self::SpendingMedalBronze => "🥉",
         }
     }
 
@@ -469,6 +535,19 @@ impl IconTarget {
             Self::AgentToolbarExit => &["🚪", "⏏️", "👋", "⛔"],
             Self::AgentToolbarFast => &["⚡", "🚀", "💨", "🏃"],
             Self::AgentToolbarSelection => &["🖱️", "◫", "▧", "Ⓢ"],
+            Self::ChromeRecap => &["·", "•", "◦", "∙"],
+            Self::AttentionSnooze => &["💤", "⏸", "☾"],
+            Self::ResourceFree => &["✓"],
+            Self::ResourceTaken => &["🔒"],
+            Self::ResourceQueued => &["⌛"],
+            Self::ResourcePaused => &["⏸"],
+            Self::ResourceUnavailable => &["⊘"],
+            Self::ResourceAttention => &["⚠"],
+            Self::ResourceOwner => &["🔑"],
+            Self::ResourceQueue => &["⇥"],
+            Self::SpendingMedalGold => &["🥇", "🏆", "★", "◆"],
+            Self::SpendingMedalSilver => &["🥈", "☆", "◇", "◆"],
+            Self::SpendingMedalBronze => &["🥉", "✦", "◈", "◆"],
         }
     }
 }
@@ -547,6 +626,19 @@ pub struct IconSettings {
     pub agent_toolbar_exit: String,
     pub agent_toolbar_fast: String,
     pub agent_toolbar_selection: String,
+    pub chrome_recap: String,
+    pub attention_snooze: String,
+    pub resource_free: String,
+    pub resource_taken: String,
+    pub resource_queued: String,
+    pub resource_paused: String,
+    pub resource_unavailable: String,
+    pub resource_attention: String,
+    pub resource_owner: String,
+    pub resource_queue: String,
+    pub spending_medal_gold: String,
+    pub spending_medal_silver: String,
+    pub spending_medal_bronze: String,
 }
 
 impl Default for IconSettings {
@@ -626,6 +718,19 @@ impl IconSettings {
             agent_toolbar_exit: value(IconTarget::AgentToolbarExit),
             agent_toolbar_fast: value(IconTarget::AgentToolbarFast),
             agent_toolbar_selection: value(IconTarget::AgentToolbarSelection),
+            chrome_recap: value(IconTarget::ChromeRecap),
+            attention_snooze: value(IconTarget::AttentionSnooze),
+            resource_free: value(IconTarget::ResourceFree),
+            resource_taken: value(IconTarget::ResourceTaken),
+            resource_queued: value(IconTarget::ResourceQueued),
+            resource_paused: value(IconTarget::ResourcePaused),
+            resource_unavailable: value(IconTarget::ResourceUnavailable),
+            resource_attention: value(IconTarget::ResourceAttention),
+            resource_owner: value(IconTarget::ResourceOwner),
+            resource_queue: value(IconTarget::ResourceQueue),
+            spending_medal_gold: value(IconTarget::SpendingMedalGold),
+            spending_medal_silver: value(IconTarget::SpendingMedalSilver),
+            spending_medal_bronze: value(IconTarget::SpendingMedalBronze),
         }
     }
 
@@ -698,6 +803,19 @@ impl IconSettings {
             IconTarget::AgentToolbarExit => &self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
+            IconTarget::ChromeRecap => &self.chrome_recap,
+            IconTarget::AttentionSnooze => &self.attention_snooze,
+            IconTarget::ResourceFree => &self.resource_free,
+            IconTarget::ResourceTaken => &self.resource_taken,
+            IconTarget::ResourceQueued => &self.resource_queued,
+            IconTarget::ResourcePaused => &self.resource_paused,
+            IconTarget::ResourceUnavailable => &self.resource_unavailable,
+            IconTarget::ResourceAttention => &self.resource_attention,
+            IconTarget::ResourceOwner => &self.resource_owner,
+            IconTarget::ResourceQueue => &self.resource_queue,
+            IconTarget::SpendingMedalGold => &self.spending_medal_gold,
+            IconTarget::SpendingMedalSilver => &self.spending_medal_silver,
+            IconTarget::SpendingMedalBronze => &self.spending_medal_bronze,
         }
     }
 
@@ -779,6 +897,19 @@ impl IconSettings {
             IconTarget::AgentToolbarExit => &mut self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &mut self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &mut self.agent_toolbar_selection,
+            IconTarget::ChromeRecap => &mut self.chrome_recap,
+            IconTarget::AttentionSnooze => &mut self.attention_snooze,
+            IconTarget::ResourceFree => &mut self.resource_free,
+            IconTarget::ResourceTaken => &mut self.resource_taken,
+            IconTarget::ResourceQueued => &mut self.resource_queued,
+            IconTarget::ResourcePaused => &mut self.resource_paused,
+            IconTarget::ResourceUnavailable => &mut self.resource_unavailable,
+            IconTarget::ResourceAttention => &mut self.resource_attention,
+            IconTarget::ResourceOwner => &mut self.resource_owner,
+            IconTarget::ResourceQueue => &mut self.resource_queue,
+            IconTarget::SpendingMedalGold => &mut self.spending_medal_gold,
+            IconTarget::SpendingMedalSilver => &mut self.spending_medal_silver,
+            IconTarget::SpendingMedalBronze => &mut self.spending_medal_bronze,
         };
         *slot = glyph;
     }
@@ -1275,6 +1406,23 @@ mod tests {
 
         icons.set(IconTarget::FrozenAgent, "❅".to_string());
         assert_eq!(icons.glyph(IconTarget::FrozenAgent), "❅");
+        assert_eq!(icons.glyph(IconTarget::Lock), "🔒");
+    }
+
+    #[test]
+    fn chrome_recap_dot_is_a_configurable_pane_header_target() {
+        let mut icons = IconSettings::default();
+
+        assert!(IconTarget::ALL.contains(&IconTarget::ChromeRecap));
+        assert_eq!(IconTarget::ChromeRecap.key(), "chrome_recap");
+        assert_eq!(IconTarget::ChromeRecap.default_glyph(), "·");
+        assert_eq!(
+            IconTarget::from_key("chrome_recap"),
+            Some(IconTarget::ChromeRecap)
+        );
+        assert_eq!(icons.glyph(IconTarget::ChromeRecap), "·");
+        icons.set(IconTarget::ChromeRecap, "•".to_string());
+        assert_eq!(icons.glyph(IconTarget::ChromeRecap), "•");
         assert_eq!(icons.glyph(IconTarget::Lock), "🔒");
     }
 

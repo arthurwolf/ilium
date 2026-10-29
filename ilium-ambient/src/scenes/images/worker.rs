@@ -523,14 +523,14 @@ mod tests {
     }
 
     fn constrained_resources() -> (Execution, crate::resources::AmbientResources) {
+        // Admit the encoded download's finite input cost so this fixture
+        // specifically exercises its smaller physical storage limit.
         let quota = QuotaGroup::new(QuotaLimits {
             clients: 1,
             jobs: 4,
             service_jobs: 0,
-            // A 32 MiB download reserves twice its size as input; the job
-            // limits must admit it so the storage refusal is what is tested.
             input_bytes: 128 * 1024 * 1024,
-            result_bytes: 128 * 1024 * 1024,
+            result_bytes: 64 * 1024 * 1024,
             worker_threads: 4,
             worker_bytes: 8 * 1024 * 1024,
         });
@@ -560,7 +560,7 @@ mod tests {
                 jobs: 4,
                 service_jobs: 0,
                 input_bytes: 128 * 1024 * 1024,
-                result_bytes: 128 * 1024 * 1024,
+                result_bytes: 64 * 1024 * 1024,
             })
             .expect("isolated image client");
         (execution, crate::resources::AmbientResources::new(finite))
@@ -619,6 +619,11 @@ mod tests {
             WorkerEvent::Failed { index, message, .. } => {
                 assert_eq!(index, 1);
                 assert!(message.view().contains("bad.png"), "{}", message.view());
+                assert!(
+                    message.view().contains("not a readable image"),
+                    "{}",
+                    message.view()
+                );
             }
             _ => panic!("expected failure"),
         }
@@ -694,13 +699,20 @@ mod tests {
             })
             .expect("request admitted");
         match wait_event(&loader) {
-            WorkerEvent::Failed { message, .. } => assert!(
-                message
-                    .view()
-                    .contains("download storage exceeds available resource capacity"),
-                "{}",
-                message.view()
-            ),
+            WorkerEvent::Failed {
+                index,
+                generation,
+                message,
+            } => {
+                assert_eq!((index, generation), (0, 1));
+                assert!(
+                    message
+                        .view()
+                        .contains("download storage exceeds available resource capacity"),
+                    "{}",
+                    message.view()
+                );
+            }
             _ => panic!("expected permanent storage-capacity refusal"),
         }
         drop(loader);

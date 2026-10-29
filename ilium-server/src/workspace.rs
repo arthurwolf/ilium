@@ -201,26 +201,44 @@ pub(crate) async fn default_new_worktree_spec(
 
 /// Collects one bounded dialog snapshot. Every mutation is revalidated later.
 pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<RepoFacts, String> {
-    let execution = state
-        .execution
-        .get()
-        .ok_or_else(|| "workspace execution service is unavailable".to_string())?;
+    let _admission = state
+        .repo_facts_admission
+        .try_acquire()
+        .map_err(|_| "too many repository queries; retry shortly".to_string())?;
     if !secure_fs::supports_nofollow_directories() {
         return Err("agent worktrees are unavailable: this platform cannot secure workspace ownership paths".into());
     }
     let project_cwd = project_directory(state, project).await?;
-    let repository = ilium_git::discover(&project_cwd)
-        .await
-        .map_err(|error| error.to_string())?;
+    let repository = state
+        .repo_discovery_cache
+        .get((project_cwd.clone(), PathBuf::new()), async {
+            ilium_git::discover(&project_cwd)
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .await?;
     if repository.is_bare {
         return Err("bare repositories cannot host agent panes".into());
     }
-    // Keep the Git registration and ownership-marker snapshot together while
-    // another request may be creating or removing a worktree.
-    let repository_lock = state
-        .workspace_repository_lock(&repository.common_dir)
-        .await;
-    let _guard = repository_lock.lock().await;
+    let key = (
+        repository.worktree_root.join(&repository.project_subpath),
+        repository.common_dir.clone(),
+    );
+    state
+        .repo_facts_cache
+        .get(key, collect_repo_facts(state, project_cwd, repository))
+        .await
+}
+
+async fn collect_repo_facts(
+    state: &ServerState,
+    project_cwd: PathBuf,
+    repository: ilium_git::Repository,
+) -> Result<RepoFacts, String> {
+    let execution = state
+        .execution
+        .get()
+        .ok_or("workspace execution service is unavailable")?;
     let default_base_ref = ilium_git::default_base_ref(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
@@ -230,64 +248,26 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
     let local_branches = ilium_git::list_branches(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
+    // Keep the Git registration and ownership-marker snapshot together while
+    // another request may be creating or removing a worktree.
+    let repository_lock = state
+        .workspace_repository_lock(&repository.common_dir)
+        .await;
+    let _guard = repository_lock.lock().await;
     let listed = ilium_git::list_worktrees(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
     crate::workspace_owner::validate_registered_worktree_count(listed.len())
         .map_err(|error| error.to_string())?;
-    let current_branch = ilium_git::head_probe(&project_cwd)
-        .await
-        .map_err(|error| error.to_string())?
-        .branch;
-    let source_status = ilium_git::status(&project_cwd)
-        .await
-        .map_err(|error| error.to_string())?;
-    let source_dirty_count = source_status
-        .staged
-        .saturating_add(source_status.modified)
-        .saturating_add(source_status.untracked)
-        .saturating_add(source_status.conflicted);
     let main_directory = listed
         .first()
         .map(|entry| entry.path.clone())
         .ok_or("Git reported no worktrees")?;
-    let main_status = if main_directory == repository.worktree_root {
-        source_status
-    } else {
-        ilium_git::status(&main_directory)
-            .await
-            .map_err(|error| format!("cannot read main checkout status: {error}"))?
-    };
-    let main_dirty_count = main_status
-        .staged
-        .saturating_add(main_status.modified)
-        .saturating_add(main_status.untracked)
-        .saturating_add(main_status.conflicted);
     let gitmodules_path = repository.worktree_root.join(".gitmodules");
     let (worktree_directories, has_gitmodules) =
         repo_facts_path_metadata(&execution.client, &listed, &gitmodules_path).await?;
-    let occupied = {
-        let tree = state.tree.read().await;
-        tree.panes()
-            .filter_map(|pane| {
-                tree.pane_cwd(pane.id)
-                    .map(|directory| (pane.id, directory.to_path_buf()))
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut worktrees = Vec::with_capacity(listed.len());
-    for (entry, is_directory) in listed.into_iter().zip(worktree_directories) {
-        let existing = occupied
-            .iter()
-            .find(|(_, directory)| directory.starts_with(&entry.path));
-        let is_dirty = if entry.is_prunable || !is_directory {
-            true
-        } else {
-            ilium_git::status(&entry.path)
-                .await
-                .map(|status| !status.is_clean())
-                .unwrap_or(true)
-        };
+    let mut ownership = Vec::with_capacity(listed.len());
+    for (entry, is_directory) in listed.iter().zip(&worktree_directories) {
         let created_by_ilium = if entry.path == main_directory || entry.is_prunable || !is_directory
         {
             false
@@ -306,6 +286,76 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
             })?
             .is_some()
         };
+        ownership.push(created_by_ilium);
+    }
+    // Status scans are read-only hints. Never hold mutation admission behind
+    // arbitrarily slow index/status reads for every registered worktree.
+    drop(_guard);
+    let current_branch = ilium_git::head_probe(&project_cwd)
+        .await
+        .map_err(|error| error.to_string())?
+        .branch;
+    let source_status = ilium_git::status(&project_cwd)
+        .await
+        .map_err(|error| error.to_string())?;
+    let source_dirty_count = source_status
+        .staged
+        .saturating_add(source_status.modified)
+        .saturating_add(source_status.untracked)
+        .saturating_add(source_status.conflicted);
+    let main_status = if main_directory == repository.worktree_root {
+        source_status
+    } else {
+        ilium_git::status(&main_directory)
+            .await
+            .map_err(|error| format!("cannot read main checkout status: {error}"))?
+    };
+    let main_dirty_count = main_status
+        .staged
+        .saturating_add(main_status.modified)
+        .saturating_add(main_status.untracked)
+        .saturating_add(main_status.conflicted);
+    let occupied = {
+        let tree = state.tree.read().await;
+        tree.panes()
+            .filter_map(|pane| {
+                tree.pane_cwd(pane.id)
+                    .map(|directory| (pane.id, directory.to_path_buf()))
+            })
+            .collect::<Vec<_>>()
+    };
+    // Four statuses at a time, with JoinSet ownership cancelling every child
+    // when the query is dropped. Preserve Git's original worktree ordering.
+    let mut dirty = vec![true; listed.len()];
+    for (chunk_index, chunk) in listed.chunks(4).enumerate() {
+        let mut statuses = tokio::task::JoinSet::new();
+        for (offset, entry) in chunk.iter().enumerate() {
+            let index = chunk_index * 4 + offset;
+            if entry.is_prunable || !worktree_directories[index] {
+                continue;
+            }
+            let path = entry.path.clone();
+            statuses.spawn(async move {
+                (
+                    index,
+                    ilium_git::status(&path)
+                        .await
+                        .map(|status| !status.is_clean())
+                        .unwrap_or(true),
+                )
+            });
+        }
+        while let Some(result) = statuses.join_next().await {
+            let (index, is_dirty) =
+                result.map_err(|error| format!("worktree status worker failed: {error}"))?;
+            dirty[index] = is_dirty;
+        }
+    }
+    let mut worktrees = Vec::with_capacity(listed.len());
+    for ((entry, is_dirty), created_by_ilium) in listed.into_iter().zip(dirty).zip(ownership) {
+        let existing = occupied
+            .iter()
+            .find(|(_, directory)| directory.starts_with(&entry.path));
         worktrees.push(WorkspaceWorktreeFact {
             path: entry.path,
             branch: entry.branch,
@@ -645,6 +695,112 @@ async fn repo_facts_path_metadata(
     Ok((directories, has_gitmodules))
 }
 
+#[derive(Debug, thiserror::Error)]
+enum IncludePreparationError {
+    #[error(transparent)]
+    Execution(#[from] crate::execution::ExecutionError<crate::worktree_include::IncludeCopyError>),
+    #[error("{0}")]
+    Storage(String),
+}
+
+/// Complete the copy's original ownership transfer before its caller awaits
+/// setup, validation or rollback I/O from the same General execution tenant.
+async fn prepare_workspace_includes(
+    client: &ExecutionClient,
+    source_project: PathBuf,
+    target_project: PathBuf,
+) -> Result<Retained<crate::worktree_include::IncludeCopyReport>, IncludePreparationError> {
+    let mut include_result = client
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 16 * 1024 * 1024,
+                result_bytes: 16 * 1024 * 1024,
+            },
+            move |context: ilium_execution::JobContext| {
+                let result = crate::worktree_include::copy_worktree_includes_with_stop(
+                    &source_project,
+                    &target_project,
+                    || context.stop_requested(),
+                );
+                if !context.stop_requested() {
+                    return result;
+                }
+                match result {
+                    Ok(report) => match crate::worktree_include::remove_created_report(
+                        &target_project,
+                        &report,
+                    ) {
+                        Ok(()) => Err(crate::worktree_include::cancelled_error()),
+                        Err(error) => Err(crate::worktree_include::report_as_error(
+                            format!("cancelled copy rollback failed: {error}"),
+                            report,
+                        )),
+                    },
+                    Err(error) => {
+                        match crate::worktree_include::remove_created_files(&target_project, &error)
+                        {
+                            Ok(()) => Err(crate::worktree_include::cancelled_error()),
+                            Err(_) => Err(error),
+                        }
+                    }
+                }
+            },
+        )
+        .await;
+    match &mut include_result {
+        Ok(report) => {
+            let backing = report.view().retained_backing_bytes();
+            release_completed_include_execution(report, backing).await?;
+        }
+        Err(crate::execution::ExecutionError::Failed(error)) => {
+            let backing = error.view().retained_backing_bytes();
+            release_completed_include_execution(error, backing).await?;
+        }
+        // NotStarted/cancelled and uncertain outcomes retain their existing
+        // worker custody; they are never presented as completed storage.
+        Err(_) => {}
+    }
+    include_result.map_err(IncludePreparationError::Execution)
+}
+
+async fn release_completed_include_execution<T>(
+    retained: &mut Retained<T>,
+    backing_bytes: Option<usize>,
+) -> Result<(), IncludePreparationError> {
+    // The module-owned size includes both vectors' allocated slots, every
+    // original/duplicate path allocation, and an error's String capacity.
+    let payload_bytes = backing_bytes
+        .and_then(|bytes| std::mem::size_of::<Retained<T>>().checked_add(bytes))
+        .ok_or_else(|| {
+            IncludePreparationError::Storage("include result storage size overflow".into())
+        })?;
+    let storage_bytes = ilium_execution::retained_result_storage_bytes::<T>(payload_bytes)
+        .map_err(|reason| {
+            IncludePreparationError::Storage(format!(
+                "include result storage sizing failed: {reason:?}"
+            ))
+        })?;
+    // Copy input/captures and temporary traversal buffers have been destroyed.
+    // Only the completing worker's final receipt hold can briefly be shared.
+    // The subtraction uses the same debit; there is no new admission or gap.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match retained.try_reduce_to_result_storage(storage_bytes) {
+                Ok(()) => return Ok(()),
+                Err(ilium_execution::RejectReason::Busy) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+                Err(reason) => return Err(IncludePreparationError::Storage(format!(
+                    "include result storage transfer failed: {reason:?}; required_storage_bytes={storage_bytes}; retained_payload_bytes={payload_bytes}"
+                ))),
+            }
+        }
+    }).await.map_err(|_| IncludePreparationError::Storage(
+        "include result completion transfer timed out".into()
+    ))?
+}
+
 /// Roll back only when include preparation wrote no path and Git finds no
 /// other changes. File identity does not prove copied contents are unchanged.
 enum CreatedIncludes {
@@ -678,6 +834,21 @@ async fn rollback_pre_pane_workspace(
             path.display()
         );
     };
+    // A launch can have durably reserved custody before its native spawn
+    // returns a visible child. A momentary empty process scan cannot disprove
+    // that in-flight spawn, so rollback shares the final prune refusal gate.
+    if let Err(problem) = crate::workspace_custody::require_no_tickets(
+        &execution.client,
+        &workspace.repo_common_dir,
+        &workspace.worktree_root,
+    )
+    .await
+    {
+        return format!(
+            "worktree retained at {}: rollback refused because process custody is unresolved: {problem}; checkout, ownership marker, and branch retained",
+            path.display()
+        );
+    }
     let cleanup_path = path.clone();
     match execution
         .client
@@ -868,9 +1039,19 @@ pub(crate) struct CreateAgentOptions {
     pub parent_group: NodeId,
     pub project_override: Option<PathBuf>,
     pub provider: BuiltinAgentProvider,
+    pub custom_agent: Option<ilium_core::custom_agent::CustomAgentIdentity>,
     pub spec: WorkspaceCreateSpec,
     pub initial_input: Option<String>,
     pub wait_for_prompt: bool,
+}
+
+/// Adds the worktree wrap-up steps after the user's own prompt, so the agent
+/// learns how to close its worktree with `ilium close-pane` when it finishes.
+fn with_worktree_wrap_up(initial_input: String) -> String {
+    format!(
+        "{initial_input}\n\n{}",
+        ilium_prompts::agent::WORKTREE_WRAP_UP_INSTRUCTIONS.trim_end()
+    )
 }
 
 pub(crate) async fn create_agent_in_workspace(
@@ -886,10 +1067,37 @@ pub(crate) async fn create_agent_in_workspace(
         parent_group,
         project_override,
         provider,
+        custom_agent,
         spec,
         initial_input,
         wait_for_prompt,
     } = options;
+    if let Some(identity) = &custom_agent {
+        if identity.base_provider != provider {
+            return Err("custom agent provider does not match the workspace request".into());
+        }
+        let config_dir = state
+            .text_trigger_config_path
+            .get()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .or_else(|| crate::paths::config_dir().ok())
+            .ok_or_else(|| "custom agent configuration directory is unavailable".to_string())?;
+        crate::custom_agent_config::resolve(&config_dir, identity)
+            .map_err(|error| error.to_string())?;
+    }
+    // Only worktrees Ilium creates get the wrap-up instruction: an existing
+    // checkout is never removed by `ilium close-pane --worktree remove`.
+    let creates_worktree = matches!(
+        spec,
+        WorkspaceCreateSpec::New { .. } | WorkspaceCreateSpec::NewAtDefaultPath { .. }
+    );
+    let initial_input = initial_input.map(|input| {
+        if creates_worktree {
+            with_worktree_wrap_up(input)
+        } else {
+            input
+        }
+    });
     let project_cwd = match &project_override {
         Some(path) => path.clone(),
         None => project_directory(state, parent_group).await?,
@@ -1115,50 +1323,25 @@ pub(crate) async fn create_agent_in_workspace(
                     path.display()
                 ));
             };
-            let source_project = project_cwd.clone();
-            let target_project = launch_cwd.clone();
-            let include_result = execution
-                .client
-                .run(
-                    Lane::Io,
-                    JobCost {
-                        input_bytes: 16 * 1024 * 1024,
-                        result_bytes: 16 * 1024 * 1024,
-                    },
-                    move |context: ilium_execution::JobContext| {
-                        let result = crate::worktree_include::copy_worktree_includes_with_stop(
-                            &source_project,
-                            &target_project,
-                            || context.stop_requested(),
-                        );
-                        if !context.stop_requested() {
-                            return result;
-                        }
-                        match result {
-                            Ok(report) => match crate::worktree_include::remove_created_report(
-                                &target_project,
-                                &report,
-                            ) {
-                                Ok(()) => Err(crate::worktree_include::cancelled_error()),
-                                Err(error) => Err(crate::worktree_include::report_as_error(
-                                    format!("cancelled copy rollback failed: {error}"),
-                                    report,
-                                )),
-                            },
-                            Err(error) => match crate::worktree_include::remove_created_files(
-                                &target_project,
-                                &error,
-                            ) {
-                                Ok(()) => Err(crate::worktree_include::cancelled_error()),
-                                Err(_) => Err(error),
-                            },
-                        }
-                    },
-                )
-                .await;
+            let include_result = prepare_workspace_includes(
+                &execution.client,
+                project_cwd.clone(),
+                launch_cwd.clone(),
+            )
+            .await;
             let include_report = match include_result {
                 Ok(report) => report,
-                Err(crate::execution::ExecutionError::Failed(error)) => {
+                Err(IncludePreparationError::Storage(reason)) => {
+                    // The copy may have written paths. A transfer refusal is
+                    // never an unstarted job and cannot authorize rollback.
+                    return Err(format!(
+                        "include preparation storage could not be retained: {reason}; worktree retained at {} with its ownership marker and branch",
+                        path.display()
+                    ));
+                }
+                Err(IncludePreparationError::Execution(
+                    crate::execution::ExecutionError::Failed(error),
+                )) => {
                     let reason = error.view().to_string();
                     let rollback = rollback_pre_pane_workspace(
                         state,
@@ -1170,7 +1353,9 @@ pub(crate) async fn create_agent_in_workspace(
                     .await;
                     return Err(format!("include preparation failed: {reason}; {rollback}"));
                 }
-                Err(crate::execution::ExecutionError::Rejected(reason)) => {
+                Err(IncludePreparationError::Execution(
+                    crate::execution::ExecutionError::Rejected(reason),
+                )) => {
                     let rollback = rollback_pre_pane_workspace(
                         state,
                         &project_cwd,
@@ -1183,16 +1368,18 @@ pub(crate) async fn create_agent_in_workspace(
                         "include preparation was not admitted ({reason:?}); {rollback}"
                     ));
                 }
-                Err(
+                Err(IncludePreparationError::Execution(
                     reason @ (crate::execution::ExecutionError::Panicked
                     | crate::execution::ExecutionError::Lost),
-                ) => {
+                )) => {
                     return Err(format!(
                         "include preparation outcome is uncertain ({reason}); worktree retained at {}",
                         path.display()
                     ));
                 }
-                Err(crate::execution::ExecutionError::Cancelled) => {
+                Err(IncludePreparationError::Execution(
+                    crate::execution::ExecutionError::Cancelled,
+                )) => {
                     let rollback = rollback_pre_pane_workspace(
                         state,
                         &project_cwd,
@@ -1271,15 +1458,6 @@ pub(crate) async fn create_agent_in_workspace(
                 .any(|entry| !entry.is_prunable && entry.path == path)
             {
                 return Err("existing checkout is absent from Git's worktree list".into());
-            }
-            {
-                let tree = state.tree.read().await;
-                if tree.panes().any(|pane| {
-                    tree.pane_cwd(pane.id)
-                        .is_some_and(|cwd| cwd.starts_with(&path))
-                }) {
-                    return Err("another Ilium pane already uses this worktree".into());
-                }
             }
             let launch_cwd = path.join(&source.project_subpath);
             if !crate::workspace_owner::is_directory(&execution.client, &launch_cwd)
@@ -1404,6 +1582,14 @@ pub(crate) async fn create_agent_in_workspace(
         } else {
             parent_group
         };
+        // Publish provenance before the node becomes visible. Fixed worktree
+        // containers admit members only through set_pane_workspace below.
+        let parent_group = if tree.worktree_container_for_node(parent_group).is_some() {
+            tree.project_ancestor(parent_group)
+                .ok_or_else(|| "worktree is missing its project".to_string())?
+        } else {
+            parent_group
+        };
         let pane_id = tree
             .add_pane(
                 parent_group,
@@ -1457,7 +1643,15 @@ pub(crate) async fn create_agent_in_workspace(
     };
     drop(repository_lease.take()); // Release cross-process admission before re-entering rollback or spawn.
     drop(repo_guard.take()); // Release the process-local repository reservation.
-    let origin = TerminalOrigin::Command(command_line);
+    let identity_for_projection = custom_agent.clone();
+    let origin = match custom_agent {
+        Some(identity) => TerminalOrigin::CustomAgent {
+            identity,
+            command_line,
+            frozen: false,
+        },
+        None => TerminalOrigin::Command(command_line),
+    };
     match spawn_and_register_pane_in_directory(
         state,
         pane_id,
@@ -1467,6 +1661,16 @@ pub(crate) async fn create_agent_in_workspace(
     .await
     {
         Ok(()) => {}
+        Err(RegisterPaneError::Admission(reason)) => {
+            state
+                .workspace_close_preferences
+                .write()
+                .await
+                .remove(&pane_id);
+            return Err(format!(
+                "worktree retained: pane admission refused: {reason}"
+            ));
+        }
         Err(RegisterPaneError::NodeRemoved(_)) => {
             state
                 .workspace_close_preferences
@@ -1489,6 +1693,12 @@ pub(crate) async fn create_agent_in_workspace(
         }
     }
     broadcast_and_persist(state).await;
+    if let Some(identity) = identity_for_projection {
+        state.broadcast(ilium_ipc::ServerEvent::PaneCustomAgentIdentity {
+            pane_id,
+            identity: Some(identity),
+        });
+    }
     if let Some(initial_input) = initial_input {
         let completion =
             crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
@@ -1624,6 +1834,367 @@ mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
+
+    struct RollbackFixture {
+        _directory: TempDir,
+        state: Arc<ServerState>,
+        main: PathBuf,
+        workspace: PaneWorkspace,
+        marker: crate::workspace_owner::OwnershipMarker,
+        marker_path: PathBuf,
+        marker_bytes: Vec<u8>,
+    }
+
+    async fn rollback_fixture() -> RollbackFixture {
+        let directory = TempDir::new().expect("isolated rollback repository");
+        let root = paths::canonicalize(directory.path()).expect("fixture root");
+        let main = root.join("main");
+        std::fs::create_dir(&main).expect("main checkout");
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["config", "user.name", "Ilium Test"]);
+        git(&main, &["config", "user.email", "ilium@example.invalid"]);
+        std::fs::write(main.join("tracked.txt"), b"tracked fixture content\n")
+            .expect("tracked fixture file");
+        git(&main, &["add", "tracked.txt"]);
+        git(&main, &["commit", "-q", "-m", "initial"]);
+        let base_commit = ilium_git::resolve_commit(&main, "main")
+            .await
+            .expect("base commit");
+        let linked = root.join("linked");
+        ilium_git::create_worktree(&main, &linked, "agent/rollback", "main")
+            .await
+            .expect("linked checkout");
+        let repository = ilium_git::discover(&linked)
+            .await
+            .expect("linked repository");
+        let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "rollback-custody-test".into(),
+            session_cwd: main.clone(),
+            home_dir: root.clone(),
+            snapshot_path: root.join("session.json"),
+            socket_path: root.join("session.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("independent finite bank"))
+            .is_ok());
+        let mut workspace = PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: repository.common_dir,
+            worktree_root: repository.worktree_root,
+            branch: "agent/rollback".into(),
+            base_ref: "main".into(),
+            base_commit,
+            created_by_ilium: true,
+            created_at_unix: 1_700_000_000,
+        };
+        let execution = state.execution.get().expect("finite bank");
+        let marker = crate::workspace_owner::create_marker(&execution.client, &mut workspace)
+            .await
+            .expect("real ownership marker");
+        let marker_path = ilium_git::head_paths(&linked)
+            .await
+            .expect("Git metadata path")
+            .head
+            .parent()
+            .expect("Git metadata directory")
+            .join("ilium-workspace-owner.json");
+        let marker_bytes = std::fs::read(&marker_path).expect("original durable marker");
+        RollbackFixture {
+            _directory: directory,
+            state,
+            main,
+            workspace,
+            marker,
+            marker_path,
+            marker_bytes,
+        }
+    }
+
+    async fn assert_rollback_retained(fixture: &RollbackFixture) {
+        assert!(
+            fixture.workspace.worktree_root.is_dir(),
+            "checkout retained"
+        );
+        assert_eq!(
+            std::fs::read(fixture.workspace.worktree_root.join("tracked.txt"))
+                .expect("tracked file retained"),
+            b"tracked fixture content\n"
+        );
+        assert_eq!(
+            std::fs::read(&fixture.marker_path).expect("marker retained"),
+            fixture.marker_bytes
+        );
+        assert_eq!(
+            ilium_git::branch_tip(&fixture.main, &fixture.workspace.branch)
+                .await
+                .expect("branch tip"),
+            Some(fixture.workspace.base_commit.clone())
+        );
+        assert!(ilium_git::list_worktrees(&fixture.main)
+            .await
+            .expect("registrations")
+            .iter()
+            .any(|entry| entry.path == fixture.workspace.worktree_root));
+    }
+
+    #[tokio::test]
+    async fn rollback_refuses_a_durable_spawn_ticket_before_checkout_cleanup() {
+        let fixture = rollback_fixture().await;
+        let execution = fixture.state.execution.get().expect("finite bank");
+        let ticket = crate::workspace_custody::begin(&execution.client, &fixture.marker)
+            .await
+            .expect("actual fsynced spawn custody ticket");
+        let result = rollback_pre_pane_workspace(
+            &fixture.state,
+            &fixture.main,
+            &fixture.workspace,
+            None,
+            CreatedIncludes::None,
+        )
+        .await;
+        assert!(
+            result.contains("rollback refused because process custody is unresolved"),
+            "pending spawn custody must be the rollback refusal: {result}"
+        );
+        assert_rollback_retained(&fixture).await;
+        drop(ticket);
+        assert!(
+            crate::workspace_custody::require_no_tickets(
+                &execution.client,
+                &fixture.workspace.repo_common_dir,
+                &fixture.workspace.worktree_root,
+            )
+            .await
+            .is_err(),
+            "dropping an in-memory ticket cannot erase durable refusal"
+        );
+        execution.request_shutdown();
+    }
+
+    #[tokio::test]
+    async fn rollback_without_tickets_still_reaches_the_existing_dirty_checkout_refusal() {
+        let fixture = rollback_fixture().await;
+        let execution = fixture.state.execution.get().expect("finite bank");
+        crate::workspace_custody::require_no_tickets(
+            &execution.client,
+            &fixture.workspace.repo_common_dir,
+            &fixture.workspace.worktree_root,
+        )
+        .await
+        .expect("no durable spawn ticket");
+        let user_file = fixture.workspace.worktree_root.join("local-change.txt");
+        std::fs::write(&user_file, b"local changes must survive\n").expect("local change");
+        let result = rollback_pre_pane_workspace(
+            &fixture.state,
+            &fixture.main,
+            &fixture.workspace,
+            None,
+            CreatedIncludes::None,
+        )
+        .await;
+        assert!(
+            result.contains("tracked, untracked, or ignored changes after copy rollback"),
+            "no-ticket flow must retain its existing Git safety check: {result}"
+        );
+        assert_eq!(
+            std::fs::read(user_file).expect("local change retained"),
+            b"local changes must survive\n"
+        );
+        assert_rollback_retained(&fixture).await;
+        execution.request_shutdown();
+    }
+
+    #[tokio::test]
+    async fn rollback_retains_actual_include_files_that_changed_after_preparation() {
+        let fixture = rollback_fixture().await;
+        let execution = fixture.state.execution.get().expect("finite bank");
+        std::fs::write(fixture.main.join(".worktreeinclude"), b"copy-me.txt\n")
+            .expect("real include selection");
+        std::fs::write(
+            fixture.main.join("copy-me.txt"),
+            b"original include content\n",
+        )
+        .expect("real include source");
+        let source = fixture.main.clone();
+        let target = fixture.workspace.worktree_root.clone();
+        let report = execution
+            .client
+            .run(
+                Lane::Io,
+                JobCost {
+                    input_bytes: 256 * 1024,
+                    result_bytes: 64 * 1024,
+                },
+                move |_| crate::worktree_include::copy_worktree_includes(&source, &target),
+            )
+            .await
+            .expect("actual copied include report");
+        assert!(!report.view().created_paths.is_empty());
+        let destination = fixture.workspace.worktree_root.join("copy-me.txt");
+        std::fs::write(&destination, b"changed after include preparation\n")
+            .expect("post-copy change on the original file identity");
+        let result = rollback_pre_pane_workspace(
+            &fixture.state,
+            &fixture.main,
+            &fixture.workspace,
+            None,
+            CreatedIncludes::Complete(report),
+        )
+        .await;
+        assert!(
+            result.contains("no copied files were removed"),
+            "copy report must preserve its conservative retention rule: {result}"
+        );
+        assert_eq!(
+            std::fs::read(destination).expect("changed include retained"),
+            b"changed after include preparation\n"
+        );
+        assert_rollback_retained(&fixture).await;
+        execution.request_shutdown();
+    }
+
+    async fn assert_eight_completed_include_results_leave_general_io_capacity(partial: bool) {
+        let directory = TempDir::new().expect("isolated include-copy fixture");
+        let source = directory.path().join("source");
+        std::fs::create_dir(&source).expect("source directory");
+        std::fs::write(source.join(".worktreeinclude"), b"a\nb\n").expect("include selection");
+        std::fs::write(source.join("a"), b"new a").expect("source a");
+        std::fs::write(source.join("b"), b"new b").expect("source b");
+        let execution =
+            crate::execution::ServerExecution::start().expect("independent finite bank");
+        let client = execution.client.clone();
+        let mut copies = tokio::task::JoinSet::new();
+        for index in 0..8 {
+            let target = directory.path().join(format!("target-{index}"));
+            std::fs::create_dir(&target).expect("target directory");
+            if partial {
+                // Sorted selection copies a first, then the existing b causes
+                // a real error that must retain a's original rollback handle.
+                std::fs::write(target.join("b"), b"old b").expect("destination collision");
+            }
+            let source = source.clone();
+            let client = client.clone();
+            copies.spawn(async move {
+                let result = prepare_workspace_includes(&client, source, target.clone()).await;
+                (target, result)
+            });
+        }
+        let mut held = Vec::new();
+        while let Some(result) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), copies.join_next())
+                .await
+                .expect("eight actual copy callbacks finish")
+        {
+            let (target, result) = result.expect("owned copy task");
+            match &result {
+                Ok(report) if !partial => assert_eq!(report.view().created_paths.len(), 2),
+                Err(IncludePreparationError::Execution(
+                    crate::execution::ExecutionError::Failed(error),
+                )) if partial => assert_eq!(error.view().created_paths, vec![target.join("a")]),
+                Err(error) => panic!("unexpected include-copy failure: {error:?}"),
+                Ok(_) => panic!("expected a partial include-copy failure"),
+            }
+            assert_eq!(std::fs::read(target.join("a")).expect("copied a"), b"new a");
+            held.push((target, result));
+        }
+        assert_eq!(
+            held.len(),
+            8,
+            "keep the eight-concurrent producer capacity target"
+        );
+        let retained_usage = client.foundation.usage();
+        let follow_up_path = held[0].0.clone();
+        let follow_up = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let reservation = client
+                .reserve(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: 4096,
+                        result_bytes: 4096,
+                    },
+                )
+                .await
+                .map_err(|error| format!("follow-up admission: {error:?}"))?;
+            client
+                .run_reserved(reservation, move |_| {
+                    std::fs::read_dir(follow_up_path).map(|entries| entries.count())
+                })
+                .await
+                .map_err(|error| format!("follow-up directory I/O: {error}"))
+        })
+        .await;
+        let follow_up_progressed = matches!(&follow_up, Ok(Ok(entries)) if *entries.view() == 2);
+        // Preserve real cleanup authority as well as accounting: conversion
+        // must keep the original open-file identities in both result shapes.
+        for (target, result) in &held {
+            match result {
+                Ok(report) => crate::worktree_include::remove_created_report(target, report.view())
+                    .expect("successful report retains original rollback handles"),
+                Err(IncludePreparationError::Execution(
+                    crate::execution::ExecutionError::Failed(error),
+                )) => crate::worktree_include::remove_created_files(target, error.view())
+                    .expect("partial error retains original rollback handles"),
+                Err(error) => panic!("unexpected held failure: {error:?}"),
+            }
+            assert!(!target.join("a").exists());
+            if partial {
+                assert_eq!(
+                    std::fs::read(target.join("b")).expect("old destination retained"),
+                    b"old b"
+                );
+            } else {
+                assert!(!target.join("b").exists());
+            }
+        }
+        drop(follow_up);
+        drop(held);
+        execution.request_shutdown();
+        assert!(follow_up_progressed,
+            "eight completed include results must not consume all 128 MiB of General result admission");
+        assert_eq!(
+            retained_usage.jobs, 0,
+            "completed reports release execution jobs"
+        );
+        assert_eq!(
+            retained_usage.input_bytes, 0,
+            "destroyed captures release input credit"
+        );
+        assert!(
+            retained_usage.result_bytes > 0,
+            "retained values and metadata stay charged"
+        );
+        assert!(
+            retained_usage.result_bytes < 1024 * 1024,
+            "the small real reports must release their unused 16 MiB allowances"
+        );
+    }
+
+    #[tokio::test]
+    async fn eight_completed_include_reports_leave_general_io_admission_available() {
+        assert_eight_completed_include_results_leave_general_io_capacity(false).await;
+    }
+
+    #[tokio::test]
+    async fn eight_partial_include_errors_leave_general_io_admission_available() {
+        assert_eight_completed_include_results_leave_general_io_capacity(true).await;
+    }
+
+    #[test]
+    fn worktree_agent_prompt_keeps_user_text_then_wrap_up_steps() {
+        let prompt = with_worktree_wrap_up("fix the parser".to_string());
+        assert!(prompt.starts_with("fix the parser\n\n"));
+        assert!(prompt.contains("ilium close-pane --worktree remove"));
+        assert!(!prompt.ends_with('\n'));
+    }
 
     #[tokio::test]
     async fn new_worktree_path_preparation_waits_for_bounded_io_admission() {

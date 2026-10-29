@@ -18,6 +18,8 @@ use crate::config::{
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
 use crate::trigger_settings::{TriggerAction, TriggerEvent};
+use crate::value_settings::SettingsNumber;
+use crate::value_settings_choice::SettingsChoice;
 use crate::App;
 
 use super::command::{SettingsAction, SettingsCommand, StateDetail};
@@ -606,6 +608,11 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "inference.title_style" => {
             app.settings_select_title_style(parse_title_style(string(&value)?)?);
         }
+        "inference.codex_official_thread_names" => {
+            let mut settings = app.inference_settings.clone();
+            settings.codex_official_thread_names = boolean(&value)?;
+            app.apply_and_persist_inference_settings(settings);
+        }
         "inference.kilo_gateway.model" => {
             let model = string(&value)?.trim();
             if !app
@@ -755,6 +762,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 app.settings_adjust_reset_planning_row(2);
             }
         }
+        path if path.starts_with("attention.") => set_attention_setting(app, path, &value)?,
         "debug.file_logging_enabled" => {
             if app.debug_settings.file_logging_enabled != boolean(&value)? {
                 app.settings_toggle_file_logging();
@@ -907,6 +915,25 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "reset_planning.monitor_claude" => app.settings_adjust_reset_planning_row(0),
         "reset_planning.monitor_codex" => app.settings_adjust_reset_planning_row(1),
         "reset_planning.time_style" => app.settings_adjust_reset_planning_row(2),
+        "attention.mode" => app.step_settings_choice(SettingsChoice::AttentionMode, direction),
+        "attention.press_sorts" => {
+            app.step_settings_choice(SettingsChoice::AttentionPressSorts, direction)
+        }
+        "attention.large_buttons" => {
+            app.step_settings_choice(SettingsChoice::AttentionLargeButtons, direction)
+        }
+        "attention.show_briefing" => {
+            app.step_settings_choice(SettingsChoice::AttentionShowBriefing, direction)
+        }
+        "attention.model_override" => {
+            app.step_settings_choice(SettingsChoice::AttentionModel, direction)
+        }
+        "attention.turbo_concurrency" => {
+            app.step_settings_number(SettingsNumber::AttentionTurboConcurrency, direction)
+        }
+        "attention.expiry_seconds" => {
+            app.step_settings_number(SettingsNumber::AttentionExpirySeconds, direction)
+        }
         _ => {
             return Err(ilium_prompts::render_value(
                 "voice/settings/setting-v0-is-not-adjustable-use-set",
@@ -950,6 +977,50 @@ fn update_inference(
     // silently breaks provider authentication).
     update(&mut settings, value.trim().to_owned());
     app.apply_and_persist_inference_settings(settings);
+}
+
+/// Sets one `attention.*` path. Out-of-range numbers are rejected rather than
+/// clamped so a script learns that its value was not applied.
+fn set_attention_setting(app: &mut App, path: &str, value: &Value) -> Result<(), String> {
+    use crate::attention::settings::{
+        EXPIRY_SECONDS_MAX, EXPIRY_SECONDS_MIN, TURBO_CONCURRENCY_MAX, TURBO_CONCURRENCY_MIN,
+    };
+    let mut settings = app.attention_settings.clone();
+    match path {
+        "attention.mode" => {
+            let text = string(value)?;
+            settings.mode = crate::attention::AttentionMode::parse(text).ok_or_else(|| {
+                format!("attention.mode must be off, instant_only, shared or turbo, not {text:?}")
+            })?;
+        }
+        "attention.press_sorts" => settings.press_sorts = boolean(value)?,
+        "attention.show_briefing" => settings.show_briefing = boolean(value)?,
+        "attention.large_buttons" => settings.large_buttons = boolean(value)?,
+        "attention.turbo_concurrency" => {
+            settings.turbo_concurrency = u8::try_from(unsigned(value)?)
+                .ok()
+                .filter(|count| (TURBO_CONCURRENCY_MIN..=TURBO_CONCURRENCY_MAX).contains(count))
+                .ok_or_else(|| {
+                    format!(
+                        "attention.turbo_concurrency must be between {TURBO_CONCURRENCY_MIN} and {TURBO_CONCURRENCY_MAX}"
+                    )
+                })?;
+        }
+        "attention.expiry_seconds" => {
+            settings.expiry_seconds = u32::try_from(unsigned(value)?)
+                .ok()
+                .filter(|seconds| (EXPIRY_SECONDS_MIN..=EXPIRY_SECONDS_MAX).contains(seconds))
+                .ok_or_else(|| {
+                    format!(
+                        "attention.expiry_seconds must be between {EXPIRY_SECONDS_MIN} and {EXPIRY_SECONDS_MAX}"
+                    )
+                })?;
+        }
+        "attention.model_override" => settings.set_model_override(optional_string(value)?),
+        other => return Err(format!("{other:?} is not a settable attention path")),
+    }
+    app.save_attention_settings(settings);
+    Ok(())
 }
 
 fn update_voice(
@@ -1302,17 +1373,17 @@ mod tests {
     fn kilo_model_setting_accepts_only_discovered_free_choices() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         app.kilo_gateway_models
-            .push("stepfun/step-5-preview-free".to_string());
+            .push("dots-studio/dots-3-note-preview:free".to_string());
 
         set_setting(
             &mut app,
             "inference.kilo_gateway.model",
-            json!("stepfun/step-5-preview-free"),
+            json!("dots-studio/dots-3-note-preview:free"),
         )
         .unwrap();
         assert_eq!(
             app.inference_settings.kilo_gateway.model,
-            "stepfun/step-5-preview-free"
+            "dots-studio/dots-3-note-preview:free"
         );
         assert!(set_setting(
             &mut app,
@@ -1393,5 +1464,53 @@ mod tests {
         assert!(set_setting(&mut app, "reset_planning.time_style", json!("soon")).is_err());
         adjust_setting(&mut app, "reset_planning.monitor_codex", 1).unwrap();
         assert!(!app.reset_planning_settings.monitor_codex);
+    }
+
+    #[test]
+    fn attention_control_paths_set_validate_and_clear_the_model() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let directory = tempfile::tempdir().unwrap();
+        app.config_dir = Some(directory.path().to_path_buf());
+        set_setting(&mut app, "attention.mode", json!("Instant-Only")).unwrap();
+        set_setting(&mut app, "attention.press_sorts", json!(false)).unwrap();
+        assert!(app.attention_settings.large_buttons);
+        set_setting(&mut app, "attention.large_buttons", json!(true)).unwrap();
+        assert!(app.attention_settings.large_buttons);
+        assert!(set_setting(&mut app, "attention.large_buttons", json!("yes")).is_err());
+        adjust_setting(&mut app, "attention.large_buttons", 1).unwrap();
+        assert!(!app.attention_settings.large_buttons);
+        set_setting(&mut app, "attention.show_briefing", json!(false)).unwrap();
+        assert!(!app.attention_settings.show_briefing);
+        assert!(set_setting(&mut app, "attention.show_briefing", json!("no")).is_err());
+        set_setting(&mut app, "attention.show_briefing", json!(true)).unwrap();
+        set_setting(&mut app, "attention.turbo_concurrency", json!(8)).unwrap();
+        set_setting(&mut app, "attention.expiry_seconds", json!(600)).unwrap();
+        set_setting(
+            &mut app,
+            "attention.model_override",
+            json!("synthetic-model"),
+        )
+        .unwrap();
+        let settings = &app.attention_settings;
+        assert_eq!(settings.mode, crate::attention::AttentionMode::InstantOnly);
+        assert!(!settings.press_sorts);
+        assert_eq!(settings.turbo_concurrency, 8);
+        assert_eq!(settings.expiry_seconds, 600);
+        assert_eq!(settings.model_override.as_deref(), Some("synthetic-model"));
+        set_setting(&mut app, "attention.model_override", json!("")).unwrap();
+        assert_eq!(app.attention_settings.model_override, None);
+        set_setting(&mut app, "attention.model_override", json!("again")).unwrap();
+        set_setting(&mut app, "attention.model_override", Value::Null).unwrap();
+        assert_eq!(app.attention_settings.model_override, None);
+
+        let before = app.attention_settings.clone();
+        assert!(set_setting(&mut app, "attention.mode", json!("sometimes")).is_err());
+        assert!(set_setting(&mut app, "attention.turbo_concurrency", json!(0)).is_err());
+        assert!(set_setting(&mut app, "attention.turbo_concurrency", json!(65)).is_err());
+        assert!(set_setting(&mut app, "attention.expiry_seconds", json!(59)).is_err());
+        assert!(set_setting(&mut app, "attention.expiry_seconds", json!(86_401)).is_err());
+        assert!(set_setting(&mut app, "attention.press_sorts", json!("yes")).is_err());
+        assert!(set_setting(&mut app, "attention.unknown", json!(1)).is_err());
+        assert_eq!(app.attention_settings, before);
     }
 }

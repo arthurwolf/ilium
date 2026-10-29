@@ -14,6 +14,7 @@ use ratatui::Frame;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::last_prompt_toolbar::{PromptToolbarButton, ToolbarVisibility};
 use crate::theme::{self, ColorScheme};
 
 /// Splits `text` into logical lines (`\n`, `\r\n`, or a lone `\r` -- see
@@ -135,42 +136,179 @@ pub fn reserved_height(max_lines: u16) -> u16 {
     max_lines.max(1)
 }
 
+/// Columns left of the text: one blank, the quote gutter, one blank.
+const TEXT_INSET_LEFT: u16 = 3;
+const TEXT_INSET_RIGHT: u16 = 2;
+/// Left-aligned quarter block drawn as the blockquote gutter.
+const QUOTE_GUTTER: &str = "\u{258e}";
+
+/// Columns the text wraps to inside `area_width`. Areas too narrow for the
+/// insets use the whole width so tiny panes still show their prompt.
+fn text_width(area_width: u16) -> u16 {
+    let inset = TEXT_INSET_LEFT + TEXT_INSET_RIGHT;
+    if area_width > inset + 8 {
+        area_width - inset
+    } else {
+        area_width
+    }
+}
+
 /// Renders the last-prompt banner into `area`: a background fill spanning
 /// the whole reserved region (see [`theme::last_prompt_style`]), with
 /// `prompt` -- when present -- wrapped and middle-truncated via [`layout`]
-/// using `area`'s own width and `max_lines`. `None` (no exact submission
-/// recorded yet for this pane) renders only the background fill.
+/// inside breathing room on both sides, behind an accent-coloured quote
+/// gutter on every row. `None` (no exact submission recorded yet for this
+/// pane) renders only the background fill.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     prompt: Option<&str>,
     max_lines: u16,
     scheme: ColorScheme,
+    toolbar: Option<ToolbarVisibility>,
+    hovered: Option<PromptToolbarButton>,
 ) {
     if area.height == 0 {
         return;
     }
-    let lines: Vec<Line> = prompt
-        .map(|prompt| {
-            layout(prompt, area.width, max_lines.min(area.height))
-                .into_iter()
-                .map(|(line, is_seam)| {
-                    if is_seam {
-                        Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
-                    } else {
-                        Line::from(line)
-                    }
-                })
-                .collect()
+    frame.render_widget(
+        Paragraph::new("").style(theme::last_prompt_style(scheme)),
+        area,
+    );
+    let Some(prompt) = prompt else {
+        return;
+    };
+    let framed = text_width(area.width) != area.width;
+    let (inset_left, inset_right) = if framed {
+        (TEXT_INSET_LEFT, TEXT_INSET_RIGHT)
+    } else {
+        (0, 0)
+    };
+    let mut text_area = Rect::new(
+        area.x + inset_left,
+        area.y,
+        area.width - inset_left - inset_right,
+        area.height,
+    );
+    if toolbar.is_some() && crate::last_prompt_toolbar::has_toolbar(area.width) {
+        text_area.width = text_area
+            .width
+            .saturating_sub(crate::last_prompt_toolbar::TOOLBAR_WIDTH.saturating_sub(inset_right));
+    }
+    let rows = layout(prompt, text_area.width, max_lines.min(area.height));
+    let gutter_style = Style::new()
+        .fg(theme::accent_bg())
+        .bg(theme::muted_accent_bg(scheme));
+    for (index, (_, is_seam)) in rows.iter().enumerate() {
+        if framed {
+            let gutter = if *is_seam {
+                gutter_style.add_modifier(Modifier::DIM)
+            } else {
+                gutter_style
+            };
+            frame.render_widget(
+                Paragraph::new(Span::styled(QUOTE_GUTTER, gutter)),
+                Rect::new(area.x + 1, area.y + index as u16, 1, 1),
+            );
+        }
+    }
+    let lines: Vec<Line> = rows
+        .into_iter()
+        .map(|(line, is_seam)| {
+            if is_seam {
+                Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
+            } else {
+                Line::from(line)
+            }
         })
-        .unwrap_or_default();
-    let paragraph = Paragraph::new(lines).style(theme::last_prompt_style(scheme));
-    frame.render_widget(paragraph, area);
+        .collect();
+    frame.render_widget(
+        Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
+        text_area,
+    );
+    if let Some(visibility) = toolbar {
+        render_toolbar(frame, area, visibility, hovered, scheme);
+    }
+}
+
+/// Draws the banner's mini toolbar in its bottom-right corner.
+fn render_toolbar(
+    frame: &mut Frame,
+    area: Rect,
+    visibility: ToolbarVisibility,
+    hovered: Option<PromptToolbarButton>,
+    scheme: ColorScheme,
+) {
+    for (button, rect) in crate::last_prompt_toolbar::visible_buttons(area, visibility) {
+        let mut style = theme::last_prompt_style(scheme);
+        if hovered == Some(button) {
+            style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+        }
+        frame.render_widget(Paragraph::new(Span::styled(button.glyph(), style)), rect);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wide_banner_draws_a_quote_gutter_and_indents_the_text() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    Some("hello world"),
+                    3,
+                    ColorScheme::Dark,
+                    None,
+                    None,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let row: String = (0..40).map(|x| buffer[(x, 0)].symbol()).collect();
+        let gutter_x = row.chars().position(|c| c == '\u{258e}');
+        let text_x = row.find("hello").map(|byte| row[..byte].chars().count());
+        let (gutter_x, text_x) = (gutter_x.expect("gutter"), text_x.expect("text"));
+        assert!(gutter_x < text_x);
+        assert!(text_x >= usize::from(TEXT_INSET_LEFT));
+    }
+
+    #[test]
+    fn toolbar_draws_its_buttons_in_the_bottom_right_corner() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 3)).unwrap();
+        let visibility = ToolbarVisibility {
+            older: false,
+            newer: false,
+        };
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    Some("hello"),
+                    3,
+                    ColorScheme::Dark,
+                    Some(visibility),
+                    None,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let bottom: String = (0..60).map(|x| buffer[(x, 2)].symbol()).collect();
+        assert!(bottom.contains(PromptToolbarButton::Copy.glyph()));
+        assert!(bottom.contains(PromptToolbarButton::Close.glyph()));
+        assert!(!bottom.contains(PromptToolbarButton::Older.glyph()));
+        let top: String = (0..60).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(!top.contains(PromptToolbarButton::Close.glyph()));
+    }
 
     #[test]
     fn small_prompt_slot_retains_the_end_of_the_prompt() {
@@ -185,6 +323,8 @@ mod tests {
                     Some("FIRST\nSECOND\nTHIRD\nLAST"),
                     4,
                     ColorScheme::Dark,
+                    None,
+                    None,
                 );
             })
             .unwrap();

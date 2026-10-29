@@ -7,15 +7,24 @@ use std::{
     sync::Arc,
 };
 
-const MAX_CHUNKS: usize = 128;
+// Saved route windows must hold a camera footprint plus a usable interior (the
+// footprint reaches up to 13 chunks from a line centre); catalog windows keep
+// their own 128-chunk Limits.
+pub const MAX_CHUNKS: usize = 384;
+/// One merged saved map holds up to three disjoint saved windows (preparation.rs
+/// MAX_WINDOWS_PER_SAVE), so route-side caps admit three windows' chunks, not one.
+pub const MAX_MERGED_CHUNKS: usize = 3 * MAX_CHUNKS;
+/// Decoded storage allowed per saved window; a full 19-by-19 window needs more than the old 32 MiB.
+pub const SAVED_WINDOW_STORAGE_CHARGE: usize = 64 << 20;
 const MAX_SECTIONS: usize = 32;
 const MAX_STORAGE_CHARGE: usize = 128 << 20;
 // The projected route source is a separately admitted, bounded read. Catalog
 // windows retain their original 128-chunk and 32-MiB defaults.
-// Count proxy; MAX_PROJECTED_STORAGE_CHARGE bounds the memory. Matches the footprint cap
-// in source_footprint.rs so a request admitted there is never refused here.
+// Matches source_footprint::MAX_REQUESTED_CHUNKS, so every admitted camera view
+// can be loaded in full. The storage charge scales with the chunk count (2x of the
+// earlier 512-chunk, 192-MiB bound).
 pub const MAX_PROJECTED_CHUNKS: usize = 1024;
-pub const MAX_PROJECTED_STORAGE_CHARGE: usize = 192 << 20;
+pub const MAX_PROJECTED_STORAGE_CHARGE: usize = 384 << 20;
 
 /// Chunk-coordinate request around a Minecraft [x, z] block anchor. This only
 /// selects coordinates; load_window must independently qualify saved coverage.
@@ -60,10 +69,10 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_chunks: 128,
+            max_chunks: MAX_CHUNKS,
             min_section: -4,
             max_section: 19,
-            max_storage_charge: 32 << 20,
+            max_storage_charge: SAVED_WINDOW_STORAGE_CHARGE,
         }
     }
 }

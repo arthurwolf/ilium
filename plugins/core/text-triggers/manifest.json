@@ -1,0 +1,32 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.text-triggers",
+  "name": "Text triggers",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Text triggers are regular-expression rules that watch terminal output and send text to the pane that printed it.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "terminal.output-filter",
+      "terminal.write"
+    ],
+    "client": [
+      "ui.panels",
+      "settings.write-kernel:text-triggers"
+    ]
+  },
+  "activation": [
+    "startup",
+    "view:text-triggers.rules"
+  ],
+  "limits_tier": "first-party"
+}

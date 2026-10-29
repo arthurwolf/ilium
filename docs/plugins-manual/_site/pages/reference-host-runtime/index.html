@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Host runtime | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/" aria-current="page">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Host runtime</h1>
+
+<p>This page fixes how the host uses Wasmtime: which version, which build features, which <code>Config</code> values, how a component becomes a running instance, how imports are linked, what WASI the host offers, how time limits are enforced and what the host checks when a package is installed. A test author uses it to write the conformance and safety tests of the runtime. A host implementer uses it as the configuration to copy.</p>
+<p>The requirement ids <code>[HST-050]</code> to <code>[HST-089]</code> belong to this page. They are collected, with a test method each, in <a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a>.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a> for the processes that own an Engine and for the rule that T2 and T3 components run in a helper.</li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a> for the call classes and their deadlines.</li>
+<li>A basic idea of Wasmtime. A <strong>component</strong> is a WebAssembly binary that follows the component model: it declares typed imports and exports instead of raw functions. A <strong><code>.cwasm</code></strong> file is a component that Wasmtime has already compiled to machine code for one target and one configuration. An <strong><code>InstancePre</code></strong> is a component whose imports have been resolved against a linker, so each new instance skips that work.</li>
+</ul>
+<h2 id="version-policy">Version policy</h2>
+<ul>
+<li><strong>[HST-050]</strong> Each Ilium release MUST pin Wasmtime to one exact version in <code>Cargo.lock</code> and in the workspace manifest (<code>=</code> requirement). The version at the time this contract was written is 49.0.2, which needs Rust 1.96 or later. The version in use is shown by <code>ilium plugin doctor</code> and recorded in every <code>.cwasm</code> header and in every benchmark result.</li>
+<li><strong>[HST-051]</strong> A Wasmtime security release that fixes a vulnerability reachable from guest code MUST be taken into a point release of Ilium within 14 days of the upstream fix (see [SEC-171]), and within 48 hours when the vulnerability is exploited in the wild.</li>
+<li><strong>[HST-052]</strong> A Wasmtime version bump MUST NOT be merged until all of these pass on the new version: the full conformance suite for the Rust and TypeScript guests, the benchmark gate of <a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a> with no regression beyond its thresholds, the test that every embedded <code>.cwasm</code> deserializes, and the safety tests listed under "Errors and edge cases" below.</li>
+<li><strong>[HST-053]</strong> Every embedded <code>.cwasm</code> MUST be regenerated by the release build on every Wasmtime bump and on every change of a <code>Config</code> value that affects code generation. A stale <code>.cwasm</code> MUST fail the build, never ship.</li>
+</ul>
+<h2 id="build-features-and-config">Build features and Config</h2>
+<p>The host depends on Wasmtime with <code>default-features = false</code>. The features are exactly these.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>State</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>runtime</code></td>
+<td>on</td>
+<td>Execution</td>
+</tr>
+<tr>
+<td><code>cranelift</code></td>
+<td>on</td>
+<td>Compiling third-party and development components; precompiling bundled ones in the release build</td>
+</tr>
+<tr>
+<td><code>component-model</code></td>
+<td>on</td>
+<td>Plugins are components</td>
+</tr>
+<tr>
+<td><code>std</code></td>
+<td>on</td>
+<td>Host platform support</td>
+</tr>
+<tr>
+<td><code>parallel-compilation</code></td>
+<td>on</td>
+<td>Faster first load of a large third-party component</td>
+</tr>
+<tr>
+<td><code>async</code></td>
+<td>on</td>
+<td><code>call_async</code>, <code>instantiate_async</code>, epoch yield</td>
+</tr>
+<tr>
+<td><code>cache</code></td>
+<td>on</td>
+<td>The compile cache for third-party components</td>
+</tr>
+<tr>
+<td><code>component-model-async</code></td>
+<td>off</td>
+<td>Not needed by contract version one; keeping it off keeps the host outside the affected code of CVE-2026-27195</td>
+</tr>
+<tr>
+<td><code>winch</code>, <code>gc</code>, <code>threads</code>, <code>profiling</code>, <code>coredump</code>, <code>debug-builtins</code></td>
+<td>off</td>
+<td>Not used; each adds attack surface or size</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-054]</strong> The host MUST build Wasmtime with exactly the feature set above, and a workspace test MUST fail when <code>component-model-async</code> is enabled.</li>
+</ul>
+<p>The <code>Config</code> values are fixed. The same values apply in the release build that produces <code>.cwasm</code> files and in the running host, because a <code>.cwasm</code> only loads on an Engine whose relevant configuration matches.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wasm_component_model(true)</code></td>
+<td>on</td>
+<td></td>
+</tr>
+<tr>
+<td><code>wasm_component_model_async(false)</code></td>
+<td>off</td>
+<td>See <code>[HST-055]</code></td>
+</tr>
+<tr>
+<td><code>async_support(true)</code></td>
+<td>on</td>
+<td>All guest calls use the async API so that epoch yields and cancellation work</td>
+</tr>
+<tr>
+<td><code>epoch_interruption(true)</code></td>
+<td>on</td>
+<td>Time limits; see the epoch section</td>
+</tr>
+<tr>
+<td><code>consume_fuel(false)</code></td>
+<td>off</td>
+<td>Fuel adds a counter update to every basic block and costs more than epoch checks; epoch checks are enough because the contract limits wall time, not instruction counts</td>
+</tr>
+<tr>
+<td><code>max_wasm_stack</code></td>
+<td>512 KiB</td>
+<td>Stack overflow is a trap</td>
+</tr>
+<tr>
+<td><code>async_stack_size</code></td>
+<td>1 MiB</td>
+<td>Must be at least <code>max_wasm_stack</code>; stacks are allocated per call in flight, not per instance</td>
+</tr>
+<tr>
+<td><code>memory_reservation</code></td>
+<td>4 GiB on 64-bit targets</td>
+<td>Virtual address space only; lets the host use guard pages instead of explicit bounds checks</td>
+</tr>
+<tr>
+<td><code>memory_guard_size</code></td>
+<td>32 MiB</td>
+<td>Wasmtime default for 64-bit targets</td>
+</tr>
+<tr>
+<td><code>signals_based_traps(true)</code></td>
+<td>on for Linux, macOS and Windows</td>
+<td>The server and client MUST NOT install their own SIGSEGV, SIGBUS or SIGILL handlers; on macOS the host uses Mach exception ports</td>
+</tr>
+<tr>
+<td><code>parallel_compilation(true)</code></td>
+<td>on</td>
+<td></td>
+</tr>
+<tr>
+<td><code>cranelift_opt_level(Speed)</code></td>
+<td>speed</td>
+<td></td>
+</tr>
+<tr>
+<td><code>wasm_simd(true)</code></td>
+<td>on</td>
+<td>The Rust scenes use SIMD128</td>
+</tr>
+<tr>
+<td><code>wasm_relaxed_simd(false)</code></td>
+<td>off</td>
+<td>Relaxed SIMD results depend on the CPU, so a scene would render differently on two machines</td>
+</tr>
+<tr>
+<td><code>wasm_threads(false)</code>, <code>wasm_multi_memory(false)</code>, <code>wasm_memory64(false)</code>, <code>wasm_gc(false)</code></td>
+<td>off</td>
+<td>Not part of the contract</td>
+</tr>
+<tr>
+<td><code>generate_address_map(true)</code>, <code>wasm_backtrace(true)</code></td>
+<td>on</td>
+<td>Release traps show function names</td>
+</tr>
+<tr>
+<td><code>debug_info(false)</code></td>
+<td>off</td>
+<td><code>ilium plugin build --debug</code> is a plugin-side concern</td>
+</tr>
+<tr>
+<td><code>cache</code></td>
+<td>see "Compile cache"</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-055]</strong> The host MUST set <code>wasm_component_model_async(false)</code>. A component that needs it MUST be refused at load with <code>component.invalid</code>.</li>
+<li><strong>[HST-056]</strong> The host MUST fix the <code>concurrency_support</code> setting at build time to the value that keeps Wasmtime's concurrency APIs unused, and a test MUST instantiate, call and drop a component under that setting. (Disabling it makes those APIs panic, so the host never calls them.)</li>
+<li><strong>[HST-057]</strong> The <code>Config</code> values in the table MUST be identical in the release build that produces <code>.cwasm</code> and in the host, and the host MUST compute a <code>config fingerprint</code> (a hash of Wasmtime version, target triple and every value in the table) and store it in the header of each embedded artifact.</li>
+<li><strong>[HST-058]</strong> Epoch interruption MUST be on, and fuel MUST be off.</li>
+<li><strong>[HST-059]</strong> <code>max_wasm_stack</code> MUST be 512 KiB and <code>async_stack_size</code> MUST be 1 MiB.</li>
+<li><strong>[HST-060]</strong> Signals-based traps MUST be enabled on every supported platform, and the Ilium processes MUST NOT install handlers for SIGSEGV, SIGBUS or SIGILL on Unix.</li>
+</ul>
+<h3 id="compile-cache">Compile cache</h3>
+<p>Third-party components are compiled on first load. The host stores the compiled code in the Wasmtime compile cache so that later loads are fast.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Location</td>
+<td><code>&lt;cache dir&gt;/ilium/plugin-compile/&lt;wasmtime version&gt;-&lt;config fingerprint&gt;/</code>, owner-only (mode 0700)</td>
+</tr>
+<tr>
+<td>Size cap</td>
+<td>1 GiB total (<code>files-total-size-soft-limit</code>), 4,096 files</td>
+</tr>
+<tr>
+<td>Eviction</td>
+<td>Wasmtime's cleanup removes least recently used entries when a cap is reached</td>
+</tr>
+<tr>
+<td>Invalidation</td>
+<td>The directory name contains the Wasmtime version and the config fingerprint. At startup the host deletes every sibling directory with another name</td>
+</tr>
+<tr>
+<td>Who writes</td>
+<td>The host process that compiled the component, or for T2 and T3 the helper that compiled it, in its own subdirectory <code>&lt;package hash&gt;/</code> (see <a href="/pages/reference-host-helper/">Sandbox helper</a>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-061]</strong> The compile cache MUST be owner-only, MUST be keyed by Wasmtime version and config fingerprint, and the host MUST delete caches of other keys at startup.</li>
+<li><strong>[HST-062]</strong> The host MUST work with an unreadable, unwritable or full compile cache by compiling in memory and logging <code>host.cache-unavailable</code> once.</li>
+</ul>
+<h2 id="allocator">Allocator</h2>
+<p>The default is the <strong>on-demand allocator</strong>: each instance gets its memory from the operating system when it is created. This is decision D6 of <a href="/pages/design-decisions/">Design decisions</a>.</p>
+<p>The <strong>pooling allocator</strong> reserves a fixed number of instance slots at start. It makes instantiation faster and bounds address space, but it reserves virtual memory for the largest slot.</p>
+<ul>
+<li><strong>[HST-063]</strong> The host MUST use the on-demand allocator unless the benchmark rule below selects pooling.</li>
+<li><strong>[HST-064]</strong> The benchmark B6 selects pooling if and only if both of these hold on the reference machine class: on-demand misses <code>HOST-START</code> (150 ms for the 40-plugin bundled set) or the instantiate time <code>B2</code> (5 ms median), and pooling meets both while adding no more than 16 MiB RSS. A selection MUST be recorded in the benchmark results page together with the Wasmtime version.</li>
+</ul>
+<p>If pooling is selected, the pool is sized as follows: <code>total_core_instances</code> 256, <code>total_memories</code> 256, <code>total_tables</code> 256, <code>total_stacks</code> 64, <code>max_memory_size</code> equal to the T1 ceiling of <code>memory_mib</code> (256 MiB), <code>table_elements</code> equal to the T1 ceiling of <code>table_elements</code> (50,000), and <code>max_core_instance_size</code> 1 MiB. Pooling is used for T1 and for helper Engines alike; an Engine never mixes allocators.</p>
+<h2 id="instantiation-pipeline">Instantiation pipeline</h2>
+<figure>
+<svg viewBox="0 0 440 210" role="img" aria-label="From package bytes to a running instance for T1 and for T2 and T3" width="660" height="315">
+<title>Instantiation pipeline</title>
+<desc>A T1 component loads from an embedded cwasm through Component deserialize. A T2 or T3 component is compiled with Component new in the helper. Both go through an InstancePre built from a Linker for the grant set, then to a Store and an instance.</desc>
+<defs>
+<marker id="hr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+<rect x="8" y="14" width="118" height="34" rx="4" fill="none" stroke="currentColor"/>
+<text x="67" y="35" font-size="10" text-anchor="middle" fill="currentColor">Embedded .cwasm (T1)</text>
+<rect x="8" y="62" width="118" height="34" rx="4" fill="none" stroke="currentColor"/>
+<text x="67" y="83" font-size="10" text-anchor="middle" fill="currentColor">Package .wasm (T2/T3)</text>
+<rect x="152" y="14" width="124" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="214" y="35" font-size="10" text-anchor="middle" fill="currentColor">Component::deserialize</text>
+<rect x="152" y="62" width="124" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="214" y="83" font-size="10" text-anchor="middle" fill="currentColor">Component::new + cache</text>
+<rect x="302" y="38" width="130" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="367" y="59" font-size="10" text-anchor="middle" fill="currentColor">Linker (per grant set)</text>
+<rect x="302" y="100" width="130" height="34" rx="4" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="367" y="121" font-size="10" text-anchor="middle" fill="currentColor">InstancePre (per plugin side)</text>
+<rect x="302" y="162" width="130" height="34" rx="4" fill="none" stroke="currentColor"/>
+<text x="367" y="183" font-size="10" text-anchor="middle" fill="currentColor">Store + instance</text>
+<line x1="126" y1="31" x2="152" y2="31" stroke="currentColor" marker-end="url(#hr-arrow)"/>
+<line x1="126" y1="79" x2="152" y2="79" stroke="currentColor" marker-end="url(#hr-arrow)"/>
+<line x1="276" y1="31" x2="302" y2="52" stroke="currentColor" marker-end="url(#hr-arrow)"/>
+<line x1="276" y1="79" x2="302" y2="60" stroke="currentColor" marker-end="url(#hr-arrow)"/>
+<line x1="367" y1="72" x2="367" y2="100" stroke="currentColor" marker-end="url(#hr-arrow)"/>
+<line x1="367" y1="134" x2="367" y2="162" stroke="currentColor" marker-end="url(#hr-arrow)"/>
+<text x="8" y="150" font-size="9" fill="currentColor">Deserialize is unsafe for untrusted bytes, so it is used</text>
+<text x="8" y="164" font-size="9" fill="currentColor">only for artifacts that the release build produced.</text>
+</svg>
+<figcaption>A T1 component is deserialized from a precompiled artifact. A T2 or T3 component is always compiled. Both reach the same InstancePre and Store steps.</figcaption>
+</figure>
+
+<h3 id="loading-a-component">Loading a component</h3>
+<ul>
+<li><strong>[HST-065]</strong> <code>Component::deserialize</code> MUST be used only for artifacts that the release build of this exact Ilium version produced with the host's Engine <code>Config</code>. It MUST NOT be called on bytes from a package, a download, a user path or a cache that the host did not write.</li>
+<li><strong>[HST-066]</strong> A test MUST deserialize every embedded <code>.cwasm</code> on the host Engine and MUST fail the build if any artifact is rejected.</li>
+<li><strong>[HST-067]</strong> T2 and T3 components MUST be loaded with <code>Component::new</code> (inside the helper), through the compile cache, and the host MUST NOT call <code>Component::deserialize</code> on package bytes. The Wasmtime compile cache is the only path that deserializes, and it reads only files that the same host wrote under its owner-only cache directory.</li>
+<li><strong>[HST-068]</strong> A package that contains a <code>.cwasm</code> file MUST be refused at install with <code>package.precompiled-forbidden</code>.</li>
+</ul>
+<h3 id="instancepre-and-linker">InstancePre and Linker</h3>
+<ul>
+<li><strong>[HST-069]</strong> The host MUST build one <code>InstancePre</code> per plugin side and MUST rebuild it whenever the grant set of that plugin changes (grant, revoke, upgrade). Existing instances keep running until they are re-activated as described in <a href="/pages/lifecycle/">Lifecycle</a>.</li>
+<li><strong>[HST-070]</strong> The host MUST build one <code>Linker</code> per distinct grant set and MUST cache it under the SHA-256 of the sorted list of granted interface names plus the side and the tier. Two plugins with equal grant sets on equal sides share a <code>Linker</code>.</li>
+</ul>
+<p>How an import is linked depends on what the manifest requested and what the user granted. Two levels exist, because a capability is finer than an interface: the interface <code>fs</code> has functions for reading and for writing, and the grants <code>fs.read:project</code> and <code>fs.write:project</code> unlock different ones.</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Interface level (static)</th>
+<th>Function level (dynamic)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Always-granted interface</td>
+<td>Linked with real functions</td>
+<td>Real functions</td>
+</tr>
+<tr>
+<td>Capability requested and granted</td>
+<td>Linked with real functions</td>
+<td>Real functions</td>
+</tr>
+<tr>
+<td>Capability requested and declined or revoked</td>
+<td>Linked</td>
+<td>The functions of that capability are stubs that return <code>not-permitted</code></td>
+</tr>
+<tr>
+<td>Capability never requested, but another capability of the same interface was</td>
+<td>Linked</td>
+<td>The functions of the unrequested capability trap with <code>host.capability-not-requested</code> (a plugin bug)</td>
+</tr>
+<tr>
+<td>Interface that no requested capability unlocks and that is not always granted</td>
+<td>The package is refused at install or load with <code>manifest.import-not-requested</code>; nothing is instantiated</td>
+<td>Not applicable</td>
+</tr>
+</tbody>
+</table>
+<p>This is the reconciliation of the two earlier statements. A component whose binary imports an interface that its manifest never requested cannot be linked, so it never runs and never traps; it is refused when it is installed or loaded. A call to a single function whose capability was not requested, inside an interface that was linked for another reason, still traps at call time, because the host cannot refuse the interface. Both rules agree with <a href="/pages/capabilities/">Capabilities and grants</a>: a declined grant returns <code>not-permitted</code>, a never-requested one is a plugin bug.</p>
+<ul>
+<li><strong>[HST-071]</strong> A declined or revoked capability MUST link its functions to stubs that return <code>not-permitted</code> without running kernel code.</li>
+<li><strong>[HST-072]</strong> A component that imports an interface that is neither always granted nor unlocked by a requested capability MUST be refused at install or load with <code>manifest.import-not-requested</code>, and MUST NOT be instantiated.</li>
+<li><strong>[HST-073]</strong> A call to a function whose capability the manifest never requested, inside a linked interface, MUST trap the instance with <code>host.capability-not-requested</code> and count as a failure.</li>
+</ul>
+<h2 id="store-setup">Store setup</h2>
+<p>Each Store is created with limits and data from the manifest <code>limits</code> after clamping to the tier ceiling (see <a href="/pages/reference-errors-and-limits/">Errors and limits</a>).</p>
+<table>
+<thead>
+<tr>
+<th>Store limit</th>
+<th>Source</th>
+<th>On growth failure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Memory (bytes)</td>
+<td><code>memory_mib</code> for the main instance, <code>job_memory_mib</code> for a job instance</td>
+<td>Trap. The guest never observes -1 [ABI-027]</td>
+</tr>
+<tr>
+<td>Table elements</td>
+<td><code>table_elements</code></td>
+<td>Trap, as for memory</td>
+</tr>
+<tr>
+<td>Instances, tables, memories per Store</td>
+<td>16, 8, 4 (fixed)</td>
+<td>Instantiation fails with <code>host.engine-error</code></td>
+</tr>
+<tr>
+<td>Linear memory total over all Stores of the process</td>
+<td><code>session_memory_mib</code></td>
+<td>The new instance is refused with <code>session.memory-exceeded</code>. Not counted as a failure (reason <code>host-capacity</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>ResourceLimiter</code> MUST trap on growth failure (<code>trap_on_grow_failure(true)</code>), so a guest never observes a failed growth as <code>-1</code>. The same rule applies to table growth past the table limit. The Store data record has this layout:</p>
+<pre><code class="language-rust">// ilium-plugin-host/src/store_data.rs (illustration of the contract)
+pub struct StoreData {
+    pub plugin: PluginId,
+    pub side: Side,                  // Server, Client or Scene
+    pub instance: u64,               // rises for each new instance of this plugin side
+    pub kind: InstanceKind,          // Main or Job { job_id }
+    pub authorization_epoch: u64,    // grant generation this instance was linked against
+    pub quota: QuotaHandle,          // execution quota group handle
+    pub call: Option&lt;CallState&gt;,     // class, start time, deadline, soft flag, late flag
+    pub limits: StoreLimits,
+    pub wasi: WasiCtx,               // see the WASI section
+    pub resources: ResourceTable,
+}
+</code></pre>
+<ul>
+<li><strong>[HST-074]</strong> Every Store MUST be created with <code>StoreLimits</code> taken from the clamped manifest limits and MUST have <code>trap_on_grow_failure(true)</code>.</li>
+<li><strong>[HST-075]</strong> Each Store MUST carry the plugin id, side, instance number, kind, authorization epoch and quota handle, and every import MUST check the authorization epoch against the current grant generation before it acts. A mismatch returns <code>revoked</code>.</li>
+</ul>
+<h2 id="wasi-policy">WASI policy</h2>
+<p>Rust components built for <code>wasm32-wasip2</code> and TypeScript components built by <code>componentize-js</code> import parts of WASI Preview 2. The host links <code>wasmtime-wasi</code> Preview 2 with these rules.</p>
+<table>
+<thead>
+<tr>
+<th>WASI interface</th>
+<th>Policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wasi:cli/stdout</code>, <code>wasi:cli/stderr</code></td>
+<td>Captured line by line into the plugin log at level <code>info</code> (stdout) and <code>warn</code> (stderr). A line longer than 16 KiB is cut and marked <code>[cut]</code>. The <code>log_lines_per_second</code> limit applies</td>
+</tr>
+<tr>
+<td><code>wasi:cli/stdin</code></td>
+<td>Always empty</td>
+</tr>
+<tr>
+<td><code>wasi:cli/environment</code></td>
+<td>No variables; one argument, the plugin id</td>
+</tr>
+<tr>
+<td><code>wasi:cli/exit</code></td>
+<td>A call traps with <code>wasi.exit</code></td>
+</tr>
+<tr>
+<td><code>wasi:clocks</code>, <code>wasi:random</code></td>
+<td>Allowed. Wall-clock time is the real clock; monotonic time is the host monotonic clock; random bytes come from the operating system</td>
+</tr>
+<tr>
+<td><code>wasi:io</code></td>
+<td>Allowed</td>
+</tr>
+<tr>
+<td><code>wasi:filesystem</code></td>
+<td>Linked, but with preopens only for scopes that an <code>fs.*</code> grant makes available, mapped through <code>ilium-platform</code> secure file access. With no <code>fs.*</code> grant the preopen list is empty</td>
+</tr>
+<tr>
+<td><code>wasi:sockets</code></td>
+<td>Refused. A component that imports it is refused at load with <code>component.wasi-forbidden</code></td>
+</tr>
+<tr>
+<td><code>wasi:http</code></td>
+<td>Refused in the same way. HTTP goes only through the <code>http</code> capability, which applies allowlists, size caps and the outbound-request rules</td>
+</tr>
+</tbody>
+</table>
+<p>Package-time composition with <code>wasi-virt</code> is a supported alternative for a plugin author who wants a smaller import set. It does not change the host rules.</p>
+<ul>
+<li><strong>[HST-076]</strong> The host MUST link WASI Preview 2 with captured stdout and stderr, an empty environment, no stdin, <code>wasi:cli/exit</code> as a trap, and preopens only from <code>fs.*</code> grants.</li>
+<li><strong>[HST-077]</strong> A component that imports <code>wasi:sockets</code> or <code>wasi:http</code> MUST be refused at load with <code>component.wasi-forbidden</code> and MUST NOT be instantiated.</li>
+<li><strong>[HST-078]</strong> A stdout or stderr line longer than 16 KiB MUST be cut at 16 KiB and marked <code>[cut]</code>.</li>
+</ul>
+<h2 id="epoch-ticker-and-deadlines">Epoch ticker and deadlines</h2>
+<p>Wasmtime's <strong>epoch interruption</strong> lets the host stop guest code without a per-instruction counter. The Engine has one counter, the epoch. A ticker thread increases it at a fixed period. Each Store can ask to be interrupted when the counter reaches a value.</p>
+<ul>
+<li><strong>[HST-079]</strong> Each Engine MUST have exactly one epoch ticker thread, named <code>ilium-plugin-epoch</code>, that increases the epoch every 10 ms. The tick period is 10 ms on every platform.</li>
+<li><strong>[HST-080]</strong> Before every guest call the host MUST install an <code>epoch_deadline_callback</code> for the Store. The callback runs on each tick while that call is executing. It compares the host monotonic clock with the call's deadlines and returns one of: continue, yield (only for yielding call classes), or a trap.</li>
+<li><strong>[HST-081]</strong> The host MUST set the instance deadline of a call with deadline <code>d</code> milliseconds to <code>ceil(d / 10) + 1</code> ticks after the call starts. A guest that spins traps no earlier than <code>d</code> and no later than <code>d + 20</code> ms of wall time on a host that is not overloaded, and a call that returns at <code>d - 1</code> ms never traps. A 20 ms deadline traps between 20 and 40 ms.</li>
+<li><strong>[HST-082]</strong> The ticker MUST continue while any call is in flight, and MUST detect a clock jump of more than one second between two ticks (for example after a system suspend) and in that case skip deadline decisions for that tick.</li>
+</ul>
+<p>Two kinds of deadline exist. A <strong>hard</strong> deadline traps the instance when it fires. A <strong>soft</strong> deadline marks the call late: the host continues the call, discards its result, and traps only if a grace period of 100 ms past the soft deadline also expires. The call classes that are hard or soft, and the effect of a breach for each, are the single table in <a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a>.</p>
+<ul>
+<li>Only the call classes marked "yields" return <code>yield</code> from the callback: <code>activate</code>, job runs and long service calls. Their wall time still counts against the deadline. All other classes run to completion or to the deadline without yielding.</li>
+<li>A guest call that is waiting in a synchronous host import does not execute guest code, so no tick can trap it during the import. The trap fires on the first epoch check after the import returns. Time spent in such an import counts toward the deadline.</li>
+<li>
+<p>Time that the host spends after a call has returned (applying the returned submissions, delivering later events) does not count toward the deadline of that call.</p>
+</li>
+<li>
+<p><strong>[HST-083]</strong> A trap caused by an epoch deadline MUST carry the error <code>trap.deadline</code> with the call class and the limit in milliseconds, and MUST be logged once.</p>
+</li>
+</ul>
+<h2 id="component-validation-at-install">Component validation at install</h2>
+<p>The host validates a component when a package is installed and again when the package is loaded. T2 and T3 validation runs inside the helper, because parsing is done by <code>Component::new</code> there.</p>
+<ol>
+<li>The bytes are a valid component (<code>wasmparser</code> validation with the features of the Config). Failure: <code>component.invalid</code>.</li>
+<li>The component size is at most 32 MiB. Failure: <code>component.too-large</code>.</li>
+<li>The component targets the world named in the manifest (<code>world</code>) of the right side. Failure: <code>component.world-mismatch</code>.</li>
+<li>The export set equals the required exports of the world plus the optional exports listed in the manifest. Failure: <code>manifest.exports-mismatch</code>.</li>
+<li>The custom section <code>ilium:api-version</code> exists and holds three big-endian unsigned 16-bit integers (major, minor, patch) equal to the manifest <code>api</code>. For contract version one the bytes are <code>00 00 00 01 00 00</code>. Failure: <code>manifest.api-version</code>.</li>
+<li>No single custom section is larger than 4 MiB and the custom sections together are at most 8 MiB. The <code>name</code> section MAY be stripped by <code>ilium plugin build --release</code>. Failure: <code>component.custom-section-too-large</code>.</li>
+<li>Every import is an interface that the host can link under the rules above. Failures: <code>manifest.import-not-requested</code>, <code>component.wasi-forbidden</code>, or <code>component.import-unknown</code> for an interface that does not exist in <code>ilium:plugin@0.1.0</code>.</li>
+</ol>
+<ul>
+<li><strong>[HST-084]</strong> The host MUST apply the seven validation steps in this order and MUST report the first failing step's error id.</li>
+<li><strong>[HST-085]</strong> The <code>ilium:api-version</code> custom section MUST be exactly six bytes and MUST equal the manifest <code>api</code> in all three fields.</li>
+<li><strong>[HST-086]</strong> A component larger than 32 MiB, a custom section larger than 4 MiB, or custom sections together larger than 8 MiB MUST be refused.</li>
+</ul>
+<h2 id="cargo-and-build-notes-for-host-implementers">Cargo and build notes for host implementers</h2>
+<p>The host crate compiles through ni-build on ni-vm like every crate of the workspace (see the project instructions). The release build step that produces <code>.cwasm</code> files is a build-script-free tool, <code>ilium-plugin-precompile</code>, that links the same <code>Config</code> function as the host (<code>runtime_config()</code> in <code>ilium-plugin-host</code>) so the two cannot drift. The step writes <code>&lt;artifact&gt;.cwasm</code> and a header with the config fingerprint (HST-057).</p>
+<pre><code class="language-rust">// ilium-plugin-host/src/runtime_config.rs (illustration of the contract)
+pub fn runtime_config() -&gt; wasmtime::Config {
+    let mut config = wasmtime::Config::new();
+    config
+        .wasm_component_model(true)
+        .wasm_component_model_async(false)
+        .epoch_interruption(true)
+        .consume_fuel(false)
+        .max_wasm_stack(512 * 1024)
+        .async_stack_size(1024 * 1024)
+        .signals_based_traps(true)
+        .parallel_compilation(true)
+        .wasm_simd(true)
+        .wasm_relaxed_simd(false)
+        .wasm_threads(false)
+        .wasm_multi_memory(false)
+        .wasm_memory64(false)
+        .wasm_gc(false)
+        .generate_address_map(true)
+        .wasm_backtrace(true);
+    config
+}
+</code></pre>
+<ul>
+<li><strong>[HST-087]</strong> The precompile step and the host MUST obtain their <code>Config</code> from the same function.</li>
+</ul>
+<h2 id="errors-and-edge-cases">Errors and edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+<th>Id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A <code>.cwasm</code> was built by another Wasmtime version or another <code>Config</code></td>
+<td><code>Component::deserialize</code> is not attempted when the fingerprint differs. The host loads the embedded <code>.wasm</code> with <code>Component::new</code> instead and logs a warning. A release build MUST have zero such fallbacks, and a CI test enforces it</td>
+<td><code>host.cwasm-incompatible</code></td>
+</tr>
+<tr>
+<td>Embedded <code>.cwasm</code> has no embedded <code>.wasm</code> to fall back to</td>
+<td>The plugin is disabled and the build is considered broken</td>
+<td><code>host.cwasm-incompatible</code></td>
+</tr>
+<tr>
+<td>Package contains a <code>.cwasm</code></td>
+<td>Install refused</td>
+<td><code>package.precompiled-forbidden</code></td>
+</tr>
+<tr>
+<td>Component imports <code>wasi:sockets</code> or <code>wasi:http</code></td>
+<td>Refused</td>
+<td><code>component.wasi-forbidden</code></td>
+</tr>
+<tr>
+<td>Component imports an interface the manifest never requested</td>
+<td>Refused at install or load</td>
+<td><code>manifest.import-not-requested</code></td>
+</tr>
+<tr>
+<td>Function of an unrequested capability called</td>
+<td>The instance traps</td>
+<td><code>host.capability-not-requested</code></td>
+</tr>
+<tr>
+<td>Epoch deadline</td>
+<td>The instance traps (hard) or the call is marked late (soft)</td>
+<td><code>trap.deadline</code></td>
+</tr>
+<tr>
+<td>Guest memory growth refused</td>
+<td>Trap; log line <code>memory limit &lt;N&gt; MiB reached</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td>Stack overflow</td>
+<td>The instance traps</td>
+<td><code>host.stack-overflow</code></td>
+</tr>
+<tr>
+<td>Wasmtime internal compile error</td>
+<td>Load fails; plugin not activated</td>
+<td><code>host.engine-error</code></td>
+</tr>
+<tr>
+<td>Component uses <code>wasm_component_model_async</code></td>
+<td>Refused</td>
+<td><code>component.invalid</code></td>
+</tr>
+<tr>
+<td>Compile cache unavailable</td>
+<td>Compile in memory, log once</td>
+<td><code>host.cache-unavailable</code></td>
+</tr>
+<tr>
+<td>System clock jumps during a call</td>
+<td>No deadline decision on the jump tick</td>
+<td>none</td>
+</tr>
+<tr>
+<td>API version section missing or wrong</td>
+<td>Refused</td>
+<td><code>manifest.api-version</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[HST-088]</strong> When the config fingerprint of an embedded <code>.cwasm</code> differs from the host's, the host MUST NOT call <code>Component::deserialize</code> on it, MUST fall back to <code>Component::new</code> on the embedded <code>.wasm</code>, and MUST log <code>host.cwasm-incompatible</code>. A release-build test MUST fail if any bundled plugin takes this path.</li>
+<li><strong>[HST-089]</strong> A stack overflow in guest code MUST trap the instance with <code>host.stack-overflow</code> and MUST NOT crash the process.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a>, <a href="/pages/reference-host-helper/">Sandbox helper</a> and <a href="/pages/reference-platform-support/">Platform support</a>.</li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a> for what each deadline means.</li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a> for B2, B6 and B7.</li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a> and <a href="/pages/security/">Security</a>.</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-host-rendering/"><small>Previous</small>Rendering pipeline for plugins</a><a class="next" href="/pages/reference-host-scheduling/"><small>Next</small>Scheduling, deadlines and cancellation</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#version-policy">Version policy</a></li><li class="l2"><a href="#build-features-and-config">Build features and Config</a></li><li class="l3"><a href="#compile-cache">Compile cache</a></li><li class="l2"><a href="#allocator">Allocator</a></li><li class="l2"><a href="#instantiation-pipeline">Instantiation pipeline</a></li><li class="l3"><a href="#loading-a-component">Loading a component</a></li><li class="l3"><a href="#instancepre-and-linker">InstancePre and Linker</a></li><li class="l2"><a href="#store-setup">Store setup</a></li><li class="l2"><a href="#wasi-policy">WASI policy</a></li><li class="l2"><a href="#epoch-ticker-and-deadlines">Epoch ticker and deadlines</a></li><li class="l2"><a href="#component-validation-at-install">Component validation at install</a></li><li class="l2"><a href="#cargo-and-build-notes-for-host-implementers">Cargo and build notes for host implementers</a></li><li class="l2"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

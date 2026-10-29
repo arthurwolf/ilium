@@ -590,8 +590,6 @@ mod admission_tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
-        // A successful join releases the worker's physical and frame storage
-        // charge; the ticket only keeps the supervisor wake state alive.
         assert_eq!(quota.snapshot().worker_bytes, baseline);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_bytes, baseline);

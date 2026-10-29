@@ -11,10 +11,16 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod allocation;
+pub mod resource_queue;
 pub use allocation::AllocationSize;
 pub mod agent_recovery;
 pub mod animation_recommendation;
+pub mod custom_agent;
 pub mod option_compatible_list;
+pub mod progress_timing;
+pub use progress_timing::{
+    EtaEstimate, ProgressCheck, ProgressCheckOutcome, ProgressRate, ProgressSample, ProgressTiming,
+};
 
 pub use agent_recovery::{AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery};
 
@@ -120,9 +126,33 @@ pub struct ProgressTaskReport {
     #[serde(default)]
     pub details: String,
     pub error: Option<String>,
+    /// Optional seconds the probe expects the task still needs, measured
+    /// from this report. When present it replaces the pace-based estimate
+    /// of the footer's ETA; the pace still provides the confidence range.
+    #[serde(default)]
+    pub eta_seconds: Option<u64>,
+    /// The probe states that the task's progress cannot be measured (a
+    /// compile or test run with no counter). The footer then shows no ETA
+    /// and the percent is only a placeholder.
+    #[serde(default)]
+    pub indeterminate: bool,
 }
 
+/// Longest ETA a probe may report: ten years, far beyond any real task but
+/// small enough that millisecond arithmetic cannot overflow.
+pub const MAXIMUM_PROGRESS_ETA_SECONDS: u64 = 315_360_000;
+
 impl ProgressTaskReport {
+    /// Attaches the probe's own estimate of the seconds still needed.
+    pub fn with_eta_seconds(
+        mut self,
+        eta_seconds: Option<u64>,
+    ) -> Result<Self, ProgressValidationError> {
+        self.eta_seconds = eta_seconds;
+        self.validate()?;
+        Ok(self)
+    }
+
     /// Constructs the canonical report. `done` is normalized to exactly 100%;
     /// every other invalid value is rejected instead of silently clamped.
     pub fn new(
@@ -144,6 +174,8 @@ impl ProgressTaskReport {
             message,
             details,
             error,
+            eta_seconds: None,
+            indeterminate: false,
         };
         if report.error.as_deref() == Some("") {
             report.error = None;
@@ -167,6 +199,14 @@ impl ProgressTaskReport {
             true,
         )?;
         validate_details(&self.details)?;
+        if self
+            .eta_seconds
+            .is_some_and(|seconds| seconds > MAXIMUM_PROGRESS_ETA_SECONDS)
+        {
+            return Err(ProgressValidationError::InvalidTiming(format!(
+                "eta_seconds must be at most {MAXIMUM_PROGRESS_ETA_SECONDS}"
+            )));
+        }
         match (&self.status, &self.error) {
             (ProgressTaskStatus::Error, Some(error)) => {
                 validate_bounded_text("error", error, MAXIMUM_PROGRESS_ERROR_BYTES, false)
@@ -187,6 +227,10 @@ pub struct PaneProgress {
     pub report: ProgressTaskReport,
     pub monitor_health: ProgressMonitorHealth,
     pub last_observed_unix_millis: u64,
+    /// Start, last-progress and rate facts; unknown on monitors restored from
+    /// snapshots that predate them.
+    #[serde(default)]
+    pub timing: ProgressTiming,
     /// Whether a human has seen this monitor's outcome. Meaningful only once
     /// the task is terminal or observation has failed; it is the task-result
     /// counterpart of an agent's unread `Done` and is cleared by the same
@@ -205,20 +249,45 @@ pub enum ProgressAttention {
 }
 
 impl PaneProgress {
+    /// A zero with no estimate is commonly a placeholder; wait for actual
+    /// movement or a probe-supplied estimate before presenting it as a gauge.
+    pub fn has_measurable_progress(&self) -> bool {
+        !self.report.indeterminate
+            && (self.report.percent > 0.0 || self.report.eta_seconds.is_some())
+    }
+
     pub fn new(
         monitor_id: u64,
         report: ProgressTaskReport,
         last_observed_unix_millis: u64,
     ) -> Result<Self, ProgressValidationError> {
+        let mut timing = ProgressTiming::started(last_observed_unix_millis, report.percent);
+        timing.set_reported_eta(last_observed_unix_millis, report.eta_seconds);
         let progress = Self {
             monitor_id,
             report,
             monitor_health: ProgressMonitorHealth::Healthy,
             last_observed_unix_millis,
+            timing,
             attention: ProgressAttention::Unread,
         };
         progress.validate()?;
         Ok(progress)
+    }
+
+    /// Continues `previous`'s timing history with this newer observation of
+    /// the same task, so start time and rate samples survive each probe.
+    pub fn carry_timing_from(&mut self, previous: &PaneProgress) {
+        let phase_changed = previous.report.message != self.report.message
+            || previous.report.status != self.report.status;
+        let mut timing = previous.timing.clone();
+        timing.observe(
+            self.last_observed_unix_millis,
+            self.report.percent,
+            phase_changed,
+        );
+        timing.set_reported_eta(self.last_observed_unix_millis, self.report.eta_seconds);
+        self.timing = timing;
     }
 
     /// A monitor that still observes a task which has not finished: the
@@ -238,6 +307,9 @@ impl PaneProgress {
             return Err(ProgressValidationError::InvalidMonitorId);
         }
         self.report.validate()?;
+        self.timing
+            .validate()
+            .map_err(ProgressValidationError::InvalidTiming)?;
         self.monitor_health.validate()
     }
 
@@ -258,6 +330,8 @@ pub enum ProgressValidationError {
     MissingTaskError,
     #[error("only error status may include task error detail")]
     UnexpectedTaskError,
+    #[error("progress timing is invalid: {0}")]
+    InvalidTiming(String),
     #[error("monitor failure count must be positive")]
     InvalidMonitorFailureCount,
     #[error("{field} must not be empty")]
@@ -938,6 +1012,7 @@ pub const TASK_PROGRESS_BUCKETS: u8 = 12;
 pub enum TaskSignal {
     Pending,
     Running { bucket: u8, degraded: bool },
+    RunningUnmeasured { degraded: bool },
     Done { unread: bool },
     Error { unread: bool },
     MonitorFailed { unread: bool },
@@ -951,6 +1026,14 @@ impl TaskSignal {
             (ProgressTaskStatus::Error, _) => Self::Error { unread },
             (_, true) => Self::MonitorFailed { unread },
             (ProgressTaskStatus::NotStartedYet, false) => Self::Pending,
+            (ProgressTaskStatus::Running, false) if !progress.has_measurable_progress() => {
+                Self::RunningUnmeasured {
+                    degraded: matches!(
+                        progress.monitor_health,
+                        ProgressMonitorHealth::Degraded { .. }
+                    ),
+                }
+            }
             (ProgressTaskStatus::Running, false) => Self::Running {
                 bucket: task_progress_bucket(progress.report.percent),
                 degraded: matches!(
@@ -1144,8 +1227,16 @@ fn project_objective_signal(
     if let Some(goal @ (GoalState::Blocked | GoalState::UsageLimited)) = goal {
         return (ObjectiveSignal::Goal(goal), "B3");
     }
-    if let Some(task @ (TaskSignal::Pending | TaskSignal::Running { .. })) = task {
-        let rule = if matches!(task, TaskSignal::Running { .. }) {
+    if let Some(
+        task @ (TaskSignal::Pending
+        | TaskSignal::Running { .. }
+        | TaskSignal::RunningUnmeasured { .. }),
+    ) = task
+    {
+        let rule = if matches!(
+            task,
+            TaskSignal::Running { .. } | TaskSignal::RunningUnmeasured { .. }
+        ) {
             "B4"
         } else {
             "B5"
@@ -1289,6 +1380,11 @@ pub enum ContainerKind {
     SplitView {
         orientation: SplitOrientation,
     },
+    /// Fixed ownership boundary for terminal panes sharing one Git checkout.
+    Worktree {
+        repo_common_dir: PathBuf,
+        worktree_root: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1335,6 +1431,10 @@ impl ContainerNode {
         matches!(self.kind, ContainerKind::Group)
     }
 
+    pub const fn is_worktree(&self) -> bool {
+        matches!(self.kind, ContainerKind::Worktree { .. })
+    }
+
     pub const fn is_project(&self) -> bool {
         matches!(self.kind, ContainerKind::Project { .. })
     }
@@ -1352,7 +1452,9 @@ impl ContainerNode {
 
     pub const fn split_orientation(&self) -> Option<SplitOrientation> {
         match self.kind {
-            ContainerKind::Project { .. } | ContainerKind::Group => None,
+            ContainerKind::Project { .. }
+            | ContainerKind::Group
+            | ContainerKind::Worktree { .. } => None,
             ContainerKind::SplitView { orientation } => Some(orientation),
         }
     }
@@ -1368,6 +1470,20 @@ impl ContainerNode {
             return Err(TreeError::SplitViewCapacityReached);
         }
         Ok(())
+    }
+
+    /// Fixed containers accept terminal provenance for their exact checkout only.
+    fn accepts_worktree_member(&self, member: &Node) -> bool {
+        let ContainerKind::Worktree {
+            repo_common_dir,
+            worktree_root,
+        } = &self.kind
+        else {
+            return false;
+        };
+        matches!(&member.kind,
+            NodeKind::Pane { content: PaneContentKind::Terminal, workspace: Some(workspace), .. }
+                if workspace.repo_common_dir == *repo_common_dir && workspace.worktree_root == *worktree_root)
     }
 
     /// Enforces the child policy owned by this container abstraction. Normal
@@ -1641,6 +1757,10 @@ impl Node {
         matches!(&self.kind, NodeKind::Container(container) if container.is_group())
     }
 
+    pub fn is_worktree(&self) -> bool {
+        matches!(&self.kind, NodeKind::Container(container) if container.is_worktree())
+    }
+
     pub fn is_project(&self) -> bool {
         matches!(&self.kind, NodeKind::Container(container) if container.is_project())
     }
@@ -1742,6 +1862,8 @@ pub enum TreeError {
     EmptyQueuedPrompt,
     #[error("pane {0:?} prompt queue already holds the maximum of {1} entries")]
     PromptQueueFull(NodeId, usize),
+    #[error("worktree container {0:?} has fixed ownership and membership")]
+    FixedWorktreeMembership(NodeId),
     #[error("cannot remove the root group")]
     CannotRemoveRoot,
     #[error("cannot move the root group")]
@@ -2305,7 +2427,7 @@ impl Tree {
         let mut current = Some(node_id);
         while let Some(candidate) = current {
             let node = self.get(candidate)?;
-            if node.accepts_normal_children() {
+            if node.accepts_normal_children() || node.is_worktree() {
                 return Some(candidate);
             }
             current = node.parent;
@@ -2323,7 +2445,7 @@ impl Tree {
     pub fn navigable_panes_in_group(&self, group_id: NodeId) -> Vec<NodeId> {
         if !self
             .get(group_id)
-            .is_some_and(Node::accepts_normal_children)
+            .is_some_and(|node| node.accepts_normal_children() || node.is_worktree())
         {
             return Vec::new();
         }
@@ -2362,7 +2484,7 @@ impl Tree {
                 let Some(node) = tree.get(*child) else {
                     continue;
                 };
-                if node.is_group() {
+                if node.is_group() || node.is_worktree() {
                     groups.push(*child);
                 }
                 if node.is_container() {
@@ -2585,6 +2707,9 @@ impl Tree {
         let NodeKind::Container(container) = &parent_node.kind else {
             return Err(TreeError::NotAContainer(parent));
         };
+        if container.is_worktree() {
+            return Err(TreeError::FixedWorktreeMembership(parent));
+        }
         container.validate_pane_child(false)
     }
 
@@ -2991,6 +3116,7 @@ impl Tree {
             &plan.children,
             &accepted_title_revisions,
         )?;
+        updated.normalize_worktree_membership_in_place()?;
         let checkpoint_activity_revisions =
             updated.mark_project_restructured_at(project_id, inference_activity_revisions)?;
         updated.get_mut(project_id)?.animation_generation = next_animation_generation;
@@ -3111,8 +3237,32 @@ impl Tree {
             .filter(|node| node.is_project())
             .ok_or(TreeError::NotAProject(project_id))?;
         let recommendation = previous_project.inferred_animation.clone();
+        let workspace_panes = self
+            .panes()
+            .filter(|node| {
+                self.pane_workspace(node.id).is_some()
+                    && self.project_ancestor(node.id) == Some(project_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let mut updated = self.clone();
         updated.restore_project_from_in_place(project_id, previous)?;
+        for mut pane in workspace_panes {
+            // A later member has no counterpart in the undo snapshot. Attach temporarily
+            // to the project; normalization reinstates its fixed checkout owner below.
+            pane.parent = Some(project_id);
+            pane.presentation_revision = pane
+                .presentation_revision
+                .checked_add(1)
+                .ok_or(TreeError::PresentationRevisionExhausted(pane.id))?;
+            for node in updated.nodes.values_mut() {
+                if let NodeKind::Container(container) = &mut node.kind {
+                    container.children.retain(|child| *child != pane.id);
+                }
+            }
+            updated.push_child(project_id, pane.id)?;
+            updated.nodes.insert(pane.id, pane);
+        }
         for current in preserved {
             let Some(restored) = updated.nodes.get_mut(&current.id) else {
                 continue;
@@ -3138,6 +3288,7 @@ impl Tree {
         let project = updated.get_mut(project_id)?;
         project.inferred_animation = recommendation;
         project.animation_generation = next_generation;
+        updated.normalize_worktree_membership_in_place()?;
         updated.validate()?;
         *self = updated;
         Ok(())
@@ -3490,6 +3641,9 @@ impl Tree {
         }
         let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
         let parent = node.parent;
+        if node.is_worktree() && !self.children_of(id)?.is_empty() {
+            return Err(TreeError::FixedWorktreeMembership(id));
+        }
 
         // Collect the whole subtree first (DFS), then remove it in one pass.
         let mut to_remove = vec![id];
@@ -3515,6 +3669,7 @@ impl Tree {
         if let Some(parent) = parent {
             let _ = self.record_node_activity(parent)?;
         }
+        self.prune_empty_worktree_containers()?;
         Ok(())
     }
 
@@ -3543,6 +3698,18 @@ impl Tree {
         if existing.parent != pane.parent {
             return Err(TreeError::PanePlacementChanged(pane.id));
         }
+        if let Some(owner) = self.worktree_container_for_node(pane.id) {
+            let Some(Node {
+                kind: NodeKind::Container(container),
+                ..
+            }) = self.get(owner)
+            else {
+                return Err(TreeError::FixedWorktreeMembership(owner));
+            };
+            if !container.accepts_worktree_member(&pane) {
+                return Err(TreeError::FixedWorktreeMembership(pane.id));
+            }
+        }
         self.nodes.insert(pane.id, pane);
         Ok(())
     }
@@ -3560,6 +3727,9 @@ impl Tree {
         inferred_icon: Option<String>,
     ) -> Result<(), TreeError> {
         let name = name.into();
+        if self.get(id).is_some_and(Node::is_worktree) {
+            return Err(TreeError::FixedWorktreeMembership(id));
+        }
         let node = self.get_mut(id)?;
         let did_change = node.name != name
             || node.short_name != short_name
@@ -3768,7 +3938,8 @@ impl Tree {
 
     /// Resets a terminal whose agent conversation started over. Automatic
     /// title fields are replaced, while manually fixed presentation and its
-    /// ownership survive. The pane moves directly under its owning project.
+    /// ownership survive. Worktree members keep their fixed checkout owner;
+    /// other panes move directly under their owning project.
     /// The transition is applied to a clone first so a structural rejection
     /// cannot leave either half committed.
     pub fn reset_terminal_pane_for_fresh_conversation(
@@ -3811,9 +3982,12 @@ impl Tree {
                 .ok_or(TreeError::PresentationRevisionExhausted(node.id))?;
         }
         let changed = changed && !is_name_fixed;
-        let placement_changed = node.parent != Some(project_id);
+        let destination = updated_tree
+            .worktree_container_for_node(id)
+            .unwrap_or(project_id);
+        let placement_changed = updated_tree.parent_of(id) != Some(destination);
         if placement_changed {
-            updated_tree.move_node(id, project_id, None)?;
+            updated_tree.move_node(id, destination, None)?;
         }
 
         *self = updated_tree;
@@ -4050,12 +4224,22 @@ impl Tree {
 
     /// Records creation provenance without changing the pane's cwd. Callers
     /// must set the actual launch directory separately before spawning.
+    /// Changes provenance and reconciles the fixed project-local checkout boundary atomically.
     pub fn set_pane_workspace(
         &mut self,
         id: NodeId,
         workspace: Option<PaneWorkspace>,
     ) -> Result<(), TreeError> {
-        let node = self.get_mut(id)?;
+        if let Some(previous) = self.pane_workspace(id) {
+            match &workspace {
+                Some(next)
+                    if previous.repo_common_dir == next.repo_common_dir
+                        && previous.worktree_root == next.worktree_root => {}
+                _ => return Err(TreeError::FixedWorktreeMembership(id)),
+            }
+        }
+        let mut updated = self.clone();
+        let node = updated.get_mut(id)?;
         let NodeKind::Pane {
             content,
             workspace: field,
@@ -4068,6 +4252,8 @@ impl Tree {
             return Err(TreeError::NotATerminal(id));
         }
         *field = workspace.map(Box::new);
+        updated.normalize_worktree_membership_in_place()?;
+        *self = updated;
         Ok(())
     }
 
@@ -4307,6 +4493,14 @@ impl Tree {
             return Err(TreeError::NodeNotFound(new_parent));
         }
         let moving_node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
+        if moving_node.is_worktree()
+            || (self.worktree_container_for_node(id).is_some()
+                && moving_node.parent != Some(new_parent))
+            || (self.get(new_parent).is_some_and(Node::is_worktree)
+                && moving_node.parent != Some(new_parent))
+        {
+            return Err(TreeError::FixedWorktreeMembership(id));
+        }
         let destination = self
             .get(new_parent)
             .ok_or(TreeError::NodeNotFound(new_parent))?;
@@ -4713,6 +4907,35 @@ impl Tree {
             ));
         }
 
+        let mut worktree_identities = HashSet::new();
+        for node in self.nodes.values() {
+            let NodeKind::Container(container) = &node.kind else {
+                continue;
+            };
+            let ContainerKind::Worktree {
+                repo_common_dir,
+                worktree_root,
+            } = &container.kind
+            else {
+                continue;
+            };
+            let Some(parent) = node
+                .parent
+                .filter(|parent| self.get(*parent).is_some_and(Node::is_project))
+            else {
+                return Err(TreeError::FixedWorktreeMembership(node.id));
+            };
+            if !worktree_identities.insert((parent, repo_common_dir, worktree_root))
+                || container.children.iter().any(|child| {
+                    !self
+                        .get(*child)
+                        .is_some_and(|member| container.accepts_worktree_member(member))
+                })
+            {
+                return Err(TreeError::FixedWorktreeMembership(node.id));
+            }
+        }
+
         let max_existing_id = self.nodes.keys().map(|id| id.0).max().unwrap_or(0);
         if self.next_id <= max_existing_id {
             return Err(TreeError::InvalidStructure(format!(
@@ -4721,6 +4944,189 @@ impl Tree {
             )));
         }
 
+        Ok(())
+    }
+}
+
+impl Tree {
+    /// The fixed checkout owner, including `node_id` when it names the owner itself.
+    pub fn worktree_container_for_node(&self, node_id: NodeId) -> Option<NodeId> {
+        let mut current = Some(node_id);
+        while let Some(id) = current {
+            let node = self.get(id)?;
+            if node.is_worktree() {
+                return Some(id);
+            }
+            current = node.parent;
+        }
+        None
+    }
+
+    /// Migrates legacy pane provenance and reconciles membership after restore or
+    /// restructuring. Paths are canonical facts supplied by the Git adapter; this
+    /// pure boundary deliberately performs no filesystem lookup or prefix matching.
+    pub fn normalize_worktree_membership(&mut self) -> Result<(), TreeError> {
+        let mut updated = self.clone();
+        updated.normalize_worktree_membership_in_place()?;
+        *self = updated;
+        Ok(())
+    }
+
+    fn normalize_worktree_membership_in_place(&mut self) -> Result<(), TreeError> {
+        let mut members = Vec::new();
+        for node in self.panes() {
+            let Some(workspace) = self.pane_workspace(node.id) else {
+                continue;
+            };
+            let project = self
+                .project_ancestor(node.id)
+                .ok_or(TreeError::NodeOutsideProject(node.id))?;
+            members.push((node.id, project, workspace.clone()));
+        }
+        let member_ids = members.iter().map(|(id, _, _)| *id).collect::<HashSet<_>>();
+        let mut containers = self
+            .nodes
+            .values()
+            .filter(|node| node.is_worktree())
+            .cloned()
+            .collect::<Vec<_>>();
+        containers.sort_unstable_by_key(|node| node.id);
+        // Existing fixed membership is the authority even while a restructure
+        // temporarily attaches the same leaves elsewhere in its candidate tree.
+        let mut member_order = HashMap::new();
+        for node in &containers {
+            if let NodeKind::Container(container) = &node.kind {
+                for child in &container.children {
+                    let next = member_order.len();
+                    member_order.entry(*child).or_insert(next);
+                }
+            }
+        }
+        for pane_id in self.pane_ids_in_tree_order() {
+            let next = member_order.len();
+            member_order.entry(pane_id).or_insert(next);
+        }
+        members.sort_unstable_by_key(|(id, _, _)| {
+            (member_order.get(id).copied().unwrap_or(usize::MAX), *id)
+        });
+        let mut owners = HashMap::new();
+        for node in &containers {
+            let parent = node
+                .parent
+                .ok_or(TreeError::FixedWorktreeMembership(node.id))?;
+            if !self.get(parent).is_some_and(Node::is_project) {
+                return Err(TreeError::FixedWorktreeMembership(node.id));
+            }
+            let NodeKind::Container(container) = &node.kind else {
+                unreachable!("filtered worktree")
+            };
+            let ContainerKind::Worktree {
+                repo_common_dir,
+                worktree_root,
+            } = &container.kind
+            else {
+                unreachable!("filtered worktree")
+            };
+            // A malformed fixed container must not silently absorb ordinary user entries.
+            if container.children.iter().any(|child| {
+                !member_ids.contains(child)
+                    || !self
+                        .get(*child)
+                        .is_some_and(|member| container.accepts_worktree_member(member))
+            }) {
+                return Err(TreeError::FixedWorktreeMembership(node.id));
+            }
+            owners
+                .entry((parent, repo_common_dir.clone(), worktree_root.clone()))
+                .or_insert(node.id);
+        }
+        for node in self.nodes.values_mut() {
+            if let NodeKind::Container(container) = &mut node.kind {
+                container
+                    .children
+                    .retain(|child| !member_ids.contains(child));
+                if container.is_worktree() {
+                    container.children.clear();
+                }
+            }
+        }
+        for (pane_id, project, workspace) in members {
+            let key = (
+                project,
+                workspace.repo_common_dir.clone(),
+                workspace.worktree_root.clone(),
+            );
+            let owner = if let Some(owner) = owners.get(&key) {
+                *owner
+            } else {
+                let id = self.alloc_id();
+                let name = if workspace.branch.is_empty() {
+                    project_display_name(&workspace.worktree_root)
+                } else {
+                    workspace.branch.clone()
+                };
+                self.nodes.insert(
+                    id,
+                    Node {
+                        id,
+                        parent: Some(project),
+                        name,
+                        short_name: None,
+                        inferred_icon: None,
+                        inferred_animation: None,
+                        animation_generation: 0,
+                        is_name_fixed: true,
+                        presentation_revision: 0,
+                        is_bookmarked: false,
+                        activity_revision: 0,
+                        last_restructure_activity_revision: None,
+                        last_focus_activity_revision: None,
+                        structure_source: StructureSource::Manual,
+                        kind: NodeKind::Container(ContainerNode {
+                            kind: ContainerKind::Worktree {
+                                repo_common_dir: workspace.repo_common_dir.clone(),
+                                worktree_root: workspace.worktree_root.clone(),
+                            },
+                            children: Vec::new(),
+                            expanded: true,
+                            locked_closed: false,
+                        }),
+                    },
+                );
+                owners.insert(key, id);
+                id
+            };
+            if !self.children_of(project)?.contains(&owner) {
+                self.push_child(project, owner)?;
+            }
+            self.push_child(owner, pane_id)?;
+            self.get_mut(pane_id)?.parent = Some(owner);
+        }
+        self.prune_empty_worktree_containers()
+    }
+
+    fn prune_empty_worktree_containers(&mut self) -> Result<(), TreeError> {
+        let empty = self
+            .nodes
+            .values()
+            .filter_map(|node| {
+                if node.is_worktree()
+                    && self
+                        .children_of(node.id)
+                        .is_ok_and(|children| children.is_empty())
+                {
+                    Some((node.id, node.parent))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for (id, parent) in empty {
+            if let Some(parent) = parent {
+                self.remove_child(parent, id)?;
+            }
+            self.nodes.remove(&id);
+        }
         Ok(())
     }
 }
@@ -7706,6 +8112,25 @@ mod pane_signal_tests {
     }
 
     #[test]
+    fn unavailable_progress_has_a_non_gauge_running_signal() {
+        let mut progress = running(0.0);
+        assert!(matches!(
+            TaskSignal::from_progress(&progress),
+            TaskSignal::RunningUnmeasured { degraded: false }
+        ));
+        progress.report.percent = 25.0;
+        assert!(matches!(
+            TaskSignal::from_progress(&progress),
+            TaskSignal::Running { .. }
+        ));
+        progress.report.indeterminate = true;
+        assert!(matches!(
+            TaskSignal::from_progress(&progress),
+            TaskSignal::RunningUnmeasured { .. }
+        ));
+    }
+
+    #[test]
     fn running_task_outweighs_an_active_goal_but_not_a_blocked_goal() {
         let status = PaneStatus::from_activity(
             AgentClass::Codex,
@@ -7851,7 +8276,9 @@ mod pane_signal_tests {
                 ObjectiveSignal::Goal(GoalState::UsageLimited) => 4,
                 ObjectiveSignal::Goal(GoalState::Reached) => 5,
                 ObjectiveSignal::Task(TaskSignal::Pending) => 6,
-                ObjectiveSignal::Task(TaskSignal::Running { .. }) => 7,
+                ObjectiveSignal::Task(
+                    TaskSignal::Running { .. } | TaskSignal::RunningUnmeasured { .. },
+                ) => 7,
                 ObjectiveSignal::Task(TaskSignal::Done { .. }) => 8,
                 ObjectiveSignal::Task(TaskSignal::Error { .. }) => 9,
                 ObjectiveSignal::Task(TaskSignal::MonitorFailed { .. }) => 10,
@@ -8480,5 +8907,323 @@ mod title_undo_preservation_tests {
         assert_eq!(restored.short_name.as_deref(), Some("M"));
         assert_eq!(restored.inferred_icon.as_deref(), Some("pin"));
         assert!(restored.is_name_fixed);
+    }
+}
+
+#[cfg(test)]
+mod progress_check_history_tests {
+    use super::*;
+
+    fn report(status: ProgressTaskStatus) -> ProgressTaskReport {
+        ProgressTaskReport::new(
+            "job".into(),
+            status,
+            10.0,
+            "Building".into(),
+            String::new(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn success_retains_failed_checks_and_status_transitions_count_as_progress() {
+        let mut previous =
+            PaneProgress::new(1, report(ProgressTaskStatus::NotStartedYet), 100).unwrap();
+        previous.timing.record_failed_check(200);
+        let mut next = PaneProgress::new(1, report(ProgressTaskStatus::Running), 300).unwrap();
+        next.carry_timing_from(&previous);
+        assert_eq!(next.timing.started_at_unix_millis, Some(100));
+        assert_eq!(next.timing.last_progress_unix_millis, Some(300));
+        assert_eq!(next.timing.checks.len(), 3);
+        assert_eq!(next.timing.checks[1].outcome, ProgressCheckOutcome::Failed);
+        assert_eq!(
+            next.timing.checks[2].outcome,
+            ProgressCheckOutcome::Progress
+        );
+    }
+
+    #[test]
+    fn details_and_eta_do_not_turn_healthy_heartbeats_into_progress() {
+        let previous = PaneProgress::new(1, report(ProgressTaskStatus::Running), 100).unwrap();
+        let mut updated_report = previous.report.clone();
+        updated_report.details = "elapsed: 20 seconds".into();
+        updated_report.eta_seconds = Some(100);
+        let mut next = PaneProgress::new(1, updated_report, 300).unwrap();
+        next.carry_timing_from(&previous);
+        assert_eq!(next.last_observed_unix_millis, 300);
+        assert_eq!(next.timing.last_progress_unix_millis, Some(100));
+        assert_eq!(
+            next.timing.checks[1].outcome,
+            ProgressCheckOutcome::Heartbeat
+        );
+    }
+}
+
+#[cfg(test)]
+mod worktree_membership_tests {
+    use crate::*;
+
+    fn workspace(root: &str) -> PaneWorkspace {
+        PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: PathBuf::from("/repo/.git"),
+            worktree_root: PathBuf::from(root),
+            branch: "feature".into(),
+            base_ref: "main".into(),
+            base_commit: "abc".into(),
+            created_by_ilium: false,
+            created_at_unix: 0,
+        }
+    }
+
+    #[test]
+    fn shared_worktree_membership_is_fixed_and_last_close_prunes_container() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let group = tree.add_group(project, "Agents").unwrap();
+        let first = tree
+            .add_pane(group, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(group, "two", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(first, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        tree.set_pane_workspace(second, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let owner = tree.get(first).unwrap().parent.unwrap();
+        assert_eq!(tree.get(owner).unwrap().parent, Some(project));
+        assert_eq!(tree.get(second).unwrap().parent, Some(owner));
+        assert_ne!(owner, group);
+        assert!(tree.move_node(first, group, None).is_err());
+        assert!(tree.remove_node(owner).is_err());
+        assert!(tree.rename_node(owner, "renamed", None, None).is_err());
+        assert!(tree.add_group(owner, "nested").is_err());
+        assert!(tree
+            .add_pane(owner, "unowned", PaneContentKind::Terminal)
+            .is_err());
+        assert!(tree
+            .create_split_view(group, "split", SplitOrientation::Vertical, &[first, second])
+            .is_err());
+        tree.remove_node(first).unwrap();
+        assert_eq!(tree.children_of(owner).unwrap(), &[second]);
+        tree.remove_node(second).unwrap();
+        assert!(tree.get(owner).is_none());
+    }
+    #[test]
+    fn worktree_identity_uses_root_not_nested_cwd_or_marker() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let first = tree
+            .add_pane(project, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(project, "two", PaneContentKind::Terminal)
+            .unwrap();
+        let third = tree
+            .add_pane(project, "three", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_launch_cwd(first, PathBuf::from("/worktrees/topic/src"))
+            .unwrap();
+        tree.set_pane_workspace(first, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let mut same = workspace("/worktrees/topic");
+        same.workspace_id = Some("owned-marker".into());
+        tree.set_pane_workspace(second, Some(same)).unwrap();
+        tree.set_pane_workspace(third, Some(workspace("/worktrees/topic-other")))
+            .unwrap();
+        assert_eq!(
+            tree.get(first).unwrap().parent,
+            tree.get(second).unwrap().parent
+        );
+        assert_ne!(
+            tree.get(first).unwrap().parent,
+            tree.get(third).unwrap().parent
+        );
+        assert_eq!(
+            tree.pane_cwd(first),
+            Some(Path::new("/worktrees/topic/src"))
+        );
+    }
+
+    #[test]
+    fn restructure_cannot_release_worktree_members_and_undo_preserves_later_member() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let first = tree
+            .add_pane(project, "one", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(first, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let owner = tree.get(first).unwrap().parent.unwrap();
+        let previous = tree.clone();
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::Group {
+                title: "Escaped".into(),
+                short_title: None,
+                icon: None,
+                children: vec![RestructureNode::Pane {
+                    id: first,
+                    title: "one".into(),
+                    short_title: None,
+                    icon: None,
+                }],
+            }],
+        };
+        tree.apply_project_restructure(project, plan).unwrap();
+        assert_eq!(tree.get(first).unwrap().parent, Some(owner));
+        assert_eq!(tree.get(owner).unwrap().parent, Some(project));
+        let second = tree
+            .add_pane(project, "two", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(second, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let before_undo_revision = tree.get(first).unwrap().presentation_revision;
+        tree.restore_project_from(project, &previous).unwrap();
+        assert!(tree.get(first).unwrap().presentation_revision > before_undo_revision);
+        assert_eq!(tree.get(first).unwrap().parent, Some(owner));
+        assert_eq!(tree.get(second).unwrap().parent, Some(owner));
+        tree.validate().unwrap();
+    }
+
+    #[test]
+    fn fresh_conversation_and_navigation_keep_worktree_ownership() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let pane = tree
+            .add_pane(project, "old", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(pane, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let owner = tree.get(pane).unwrap().parent.unwrap();
+        tree.reset_terminal_pane_for_fresh_conversation(pane, "new")
+            .unwrap();
+        assert_eq!(tree.get(pane).unwrap().parent, Some(owner));
+        assert_eq!(tree.containing_group(pane), Some(owner));
+        assert_eq!(tree.navigable_panes_in_group(owner), vec![pane]);
+        assert!(tree.group_ids_in_tree_order().contains(&owner));
+    }
+
+    #[test]
+    fn legacy_provenance_migration_is_idempotent_and_fixed_owner_rejects_foreign_entries() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let group = tree.add_group(project, "legacy").unwrap();
+        let pane = tree
+            .add_pane(group, "old", PaneContentKind::Terminal)
+            .unwrap();
+        let NodeKind::Pane {
+            workspace: field, ..
+        } = &mut tree.get_mut(pane).unwrap().kind
+        else {
+            panic!("pane")
+        };
+        *field = Some(Box::new(workspace("/worktrees/topic")));
+        tree.normalize_worktree_membership().unwrap();
+        let normalized = tree.clone();
+        tree.normalize_worktree_membership().unwrap();
+        assert_eq!(tree, normalized);
+        tree.validate().unwrap();
+        let owner = tree.worktree_container_for_node(pane).unwrap();
+        let ordinary = tree
+            .add_pane(project, "ordinary", PaneContentKind::Terminal)
+            .unwrap();
+        tree.remove_child(project, ordinary).unwrap();
+        tree.push_child(owner, ordinary).unwrap();
+        tree.get_mut(ordinary).unwrap().parent = Some(owner);
+        assert!(tree.normalize_worktree_membership().is_err());
+    }
+
+    #[test]
+    fn bound_workspace_identity_cannot_change_and_refresh_preserves_member_order() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let first = tree
+            .add_pane(project, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(project, "two", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(first, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        tree.set_pane_workspace(second, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let owner = tree.worktree_container_for_node(first).unwrap();
+        tree.move_node(second, owner, Some(0)).unwrap();
+        tree.set_pane_workspace(first, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        assert_eq!(tree.children_of(owner).unwrap(), &[second, first]);
+        let before = tree.clone();
+        assert!(tree
+            .set_pane_workspace(first, Some(workspace("/worktrees/other")))
+            .is_err());
+        assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn persisted_worktree_container_rejects_mismatched_provenance_and_nonterminal() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let pane = tree
+            .add_pane(project, "one", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(pane, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let mut mismatched = tree.clone();
+        let NodeKind::Pane {
+            workspace: field, ..
+        } = &mut mismatched.get_mut(pane).unwrap().kind
+        else {
+            panic!("pane")
+        };
+        field.as_mut().unwrap().worktree_root = PathBuf::from("/other");
+        assert!(mismatched.validate().is_err());
+        let NodeKind::Pane { content, .. } = &mut tree.get_mut(pane).unwrap().kind else {
+            panic!("pane")
+        };
+        *content = PaneContentKind::Editor;
+        assert!(tree.validate().is_err());
+    }
+
+    #[test]
+    fn pane_refresh_cannot_strip_fixed_workspace_ownership() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/repo")).unwrap();
+        let pane = tree
+            .add_pane(project, "one", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(pane, Some(workspace("/worktrees/topic")))
+            .unwrap();
+        let mut replacement = tree.get(pane).unwrap().clone();
+        replacement.name = "working".into();
+        tree.replace_pane_in_place(replacement.clone()).unwrap();
+        let NodeKind::Pane { workspace, .. } = &mut replacement.kind else {
+            panic!("pane")
+        };
+        *workspace = None;
+        assert!(tree.replace_pane_in_place(replacement).is_err());
+        assert!(tree.pane_workspace(pane).is_some());
+    }
+
+    #[test]
+    fn provenance_without_project_is_rejected_atomically() {
+        let mut tree = Tree::new();
+        let legacy_group = tree.add_group(ROOT_ID, "legacy").unwrap();
+        let pane = tree
+            .add_pane(legacy_group, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let NodeKind::Pane {
+            workspace: field, ..
+        } = &mut tree.get_mut(pane).unwrap().kind
+        else {
+            panic!("pane")
+        };
+        *field = Some(Box::new(workspace("/worktrees/topic")));
+        let before = tree.clone();
+        assert!(
+            matches!(tree.normalize_worktree_membership(), Err(TreeError::NodeOutsideProject(id)) if id == pane)
+        );
+        assert_eq!(tree, before);
     }
 }

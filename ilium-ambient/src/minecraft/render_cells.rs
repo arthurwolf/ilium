@@ -66,7 +66,7 @@ pub fn prepare(
     if chunks.is_empty() {
         return Err(Error::Invalid);
     }
-    if chunks.len() > 128 {
+    if chunks.len() > super::loader::MAX_CHUNKS {
         return Err(Error::Limit("input chunks"));
     }
     let mut core = surface::Bounds {
@@ -111,7 +111,9 @@ pub fn prepare_core(
     {
         return Err(Error::Invalid);
     }
-    if map.loaded().chunks.is_empty() || map.loaded().chunks.len() > 128 {
+    if map.loaded().chunks.is_empty()
+        || map.loaded().chunks.len() > super::loader::MAX_MERGED_CHUNKS
+    {
         return Err(Error::Invalid);
     }
     prepare_region(map, core, 8, limits, &mut work)
@@ -136,8 +138,8 @@ fn prepare_region(
             halo,
             chunks.values().map(Arc::as_ref),
             surface::Limits {
-                max_chunks: 128,
-                max_columns: 32768,
+                max_chunks: super::loader::MAX_CHUNKS,
+                max_columns: 65_536,
                 max_owned_bytes: 16384,
             },
             work,

@@ -1371,7 +1371,8 @@ fn saved_source_accepts_three_window_footprint_and_clones_retain_projected_charg
 
     let template = Arc::clone(expanded.chunks.get(&[0, 0]).unwrap());
     let mut oversized = super::super::loader::LoadedWindow::default();
-    for x in 0..=384 {
+    // One chunk over the merged-map cap (three saved windows), so the limit is exceeded.
+    for x in 0..=super::super::loader::MAX_MERGED_CHUNKS as i32 {
         let position = [x, 0];
         oversized.chunks.insert(position, Arc::clone(&template));
         oversized.coverage.chunks.insert(position);
