@@ -333,6 +333,69 @@ shell_available = sys.platform.startswith('linux') and all(shutil.which(tool) fo
 
 @unittest.skipUnless(shell_available, 'requires Linux shell/coreutils fixture tools; no native package operations')  # This fixture skip never changes production required-format gates.
 class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell logic against owned temporary paths.
+    def test_offline_deb_installs_exact_file_and_checks_dependencies_before_body(self):  # Exercise the real generated transaction without invoking a native package manager.
+        adapter_source = '\n'.join([  # This complete adapter rejects every unexpected tool or argument vector.
+            'import os, sys # Read only the explicit fixture environment and arguments.',  # Keep the helper independent of repository imports.
+            'from pathlib import Path # Touch only run-owned markers.',  # No real package database is accessed.
+            'tool, arguments = sys.argv[1], sys.argv[2:] # Retain argument boundaries for quoted package paths.',  # Spaces must not split the artifact argument.
+            'mode = os.environ["fixture_mode"] # Select one controlled failure.',  # Make failure origin explicit.
+            'package = os.environ["fixture_package"] # Bind the sole allowed exact-file path.',  # A manager cannot silently select another artifact.
+            'events, payload = Path(os.environ["fixture_events"]), Path(os.environ["fixture_payload"]) # Restrict every mutation to this fixture.',  # Reuse the real transaction ownership boundary.
+            'if tool in ("apt-get", "dpkg") and arguments == ["--version"]: # Allow only the diagnostic version query.',  # Diagnostics confer no acceptance.
+            '    print("fixture manager version"); sys.exit(0) # Emit controlled public diagnostic text.',  # Stop before mutation dispatch.
+            'if tool == "dpkg-deb" and arguments == ["--field", package, "Package", "Version", "Architecture", "Depends", "Pre-Depends"]: # Require exact metadata argv.',  # Metadata queries must use the same artifact.
+            '    print("Package: ilium"); sys.exit(0) # Return harmless synthetic metadata.',  # Real metadata remains a native acceptance requirement.
+            'if tool == "dpkg" and arguments == ["-s", "ilium"]: # Model the existing registration check.',  # Do not accept a different package name.
+            '    print("Status: install ok installed"); sys.exit(0 if payload.exists() else 1) # Registration requires a retained marker.',  # Absence cannot pass this body gate.
+            'operation = "install" if (tool, arguments) in (("dpkg", ["--install", package]), ("apt-get", ["install", "-y", "-qq", package])) else "check" if (tool, arguments) == ("apt-get", ["--no-download", "check"]) else "remove" if (tool, arguments) == ("apt-get", ["remove", "-y", "-qq", "ilium"]) else "unexpected" # Admit exactly the reviewed manager calls.',  # This checks both offline and unchanged online argv.
+            'with events.open("a") as stream: # Preserve observed operation order.',  # No adapter invents transaction success.
+            '    stream.write(operation + "\\n") # Record before a partial mutation can fail.',  # Retain failed installation attempts.
+            'if operation == "unexpected": # Reject any manager invocation outside the contract.',  # No real manager is used as fallback.
+            '    sys.exit(91) # Stop the actual generated shell.',  # Preserve failure-sensitive dispatch.
+            'if operation == "install": # A failed install may leave partial state.',  # Exercise trap responsibility.
+            '    payload.write_bytes(b"owned partial install") # Create only the disposable package marker.',  # Cleanup must remove it.
+            'if operation == "remove" and mode != "leftover": # Model authoritative removal separately from its status.',  # A retained marker must still fail absence.
+            '    payload.unlink(missing_ok=True) # Remove only this fixture marker.',  # Never touch real installation paths.
+            'sys.exit(7 if mode == operation + "-fails" else 0) # Preserve install, dependency-check and removal failures.',  # The transaction owns propagation and cleanup.
+        ]) + '\n'  # Finish the standalone harmless adapter.
+        cases = [(True, value) for value in ('pass', 'install-fails', 'check-fails', 'verify-fails', 'remove-fails', 'leftover', 'foreign')] + [(False, 'pass')]  # Preserve the unchanged online APT install path too.
+        transaction_script = smoke.managed_script  # Retain the real transaction while adapting only online image preparation.
+        for offline, mode in cases:  # Cover independent offline install and dependency failures.
+            with self.subTest(offline=offline, mode=mode), tempfile.TemporaryDirectory() as temporary:  # Own every executable, marker and event file.
+                directory = Path(temporary)  # Never reuse ambient package-manager state.
+                adapter = directory / 'adapter.py'  # Use the current Python interpreter through a shell launcher.
+                adapter.write_text(adapter_source)  # Retain the complete explicit manager behavior.
+                for tool in ('apt-get', 'dpkg', 'dpkg-deb'):  # Shadow every invoked native manager.
+                    executable = directory / tool  # Ensure PATH resolves only these harmless adapters first.
+                    executable.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' + shlex.quote(str(adapter)) + ' "${0##*/}" "$@" # Preserve exact tool and argv boundaries.\n')  # Avoid a shebang path containing spaces.
+                    executable.chmod(0o755)  # Permit execution only inside this temporary fixture.
+                payload, events = directory / 'payload', directory / 'events'  # Model actual ownership and observed command order.
+                absent = directory / 'absent.sh'  # Keep the production transaction's pre/post readback calls.
+                absent.write_text('set -eu # Fail on any retained marker.\nprintf "absence\\n" >> "$fixture_events" # Retain readback order.\n' + smoke.absence_script([payload]))  # Apply the real filesystem-absence generator.
+                verifier = directory / 'verify.sh'  # Replace only installed-package byte access with a controlled verifier.
+                verifier.write_text('set -eu # Preserve the verifier exit status.\nprintf "verify\\n" >> "$fixture_events" # Mark entry into installed verification.\ntest "$fixture_mode" != verify-fails # Reject a failed installed gate.\n')  # Do not execute application binaries.
+                def generated_transaction(package_format, prelude, install, remove, body):  # Keep test prerequisites separate from the production install and cleanup gates.
+                    return transaction_script(package_format, prelude if offline else ': # Image prerequisites are simulated by this fixture.', install, remove, body)  # Never modify host dpkg configuration or refresh real repositories.
+                with patch.object(smoke, 'installed_body', return_value=': # Installed behavior has separate complete regressions.\n'), patch.object(smoke, 'managed_script', side_effect=generated_transaction):  # Keep this test focused on transaction dispatch and dependencies.
+                    script = smoke.deb_script("receipt file's.deb", '0.1.1-linux.1', offline=offline)  # Exercise shell-safe exact-file argv as well as early return semantics.
+                script = script.replace('/smoke/absent-deb.sh', shlex.quote(str(absent))).replace('/smoke/package-deb.sh', shlex.quote(str(verifier)))  # Redirect only owned helper paths.
+                if mode == 'foreign':  # Refuse to adopt a package present before the transaction.
+                    payload.write_bytes(b'foreign sentinel')  # Require preservation of this pre-existing marker.
+                environment = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'], 'fixture_mode': mode, 'fixture_package': "/packages/receipt file's.deb", 'fixture_payload': str(payload), 'fixture_events': str(events)}  # Bind every adapter effect to this case.
+                result = subprocess.run(['sh', '-ec', script], env=environment, capture_output=True, text=True, timeout=10)  # Execute the real generated trap with harmless managers.
+                self.assertEqual(result.returncode == 0, mode == 'pass', result.stdout + result.stderr)  # Only a complete transaction can qualify.
+                recorded = events.read_text().splitlines()  # Every case must perform an authoritative absence query.
+                self.assertNotIn('unexpected', recorded)  # Check exact manager names, flags and artifact argument boundaries.
+                if mode == 'foreign':  # A rejected preflight cannot authorize installation or removal.
+                    self.assertEqual(recorded, ['absence'])  # Read-only version/metadata queries are the only earlier commands.
+                    self.assertEqual(payload.read_bytes(), b'foreign sentinel')  # Retain foreign state exactly.
+                    continue  # No owned-install assertions apply to a refused preflight.
+                self.assertEqual(recorded[:2], ['absence', 'install'])  # Arm ownership only after absence succeeds.
+                self.assertEqual('check' in recorded, offline and mode != 'install-fails')  # A failed native install cannot enter dependency acceptance; online APT already resolves dependencies.
+                self.assertEqual('verify' in recorded, mode not in ('install-fails', 'check-fails'))  # Both failures must stop before installed-file or application checks.
+                self.assertEqual(recorded[-2:], ['remove', 'absence'])  # Always retain removal and authoritative cleanup readback.
+                self.assertEqual(payload.exists(), mode == 'leftover')  # Do not erase evidence to make cleanup pass.
+
     def test_installed_body_requires_both_versions_and_real_lifecycle_success(self):  # Run the shared deb/RPM body with synthetic binaries and the actual lifecycle.
         client_source = '#!/bin/sh\nset -eu\nif [ "${1:-}" = --version ]; then printf "%s\\n" "${fixture_client_version:-ilium 0.1.0}"; exit 0; fi\nif [ "${1:-}" = release-animation-probe ]; then test "${fixture_animation_failure:-0}" = 0; printf "%s\\n" "$fixture_animation_output"; exit 0; fi\ncase "$3" in\nnew-pane) test "${fixture_lifecycle_failure:-0}" = 0; touch "$fixture_alive" ;;\nls) if [ -e "$fixture_alive" ]; then echo "default running"; else echo "default not running"; fi ;;\nkill-session) rm -f "$fixture_alive" ;;\n*) exit 2 ;;\nesac\n'  # This complete harmless CLI changes only a named fixture marker.
         server_source = '#!/bin/sh\nset -eu\nprintf "%s\\n" "${fixture_server_version:-ilium-server 0.1.0}"\n'  # Version changes are adapter outcomes rather than changed audited bytes.

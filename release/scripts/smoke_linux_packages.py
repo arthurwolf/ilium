@@ -451,8 +451,13 @@ def deb_script(name, version, *, offline=False):  # Preserve the existing helper
     prelude = 'export DEBIAN_FRONTEND=noninteractive # Disable package-manager prompts.\nrm -f /etc/dpkg/dpkg.cfg.d/excludes # Preserve audited notices.\napt-get update -qq >/dev/null # Refresh this disposable image.'  # Retain existing working setup.
     install = 'apt-get install -y -qq %s >/dev/null # Install the exact deb.' % shlex.quote('/packages/' + name)  # Quote the receipt-bound path.
     if offline:  # Dependency preparation already completed inside the native base image.
-        prelude = ": # Use the prepared package database without external networking."  # Keep acceptance in its private network namespace.
-        install = install.replace("apt-get install", "apt-get --no-download install")  # Require all dependencies to be locally available.
+        prelude = '\n'.join([  # Retain native tool identity and public package metadata before taking installation ownership.
+            'export DEBIAN_FRONTEND=noninteractive # Disable package-manager prompts in the isolated boot.',  # Preserve the normal Debian transaction environment.
+            'apt-get --version >&2 # Retain the actual APT version.',  # Do not infer a version from the distribution label.
+            'dpkg --version >&2 # Retain the actual native installer version.',  # Bind diagnosis to the executed distribution tools.
+            'dpkg-deb --field %s Package Version Architecture Depends Pre-Depends >&2 # Retain exact-file dependency metadata.' % shlex.quote('/packages/' + name),  # Read only the admitted local package.
+        ])  # These read-only diagnostics cannot substitute for installation acceptance.
+        install = 'dpkg --install %s # Install the exact local file with normal dependency enforcement.\napt-get --no-download check # Reject any broken dependency state before installed verification.' % shlex.quote('/packages/' + name)  # Avoid APT local-file acquisition while keeping the boot offline.
     body = "dpkg -s ilium | grep -q '^Status: install ok installed' # Verify successful registration.\nsh /smoke/package-deb.sh / # Read back every admitted package-owned leaf.\n" + installed_body(version)  # Retain the existing registration proof.
     return managed_script('deb', prelude, install, 'apt-get remove -y -qq ilium >/dev/null', body)  # Make removal and readback part of success.
 

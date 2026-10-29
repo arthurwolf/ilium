@@ -341,9 +341,13 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                 path.touch()  # No placeholder is executable or executed.
             state = SimpleNamespace(mode=mode, base=base, work=work, logs=logs, calls=[], created=False, started=False, stopped=False, clock=0.0)  # Track resource custody independently of returned evidence.
             sources = {name: container_fixture.sha(root / name) for name in container_fixture.source_files}  # Use real current implementation hashes.
-            stdout = 'ILIUM_ANIMATION_BEGIN\n{}\n{}\n{}\n{}\nILIUM_ANIMATION_END\n'  # Deliberately not animation qualification; this fixture tests the runtime layer only.
-            record = fixture_record('deb', 'ubuntu:22.04', 'x86_64', sources, stdout, 'fixture stderr\n')  # Supply complete synthetic guest evidence for the runtime positive case.
+            stdout = '' if mode == 'guest-rejected' else 'ILIUM_ANIMATION_BEGIN\n{}\n{}\n{}\n{}\nILIUM_ANIMATION_END\n'  # An early guest failure never fabricates application output.
+            stderr = '' if mode == 'guest-rejected' else 'fixture stderr\n'  # Keep unattempted transaction streams empty.
+            record = fixture_record('deb', 'ubuntu:22.04', 'x86_64', sources, stdout, stderr)  # Preserve the complete positive fixture in every existing mode.
             nonce, unit = record['nonce'], record['unit']  # Preserve exact fresh-name relationships.
+            if mode == 'guest-rejected':  # Model failure before namespace admission or user-manager startup.
+                record['guest'] = {'schema': 1, 'nonce': nonce, 'state': 'failed', 'case_exit_code': None, 'user_manager_retired': False, 'errors': ['cgroup namespace root is not a writable unified hierarchy'], 'case.stdout_sha256': hashlib.sha256(b'').hexdigest(), 'case.stderr_sha256': hashlib.sha256(b'').hexdigest(), 'namespace_diagnostics': {'synthetic_mount_row': '1 0 0:1 /foreign /sys/fs/cgroup rw - cgroup2 cgroup rw'}}  # Synthetic failed evidence cannot qualify a lane.
+            state.expected_guest = record['guest']  # Compare opaque recovered observations with the exact guest bytes supplied.
             group = route('/sys/fs/cgroup/system.slice/' + unit)  # Test the exact fallback used even after partial startup.
             identity = 'd' * 64  # Model a complete immutable Docker ID.
             def allocate(**options):  # Replace only the private-work allocator.
@@ -388,7 +392,7 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                 elif argv[:2] == ['/usr/bin/systemctl', 'show']:  # Exercise the real structured unit_state parser.
                     values = dict.fromkeys(container_fixture.unit_keys, '')  # Include every required property exactly once.
                     missing = not state.started or mode == 'collected-live'  # A collected unit can still have a retained physical group.
-                    values.update(LoadState='not-found' if missing else 'loaded', ActiveState='inactive' if missing or state.stopped else 'active', SubState='exited' if mode == 'complete' else 'running', Description='foreign' if mode == 'foreign-unit' else 'Ilium distribution fixture ' + nonce, Transient='yes', Delegate='yes', ControlGroup='' if missing or state.stopped else '/system.slice/' + ('foreign.service' if mode == 'foreign-group' else unit), Result='success', ExecMainCode='1', ExecMainStatus='0')  # Model manager state separately from kernel presence.
+                    values.update(LoadState='not-found' if missing else 'loaded', ActiveState='inactive' if missing or state.stopped else 'active', SubState='exited' if mode in ('complete', 'guest-rejected') else 'running', Description='foreign' if mode == 'foreign-unit' else 'Ilium distribution fixture ' + nonce, Transient='yes', Delegate='yes', ControlGroup='' if missing or state.stopped else '/system.slice/' + ('foreign.service' if mode == 'foreign-group' else unit), Result='success', ExecMainCode='1', ExecMainStatus='0')  # Model manager state separately from kernel presence.
                     output = ''.join(key + '=' + values[key] + '\n' for key in container_fixture.unit_keys)  # Retain the actual property parsing boundary.
                     code = 4 if missing else 0  # Only explicit not-found evidence permits this nonzero result.
                 elif argv[0] == '/usr/bin/systemd-run':  # Model a partial or completed service start.
@@ -398,7 +402,7 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                     (group / 'pids.max').write_text('1024')  # Never alter the untrusted leaf ceilings.
                     control = work / 'rootfs/var/lib/ilium-container-fixture'  # This directory was made by the real install_units function.
                     (control / 'case.stdout').write_text(stdout, encoding='utf-8')  # Retain actual diagnostic bytes through the production recovery path.
-                    (control / 'case.stderr').write_text('fixture stderr\n', encoding='utf-8')  # Keep stdout and stderr separate.
+                    (control / 'case.stderr').write_text(stderr, encoding='utf-8')  # Keep failed early-start streams empty and separate.
                     (control / 'result.json').write_text(json.dumps(record['guest']) + '\n', encoding='utf-8')  # A forged guest pass cannot erase host failure.
                     if mode == 'complete':  # Only the positive runtime fixture reaches host admission.
                         (control / 'ready.json').write_text(json.dumps(record['guest']) + '\n', encoding='utf-8')  # Preserve nonce and namespace fields.
@@ -430,7 +434,7 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
             stack.enter_context(patch.object(container_fixture.tempfile, 'mkdtemp', side_effect=allocate))  # Allocate only inside the test scope.
             stack.enter_context(patch.object(container_fixture.time, 'monotonic', side_effect=lambda: state.clock))  # Bound every loop with simulated time.
             stack.enter_context(patch.object(container_fixture.time, 'sleep', side_effect=pause))  # Never perform a blocking wait.
-            stack.enter_context(patch.object(container_fixture, 'admit_guest', return_value=record['host_admission']))  # Replace only kernel admission for this orchestration test; separate tests run that function.
+            state.admission = stack.enter_context(patch.object(container_fixture, 'admit_guest', return_value=record['host_admission']))  # Observe that rejected startup never requests host admission.
             state.result, state.record = container_fixture.run_fixture('ubuntu:22.04', 'deb', 'x86_64', base, inputs, logs, 'lane', 'false # synthetic transaction; never executed\n', 'fixture.deb', runner, sources)  # Run the real complete allocation, preparation, cleanup and evidence flow.
             yield state  # Assert custody before the outer test scope removes any retained failures.
 
@@ -460,6 +464,24 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                     self.assertIn(container_fixture.docker + ['rm', '--force', 'd' * 64], state.calls)  # Recover by complete ID despite no successful create response.
                 if mode == 'docker-foreign':  # Matching names cannot establish ownership.
                     self.assertFalse(any('rm' in call for call in state.calls))  # Preserve the foreign container rather than force-removing it.
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX bind-path fixture required; all real Linux acceptance lanes remain mandatory')  # Keep the existing source-runner boundary.
+    def test_rejected_guest_diagnostics_survive_successful_outer_cleanup(self):  # Poweroff success must retain the failed guest and its observations.
+        with self.host_fixture('guest-rejected') as state:  # Execute the real full host orchestration with synthetic native adapters.
+            self.assertEqual(state.result.returncode, 1)  # An unadmitted transaction cannot become accepted.
+            self.assertEqual(state.record['state'], 'failed')  # Keep outer failure independent of successful retirement.
+            self.assertEqual(state.record['guest'], state.expected_guest)  # Recover the exact diagnostic payload before deleting its private rootfs.
+            self.assertEqual(state.record['runtime'], {'Result': 'success', 'ExecMainCode': '1', 'ExecMainStatus': '0'})  # Reproduce a clean container poweroff after guest rejection.
+            self.assertEqual(state.record['cleanup'], dict.fromkeys(('unit_retired', 'cgroup_absent', 'docker_removed', 'state_removed'), True))  # Require every original cleanup gate independently.
+            self.assertFalse(state.work.exists())  # Retained diagnostics must not depend on leaking a disposable rootfs.
+            persisted = json.loads((state.logs / 'lane-fixture.json').read_text())  # Read the production record written after filesystem cleanup.
+            self.assertEqual(persisted['guest'], state.expected_guest)  # A returned Python object alone is insufficient durable recovery evidence.
+            self.assertFalse(persisted['guest']['user_manager_retired'])  # Do not invent retirement for a manager whose startup was never attempted.
+            self.assertIsNone(persisted['guest']['case_exit_code'])  # No installed package transaction ran.
+            for name in ('case.stdout', 'case.stderr'):  # Both original application-stream receipts remain empty.
+                self.assertEqual((state.logs / ('lane-' + name + '.log')).read_bytes(), b'')  # Diagnostic text cannot pollute animation output.
+            state.admission.assert_not_called()  # Failed capability validation cannot request host admission.
+            self.assertNotIn('host_admission', persisted)  # Do not retain a fabricated successful admission receipt.
 
     def test_structured_manager_errors_are_never_absence(self):  # Exercise actual property parsing instead of mocked state dictionaries.
         for stdout, status in (('', 1), ('LoadState=not-found\n', 4), (''.join(key + '=\n' for key in container_fixture.unit_keys), 1)):  # Include missing, partial and nonzero complete readbacks.
