@@ -232,7 +232,19 @@ fn failed_world_loader_retries_after_backoff() {
         ._worker
         .join_observer()
         .unwrap();
-    render_loaded(&mut scene, next_time, 80, 24);
+    // `render_loaded` returns as soon as any world is shown, which is the
+    // retained previous world here; wait for the retried world itself.
+    for _ in 0..500 {
+        render(&mut scene, next_time, 80, 24);
+        if scene
+            .current
+            .as_ref()
+            .is_some_and(|loaded| loaded.id == desired)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert_eq!(scene.current.as_ref().unwrap().id, desired);
     retry_ticket
         .join_until(Instant::now() + Duration::from_secs(5))

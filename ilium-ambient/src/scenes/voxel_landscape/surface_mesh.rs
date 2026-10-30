@@ -345,8 +345,16 @@ impl BoundModel {
             .iter()
             .map(|(_, model)| model.origins.len())
             .sum();
+        // Retained bytes per bound model: the struct itself (its real size, with
+        // room for the Arc counts and allocator rounding) is charged once per
+        // distinct model. Each quad is charged 512 bytes, which covers a
+        // BoundQuad plus Vec doubling slack because quads are pushed one at a
+        // time. Each origin keeps its strings and is charged 4 KiB, a bound
+        // the origin strings have not been measured against.
         let reservation = budget.reserve(
-            32768 + count as u64 * 512 + origin_count as u64 * 4096,
+            (std::mem::size_of::<BoundModel>() + 256) as u64
+                + count as u64 * 512
+                + origin_count as u64 * 4096,
             cancel,
         )?;
         let mut quads = Vec::new();
@@ -452,12 +460,18 @@ pub struct FaceOwner {
     pub face: u16,
     pub layer: u16,
 }
+/// The block position lives only in `owner`, which is the collision-free key.
+/// Keeping a second copy here cost 8 bytes per retained face on every tile.
 #[derive(Clone, Debug)]
 pub struct MeshFace {
-    pub position: [i32; 3],
     pub model: Arc<BoundModel>,
     pub quad_index: u16,
     pub owner: FaceOwner,
+}
+impl MeshFace {
+    pub fn position(&self) -> [i32; 3] {
+        self.owner.position
+    }
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MeshRegion {
@@ -507,7 +521,6 @@ impl PreparedMesh {
                 ));
             }
             faces.push(MeshFace {
-                position,
                 quad_index,
                 owner: FaceOwner {
                     position,
@@ -652,7 +665,6 @@ impl PreparedMesh {
                     continue;
                 }
                 faces.push(MeshFace {
-                    position: *position,
                     model: Arc::clone(model),
                     quad_index: index as u16,
                     owner: FaceOwner {

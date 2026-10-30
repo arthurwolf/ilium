@@ -160,7 +160,8 @@ fn prepare_fixture(
 }
 fn has_face(surface: &PreparedSurface, position: [i32; 3], normal: [f32; 3]) -> bool {
     surface.mesh.faces.iter().any(|face| {
-        face.position == position && face.model.quads[usize::from(face.quad_index)].normal == normal
+        face.position() == position
+            && face.model.quads[usize::from(face.quad_index)].normal == normal
     })
 }
 fn model_at(surface: &PreparedSurface, position: [i32; 3]) -> &BoundModel {
@@ -168,7 +169,7 @@ fn model_at(surface: &PreparedSurface, position: [i32; 3]) -> &BoundModel {
         .mesh
         .faces
         .iter()
-        .find(|face| face.position == position)
+        .find(|face| face.position() == position)
         .map(|face| face.model.as_ref())
         .expect("expected a published model at the exact global cell");
     assert!(model
@@ -255,7 +256,7 @@ fn generated_ground_survives_six_selected_cutout_layers_in_vertical_and_horizont
             .mesh
             .faces
             .iter()
-            .any(|face| face.position == [0, 0, z]));
+            .any(|face| face.position() == [0, 0, z]));
     }
     drop(surface);
     let mut horizontal = filled_world([-2, -2, 0], [9, 5, 5]);
@@ -365,7 +366,7 @@ fn generated_ground_true_opaque_cover_keeps_interior_faces_culled() {
         .mesh
         .faces
         .iter()
-        .any(|face| face.position == [0, 0, 4]));
+        .any(|face| face.position() == [0, 0, 4]));
     assert!(has_face(&surface, [0, 0, 8], [0.0, 0.0, 1.0]));
     assert!(!has_face(&surface, [0, 0, 8], [0.0, 0.0, -1.0]));
     assert!(surface.skipped_states.is_empty());
@@ -433,7 +434,7 @@ fn generated_ground_clipped_ring_admits_a_transparent_chain_without_local_exposu
         .mesh
         .faces
         .iter()
-        .all(|face| core.contains(face.position)));
+        .all(|face| core.contains(face.position())));
     assert_eq!(
         model_at(&surface, [0, 0, 2]).state.id(),
         &resource("test:ground")
@@ -742,7 +743,7 @@ fn generated_ground_weighted_state_geometry_and_selected_provenance_match_direct
             .mesh
             .faces
             .iter()
-            .filter(|face| face.position == position)
+            .filter(|face| face.position() == position)
         {
             let quad = &actual.quads[usize::from(face.quad_index)];
             assert_eq!(

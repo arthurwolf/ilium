@@ -120,7 +120,9 @@ fn external_revision_conflict_requires_reload_before_successor_admission() {
             .unwrap(),
         )
         .unwrap();
-    assert!(runtime.submit(history(2)).is_ok());
+    runtime
+        .submit(history(2))
+        .expect("successor writer accepts the reloaded history");
     runtime.retire().unwrap();
     loop {
         match runtime.gate() {

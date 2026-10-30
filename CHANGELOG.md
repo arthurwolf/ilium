@@ -269,6 +269,12 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium close-pane` closes the pane it runs in (or `--pane <id>` in the same session) as JSONL. `--worktree remove` and `remove-and-branch` also remove the pane's Ilium-created worktree through the same checks as the worktree manager, so a worktree agent can wrap up with one command after it commits and merges.
 
 ### Fixed
+- Saved-world landscapes release the unused face slots of native fluid meshes before charging them to the saved-scene memory account. Previously each tile pinned several hundred MB of empty capacity, which pushed large routes over the one-GiB limit.
+- Saved-world landscapes render waterlogged polished deepslate stairs as source water, as the Java 1.19.3 stair block does; such saves no longer fail route qualification on that block.
+- Saved-world landscapes store each distinct block state once, so a saved route holds far less memory per cell.
+- Saved-world landscapes no longer fail route qualification because the native biome-tint registry was charged 2 MiB against the saved-scene memory account; it is now charged for its actual 28 KB manifest.
+- Saved-world landscape errors now name the block textures that the selected pack and Java jar lack, instead of only reporting "required native model textures missing".
+- Overworld landscapes using the installed Java 1.19.3 textures no longer fail the texture coverage check on blocks that version lacks (cactus flower, cherry wood, pink petals, torchflower, pitcher plant, leaf litter, dry grasses). Each such block shows a labelled 1.19.3 stand-in texture instead of stopping the frame.
 - Selecting a pane shows its content at once with 200 panes, where before it could stay blank for about 30 s or never appear. Panes holding a large output history (32 MiB each) show their current screen first and fill in the history behind it. When parser memory is full, queued output of hidden panes is dropped and rebuilt from the server journal when the pane is shown again.
 - Terminal panes no longer fail to attach their parser when the shared storage ledger is briefly contended. Attach retries that contention for up to 500 ms before reporting pressure, so a pane among many no longer stays blank until a later redraw.
 - Saved Java worlds in the Voxel Landscape animation: camera-route search keeps a margin inside the saved area, and tiny saves keep their full area so they still propose routes.
