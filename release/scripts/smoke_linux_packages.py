@@ -787,22 +787,20 @@ def expect_version(command, expected, log, label, environment):  # Check a real 
 
 # Older systemd (Ubuntu 22.04) keeps the service process in the delegated cgroup, which forbids enabling child controllers there;
 # move into a child cgroup first, then enable the controllers the sandbox requires on the now process-free parent.
-DELEGATED_LEAF = (
-    'cg=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); '
-    'diagnose() { echo "cgroup setup failed at $1: cg=$cg controllers=[$(cat "$cg/cgroup.controllers")] '
-    'subtree=[$(cat "$cg/cgroup.subtree_control")] procs=[$(cat "$cg/cgroup.procs" | tr "\\n" " ")] '
-    'type=$(cat "$cg/cgroup.type") owner=$(stat -c %U "$cg") uid=$(id -u)" >&2; exit 1; }; '
-    'mkdir "$cg/probe" || diagnose mkdir; echo $$ > "$cg/probe/cgroup.procs" || { /usr/bin/python3 -c '
-    '"import os,sys;\ntry: open(sys.argv[1],\'w\').write(str(os.getpid()))\nexcept OSError as e: print(\'python move errno\',e.errno,e)" '
-    '"$cg/probe/cgroup.procs" >&2; ls -ld "$cg/probe" "$cg/probe/cgroup.procs" >&2; cat "$cg/probe/cgroup.type" >&2; uname -r >&2; diagnose move; }; '
-    'echo "+cpu +memory +pids" > "$cg/cgroup.subtree_control" || diagnose enable; exec "$@"')
+DELEGATED_LEAF = (  # The runner's shell fails the cgroup.procs write with EIO while a Python process succeeds, so Python does the setup.
+    'import os, sys\n'
+    'cg = "/sys/fs/cgroup" + next(l.strip()[3:] for l in open("/proc/self/cgroup") if l.startswith("0::"))\n'
+    'os.mkdir(cg + "/probe")\n'
+    'open(cg + "/probe/cgroup.procs", "w").write(str(os.getpid()))\n'
+    'open(cg + "/cgroup.subtree_control", "w").write("+cpu +memory +pids")\n'
+    'os.execvp(sys.argv[1], sys.argv[1:])\n')
 
 
 def delegated_service(command, child_env):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
     uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
     return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
             '--property=Type=exec', '--property=Delegate=cpu memory pids', '--property=MemoryMax=6G', '--property=TasksMax=4096', '--property=CPUWeight=100', '--property=WorkingDirectory=' + os.getcwd(),
-            *('--setenv=%s=%s' % item for item in sorted(child_env.items())), 'sh', '-ec', DELEGATED_LEAF, 'sh',
+            *('--setenv=%s=%s' % item for item in sorted(child_env.items())), '/usr/bin/python3', '-c', DELEGATED_LEAF,
             *[str(part) for part in command]]
 
 
