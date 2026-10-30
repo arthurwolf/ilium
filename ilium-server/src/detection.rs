@@ -48,6 +48,16 @@ use ilium_sound::NotificationEvent;
 /// classification to run every single base tick regardless of its
 /// configured poll tier.
 const FORCE_CHECK_DEBOUNCE: Duration = Duration::from_secs(5);
+/// How long after PTY output a slow-tier agent pane is rechecked. Gives a
+/// freshly started turn time to paint its spinner and status line.
+/// Ceiling on the idle check interval of a pane that holds an agent. A turn can
+/// start without any screen output the wake path sees (for example a silent
+/// redraw), so agent panes are never left on the full plain-shell interval.
+const AGENT_IDLE_POLL_CEILING: Duration = Duration::from_secs(15);
+pub(crate) const OUTPUT_WAKE_DELAY: Duration = Duration::from_secs(1);
+/// Minimum spacing between output-driven wakes of one pane, so a chatty idle
+/// screen costs at most one classification per window instead of one per chunk.
+const OUTPUT_WAKE_MIN_SPACING: Duration = Duration::from_secs(5);
 /// Focused panes retain the previous one-second classification cadence, while
 /// the scheduler itself now sleeps to exact deadlines instead of polling.
 const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -2579,6 +2589,8 @@ async fn run_due_panes_with_hook(
             } else {
                 polled_interval
             };
+            runtime.detection_schedule.wake_on_output =
+                wakes_on_output(&new_status, runtime.detection_schedule.client_focused);
             runtime.detection_schedule.next_due =
                 if screen_changed_after_snapshot || runtime.pending_idle_confirmation {
                     // Bounded catch-up, not a flat 1s reschedule: a pane whose
@@ -3753,6 +3765,54 @@ pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) 
     schedule.next_due < previous_deadline
 }
 
+/// Pulls a slow-tier agent pane's next check forward after PTY output.
+///
+/// An agent can start a turn by itself (goal continuation, queued or scheduled
+/// prompt, background-task notification, loop), so no keystroke reaches the
+/// server to call [`force_check`]. Without this, such a pane is only seen at
+/// its next idle tick (45 s by default) and a short turn can be missed whole.
+/// Unlike `force_check` this does not advance `request_generation`: output is
+/// not a user request, and an in-flight pass is as fresh as the output it saw.
+/// Returns true when the deadline moved earlier, so the caller must notify the
+/// detection loop.
+pub fn wake_for_output(schedule: &mut crate::pane::DetectionSchedule, now: Instant) -> bool {
+    if !schedule.wake_on_output {
+        return false;
+    }
+    let requested_deadline = match schedule.last_output_wake {
+        Some(last_wake) if now.saturating_duration_since(last_wake) < OUTPUT_WAKE_MIN_SPACING => {
+            last_wake + OUTPUT_WAKE_MIN_SPACING
+        }
+        Some(_) | None => {
+            schedule.last_output_wake = Some(now);
+            now + OUTPUT_WAKE_DELAY
+        }
+    };
+    let previous_deadline = schedule.next_due;
+    schedule.next_due = schedule.next_due.min(requested_deadline);
+    schedule.next_due < previous_deadline
+}
+
+/// True when the status is an agent in an active turn (or waiting on one),
+/// which polls at the working tier instead of the idle tier.
+fn is_active_agent_turn(status: &PaneStatus) -> bool {
+    status.agent_state().is_some_and(|agent| {
+        matches!(
+            agent.turn,
+            AgentTurn::Working
+                | AgentTurn::WaitingSubagents
+                | AgentTurn::Settling
+                | AgentTurn::WaitingApproval
+        )
+    })
+}
+
+/// Whether output should wake this pane early: an agent that is between turns
+/// and not focused (a focused pane already polls every second).
+fn wakes_on_output(status: &PaneStatus, client_focused: bool) -> bool {
+    !client_focused && status.agent_state().is_some() && !is_active_agent_turn(status)
+}
+
 /// One pure identity/screen reduction result. Goal ownership stays separate
 /// from `PaneStatus` so the caller can persist it across inconclusive frames.
 #[derive(Clone)]
@@ -4066,13 +4126,12 @@ fn interval_for(
     if client_focused {
         return FOCUSED_POLL_INTERVAL;
     }
-    if status.agent_state().is_some_and(|agent| {
-        matches!(
-            agent.turn,
-            AgentTurn::Working | AgentTurn::WaitingSubagents | AgentTurn::Settling
-        ) || agent.turn == AgentTurn::WaitingApproval
-    }) {
+    if is_active_agent_turn(status) {
         detection_config.working_poll_interval
+    } else if status.agent_state().is_some() {
+        detection_config
+            .idle_poll_interval
+            .min(AGENT_IDLE_POLL_CEILING)
     } else {
         detection_config.idle_poll_interval
     }
@@ -4830,18 +4889,14 @@ mod tests {
     }
 
     #[test]
-    fn idle_done_and_plain_shell_poll_on_the_slow_tier() {
+    fn idle_agents_poll_faster_than_plain_shells() {
         let config = config();
         let idle = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None);
         let done = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None);
-        assert_eq!(
-            interval_for(&idle, false, &config),
-            config.idle_poll_interval
-        );
-        assert_eq!(
-            interval_for(&done, false, &config),
-            config.idle_poll_interval
-        );
+        let agent_interval = config.idle_poll_interval.min(AGENT_IDLE_POLL_CEILING);
+        assert!(agent_interval < config.idle_poll_interval);
+        assert_eq!(interval_for(&idle, false, &config), agent_interval);
+        assert_eq!(interval_for(&done, false, &config), agent_interval);
         assert_eq!(
             interval_for(&PaneStatus::PlainShell, false, &config),
             config.idle_poll_interval
@@ -4862,6 +4917,72 @@ mod tests {
         );
     }
 
+    fn output_wake_schedule(wake_on_output: bool) -> crate::pane::DetectionSchedule {
+        crate::pane::DetectionSchedule {
+            next_due: Instant::now() + Duration::from_secs(45),
+            launched_at: Instant::now(),
+            current_interval: Duration::from_secs(45),
+            client_focused: false,
+            last_forced: None,
+            request_generation: 7,
+            wake_on_output,
+            last_output_wake: None,
+            identity_system_generation: None,
+            cached_identity: None,
+            cached_screen_classification: None,
+        }
+    }
+
+    /// Output on an idle-tier agent pane pulls its check to one second out,
+    /// repeated output inside the spacing window coalesces at that window's
+    /// end, and no wake ever invalidates an in-flight pass.
+    #[test]
+    fn output_wake_is_delayed_spaced_and_keeps_generation() {
+        let mut schedule = output_wake_schedule(true);
+        let t0 = Instant::now();
+        assert!(wake_for_output(&mut schedule, t0));
+        assert_eq!(schedule.next_due, t0 + OUTPUT_WAKE_DELAY);
+
+        // The check ran and rescheduled far out; chatter inside the window
+        // may only move it to the window boundary.
+        schedule.next_due = t0 + Duration::from_secs(45);
+        assert!(wake_for_output(&mut schedule, t0 + Duration::from_secs(2)));
+        assert_eq!(schedule.next_due, t0 + OUTPUT_WAKE_MIN_SPACING);
+
+        // After the window a new wake takes effect again.
+        schedule.next_due = t0 + Duration::from_secs(45);
+        let t1 = t0 + OUTPUT_WAKE_MIN_SPACING;
+        assert!(wake_for_output(&mut schedule, t1));
+        assert_eq!(schedule.next_due, t1 + OUTPUT_WAKE_DELAY);
+
+        // An earlier deadline is never pushed back.
+        assert!(!wake_for_output(&mut schedule, t1 + Duration::from_secs(1)));
+        assert_eq!(schedule.request_generation, 7);
+    }
+
+    #[test]
+    fn output_wake_ignores_panes_outside_the_slow_agent_tier() {
+        let mut schedule = output_wake_schedule(false);
+        let deadline = schedule.next_due;
+        assert!(!wake_for_output(&mut schedule, Instant::now()));
+        assert_eq!(schedule.next_due, deadline);
+        assert!(schedule.last_output_wake.is_none());
+    }
+
+    /// Only an agent between turns that nobody is looking at wakes on output.
+    #[test]
+    fn only_idle_unfocused_agents_wake_on_output() {
+        let idle = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None);
+        let working = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None);
+        assert!(wakes_on_output(&idle, false));
+        assert!(!wakes_on_output(&idle, true), "focused panes poll at 1s");
+        assert!(
+            !wakes_on_output(&working, false),
+            "working tier already polls"
+        );
+        assert!(!wakes_on_output(&PaneStatus::PlainShell, false));
+    }
+
     /// `force_check` pulls `next_due` to `now` on first call. A second call
     /// within `FORCE_CHECK_DEBOUNCE` coalesces at the existing window boundary
     /// while still advancing the generation that invalidates an in-flight pass.
@@ -4874,6 +4995,8 @@ mod tests {
             client_focused: false,
             last_forced: None,
             request_generation: 0,
+            wake_on_output: false,
+            last_output_wake: None,
             identity_system_generation: None,
             cached_identity: None,
             cached_screen_classification: None,

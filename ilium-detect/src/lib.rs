@@ -306,11 +306,9 @@ fn live_status_evidence(class: Option<&AgentClass>, screen_text: &str) -> Option
         None => {
             looks_like_live_status_line(screen_text).then_some(ActivityEvidence::GenericLiveStatus)
         }
-        Some(AgentClass::Claude) => {
-            (looks_like_live_status_line(screen_text)
-                || claude_ascii_live_status_line(screen_text).is_some())
-            .then_some(ActivityEvidence::ClaudeLiveStatus)
-        }
+        Some(AgentClass::Claude) => (looks_like_live_status_line(screen_text)
+            || claude_ascii_live_status_line(screen_text).is_some())
+        .then_some(ActivityEvidence::ClaudeLiveStatus),
         Some(AgentClass::Codex) => looks_like_codex_live_status_line(screen_text)
             .then_some(ActivityEvidence::CodexLiveStatus),
         Some(AgentClass::Antigravity | AgentClass::Other(_)) => None,
@@ -1351,11 +1349,21 @@ fn is_live_status_line(line: &str) -> bool {
 /// ASCII `*` is also a Markdown bullet, so accept it only at Claude's
 /// composer boundary instead of anywhere in the transcript.
 fn claude_ascii_live_status_line(screen_text: &str) -> Option<&str> {
-    let mut lines = screen_text.lines().rev().filter(|line| !line.trim().is_empty());
-    if !lines.next().is_some_and(is_horizontal_rule) {
-        return None;
-    }
-    let line = lines.next()?;
+    let lines: Vec<&str> = screen_text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    // The composer's top rule is the last rule followed by the `❯` prompt row
+    // (or, when the caller already cut the screen at the composer, the final
+    // line). Rules below the prompt row and footer chrome are skipped.
+    let top_rule = (1..lines.len()).rev().find(|&index| {
+        is_horizontal_rule(lines[index])
+            && match lines.get(index + 1) {
+                Some(next) => next.trim_start().starts_with('❯'),
+                None => !lines[index - 1].trim_start().starts_with('❯'),
+            }
+    })?;
+    let line = lines[top_rule - 1];
     let body = line.trim().strip_prefix('*')?;
     is_live_status_body(body).then_some(line)
 }
@@ -2601,7 +2609,7 @@ mod tests {
     fn claude_ascii_and_six_point_spinner_frames_keep_active_turn_working() {
         for spinner in ['✶', '*'] {
             let screen = format!(
-                "● Reading 1 file…\n  ⎿ questions/q12.txt\n\n{spinner} Considering… (51s · ↓ 3.5k tokens)\n\n────────\n❯\n────────\n  ⏵⏵ accept edits on (shift+tab to cycle)"
+                "● Reading 1 file…\n  ⎿ questions/q12.txt\n\n{spinner} Considering… (51s · ↓ 3.5k tokens)\n\n────────────\n❯\n────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)"
             );
             assert_eq!(
                 classify_activity_for_agent(&AgentClass::Claude, &screen),
@@ -2611,9 +2619,23 @@ mod tests {
         }
     }
 
+    /// Pane rows of a real Claude Haiku turn captured mid-run with a queued
+    /// message: the live status line carries the six-point `✶` frame, and the
+    /// composer below shows the queue hint instead of an empty prompt.
+    #[test]
+    fn real_claude_capture_with_six_point_spinner_and_queued_input_is_working() {
+        assert_eq!(
+            classify_activity_for_agent(
+                &AgentClass::Claude,
+                &fixture("claude_working_six_point_spinner_with_queued_input.txt")
+            ),
+            AgentTurn::Working
+        );
+    }
+
     #[test]
     fn claude_ascii_bullet_in_transcript_is_not_live_spinner() {
-        let screen = "* Considering… (51s · example)\n\nFinal answer.\n\n────────\n❯\n────────\n  ⏵⏵ accept edits on (shift+tab to cycle)";
+        let screen = "* Considering… (51s · example)\n\nFinal answer.\n\n────────────\n❯\n────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)";
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Claude, screen),
             AgentTurn::Idle

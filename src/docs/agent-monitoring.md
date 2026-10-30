@@ -43,7 +43,10 @@ Detection is adaptive rather than fixed.
 | Pane state | Default check interval | Setting |
 | --- | --- | --- |
 | Working or waiting for approval | 10 seconds | `working_poll_seconds` |
-| Idle, finished, or plain shell | 45 seconds | `idle_poll_seconds` |
+| Idle or finished agent | 15 seconds (or `idle_poll_seconds` if lower) | `idle_poll_seconds` |
+| Plain shell | 45 seconds | `idle_poll_seconds` |
+
+A pane you are not viewing that holds an idle or finished agent is also rechecked about one second after it prints new output, at most once every five seconds. An agent that starts a turn by itself (a goal continuation, a queued or scheduled prompt, a background-task notification) therefore shows its activity spinner within a couple of seconds instead of waiting for the idle check. Plain shells keep the idle interval.
 
 Both values are whole seconds, are applied to a running server within moments of saving, and are clamped to a minimum of 500 ms (a value of `0` means 500 ms). They are detection checks only. They do not change how fast an agent works and are unrelated to progress-monitor polling.
 

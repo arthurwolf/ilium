@@ -1436,6 +1436,41 @@ async fn record_input_activity_if_current(
     Ok(true)
 }
 
+/// Output from an agent pane in the slow idle tier means it may have started a
+/// turn on its own, with no keystroke for `force_check` to react to. Peeks
+/// under the read lock so the common case (pane not idle-tier) never takes the
+/// write lock.
+async fn wake_idle_agent_detection(state: &ServerState, pane_id: NodeId, input: &PtyInput) {
+    {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return;
+        };
+        if !runtime.detection_schedule.wake_on_output
+            || !input.same_session(&runtime.session.input_handle())
+        {
+            return;
+        }
+    }
+    let woke = {
+        let mut panes = state.panes.write().await;
+        match panes.get_mut(&pane_id) {
+            Some(PaneResource::Terminal(runtime))
+                if input.same_session(&runtime.session.input_handle()) =>
+            {
+                crate::detection::wake_for_output(
+                    &mut runtime.detection_schedule,
+                    std::time::Instant::now(),
+                )
+            }
+            _ => false,
+        }
+    };
+    if woke {
+        state.detection_schedule_changed.notify_one();
+    }
+}
+
 /// Advances output activity without broadcasting revisions a hidden pane's
 /// clients cannot render. The first unread/unrestructured edge is always
 /// published; a later visible-pane subscription explicitly synchronizes the
@@ -6597,6 +6632,12 @@ async fn forward_output_with_recovery<Recovery>(
                         tracing::warn!("{error}");
                     }
                 }
+                // Outside the activity gate on purpose: a turn that starts by
+                // itself is often one repaint arriving under 500ms after the
+                // previous chunk, and no later chunk follows to be recorded.
+                // The wake has its own spacing, and its cheap read-lock peek
+                // returns at once for every pane outside the idle agent tier.
+                wake_idle_agent_detection(&state, pane_id, &input).await;
                 // The PTY reader already parsed and journaled these bytes.
                 // Hidden panes still feed Text Triggers even without clients.
                 if !subscription_cache.has_subscribers(&state, pane_id) {
@@ -12089,6 +12130,76 @@ mod tests {
             teardown_pane_resource(resource_pane_id, resource);
         }
         sound_task.abort();
+    }
+
+    /// Fix for idle agent panes that start a turn on their own: PTY output from
+    /// an unfocused pane in the slow agent tier must pull its next detection
+    /// check forward, with no keystroke involved.
+    #[tokio::test]
+    async fn pty_output_wakes_a_slow_tier_agent_pane_check() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("output-wake").await;
+        let far_future = std::time::Instant::now() + Duration::from_secs(999);
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture pane is a terminal");
+            };
+            runtime.detection_schedule.wake_on_output = true;
+            runtime.detection_schedule.next_due = far_future;
+        }
+        // Not a line submission, so only the output wake can move the deadline;
+        // `cat` echoes the byte back as PTY output.
+        write_key_input(&state, pane_id, b"x", None)
+            .await
+            .expect("write terminal input");
+        let woke = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let due = match state.panes.read().await.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => runtime.detection_schedule.next_due,
+                    _ => panic!("fixture pane is a terminal"),
+                };
+                if due < far_future {
+                    break due;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("output must wake the slow-tier pane");
+        assert!(
+            woke <= std::time::Instant::now() + crate::detection::OUTPUT_WAKE_DELAY,
+            "the wake is delayed by at most the output settle delay"
+        );
+        teardown_state_panes(&state);
+    }
+
+    /// Server-side prompt writes (prompt queue, scheduled input, goal resume)
+    /// all reach `write_key_input_unlocked`; a submitted line must recheck the
+    /// pane at once even when it is in the slow tier and not woken by output.
+    #[tokio::test]
+    async fn submitted_line_rechecks_a_slow_tier_pane_immediately() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("submit-wake").await;
+        let far_future = std::time::Instant::now() + Duration::from_secs(999);
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture pane is a terminal");
+            };
+            runtime.detection_schedule.wake_on_output = false;
+            runtime.detection_schedule.next_due = far_future;
+        }
+        write_key_input(&state, pane_id, b"hello\r", None)
+            .await
+            .expect("write terminal input");
+        let due = match state.panes.read().await.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => runtime.detection_schedule.next_due,
+            _ => panic!("fixture pane is a terminal"),
+        };
+        assert!(
+            due < far_future,
+            "a submitted line must pull the slow-tier check forward"
+        );
+        teardown_state_panes(&state);
     }
 
     /// Builds a session with one live `cat` terminal pane, ready for
