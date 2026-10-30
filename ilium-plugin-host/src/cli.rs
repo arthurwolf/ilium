@@ -14,6 +14,11 @@ use crate::registry_client::Fetcher;
 use crate::telemetry::{HourBucket, InspectNode, MemoryView, TraceRecord};
 pub mod check_command;
 pub mod install_command;
+mod build_command;
+mod dev_command;
+mod doctor_command;
+mod test_command;
+mod lifecycle_command;
 pub mod local_install;
 pub mod keys_command;
 pub mod new_command;
@@ -197,12 +202,15 @@ pub struct CliOutput {
 pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
     let started = std::time::Instant::now();
     let mut output = run_inner(args, env);
+    if args.iter().any(|arg| arg == "--quiet") {
+        output.stdout_jsonl.retain(|record| record["type"] != "progress");
+    }
     if let Some(summary) = output
         .stdout_jsonl
         .iter_mut()
         .find(|record| record["type"] == "summary")
     {
-        summary["duration_ms"] = serde_json::json!(started.elapsed().as_secs_f64() * 1000.0);
+        summary["duration_ms"] = serde_json::json!(started.elapsed().as_millis() as u64);
     }
     let custom_text = (output.stdout_text != output.stdout_raw).then_some(output.stdout_text);
     let mut rendered = offline::render(output.stdout_jsonl, output.exit_code);
@@ -213,13 +221,80 @@ pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
     rendered
 }
 
-fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
+/// The global flags every command accepts (reference-plugin-cli.md DEV-003).
+#[derive(Default)]
+struct GlobalFlags {
+    session: Option<String>,
+    cwd: Option<String>,
+    help: bool,
+}
+
+const USAGE: &str = "Usage: ilium plugin <command> [options]\n\nGlobal flags:\n  --session <name>  the Ilium session to talk to (default: the session of the project)\n  --cwd <path>      the project directory that names the session\n  --quiet           print no progress records\n  --no-color        print no colour\n  --json            print JSON lines instead of text\n  --help            print this usage\n";
+
+/// Removes the global flags that only the dispatcher needs from `args`.
+fn split_global(args: &[String]) -> Result<(Vec<String>, GlobalFlags), CliOutput> {
+    let mut flags = GlobalFlags::default();
+    let mut rest = Vec::with_capacity(args.len());
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--quiet" | "--no-color" => {}
+            "--help" => flags.help = true,
+            "--session" | "--cwd" => {
+                let Some(value) = iter.next() else {
+                    return Err(offline::failure(
+                        "usage.missing-argument",
+                        "The flag needs a value",
+                        2,
+                    ));
+                };
+                if arg == "--session" {
+                    flags.session = Some(value.clone());
+                } else {
+                    flags.cwd = Some(value.clone());
+                }
+            }
+            _ => rest.push(arg.clone()),
+        }
+    }
+    Ok((rest, flags))
+}
+
+fn session_name_error(flags: &GlobalFlags, env: &CliEnv) -> Option<CliOutput> {
+    if flags.session.as_deref().is_some_and(|name| name != "default") {
+        return Some(offline::failure(
+            "session.not-found",
+            "The named session does not exist",
+            6,
+        ));
+    }
+    let elsewhere = flags.cwd.as_ref().is_some_and(|cwd| {
+        let wanted = env.cwd.join(cwd);
+        std::fs::canonicalize(&wanted).ok() != std::fs::canonicalize(&env.cwd).ok()
+    });
+    elsewhere.then(|| {
+        offline::failure(
+            "session.unreachable",
+            "No session runs in that project directory",
+            6,
+        )
+    })
+}
+
+fn run_inner(raw_args: &[String], env: &CliEnv) -> CliOutput {
+    let (args, flags) = match split_global(raw_args) {
+        Ok(split) => split,
+        Err(output) => return output,
+    };
+    let args = args.as_slice();
+    if flags.help {
+        let mut output = offline::finish(vec![], 0);
+        output.stdout_text = USAGE.to_owned();
+        return output;
+    }
     let Some(command) = args.first().map(String::as_str) else {
         return offline::failure("usage.command-missing", "A plugin command is required", 2);
     };
-    if args.iter().any(|arg| arg == "--help") {
-        return offline::finish(vec![], 0);
-    }
     if env
         .interrupt
         .as_ref()
@@ -227,8 +302,34 @@ fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
     {
         return offline::failure("command.interrupted", "Command interrupted", 130);
     }
+    let uses_session = matches!(
+        command,
+        "list" | "logs" | "grants" | "audit" | "uninstall" | "enable" | "disable" | "log-level"
+            | "dev" | "trace" | "profile"
+    ) || (command == "install" && env.installer.is_none());
+    if uses_session {
+        if let Some(output) = session_name_error(&flags, env) {
+            return output;
+        }
+        if env.session.is_none() {
+            return offline::failure(
+                "session.unreachable",
+                "No reachable session was supplied",
+                6,
+            );
+        }
+    }
     if matches!(command, "list" | "logs" | "grants" | "audit") {
         return session_commands::run(command, &args[1..], env);
+    }
+    if matches!(command, "--version" | "version") {
+        return doctor_command::version(&args[1..]);
+    }
+    if command == "doctor" {
+        return doctor_command::doctor(&args[1..], env);
+    }
+    if matches!(command, "uninstall" | "enable" | "disable" | "log-level") {
+        return lifecycle_command::run(command, &args[1..], env);
     }
     if command == "install" {
         return match &env.installer {
@@ -238,6 +339,9 @@ fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
     }
     match command {
         "check" | "lint" => check_command::run(command, &args[1..], env),
+        "build" => build_command::run(&args[1..], env),
+        "test" => test_command::run(&args[1..], env),
+        "dev" => dev_command::run(&args[1..], env),
         "inspect" | "verify" => offline::run(command, &args[1..], env),
         "new" => new_command::run(&args[1..], env),
         "keygen" | "sign" | "trust" | "publish" => keys_command::run(command, &args[1..], env),
@@ -509,6 +613,40 @@ pub enum SessionRequest {
         id: String,
         level: String,
     },
+    /// Returns the plugin's effective log threshold (DEV-195).
+    GetLogLevel {
+        id: String,
+    },
+    /// Returns the plugin's threshold to the session default (DEV-195).
+    ResetLogLevel {
+        id: String,
+    },
+    /// Persistently enables a plugin: resets its failure count and activates it (DEV-160).
+    Enable {
+        id: String,
+    },
+    /// Persistently disables a plugin: deactivates it with reason `disabled` (DEV-160).
+    Disable {
+        id: String,
+    },
+    /// Sets the installed real copy of `id` aside while a dev copy runs; the response carries
+    /// the state it had (DEV-183).
+    ReplaceInstalled {
+        id: String,
+    },
+    /// Puts the copy set aside by `ReplaceInstalled` back, in `state` (DEV-189).
+    RestoreReplaced {
+        id: String,
+        state: String,
+    },
+    /// Reloads one running instance after a rebuild: deactivate with reason `upgrade`, then
+    /// activate with the state it saved, dropped when over [`dev::RESTORE_LIMIT_BYTES`] (DEV-187, DEV-188).
+    Reload {
+        id: String,
+        side: String,
+    },
+    /// How many clients are attached to the session (DEV-187).
+    AttachedClients,
     /// A trust decision removed the key that signed this plugin; it stays installed but
     /// untrusted (DEV-127).
     MarkUntrusted {
@@ -541,6 +679,12 @@ pub enum SessionResponse {
     Plugin(SessionPluginDetails),
     Decision(bool),
     Logs(Vec<(String, String, String)>),
+    Value(String),
+    /// What a reload handed the new instance.
+    Reloaded {
+        restored_bytes: u64,
+        dropped: bool,
+    },
 }
 
 /// Deterministic in-memory CLI test adapter, with explicit runtime observations.
@@ -605,6 +749,10 @@ struct MemoryPlugin {
     runtime_outcomes: BTreeMap<String, Result<(), String>>,
     memory: Vec<MemoryView>,
     counters: Vec<(Side, Vec<HourBucket>)>,
+    /// The real copy a dev copy of the same id replaced (DEV-183).
+    replaced: Option<Box<MemoryPlugin>>,
+    /// Set on a restored real copy: its whole history belongs to the non-dev copy (DEV-183).
+    was_replaced: bool,
 }
 
 impl MemorySession {
@@ -904,18 +1052,17 @@ impl MemorySession {
     pub fn install_history(&self) -> Vec<InstallRecord> {
         self.access("install-history".into(), |session| session.installs.clone())
     }
-    pub fn state_history(&self, id: &str, with_initial: bool) -> Vec<String> {
-        self.access(format!("state-history:{id}:{with_initial}"), |session| {
+    /// The states a copy went through. `flag` is `with_initial` for an ordinary plugin; for a real
+    /// copy that a dev copy replaced and that was then restored, `false` selects that real copy
+    /// (its whole history) and `true` the dev copy.
+    pub fn state_history(&self, id: &str, flag: bool) -> Vec<String> {
+        self.access(format!("state-history:{id}:{flag}"), |session| {
             session
                 .plugins
                 .get(id)
                 .map(|plugin| {
-                    plugin
-                        .history
-                        .iter()
-                        .skip(usize::from(!with_initial))
-                        .cloned()
-                        .collect()
+                    let skip = usize::from(!flag && !plugin.was_replaced);
+                    plugin.history.iter().skip(skip).cloned().collect()
                 })
                 .unwrap_or_default()
         })
@@ -932,9 +1079,7 @@ impl MemorySession {
     }
     pub fn set_restore_bytes(&self, id: &str, bytes: u64) {
         self.access(format!("set-restore-bytes:{id}"), |session| {
-            if let Some(plugin) = session.plugins.get_mut(id) {
-                plugin.restore_bytes = bytes;
-            }
+            session.plugins.entry(id.to_owned()).or_default().restore_bytes = bytes;
         });
     }
     pub fn activation_restore_bytes(&self, id: &str) -> Vec<u64> {
@@ -1077,6 +1222,10 @@ impl MemorySession {
             plugin.tier = record.tier.clone();
             plugin.dev = record.dev;
             plugin.installed = true;
+            if record.dev {
+                // A running dev copy owns a data folder from its first start.
+                plugin.data = true;
+            }
             plugin.state = state.into();
             plugin.history.push(state.into());
             plugin.grants = record
@@ -1381,6 +1530,113 @@ impl SessionBackend for MemorySession {
             SessionRequest::SetLogLevel { id, level } => self
                 .set_log_level(&id, &level)
                 .map(|()| SessionResponse::Done),
+            SessionRequest::GetLogLevel { id } => {
+                if self.plugin(&id).is_none() {
+                    return Err("plugin.not-found".into());
+                }
+                Ok(SessionResponse::Value(self.log_level(&id)))
+            }
+            SessionRequest::ResetLogLevel { id } => {
+                self.access(format!("reset-log-level:{id}"), |session| {
+                    let plugin = session
+                        .plugins
+                        .get_mut(&id)
+                        .filter(|plugin| plugin.installed)
+                        .ok_or("plugin.not-found")?;
+                    plugin.log_level = None;
+                    session.journal.push(format!("log-level-reset:{id}"));
+                    Ok(SessionResponse::Done)
+                })
+            }
+            SessionRequest::Enable { id } => {
+                self.access(format!("enable-reset:{id}"), |session| {
+                    session
+                        .plugins
+                        .get_mut(&id)
+                        .filter(|plugin| plugin.installed)
+                        .ok_or_else(|| "plugin.not-found".to_owned())?
+                        .failure_count = 0;
+                    Ok::<(), String>(())
+                })?;
+                self.record_activation(&id).map(|()| SessionResponse::Done)
+            }
+            SessionRequest::Disable { id } => self
+                .record_deactivation(&id, "disabled", "disabled")
+                .map(|()| SessionResponse::Done),
+            SessionRequest::ReplaceInstalled { id } => {
+                self.access(format!("replace-installed:{id}"), |session| {
+                    let slot = session
+                        .plugins
+                        .get_mut(&id)
+                        .filter(|plugin| plugin.installed)
+                        .ok_or_else(|| "plugin.not-found".to_owned())?;
+                    let mut prior = std::mem::take(slot);
+                    let state = prior.state.clone();
+                    if state != "disabled" {
+                        prior.deactivations.push("disabled".into());
+                        prior.state = "disabled".into();
+                        prior.history.push("disabled".into());
+                    }
+                    slot.replaced = Some(Box::new(prior));
+                    session.journal.push(format!("replace-installed:{id}"));
+                    Ok(SessionResponse::Value(state))
+                })
+            }
+            SessionRequest::RestoreReplaced { id, state } => {
+                self.access(format!("restore-replaced:{id}"), |session| {
+                    let slot = session
+                        .plugins
+                        .get_mut(&id)
+                        .ok_or_else(|| "plugin.not-found".to_owned())?;
+                    let mut prior = *slot
+                        .replaced
+                        .take()
+                        .ok_or_else(|| "plugin.not-found".to_owned())?;
+                    if prior.state != state {
+                        if state == "running" {
+                            prior.activations += 1;
+                            prior.restored.push(prior.restore_bytes);
+                        }
+                        prior.state = state.clone();
+                        prior.history.push(state);
+                    }
+                    prior.was_replaced = true;
+                    *slot = prior;
+                    session.journal.push(format!("restore-replaced:{id}"));
+                    Ok(SessionResponse::Done)
+                })
+            }
+            SessionRequest::Reload { id, side } => {
+                self.access(format!("reload:{id}:{side}"), |session| {
+                    if let Some(error) = session.errors.get("reload") {
+                        return Err(error.clone());
+                    }
+                    let plugin = session
+                        .plugins
+                        .get_mut(&id)
+                        .filter(|plugin| plugin.installed)
+                        .ok_or_else(|| "plugin.not-found".to_owned())?;
+                    let dropped = plugin.restore_bytes > dev::RESTORE_LIMIT_BYTES;
+                    let restored_bytes = if dropped { 0 } else { plugin.restore_bytes };
+                    if side == "server" {
+                        plugin.deactivations.push("upgrade".into());
+                        plugin.contributions.clear();
+                        plugin.activations += 1;
+                        plugin.restored.push(restored_bytes);
+                        plugin.state = "running".into();
+                        plugin.history.push("running".into());
+                        session.journal.push(format!("reload:{id}"));
+                    }
+                    Ok(SessionResponse::Reloaded {
+                        restored_bytes,
+                        dropped,
+                    })
+                })
+            }
+            SessionRequest::AttachedClients => Ok(SessionResponse::Value(
+                self.access("attached-clients".into(), |session| session.clients)
+                    .to_string(),
+            )),
         }
     }
     fn plugin(&self, id: &str) -> Option<SessionPlugin> {
@@ -1499,6 +1755,9 @@ pub mod dev {
 
     /// Changes closer together than this are one rebuild (DEV-853).
     pub const DEBOUNCE: Duration = Duration::from_millis(300);
+
+    /// Saved state larger than this is dropped on a reload (DEV-188).
+    pub const RESTORE_LIMIT_BYTES: u64 = 1_048_576;
 
     /// Counts the rebuilds owed after debounced changes (DEV-853).
     #[derive(Debug)]

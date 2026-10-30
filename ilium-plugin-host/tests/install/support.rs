@@ -504,7 +504,7 @@ impl Fx {
             probe: None,
             builder: None,
             runner: None,
-            session: None,
+            session: Some(Arc::new(ilium_plugin_host::cli::MemorySession::default())),
             installer: None,
             audit_context: None,
             interrupt: None,

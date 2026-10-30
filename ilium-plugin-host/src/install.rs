@@ -345,7 +345,11 @@ impl Installer {
                 .collect(),
         });
         context.mode = CheckMode::Check;
-        let errors = manifest::validate_json(text, &context);
+        // SEC-100 step 8: grant strings parse and fit the tier only after the inventory
+        // (step 3) and are reported after it, so a defective inventory wins over a grant fault.
+        let (grant_errors, errors): (Vec<_>, Vec<_>) = manifest::validate_json(text, &context)
+            .into_iter()
+            .partition(|error| error.code.as_str().starts_with("manifest.grant-"));
         if errors
             .iter()
             .any(|error| error.stage.is_none_or(|s| s.0 <= 3))
@@ -354,6 +358,17 @@ impl Installer {
         }
         let manifest = match manifest::parse_manifest(text) {
             Ok(manifest) => manifest,
+            // Grant faults are reported after the inventory; the typed manifest still loads.
+            Err(errors)
+                if errors
+                    .iter()
+                    .all(|error| error.code.as_str().starts_with("manifest.grant-")) =>
+            {
+                match serde_json::from_str::<manifest::Manifest>(text) {
+                    Ok(manifest) => manifest,
+                    Err(_) => return stage_report(errors, 3),
+                }
+            }
             Err(errors) => return stage_report(errors, 3),
         };
         let document: serde_json::Value = match serde_json::from_str(text) {
@@ -384,9 +399,12 @@ impl Installer {
         if !errors.is_empty() {
             return stage_report(errors, 4);
         }
-        let errors = inventory(&manifest, &entries);
-        if !errors.is_empty() {
-            return stage_report(errors, 5);
+        let inventory_errors = inventory(&manifest, &entries);
+        if !inventory_errors.is_empty() {
+            return stage_report(inventory_errors, 5);
+        }
+        if !grant_errors.is_empty() {
+            return stage_report(grant_errors, 4);
         }
         let mut diagnostics = components(&manifest, &entries, &context);
         if diagnostics.iter().any(|d| d.severity == Severity::Error) {
@@ -426,6 +444,16 @@ impl Installer {
                             diagnostics.push(info);
                         }
                     }
+                }
+                // Without the signer's public key the signature can be neither checked nor trusted:
+                // a warning, tier untrusted (PKG-156). `install` verifies with the real trust set.
+                Err(error)
+                    if error.code.as_str() == "manifest.signature-invalid"
+                        && error.message == crate::signing::KEY_UNAVAILABLE_MESSAGE =>
+                {
+                    let mut warning = finding("trust.key-unknown", "", error.message.clone(), 7);
+                    warning.severity = Severity::Warning;
+                    diagnostics.push(warning);
                 }
                 Err(error) => return stage_report(vec![error], 7),
                 Ok(_) => {}

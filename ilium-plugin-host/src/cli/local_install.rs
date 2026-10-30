@@ -133,10 +133,13 @@ impl InstallCommandBackend for LocalInstall {
 impl LocalInstall {
     fn perform(&self, path: &Path) -> Result<crate::install::TrustedInstallReport, CliOutput> {
         let fail = |diagnostic: Diagnostic| {
-            offline::failure(
-                diagnostic.code.as_str(),
-                diagnostic.message.clone(),
-                install_command::install_exit_code(diagnostic.code.as_str()),
+            offline::with_stage(
+                offline::failure(
+                    diagnostic.code.as_str(),
+                    diagnostic.message.clone(),
+                    install_command::install_exit_code(diagnostic.code.as_str()),
+                ),
+                diagnostic.stage.map(|stage| stage.0),
             )
         };
         let _gate = self.gate.lock().map_err(|_| {

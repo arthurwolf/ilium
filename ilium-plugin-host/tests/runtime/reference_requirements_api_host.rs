@@ -291,7 +291,7 @@ fn install_codes(files: Vec<(String, Vec<u8>)>) -> Vec<String> {
 
 fn manifest_with(id: &str, extra: &str) -> Vec<(String, Vec<u8>)> {
     let text = format!(
-        "{{\"id\":\"{id}\",\"name\":\"T\",\"version\":\"0.1.0\",\"tier\":\"T3\",\"api\":\"0.1.0\"{extra}}}"
+        "{{\"id\":\"{id}\",\"name\":\"T\",\"version\":\"0.1.0\",\"publisher\":\"Example Labs\",\"api\":\"ilium:plugin@0.1.0\",\"server\":{{\"entry\":\"server.wasm\",\"world\":\"ilium:server/base@0.1.0\",\"exports\":[]}}{extra}}}"
     );
     vec![("manifest.json".to_owned(), text.into_bytes())]
 }
@@ -333,7 +333,8 @@ fn api_080_the_cli_exit_code_is_1_when_any_error_line_was_printed() {
     )
     .unwrap();
     let output = ilium_plugin_host::cli::run_check_dir(&package);
-    assert_eq!(output.exit_code, 1);
+    // `check` ends with the findings exit code 3 (reference-plugin-cli.md exit-code table).
+    assert_eq!(output.exit_code, 3);
     assert!(output
         .stdout_jsonl
         .iter()

@@ -245,6 +245,8 @@ proptest! {
 #[test]
 fn sec_244_the_owning_side_reads_its_secret_and_read_all_returns_an_empty_string() {
     let rig = setup(&["settings.read-all"])
+        .tier(ilium_plugin_api::Tier::T1)
+        .side(ilium_plugin_api::Side::Client)
         .secret("token", SECRET)
         .start();
     let own = rig
@@ -263,7 +265,7 @@ fn sec_244_the_owning_side_reads_its_secret_and_read_all_returns_an_empty_string
 /// REQ: SEC-244
 #[test]
 fn sec_244_read_kernel_returns_redacted_for_a_kernel_secret() {
-    let rig = setup(&["settings.read-kernel"])
+    let rig = setup(&["settings.read-kernel:api"])
         .kernel_secret("api.provider_key", "provider-key-123456")
         .start();
     let kernel = rig

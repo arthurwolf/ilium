@@ -26,14 +26,18 @@
       "inference",
       "jobs.run",
       "panes.lifecycle",
-      "fs.read:agent-homes",
-      "fs.write:agent-homes"
+      "fs.read:agent-config:claude",
+      "agent-config.propose:claude",
+      "fs.read:agent-config:codex",
+      "agent-config.propose:codex",
+      "settings.write-kernel:optimization",
+      "settings.write-kernel:remote-compaction",
+      "extensions.provide:ilium.core.compaction/techniques",
+      "extensions.provide:ilium.core.compaction/before-compact"
     ],
     "client": [
       "open-external",
-      "ui.panels",
-      "settings.write-kernel:optimization",
-      "settings.write-kernel:remote-compaction"
+      "ui.panels"
     ]
   },
   "activation": [
@@ -42,10 +46,69 @@
     "view:compaction.optimizer"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "techniques",
+        "kind": "collect",
+        "title": "Compaction techniques",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-compact",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before compact",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "pane",
+            "technique",
+            "tokens"
+          ],
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "technique": {
+              "type": "string"
+            },
+            "tokens": {
+              "type": "integer"
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "jobs": [
       {
         "kind": "compact",
-        "deadline_ms": 300000,
+        "deadline_ms": 60000,
         "memory_mib": 256
       }
     ],

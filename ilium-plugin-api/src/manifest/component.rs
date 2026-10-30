@@ -101,13 +101,22 @@ pub fn check_component(
     } else {
         &["lifecycle", "handler"]
     };
-    let expected: BTreeSet<_> = required
+    // reference-manifest.md ABI-018/PKG-043: the manifest list holds only the optional exports,
+    // and must equal the optional exports the component really has. Required exports are never
+    // listed (the manual's minimal vector has an empty component and `exports: []`).
+    let expected: BTreeSet<_> = declared.exports.iter().map(String::as_str).collect();
+    let actual: BTreeSet<_> = component
+        .exports
         .iter()
-        .copied()
-        .chain(declared.exports.iter().map(String::as_str))
+        .map(String::as_str)
+        .filter(|name| !required.contains(name))
         .collect();
-    let actual: BTreeSet<_> = component.exports.iter().map(String::as_str).collect();
-    if actual != expected || component.exports.len() != actual.len() {
+    let optional_count = component
+        .exports
+        .iter()
+        .filter(|name| !required.contains(&name.as_str()))
+        .count();
+    if actual != expected || optional_count != actual.len() {
         return vec![finding(
             "manifest.exports-mismatch",
             format!("{path}/exports"),

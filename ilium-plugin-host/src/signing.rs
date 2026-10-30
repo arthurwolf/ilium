@@ -320,7 +320,7 @@ pub fn verify_with_public_keys(
         if candidates.is_empty() {
             return Err(failure(
                 "manifest.signature-invalid",
-                "The signing key is not available in the effective trust set or supplied public keys",
+                KEY_UNAVAILABLE_MESSAGE,
             ));
         }
         let verifies = |candidate: &TrustedKey| {
@@ -452,6 +452,11 @@ pub fn jcs(value: &serde_json::Value) -> Result<String, Diagnostic> {
     String::from_utf8(bytes)
         .map_err(|_| failure("package.manifest-json", "Canonical JSON is not UTF-8"))
 }
+
+/// The message of the signature failure raised when no public key for the signer is available, so
+/// the signature can be neither checked nor trusted (reference-package-format.md PKG-156).
+pub const KEY_UNAVAILABLE_MESSAGE: &str =
+    "The signing key is not available in the effective trust set or supplied public keys";
 
 fn failure(code: &'static str, message: &str) -> Diagnostic {
     Diagnostic::error(Code::from_static(code), "", message)

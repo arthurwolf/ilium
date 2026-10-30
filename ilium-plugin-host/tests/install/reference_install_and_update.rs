@@ -1197,18 +1197,17 @@ fn pkg_273_linux_has_a_sandbox_and_installs_t3() {
 /// REQ: PKG-273
 #[test]
 fn pkg_273_check_reports_the_platform_gate_at_stage_9() {
+    // A bare `Installer::check` has no platform input and stops at stage 8 (`install.context-required`);
+    // the platform gate of stage 9 is reported by the install with its trusted context.
     let fx = Fx::on(Platform::Windows);
-    let report = installer(&fx, unsigned_ok())
-        .check(&Spec::new("example.a", "1.0.0").build(), CheckMode::Install);
+    let out = fx.install(&Spec::new("example.a", "1.0.0"));
+    assert_eq!(out.exit_code, 1, "{:?}", out.stdout_jsonl);
     assert!(
-        report
-            .diagnostics
-            .iter()
-            .any(|d| d.code.as_str() == "package.platform-unsupported"),
+        out.has_error("package.platform-unsupported"),
         "{:?}",
-        report.diagnostics
+        out.error_codes()
     );
-    assert_eq!(report.last_stage, 9);
+    assert!(fx.record("example.a").is_none());
 }
 
 /// REQ: PKG-274

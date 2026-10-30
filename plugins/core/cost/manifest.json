@@ -29,11 +29,13 @@
       "http:status.openai.com",
       "services.provide:ilium.core.cost/usage",
       "settings.contribute:agent-cost",
-      "settings.write-kernel:agent-cost"
+      "settings.write-kernel:agent-cost",
+      "settings.write-kernel:reset-planning",
+      "extensions.provide:ilium.core.cost/price-sources",
+      "extensions.provide:ilium.core.cost/quota-sources"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:reset-planning"
+      "ui.panels"
     ]
   },
   "activation": [
@@ -41,6 +43,76 @@
     "view:cost.panel"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "price-sources",
+        "kind": "collect",
+        "title": "Price sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "model_pattern": {
+              "type": "string"
+            },
+            "input_per_mtok": {
+              "type": "number"
+            },
+            "output_per_mtok": {
+              "type": "number"
+            },
+            "cache_read_per_mtok": {
+              "type": "number"
+            },
+            "currency": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "model_pattern",
+            "input_per_mtok",
+            "output_per_mtok",
+            "cache_read_per_mtok",
+            "currency"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "quota-sources",
+        "kind": "collect",
+        "title": "Quota sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "provider",
+            "service"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
     "decoration_slots": [
       {
         "id": "cost",

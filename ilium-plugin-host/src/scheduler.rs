@@ -242,6 +242,8 @@ struct SideQueue {
     events: VecDeque<Event>,
     capacity: usize,
     dropped: u64,
+    /// Drops not yet reported to the plugin, as `events-dropped` records (EVT-004).
+    dropped_records: Vec<ilium_plugin_api::generated::types::events::DroppedCount>,
     busy: bool,
     activating: bool,
     activation_failed: bool,
@@ -262,6 +264,7 @@ impl Default for SideQueue {
             events: VecDeque::new(),
             capacity: 1024,
             dropped: 0,
+            dropped_records: Vec::new(),
             busy: false,
             activating: false,
             activation_failed: false,
@@ -809,8 +812,14 @@ impl Scheduler {
         let Some(side) = state.sides.get_mut(plugin) else {
             return Vec::new();
         };
-        let count = maximum.min(side.events.len());
-        side.events.drain(..count).collect()
+        let mut batch: Vec<Event> = Vec::new();
+        // The `events-dropped` record leads the batch and counts toward its limit.
+        if maximum > 0 && !side.dropped_records.is_empty() {
+            batch.push(Event::EventsDropped(std::mem::take(&mut side.dropped_records)));
+        }
+        let count = maximum.saturating_sub(batch.len()).min(side.events.len());
+        batch.extend(side.events.drain(..count));
+        batch
     }
 
     /// Observes pending delivery order without consuming events or changing policy state.
@@ -1021,6 +1030,29 @@ fn merge_event(previous: Event, mut incoming: Event) -> Event {
     incoming
 }
 
+/// Adds a dropped event to the pending `events-dropped` records (EVT-004).
+fn note_dropped(side: &mut SideQueue, event: &Event) {
+    let (name, source) = match event {
+        Event::OutputMatched(matched) => ("output-matched", Some(matched.filter_id.clone())),
+        Event::TopicPublished(published) => ("topic-published", Some(published.topic.clone())),
+        _ => ("audio-frames", None),
+    };
+    if let Some(record) = side
+        .dropped_records
+        .iter_mut()
+        .find(|record| record.event == name && record.source == source)
+    {
+        record.count = record.count.saturating_add(1);
+    } else {
+        side.dropped_records
+            .push(ilium_plugin_api::generated::types::events::DroppedCount {
+                event: name.to_owned(),
+                source,
+                count: 1,
+            });
+    }
+}
+
 fn push_to_side(side: &mut SideQueue, mut event: Event) -> EventPush {
     if let Event::NodeRemoved(node) = &event {
         side.events.retain_mut(|pending| {
@@ -1064,13 +1096,16 @@ fn push_to_side(side: &mut SideQueue, mut event: Event) -> EventPush {
         .iter()
         .position(|pending| event_queue_policy(pending) == QueuePolicy::DropOldest)
     {
-        side.events.remove(index);
+        if let Some(evicted) = side.events.remove(index) {
+            note_dropped(side, &evicted);
+        }
         side.dropped = side.dropped.saturating_add(1);
         side.events.push_back(event);
         return EventPush::DroppedOldest;
     }
     if policy == QueuePolicy::DropOldest {
         side.dropped = side.dropped.saturating_add(1);
+        note_dropped(side, &event);
         return EventPush::DiscardedIncoming;
     }
     EventPush::Stuck

@@ -161,7 +161,7 @@ impl ScriptedRunner {
     pub fn passing() -> Arc<ScriptedRunner> {
         Arc::new(ScriptedRunner {
             result: RunResult {
-                submissions: vec![serde_json::json!({"intent": "set-decoration", "slot": "work"})],
+                submissions: vec![serde_json::json!({"intent": "set-decoration", "node": 42, "slot": "work"})],
                 outcomes: vec![serde_json::json!("ok")],
                 logs: vec![serde_json::json!({"level": "info", "message": "activate"})],
                 trap: None,

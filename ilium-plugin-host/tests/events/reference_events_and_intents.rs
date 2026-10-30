@@ -331,7 +331,7 @@ fn evt_004_one_event_over_drops_exactly_one() {
 /// REQ: EVT-004
 #[test]
 fn evt_004_eviction_takes_the_oldest_drop_oldest_event_of_any_kind() {
-    let env = Setup::new(&["terminal.output-filter", "topics.subscribe"]).build();
+    let env = Setup::new(&["terminal.output-filter", "topics.subscribe:build"]).build();
     let mut events = vec![Event::TopicPublished(TopicPublishedEvent {
         topic: "build".to_owned(),
         from: PluginId("other.plugin".to_owned()),

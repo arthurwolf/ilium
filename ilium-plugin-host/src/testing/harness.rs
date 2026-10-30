@@ -862,6 +862,8 @@ impl HostHarness {
         if let Some(trap) = harness_lock(&handle.instance).last_trap().cloned() {
             harness_lock(&handle.observations).failures.push(trap);
         }
+        handle.push_activation_tree();
+        handle.pump(8);
         Ok(handle)
     }
 }
@@ -1242,6 +1244,41 @@ impl HarnessHandle {
             harness_lock(&self.observations).failures.push(trap);
             self.note_failure();
         }
+        self.push_activation_tree();
+    }
+
+    /// EVT-047: after every activation, a holder of tree.read gets one tree-changed
+    /// listing every node in pre-order at the start of its first batch.
+    fn push_activation_tree(&self) {
+        if self.state() != InstanceState::Active || !self.admission.permits("tree.read") {
+            return;
+        }
+        let entries: Vec<(u64, Option<u64>)> = self
+            .kernel
+            .state()
+            .nodes
+            .iter()
+            .map(|node| (node.id.0, node.parent.map(|parent| parent.0)))
+            .collect();
+        let mut order: Vec<NodeId> = Vec::with_capacity(entries.len());
+        let mut stack: Vec<u64> = entries
+            .iter()
+            .rev()
+            .filter(|(_, parent)| parent.is_none_or(|id| !entries.iter().any(|(node, _)| *node == id)))
+            .map(|(id, _)| *id)
+            .collect();
+        while let Some(id) = stack.pop() {
+            order.push(NodeId(id));
+            for (child, parent) in entries.iter().rev() {
+                if *parent == Some(id) {
+                    stack.push(*child);
+                }
+            }
+        }
+        if !order.is_empty() {
+            self.scheduler
+                .push_event(&self.plugin, Event::TreeChanged(order));
+        }
     }
 
     /// A sliding-window rate limit; `Err` carries the wait in milliseconds.
@@ -1477,6 +1514,29 @@ impl HarnessHandle {
                     Some(bytes) => Routed::Value(serde_json::json!(String::from_utf8_lossy(&bytes))),
                     None => Routed::Err(PluginError::new(ErrorCode::NotFound, "no such file")),
                 }
+            }
+            ("settings", "get-json" | "get-plugin-json" | "get-kernel-json") => {
+                // Own values include the plugin's secrets, another plugin's secrets read as the
+                // empty string and kernel secrets as `<redacted>` (SEC-244).
+                let world = harness_lock(&self.world);
+                let mut object = serde_json::Map::new();
+                if function == "get-kernel-json" {
+                    for ((_, key), _) in world.keyring.iter().filter(|((owner, _), _)| owner == "kernel") {
+                        object.insert(key.clone(), Value::String("<redacted>".into()));
+                    }
+                } else {
+                    for (key, value) in &world.settings {
+                        object.insert(key.clone(), value.clone());
+                    }
+                    let own = function == "get-json";
+                    for ((owner, key), value) in world.keyring.iter().chain(world.file_secrets.iter()) {
+                        if *owner == world.plugin {
+                            let shown = if own { value.clone() } else { String::new() };
+                            object.insert(key.clone(), Value::String(shown));
+                        }
+                    }
+                }
+                Routed::Value(Value::Object(object))
             }
             ("settings", "write-all") => {
                 let mut observations = harness_lock(&self.observations);
@@ -1740,7 +1800,15 @@ impl HarnessHandle {
                 | Event::PaneFocused(_)
                 | Event::PaneResized(_)
                 | Event::PaneTitleChanged(_) => self.admission.permits("panes.read"),
+                Event::OutputMatched(_) => self.admission.permits("terminal.output-filter"),
+                Event::TopicPublished(published) => self
+                    .admission
+                    .permits(&format!("topics.subscribe:{}", published.topic)),
+                Event::AgentIdentified(_)
+                | Event::AgentActivityChanged(_)
+                | Event::AgentGoalChanged(_) => self.admission.permits("agent.read"),
                 Event::SettingsChanged(_)
+                | Event::UiAction(_)
                 | Event::TimerFired(_)
                 | Event::RequestCompleted(_)
                 | Event::EventsDropped(_) => true,
@@ -1752,6 +1820,13 @@ impl HarnessHandle {
             // push_event consumes its argument even when Stuck, so retain an exact copy
             // until the scheduler confirms ownership or an explicit drop policy consumes it.
             if self.scheduler.push_event(&self.plugin, event.clone()) == EventPush::Stuck {
+                if !matches!(event, Event::RequestCompleted(_)) {
+                    // EVT-004: a never-dropped event on a full queue with nothing droppable
+                    // restarts the instance; the new instance learns the whole tree.
+                    self.scheduler.take_events(&self.plugin, usize::MAX);
+                    self.restart_instance(DeactivationReason::CrashRestart);
+                    continue;
+                }
                 return Err(std::iter::once(event).chain(remaining).collect());
             }
         }
@@ -3446,6 +3521,16 @@ impl HarnessHandle {
     /// Replaces a secret value now.
     pub fn set_secret_now(&self, key: &str, value: &str) {
         harness_lock(&self.world).store_secret(key, value);
+        // The change event names the key only, never the value (SEC-244).
+        harness_lock(&self.observations).extras.emitted.push((
+            "settings-changed".into(),
+            Event::SettingsChanged(SettingsChange {
+                keys: vec![key.to_owned()],
+                origin: SettingsOrigin::Plugin,
+                side: PluginSide::Server,
+            }),
+            true,
+        ));
     }
 
     /// The CLI's JSON output text.

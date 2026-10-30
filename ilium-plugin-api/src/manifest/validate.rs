@@ -99,6 +99,10 @@ pub fn validate_json(json: &str, context: &ValidationContext) -> Vec<Diagnostic>
         Err(error) => return vec![error],
     };
     let mut errors = schema_errors(&value);
+    // An identity failure explains the document first (API-080): a bad id hides unknown keys.
+    if errors.iter().any(|error| error.code.as_str() == "manifest.id-invalid") {
+        errors.retain(|error| error.code.as_str() != "manifest.unknown-key");
+    }
     if context.mode == CheckMode::Install && value.get("files").is_none() {
         errors.push(finding(
             "manifest.key-missing",

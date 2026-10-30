@@ -106,6 +106,11 @@ pub(super) fn run(args: &[String], env: &CliEnv) -> CliOutput {
         }) {
             return offline::failure("session.unreachable", message, 6);
         }
+        if let Err(message) = session.request(SessionRequest::Enable {
+            id: text("id"),
+        }) {
+            return offline::failure("session.unreachable", message, 6);
+        }
     }
     output
 }

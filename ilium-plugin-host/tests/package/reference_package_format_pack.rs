@@ -458,7 +458,7 @@ fn pkg_142_exports_not_matching_the_manifest_refused_exports_mismatch() {
     let source = String::from_utf8(vector_manifest()).expect("utf8");
     let declared = source.replace(
         "\"exports\": []",
-        "\"exports\": [\n      \"ilium:server/missing@0.1.0\"\n    ]",
+        "\"exports\": [\n      \"detector\"\n    ]",
     );
     let manifest = declared;
     let bytes = package_of_manifest(manifest.into_bytes());
@@ -492,6 +492,7 @@ proptest! {
 // ---------------------------------------------------------------------------------------------
 
 fn pack_in(fixture: &CliFixture, extra: &[&str]) -> (CliOutput, Vec<u8>) {
+    refresh_build_record(&fixture.work());
     let mut args = vec!["pack", "--allow-debug"];
     args.extend_from_slice(extra);
     let output = run_cli(fixture, &args);
@@ -1050,9 +1051,13 @@ fn pkg_153_check_of_a_package_runs_through_stage_6() {
     write_file(&path, &package_with_component(&component_with(&[])));
     let output = run_cli(&fixture, &["check", path.to_str().expect("utf8")]);
     assert_eq!(output.exit_code, 3);
-    assert!(record_codes(&output, "error")
-        .iter()
-        .any(|c| c == "package.api-section-missing"));
+    assert!(
+        records(&output, "check")
+            .iter()
+            .any(|r| r.get("rule").and_then(|v| v.as_str()) == Some("package.api-section-missing")),
+        "{:?}",
+        output.stdout_jsonl
+    );
 }
 
 /// REQ: PKG-153

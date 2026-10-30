@@ -699,9 +699,29 @@ pub fn installer() -> (tempfile::TempDir, Installer) {
     (dir, installer)
 }
 
+/// The install check. Stage 7 needs the signer's public key to verify a signature, so the check
+/// is given the public key of the golden vector; any other key stays unavailable (PKG-156).
 pub fn check(bytes: &[u8]) -> CheckReport {
     let (_dir, installer) = installer();
-    installer.check(bytes, CheckMode::Install)
+    let context = ilium_plugin_api::manifest::ValidationContext {
+        tier: ilium_plugin_api::Tier::T3,
+        mode: CheckMode::Check,
+        platform: ilium_plugin_api::Platform::Linux,
+        installed: Vec::new(),
+        core_plugins: Vec::new(),
+        unstable_features: ilium_plugin_api::abi::UNSTABLE_FEATURES
+            .iter()
+            .map(|feature| (*feature).into())
+            .collect(),
+    };
+    let keys = vec![ilium_plugin_host::signing::TrustedKey {
+        key_id: VECTOR_KEY_ID.to_owned(),
+        publisher_id: "example".to_owned(),
+        public_key: ilium_plugin_host::signing::PublicKey(vector_public_key()),
+    }];
+    installer
+        .with_check_context(context, keys)
+        .check(bytes, CheckMode::Install)
 }
 
 /// Error codes of the install check, in print order.
@@ -822,9 +842,17 @@ pub fn write_pack_project(dir: &Path) {
     let source_manifest = format!("{}\n}}\n", &source[..cut]);
     write_file(&dir.join("manifest.json"), source_manifest.as_bytes());
     write_file(&dir.join("dist").join("server.wasm"), &vector_component());
+    refresh_build_record(dir);
+}
+
+/// Rewrites `dist/build.json` as `ilium plugin build` would after the sources in `dir` last
+/// changed: the recorded `input_hash` is the current one (reference-plugin-cli.md DEV-095, DEV-304).
+pub fn refresh_build_record(dir: &Path) {
+    let Ok(input_hash) = ilium_plugin_host::cli::project_input_hash(dir) else {
+        return;
+    };
     let build_json = format!(
-        "{{\"profile\":\"release\",\"api\":\"ilium:plugin@0.1.0\",\"input_hash\":\"{}\",\"sides\":[{{\"name\":\"server\",\"bytes\":34,\"sha256\":\"{VECTOR_COMPONENT_SHA256}\"}}],\"toolchain\":{{}},\"cached\":false}}\n",
-        "0".repeat(64)
+        "{{\"profile\":\"release\",\"api\":\"ilium:plugin@0.1.0\",\"input_hash\":\"{input_hash}\",\"sides\":[{{\"name\":\"server\",\"bytes\":34,\"sha256\":\"{VECTOR_COMPONENT_SHA256}\"}}],\"toolchain\":{{}},\"cached\":false}}\n"
     );
     write_file(&dir.join("dist").join("build.json"), build_json.as_bytes());
 }

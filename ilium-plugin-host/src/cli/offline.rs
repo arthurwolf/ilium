@@ -20,18 +20,54 @@ pub(super) fn finish(mut records: Vec<Value>, exit: i32) -> CliOutput {
     render(records, exit)
 }
 
+/// The field order of every record type (reference-plugin-cli.md, the record catalogue); fields
+/// a type does not list follow in alphabetical order.
+const FIELD_ORDER: &[(&str, &[&str])] = &[
+    ("progress", &["step", "message", "current", "total"]),
+    ("warning", &["code", "message", "file", "line", "column"]),
+    ("error", &["code", "message", "file", "line", "column", "key_path", "hint"]),
+    ("artifact", &["kind", "path", "sha256", "bytes"]),
+    ("check", &["rule", "severity", "message", "file", "line", "column", "key_path"]),
+    ("lint", &["rule", "severity", "message", "file", "line", "column", "key_path", "fix", "suppressed"]),
+    ("test-case", &["name", "fixture", "side", "status", "duration_ms", "diff", "reason"]),
+    ("diff", &["subject", "expected", "actual", "first_difference"]),
+    ("submission", &["index", "correlation", "intent", "dedup_key"]),
+    ("outcome", &["correlation", "outcome", "code"]),
+    ("reload", &["plugin", "side", "version", "restored_bytes", "restore_dropped", "build_ms"]),
+    ("log", &["at", "plugin", "side", "level", "message"]),
+    ("timing", &["plugin", "side", "export", "calls", "p50_ms", "p99_ms", "max_ms", "deadline_ms"]),
+    ("trace", &["at", "plugin", "side", "kind", "detail"]),
+    ("plugin", &["id", "version", "tier", "state", "dev", "sides", "grants_granted", "grants_requested"]),
+    ("grant", &["plugin", "grant", "risk", "state"]),
+    ("inspect", &["section", "data"]),
+    ("doctor-check", &["item", "status", "message", "fix"]),
+    ("summary", &["duration_ms", "warnings", "errors"]),
+    ("result", &["ok", "exit_code"]),
+];
+
 pub(super) fn render(records: Vec<Value>, exit: i32) -> CliOutput {
     let mut raw = String::new();
     for record in &records {
-        // serde_json's default map sorts keys; the CLI contract puts type first.
         raw.push_str("{\"type\":");
         raw.push_str(&record["type"].to_string());
         if let Some(fields) = record.as_object() {
-            for (key, value) in fields.iter().filter(|(key, _)| key.as_str() != "type") {
+            let order: &[&str] = FIELD_ORDER
+                .iter()
+                .find(|(name, _)| record["type"] == *name)
+                .map_or(&[], |(_, order)| order);
+            let mut keys: Vec<&String> = fields.keys().filter(|key| key.as_str() != "type").collect();
+            keys.sort_by_key(|key| {
+                let rank = order
+                    .iter()
+                    .position(|name| *name == key.as_str())
+                    .unwrap_or(order.len());
+                (rank, key.as_str() == "details", (*key).clone())
+            });
+            for key in keys {
                 raw.push(',');
                 raw.push_str(&json!(key).to_string());
                 raw.push(':');
-                raw.push_str(&value.to_string());
+                raw.push_str(&fields[key].to_string());
             }
         }
         raw.push_str("}\n");
@@ -158,25 +194,69 @@ pub(super) fn run(command: &str, args: &[String], env: &CliEnv) -> CliOutput {
     let installer = Installer::new(PackageStore {
         root: env.data_dir.join("plugins"),
     });
+    // Public keys of the trust store let stage 7 check a signature (the keys stay untrusted for
+    // this read-only command, which grants no installation authority).
+    let installer = installer.with_check_context(
+        ilium_plugin_api::manifest::ValidationContext {
+            tier: ilium_plugin_api::Tier::T3,
+            mode: CheckMode::Check,
+            platform: ilium_plugin_api::Platform::Linux,
+            installed: Vec::new(),
+            core_plugins: Vec::new(),
+            unstable_features: ilium_plugin_api::abi::UNSTABLE_FEATURES
+                .iter()
+                .map(|feature| (*feature).into())
+                .collect(),
+        },
+        trust_store_keys(env),
+    );
     if command != "inspect" {
         let report = installer.check(&bytes, CheckMode::Check);
         let has_errors = report
             .diagnostics
             .iter()
             .any(|d| d.severity == ilium_plugin_api::Severity::Error);
-        let records = report.diagnostics.into_iter().map(|d| json!({"type":"check","rule":d.code.as_str(),"severity":match d.severity {ilium_plugin_api::Severity::Error=>"error",ilium_plugin_api::Severity::Warning=>"warn",_=>"info"},"message":d.message,"key_path":d.pointer})).collect();
-        return finish(
-            records,
-            if has_errors {
-                if command == "check" {
-                    3
-                } else {
-                    1
-                }
-            } else {
-                0
-            },
-        );
+        // Package files print `progress`, `warning` and `error` lines (reference-package-format.md
+        // PKG-154, PKG-156); a key outside the trust store is a warning for `verify`.
+        let mut records: Vec<Value> = Vec::new();
+        if command == "verify" {
+            const STAGES: [&str; 7] = ["archive", "manifest-parse", "schema", "semantic", "inventory", "components", "signature"];
+            let reached = usize::from(report.last_stage).clamp(1, STAGES.len());
+            for (index, name) in STAGES.iter().enumerate().take(reached) {
+                records.push(json!({"type":"progress","stage":index + 1,"name":name}));
+            }
+        }
+        let mut key_unknown = false;
+        for d in &report.diagnostics {
+            key_unknown |= d.code.as_str() == "trust.key-unknown";
+            let kind = match d.severity {
+                ilium_plugin_api::Severity::Error => "error",
+                _ => "warning",
+            };
+            records.push(json!({"type":kind,"code":d.code.as_str(),"message":d.message,"key_path":d.pointer}));
+        }
+        let exit = if has_errors { if command == "check" { 3 } else { 1 } } else { 0 };
+        if command == "verify" {
+            let manifest_sha256 = archive
+                .entries
+                .iter()
+                .find(|entry| entry.path == "manifest.json")
+                .map(|entry| format!("{:x}", Sha256::digest(&entry.bytes)));
+            let mut result = json!({
+                "type":"result","ok":exit == 0,"exit_code":exit,
+                "id":archive.manifest.id,"version":archive.manifest.version.to_string(),
+                "sha256":format!("{:x}", Sha256::digest(&bytes)),"manifest_sha256":manifest_sha256,
+                "tier":if key_unknown || has_errors { "untrusted" } else { "T2" },
+                "signer_key_id":Value::Null,"publisher_id":Value::Null,
+            });
+            result["type"] = json!("result");
+            let warnings = records.iter().filter(|r| r["type"] == "warning").count();
+            let errors = records.iter().filter(|r| r["type"] == "error").count();
+            records.push(json!({"type":"summary","duration_ms":0,"warnings":warnings,"errors":errors}));
+            records.push(result);
+            return render(records, exit);
+        }
+        return finish(records, exit);
     }
     let manifest = match archive
         .entries
@@ -267,4 +347,42 @@ pub(super) fn check_directory(directory: &Path) -> CliOutput {
         .any(|d| d.severity == ilium_plugin_api::Severity::Error);
     let records = diagnostics.into_iter().map(|d|json!({"type":"check","rule":d.code.as_str(),"severity":match d.severity {ilium_plugin_api::Severity::Error=>"error",ilium_plugin_api::Severity::Warning=>"warn",_=>"info"},"message":d.message,"key_path":d.pointer})).collect();
     finish(records, if failed { 3 } else { 0 })
+}
+
+/// Adds the validation `stage` of the diagnostic to the first `error` record of a refused result.
+pub(super) fn with_stage(output: CliOutput, stage: Option<u8>) -> CliOutput {
+    let Some(stage) = stage else {
+        return output;
+    };
+    let mut records = output.stdout_jsonl;
+    if let Some(record) = records.iter_mut().find(|record| record["type"] == "error") {
+        record["stage"] = json!(stage);
+    }
+    render(records, output.exit_code)
+}
+
+/// The public keys of every entry of the trust store, for read-only signature checking.
+fn trust_store_keys(env: &CliEnv) -> Vec<crate::signing::TrustedKey> {
+    let Some(document) = std::fs::read(super::keys_command::trust_store_path(env))
+        .ok()
+        .and_then(|raw| crate::trust::TrustDocument::parse(&raw).ok())
+    else {
+        return Vec::new();
+    };
+    document
+        .keys
+        .iter()
+        .filter_map(|entry| {
+            let public_key = base64::Engine::decode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                &entry.public_key,
+            )
+            .ok()?;
+            Some(crate::signing::TrustedKey {
+                key_id: entry.key_id.clone(),
+                publisher_id: entry.publisher_id.clone(),
+                public_key: crate::signing::PublicKey(public_key),
+            })
+        })
+        .collect()
 }

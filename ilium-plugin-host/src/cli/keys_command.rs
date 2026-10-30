@@ -278,7 +278,7 @@ fn sign(args: &[String], env: &CliEnv) -> CliOutput {
     offline::finish(vec![artifact("signature", &package_path, &signed)], 0)
 }
 
-fn trust_store_path(env: &CliEnv) -> PathBuf {
+pub(super) fn trust_store_path(env: &CliEnv) -> PathBuf {
     env.env
         .get("ILIUM_TRUST_STORE")
         .map(PathBuf::from)

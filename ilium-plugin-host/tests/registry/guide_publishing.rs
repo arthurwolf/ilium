@@ -546,7 +546,8 @@ fn rebuilt_after_signing(change_manifest: bool) -> Vec<u8> {
         )
     } else {
         let mut component = unhex(COMPONENT_HEX);
-        component.push(0);
+        let last = component.len() - 1;
+        component[last] ^= 0xff;
         (manifest.into_bytes(), component)
     };
     write_package(&[
@@ -574,6 +575,16 @@ fn pkg_505_a_file_changed_after_signing_is_refused_file_hash() {
 #[test]
 fn pkg_505_a_manifest_changed_after_signing_is_refused_signature_invalid() {
     let sandbox = Sandbox::new();
+    // The signature can only be checked against the publisher's public key, so the key is trusted.
+    let trust = format!(
+        r#"{{"format":"ilium-trust/1","keys":[{{"key_id":"{}","publisher_id":"{}","publisher":"Acme","public_key":"{}","added":"2026-10-12 10:05:00","added_by":"user","status":"trusted","revoked":null}}]}}"#,
+        publisher_key_id(),
+        PUBLISHER_ID,
+        public_key_b64(PUBLISHER_SEED),
+    );
+    let store = sandbox.dir.path().join("state").join("ilium");
+    std::fs::create_dir_all(&store).expect("trust store folder");
+    std::fs::write(store.join("trust.json"), trust).expect("trust store");
     let output = verify_bytes(&sandbox, &rebuilt_after_signing(true));
     assert!(
         has_error(&output, "manifest.signature-invalid")

@@ -2205,7 +2205,9 @@ impl OpsRig {
     fn package_files(spec: &PackageSpec) -> Vec<(String, Vec<u8>)> {
         use sha2::{Digest, Sha256};
         // A genuine empty component carrying the API-version custom section.
-        let component = crate::testing::wat::plugin_component(&[]);
+        let exports_migrator = spec.migrator_both || (spec.migrator_server_only && !spec.client_side);
+        let lists_migrator = exports_migrator || spec.migrator_listed_only;
+        let component = crate::testing::wat::plugin_component(if exports_migrator { &["migrator"] } else { &[] });
         let entry = if spec.client_side { "client.wasm" } else { "server.wasm" };
         let mut files = vec![(entry.to_owned(), component)];
         if spec.padding_bytes > 0 {
@@ -2237,9 +2239,14 @@ impl OpsRig {
             "name": spec.id,
             "version": spec.version,
             "publisher": "Example Labs",
-            side: {"entry": entry, "world": world, "exports": []},
+            side: {"entry": entry, "world": world, "exports": if lists_migrator { vec!["migrator"] } else { Vec::new() }},
             "files": inventory,
         });
+        if let Some(raw) = &spec.raw_data_version {
+            manifest["data_version"] = serde_json::from_str(raw).unwrap_or(serde_json::Value::Null);
+        } else if let Some(version) = spec.data_version {
+            manifest["data_version"] = serde_json::json!(version);
+        }
         if !spec.grants.is_empty() {
             manifest["capabilities"] = serde_json::json!({ side: spec.grants });
         }
@@ -2353,6 +2360,10 @@ impl OpsRig {
     /// `installed.json` parsed.
     pub fn registry_json(&self) -> serde_json::Value {
         let bytes = self.registry_bytes();
+        if bytes.is_empty() {
+            // Nothing installed yet: the registry is the empty document.
+            return serde_json::json!({"plugins": {}});
+        }
         serde_json::from_slice(&bytes)
             .unwrap_or_else(|error| panic!("installed.json is not JSON ({error}): {bytes:?}"))
     }

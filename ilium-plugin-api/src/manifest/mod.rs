@@ -1491,7 +1491,7 @@ mod tests {
         let diagnostics = check_component(
             &manifest,
             Side::Client,
-            &client_summary(&["detector"]),
+            &client_summary(&["annotator"]),
             &context(CheckMode::Install),
         );
         assert!(
@@ -1504,7 +1504,7 @@ mod tests {
     /// REQ: PKG-043
     #[test]
     fn manifest_export_missing_from_component_is_exports_mismatch() {
-        let manifest = manifest_with_client_exports(&["detector"]);
+        let manifest = manifest_with_client_exports(&["annotator"]);
         let diagnostics = check_component(
             &manifest,
             Side::Client,
@@ -1521,11 +1521,11 @@ mod tests {
     /// REQ: PKG-043
     #[test]
     fn matching_exports_and_api_section_produce_no_exports_mismatch() {
-        let manifest = manifest_with_client_exports(&["detector"]);
+        let manifest = manifest_with_client_exports(&["annotator"]);
         let diagnostics = check_component(
             &manifest,
             Side::Client,
-            &client_summary(&["detector"]),
+            &client_summary(&["annotator"]),
             &context(CheckMode::Install),
         );
         assert!(
