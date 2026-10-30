@@ -306,11 +306,9 @@ fn live_status_evidence(class: Option<&AgentClass>, screen_text: &str) -> Option
         None => {
             looks_like_live_status_line(screen_text).then_some(ActivityEvidence::GenericLiveStatus)
         }
-        Some(AgentClass::Claude) => {
-            (looks_like_live_status_line(screen_text)
-                || claude_ascii_live_status_line(screen_text).is_some())
-            .then_some(ActivityEvidence::ClaudeLiveStatus)
-        }
+        Some(AgentClass::Claude) => (looks_like_live_status_line(screen_text)
+            || claude_ascii_live_status_line(screen_text).is_some())
+        .then_some(ActivityEvidence::ClaudeLiveStatus),
         Some(AgentClass::Codex) => looks_like_codex_live_status_line(screen_text)
             .then_some(ActivityEvidence::CodexLiveStatus),
         Some(AgentClass::Antigravity | AgentClass::Other(_)) => None,
