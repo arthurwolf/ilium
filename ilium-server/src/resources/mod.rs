@@ -962,6 +962,24 @@ async fn execute(
                     ));
                 }
             }
+            if let ResourceCommand::RecoverStaleOwner { resource_id, .. } = command {
+                // Stale-owner recovery needs no typed confirmation, but the caller
+                // must be a live agent (or the user) of a project linked to it.
+                if !matches!(who, ResourceActor::Agent(_) | ResourceActor::User) {
+                    return Err(err(
+                        "actor",
+                        "Stale-owner recovery needs an agent or the user",
+                    ));
+                }
+                if !catalog.links.iter().any(|link| {
+                    link.project_id == current_project && link.resource_id == *resource_id
+                }) {
+                    return Err(err(
+                        "not_linked",
+                        "This project is not linked to that resource",
+                    ));
+                }
+            }
             if matches!(
                 command,
                 ResourceCommand::Reserve { .. }
