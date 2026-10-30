@@ -97,7 +97,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Queue prompts for an agent</strong></p>
-<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a local Codex-shaped fixture; Ilium sends them in order after each turn. No model; output is synthetic." width="100%"></a></p>
+<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order." width="100%"></a></p>
 </td>
 </tr>
 <tr>

@@ -94,9 +94,11 @@ Smart Copy uses local inference to select and paste a code from real Codex outpu
 
 ## Queue prompts for an agent
 
-![Queue two prompts for a local Codex-shaped fixture; Ilium sends them in order after each turn. No model; output is synthetic.](../../assets/demos/13-prompt-queue.gif)
+![Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order.](../../assets/demos/13-prompt-queue.gif)
 
 Prompts queued for an agent are delivered one by one as each of its turns finishes. Explained in [Automation](automation.md).
+
+Disclosure: this is a current-build recording of a real Claude (Haiku) agent in an isolated lane; the agent's file output is real. The idle wait before the first prompt and part of the first turn's idle time are cut, and short reading holds are added, as shown by the loop clock. Names in the tree (`Exam University`, `Exam TA`) are staged. The readback that proves FIFO delivery (server log, Claude transcript and the driver key log: separate turns 2.75 s and 1.82 s after each previous turn ended, no key typed after the second Enqueue) was adjusted for this take to ignore the shell line that launches the agent, which the server log also records as a submitted prompt; the rest of its checks are unchanged. Earlier versions of this GIF used a synthetic Codex-shaped fixture.
 
 ## Get results from background tasks
 
