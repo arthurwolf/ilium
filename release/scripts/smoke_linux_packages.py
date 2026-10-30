@@ -1113,4 +1113,6 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['host'] and not os.environ.get('DBUS_SESSION_BUS_ADDRESS') and shutil.which('dbus-run-session'):
+        os.execvp('dbus-run-session', ['dbus-run-session', '--', sys.executable, *sys.argv])  # Flatpak needs a session bus on a headless runner.
     sys.exit(main())

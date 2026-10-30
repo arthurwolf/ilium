@@ -245,7 +245,7 @@ jobs:
       run: |
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke-host"
-        dbus-run-session -- python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
+        python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
     - name: Execute every declared native Linux sandbox case # Keep this step bound to the runner and matching Rust test source.
       run: python release/scripts/native_sandbox_runner.py --artifact-directory native-linux/evidence --helper native-linux/candidate/ilium-animation-helper --workspace Cargo.toml --output "$RUNNER_TEMP/native-sandbox"
     - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
