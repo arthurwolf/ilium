@@ -787,8 +787,13 @@ def expect_version(command, expected, log, label, environment):  # Check a real 
 
 # Older systemd (Ubuntu 22.04) keeps the service process in the delegated cgroup, which forbids enabling child controllers there;
 # move into a child cgroup first, then enable the controllers the sandbox requires on the now process-free parent.
-DELEGATED_LEAF = ('cg=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); mkdir "$cg/probe"; echo $$ > "$cg/probe/cgroup.procs"; '
-                  'echo "+cpu +memory +pids" > "$cg/cgroup.subtree_control"; exec "$@"')
+DELEGATED_LEAF = (
+    'cg=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); '
+    'diagnose() { echo "cgroup setup failed at $1: cg=$cg controllers=[$(cat "$cg/cgroup.controllers")] '
+    'subtree=[$(cat "$cg/cgroup.subtree_control")] procs=[$(cat "$cg/cgroup.procs" | tr "\\n" " ")] '
+    'type=$(cat "$cg/cgroup.type") owner=$(stat -c %U "$cg") uid=$(id -u)" >&2; exit 1; }; '
+    'mkdir "$cg/probe" || diagnose mkdir; echo $$ > "$cg/probe/cgroup.procs" || diagnose move; '
+    'echo "+cpu +memory +pids" > "$cg/cgroup.subtree_control" || diagnose enable; exec "$@"')
 
 
 def delegated_service(command, child_env):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
