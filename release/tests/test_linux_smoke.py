@@ -41,6 +41,25 @@ def audited_tree(directory, package_format='snap'):  # Create independent nonexe
 
 
 class linux_smoke_tests(unittest.TestCase):  # All tests in this class run without POSIX-only modules or tools.
+    @unittest.skipUnless(shutil.which('sh'), 'requires a POSIX shell')
+    def test_installed_animation_uses_delegated_service(self):
+        # A direct setpriv launch inherits the root acceptance service, not a delegated cgroup.
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            client = directory / 'client'
+            client.write_text('#!/bin/sh\ntest "$1" = release-animation-probe\ntest "${fixture_delegated:-}" = yes\n')
+            client.chmod(0o755)
+            manager = directory / 'systemd-run'
+            manager.write_text('#!/bin/sh\nset -eu\ndelegated=no\nwhile [ "$#" -gt 0 ]; do\n case "$1" in --property=Delegate=yes) delegated=yes; shift;; --*) shift;; *) break;; esac\ndone\ntest "$delegated" = yes\nfixture_delegated=yes exec "$@"\n')
+            manager.chmod(0o755)
+            body = smoke.installed_body('0.1.0')
+            command = next(line for line in body.splitlines() if 'release-animation-probe' in line)
+            command = command.replace('setpriv --reuid=65534 --regid=65534 --clear-groups', 'env')
+            command = command.replace('/usr/bin/systemd-run', shlex.quote(str(manager)))
+            command = command.replace('/usr/bin/ilium', shlex.quote(str(client)))
+            result = subprocess.run(['sh', '-ec', command], capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_container_animation_requires_both_installed_render_receipts(self):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:  # Restore Linux receipt-path adapters after this portable fixture.
             for module in (smoke, animation_seal, smoke.container_fixture):  # Keep Linux namespace semantics separate from real source-runner files.
