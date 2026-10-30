@@ -56,6 +56,7 @@ mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
+pub mod chatroom_root;
 pub mod chatroom_ui;
 pub mod claude_model_statusline;
 pub mod compaction_app;
