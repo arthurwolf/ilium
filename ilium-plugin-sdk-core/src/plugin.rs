@@ -4,8 +4,9 @@ use crate::generated::anim::FrameInput;
 use crate::generated::exports::{ExportLifecycle, HookCall, HookReply, ServiceCall, ServiceReply};
 use crate::generated::host::{
     HostClock, HostCli, HostFs, HostHttp, HostInference, HostJobs, HostKeys, HostLog, HostProcess,
-    HostSettings, HostStorage, HostTimers, InstanceState,
+    HostSettings, HostStorage, HostTimers, InstanceState, HostExtensions, HostServices, HostTopics,
 };
+use crate::generated::primitives::HostAgent;
 use crate::generated::types::{
     Activation, DeactivationReason, ErrorCode, Event, PluginError, Submission,
 };
@@ -81,6 +82,10 @@ pub trait HostCalls:
     + HostInference
     + HostCli
     + HostKeys
+    + HostTopics
+    + HostServices
+    + HostExtensions
+    + HostAgent
 {
 }
 impl<T: ?Sized> HostCalls for T where
@@ -96,6 +101,10 @@ impl<T: ?Sized> HostCalls for T where
         + HostInference
         + HostCli
         + HostKeys
+        + HostTopics
+        + HostServices
+        + HostExtensions
+        + HostAgent
 {
 }
 

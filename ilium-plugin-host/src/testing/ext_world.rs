@@ -1619,13 +1619,23 @@ impl ExtWorld {
     /// Stores a plugin with its points, runtime entries and provided services.
     fn add_plugin(&mut self, manifest: Value, handlers: BTreeMap<String, HandlerScript>) -> String {
         let plugin_id = manifest_id(&manifest);
-        if let Some(points) = manifest.get("points").and_then(Value::as_array) {
+        let declared = manifest
+            .get("points")
+            .or_else(|| manifest.pointer("/contributes/extension_points"))
+            .and_then(Value::as_array);
+        if let Some(points) = declared {
             for point in points {
                 let Some(id) = point.get("id").and_then(Value::as_str) else {
                     continue;
                 };
+                // A manifest names its points by local id; the world keys them as `owner/id`.
+                let id = if id.contains('/') {
+                    id.to_string()
+                } else {
+                    format!("{plugin_id}/{id}")
+                };
                 self.points.push(PointDecl {
-                    id: id.to_string(),
+                    id,
                     owner: plugin_id.clone(),
                     dynamic: point
                         .get("dynamic")

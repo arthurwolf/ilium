@@ -15,9 +15,11 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
+use ilium_plugin_api::grants::Grant;
 use ilium_plugin_api::generated::host::fs::{
     ConfigChange, DirEntry, EntryKind, FsMetadata, HostFs, PickSpec, ProposalResult, RevisionToken,
     Revisioned, ScannedEntry, ScopeRoot, TailChunk, WriteMode,
@@ -46,6 +48,9 @@ const MESSAGE_MAX_CHARS: usize = 256;
 const SCOPE_PACKAGE: &str = "package";
 const SCOPE_DATA: &str = "data";
 const SCOPE_CACHE: &str = "cache";
+const SCOPE_PROJECT: &str = "project";
+/// Folder of the project that no plugin may reach through the `project` scope.
+const PROJECT_HIDDEN_FOLDER: &str = ".ilium";
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -61,9 +66,46 @@ struct ScopeDirs {
     cache: PathBuf,
 }
 
+/// The operation a call performs, which decides the grant it needs on a granted scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    Read,
+    Write,
+    Watch,
+    /// A lock needs both the read and the write grant.
+    Lock,
+}
+
+/// The `project` scope: the session's project folder and the grants that open it.
+#[derive(Debug, Clone)]
+struct ProjectScope {
+    root: PathBuf,
+    grants: Arc<Mutex<Vec<Grant>>>,
+}
+
+impl ProjectScope {
+    fn granted(&self, family: &str) -> bool {
+        let wanted = format!("{family}:{SCOPE_PROJECT}");
+        self.grants
+            .lock()
+            .map(|grants| grants.iter().any(|grant| grant.as_str() == wanted))
+            .unwrap_or(false)
+    }
+
+    fn allows(&self, access: Access) -> bool {
+        match access {
+            Access::Read => self.granted("fs.read"),
+            Access::Write => self.granted("fs.write"),
+            Access::Watch => self.granted("fs.watch"),
+            Access::Lock => self.granted("fs.read") && self.granted("fs.write"),
+        }
+    }
+}
+
 /// Per-thread state of the import.
 #[derive(Debug, Default)]
 struct FsState {
+    project: Option<ProjectScope>,
     dirs: Option<ScopeDirs>,
     /// Scratch folder created by this state; removed when the thread ends.
     owned_dir: Option<PathBuf>,
@@ -114,6 +156,23 @@ pub fn configure_scope_roots(
     };
     with_state(|state| {
         state.dirs = Some(dirs);
+    });
+    Ok(())
+}
+
+/// Points the `project` scope of the current thread at the session's project folder. The scope
+/// opens only while `fs.read:project`, `fs.write:project` or `fs.watch:project` is in `grants`;
+/// the list is shared, so a later revocation takes effect on the next call.
+pub fn configure_project_scope(
+    root: PathBuf,
+    grants: Arc<Mutex<Vec<Grant>>>,
+) -> Result<(), PluginError> {
+    let canonical = fs::canonicalize(&root).map_err(io_error)?;
+    with_state(|state| {
+        state.project = Some(ProjectScope {
+            root: canonical,
+            grants,
+        });
     });
     Ok(())
 }
@@ -197,13 +256,22 @@ impl Resolved {
     }
 }
 
-fn resolve(path: &FsPath) -> Result<Resolved, PluginError> {
+fn resolve(path: &FsPath, access: Access) -> Result<Resolved, PluginError> {
     let (root, writable) = with_state(|state| {
         let dirs = state.scope_dirs()?;
         match path.scope.as_str() {
             SCOPE_PACKAGE => Ok((dirs.package, false)),
             SCOPE_DATA => Ok((dirs.data, true)),
             SCOPE_CACHE => Ok((dirs.cache, true)),
+            SCOPE_PROJECT => match &state.project {
+                Some(project) if project.allows(access) => {
+                    Ok((project.root.clone(), project.granted("fs.write")))
+                }
+                _ => Err(plugin_error(
+                    ErrorCode::NotPermitted,
+                    "scope project is not granted",
+                )),
+            },
             other => Err(plugin_error(
                 ErrorCode::NotPermitted,
                 format!("scope {other} is not granted"),
@@ -240,6 +308,12 @@ fn resolve(path: &FsPath) -> Result<Resolved, PluginError> {
         }
     }
     // A symlink inside the scope must not lead out of it: check the deepest existing ancestor.
+    if path.scope == SCOPE_PROJECT && normalised.first() == Some(&PROJECT_HIDDEN_FOLDER) {
+        return Err(plugin_error(
+            ErrorCode::NotPermitted,
+            "the project's .ilium folder is hidden",
+        ));
+    }
     let mut probe = target.clone();
     while fs::symlink_metadata(&probe).is_err() {
         if !probe.pop() {
@@ -420,15 +494,29 @@ fn glob_to_regex(glob: &str) -> Result<Regex, PluginError> {
 }
 
 /// Collects entries below `folder` depth first in name order, stopping at `max_entries`.
+/// How one `scan` walk matches and reports entries.
+#[derive(Debug, Clone, Copy)]
+struct WalkOptions {
+    match_name_only: bool,
+    scope_writable: bool,
+    max_entries: usize,
+    /// Skip the project's hidden `.ilium` folder at the start folder.
+    hide_project_folder: bool,
+}
+
 fn walk_matching(
     folder: &Path,
     relative_prefix: &str,
     matcher: &Regex,
-    match_name_only: bool,
-    scope_writable: bool,
-    max_entries: usize,
+    options: WalkOptions,
     found: &mut Vec<ScannedEntry>,
 ) -> Result<(), PluginError> {
+    let WalkOptions {
+        match_name_only,
+        scope_writable,
+        max_entries,
+        hide_project_folder,
+    } = options;
     let mut children: Vec<fs::DirEntry> = fs::read_dir(folder)
         .map_err(io_error)?
         .filter_map(Result::ok)
@@ -439,6 +527,9 @@ fn walk_matching(
             return Ok(());
         }
         let name = child.file_name().to_string_lossy().into_owned();
+        if hide_project_folder && relative_prefix.is_empty() && name == PROJECT_HIDDEN_FOLDER {
+            continue;
+        }
         let relative_path = if relative_prefix.is_empty() {
             name.clone()
         } else {
@@ -463,9 +554,7 @@ fn walk_matching(
                 &child.path(),
                 &relative_path,
                 matcher,
-                match_name_only,
-                scope_writable,
-                max_entries,
+                options,
                 found,
             )?;
         }
@@ -492,7 +581,7 @@ impl HostFs for FsImport {
     }
 
     fn metadata(&mut self, path: FsPath) -> Result<FsMetadata, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         metadata_of(&resolved.target, resolved.writable)
     }
 
@@ -507,7 +596,7 @@ impl HostFs for FsImport {
                 format!("max-entries is at most {LIST_DIR_MAX_ENTRIES}"),
             ));
         }
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         let mut children: Vec<fs::DirEntry> = fs::read_dir(&resolved.target)
             .map_err(|error| {
                 if resolved.target.is_file() {
@@ -520,6 +609,10 @@ impl HostFs for FsImport {
             .collect();
         children.sort_by_key(fs::DirEntry::file_name);
         let mut listing = Vec::new();
+        let hide_project_folder = resolved.scope == SCOPE_PROJECT && resolved.is_scope_root;
+        children.retain(|child| {
+            !(hide_project_folder && child.file_name() == PROJECT_HIDDEN_FOLDER)
+        });
         for child in children.into_iter().take(max_entries as usize) {
             if let Ok(metadata) = metadata_of(&child.path(), resolved.writable) {
                 listing.push(DirEntry {
@@ -543,12 +636,12 @@ impl HostFs for FsImport {
                 format!("max-bytes is at most {SYNC_READ_MAX_BYTES}"),
             ));
         }
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         read_bounded(&resolved.target, offset, max_bytes)
     }
 
     fn read_all(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         let content = read_whole_file(&resolved.target)?;
         Ok(with_state(|state| {
             let id = state.allocate_id();
@@ -570,7 +663,7 @@ impl HostFs for FsImport {
             ));
         }
         let matcher = glob_to_regex(&glob)?;
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         if !resolved.target.is_dir() {
             return Err(plugin_error(
                 if resolved.target.exists() {
@@ -586,9 +679,12 @@ impl HostFs for FsImport {
             &resolved.target,
             "",
             &matcher,
-            !glob.contains('/'),
-            resolved.writable,
-            max_entries as usize,
+            WalkOptions {
+                match_name_only: !glob.contains('/'),
+                scope_writable: resolved.writable,
+                max_entries: max_entries as usize,
+                hide_project_folder: resolved.scope == SCOPE_PROJECT && resolved.is_scope_root,
+            },
             &mut found,
         )?;
         Ok(with_state(|state| {
@@ -604,7 +700,7 @@ impl HostFs for FsImport {
         data: Vec<u8>,
         mode: WriteMode,
     ) -> Result<RequestId, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Write)?;
         check_write_size(data.len())?;
         resolved.require_writable()?;
         if resolved.is_scope_root {
@@ -637,7 +733,7 @@ impl HostFs for FsImport {
     }
 
     fn create_dir(&mut self, path: FsPath) -> Result<(), PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Write)?;
         resolved.require_writable()?;
         if resolved.target.is_dir() {
             return Ok(());
@@ -647,7 +743,7 @@ impl HostFs for FsImport {
     }
 
     fn remove(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Write)?;
         if resolved.is_scope_root {
             return Err(plugin_error(
                 ErrorCode::InvalidArgument,
@@ -671,8 +767,8 @@ impl HostFs for FsImport {
                 "rename stays inside one scope",
             ));
         }
-        let resolved_source = resolve(&source)?;
-        let resolved_target = resolve(&target)?;
+        let resolved_source = resolve(&source, Access::Write)?;
+        let resolved_target = resolve(&target, Access::Write)?;
         if resolved_source.is_scope_root || resolved_target.is_scope_root {
             return Err(plugin_error(
                 ErrorCode::InvalidArgument,
@@ -693,7 +789,7 @@ impl HostFs for FsImport {
     }
 
     fn watch(&mut self, path: FsPath, _recursive: bool) -> Result<WatchId, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Watch)?;
         fs::symlink_metadata(&resolved.target).map_err(io_error)?;
         Ok(with_state(|state| {
             let id = state.allocate_id();
@@ -720,7 +816,7 @@ impl HostFs for FsImport {
                 format!("timeout-millis is at most {LOCK_MAX_TIMEOUT_MILLIS}"),
             ));
         }
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Lock)?;
         resolved.require_writable()?;
         with_state(|state| {
             let conflicts = state.held_locks.values().any(|(held_key, held_exclusive)| {
@@ -757,7 +853,7 @@ impl HostFs for FsImport {
     }
 
     fn read_with_revision(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         let bytes = read_whole_file(&resolved.target)?;
         let revision = revision_of(&bytes);
         Ok(with_state(|state| {
@@ -773,7 +869,7 @@ impl HostFs for FsImport {
         data: Vec<u8>,
         expected: Option<RevisionToken>,
     ) -> Result<RequestId, PluginError> {
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Write)?;
         check_write_size(data.len())?;
         resolved.require_writable()?;
         if resolved.is_scope_root {
@@ -832,7 +928,7 @@ impl HostFs for FsImport {
                 format!("max-bytes is at most {SYNC_READ_MAX_BYTES}"),
             ));
         }
-        let resolved = resolve(&path)?;
+        let resolved = resolve(&path, Access::Read)?;
         let length = fs::metadata(&resolved.target).map_err(io_error)?.len();
         // A cursor past the end means the file was truncated or rotated: restart from the top.
         let truncated = cursor > length;

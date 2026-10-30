@@ -6,10 +6,13 @@
 use std::collections::BTreeMap;
 
 use ilium_plugin_sdk_core::generated::host::*;
+use ilium_plugin_sdk_core::generated::primitives::{AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn};
 use ilium_plugin_sdk_core::generated::types::*;
 use ilium_plugin_sdk_core::{clear_host, set_host, HostApi};
 
-use super::FakeHost;
+use ilium_plugin_sdk_core::exports::{HookCall, HookReply};
+
+use super::{FakeHost, FakeTranscript};
 
 /// Results of host calls that the plugin collects later with the matching `take-*` call.
 #[derive(Debug, Default)]
@@ -18,6 +21,14 @@ pub(super) struct BridgeState {
     http: BTreeMap<u64, HttpResponse>,
     completions: BTreeMap<u64, Completion>,
     exits: BTreeMap<u64, ProcessExit>,
+    replies: BTreeMap<u64, String>,
+    transcripts: BTreeMap<u64, Vec<TranscriptTurn>>,
+    /// Topics the plugin published, as `(topic, payload JSON)` in publish order.
+    pub(super) published: Vec<(String, String)>,
+    /// Running timers as `(id, repeat)`.
+    pub(super) timers: BTreeMap<u64, Option<u32>>,
+    /// Durable timers as `name -> due epoch`.
+    pub(super) durable: BTreeMap<String, u64>,
 }
 
 /// Keeps the bridge installed for one call into the plugin and removes it afterwards.
@@ -122,18 +133,23 @@ impl HostClock for NativeBridge {
 
 impl HostTimers for NativeBridge {
     fn set(&mut self, after_millis: u32, repeat_millis: Option<u32>) -> Result<TimerId, PluginError> {
-        let _ = (after_millis, repeat_millis);
-        Ok(TimerId(self.next_id()))
+        let _ = after_millis;
+        let id = self.next_id();
+        self.host().bridge.timers.insert(id, repeat_millis);
+        Ok(TimerId(id))
     }
     fn cancel(&mut self, timer: TimerId) {
-        let _ = timer;
+        self.host().bridge.timers.remove(&timer.0);
     }
     fn at(&mut self, epoch: EpochMs, name: String) -> Result<TimerId, PluginError> {
-        let _ = (epoch, name);
+        if name.is_empty() {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "a durable timer needs a name"));
+        }
+        self.host().bridge.durable.insert(name, epoch.0);
         Ok(TimerId(self.next_id()))
     }
     fn cancel_durable(&mut self, name: String) {
-        let _ = name;
+        self.host().bridge.durable.remove(&name);
     }
 }
 
@@ -589,5 +605,225 @@ impl HostKeys for NativeBridge {
     }
     fn release(&mut self, grab: GrabId) {
         self.host().keys.release(grab.0);
+    }
+}
+
+/// Longest topic name and payload of `topics.publish` (api-messages-and-topics.md, "Limits").
+const TOPIC_NAME_LIMIT: usize = 128;
+const TOPIC_PAYLOAD_LIMIT: usize = 64 * 1024;
+
+impl NativeBridge {
+    /// Checks a scoped grant `<prefix>:<name>` against the granted names; a granted `*` suffix covers a prefix.
+    fn permit_scoped(&mut self, prefix: &str, name: &str) -> bool {
+        let exact = format!("{prefix}:{name}");
+        self.host().granted.iter().any(|grant| {
+            *grant == exact
+                || grant
+                    .strip_prefix(prefix)
+                    .and_then(|rest| rest.strip_prefix(':'))
+                    .is_some_and(|pattern| pattern == "*" || pattern.strip_suffix('*').is_some_and(|head| name.starts_with(head)))
+        })
+    }
+}
+
+impl HostTopics for NativeBridge {
+    fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
+        let own_prefix = format!("{}/", self.host().plugin_id);
+        if topic.len() > TOPIC_NAME_LIMIT {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "the topic name is longer than 128 characters"));
+        }
+        if !topic.starts_with(&own_prefix) || topic.len() == own_prefix.len() {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("a plugin may publish only topics that start with {own_prefix}"),
+            ));
+        }
+        if payload_json.len() > TOPIC_PAYLOAD_LIMIT {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "the topic payload is larger than 64 KiB"));
+        }
+        if serde_json::from_str::<serde_json::Value>(&payload_json).is_err() {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "the topic payload is not valid JSON"));
+        }
+        self.host().bridge.published.push((topic, payload_json));
+        Ok(())
+    }
+}
+
+impl HostServices for NativeBridge {
+    fn call(&mut self, service: String, method: String, payload_json: String) -> Result<RequestId, PluginError> {
+        if !self.permit_scoped("services.use", &service) {
+            return Err(PluginError::new(ErrorCode::NotPermitted, format!("the services.use:{service} grant is missing")));
+        }
+        let id = self.next_id();
+        let host = self.host();
+        host.extensions
+            .service_log
+            .push((service.clone(), method.clone(), payload_json));
+        host.call_order.calls.push(format!("service:{service}.{method}"));
+        match host.extensions.answer_service(&service, &method) {
+            Ok(reply) => {
+                host.bridge.replies.insert(id, reply);
+                self.complete(id, Outcome::Ok);
+            }
+            Err(error) => self.complete(id, Outcome::Failed(error)),
+        }
+        Ok(RequestId(id))
+    }
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        self.host().bridge.replies.remove(&request.0)
+    }
+    fn reply(&mut self, call: u64, outcome: Result<String, PluginError>) -> Result<(), PluginError> {
+        let _ = (call, outcome);
+        Err(PluginError::new(ErrorCode::NotFound, "no deferred service call is waiting for this reply"))
+    }
+}
+
+impl HostExtensions for NativeBridge {
+    fn list(&mut self, point: String) -> Result<Vec<ExtensionEntry>, ExtensionError> {
+        if !self.permit_scoped("extensions.provide", &point) {
+            return Err(ExtensionError::NotGranted);
+        }
+        *self.host().extensions.list_calls.entry(point.clone()).or_default() += 1;
+        let plugin = PluginId(self.host().plugin_id.clone());
+        let entries = self
+            .host()
+            .extensions
+            .entries(&point)
+            .into_iter()
+            .map(|entry| ExtensionEntry {
+                extension: entry.id,
+                contributor: plugin.clone(),
+                priority: u8::try_from(entry.priority.clamp(0, 255)).unwrap_or(u8::MAX),
+                entry_json: entry.entry.to_string(),
+            })
+            .collect();
+        Ok(entries)
+    }
+    fn run_hook(&mut self, point: String, payload_json: String) -> Result<RequestId, ExtensionError> {
+        if !self.permit_scoped("extensions.provide", &point) {
+            return Err(ExtensionError::NotGranted);
+        }
+        if payload_json.len() > TOPIC_PAYLOAD_LIMIT {
+            return Err(ExtensionError::CapExceeded);
+        }
+        let id = self.next_id();
+        let host = self.host();
+        let call = HookCall { call: id, point, extension: String::new(), payload_json };
+        let (reply, trapped) = if host.extensions.has_hook_stub(&call.point) {
+            host.extensions.answer_hook(&call)
+        } else {
+            (HookReply::Pass, false)
+        };
+        host.extensions.hook_log.push(call);
+        match reply {
+            HookReply::Replace(text) | HookReply::Answer(text) if !trapped => {
+                host.bridge.replies.insert(id, text);
+                self.complete(id, Outcome::Ok);
+            }
+            HookReply::Refuse(message) if !trapped => self.complete(
+                id,
+                Outcome::Refused(PluginError::new(ErrorCode::Conflict, format!("extension.vetoed: {message}"))),
+            ),
+            _ => self.complete(id, Outcome::Ok),
+        }
+        Ok(RequestId(id))
+    }
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        self.host().bridge.replies.remove(&request.0)
+    }
+    fn register(&mut self, point: String, extension: String, priority: u8, entry_json: String) -> Result<(), ExtensionError> {
+        if !self.permit_scoped("extensions.contribute", &point) {
+            return Err(ExtensionError::NotGranted);
+        }
+        if serde_json::from_str::<serde_json::Value>(&entry_json).is_err() {
+            return Err(ExtensionError::SchemaMismatch);
+        }
+        self.host().extensions.contribute(&point, &extension, i64::from(priority), entry_json);
+        Ok(())
+    }
+    fn unregister(&mut self, point: String, extension: String) -> Result<(), ExtensionError> {
+        if !self.permit_scoped("extensions.contribute", &point) {
+            return Err(ExtensionError::NotGranted);
+        }
+        if !self.host().extensions.points.get(&point).is_some_and(|collect| collect.entries.iter().any(|entry| entry.id == extension)) {
+            return Err(ExtensionError::NotFound);
+        }
+        self.host().extensions.withdraw(&point, &extension);
+        Ok(())
+    }
+}
+
+impl HostAgent for NativeBridge {
+    fn agents(&mut self) -> Vec<AgentPane> {
+        if self.permit("agent.read").is_err() {
+            return Vec::new();
+        }
+        let tree = &self.host().tree;
+        tree.preorder_ids()
+            .into_iter()
+            .filter_map(|id| tree.get(id))
+            .filter_map(|node| node.agent.map(|view| AgentPane { pane: NodeId(node.id), view }))
+            .collect()
+    }
+    fn view(&mut self, pane: NodeId) -> Option<AgentView> {
+        self.permit("agent.read").ok()?;
+        self.host().tree.get(pane.0)?.agent
+    }
+    fn session(&mut self, pane: NodeId) -> Option<SessionRef> {
+        self.permit("agent.read").ok()?;
+        self.host().agents.sessions.get(&pane.0).cloned().flatten()
+    }
+    fn last_prompt(&mut self, pane: NodeId) -> Option<String> {
+        let _ = pane;
+        None
+    }
+    fn register_signature(&mut self, spec: SignatureSpec) -> Result<(), PluginError> {
+        self.permit("agent.signatures")?;
+        self.host().agents.signatures.push(spec);
+        Ok(())
+    }
+    fn set_toolbar_state(&mut self, button: String, pane: Option<NodeId>, enabled: bool, label: Option<String>) -> Result<(), PluginError> {
+        let _ = (button, pane, enabled, label);
+        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+    }
+    fn model(&mut self, pane: NodeId) -> Option<AgentModel> {
+        self.permit("agent.read").ok()?;
+        self.host().agents.models.get(&pane.0).cloned()
+    }
+    fn prompt_epoch(&mut self, pane: NodeId) -> Option<u64> {
+        let _ = pane;
+        None
+    }
+    fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
+        self.permit("agent.transcript")?;
+        if query.last_turns > 512 || query.max_bytes > 4 * 1024 * 1024 {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "last-turns is at most 512 and max-bytes at most 4 MiB"));
+        }
+        let id = self.next_id();
+        let outcome = match self.host().agents.transcripts.get(&query.pane.0) {
+            Some(FakeTranscript::Turns(turns)) => {
+                let wanted = usize::try_from(query.last_turns).unwrap_or(usize::MAX);
+                let mut kept: Vec<TranscriptTurn> = turns.iter().rev().take(wanted).cloned().collect();
+                let mut bytes = 0usize;
+                let limit = usize::try_from(query.max_bytes).unwrap_or(usize::MAX);
+                kept.retain(|turn| {
+                    bytes += turn.text.len();
+                    bytes <= limit
+                });
+                kept.reverse();
+                self.host().bridge.transcripts.insert(id, kept);
+                Outcome::Ok
+            }
+            Some(FakeTranscript::Bytes(_)) => Outcome::Failed(PluginError::new(
+                ErrorCode::Unsupported,
+                "the transcript format of this agent is not known",
+            )),
+            None => Outcome::Failed(PluginError::new(ErrorCode::NotFound, "the pane has no agent transcript")),
+        };
+        self.complete(id, outcome);
+        Ok(RequestId(id))
+    }
+    fn take_transcript(&mut self, request: RequestId) -> Option<Vec<TranscriptTurn>> {
+        self.host().bridge.transcripts.remove(&request.0)
     }
 }

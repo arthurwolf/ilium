@@ -102,19 +102,12 @@ pub(super) fn run(command: &str, args: &[String], env: &CliEnv) -> CliOutput {
     }) {
         return failure("usage.unknown-flag", format!("Unknown flag: {flag}"), 2);
     }
-    if args
-        .iter()
-        .any(|arg| ["--view", "--memory"].contains(&arg.as_str()))
+    if command == "inspect"
+        && args
+            .iter()
+            .any(|arg| ["--view", "--memory"].contains(&arg.as_str()))
     {
-        return failure(
-            if env.session.is_none() {
-                "session.unreachable"
-            } else {
-                "command.context-required"
-            },
-            "Live inspection requires its session adapter",
-            if env.session.is_none() { 6 } else { 1 },
-        );
+        return super::devtools_command::inspect_live(args, env);
     }
     if command != "inspect"
         && args

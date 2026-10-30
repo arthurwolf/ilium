@@ -2220,22 +2220,35 @@ impl FakeHost {
 
     /// Topics the plugin published as `(topic, payload)`.
     pub fn published_topics(&self) -> Vec<(String, String)> {
-        Vec::new()
+        self.bridge.published.clone()
     }
 
     /// Payloads published on a topic.
-    pub fn published(&self, _topic: &str) -> Vec<String> {
-        Vec::new()
+    pub fn published(&self, topic: &str) -> Vec<String> {
+        self.bridge
+            .published
+            .iter()
+            .filter(|(published, _)| published == topic)
+            .map(|(_, payload)| payload.clone())
+            .collect()
     }
 
     /// Durable timers as `(name, due)`.
     pub fn durable_timers(&self) -> Vec<(String, u64)> {
-        Vec::new()
+        self.bridge
+            .durable
+            .iter()
+            .map(|(name, due)| (name.clone(), *due))
+            .collect()
     }
 
     /// Active timers as `(id, repeat)`.
     pub fn active_timers(&self) -> Vec<(u32, Option<u32>)> {
-        Vec::new()
+        self.bridge
+            .timers
+            .iter()
+            .map(|(id, repeat)| (u32::try_from(*id).unwrap_or(u32::MAX), *repeat))
+            .collect()
     }
 
     /// HTTP replies the plugin sent to route calls.

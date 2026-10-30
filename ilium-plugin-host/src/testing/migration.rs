@@ -560,8 +560,14 @@ impl MigrationRig {
 
     /// Installs a plugin.
     pub fn install(&self, spec: &PluginSpec) -> CliOutput {
+        // The rig builds unsigned packages; a local install of one is the documented
+        // `--allow-unsigned` path (guide-signing-and-trust).
         let bytes = package_bytes(spec);
-        self.install_package_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &bytes, &[])
+        self.install_package_file(
+            &format!("{}-{}.iliumpkg", spec.id, spec.version),
+            &bytes,
+            &["--allow-unsigned"],
+        )
     }
 
     /// Updates a plugin.

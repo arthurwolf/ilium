@@ -712,7 +712,16 @@ impl HostHarness {
         let mut grants = Vec::new();
         for text in &self.grants {
             let grant = Grant::parse(text).map_err(HostError::Diagnostic)?;
-            check_grant(&grant, self.tier, self.side).map_err(HostError::Diagnostic)?;
+            // One harness stands for a whole plugin whose halves run on both sides, so a grant
+            // is refused only when neither side offers it.
+            let other_side = if self.side == Side::Server {
+                Side::Client
+            } else {
+                Side::Server
+            };
+            if let Err(first) = check_grant(&grant, self.tier, self.side) {
+                check_grant(&grant, self.tier, other_side).map_err(|_| HostError::Diagnostic(first))?;
+            }
             if !self.declined.contains(text) {
                 grants.push(grant);
             }
@@ -735,7 +744,7 @@ impl HostHarness {
             clients: 0, jobs: 0, service_jobs: 0, input_bytes: 0, result_bytes: 0,
             worker_threads: 9, worker_bytes: 32 * 1024 * 1024,
         });
-        let scheduler = Scheduler::try_with_config(process, 1, crate::calls::ResolvedLimits(resolved.clone()), &quota)
+        let scheduler = build_scheduler_waiting_for_retirement(process, &resolved, &quota)
             .map_err(|error| HostError::EngineError(error.to_string()))?;
         scheduler.register_side_with_limits(&plugin, crate::calls::ResolvedLimits(resolved.clone()));
         let extras_declined = self.declined.clone();
@@ -4935,6 +4944,35 @@ mod tests {
                 matches!(side, Side::Server | Side::Client),
                 "intent {case} must be applied by server or client"
             );
+        }
+    }
+}
+
+/// Builds a scheduler for a fixture. The process-wide worker cap is strict in production, but a
+/// test binary builds thousands of short-lived fixtures in parallel while the platform supervisor
+/// retires the workers of the dropped ones one at a time, so a refusal for capacity is retried
+/// (bounded) until the supervisor catches up.
+fn build_scheduler_waiting_for_retirement(
+    process: ilium_plugin_api::platform::ProcessKind,
+    resolved: &std::collections::BTreeMap<LimitKey, u64>,
+    quota: &ilium_execution::QuotaGroup,
+) -> Result<Scheduler, ilium_execution::WorkerStartError> {
+    let mut attempts = 0u32;
+    loop {
+        let outcome = Scheduler::try_with_config(
+            process,
+            1,
+            crate::calls::ResolvedLimits(resolved.clone()),
+            quota,
+        );
+        match outcome {
+            Err(ilium_execution::WorkerStartError::Platform(ref error))
+                if error.kind() == std::io::ErrorKind::WouldBlock && attempts < 4_000 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            other => return other,
         }
     }
 }

@@ -16,6 +16,8 @@ pub mod check_command;
 pub mod install_command;
 mod build_command;
 mod dev_command;
+mod completions_command;
+mod devtools_command;
 mod doctor_command;
 mod test_command;
 mod lifecycle_command;
@@ -213,7 +215,13 @@ pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
         summary["duration_ms"] = serde_json::json!(started.elapsed().as_millis() as u64);
     }
     let custom_text = (output.stdout_text != output.stdout_raw).then_some(output.stdout_text);
+    // A command that prints plain text (a completion script) carries no records: keep its raw text.
+    let plain_raw = output.stdout_jsonl.is_empty().then_some(output.stdout_raw);
     let mut rendered = offline::render(output.stdout_jsonl, output.exit_code);
+    if let Some(raw) = plain_raw.filter(|raw| !raw.is_empty()) {
+        rendered.stdout_raw = raw.clone();
+        rendered.stdout_text = raw;
+    }
     if let Some(text) = custom_text {
         rendered.stdout_text = text;
     }
@@ -346,6 +354,9 @@ fn run_inner(raw_args: &[String], env: &CliEnv) -> CliOutput {
         "new" => new_command::run(&args[1..], env),
         "keygen" | "sign" | "trust" | "publish" => keys_command::run(command, &args[1..], env),
         "pack" => pack_command::run(&args[1..], env),
+        "completions" => completions_command::run(&args[1..]),
+        "trace" => devtools_command::trace(&args[1..], env),
+        "profile" => devtools_command::profile(&args[1..], env),
         "registry" => registry_command::run(&args[1..], env),
         "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs"
         | "log-level" | "trace" | "profile"

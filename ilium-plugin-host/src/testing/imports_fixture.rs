@@ -310,6 +310,9 @@ impl ImportsFixtureBuilder {
                 .filter(|value| *value > 0)
                 .ok_or("invalid fixture data version")?,
         };
+        let grants = Arc::new(Mutex::new(grants));
+        crate::imports::fs::configure_project_scope(project.clone(), grants.clone())
+            .map_err(|error| error.message)?;
         let scope = StorageContext {
             project: Some(project),
             session: Some("imports-fixture".into()),
@@ -399,6 +402,7 @@ impl ImportsFixtureBuilder {
             .with_native_guest(Box::new(NullGuest))
             .build()
             .map_err(|error| format!("imports fixture harness did not build: {error}"))?;
+        let jobs = FixtureJobs::new(&manifest, self.runner);
         Ok(ImportsFixture {
             log_import,
             logger,
@@ -410,7 +414,7 @@ impl ImportsFixtureBuilder {
                 errors: errors.clone(),
             },
             storage_authorization,
-            grants: Arc::new(Mutex::new(grants)),
+            grants,
             kernel,
             plugin,
             manifest,
@@ -424,7 +428,7 @@ impl ImportsFixtureBuilder {
             codec_import: CodecImport,
             fs_import: FsImport,
             http_import: HttpImport,
-            jobs_import: JobsImport,
+            jobs_import: jobs,
             journal_import: JournalImport,
             panes_import: PanesImport,
             process_import: ProcessImport,
@@ -433,7 +437,7 @@ impl ImportsFixtureBuilder {
             tree_import: TreeImport,
             save_trace: Vec::new(),
             validate_trap_pending: false,
-            _runner: self.runner,
+            _runner: None,
             _websocket: self.websocket,
             _limits: self.limits,
             root,
@@ -572,7 +576,7 @@ pub struct ImportsFixture {
     codec_import: CodecImport,
     fs_import: FsImport,
     http_import: HttpImport,
-    jobs_import: JobsImport,
+    jobs_import: FixtureJobs,
     journal_import: JournalImport,
     panes_import: PanesImport,
     process_import: ProcessImport,
@@ -883,6 +887,9 @@ impl ImportsFixture {
 
     /// Waits for the outcome of a request.
     pub fn wait_outcome(&mut self, request: RequestId, timeout: Duration) -> Option<Outcome> {
+        if let Some(outcome) = self.jobs_import.outcome_of(request) {
+            return Some(outcome);
+        }
         self.harness.advance_clock(timeout);
         self.harness.pump(PUMP_ROUNDS);
         self.harness
@@ -1678,5 +1685,100 @@ mod tests {
         let fixture = default_fixture();
         assert!(fixture.row_note("no-such-row").is_none());
         assert!(fixture.info_text("no-such-row").is_none());
+    }
+}
+
+/// Request ids of fixture jobs start here, far above the ids the harness kernel hands out.
+const FIXTURE_JOB_ID_BASE: u64 = 1 << 40;
+
+/// The kind the fixture accepts for a background request that stays pending.
+const BACKGROUND_KIND: &str = "background";
+
+/// The `jobs` import of the fixture plugin: kinds come from `contributes.jobs` of its manifest,
+/// the fake job-runner export runs a started job at once and its result is kept for
+/// `wait_outcome` and `take_output`.
+struct FixtureJobs {
+    inner: JobsImport,
+    kinds: Vec<String>,
+    runner: Option<JobRunner>,
+    next: u64,
+    outputs: BTreeMap<u64, Vec<u8>>,
+    outcomes: BTreeMap<u64, Outcome>,
+}
+
+impl FixtureJobs {
+    fn new(manifest: &serde_json::Value, runner: Option<JobRunner>) -> FixtureJobs {
+        let kinds = manifest
+            .pointer("/contributes/jobs")
+            .and_then(serde_json::Value::as_array)
+            .map(|jobs| {
+                jobs.iter()
+                    .filter_map(|job| job.get("kind").and_then(serde_json::Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        FixtureJobs {
+            inner: JobsImport,
+            kinds,
+            runner,
+            next: FIXTURE_JOB_ID_BASE,
+            outputs: BTreeMap::new(),
+            outcomes: BTreeMap::new(),
+        }
+    }
+
+    fn outcome_of(&self, request: RequestId) -> Option<Outcome> {
+        self.outcomes.get(&request.0).cloned()
+    }
+}
+
+impl HostJobs for FixtureJobs {
+    fn start(&mut self, kind: String, input: Vec<u8>) -> Result<RequestId, PluginError> {
+        let accepted = kind == BACKGROUND_KIND || self.kinds.contains(&kind);
+        if !accepted {
+            return self.inner.start(kind, input);
+        }
+        // The production import owns the shared checks (empty kind, input size).
+        if kind.is_empty() || input.len() > 16 * 1024 * 1024 {
+            return self.inner.start(kind, input);
+        }
+        let id = self.next;
+        self.next += 1;
+        if kind == BACKGROUND_KIND {
+            return Ok(RequestId(id));
+        }
+        let outcome = match self.runner.as_mut() {
+            Some(runner) => match runner(&kind, &input) {
+                Ok(output) => {
+                    self.outputs.insert(id, output);
+                    Outcome::Ok
+                }
+                Err(error) => Outcome::Failed(error),
+            },
+            None => Outcome::Ok,
+        };
+        self.outcomes.insert(id, outcome);
+        Ok(RequestId(id))
+    }
+
+    fn cancel(&mut self, job: RequestId) {
+        self.inner.cancel(job);
+    }
+
+    fn take_output(&mut self, job: RequestId) -> Option<Vec<u8>> {
+        self.outputs.remove(&job.0)
+    }
+
+    fn report_progress(&mut self, percent: f32) {
+        self.inner.report_progress(percent);
+    }
+
+    fn is_cancelled(&mut self) -> bool {
+        self.inner.is_cancelled()
+    }
+
+    fn wait_request(&mut self, request: RequestId, timeout_millis: u32) -> Result<(), PluginError> {
+        self.inner.wait_request(request, timeout_millis)
     }
 }

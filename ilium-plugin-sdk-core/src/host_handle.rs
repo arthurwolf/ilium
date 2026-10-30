@@ -2,6 +2,7 @@
 use crate::plugin::{no_host, HostApi, HostHandle};
 use crate::generated::host::*;
 use crate::generated::types::*;
+use crate::generated::primitives::{AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn};
 impl HostLog for HostHandle {
     fn log(&mut self, level: Level, message: String) {
         match self.backend() {
@@ -563,6 +564,128 @@ impl HostKeys for HostHandle {
         match self.backend() {
             Some(backend) => <dyn HostApi as HostKeys>::release(&mut **backend.borrow_mut(), grab),
             None => (),
+        }
+    }
+}
+impl HostTopics for HostHandle {
+    fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostTopics>::publish(&mut **backend.borrow_mut(), topic, payload_json),
+            None => Err(no_host()),
+        }
+    }
+}
+impl HostServices for HostHandle {
+    fn call(&mut self, service: String, method: String, payload_json: String) -> Result<RequestId, PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostServices>::call(&mut **backend.borrow_mut(), service, method, payload_json),
+            None => Err(no_host()),
+        }
+    }
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostServices>::take_reply(&mut **backend.borrow_mut(), request),
+            None => None,
+        }
+    }
+    fn reply(&mut self, call: u64, outcome: Result<String, PluginError>) -> Result<(), PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostServices>::reply(&mut **backend.borrow_mut(), call, outcome),
+            None => Err(no_host()),
+        }
+    }
+}
+impl HostExtensions for HostHandle {
+    fn list(&mut self, point: String) -> Result<Vec<ExtensionEntry>, ExtensionError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostExtensions>::list(&mut **backend.borrow_mut(), point),
+            None => Err(ExtensionError::UnknownPoint),
+        }
+    }
+    fn run_hook(&mut self, point: String, payload_json: String) -> Result<RequestId, ExtensionError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostExtensions>::run_hook(&mut **backend.borrow_mut(), point, payload_json),
+            None => Err(ExtensionError::UnknownPoint),
+        }
+    }
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostExtensions>::take_reply(&mut **backend.borrow_mut(), request),
+            None => None,
+        }
+    }
+    fn register(&mut self, point: String, extension: String, priority: u8, entry_json: String) -> Result<(), ExtensionError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostExtensions>::register(&mut **backend.borrow_mut(), point, extension, priority, entry_json),
+            None => Err(ExtensionError::UnknownPoint),
+        }
+    }
+    fn unregister(&mut self, point: String, extension: String) -> Result<(), ExtensionError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostExtensions>::unregister(&mut **backend.borrow_mut(), point, extension),
+            None => Err(ExtensionError::UnknownPoint),
+        }
+    }
+}
+impl HostAgent for HostHandle {
+    fn agents(&mut self) -> Vec<AgentPane> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::agents(&mut **backend.borrow_mut()),
+            None => Vec::new(),
+        }
+    }
+    fn view(&mut self, pane: NodeId) -> Option<AgentView> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::view(&mut **backend.borrow_mut(), pane),
+            None => None,
+        }
+    }
+    fn session(&mut self, pane: NodeId) -> Option<SessionRef> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::session(&mut **backend.borrow_mut(), pane),
+            None => None,
+        }
+    }
+    fn last_prompt(&mut self, pane: NodeId) -> Option<String> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::last_prompt(&mut **backend.borrow_mut(), pane),
+            None => None,
+        }
+    }
+    fn register_signature(&mut self, spec: SignatureSpec) -> Result<(), PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::register_signature(&mut **backend.borrow_mut(), spec),
+            None => Err(no_host()),
+        }
+    }
+    fn set_toolbar_state(&mut self, button: String, pane: Option<NodeId>, enabled: bool, label: Option<String>) -> Result<(), PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::set_toolbar_state(&mut **backend.borrow_mut(), button, pane, enabled, label),
+            None => Err(no_host()),
+        }
+    }
+    fn model(&mut self, pane: NodeId) -> Option<AgentModel> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::model(&mut **backend.borrow_mut(), pane),
+            None => None,
+        }
+    }
+    fn prompt_epoch(&mut self, pane: NodeId) -> Option<u64> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::prompt_epoch(&mut **backend.borrow_mut(), pane),
+            None => None,
+        }
+    }
+    fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::transcript(&mut **backend.borrow_mut(), query),
+            None => Err(no_host()),
+        }
+    }
+    fn take_transcript(&mut self, request: RequestId) -> Option<Vec<TranscriptTurn>> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostAgent>::take_transcript(&mut **backend.borrow_mut(), request),
+            None => None,
         }
     }
 }
