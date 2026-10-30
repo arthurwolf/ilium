@@ -785,11 +785,18 @@ def expect_version(command, expected, log, label, environment):  # Check a real 
     require(result.stdout.rstrip('\n') == expected, 'installed version differs: expected %r, got %r' % (expected, result.stdout))  # Do not accept a different successful binary.
 
 
+# Older systemd (Ubuntu 22.04) keeps the service process in the delegated cgroup, which forbids enabling child controllers there;
+# move into a child cgroup first, then enable the controllers the sandbox requires on the now process-free parent.
+DELEGATED_LEAF = ('cg=/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup); mkdir "$cg/probe"; echo $$ > "$cg/probe/cgroup.procs"; '
+                  'echo "+cpu +memory +pids" > "$cg/cgroup.subtree_control"; exec "$@"')
+
+
 def delegated_service(command, child_env):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
     uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
     return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
             '--property=Type=exec', '--property=Delegate=cpu memory pids', '--property=MemoryMax=6G', '--property=TasksMax=4096', '--property=CPUWeight=100', '--property=WorkingDirectory=' + os.getcwd(),
-            *('--setenv=%s=%s' % item for item in sorted(child_env.items())), *[str(part) for part in command]]
+            *('--setenv=%s=%s' % item for item in sorted(child_env.items())), 'sh', '-ec', DELEGATED_LEAF, 'sh',
+            *[str(part) for part in command]]
 
 
 def installed_animation(arguments, receipt, log, label, package_format, payload_root,
