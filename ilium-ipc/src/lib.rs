@@ -842,6 +842,7 @@ mod tests {
                 pane_id: NodeId(2),
                 session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: Some(PathBuf::from("/home/user/.claude/projects/p/95fd.jsonl")),
             },
@@ -891,6 +892,11 @@ mod tests {
             ServerEvent::NodeActivityChanged {
                 node_id: NodeId(2),
                 activity_revision: 7,
+            },
+            ServerEvent::PaneRecentActivity {
+                pane_id: NodeId(2),
+                revision: 7,
+                age_millis: 1234,
             },
             ServerEvent::NodeFocusCheckpointChanged {
                 node_id: NodeId(2),

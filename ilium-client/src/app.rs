@@ -563,6 +563,7 @@ pub enum SettingsTab {
     TextTriggers,
     CustomAgents,
     Icons,
+    Toolbar,
     Appearance,
     /// Panel padding modes and fine-tuning.
     Padding,
@@ -748,10 +749,11 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 28] = [
+    pub const ALL: [SettingsTab; 29] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
+        Self::Toolbar,
         Self::AgentMonitoring,
         Self::Attention,
         Self::Cost,
@@ -789,6 +791,7 @@ impl SettingsTab {
             Self::TextTriggers => "Text Triggers",
             Self::CustomAgents => "Custom Agents",
             Self::Icons => "Icons",
+            Self::Toolbar => "Toolbar",
             Self::Appearance => "User Interface",
             Self::Padding => "Padding",
             Self::Animations => "Animations",
@@ -859,6 +862,8 @@ pub enum AppearanceRow {
     ShowToolbarLabels,
     SectionFrames,
     LastPrompt,
+    GoalTab,
+    GoalToolbarIcon,
     LastPromptMaxLines,
     ProgressMonitor,
     ProgressMonitorMaxLines,
@@ -875,7 +880,7 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 27] = [
+    const GENERAL: [AppearanceRow; 29] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
         Self::ResourceGrouping,
@@ -893,6 +898,8 @@ impl AppearanceRow {
         Self::ShowToolbarLabels,
         Self::SectionFrames,
         Self::LastPrompt,
+        Self::GoalTab,
+        Self::GoalToolbarIcon,
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
         Self::LockClosedEnabled,
@@ -1257,6 +1264,7 @@ pub struct SettingsState {
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
     pub tree_layout_editor: Option<crate::tree_layout_settings::EditorState>,
+    pub toolbar_picker: Option<usize>,
     /// Full-screen catalogue picker layered over the Icons tab.
     pub icon_picker: Option<IconPickerState>,
     /// The action whose key is being chosen in the collision-safe visual
@@ -1395,6 +1403,7 @@ impl SettingsState {
             plugin_editor: None,
             icons_preview_real: false,
             tree_layout_editor: None,
+            toolbar_picker: None,
             icon_picker: None,
             keyboard_picker: None,
             padding: crate::padding_ui::PaddingUiState::default(),
@@ -2455,10 +2464,13 @@ pub struct App {
     /// The costs-and-stats popover hanging off an agent pane's second header
     /// icon: a hover preview or a pinned window (see `session_stats_popover`).
     pub stats_popover: Option<crate::session_stats_ui::StatsPopover>,
+    pub(crate) goal_popover: Option<crate::session_goal_popover::GoalPopover>,
     /// Per-pane transcript statistics and the worker that reads them.
     pub session_stats: crate::session_stats_store::SessionStatsStore,
     /// Latest model evidence for live tree rows; independent of cost settings.
     pub(crate) session_models: crate::session_models::SessionModelCache,
+    pub(crate) session_goals: crate::session_goal_store::SessionGoalStore,
+    pub(crate) claude_goals: crate::session_goal_claude::ClaudeGoalStore,
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub custom_toolbar_selected: Option<String>,
@@ -2517,6 +2529,7 @@ pub struct App {
     /// Panes whose last-prompt banner the user closed. Per agent and per
     /// client run; the global setting is untouched.
     pub last_prompt_banner_closed: HashSet<NodeId>,
+    pub(crate) goal_tab_selected: HashSet<NodeId>,
     /// The banner toolbar button under the pointer, for its hover highlight.
     pub hovered_last_prompt_button:
         Option<(NodeId, crate::last_prompt_toolbar::PromptToolbarButton)>,
@@ -2691,6 +2704,11 @@ pub struct App {
     /// Live rendered-text changes and accepted key input feed this tracker;
     /// no server poll or durable pane status is involved.
     pub(crate) terminal_activity: TerminalActivityTracker,
+    /// Server-observed activity revisions and monotonic observation times.
+    pub(crate) recent_tree_activity: HashMap<NodeId, (u64, Instant)>,
+    /// Session-local eye toggle; the default is the unfiltered tree.
+    pub(crate) hide_inactive_tree: bool,
+    last_tree_activity_projection: Option<HashSet<NodeId>>,
     /// Whether `track_tree_snapshot_change` has processed at least one
     /// snapshot yet -- see that method's doc comment.
     has_applied_first_snapshot: bool,
@@ -2754,6 +2772,7 @@ pub struct App {
     /// `agent_session_ids` because title prompts need the PID while process
     /// discovery remains server-owned.
     pub agent_process_ids: HashMap<NodeId, u32>,
+    pub agent_process_identity_inode: HashMap<NodeId, u64>,
     /// Server-replayed paths for editor panes that existed before this
     /// client attached. They let this client construct its own local editor
     /// buffer instead of treating a restored editor as a missing pane.
@@ -3117,8 +3136,11 @@ impl App {
             hovered_goal_resume: None,
             workspace_git_statuses: HashMap::new(),
             stats_popover: None,
+            goal_popover: None,
             session_stats: crate::session_stats_store::SessionStatsStore::default(),
             session_models: crate::session_models::SessionModelCache::default(),
+            session_goals: crate::session_goal_store::SessionGoalStore::default(),
+            claude_goals: crate::session_goal_claude::ClaudeGoalStore::default(),
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             custom_toolbar_selected: None,
@@ -3147,6 +3169,7 @@ impl App {
             last_prompt_backfill_sender: last_prompt_backfill_channel.0,
             last_prompt_backfill_receiver: last_prompt_backfill_channel.1,
             last_prompt_banner_closed: HashSet::new(),
+            goal_tab_selected: HashSet::new(),
             hovered_last_prompt_button: None,
             smart_copy_session: None,
             smart_copy_light: None,
@@ -3337,6 +3360,9 @@ impl App {
             editor_load_errors: HashMap::new(),
             recently_created: HashMap::new(),
             terminal_activity: TerminalActivityTracker::default(),
+            recent_tree_activity: HashMap::new(),
+            hide_inactive_tree: false,
+            last_tree_activity_projection: None,
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
             custom_agent_panes: HashMap::new(),
@@ -3364,6 +3390,7 @@ impl App {
             optimization: crate::compaction_app::OptimizationState::default(),
             pending_replacement_focus: None,
             agent_process_ids: HashMap::new(),
+            agent_process_identity_inode: HashMap::new(),
             restored_editor_paths: HashMap::new(),
             editor_path_holds: HashMap::new(),
             editor_path_event_holds: HashMap::new(),
@@ -3849,6 +3876,48 @@ impl App {
     /// most one extra rebuild on an idle session, never a stale hit test).
     pub(crate) fn bump_tree_version(&mut self) {
         self.tree_version = self.tree_version.wrapping_add(1);
+    }
+
+    /// Projects the current activity evidence without mutating the tree.
+    pub(crate) fn active_tree_projection(&self, now: Instant) -> Option<HashSet<NodeId>> {
+        if !self.hide_inactive_tree {
+            return None;
+        }
+        let timeout = Duration::from_secs(u64::from(self.ui_settings.tree_inactivity_minutes) * 60);
+        let active = self.tree.all_ids().filter(|node_id| {
+            let Some(node) = self.tree.get(*node_id) else { return false };
+            let ilium_core::NodeKind::Pane { content: ilium_core::PaneContentKind::Terminal, status, .. } = &node.kind else { return false };
+            let running = matches!(status, ilium_core::PaneStatus::Agent(agent)
+                if matches!(agent.turn, ilium_core::AgentTurn::Working | ilium_core::AgentTurn::WaitingSubagents | ilium_core::AgentTurn::Settling));
+            running || self.recent_tree_activity.get(node_id)
+                .is_some_and(|(_, observed)| now.saturating_duration_since(*observed) < timeout)
+        }).collect();
+        Some(crate::tree_activity_projection::visible_nodes(
+            &self.tree, &active,
+        ))
+    }
+
+    pub(crate) fn tick_tree_activity_projection(&mut self, now: Instant) -> bool {
+        let projection = self.active_tree_projection(now);
+        if projection == self.last_tree_activity_projection {
+            return false;
+        }
+        if let Some(visible) = &projection {
+            let selected_is_hidden = self.tree_state.selected().iter().any(|id| {
+                if self.tree.get(*id).is_some() && !visible.contains(id) {
+                    return true;
+                }
+                matches!(self.resources.rows.targets.get(id),
+                    Some(crate::resource_queue::tree::ResourceRowTarget::Participant { pane_id: Some(pane_id), .. })
+                    if !visible.contains(pane_id))
+            });
+            if selected_is_hidden {
+                self.tree_state.select(Vec::new());
+            }
+        }
+        self.last_tree_activity_projection = projection;
+        self.bump_tree_version();
+        true
     }
 
     /// Drops creation-pulse bookkeeping for nodes no longer in the tree, or
@@ -5100,9 +5169,11 @@ impl App {
     pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
         self.ui_settings.last_prompt_enabled
             && !self.last_prompt_banner_closed.contains(&pane_id)
-            && self
+            && (self
                 .display_last_agent_prompt(pane_id)
-                .is_some_and(|text| !text.is_empty())
+                .is_some_and(|text| !text.trim().is_empty())
+                || (self.ui_settings.goal_tab_enabled
+                    && self.current_goal_phase(pane_id).is_some()))
     }
 
     /// Whether the progress slot displays a report: the user
@@ -5339,10 +5410,17 @@ impl App {
 
     pub(crate) fn emitted_tree_toolbar_at(&self, position: Position) -> Option<TreeToolbarAction> {
         if let Some(geometry) = &self.emitted_geometry {
-            return geometry.tree_rows.as_ref()?.toolbar_at(position);
+            return geometry
+                .tree_rows
+                .as_ref()?
+                .toolbar_at(position, &self.ui_settings.tree_toolbar_layout);
         }
         if cfg!(test) {
-            return tree_ui::toolbar_action_at(self.layout.tree_area, position);
+            return tree_ui::configured_toolbar_action_at(
+                self.layout.tree_area,
+                position,
+                &self.ui_settings.tree_toolbar_layout,
+            );
         }
         None
     }
@@ -10627,6 +10705,7 @@ impl App {
         }
         match action {
             AgentToolbarAction::Close => self.settings_toggle_agent_toolbar(),
+            AgentToolbarAction::Goal => {}
             AgentToolbarAction::ShowLastPrompt => self.reopen_last_prompt_banner(pane_id),
             AgentToolbarAction::ToggleTextSelection => {
                 self.settings_toggle_terminal_text_selection()
@@ -11543,6 +11622,17 @@ impl App {
             AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
             AppearanceRow::SectionFrames => self.settings_toggle_section_frames(),
             AppearanceRow::LastPrompt => self.settings_toggle_last_prompt(),
+            AppearanceRow::GoalTab => {
+                let mut ui = self.ui_settings.clone();
+                ui.goal_tab_enabled = !ui.goal_tab_enabled;
+                self.apply_and_persist_ui_settings(ui);
+                self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+            }
+            AppearanceRow::GoalToolbarIcon => {
+                let mut ui = self.ui_settings.clone();
+                ui.goal_toolbar_icon_enabled = !ui.goal_toolbar_icon_enabled;
+                self.apply_and_persist_ui_settings(ui);
+            }
             AppearanceRow::LastPromptMaxLines => {
                 self.settings_adjust_last_prompt_max_lines(direction)
             }
@@ -18079,6 +18169,7 @@ impl App {
             return None;
         }
         let tree_order = self.effective_tree_order();
+        let visibility = self.active_tree_projection(Instant::now());
         let overlay = self.cost_tracker.overlay();
         let items = self.tree_hit_test_cache.get_or_build_ranked(
             &self.tree,
@@ -18090,6 +18181,7 @@ impl App {
                 &self.sidebar_snapshot,
                 &self.chatroom_projects,
                 Some(&self.resources),
+                visibility.as_ref(),
             ),
         );
         tree_ui::status_slot_at_position(
@@ -18158,6 +18250,7 @@ impl App {
             return None;
         }
         let tree_order = self.effective_tree_order();
+        let visibility = self.active_tree_projection(Instant::now());
         let overlay = self.cost_tracker.overlay();
         let items = self.tree_hit_test_cache.get_or_build_ranked(
             &self.tree,
@@ -18169,6 +18262,7 @@ impl App {
                 &self.sidebar_snapshot,
                 &self.chatroom_projects,
                 Some(&self.resources),
+                visibility.as_ref(),
             ),
         );
         tree_ui::node_at_position(
@@ -19779,6 +19873,28 @@ impl App {
             .last_prompt_area
             .filter(|banner| banner.contains(position) && self.shows_last_prompt_banner(id))
         {
+            if self.ui_settings.goal_tab_enabled && self.current_goal_phase(id).is_some() {
+                if let Some((prompt_tab, goal_tab)) = crate::last_prompt_banner::tab_rects(
+                    banner,
+                    crate::last_prompt_toolbar::has_toolbar(banner.width),
+                ) {
+                    if matches!(
+                        mouse.kind,
+                        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                    ) {
+                        if goal_tab.contains(position) {
+                            self.goal_tab_selected.insert(id);
+                            self.focus_pane(id);
+                            return;
+                        }
+                        if prompt_tab.contains(position) {
+                            self.goal_tab_selected.remove(&id);
+                            self.focus_pane(id);
+                            return;
+                        }
+                    }
+                }
+            }
             let button = crate::last_prompt_toolbar::button_at(
                 banner,
                 self.last_prompt_toolbar_visibility(id),
@@ -19855,6 +19971,8 @@ impl App {
                     show_labels: self.ui_settings.show_toolbar_labels,
                     selection_enabled: self.ui_settings.terminal_text_selection_enabled,
                     show_prompt_reopen: self.last_prompt_reopen_available(id),
+                    show_goal: self.ui_settings.goal_toolbar_icon_enabled
+                        && self.current_goal_phase(id).is_some(),
                 };
                 if let crossterm::event::MouseEventKind::Down(
                     button @ (crossterm::event::MouseButton::Left
@@ -22439,7 +22557,10 @@ mod tests {
         let after = app.pane_viewport(pane_id).unwrap();
         assert!(after.content_area.height > before.content_area.height);
         assert!(!app.shows_progress_footer(pane_id));
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
         terminal
             .draw(|frame| crate::ui::draw(frame, &mut app))
             .unwrap();
@@ -23207,6 +23328,69 @@ mod tests {
             snapshot.cause,
             crate::terminal_activity::TerminalActivityCause::TerminalTextQueued
         ));
+    }
+
+    #[test]
+    fn activity_projection_expires_idle_panes_but_keeps_working_agents() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let shell = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let agent = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let waiting = app
+            .tree
+            .add_pane(group, "waiting", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                agent,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
+            )
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                waiting,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::WaitingApproval, None),
+            )
+            .unwrap();
+        let now = Instant::now();
+        app.recent_tree_activity.insert(shell, (1, now));
+        assert!(app.active_tree_projection(now).is_none());
+        app.hide_inactive_tree = true;
+        assert!(app
+            .active_tree_projection(now + Duration::from_secs(899))
+            .unwrap()
+            .contains(&shell));
+        let expired = app
+            .active_tree_projection(now + Duration::from_secs(900))
+            .unwrap();
+        assert!(!expired.contains(&shell));
+        assert!(expired.contains(&agent));
+        assert!(!expired.contains(&waiting));
+        assert!(expired.contains(&group));
+    }
+
+    #[test]
+    fn filtering_clears_a_selected_terminal_when_it_expires() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "terminal", PaneContentKind::Terminal)
+            .unwrap();
+        let now = Instant::now();
+        app.recent_tree_activity.insert(pane, (1, now));
+        app.select_node(pane);
+        app.hide_inactive_tree = true;
+        app.tick_tree_activity_projection(now);
+        assert_eq!(app.selected_node_id(), Some(pane));
+        assert!(app.tick_tree_activity_projection(now + Duration::from_secs(900)));
+        assert!(app.selected_node_id().is_none());
     }
 
     #[test]
@@ -28457,6 +28641,7 @@ mod tests {
             show_labels: app.ui_settings.show_toolbar_labels,
             selection_enabled: app.ui_settings.terminal_text_selection_enabled,
             show_prompt_reopen: false,
+            show_goal: false,
         };
         let sol_rect = crate::agent_toolbar::button_rect_for(
             toolbar_area,
@@ -29400,7 +29585,7 @@ mod tests {
         assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Padding);
         assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
-        assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
+        assert_eq!(SettingsTab::Icons.next(), SettingsTab::Toolbar);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Attention);
         assert_eq!(SettingsTab::Attention.next(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Cost.previous(), SettingsTab::Attention);
@@ -29729,6 +29914,23 @@ mod tests {
                 .ui
                 .use_stable_glyphs
         );
+    }
+
+    #[test]
+    fn goal_settings_toggle_independently_and_persist() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        assert!(app.ui_settings.goal_tab_enabled);
+        assert!(app.ui_settings.goal_toolbar_icon_enabled);
+        app.settings_adjust_row(AppearanceRow::GoalTab, 1);
+        assert!(!app.ui_settings.goal_tab_enabled);
+        assert!(app.ui_settings.goal_toolbar_icon_enabled);
+        app.settings_adjust_row(AppearanceRow::GoalToolbarIcon, 1);
+        assert!(!app.ui_settings.goal_toolbar_icon_enabled);
+        app.settle_filesystem_for_test();
+        let saved = crate::config::load(config_dir.path()).unwrap().ui;
+        assert!(!saved.goal_tab_enabled && !saved.goal_toolbar_icon_enabled);
     }
 
     #[test]

@@ -25,6 +25,33 @@ enum SelectionReconciliation {
 /// there is one. State is always applied before the occurrence is returned.
 pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
     match event {
+        ServerEvent::PaneRecentActivity {
+            pane_id,
+            revision,
+            age_millis,
+        } => {
+            let replace = app
+                .recent_tree_activity
+                .get(&pane_id)
+                .is_none_or(|(current, _)| revision > *current);
+            if replace && app.tree.get(pane_id).is_some() {
+                let now = std::time::Instant::now();
+                // Live observations are coalesced for at most one second by
+                // the server. Retain that window so the client never hides a
+                // pane before the last unbroadcast output has expired.
+                let observed_at = if age_millis == 0 {
+                    now.checked_add(std::time::Duration::from_secs(1))
+                        .unwrap_or(now)
+                } else {
+                    now.checked_sub(std::time::Duration::from_millis(age_millis))
+                        .unwrap_or(now)
+                };
+                app.recent_tree_activity
+                    .insert(pane_id, (revision, observed_at));
+                app.bump_tree_version();
+            }
+            None
+        }
         ServerEvent::ResourceObservationFailed { message } => {
             app.resources.observation_error = Some(message);
             app.bump_tree_version();
@@ -402,9 +429,24 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             session_id,
             process_id,
+            process_identity_inode,
             title_generation,
             transcript_path,
         } => {
+            let prompt_was_visible = app.shows_last_prompt_banner(pane_id);
+            // The server can renew a binding after PID reuse without changing
+            // the visible values. Neither old evidence nor an in-flight read
+            // can be carried across that boundary.
+            app.session_goals.invalidate(pane_id);
+            app.claude_goals.invalidate(pane_id);
+            match process_identity_inode {
+                Some(inode) => {
+                    app.agent_process_identity_inode.insert(pane_id, inode);
+                }
+                None => {
+                    app.agent_process_identity_inode.remove(&pane_id);
+                }
+            }
             app.agent_title_generations
                 .insert(pane_id, title_generation);
             match process_id {
@@ -449,6 +491,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                         .remove(&(pane_id, previous_session_id));
                 }
             }
+            if prompt_was_visible != app.shows_last_prompt_banner(pane_id) {
+                app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+            }
             (changed
                 && app.tree.get(pane_id).is_some_and(|node| {
                     matches!(
@@ -468,9 +513,13 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             title_generation,
         } => {
+            let prompt_was_visible = app.shows_last_prompt_banner(pane_id);
+            app.session_goals.invalidate(pane_id);
+            app.claude_goals.invalidate(pane_id);
             app.agent_title_generations
                 .insert(pane_id, title_generation);
             app.agent_process_ids.remove(&pane_id);
+            app.agent_process_identity_inode.remove(&pane_id);
             app.agent_transcript_paths.remove(&pane_id);
             if let Some(previous_session_id) = app.agent_session_ids.remove(&pane_id) {
                 app.title_inference_attempts
@@ -478,6 +527,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             app.inferred_title_session_ids.remove(&pane_id);
             app.titles_loading.remove(&pane_id);
+            if prompt_was_visible != app.shows_last_prompt_banner(pane_id) {
+                app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+            }
             None
         }
         ServerEvent::PaneSessionTitleCleared {
@@ -821,6 +873,24 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     let selection_reconciliation = selection_reconciliation(app, &tree);
     app.track_tree_snapshot_change(&tree);
     app.tree = tree;
+    app.recent_tree_activity
+        .retain(|node_id, _| app.tree.get(*node_id).is_some());
+    // Until the server replays authoritative observations, a newly observed
+    // terminal gets one threshold window instead of disappearing immediately.
+    let now = std::time::Instant::now();
+    for node_id in app.tree.all_ids() {
+        if app.tree.get(node_id).is_some_and(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    content: PaneContentKind::Terminal,
+                    ..
+                }
+            )
+        }) {
+            app.recent_tree_activity.entry(node_id).or_insert((0, now));
+        }
+    }
     // Resource snapshots can arrive before the initial tree. Rebuild their
     // display projection against the authoritative tree without resetting the
     // observation clock or changing the retained catalog.
@@ -895,6 +965,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     app.agent_session_ids
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.agent_process_ids
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.agent_process_identity_inode
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.restored_editor_paths
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
@@ -1178,6 +1250,37 @@ mod tests {
             Some("poll interval rejected")
         );
         assert!(!app.agent_detection_settings_pending);
+    }
+
+    #[test]
+    fn recent_activity_replay_cannot_replace_a_newer_live_event() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        apply(
+            &mut app,
+            ServerEvent::PaneRecentActivity {
+                pane_id,
+                revision: 8,
+                age_millis: 0,
+            },
+        );
+        let latest = app.recent_tree_activity[&pane_id];
+        apply(
+            &mut app,
+            ServerEvent::PaneRecentActivity {
+                pane_id,
+                revision: 7,
+                age_millis: 30_000,
+            },
+        );
+        assert_eq!(app.recent_tree_activity[&pane_id], latest);
+        apply(&mut app, ServerEvent::TreeSnapshot(ilium_core::Tree::new()));
+        assert!(!app.recent_tree_activity.contains_key(&pane_id));
     }
 
     #[test]
@@ -1894,7 +1997,7 @@ mod tests {
     }
 
     #[test]
-    fn detection_and_prompt_updates_reveal_fixed_slots_without_resizing() {
+    fn detection_and_prompt_updates_resize_when_prompt_appears() {
         // Regression test: the toolbar must not depend on a full
         // `TreeSnapshot` following detection -- the server's actual
         // detection path broadcasts an incremental `PaneStatusChanged`
@@ -1949,11 +2052,14 @@ mod tests {
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]
-    fn a_wrapped_prompt_uses_the_fixed_budget_without_resizing() {
+    fn a_wrapped_prompt_uses_the_fixed_budget_after_resizing() {
         // Regression test for the banner growing past one row without ever
         // reserving its full `max_lines` ceiling: a prompt long enough to
         // wrap, but not long enough to hit the default four-line cap.
@@ -2015,7 +2121,10 @@ mod tests {
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
     }
 
     #[test]
@@ -2257,6 +2366,7 @@ mod tests {
                 pane_id,
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: None,
             },
@@ -2319,6 +2429,7 @@ mod tests {
                 pane_id,
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: None,
             },
@@ -2332,6 +2443,7 @@ mod tests {
                 pane_id,
                 session_id: "session-2".to_string(),
                 process_id: Some(23456),
+                process_identity_inode: None,
                 title_generation: 1,
                 transcript_path: None,
             },
@@ -2363,6 +2475,7 @@ mod tests {
                 pane_id,
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: None,
             },
@@ -2383,6 +2496,7 @@ mod tests {
                 pane_id,
                 session_id: "session-1".to_string(),
                 process_id: Some(23456),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: None,
             },
@@ -2395,6 +2509,91 @@ mod tests {
                 .get(&(pane_id, "session-1".to_string())),
             Some(&2)
         );
+    }
+
+    #[test]
+    fn renewed_session_resolution_discards_previous_codex_goal_observation() {
+        use crate::session_goal_store::CodexContext;
+        use ilium_agent_session::goal_evidence::GoalPhase;
+        use std::collections::BTreeMap;
+        use std::time::Instant;
+
+        let mut app = app();
+        let pane_id = NodeId(7);
+        let context = CodexContext {
+            session_id: "synthetic-thread".into(),
+            project: "/project".into(),
+            home: "/home".into(),
+            transcript_path: Some("/home/.codex/sessions/transcript.jsonl".into()),
+            process_id: 42,
+            process_identity_inode: 123,
+            identity_generation: 1,
+            screen: Some(GoalPhase::Active),
+        };
+        let resolution = || ServerEvent::PaneSessionIdResolved {
+            pane_id,
+            session_id: context.session_id.clone(),
+            process_id: Some(context.process_id),
+            process_identity_inode: Some(context.process_identity_inode),
+            title_generation: context.identity_generation,
+            transcript_path: context.transcript_path.clone(),
+        };
+        apply(&mut app, resolution());
+        assert_eq!(
+            app.agent_process_identity_inode.get(&pane_id),
+            Some(&context.process_identity_inode)
+        );
+        app.session_goals
+            .tick(BTreeMap::from([(pane_id, context.clone())]), Instant::now());
+        assert!(app.session_goals.observation(pane_id, &context).is_some());
+
+        // A replacement process can reuse both the numeric ID and transcript.
+        apply(&mut app, resolution());
+        assert!(app.session_goals.observation(pane_id, &context).is_none());
+    }
+
+    #[test]
+    fn renewed_session_resolution_discards_previous_claude_goal_observation() {
+        use crate::session_goal_claude::ClaudeContext;
+        use crate::session_stats_store::StatsRequest;
+        use ilium_agent_session::goal_evidence::GoalPhase;
+        use std::collections::BTreeMap;
+        use std::time::Instant;
+
+        let mut app = app();
+        let pane_id = NodeId(8);
+        let context = ClaudeContext {
+            request: StatsRequest {
+                class: AgentClass::Claude,
+                session_id: "synthetic-session".into(),
+                project_path: "/project".into(),
+                home: "/home".into(),
+            },
+            process_id: 42,
+            process_identity_inode: 123,
+            transcript_path: "/home/.claude/projects/synthetic.jsonl".into(),
+            identity_generation: 1,
+            screen: Some(GoalPhase::Active),
+        };
+        let resolution = || ServerEvent::PaneSessionIdResolved {
+            pane_id,
+            session_id: context.request.session_id.clone(),
+            process_id: Some(context.process_id),
+            process_identity_inode: Some(context.process_identity_inode),
+            title_generation: context.identity_generation,
+            transcript_path: Some(context.transcript_path.clone()),
+        };
+        apply(&mut app, resolution());
+        assert_eq!(
+            app.agent_process_identity_inode.get(&pane_id),
+            Some(&context.process_identity_inode)
+        );
+        app.claude_goals
+            .tick(BTreeMap::from([(pane_id, context.clone())]), Instant::now());
+        assert!(app.claude_goals.observation(pane_id, &context).is_some());
+
+        apply(&mut app, resolution());
+        assert!(app.claude_goals.observation(pane_id, &context).is_none());
     }
 
     #[test]
@@ -2412,6 +2611,7 @@ mod tests {
                 pane_id,
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: None,
             },
@@ -2456,6 +2656,7 @@ mod tests {
                 pane_id,
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: None,
             },

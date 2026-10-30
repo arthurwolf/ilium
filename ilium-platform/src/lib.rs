@@ -51,7 +51,13 @@ pub mod animation_files;
 pub mod animation_sandbox;
 pub mod audio_backend;
 pub mod child_limits;
+pub mod claude_session_record;
+#[cfg(target_os = "linux")]
+pub mod codex_goal_sandbox;
+#[cfg(target_os = "linux")]
+pub mod codex_goal_storage;
 pub mod detached;
+pub mod file_identity;
 pub mod file_lock;
 pub mod flatpak_host;
 #[cfg(unix)]

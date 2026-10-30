@@ -160,6 +160,12 @@ pub mod search_workers;
 pub mod section_frame;
 mod semantic_animation;
 pub mod session_conversion;
+mod session_goal_claude;
+mod session_goal_codex;
+mod session_goal_custody;
+mod session_goal_display;
+mod session_goal_popover;
+mod session_goal_store;
 mod session_models;
 pub mod session_naming;
 pub mod session_stats;
@@ -215,7 +221,10 @@ pub mod theme;
 pub mod tick;
 pub mod title_inference;
 pub mod transcript_context;
+mod tree_activity_projection;
 pub mod tree_ordering;
+pub mod tree_toolbar_layout;
+mod tree_toolbar_settings;
 pub mod tree_transitions;
 pub mod tree_ui;
 pub mod trigger_execution_lease;
@@ -940,6 +949,8 @@ async fn run_inner(
     app.session_stats
         .configure_execution(statistics_client.clone());
     app.session_models
+        .configure_execution(statistics_client.clone());
+    app.claude_goals
         .configure_execution(statistics_client.clone());
     app.compaction_optimizer
         .configure_execution(statistics_client.clone());

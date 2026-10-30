@@ -43,30 +43,8 @@ pub fn validate_leaf(name: &str) -> io::Result<()> {
     }
     Ok(())
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileIdentity {
-    pub device: u64,
-    pub inode: u64,
-}
-#[cfg(unix)]
-fn identity(file: &File) -> io::Result<FileIdentity> {
-    use std::os::unix::fs::MetadataExt;
-
-    let metadata = file.metadata()?;
-    Ok(FileIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
-}
-#[cfg(windows)]
-fn identity(file: &File) -> io::Result<FileIdentity> {
-    let (device, inode) = crate::secure_fs::file_generation(file)?;
-    Ok(FileIdentity { device, inode })
-}
-#[cfg(not(any(unix, windows)))]
-fn identity(_file: &File) -> io::Result<FileIdentity> {
-    Err(unsupported())
-}
+use crate::file_identity::identity;
+pub use crate::file_identity::FileIdentity;
 pub struct PinnedFile {
     file: File,
     identity: FileIdentity,

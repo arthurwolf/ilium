@@ -669,7 +669,8 @@ impl Canvas {
     }
 
     /// The ribbon under a chart's axis: a one-dot-thick braille line coloured
-    /// by what the agent was doing (bold dots while a progress bar runs), a
+    /// by what the agent was doing (idle is white), a coloured line under it
+    /// while a progress bar runs, a
     /// row of success/failure icons for finished progress bars, and a flexing
     /// legend. Columns line up with the chart's data columns.
     fn work_ribbon_rows(&mut self, work: &WorkContext<'_>, gutter: usize, chart_width: usize) {
@@ -691,19 +692,27 @@ impl Canvas {
         let mut line = vec![prefix(label)];
         for cell in &ribbon.cells {
             line.push(match cell {
-                Some(cell) => {
-                    let color = self.work_color(cell.kind);
-                    if cell.progress_running {
-                        // Two dots thick: the "bold" line of a running progress bar.
-                        Span::styled("⣤", Style::new().fg(color).add_modifier(Modifier::BOLD))
-                    } else {
-                        Span::styled("⠤", Style::new().fg(color))
-                    }
-                }
+                Some(cell) => Span::styled("⠤", Style::new().fg(self.work_color(cell.kind))),
                 None => Span::raw(" "),
             });
         }
         self.line(Line::from(line));
+
+        if ribbon.has_running_progress() {
+            // Colour only, no bold: a second line in the progress colour
+            // marks the columns where a progress bar was running.
+            let progress_color = self.palette.label;
+            let mut line = vec![prefix("")];
+            for cell in &ribbon.cells {
+                line.push(match cell {
+                    Some(cell) if cell.progress_running => {
+                        Span::styled("⠤", Style::new().fg(progress_color))
+                    }
+                    _ => Span::raw(" "),
+                });
+            }
+            self.line(Line::from(line));
+        }
 
         if ribbon.outcomes.iter().any(Option::is_some) {
             let mut line = vec![prefix("")];
@@ -711,7 +720,7 @@ impl Canvas {
                 line.push(match outcome {
                     Some(outcome) => {
                         let (icon, color) = self.outcome_icon(*outcome);
-                        Span::styled(icon, Style::new().fg(color).add_modifier(Modifier::BOLD))
+                        Span::styled(icon, Style::new().fg(color))
                     }
                     None => Span::raw(" "),
                 });
@@ -728,12 +737,7 @@ impl Canvas {
         }
         if ribbon.has_running_progress() {
             entries.push(vec![
-                Span::styled(
-                    "⣤⣤ ",
-                    Style::new()
-                        .fg(self.palette.label)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("⠤⠤ ", Style::new().fg(self.palette.label)),
                 Span::styled("progress bar running", dim),
             ]);
         }
@@ -745,10 +749,7 @@ impl Canvas {
             if ribbon.has_outcome(outcome) {
                 let (icon, color) = self.outcome_icon(outcome);
                 entries.push(vec![
-                    Span::styled(
-                        format!("{icon} "),
-                        Style::new().fg(color).add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(format!("{icon} "), Style::new().fg(color)),
                     Span::styled(text, dim),
                 ]);
             }
@@ -785,7 +786,7 @@ impl Canvas {
     fn work_color(&self, kind: WorkKind) -> Color {
         let palette = &self.palette;
         match kind {
-            WorkKind::Idle => palette.dim,
+            WorkKind::Idle => Color::White,
             WorkKind::Model => palette.output,
             WorkKind::Shell => palette.warn,
             WorkKind::Edit => palette.good,
@@ -2385,14 +2386,15 @@ mod tests {
         }
         let ribbon = rows[heading + 2..]
             .iter()
-            .position(|row| row.contains('⠤') && row.contains('⣤'))
+            .position(|row| row.contains('⠤'))
             .map(|offset| heading + 2 + offset)
-            .expect("ribbon row with thin and bold dots");
-        assert!(rows[ribbon + 1].contains('✓') && rows[ribbon + 1].contains('✗'));
-        assert!(rows[ribbon + 2].contains("progress bar running"));
-        assert!(rows[ribbon + 2].contains("thinking"));
+            .expect("ribbon row");
+        assert!(rows[ribbon + 1].contains('⠤'), "progress colour line");
+        assert!(rows[ribbon + 2].contains('✓') && rows[ribbon + 2].contains('✗'));
+        assert!(rows[ribbon + 3].contains("progress bar running"));
+        assert!(rows[ribbon + 3].contains("thinking"));
         // Time labels come after the ribbon, under the axis.
-        assert!(rows[ribbon + 3].contains(':'));
+        assert!(rows[ribbon + 4].contains(':'));
         assert!(popover.scale_buttons.len() >= StatsScale::ALL.len());
     }
 

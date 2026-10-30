@@ -6,6 +6,7 @@
 //! and for other attached clients to know what's open).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::{
@@ -410,6 +411,12 @@ pub struct TerminalPaneRuntime {
     /// Latest manual Enter eligible for a provider transcript correction.
     pub prompt_transcript_epoch: Option<PromptTranscriptEpoch>,
     pub session_process_started_at_unix_seconds: Option<u64>,
+    pub session_process_identity_inode: Option<u64>,
+    /// Revisit Claude session evidence periodically without tying I/O to every screen refresh.
+    pub next_claude_session_recheck: Instant,
+    /// Held while the session binding is cached, so PID reuse cannot recreate
+    /// ownership even if the replacement has the same kernel start tick.
+    pub session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -511,6 +518,9 @@ impl TerminalPaneRuntime {
             legacy_prompt_fallback_blocked: false,
             prompt_transcript_epoch: None,
             session_process_started_at_unix_seconds: None,
+            session_process_identity_inode: None,
+            next_claude_session_recheck: Instant::now(),
+            session_process_identity: None,
             session_process_id: None,
             session_transcript_path: None,
             auto_answer_attempt: None,

@@ -49,12 +49,12 @@ pub struct PaneViewport {
     pub slot_index: usize,
     /// Fixed toolbar slot; visibility is independent of its allocation.
     pub toolbar_area: Option<Rect>,
-    /// Fixed prompt slot below the toolbar, clipped only by physical space.
+    /// Prompt area below the toolbar when there is content to display.
     pub last_prompt_area: Option<Rect>,
     /// Briefing box slot directly below the prompt slot; present only while
     /// an attention briefing is shown for the pane.
     pub briefing_area: Option<Rect>,
-    /// Fixed progress slot at the bottom, including hidden retained results.
+    /// Progress area at the bottom while a visible monitor or resource wait exists.
     pub progress_area: Option<Rect>,
     /// One-row frame rule below the agent toolbar, full outer width so its
     /// ends land on the pane's side borders. It doubles as the top edge of
