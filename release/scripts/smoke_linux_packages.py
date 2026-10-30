@@ -792,7 +792,9 @@ DELEGATED_LEAF = (
     'diagnose() { echo "cgroup setup failed at $1: cg=$cg controllers=[$(cat "$cg/cgroup.controllers")] '
     'subtree=[$(cat "$cg/cgroup.subtree_control")] procs=[$(cat "$cg/cgroup.procs" | tr "\\n" " ")] '
     'type=$(cat "$cg/cgroup.type") owner=$(stat -c %U "$cg") uid=$(id -u)" >&2; exit 1; }; '
-    'mkdir "$cg/probe" || diagnose mkdir; echo $$ > "$cg/probe/cgroup.procs" || diagnose move; '
+    'mkdir "$cg/probe" || diagnose mkdir; echo $$ > "$cg/probe/cgroup.procs" || { /usr/bin/python3 -c '
+    '"import os,sys;\ntry: open(sys.argv[1],\'w\').write(str(os.getpid()))\nexcept OSError as e: print(\'python move errno\',e.errno,e)" '
+    '"$cg/probe/cgroup.procs" >&2; ls -ld "$cg/probe" "$cg/probe/cgroup.procs" >&2; cat "$cg/probe/cgroup.type" >&2; uname -r >&2; diagnose move; }; '
     'echo "+cpu +memory +pids" > "$cg/cgroup.subtree_control" || diagnose enable; exec "$@"')
 
 
