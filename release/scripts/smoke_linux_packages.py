@@ -788,7 +788,7 @@ def expect_version(command, expected, log, label, environment):  # Check a real 
 def delegated_service(command, child_env):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
     uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
     return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
-            '--property=Type=exec', '--property=Delegate=yes', '--property=WorkingDirectory=' + os.getcwd(),
+            '--property=Type=exec', '--property=Delegate=cpu memory pids', '--property=WorkingDirectory=' + os.getcwd(),
             *('--setenv=%s=%s' % item for item in sorted(child_env.items())), *[str(part) for part in command]]
 
 
