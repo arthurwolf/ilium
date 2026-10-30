@@ -11,12 +11,19 @@ use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::NodeId;
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, Views};
+
+mod redact;
+mod runner;
 
 /// The server side of `ilium.core.compaction` (core-plugin-compaction.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner"])]
 #[derive(Default)]
-pub struct CompactionServer;
+pub struct CompactionServer {
+    /// The pane the user focused last; it decides which technique row the job runner uses.
+    focused: Option<NodeId>,
+}
 
 impl Lifecycle for CompactionServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
@@ -25,14 +32,22 @@ impl Lifecycle for CompactionServer {
 }
 
 impl Handler for CompactionServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        for event in batch {
+            if let Event::PaneFocused(pane) = event {
+                self.focused = pane;
+            }
+        }
         Vec::new()
     }
 }
 
 impl JobRunner for CompactionServer {
-    fn run(&mut self, _kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        Err(PluginError::invalid_argument(format!("unknown job kind: {_kind}")))
+    fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        match kind.as_str() {
+            "compact" => runner::run_compact(&input, self.focused),
+            other => Err(PluginError::invalid_argument(format!("unknown job kind: {other}"))),
+        }
     }
 }
 

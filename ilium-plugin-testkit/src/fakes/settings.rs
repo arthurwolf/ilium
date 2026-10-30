@@ -13,6 +13,10 @@ use super::tree::Outbox;
 /// Longest text value a setting accepts (SET-024).
 const MAX_TEXT_CHARS: usize = 4096;
 
+/// Range of `ui.last_prompt_max_lines` (reference-config-and-data-migration.md "[ui] toolbar").
+const MIN_PROMPT_LINES: i64 = 1;
+const MAX_PROMPT_LINES: i64 = 20;
+
 /// What kind of value a setting row takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ValueKind {
@@ -71,6 +75,16 @@ impl FakeSettings {
         }
     }
 
+    /// Declares the kernel keys that first-party plugins read (`[ui]` toolbar keys and
+    /// `remote_compaction.enabled`) with their defaults; the values are kept if already present.
+    pub(crate) fn declare_kernel_keys(&mut self) {
+        for key in ["ui.last_prompt_enabled", "ui.agent_toolbar_enabled", "ui.show_toolbar_labels"] {
+            self.declare(key, ValueKind::Bool, Some(Value::Bool(true)));
+        }
+        self.declare("ui.last_prompt_max_lines", ValueKind::Number, Some(Value::from(4)));
+        self.declare("remote_compaction.enabled", ValueKind::Bool, Some(Value::Bool(false)));
+    }
+
     /// Side that owns the keys in `settings-changed`.
     pub(crate) fn set_side(&mut self, side: PluginSide) {
         self.side = Some(side);
@@ -112,6 +126,19 @@ impl FakeSettings {
                 ErrorCode::InvalidArgument,
                 format!("value of {key} has the wrong type"),
             ));
+        }
+        if key == "ui.last_prompt_max_lines" {
+            let in_range = value
+                .as_i64()
+                .is_some_and(|lines| (MIN_PROMPT_LINES..=MAX_PROMPT_LINES).contains(&lines));
+            if !in_range {
+                return Err(PluginError::new(
+                    ErrorCode::InvalidArgument,
+                    format!(
+                        "{key} = {value} must be between {MIN_PROMPT_LINES} and {MAX_PROMPT_LINES}"
+                    ),
+                ));
+            }
         }
         self.values.insert(key.to_string(), value.clone());
         self.writes.push((key.to_string(), value));

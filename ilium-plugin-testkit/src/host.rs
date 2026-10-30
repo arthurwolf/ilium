@@ -726,6 +726,13 @@ impl FakeHost {
 
     /// Declares the settings rows of the manifest so wrong-typed writes are refused.
     fn declare_settings_rows(&mut self, manifest: &Value) {
+        let is_core = manifest
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id.starts_with("ilium.core."));
+        if is_core {
+            self.settings.declare_kernel_keys();
+        }
         let Some(tabs) = manifest
             .get("contributes")
             .and_then(|contributes| contributes.get("settings"))
@@ -2910,13 +2917,28 @@ impl FakeTerminal {
 #[derive(Debug, Default)]
 pub struct FakeJournal {
     entries: Vec<(Option<u64>, String, String)>,
+    times: Vec<u64>,
 }
 
 impl FakeJournal {
     /// Appends an entry.
-    pub fn append(&mut self, pane: u64, _at_ms: u64, kind: &str, text: &str) {
+    pub fn append(&mut self, pane: u64, at_ms: u64, kind: &str, text: &str) {
+        self.push(Some(pane), at_ms, kind, text);
+    }
+
+    /// Appends an entry that may have no pane.
+    pub(crate) fn push(&mut self, pane: Option<u64>, at_ms: u64, kind: &str, text: &str) {
+        self.entries.push((pane, kind.to_string(), text.to_string()));
+        self.times.push(at_ms);
+    }
+
+    /// Every entry as `(pane, at ms, kind, text)`, oldest first.
+    pub(crate) fn rows(&self) -> Vec<(Option<u64>, u64, String, String)> {
         self.entries
-            .push((Some(pane), kind.to_string(), text.to_string()));
+            .iter()
+            .zip(&self.times)
+            .map(|((pane, kind, text), at)| (*pane, *at, kind.clone(), text.clone()))
+            .collect()
     }
 
     /// Entries as `(pane, kind, text)`.

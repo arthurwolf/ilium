@@ -1,49 +1,18 @@
 //! Core plugin `ilium.core.agent-toolbar` (manual page core-plugin-agent-toolbar.md).
 //!
-//! One struct per side declared in `manifest.json`. The toolbar actions, the last-prompt banner and
-//! the model and context facts read the screen, the transcript and the settings through SDK host
-//! calls that are not implemented yet; until they are, both sides activate cleanly, accept events
-//! and submit nothing.
+//! One struct per side declared in `manifest.json`. The client side owns the last-prompt banner,
+//! the recover hint, the model header and the compact routing; the server side owns the compact
+//! action, the model and context message and the debug history.
 
-use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+mod client;
+mod server;
+mod settings;
 
-/// The server side of `ilium.core.agent-toolbar` (core-plugin-agent-toolbar.md, world `ilium:server/base@0.1.0`).
-#[ilium_plugin(side = "server", exports = [])]
-#[derive(Default)]
-pub struct AgentToolbarServer;
+pub use client::AgentToolbarClient;
+pub use server::AgentToolbarServer;
 
-impl Lifecycle for AgentToolbarServer {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        Ok(())
-    }
-}
-
-impl Handler for AgentToolbarServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
-    }
-}
-
-/// The client side of `ilium.core.agent-toolbar` (core-plugin-agent-toolbar.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
-#[derive(Default)]
-pub struct AgentToolbarClient;
-
-impl Lifecycle for AgentToolbarClient {
-    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        Ok(())
-    }
-}
-
-impl Handler for AgentToolbarClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
-    }
-}
+/// The id of this plugin, used as the target of its own side-to-side messages.
+pub(crate) const PLUGIN_ID: &str = "ilium.core.agent-toolbar";
 
 #[cfg(test)]
 mod spec_tests {

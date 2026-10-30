@@ -689,3 +689,17 @@ impl HostAgent for HostHandle {
         }
     }
 }
+impl HostJournal for HostHandle {
+    fn log_event(&mut self, pane: Option<NodeId>, kind: String, payload_json: String) -> Result<(), PluginError> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostJournal>::log_event(&mut **backend.borrow_mut(), pane, kind, payload_json),
+            None => Err(no_host()),
+        }
+    }
+    fn read(&mut self, pane: Option<NodeId>, since: EpochMs, limit: u32) -> Vec<JournalEntry> {
+        match self.backend() {
+            Some(backend) => <dyn HostApi as HostJournal>::read(&mut **backend.borrow_mut(), pane, since, limit),
+            None => Vec::new(),
+        }
+    }
+}

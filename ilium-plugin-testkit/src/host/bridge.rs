@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use ilium_plugin_sdk_core::generated::host::*;
-use ilium_plugin_sdk_core::generated::primitives::{AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn};
+use ilium_plugin_sdk_core::generated::primitives::{AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn, TurnRole};
 use ilium_plugin_sdk_core::generated::types::*;
 use ilium_plugin_sdk_core::{clear_host, set_host, HostApi};
 
@@ -771,7 +771,18 @@ impl HostAgent for NativeBridge {
     }
     fn session(&mut self, pane: NodeId) -> Option<SessionRef> {
         self.permit("agent.read").ok()?;
-        self.host().agents.sessions.get(&pane.0).cloned().flatten()
+        if let Some(explicit) = self.host().agents.sessions.get(&pane.0) {
+            return explicit.clone();
+        }
+        // A pane whose transcript was verified has a resolved agent session.
+        if self.host().agents.verified.get(&pane.0).copied().unwrap_or(false) {
+            return Some(SessionRef {
+                scope: "transcript".to_string(),
+                path: String::new(),
+                session_id: "verified".to_string(),
+            });
+        }
+        None
     }
     fn last_prompt(&mut self, pane: NodeId) -> Option<String> {
         let _ = pane;
@@ -800,6 +811,7 @@ impl HostAgent for NativeBridge {
             return Err(PluginError::new(ErrorCode::InvalidArgument, "last-turns is at most 512 and max-bytes at most 4 MiB"));
         }
         let id = self.next_id();
+        let known_tokens = self.host().agents.tokens.get(&query.pane.0).copied();
         let outcome = match self.host().agents.transcripts.get(&query.pane.0) {
             Some(FakeTranscript::Turns(turns)) => {
                 let wanted = usize::try_from(query.last_turns).unwrap_or(usize::MAX);
@@ -814,6 +826,19 @@ impl HostAgent for NativeBridge {
                 self.host().bridge.transcripts.insert(id, kept);
                 Outcome::Ok
             }
+            None if known_tokens.is_some() => {
+                // Only a used-token count is known: one assistant turn carries it.
+                let used = known_tokens.unwrap_or(0);
+                let turn = TranscriptTurn {
+                    role: TurnRole::Assistant,
+                    text: String::new(),
+                    tool: None,
+                    at: None,
+                    tokens: Some(u32::try_from(used).unwrap_or(u32::MAX)),
+                };
+                self.host().bridge.transcripts.insert(id, vec![turn]);
+                Outcome::Ok
+            }
             Some(FakeTranscript::Bytes(_)) => Outcome::Failed(PluginError::new(
                 ErrorCode::Unsupported,
                 "the transcript format of this agent is not known",
@@ -825,5 +850,39 @@ impl HostAgent for NativeBridge {
     }
     fn take_transcript(&mut self, request: RequestId) -> Option<Vec<TranscriptTurn>> {
         self.host().bridge.transcripts.remove(&request.0)
+    }
+}
+
+impl HostJournal for NativeBridge {
+    fn log_event(&mut self, pane: Option<NodeId>, kind: String, payload_json: String) -> Result<(), PluginError> {
+        let now = self.host().now_ms;
+        self.host().journal.push(pane.map(|id| id.0), now, &kind, &payload_json);
+        Ok(())
+    }
+    fn read(&mut self, pane: Option<NodeId>, since: EpochMs, limit: u32) -> Vec<JournalEntry> {
+        if self.permit("journal.read").is_err() {
+            return Vec::new();
+        }
+        let wanted = pane.map(|id| id.0);
+        let mut rows: Vec<JournalEntry> = self
+            .host()
+            .journal
+            .rows()
+            .into_iter()
+            .filter(|(entry_pane, at, _, _)| (wanted.is_none() || *entry_pane == wanted) && *at >= since.0)
+            .map(|(entry_pane, at, kind, text)| JournalEntry {
+                at: EpochMs(at),
+                pane: entry_pane.map(NodeId),
+                source: "host".to_string(),
+                kind,
+                payload_json: text,
+            })
+            .collect();
+        // Newest last; keep the newest `limit` entries.
+        let cap = usize::try_from(limit.min(1000)).unwrap_or(1000);
+        if rows.len() > cap {
+            rows.drain(..rows.len() - cap);
+        }
+        rows
     }
 }
