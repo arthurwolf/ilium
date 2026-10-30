@@ -50,10 +50,9 @@ impl DecodedImage {
     #[cfg(test)]
     pub fn from_rgb(width: u32, height: u32, pixels: Vec<[u8; 3]>) -> Self {
         debug_assert_eq!(pixels.len() as u64, u64::from(width) * u64::from(height));
-        let storage = crate::resources::test_resources()
-            .reserve_storage(
-                pixel_storage_bytes(pixels.capacity()).expect("fixture pixel capacity"),
-            )
+        let resources = crate::resources::test_resources();
+        let bytes = pixel_storage_bytes(pixels.capacity()).expect("fixture pixel capacity");
+        let storage = crate::resources::retry_while_busy(|| resources.reserve_storage(bytes))
             .expect("explicit fixture pixel storage");
         Self {
             width,
