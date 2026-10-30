@@ -198,6 +198,10 @@ impl AllocationSize for ResourceCommand {
             Self::ConfirmClear {
                 resource_id,
                 reason,
+            }
+            | Self::RecoverStaleOwner {
+                resource_id,
+                reason,
             } => resource_id.heap_bytes().saturating_add(reason.heap_bytes()),
             Self::ReconcileInvocation { agent, evidence } => {
                 agent.heap_bytes().saturating_add(evidence.heap_bytes())

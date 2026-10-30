@@ -818,6 +818,6 @@ ilium --reset-session new-session scratch
 | `resource cancel RESERVATION` | Cancel the agent's queued claim |
 | `resource estimate RESERVATION DURATION` | Update the estimate without extending or expiring ownership |
 | `resource gate SLUG open\|paused\|unavailable [--reason TEXT]` | Change availability without clearing occupancy |
-| `resource recover SLUG --expected-revision N --reason TEXT` | Interactive, revision-bound revocation or subsequent clearance confirmation |
+| `resource recover SLUG --reason TEXT [--expected-revision N]` | From an agent pane of the project: clears a stale (rebooted or dead) owner in one step. For a live owner: interactive, typed confirmation by the user |
 
 Mutations return a timestamped request key. Reuse it with `--request-id KEY` when retrying an uncertain response; changing the payload under the same key is rejected. Durations use explicit units, for example `20m` or `1h30m`, from one second through seven days. Interrupted waits retain reservations. Estimates never expire ownership or prove that hardware is safe. User cancellation additionally requires `--reason TEXT --expected-revision N` and fresh interactive confirmation. See [Resource queues](resource-queues.md) for recovery and GPU/USB-board workflows.

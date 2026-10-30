@@ -631,6 +631,9 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
 
     // The costs-and-stats popover floats over the pane surface, so it claims
     // its own pointer events before the tree or the pane can see them.
+    if app.handle_goal_popover_mouse(mouse, position) {
+        return;
+    }
     if app.handle_stats_popover_mouse(mouse, position) {
         return;
     }
@@ -1260,9 +1263,12 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     if let Some(action) = app.emitted_tree_toolbar_at(position) {
         if let TreeToolbarAction::Agent(provider) = action {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
-                if let Some((_, anchor)) = tree_ui::toolbar_button_rects(app.layout.tree_area)
-                    .into_iter()
-                    .find(|(button, _)| *button == action)
+                if let Some((_, anchor)) = tree_ui::configured_toolbar_button_rects(
+                    app.layout.tree_area,
+                    &app.ui_settings.tree_toolbar_layout,
+                )
+                .into_iter()
+                .find(|(button, _)| *button == action)
                 {
                     app.hover_agent_popover(provider, anchor, Instant::now(), true);
                 }
@@ -1495,14 +1501,21 @@ fn update_tree_hover(app: &mut App, position: Position) {
     }
     app.set_hovered_tree_node(hit);
     app.hovered_status_slot = app.tree_status_slot_at(position);
-    let toolbar_action = tree_ui::toolbar_action_at(app.layout.tree_area, position);
+    let toolbar_action = tree_ui::configured_toolbar_action_at(
+        app.layout.tree_area,
+        position,
+        &app.ui_settings.tree_toolbar_layout,
+    );
     let toolbar_hovered = tree_ui::toolbar_area(app.layout.tree_area).contains(position);
     app.set_tree_toolbar_hover(toolbar_hovered, toolbar_action);
     let now = Instant::now();
     if let Some(TreeToolbarAction::Agent(provider)) = toolbar_action {
-        if let Some((_, anchor)) = tree_ui::toolbar_button_rects(app.layout.tree_area)
-            .into_iter()
-            .find(|(button, _)| *button == TreeToolbarAction::Agent(provider))
+        if let Some((_, anchor)) = tree_ui::configured_toolbar_button_rects(
+            app.layout.tree_area,
+            &app.ui_settings.tree_toolbar_layout,
+        )
+        .into_iter()
+        .find(|(button, _)| *button == TreeToolbarAction::Agent(provider))
         {
             app.hover_agent_popover(provider, anchor, now, false);
         }
@@ -1657,6 +1670,11 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
         }
         TreeToolbarAction::Folder => {
             app.action_new_folder();
+            return;
+        }
+        TreeToolbarAction::ActivityFilter => {
+            app.hide_inactive_tree = !app.hide_inactive_tree;
+            app.tick_tree_activity_projection(std::time::Instant::now());
             return;
         }
         TreeToolbarAction::Settings => {
@@ -2537,6 +2555,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             _ => {}
         }
         state.padding.dialog = Some(dialog);
+        app.mode = Mode::Settings(Box::new(state));
+        return;
+    }
+    if state.tab == crate::app::SettingsTab::Toolbar && layout.content_area.contains(position) {
+        crate::tree_toolbar_settings::handle_mouse(app, &mut state, layout.content_area, mouse);
         app.mode = Mode::Settings(Box::new(state));
         return;
     }

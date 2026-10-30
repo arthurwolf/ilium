@@ -1319,6 +1319,9 @@ pub enum ServerEvent {
         /// `None` is retained only as a defensive representation for an
         /// inconsistent restored runtime; normal discovery always supplies it.
         process_id: Option<u32>,
+        /// Verified Linux pidfs inode of the captured process owning this session.
+        /// Absent if the server could not establish process custody.
+        process_identity_inode: Option<u64>,
         title_generation: u64,
         /// Absolute transcript path the server verified for `session_id`, when
         /// discovery reached it through an exact-PID descriptor. Clients treat
@@ -1732,5 +1735,12 @@ pub enum ServerEvent {
     PaneCustomAgentIdentity {
         pane_id: NodeId,
         identity: Option<ilium_core::custom_agent::CustomAgentIdentity>,
+    },
+    /// Monotonic revision and age of a server-observed pane activity edge.
+    /// Appended to preserve earlier event discriminants.
+    PaneRecentActivity {
+        pane_id: NodeId,
+        revision: u64,
+        age_millis: u64,
     },
 }

@@ -47,6 +47,7 @@ The tabs appear in this order:
 | User Interface | Left panel sizing, tree order, identifiers, colour scheme, motion, density, toolbars, banners, progress footer, selection and tree behaviours | `[ui]`, `[theme]` |
 | Padding | Blank cells between the panel borders and the tree or pane content | `[padding]` |
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
+| Toolbar | Tree toolbar order, buttons and inactivity threshold | `[ui]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
 | Optimization | Scan Codex or Claude Code transcripts and apply the cheapest auto-compaction threshold | none (writes the agent's own config) |
@@ -110,6 +111,8 @@ General options:
 | Agent toolbar labels | On / Off | On |
 | Section frames | On / Off. Draws rounded rules joined to the pane border around the agent toolbar, last-prompt banner, progress footer and the left panel's toolbar; Off gives their rows back to the terminal | On |
 | Last prompt banner | On / Off. Shows the last exactly reconstructed prompt submitted to a detected agent | On |
+| Goal tab | On / Off. Adds the current goal to the last-prompt banner | On |
+| Goal toolbar icon | On / Off. Shows a flag for current goal details in the agent toolbar | On |
 | Last prompt banner lines | 1 to 20 | 4 |
 | Terminal text selection | On / Off. Left-drag selects locally instead of forwarding to the foreground app | On |
 | Lock-closed items | On / Off. Allows locking a project, group or folder row closed | On |
@@ -134,6 +137,12 @@ Press `L` in Icons to open **Tree layout**. Select Identity, Objective, Activity
 Layouts persist under `[ui.tree_row_layout]` with `order` and `hidden` lists containing `identity`, `objective`, `activity` and `title`. Duplicate/missing order entries are normalized; Title cannot be hidden. Direct moves, visibility and preset changes save immediately.
 
 Choose the glyph for each configurable role: group, top-level destination, project, vertical and horizontal split, folder, worktree branch, terminal, editor, board, each agent family, bookmark and locked-closed markers, tree toolbar buttons (Search, Restructure, Settings), hover-row controls (Rename, Move up, Move down, Close, Retitle), project restructure, Ask for update, screen-transfer arrows, Open in OS, and the agent toolbar actions (Compact, Clear, Configure, Stop, Copy screen, Smart Copy, Copy last message, Change effort, Change model, model choices, Exit, Fast mode, Text selection). Up and Down select a role, Left and Right cycle its glyph, and `Enter`, `Space` or `+` opens the icon picker. `R` toggles between the preview and the real rendering. Custom assignments are stored under `[ui.icons]`.
+
+### Toolbar
+
+The tree toolbar can be arranged in Settings → Toolbar. Select a button with Up/Down; use Shift+Up/Down or the arrow buttons to move it, Delete or × to remove it, and + to open the list of available buttons. The live preview follows the chosen order. Press `r` to restore the default arrangement. Changes are saved immediately.
+
+The eye button switches between the normal complete tree and an activity filter. The filter hides inactive terminals and agents, projects without an active terminal, and groups without an active descendant. Visible projects retain their auxiliary rows. The inactivity threshold defaults to 15 minutes and can be adjusted in this tab. The filter starts off each time Ilium opens.
 
 ### Agent Monitoring
 

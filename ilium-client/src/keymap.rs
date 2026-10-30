@@ -266,6 +266,10 @@ pub enum Action {
     AttentionPanel,
     /// Opens the "Needs you" overview dialog listing every queued agent.
     AttentionOverview,
+    /// Switch the focused pane's prompt banner between prompt and goal.
+    ToggleGoalTab,
+    /// Pin and focus the current goal's toolbar popover.
+    ToggleGoalPopover,
 }
 
 impl Action {
@@ -564,6 +568,16 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Open the Needs you overview (every agent that needs attention)",
     },
     KeyBinding {
+        key: BindingKey::Character('G'),
+        action: Action::ToggleGoalTab,
+        description: "Switch the focused pane between its prompt and goal tabs",
+    },
+    KeyBinding {
+        key: BindingKey::Character('U'),
+        action: Action::ToggleGoalPopover,
+        description: "Open or close the focused pane's goal details",
+    },
+    KeyBinding {
         key: BindingKey::Character('?'),
         action: Action::Help,
         description: "Show or hide this help screen",
@@ -625,6 +639,8 @@ pub fn action_name(action: Action) -> &'static str {
         Action::AttentionNext => "attention_next",
         Action::AttentionPanel => "attention_panel",
         Action::AttentionOverview => "attention_overview",
+        Action::ToggleGoalTab => "toggle_goal_tab",
+        Action::ToggleGoalPopover => "toggle_goal_popover",
     }
 }
 
@@ -671,6 +687,8 @@ pub const fn action_label(action: Action) -> &'static str {
         Action::AttentionNext => "Next needing you",
         Action::AttentionPanel => "Attention panel",
         Action::AttentionOverview => "Needs you overview",
+        Action::ToggleGoalTab => "Toggle goal tab",
+        Action::ToggleGoalPopover => "Toggle goal details",
     }
 }
 
@@ -1189,6 +1207,14 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "list",
             },
         ],
+        Action::ToggleGoalTab => &[Mnemonic {
+            key: 'g',
+            word: "goal",
+        }],
+        Action::ToggleGoalPopover => &[Mnemonic {
+            key: 'u',
+            word: "unfold",
+        }],
         Action::Settings => &[
             Mnemonic {
                 key: 'c',
@@ -1590,6 +1616,16 @@ mod tests {
             }
         }
         assert_eq!(mnemonic_for(Action::Search, '/'), None);
+    }
+
+    #[test]
+    fn goal_tab_has_a_configurable_leader_binding() {
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('G')),
+            Some(Action::ToggleGoalTab)
+        );
+        assert_eq!(action_name(Action::ToggleGoalTab), "toggle_goal_tab");
+        assert_eq!(mnemonic_for(Action::ToggleGoalTab, 'G'), Some("goal"));
     }
 
     #[test]

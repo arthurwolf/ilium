@@ -38,6 +38,94 @@
 
 use std::path::PathBuf;
 
+/// The only process environment values goal discovery needs. Never expose or
+/// log the other environment entries, which may contain credentials.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentProviderHomes {
+    pub home: PathBuf,
+    pub claude_config: PathBuf,
+    pub codex_home: PathBuf,
+}
+
+/// Read a bounded process-start environment. An inaccessible, malformed or
+/// unsupported environment is unknown, never the client's assumed home.
+#[cfg(target_os = "linux")]
+pub fn agent_provider_homes(process_id: u32) -> Option<AgentProviderHomes> {
+    use std::io::Read;
+    let file = std::fs::File::open(format!("/proc/{process_id}/environ")).ok()?;
+    let mut bytes = Vec::new();
+    file.take(1024 * 1024 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 1024 * 1024 {
+        return None;
+    }
+    parse_agent_provider_homes(&bytes)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_agent_provider_homes(bytes: &[u8]) -> Option<AgentProviderHomes> {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    if bytes.last() != Some(&0) {
+        return None;
+    }
+    let mut home = None;
+    let mut claude = None;
+    let mut codex = None;
+    for entry in bytes
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (slot, value) = if let Some(value) = entry.strip_prefix(b"HOME=") {
+            (&mut home, value)
+        } else if let Some(value) = entry.strip_prefix(b"CLAUDE_CONFIG_DIR=") {
+            (&mut claude, value)
+        } else if let Some(value) = entry.strip_prefix(b"CODEX_HOME=") {
+            (&mut codex, value)
+        } else {
+            continue;
+        };
+        if slot.is_some() || value.is_empty() || value.len() > 4096 {
+            return None;
+        }
+        let path = PathBuf::from(OsString::from_vec(value.to_vec()));
+        if !path.is_absolute() {
+            return None;
+        }
+        *slot = Some(path);
+    }
+    let home = home?;
+    Some(AgentProviderHomes {
+        claude_config: claude.unwrap_or_else(|| home.join(".claude")),
+        codex_home: codex.unwrap_or_else(|| home.join(".codex")),
+        home,
+    })
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod provider_home_tests {
+    use super::*;
+
+    #[test]
+    fn provider_home_parser_uses_only_named_absolute_values() {
+        let homes = parse_agent_provider_homes(
+            b"SECRET=not-retained\0HOME=/people/a\0CODEX_HOME=/custom/codex\0",
+        )
+        .unwrap();
+        assert_eq!(homes.home, PathBuf::from("/people/a"));
+        assert_eq!(homes.claude_config, PathBuf::from("/people/a/.claude"));
+        assert_eq!(homes.codex_home, PathBuf::from("/custom/codex"));
+        assert!(parse_agent_provider_homes(b"HOME=/a\0HOME=/b\0").is_none());
+        assert!(parse_agent_provider_homes(b"HOME=/a\0CODEX_HOME=relative\0").is_none());
+        assert!(parse_agent_provider_homes(b"CODEX_HOME=/a\0").is_none());
+        assert!(parse_agent_provider_homes(b"HOME=/incomplete").is_none());
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn agent_provider_homes(_process_id: u32) -> Option<AgentProviderHomes> {
+    None
+}
+
 /// The process's current working directory, or `None` if it cannot be read.
 #[cfg(target_os = "linux")]
 pub fn working_directory(process_id: u32) -> Option<PathBuf> {
@@ -346,11 +434,85 @@ pub struct OpenFilePathLimits {
     pub descriptors: usize,
     pub retained_bytes: usize,
 }
+
+/// Verify that the process holds the same opened file, not merely the same
+/// pathname, so a replacement between descriptor inspection and open fails.
+#[cfg(target_os = "linux")]
+pub fn process_has_open_file(
+    process_id: u32,
+    file: &std::fs::File,
+    descriptor_limit: usize,
+) -> std::io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let expected = file.metadata()?;
+    let descriptors = std::fs::read_dir(format!("/proc/{process_id}/fd"))?;
+    for (index, entry) in descriptors.enumerate() {
+        if index >= descriptor_limit {
+            return Err(descriptor_limit_error());
+        }
+        let entry = entry?;
+        if std::fs::metadata(entry.path())
+            .is_ok_and(|actual| actual.dev() == expected.dev() && actual.ino() == expected.ino())
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn process_has_open_file(
+    _process_id: u32,
+    _file: &std::fs::File,
+    _descriptor_limit: usize,
+) -> std::io::Result<bool> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "open-file identity unavailable",
+    ))
+}
 fn descriptor_limit_error() -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::OutOfMemory,
         "open-file evidence resource limit reached",
     )
+}
+
+/// A complete descriptor inventory for privacy-sensitive ownership decisions.
+/// An unreadable or concurrently closed descriptor makes the answer unknown.
+#[cfg(target_os = "linux")]
+pub fn open_file_paths_strict(
+    process_id: u32,
+    limits: OpenFilePathLimits,
+) -> std::io::Result<Vec<PathBuf>> {
+    let entries = std::fs::read_dir(format!("/proc/{process_id}/fd"))?;
+    let mut paths = Vec::new();
+    let mut bytes = 0usize;
+    for (index, entry) in entries.enumerate() {
+        if index >= limits.descriptors {
+            return Err(descriptor_limit_error());
+        }
+        let path = std::fs::read_link(entry?.path())?;
+        bytes = bytes
+            .saturating_add(path.capacity().saturating_mul(2))
+            .saturating_add(std::mem::size_of::<PathBuf>() * 2);
+        if bytes > limits.retained_bytes {
+            return Err(descriptor_limit_error());
+        }
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn open_file_paths_strict(
+    _process_id: u32,
+    _limits: OpenFilePathLimits,
+) -> std::io::Result<Vec<PathBuf>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "complete descriptor inventory unavailable",
+    ))
 }
 #[cfg(target_os = "linux")]
 pub fn open_file_paths_bounded(
@@ -978,6 +1140,26 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn strict_descriptor_inventory_fails_closed_when_incomplete() {
+        let limits = OpenFilePathLimits {
+            descriptors: 0,
+            retained_bytes: 4096,
+        };
+        assert_eq!(
+            open_file_paths_strict(std::process::id(), limits)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::OutOfMemory
+        );
+        let limits = OpenFilePathLimits {
+            descriptors: 4096,
+            retained_bytes: 4096,
+        };
+        assert!(open_file_paths_strict(u32::MAX, limits).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn bounded_open_files_reports_overflow_and_preserves_complete_fixture_path() {
         let file = tempfile::NamedTempFile::new().expect("fixture");
         let paths = open_file_paths_bounded(
@@ -1015,6 +1197,29 @@ mod tests {
     /// its offsets are right: reading the wrong offset yields a wrong path or
     /// none, so a failure here means the layout needs revisiting rather than
     /// the feature being unavailable.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn open_file_identity_rejects_path_replacement() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("transcript");
+        std::fs::write(&path, b"original").expect("write original");
+        let original = std::fs::File::open(&path).expect("open original");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(original.try_clone().expect("clone original"))
+            .spawn()
+            .expect("spawn owned process");
+        assert!(process_has_open_file(child.id(), &original, 4096).expect("inspect original"));
+        std::fs::rename(&path, directory.path().join("old-transcript")).expect("rename original");
+        std::fs::write(&path, b"replacement").expect("write replacement");
+        let replacement = std::fs::File::open(&path).expect("open replacement");
+        assert!(
+            !process_has_open_file(child.id(), &replacement, 4096).expect("inspect replacement")
+        );
+        child.kill().expect("stop owned process");
+        child.wait().expect("reap owned process");
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn the_current_process_working_directory_is_readable() {

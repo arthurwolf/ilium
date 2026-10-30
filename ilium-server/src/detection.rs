@@ -854,6 +854,7 @@ async fn run_due_panes_with_hook(
         agent_generation: u64,
         title_generation: u64,
         shell_pid: Option<u32>,
+        shell_birth_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
         shell_was_plain: bool,
         shell_observer: Option<ilium_pty::PtyShellObserver>,
         screen_generation: u64,
@@ -865,6 +866,9 @@ async fn run_due_panes_with_hook(
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
         session_process_started_at_unix_seconds: Option<u64>,
+        session_process_identity_inode: Option<u64>,
+        claude_session_recheck_due: bool,
+        session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
         pending_generated_session_id: Option<String>,
         identity_system_generation: Option<u64>,
         agent_launcher_ancestors: Vec<AgentProcessKey>,
@@ -939,6 +943,7 @@ async fn run_due_panes_with_hook(
                 agent_generation: runtime.agent_generation,
                 title_generation: runtime.title_generation,
                 shell_pid: runtime.session.process_id(),
+                shell_birth_identity: runtime.session.process_birth_identity(),
                 shell_was_plain: shell_observer.is_some(),
                 shell_observer,
                 screen_generation: runtime.session.screen_generation(),
@@ -951,6 +956,9 @@ async fn run_due_panes_with_hook(
                 session_process_id: runtime.session_process_id,
                 session_process_started_at_unix_seconds: runtime
                     .session_process_started_at_unix_seconds,
+                session_process_identity_inode: runtime.session_process_identity_inode,
+                claude_session_recheck_due: now >= runtime.next_claude_session_recheck,
+                session_process_identity: runtime.session_process_identity.clone(),
                 pending_generated_session_id: runtime.pending_generated_session_id.clone(),
                 identity_system_generation: runtime.detection_schedule.identity_system_generation,
                 agent_launcher_ancestors: runtime.agent_launcher_ancestors.clone(),
@@ -1033,10 +1041,15 @@ async fn run_due_panes_with_hook(
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
         session_process_started_at_unix_seconds: Option<u64>,
+        session_process_identity_inode: Option<u64>,
+        session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+        session_identity_changed: bool,
+        claude_session_recheck: bool,
         session_agent_class: Option<ilium_core::AgentClass>,
         pending_generated_session_id: Option<String>,
         needs_session_discovery: bool,
         shell_pid: Option<u32>,
+        shell_birth_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
         shell_was_plain: bool,
         shell_ownership: Option<bool>,
         activity_evidence: Option<ilium_detect::ActivityEvidence>,
@@ -1292,8 +1305,23 @@ async fn run_due_panes_with_hook(
                                         &ambiguous_session_ids,
                                     )
                                 });
-                            let needs_session_discovery =
-                                identity.is_some() && !has_stable_session_owner;
+                            // An otherwise stable session can have been discovered
+                            // while native process custody was unavailable. Retry
+                            // qualification when the terminal itself has a proof.
+                            let claude_session_recheck = has_stable_session_owner
+                                && due_pane.claude_session_recheck_due
+                                && identity.as_ref().is_some_and(|identity| {
+                                    identity.class == ilium_core::AgentClass::Claude
+                                });
+                            let needs_session_discovery = identity.is_some()
+                                && (!has_stable_session_owner
+                                    || claude_session_recheck
+                                    || (due_pane.session_process_identity_inode.is_none()
+                                        && due_pane
+                                            .shell_birth_identity
+                                            .as_ref()
+                                            .and_then(|identity| identity.pidfs_inode())
+                                            .is_some()));
                             Some(ClassifiedPane {
                                 pane_id: due_pane.pane_id,
                                 input: due_pane.input,
@@ -1314,10 +1342,16 @@ async fn run_due_panes_with_hook(
                                 session_process_id: due_pane.session_process_id,
                                 session_process_started_at_unix_seconds: due_pane
                                     .session_process_started_at_unix_seconds,
+                                session_process_identity_inode: due_pane
+                                    .session_process_identity_inode,
+                                session_process_identity: due_pane.session_process_identity,
+                                session_identity_changed: false,
+                                claude_session_recheck,
                                 session_agent_class: due_pane.session_agent_class,
                                 pending_generated_session_id: due_pane.pending_generated_session_id,
                                 needs_session_discovery,
                                 shell_pid: due_pane.shell_pid,
+                                shell_birth_identity: due_pane.shell_birth_identity,
                                 shell_was_plain: due_pane.shell_was_plain,
                                 shell_ownership: shell_ownership
                                     .get(&due_pane.pane_id)
@@ -1337,9 +1371,11 @@ async fn run_due_panes_with_hook(
                         .collect();
 
                     pane_cwds.retain(|pane_id, _| {
-                        classifications
-                            .iter()
-                            .any(|pane| pane.pane_id == *pane_id && pane.needs_session_discovery)
+                        classifications.iter().any(|pane| {
+                            pane.pane_id == *pane_id
+                                && (pane.needs_session_discovery
+                                    || pane.session_process_identity_inode.is_some())
+                        })
                     });
 
                     // CPU work only reads the immutable process-tree snapshot. Native
@@ -1466,6 +1502,9 @@ async fn run_due_panes_with_hook(
         ilium_detect::AgentIdentity,
         Option<std::path::PathBuf>,
         bool,
+        Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+        Option<u64>,
+        Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     )>());
     for pane in &classifications {
         let Some(identity) = pane.identity.as_ref() else {
@@ -1477,7 +1516,7 @@ async fn run_due_panes_with_hook(
         if let ilium_core::AgentClass::Other(name) = &identity.class {
             discovery_input_bytes = discovery_input_bytes.saturating_add(name.capacity());
         }
-        if pane.needs_session_discovery {
+        if pane.needs_session_discovery || pane.session_process_identity_inode.is_some() {
             discovery_input_bytes = discovery_input_bytes.saturating_add(
                 pane_cwds
                     .get(&pane.pane_id)
@@ -1489,10 +1528,10 @@ async fn run_due_panes_with_hook(
     }
     discovery_input_bytes = discovery_input_bytes
         .saturating_add(MAX_DUE_PANES.saturating_mul(std::mem::size_of::<Pid>()));
-    if classifications
-        .iter()
-        .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
-    {
+    if classifications.iter().any(|pane| {
+        pane.identity.is_some()
+            && (pane.needs_session_discovery || pane.session_process_identity_inode.is_some())
+    }) {
         discovery_input_bytes =
             discovery_input_bytes.saturating_add(state.session_cwd.capacity().saturating_mul(2));
     }
@@ -1507,10 +1546,11 @@ async fn run_due_panes_with_hook(
             Lane::Io,
             JobCost {
                 input_bytes: discovery_input_bytes,
-                result_bytes: if classifications
-                    .iter()
-                    .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
-                {
+                result_bytes: if classifications.iter().any(|pane| {
+                    pane.identity.is_some()
+                        && (pane.needs_session_discovery
+                            || pane.session_process_identity_inode.is_some())
+                }) {
                     DISCOVERY_RESULT_BYTES
                 } else {
                     1024 * 1024
@@ -1522,7 +1562,9 @@ async fn run_due_panes_with_hook(
         .iter()
         .filter_map(|pane| {
             pane.identity.clone().map(|identity| {
-                let project_cwd = pane.needs_session_discovery.then(|| {
+                let project_cwd = (pane.needs_session_discovery
+                    || pane.session_process_identity_inode.is_some())
+                .then(|| {
                     pane_cwds
                         .get(&pane.pane_id)
                         .unwrap_or(&state.session_cwd)
@@ -1533,6 +1575,9 @@ async fn run_due_panes_with_hook(
                     identity,
                     project_cwd,
                     pane.needs_session_discovery,
+                    pane.shell_birth_identity.clone(),
+                    pane.session_process_identity_inode,
+                    pane.session_process_identity.clone(),
                 )
             })
         })
@@ -1546,22 +1591,59 @@ async fn run_due_panes_with_hook(
             move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
                 let mut discovery_pids: Vec<Pid> = discovery_requests
                     .iter()
-                    .filter(|(_, _, _, needs_discovery)| *needs_discovery)
-                    .map(|(_, identity, _, _)| Pid::from_u32(identity.pid))
+                    .filter(|(_, _, _, needs_discovery, _, birth, _)| {
+                        *needs_discovery || birth.is_some()
+                    })
+                    .map(|(_, identity, _, _, _, _, _)| Pid::from_u32(identity.pid))
                     .collect();
                 discovery_pids.sort_unstable();
                 discovery_pids.dedup();
+                // Hold the kernel identity before refreshing any process facts;
+                // a reused PID cannot inherit the subsequent discovery result.
+                let process_identities: std::collections::HashMap<_, _> = discovery_pids
+                    .iter()
+                    .filter_map(|pid| {
+                        ilium_platform::process_control::capture_pty_process(pid.as_u32())
+                            .ok()
+                            .map(|identity| (*pid, Arc::new(identity)))
+                    })
+                    .collect();
+                let changed_identities: std::collections::HashSet<_> = discovery_requests
+                    .iter()
+                    .filter_map(|(pane_id, identity, _, _, _, birth, retained)| {
+                        cached_session_owner_changed(
+                            *birth,
+                            process_identities
+                                .get(&Pid::from_u32(identity.pid))
+                                .and_then(|proof| proof.pidfs_inode()),
+                            retained.as_ref().map(|proof| {
+                                ilium_platform::process_control::captured_process_is_current(proof)
+                                    .unwrap_or(false)
+                            }),
+                        )
+                        .then_some(*pane_id)
+                    })
+                    .collect();
+                // Stable owners need only the bounded identity check above; do not
+                // refresh their command lines and cwd on every detection tick.
+                discovery_pids.retain(|pid| {
+                    discovery_requests.iter().any(|(pane_id, identity, _, needs, _, _, _)| {
+                        identity.pid == pid.as_u32() && (*needs || changed_identities.contains(pane_id))
+                    })
+                });
                 let mut process_table = discovery_process_table
                     .system
                     .lock()
                     .map_err(|_| std::io::Error::other("process table lock poisoned"))?;
                 crate::session_id::refresh_for_discovery(&mut process_table, &discovery_pids);
                 let mut snapshots = std::collections::HashMap::with_capacity(discovery_pids.len());
-                for (pane_id, identity, project_cwd, needs_discovery) in &discovery_requests {
+                for (pane_id, identity, project_cwd, needs_discovery, shell_identity, _, _) in
+                    &discovery_requests
+                {
                     if context.stop_requested() {
                         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                     }
-                    if *needs_discovery {
+                    if *needs_discovery || changed_identities.contains(pane_id) {
                         let cwd = project_cwd.as_deref().unwrap_or(&discovery_session_cwd);
                         snapshots.insert(
                             *pane_id,
@@ -1569,13 +1651,24 @@ async fn run_due_panes_with_hook(
                                 &process_table,
                                 Pid::from_u32(identity.pid),
                                 cwd,
+                                process_identities
+                                    .get(&Pid::from_u32(identity.pid))
+                                    .filter(|agent| {
+                                        shell_identity.as_ref().is_some_and(|shell| {
+                                            ilium_platform::process_control::captured_process_descends_from(
+                                                agent, shell,
+                                            )
+                                            .unwrap_or(false)
+                                        })
+                                    })
+                                    .cloned(),
                             ),
                         );
                     }
                 }
                 drop(process_table);
                 let mut stale_panes = std::collections::HashSet::new();
-                for (pane_id, identity, _, _) in &discovery_requests {
+                for (pane_id, identity, _, _, _, _, _) in &discovery_requests {
                     if context.stop_requested() {
                         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                     }
@@ -1591,6 +1684,9 @@ async fn run_due_panes_with_hook(
                     stale_panes
                         .capacity()
                         .saturating_mul(std::mem::size_of::<NodeId>()),
+                );
+                result_bytes = result_bytes.saturating_add(
+                    changed_identities.capacity().saturating_mul(std::mem::size_of::<NodeId>()),
                 );
                 for snapshot in snapshots.values().flatten() {
                     result_bytes = result_bytes
@@ -1615,7 +1711,7 @@ async fn run_due_panes_with_hook(
                         "detection process discovery result exceeds retained admission",
                     ));
                 }
-                Ok((snapshots, stale_panes, result_bytes))
+                Ok((snapshots, stale_panes, changed_identities, result_bytes))
             },
         ),
     )
@@ -1623,8 +1719,12 @@ async fn run_due_panes_with_hook(
     .map_err(|_| execution_error("detection process discovery deadline expired"))?
     .map_err(execution_error)?;
     let (discovery_result, _discovery_retention) = discovery_evidence.into_parts();
-    let (discovery_snapshots, stale_classifications, _) = discovery_result;
+    let (discovery_snapshots, stale_classifications, changed_identities, _) = discovery_result;
     for pane in &mut classifications {
+        if changed_identities.contains(&pane.pane_id) {
+            pane.needs_session_discovery = true;
+            pane.session_identity_changed = true;
+        }
         if !stale_classifications.contains(&pane.pane_id) {
             continue;
         }
@@ -1758,6 +1858,32 @@ async fn run_due_panes_with_hook(
             let Some(identity) = pane.identity.as_ref() else {
                 continue;
             };
+            if pane.claude_session_recheck {
+                let process = discovery_snapshots
+                    .get(&pane.pane_id)
+                    .and_then(Option::as_ref)
+                    .and_then(|snapshot| snapshot.process_identity.clone());
+                let Some(process) = process else {
+                    continue;
+                };
+                let project = pane_cwds
+                    .get(&pane.pane_id)
+                    .unwrap_or(&state.session_cwd)
+                    .clone();
+                let current = crate::session_id::claude_session_record_staged(
+                    &execution,
+                    identity.pid,
+                    process,
+                    project,
+                )
+                .await;
+                if !claude_session_record_requires_rediscovery(
+                    pane.captured_session_id.as_deref(),
+                    current.as_deref(),
+                ) {
+                    continue;
+                }
+            }
             let mut exclusion_details: Vec<String> = claimed_session_ids
                 .iter()
                 .filter(|(_, owner)| **owner != pane.pane_id)
@@ -1777,11 +1903,39 @@ async fn run_due_panes_with_hook(
                 .collect();
             excluded_session_ids.extend(captured_ambiguous_session_ids.iter().cloned());
             let project_cwd = pane_cwds.get(&pane.pane_id).unwrap_or(&state.session_cwd);
-            let transcript_locator = TranscriptLocator::new_bounded(
-                &state.home_dir,
+            let process_id = identity.pid;
+            let provider_homes = execution
+                .run(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: 2 * 1024 * 1024,
+                        result_bytes: 32 * 1024,
+                    },
+                    move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                        if context.stop_requested() {
+                            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                        }
+                        Ok(ilium_platform::process_info::agent_provider_homes(
+                            process_id,
+                        ))
+                    },
+                )
+                .await
+                .ok()
+                .and_then(|result| result.view().clone());
+            let home = provider_homes
+                .as_ref()
+                .map_or(&state.home_dir, |homes| &homes.home);
+            let mut transcript_locator = TranscriptLocator::new_bounded(
+                home,
                 project_cwd,
                 crate::session_id::TRANSCRIPT_READ_LIMITS,
             );
+            if let Some(homes) = provider_homes {
+                transcript_locator = transcript_locator
+                    .with_claude_config_dir(&homes.claude_config)
+                    .with_codex_home(&homes.codex_home);
+            }
             // A resumed process can keep the old descriptor open until its
             // transition finishes. That identity stays excluded on every rank.
             if pane.is_session_identity_invalidated
@@ -1877,7 +2031,10 @@ async fn run_due_panes_with_hook(
             let discovered_session = if transcript_locator.read_limit_reached() {
                 None
             } else {
-                discovered_session
+                discovered_session.filter(|session| {
+                    !pane.claude_session_recheck
+                        || session.source == crate::session_id::DiscoverySource::ClaudeSessionRecord
+                })
             };
             discovery_phases.push(crate::session_id::SessionDiscoveryPhase {
                 phase: "overall result",
@@ -1925,11 +2082,14 @@ async fn run_due_panes_with_hook(
             },
         )
         .map_err(|error| execution_error(format!("{error:?}")))?;
-    let identity_checks: Vec<(
+    type IdentityCheck = (
         NodeId,
         ilium_detect::AgentIdentity,
         Option<std::path::PathBuf>,
-    )> = classifications
+        bool,
+        Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+    );
+    let identity_checks: Vec<IdentityCheck> = classifications
         .iter()
         .filter_map(|pane| {
             pane.identity.clone().map(|identity| {
@@ -1944,7 +2104,18 @@ async fn run_due_panes_with_hook(
                             .unwrap_or(&state.session_cwd)
                             .clone()
                     });
-                (pane.pane_id, identity, project_cwd)
+                let has_discovered_session = discovered_session_ids.contains_key(&pane.pane_id);
+                let process_identity = discovery_snapshots
+                    .get(&pane.pane_id)
+                    .and_then(Option::as_ref)
+                    .and_then(|snapshot| snapshot.process_identity.clone());
+                (
+                    pane.pane_id,
+                    identity,
+                    project_cwd,
+                    has_discovered_session,
+                    process_identity,
+                )
             })
         })
         .collect();
@@ -1954,12 +2125,19 @@ async fn run_due_panes_with_hook(
             identity_check_reservation,
             move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
                 let mut stale = std::collections::HashSet::new();
-                for (pane_id, identity, project_cwd) in identity_checks {
+                for (pane_id, identity, project_cwd, has_discovered_session, process_identity) in
+                    identity_checks
+                {
                     if context.stop_requested() {
                         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                     }
                     if !crate::agent_identity_guard::matches_current_agent_identity(&identity)
                         || !ilium_platform::process_control::is_running(identity.pid)
+                        || (has_discovered_session
+                            && process_identity.as_ref().is_some_and(|proof| {
+                                !ilium_platform::process_control::captured_process_is_current(proof)
+                                    .unwrap_or(false)
+                            }))
                         || project_cwd.as_deref().is_some_and(|project_cwd| {
                             !crate::session_id::current_process_project_matches(
                                 identity.pid,
@@ -2141,6 +2319,16 @@ async fn run_due_panes_with_hook(
                 || runtime.session_process_started_at_unix_seconds
                     != classified_pane.session_process_started_at_unix_seconds
                 || runtime.session_agent_class != classified_pane.session_agent_class
+                || runtime.session_process_identity_inode
+                    != classified_pane.session_process_identity_inode
+                || match (
+                    &runtime.session_process_identity,
+                    &classified_pane.session_process_identity,
+                ) {
+                    (Some(current), Some(captured)) => !Arc::ptr_eq(current, captured),
+                    (None, None) => false,
+                    _ => true,
+                }
                 || runtime.pending_generated_session_id
                     != classified_pane.pending_generated_session_id
                 || (classified_pane.needs_session_discovery
@@ -2167,6 +2355,10 @@ async fn run_due_panes_with_hook(
                 runtime.cancel_agent_owned_delivery();
                 runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
                 continue;
+            }
+
+            if classified_pane.claude_session_recheck {
+                runtime.next_claude_session_recheck = now + Duration::from_secs(3);
             }
 
             runtime.agent_launcher_ancestors = classified_pane.agent_launcher_ancestors.clone();
@@ -2480,7 +2672,8 @@ async fn run_due_panes_with_hook(
                 && runtime.session_agent_class != detected_agent_class;
             let owning_process_changed_without_reverification = runtime.session_id.is_some()
                 && classified_pane.identity.as_ref().is_some_and(|identity| {
-                    Some(identity.pid) != runtime.session_process_id
+                    classified_pane.session_identity_changed
+                        || Some(identity.pid) != runtime.session_process_id
                         || Some(identity.started_at_unix_seconds)
                             != runtime.session_process_started_at_unix_seconds
                 })
@@ -2511,6 +2704,8 @@ async fn run_due_panes_with_hook(
                 }
                 runtime.session_id = None;
                 runtime.session_transcript_path = None;
+                runtime.session_process_identity_inode = None;
+                runtime.session_process_identity = None;
                 session_was_cleared = true;
                 runtime.title_generation = runtime.title_generation.saturating_add(1);
                 runtime.session_agent_class = None;
@@ -2528,12 +2723,21 @@ async fn run_due_panes_with_hook(
 
             let mut newly_resolved_session = None;
             if let Some(discovered) = discovered_session_ids.get(&pane_id) {
+                let process_identity = discovery_snapshots
+                    .get(&pane_id)
+                    .and_then(Option::as_ref)
+                    .and_then(|snapshot| snapshot.process_identity.clone());
+                let process_identity_inode = process_identity
+                    .as_ref()
+                    .and_then(|identity| identity.pidfs_inode());
                 let session_id = &discovered.session_id;
                 if runtime.session_id.as_ref() != Some(session_id) {
                     let invalidated_session_id = runtime.invalidated_session_id.clone();
                     let correlation_id = runtime.pending_session_transition_correlation_id.take();
                     runtime.session_id = Some(session_id.clone());
                     runtime.session_transcript_path = discovered.transcript_path.clone();
+                    runtime.session_process_identity_inode = process_identity_inode;
+                    runtime.session_process_identity = process_identity.clone();
                     runtime.session_agent_class = detected_agent_class.clone();
                     runtime.session_process_id = classified_pane
                         .identity
@@ -2553,14 +2757,18 @@ async fn run_due_panes_with_hook(
                         pane_id,
                         session_id: session_id.clone(),
                         process_id: runtime.session_process_id,
+                        process_identity_inode: runtime.session_process_identity_inode,
                         title_generation: runtime.title_generation,
                         transcript_path: runtime.session_transcript_path.clone(),
                     });
                 } else {
                     let previous_process_id = runtime.session_process_id;
                     let previous_process_start = runtime.session_process_started_at_unix_seconds;
+                    let previous_process_identity_inode = runtime.session_process_identity_inode;
                     let previous_transcript_path = runtime.session_transcript_path.clone();
                     runtime.session_transcript_path = discovered.transcript_path.clone();
+                    runtime.session_process_identity_inode = process_identity_inode;
+                    runtime.session_process_identity = process_identity;
                     runtime.session_agent_class = detected_agent_class;
                     runtime.session_process_id = classified_pane
                         .identity
@@ -2570,9 +2778,14 @@ async fn run_due_panes_with_hook(
                         .identity
                         .as_ref()
                         .map(|identity| identity.started_at_unix_seconds);
+                    if classified_pane.session_identity_changed {
+                        runtime.title_generation = runtime.title_generation.saturating_add(1);
+                    }
                     if runtime.session_process_id != previous_process_id
                         || runtime.session_process_started_at_unix_seconds != previous_process_start
+                        || runtime.session_process_identity_inode != previous_process_identity_inode
                         || runtime.session_transcript_path != previous_transcript_path
+                        || classified_pane.session_identity_changed
                         || process_was_replaced
                     {
                         state.request_snapshot_save();
@@ -2580,6 +2793,7 @@ async fn run_due_panes_with_hook(
                             pane_id,
                             session_id: session_id.clone(),
                             process_id: runtime.session_process_id,
+                            process_identity_inode: runtime.session_process_identity_inode,
                             title_generation: runtime.title_generation,
                             transcript_path: runtime.session_transcript_path.clone(),
                         });
@@ -3410,6 +3624,18 @@ fn sentence_case(value: &str) -> String {
     first.to_uppercase().chain(characters).collect()
 }
 
+fn claude_session_record_requires_rediscovery(bound: Option<&str>, current: Option<&str>) -> bool {
+    current.is_some_and(|session_id| Some(session_id) != bound)
+}
+
+fn cached_session_owner_changed(
+    previous: Option<u64>,
+    current: Option<u64>,
+    retained_is_current: Option<bool>,
+) -> bool {
+    previous.is_some_and(|previous| current != Some(previous) || retained_is_current != Some(true))
+}
+
 /// Returns whether existing transcript ownership remains conclusive enough
 /// to avoid repeated command/cwd refreshes and `/proc/<pid>/fd` scans.
 fn session_owner_is_stable(
@@ -3858,6 +4084,25 @@ mod tests {
     use crate::config::DetectionConfig;
     use ilium_core::{AgentActivity, AgentClass};
 
+    #[test]
+    fn cached_session_birth_change_requires_rediscovery() {
+        assert!(!cached_session_owner_changed(None, None, None));
+        assert!(!cached_session_owner_changed(None, Some(10), None));
+        assert!(!cached_session_owner_changed(
+            Some(10),
+            Some(10),
+            Some(true)
+        ));
+        assert!(cached_session_owner_changed(Some(10), Some(11), Some(true)));
+        assert!(cached_session_owner_changed(Some(10), None, Some(true)));
+        assert!(cached_session_owner_changed(
+            Some(10),
+            Some(10),
+            Some(false)
+        ));
+        assert!(cached_session_owner_changed(Some(10), Some(10), None));
+    }
+
     #[tokio::test]
     async fn shell_ownership_observation_uses_the_admitted_io_worker() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
@@ -4269,6 +4514,22 @@ mod tests {
             Some(Duration::ZERO)
         );
         assert_eq!(minimum_detection_delay(std::iter::empty(), now), None);
+    }
+
+    #[test]
+    fn claude_session_record_rechecks_only_a_verified_different_session() {
+        assert!(!claude_session_record_requires_rediscovery(
+            Some("old"),
+            None
+        ));
+        assert!(!claude_session_record_requires_rediscovery(
+            Some("old"),
+            Some("old")
+        ));
+        assert!(claude_session_record_requires_rediscovery(
+            Some("old"),
+            Some("new")
+        ));
     }
 
     #[test]

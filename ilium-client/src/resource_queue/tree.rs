@@ -142,6 +142,7 @@ impl ResourceRows {
         group: bool,
         icons: &crate::icon_settings::IconSettings,
         stable: bool,
+        visible_nodes: Option<&HashSet<NodeId>>,
     ) -> Vec<TreeItem<'static, NodeId>> {
         self.projects.get(&project).into_iter().flatten().filter_map(|id|{
    let ResourceRowTarget::Resource{resource_id,..}=self.targets.get(id)? else {return None;};
@@ -153,6 +154,7 @@ impl ResourceRows {
    if group {
     for reservation in queue {
      let row_id=self.targets.iter().find_map(|(id,target)|matches!(target,ResourceRowTarget::Participant{project_id,resource_id:resource,reservation_id,..} if *project_id==project&&resource==&record.definition.id&&reservation_id==&reservation.id).then_some(*id))?;
+     if matches!(self.targets.get(&row_id), Some(ResourceRowTarget::Participant { pane_id: Some(pane_id), .. }) if visible_nodes.is_some_and(|visible| !visible.contains(pane_id))) { continue; }
      let prefix=if matches!(reservation.state,ReservationState::Queued) {let position=record.reservations.iter().filter(|other|matches!(other.state,ReservationState::Queued)&&other.ticket<=reservation.ticket).count(); if waiters>1 {format!("{} {position}. ",icons.glyph_for_display(crate::icon_settings::IconTarget::ResourceQueued,stable))}else{format!("{} ",icons.glyph_for_display(crate::icon_settings::IconTarget::ResourceQueued,stable))}}else{format!("{} ",icons.glyph_for_display(crate::icon_settings::IconTarget::ResourceOwner,stable))};
      let local=matches!(self.targets.get(&row_id),Some(ResourceRowTarget::Participant{pane_id:Some(_),..}));
      children.push(TreeItem::new_leaf(row_id,Line::from(format!("{prefix}{}{}",single_line(&reservation.agent.label),if local {""}else{" ↗ referenced invocation"}))));
@@ -362,16 +364,41 @@ pub(crate) mod tests {
         let before = serde_json::to_vec(&tree).unwrap();
         let mut rows = ResourceRows::default();
         rows.rebuild(&tree, &catalog, "test", &live(&catalog));
-        let grouped = rows.items(project, &catalog, true, &Default::default(), false);
+        let grouped = rows.items(project, &catalog, true, &Default::default(), false, None);
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].children().len(), 1);
         assert!(grouped_local_panes(&rows, &tree, project).contains(&pane));
         assert!(
-            rows.items(project, &catalog, false, &Default::default(), false)[0]
+            rows.items(project, &catalog, false, &Default::default(), false, None)[0]
                 .children()
                 .is_empty()
         );
         assert_eq!(before, serde_json::to_vec(&tree).unwrap());
+    }
+    #[test]
+    fn activity_filter_keeps_resource_row_but_hides_inactive_local_participant() {
+        let (tree, catalog, project, pane) = fixture();
+        let mut rows = ResourceRows::default();
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        let hidden = rows.items(
+            project,
+            &catalog,
+            true,
+            &Default::default(),
+            false,
+            Some(&HashSet::new()),
+        );
+        assert_eq!(hidden.len(), 1);
+        assert!(hidden[0].children().is_empty());
+        let visible = rows.items(
+            project,
+            &catalog,
+            true,
+            &Default::default(),
+            false,
+            Some(&HashSet::from([pane])),
+        );
+        assert_eq!(visible[0].children().len(), 1);
     }
     #[test]
     fn row_identity_survives_snapshot_and_queue_reordering() {

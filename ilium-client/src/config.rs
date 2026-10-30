@@ -1043,6 +1043,8 @@ pub struct UiSettings {
     /// placement in the right panel.
     pub tree_order: TreeOrder,
     pub tree_row_layout: crate::tree_row_layout::TreeRowLayout,
+    pub tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout,
+    pub tree_inactivity_minutes: u16,
     /// Per-project Appearance setting mirrored from `.ilium/config.yaml`.
     /// This value is intentionally excluded from the global `config.toml`.
     pub show_project_separators: bool,
@@ -1089,6 +1091,10 @@ pub struct UiSettings {
     /// detected agent pane in a persistent banner below its toolbar (see
     /// `ilium_core::Tree::set_last_prompt`).
     pub last_prompt_enabled: bool,
+    /// Offer a Goal tab when a current agent goal is known.
+    pub goal_tab_enabled: bool,
+    /// Offer the goal flag and its detailed popover in the agent toolbar.
+    pub goal_toolbar_icon_enabled: bool,
     /// Maximum rows the last-prompt banner reserves. A prompt with more
     /// lines than this is middle-truncated (see `crate::last_prompt_banner`)
     /// rather than growing the banner, so the reservation stays a fixed
@@ -1152,6 +1158,8 @@ impl Default for UiSettings {
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::default(),
+            tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
+            tree_inactivity_minutes: 15,
             show_project_separators: false,
             resource_queue_grouping: true,
             motion_level: MotionLevel::default(),
@@ -1167,6 +1175,8 @@ impl Default for UiSettings {
             section_frames_enabled: true,
             show_toolbar_labels: true,
             last_prompt_enabled: true,
+            goal_tab_enabled: true,
+            goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             attention_running_indicator:
@@ -1285,6 +1295,8 @@ struct RawUiConfig {
     antigravity_agent_icon: Option<String>,
     tree_order: Option<String>,
     tree_row_layout: Option<crate::tree_row_layout::TreeRowLayout>,
+    tree_toolbar_layout: Option<crate::tree_toolbar_layout::TreeToolbarLayout>,
+    tree_inactivity_minutes: Option<u16>,
     motion_level: Option<String>,
     sidebar_density: Option<String>,
     use_stable_glyphs: Option<bool>,
@@ -1298,6 +1310,8 @@ struct RawUiConfig {
     section_frames_enabled: Option<bool>,
     show_toolbar_labels: Option<bool>,
     last_prompt_enabled: Option<bool>,
+    goal_tab_enabled: Option<bool>,
+    goal_toolbar_icon_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     agent_monitoring_mode: Option<String>,
     agent_tree_model_icons: Option<bool>,
@@ -1818,6 +1832,8 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         },
         tree_order,
         tree_row_layout: raw.tree_row_layout.unwrap_or_default().normalized(),
+        tree_toolbar_layout: raw.tree_toolbar_layout.unwrap_or_default().normalized(),
+        tree_inactivity_minutes: raw.tree_inactivity_minutes.unwrap_or(15).max(1),
         show_project_separators: false,
         resource_queue_grouping: raw
             .resource_queue_grouping
@@ -1855,6 +1871,10 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         last_prompt_enabled: raw
             .last_prompt_enabled
             .unwrap_or(defaults.last_prompt_enabled),
+        goal_tab_enabled: raw.goal_tab_enabled.unwrap_or(defaults.goal_tab_enabled),
+        goal_toolbar_icon_enabled: raw
+            .goal_toolbar_icon_enabled
+            .unwrap_or(defaults.goal_toolbar_icon_enabled),
         last_prompt_max_lines: match raw.last_prompt_max_lines {
             Some(lines)
                 if (MIN_LAST_PROMPT_MAX_LINES..=MAX_LAST_PROMPT_MAX_LINES).contains(&lines) =>
@@ -2233,6 +2253,31 @@ fn merge_keybindings(
         // every binding), so this always finds a match.
         if let Some(binding) = bindings.iter_mut().find(|binding| binding.action == action) {
             binding.key = key;
+        }
+    }
+
+    // New goal actions must not invalidate an existing user's explicit
+    // bindings merely because one of their old choices became a default.
+    // Explicit collisions still fail below; only an unconfigured new action
+    // moves to the first free printable key.
+    for action in [
+        keymap::Action::ToggleGoalTab,
+        keymap::Action::ToggleGoalPopover,
+    ] {
+        if overrides.contains_key(keymap::action_name(action)) {
+            continue;
+        }
+        let Some(index) = bindings.iter().position(|binding| binding.action == action) else {
+            continue;
+        };
+        if bindings
+            .iter()
+            .enumerate()
+            .any(|(other, binding)| other != index && binding.key == bindings[index].key)
+        {
+            if let Some(key) = keymap::available_keys(&bindings).first().copied() {
+                bindings[index].key = BindingKey::Character(key);
+            }
         }
     }
 
@@ -3103,6 +3148,23 @@ fn write_toml_document(path: &Path, document: &ConfigDocument) -> Result<(), Cli
 fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     let mut table = toml::value::Table::new();
     table.insert(
+        "tree_toolbar_layout".to_string(),
+        toml::Value::Table(toml::value::Table::from_iter([(
+            "entries".to_string(),
+            toml::Value::Array(
+                ui.tree_toolbar_layout
+                    .entries
+                    .iter()
+                    .map(|entry| toml::Value::String(entry.key().to_string()))
+                    .collect(),
+            ),
+        )])),
+    );
+    table.insert(
+        "tree_inactivity_minutes".to_string(),
+        toml::Value::Integer(i64::from(ui.tree_inactivity_minutes)),
+    );
+    table.insert(
         "tree_row_layout".to_string(),
         toml::Value::Table(toml::value::Table::from_iter([
             (
@@ -3266,6 +3328,14 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "last_prompt_enabled".to_string(),
         toml::Value::Boolean(ui.last_prompt_enabled),
+    );
+    table.insert(
+        "goal_tab_enabled".to_string(),
+        toml::Value::Boolean(ui.goal_tab_enabled),
+    );
+    table.insert(
+        "goal_toolbar_icon_enabled".to_string(),
+        toml::Value::Boolean(ui.goal_toolbar_icon_enabled),
     );
     table.insert(
         "last_prompt_max_lines".to_string(),
@@ -4323,6 +4393,30 @@ mod tests {
     }
 
     #[test]
+    fn existing_remaps_take_precedence_over_new_goal_defaults() {
+        let overrides = HashMap::from([
+            ("quit".to_string(), "G".to_string()),
+            ("new_terminal".to_string(), "U".to_string()),
+        ]);
+        let bindings = merge_keybindings(&overrides).unwrap();
+        assert_eq!(
+            keymap::action_for_table(&bindings, BindingKey::Character('G')),
+            Some(keymap::Action::Quit)
+        );
+        assert_eq!(
+            keymap::action_for_table(&bindings, BindingKey::Character('U')),
+            Some(keymap::Action::NewTerminal)
+        );
+        assert!(bindings
+            .iter()
+            .any(|binding| binding.action == keymap::Action::ToggleGoalTab));
+        assert!(bindings
+            .iter()
+            .any(|binding| binding.action == keymap::Action::ToggleGoalPopover));
+        assert!(reject_duplicate_keys(&bindings).is_ok());
+    }
+
+    #[test]
     fn a_theme_override_replaces_only_the_specified_color() {
         let dir = scratch_dir();
         std::fs::write(
@@ -4379,6 +4473,22 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn tree_toolbar_settings_round_trip_and_preserve_an_empty_layout() {
+        let dir = scratch_dir();
+        let ui = UiSettings {
+            tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout {
+                entries: Vec::new(),
+            },
+            tree_inactivity_minutes: 27,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+        let restored = load(&dir).unwrap().ui;
+        assert_eq!(restored.tree_toolbar_layout, ui.tree_toolbar_layout);
+        assert_eq!(restored.tree_inactivity_minutes, 27);
     }
 
     #[test]
@@ -5022,6 +5132,8 @@ mod tests {
             },
             tree_order: TreeOrder::NameDescending,
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::mixed(),
+            tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
+            tree_inactivity_minutes: 15,
             show_project_separators: false,
             resource_queue_grouping: true,
             tree_toolbar_always_visible: false,
@@ -5035,6 +5147,8 @@ mod tests {
             section_frames_enabled: false,
             show_toolbar_labels: false,
             last_prompt_enabled: false,
+            goal_tab_enabled: false,
+            goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
             attention_progress_reports: false,
@@ -5187,6 +5301,26 @@ mod tests {
         let loaded = load(&dir).unwrap();
         assert!(!loaded.ui.last_prompt_enabled);
         assert_eq!(loaded.ui.last_prompt_max_lines, 8);
+    }
+
+    #[test]
+    fn goal_visibility_settings_default_on_and_persist_independently() {
+        let dir = scratch_dir();
+        let defaults = load(&dir).unwrap().ui;
+        assert!(defaults.goal_tab_enabled && defaults.goal_toolbar_icon_enabled);
+        for (tab, icon) in [(true, false), (false, true), (false, false), (true, true)] {
+            let settings = UiSettings {
+                goal_tab_enabled: tab,
+                goal_toolbar_icon_enabled: icon,
+                ..UiSettings::default()
+            };
+            save_ui_settings(&dir, &settings).unwrap();
+            let loaded = load(&dir).unwrap().ui;
+            assert_eq!(
+                (loaded.goal_tab_enabled, loaded.goal_toolbar_icon_enabled),
+                (tab, icon)
+            );
+        }
     }
 
     #[test]

@@ -1184,3 +1184,87 @@ fn wall_clock_rollback_cannot_reverse_definition_update_time() {
     );
     validate_resource_catalog(&earlier).unwrap();
 }
+fn recover_stale(c: &ResourceCatalog, agent: Option<&str>) -> Result<ResourceCatalog, String> {
+    let mut ctx = context(9, agent);
+    ctx.expected_revision = Some(c.revision);
+    apply_resource_command(
+        c,
+        ResourceCommand::RecoverStaleOwner {
+            resource_id: "gpu".into(),
+            reason: "Checked no workload uses the board".into(),
+        },
+        &ctx,
+    )
+    .map(|t| t.catalog)
+    .map_err(|e| e.code)
+}
+fn with_dead_owner() -> ResourceCatalog {
+    let c = reserve(&reserve(&catalog(), "a", 2, 10), "b", 3, 10);
+    let mut ctx = context(4, None);
+    ctx.actor = ResourceActor::System;
+    apply_resource_command(
+        &c,
+        ResourceCommand::ReconcileInvocation {
+            agent: actor("a"),
+            evidence: InvocationEligibility::Dead,
+        },
+        &ctx,
+    )
+    .unwrap()
+    .catalog
+}
+#[test]
+fn agent_clears_dead_owner_in_one_step_and_next_waiter_is_promoted() {
+    let c = with_dead_owner();
+    assert!(matches!(
+        c.resources[&"gpu".into()].reservations[0].state,
+        ReservationState::NeedsAttention { .. }
+    ));
+    let c = recover_stale(&c, Some("b")).unwrap();
+    let r = &c.resources[&"gpu".into()];
+    assert!(matches!(
+        r.reservations[0].state,
+        ReservationState::Revoked { .. }
+    ));
+    assert_eq!(r.reservations[1].state, ReservationState::Owned);
+    assert!(!r.clearance_required);
+}
+#[test]
+fn agent_cannot_clear_live_owner_or_act_as_system() {
+    let live = reserve(&catalog(), "a", 2, 10);
+    assert_eq!(recover_stale(&live, Some("b")).unwrap_err(), "owner_live");
+    let stale = with_dead_owner();
+    let mut ctx = context(9, None);
+    ctx.actor = ResourceActor::System;
+    ctx.expected_revision = Some(stale.revision);
+    let denied = apply_resource_command(
+        &stale,
+        ResourceCommand::RecoverStaleOwner {
+            resource_id: "gpu".into(),
+            reason: "x".into(),
+        },
+        &ctx,
+    )
+    .unwrap_err();
+    assert_eq!(denied.code, "agent_or_user_required");
+}
+#[test]
+fn stale_recovery_needs_a_stale_owner_and_a_fresh_revision() {
+    assert_eq!(
+        recover_stale(&catalog(), Some("b")).unwrap_err(),
+        "nothing_to_recover"
+    );
+    let stale = with_dead_owner();
+    let mut ctx = context(9, Some("b"));
+    ctx.expected_revision = Some(stale.revision - 1);
+    let err = apply_resource_command(
+        &stale,
+        ResourceCommand::RecoverStaleOwner {
+            resource_id: "gpu".into(),
+            reason: "x".into(),
+        },
+        &ctx,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "revision_conflict");
+}

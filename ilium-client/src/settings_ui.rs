@@ -466,6 +466,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
     match state.tab {
+        SettingsTab::Toolbar => {
+            crate::tree_toolbar_settings::render(frame, layout.content_area, app, state)
+        }
         SettingsTab::LlmInstructions => {}
         SettingsTab::Setup => render_scrollable(
             frame,
@@ -763,6 +766,9 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::About => {}
+        SettingsTab::Toolbar => {
+            push_help_anchor(&mut anchors, layout, "TOOLBAR-01", 2, 0, true);
+        }
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
             for (topic_id, line, row) in
@@ -1053,6 +1059,8 @@ pub fn settings_help_anchors(
                     AppearanceRow::ShowToolbarLabels => "AP-17",
                     AppearanceRow::SectionFrames => "AP-33",
                     AppearanceRow::LastPrompt => "AP-18",
+                    AppearanceRow::GoalTab => "AP-37",
+                    AppearanceRow::GoalToolbarIcon => "AP-38",
                     AppearanceRow::LastPromptMaxLines => "AP-19",
                     AppearanceRow::ProgressMonitor => "AP-20",
                     AppearanceRow::ProgressMonitorMaxLines => "AP-21",
@@ -1348,6 +1356,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Appearance => "◐",
         SettingsTab::Padding => "▢",
         SettingsTab::Icons => "▦",
+        SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
         SettingsTab::Optimization => "↗",
@@ -1876,7 +1885,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
-        SettingsTab::Padding => 0,
+        SettingsTab::Padding | SettingsTab::Toolbar => 0,
         SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,
@@ -2268,6 +2277,8 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             &app.tree,
             &mut preview_tree_state,
             crate::tree_ui::TreeRenderOptions {
+                visibility: None,
+                toolbar_layout: &app.ui_settings.tree_toolbar_layout,
                 custom_toolbar_profiles: None,
                 custom_toolbar_selected: None,
                 custom_toolbar_hovered: None,
@@ -4785,6 +4796,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
         AppearanceRow::SectionFrames => "Section frames",
         AppearanceRow::LastPrompt => "Last prompt banner",
+        AppearanceRow::GoalTab => "Goal tab",
+        AppearanceRow::GoalToolbarIcon => "Goal toolbar icon",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::ProgressMonitor => "Progress monitor",
         AppearanceRow::ProgressMonitorMaxLines => "Progress footer lines",
@@ -4873,6 +4886,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::LastPrompt => {
             "Show the last prompt you typed or pasted and submitted into a detected agent pane, in a banner below its toolbar. Only an exactly-reconstructed submission updates it -- an unrecognised input leaves the previous prompt showing."
         }
+        AppearanceRow::GoalTab => {
+            "Offer a Goal tab in the prompt banner when the agent has a current goal."
+        }
+        AppearanceRow::GoalToolbarIcon => {
+            "Show a goal flag in the agent toolbar with a readable goal popover."
+        }
         AppearanceRow::LastPromptMaxLines => {
             "Maximum rows the last-prompt banner can grow to -- it only reserves as many as the prompt actually needs (wrapping long lines to fit), up to this ceiling. A prompt that still doesn't fit is truncated in the middle, keeping its first and last lines."
         }
@@ -4944,6 +4963,8 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         AppearanceRow::ShowToolbarLabels => on_off(ui.show_toolbar_labels),
         AppearanceRow::SectionFrames => on_off(ui.section_frames_enabled),
         AppearanceRow::LastPrompt => on_off(ui.last_prompt_enabled),
+        AppearanceRow::GoalTab => on_off(ui.goal_tab_enabled),
+        AppearanceRow::GoalToolbarIcon => on_off(ui.goal_toolbar_icon_enabled),
         AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
         AppearanceRow::ProgressMonitor => on_off(ui.progress_monitor_enabled),
         AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
@@ -7330,8 +7351,8 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙",
-            "↻", "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
+            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {

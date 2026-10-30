@@ -35,6 +35,7 @@ pub enum DiscoverySource {
     GeneratedAtLaunch,
     Arguments,
     OpenFile,
+    ClaudeSessionRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +101,8 @@ pub(crate) const TRANSCRIPT_READ_LIMITS: ilium_agent_session::TranscriptReadLimi
 #[derive(Debug)]
 pub struct ProcessDiscoverySnapshot {
     pub pid: u32,
+    pub process_identity:
+        Option<std::sync::Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     pub process_cwd: Option<PathBuf>,
     pub project_matches: bool,
     pub arguments: Vec<String>,
@@ -109,7 +112,16 @@ pub fn capture_process_discovery(
     system: &System,
     pid: Pid,
     project_cwd: &Path,
+    process_identity: Option<std::sync::Arc<ilium_platform::process_control::PtyProcessIdentity>>,
 ) -> Option<ProcessDiscoverySnapshot> {
+    #[cfg(target_os = "linux")]
+    if process_identity.as_ref().is_some_and(|identity| {
+        !identity.is_for_process(pid.as_u32())
+            || !ilium_platform::process_control::captured_process_is_current(identity)
+                .unwrap_or(false)
+    }) {
+        return None;
+    }
     let process = system.process(pid)?;
     let process_cwd = process
         .cwd()
@@ -120,6 +132,7 @@ pub fn capture_process_discovery(
         .is_some_and(|cwd| same_canonical_path(cwd, project_cwd));
     Some(ProcessDiscoverySnapshot {
         pid: pid.as_u32(),
+        process_identity,
         process_cwd,
         project_matches,
         arguments: ilium_detect::effective_arguments(process),
@@ -377,6 +390,39 @@ async fn open_files_staged(
     }))
 }
 
+pub(crate) async fn claude_session_record_staged(
+    execution: &crate::execution::ExecutionClient,
+    pid: u32,
+    process: std::sync::Arc<ilium_platform::process_control::PtyProcessIdentity>,
+    project: PathBuf,
+) -> Option<String> {
+    execution
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 17 * 1024 * 1024,
+                result_bytes: 4096,
+            },
+            move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                if context.stop_requested() {
+                    return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                }
+                let homes = ilium_platform::process_info::agent_provider_homes(pid);
+                Ok(homes.and_then(|homes| {
+                    ilium_platform::claude_session_record::session_for_process(
+                        pid,
+                        &process,
+                        &homes.claude_config,
+                        &project,
+                    )
+                }))
+            },
+        )
+        .await
+        .ok()
+        .and_then(|result| result.view().clone())
+}
+
 #[allow(clippy::too_many_arguments)] // Preserve explicit process, transcript and exclusion evidence inputs.
 pub async fn discover_with_trace_staged(
     execution: &crate::execution::ExecutionClient,
@@ -453,10 +499,47 @@ pub async fn discover_with_trace_staged(
         detail: format!("canonical cwd matches {}", project_cwd.display()),
     });
 
+    // The provider's process-owned socket binds its current session record to
+    // this captured process; verify both sides of the staged transcript read.
+    let mut record_discovery = None;
+    let mut record_observed = false;
+    if *class == AgentClass::Claude {
+        if let Some(process) = snapshot.process_identity.clone() {
+            let project = project_cwd.to_path_buf();
+            if let Some(session_id) =
+                claude_session_record_staged(execution, pid, process.clone(), project.clone()).await
+            {
+                record_observed = true;
+                if !excluded_session_ids.contains(&session_id) {
+                    if let Some(transcript) =
+                        verify_session_staged(execution, locator, class, &session_id).await?
+                    {
+                        if claude_session_record_staged(execution, pid, process, project)
+                            .await
+                            .as_ref()
+                            == Some(&session_id)
+                        {
+                            record_discovery = Some(DiscoveredSession {
+                                session_id,
+                                source: DiscoverySource::ClaudeSessionRecord,
+                                transcript_path: Some(transcript.path),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
     let excluded_list = sorted_session_ids(excluded_session_ids.iter().cloned());
     let open_file_discovery =
         open_files_staged(execution, pid, class, locator, excluded_session_ids).await?;
-    let discovered = if let Some(open_file) = open_file_discovery
+    let discovered = if let Some(discovered) = record_discovery {
+        phases.push(SessionDiscoveryPhase { phase: "Claude process session record", outcome: "resolved", detail: "The live process owns the session-record socket and the transcript matches the project".into() });
+        Some(discovered)
+    } else if record_observed {
+        phases.push(SessionDiscoveryPhase { phase: "Claude process session record", outcome: "unresolved", detail: "The current session record could not be verified; older transcript descriptors are not authoritative".into() });
+        None
+    } else if let Some(open_file) = open_file_discovery
         .as_ref()
         .filter(|open_file| open_file.discovered_session_id.is_some())
     {
@@ -620,6 +703,34 @@ fn same_canonical_path(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn discovery_retains_a_live_process_identity_when_available() {
+        let process_id = Pid::from_u32(std::process::id());
+        let mut system = System::new();
+        refresh_for_discovery(&mut system, &[process_id]);
+        let project = std::env::current_dir().unwrap();
+        let unpinned = capture_process_discovery(&system, process_id, &project, None).unwrap();
+        assert!(unpinned.process_identity.is_none());
+        let identity = std::sync::Arc::new(
+            ilium_platform::process_control::capture_pty_process(process_id.as_u32()).unwrap(),
+        );
+        assert!(
+            capture_process_discovery(&system, process_id, &project, Some(identity.clone()))
+                .is_some()
+        );
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let child_id = Pid::from_u32(child.id());
+        refresh_for_discovery(&mut system, &[child_id]);
+        assert!(capture_process_discovery(&system, child_id, &project, None).is_some());
+        assert!(capture_process_discovery(&system, child_id, &project, Some(identity)).is_none());
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
 
     #[tokio::test]
     async fn staged_verification_uses_io_and_cpu_lanes() {

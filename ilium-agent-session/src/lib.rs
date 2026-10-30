@@ -15,6 +15,7 @@ use ilium_core::AgentClass;
 use serde_json::Value;
 
 mod codex_thread_name;
+pub mod goal_evidence;
 mod request_evidence;
 pub use codex_thread_name::official_thread_name;
 pub use request_evidence::{
@@ -276,8 +277,14 @@ fn transcript_metadata_matches_bounded(
     expected_project_cwd: &Path,
     budget: &TranscriptReadBudget,
     parser: Option<&dyn TranscriptMetadataParser>,
+    preserve_access_time: bool,
 ) -> bool {
-    let Ok(file) = ilium_platform::secure_fs::open_regular_file(path) else {
+    let open = if preserve_access_time {
+        ilium_platform::secure_fs::open_regular_file_without_atime
+    } else {
+        ilium_platform::secure_fs::open_regular_file
+    };
+    let Ok(file) = open(path) else {
         return false;
     };
     let mut reader = BufReader::new(file);
@@ -377,9 +384,12 @@ fn bounded_candidate_paths(
 #[derive(Debug, Clone)]
 pub struct TranscriptLocator {
     home: PathBuf,
+    claude_config_dir: PathBuf,
+    codex_home: PathBuf,
     project_cwd: PathBuf,
     read_budget: Option<std::sync::Arc<TranscriptReadBudget>>,
     metadata_parser: Option<std::sync::Arc<dyn TranscriptMetadataParser>>,
+    preserve_access_time: bool,
 }
 
 /// A single open, bounded metadata stream. The file and all filesystem
@@ -644,9 +654,12 @@ impl TranscriptLocator {
     pub fn new(home: &Path, project_cwd: &Path) -> Self {
         Self {
             home: home.to_path_buf(),
+            claude_config_dir: home.join(".claude"),
+            codex_home: home.join(".codex"),
             project_cwd: canonical_or_original(project_cwd),
             read_budget: None,
             metadata_parser: None,
+            preserve_access_time: false,
         }
     }
 
@@ -660,13 +673,31 @@ impl TranscriptLocator {
     pub fn with_read_limits(&self, limits: TranscriptReadLimits) -> Self {
         Self {
             home: self.home.clone(),
+            claude_config_dir: self.claude_config_dir.clone(),
+            codex_home: self.codex_home.clone(),
             project_cwd: self.project_cwd.clone(),
             read_budget: Some(std::sync::Arc::new(TranscriptReadBudget::new(limits))),
             metadata_parser: self.metadata_parser.clone(),
+            preserve_access_time: self.preserve_access_time,
         }
     }
     pub fn read_limits(&self) -> Option<TranscriptReadLimits> {
         self.read_budget.as_ref().map(|budget| budget.limits)
+    }
+    /// Use the verified agent process's Claude configuration root.
+    pub fn with_claude_config_dir(mut self, path: &Path) -> Self {
+        self.claude_config_dir = path.to_path_buf();
+        self
+    }
+    /// Require provider transcript reads to leave access timestamps unchanged.
+    pub fn without_access_time_updates(mut self) -> Self {
+        self.preserve_access_time = true;
+        self
+    }
+    /// Use the verified agent process's Codex store root.
+    pub fn with_codex_home(mut self, path: &Path) -> Self {
+        self.codex_home = path.to_path_buf();
+        self
     }
     /// Installs an explicitly owned CPU parser only on a bounded attempt.
     /// The caller must run discovery on its admitted I/O owner and provide a
@@ -737,7 +768,12 @@ impl TranscriptLocator {
         } else {
             path.to_path_buf()
         };
-        let file = ilium_platform::secure_fs::open_regular_file(&metadata_path).ok()?;
+        let file = if self.preserve_access_time {
+            ilium_platform::secure_fs::open_regular_file_without_atime(&metadata_path)
+        } else {
+            ilium_platform::secure_fs::open_regular_file(&metadata_path)
+        }
+        .ok()?;
         Some(StagedMetadataCursor {
             locator: self.clone(),
             class: class.clone(),
@@ -793,7 +829,8 @@ impl TranscriptLocator {
         class: &AgentClass,
         session_id: &str,
     ) -> Option<VerifiedTranscript> {
-        if !looks_like_uuid(session_id) {
+        if !looks_like_uuid(session_id) || (self.preserve_access_time && self.read_budget.is_none())
+        {
             return None;
         }
 
@@ -818,6 +855,9 @@ impl TranscriptLocator {
         class: &AgentClass,
         path: &Path,
     ) -> Option<VerifiedTranscript> {
+        if self.preserve_access_time && self.read_budget.is_none() {
+            return None;
+        }
         let session_id = session_id_from_transcript_path(class, path)?;
         if !self.path_is_in_expected_store(class, path) {
             return None;
@@ -841,7 +881,9 @@ impl TranscriptLocator {
                 &self.project_cwd,
                 budget,
                 self.metadata_parser.as_deref(),
+                self.preserve_access_time,
             ),
+            None if self.preserve_access_time => false,
             None => transcript_metadata_matches(class, path, &session_id, &self.project_cwd),
         };
         if !matches || self.read_limit_reached() {
@@ -861,6 +903,11 @@ impl TranscriptLocator {
         class: &AgentClass,
         session_id: &str,
     ) -> std::io::Result<GenuineRequestEvidence> {
+        // The request reader uses a separate ordinary file open; it cannot
+        // satisfy the locator's access-time preservation contract yet.
+        if self.preserve_access_time {
+            return Ok(GenuineRequestEvidence::Unavailable);
+        }
         let Some(transcript) = self.transcript_for_session(class, session_id) else {
             return Ok(GenuineRequestEvidence::Unavailable);
         };
@@ -884,6 +931,11 @@ impl TranscriptLocator {
     }
 
     fn candidate_paths_for_session(&self, class: &AgentClass, session_id: &str) -> Vec<PathBuf> {
+        // Codex discovery walks directories; until that traversal can preserve
+        // directory access times, a preserving lookup must fail closed.
+        if self.preserve_access_time && matches!(class, AgentClass::Codex) {
+            return Vec::new();
+        }
         let Some(budget) = &self.read_budget else {
             return self
                 .candidate_paths(class)
@@ -939,14 +991,14 @@ impl TranscriptLocator {
     }
 
     fn claude_project_dir(&self) -> PathBuf {
-        self.home
-            .join(".claude")
+        self.claude_config_dir
+            .clone()
             .join("projects")
             .join(slugify_claude_project_path(&self.project_cwd))
     }
 
     fn codex_sessions_dir(&self) -> PathBuf {
-        self.home.join(".codex").join("sessions")
+        self.codex_home.join("sessions")
     }
 
     fn antigravity_conversations_dir(&self) -> PathBuf {
@@ -973,7 +1025,12 @@ impl TranscriptLocator {
             .join(".gemini")
             .join("antigravity-cli")
             .join("history.jsonl");
-        let Ok(file) = ilium_platform::secure_fs::open_regular_file(&history_path) else {
+        let file = if self.preserve_access_time {
+            ilium_platform::secure_fs::open_regular_file_without_atime(&history_path)
+        } else {
+            ilium_platform::secure_fs::open_regular_file(&history_path)
+        };
+        let Ok(file) = file else {
             return false;
         };
         if let Some(budget) = &self.read_budget {
@@ -1197,6 +1254,21 @@ fn looks_like_uuid(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn claude_locator_preserves_a_verified_custom_configuration_root() {
+        let locator = TranscriptLocator::new(Path::new("/users/a"), Path::new("/project"))
+            .with_claude_config_dir(Path::new("/custom/claude"))
+            .with_read_limits(INTERACTIVE_TRANSCRIPT_LOOKUP_LIMITS);
+        assert!(locator
+            .claude_project_dir()
+            .starts_with("/custom/claude/projects"));
+        assert!(locator.codex_sessions_dir().starts_with("/users/a/.codex"));
+        let custom_codex = locator.with_codex_home(Path::new("/custom/codex"));
+        assert!(custom_codex
+            .codex_sessions_dir()
+            .starts_with("/custom/codex/sessions"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn transcript_reads_reject_fifo_without_waiting_for_a_writer() {
@@ -1225,6 +1297,7 @@ mod tests {
                             retained_path_bytes: 65536,
                         }),
                         None,
+                        false,
                     ),
                     1 => transcript_metadata_matches(
                         &AgentClass::Claude,
@@ -1348,6 +1421,144 @@ mod tests {
             scanned_entries: 64,
             retained_path_bytes: 64 * 1024,
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bounded_claude_discovery_preserves_transcript_access_time() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session_id = "123e4567-e89b-12d3-a456-426614174000";
+        let path = write_claude_transcript(home.path(), project.path(), project.path(), session_id);
+        let transcript = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        transcript
+            .set_times(
+                std::fs::FileTimes::new().set_accessed(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let before = transcript.metadata().unwrap().accessed().unwrap();
+        let locator = TranscriptLocator::new_bounded(home.path(), project.path(), parser_limits())
+            .without_access_time_updates();
+
+        assert!(locator
+            .transcript_for_session(&AgentClass::Claude, session_id)
+            .is_some());
+        assert_eq!(transcript.metadata().unwrap().accessed().unwrap(), before);
+        assert!(drive_staged_cursor(&locator, &AgentClass::Claude, &path).is_some());
+        assert_eq!(transcript.metadata().unwrap().accessed().unwrap(), before);
+        assert!(matches!(
+            locator.genuine_request_evidence(&AgentClass::Claude, session_id),
+            Ok(GenuineRequestEvidence::Unavailable)
+        ));
+        assert_eq!(transcript.metadata().unwrap().accessed().unwrap(), before);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn access_time_preserving_unbounded_discovery_fails_closed() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session_id = "123e4567-e89b-12d3-a456-426614174000";
+        let path = write_claude_transcript(home.path(), project.path(), project.path(), session_id);
+        let transcript = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        transcript
+            .set_times(
+                std::fs::FileTimes::new().set_accessed(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let before = transcript.metadata().unwrap().accessed().unwrap();
+        let locator =
+            TranscriptLocator::new(home.path(), project.path()).without_access_time_updates();
+        let directory = std::fs::File::open(path.parent().unwrap()).unwrap();
+        directory
+            .set_times(
+                std::fs::FileTimes::new().set_accessed(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let directory_before = directory.metadata().unwrap().accessed().unwrap();
+
+        assert!(locator
+            .transcript_from_path(&AgentClass::Claude, &path)
+            .is_none());
+        assert_eq!(transcript.metadata().unwrap().accessed().unwrap(), before);
+        assert!(locator
+            .transcript_for_session(&AgentClass::Claude, session_id)
+            .is_none());
+        assert_eq!(
+            directory.metadata().unwrap().accessed().unwrap(),
+            directory_before
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn access_time_preserving_history_verification_does_not_touch_provider_history() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session_id = "123e4567-e89b-12d3-a456-426614174000";
+        let path = write_antigravity_conversation(home.path(), project.path(), session_id);
+        let history_path = home.path().join(".gemini/antigravity-cli/history.jsonl");
+        let history = std::fs::OpenOptions::new()
+            .write(true)
+            .open(history_path)
+            .unwrap();
+        history
+            .set_times(
+                std::fs::FileTimes::new().set_accessed(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let before = history.metadata().unwrap().accessed().unwrap();
+        let locator = TranscriptLocator::new_bounded(home.path(), project.path(), parser_limits())
+            .without_access_time_updates();
+
+        assert!(locator
+            .transcript_from_path(&AgentClass::Antigravity, &path)
+            .is_some());
+        assert_eq!(history.metadata().unwrap().accessed().unwrap(), before);
+        assert!(drive_staged_cursor(&locator, &AgentClass::Antigravity, &path).is_some());
+        assert_eq!(history.metadata().unwrap().accessed().unwrap(), before);
+        let unbounded =
+            TranscriptLocator::new(home.path(), project.path()).without_access_time_updates();
+        assert!(unbounded
+            .transcript_from_path(&AgentClass::Antigravity, &path)
+            .is_none());
+        assert_eq!(history.metadata().unwrap().accessed().unwrap(), before);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn access_time_preserving_codex_discovery_refuses_directory_scans() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session_id = "123e4567-e89b-12d3-a456-426614174000";
+        write_codex_transcript(home.path(), project.path(), session_id);
+        let directory = std::fs::File::open(home.path().join(".codex/sessions")).unwrap();
+        directory
+            .set_times(
+                std::fs::FileTimes::new().set_accessed(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let before = directory.metadata().unwrap().accessed().unwrap();
+        let locator = TranscriptLocator::new_bounded(home.path(), project.path(), parser_limits())
+            .without_access_time_updates();
+
+        assert!(locator
+            .transcript_for_session(&AgentClass::Codex, session_id)
+            .is_none());
+        assert!(locator
+            .staged_candidate_paths_for_session(&AgentClass::Codex, session_id)
+            .is_empty());
+        assert_eq!(directory.metadata().unwrap().accessed().unwrap(), before);
     }
 
     fn drive_staged_cursor(
