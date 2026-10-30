@@ -489,7 +489,7 @@ def appimage_script(name, version, *, offline=False):  # Keep extract-and-run as
         'export DEBIAN_FRONTEND=noninteractive # Avoid interactive apt prompts.',  # Keep native dependency installation unattended.
         ': # Use the prepared distribution metadata.' if offline else 'apt-get update -qq >/dev/null # Refresh the disposable image.',  # Preserve the existing Ubuntu lane.
         ': # Runtime dependencies were installed during image preparation.' if offline else 'apt-get install -y -qq libasound2t64 libssl3t64 libstdc++6 >/dev/null # Install existing runtime dependencies.',  # Do not alter the AppImage payload.
-        'work=$(mktemp -d /tmp/ilium-appimage.XXXXXX) # Own all extraction and cache data.',  # Never use the developer\'s AppImage cache.
+        'work=$(mktemp -d /var/tmp/ilium-appimage.XXXXXX) # Own all extraction and cache data on disk: guest /tmp is a memory-backed tmpfs charged to the 768 MiB caller budget.',  # Never use the developer\'s AppImage cache.
         'trap \'rm -rf "$work"\' EXIT # Limit fallback cleanup to the owned scope.',  # Container failure still propagates through sh -e.
         'chmod 0755 "$work" # Allow the existing unprivileged identity to enter.',  # Avoid root-only temporary-directory permissions.
         'cp %s "$work/ilium.AppImage" # Preserve the input artifact.' % shlex.quote('/packages/' + name),  # Only the private copy is made executable.

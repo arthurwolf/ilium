@@ -144,6 +144,17 @@ def read_ready(stream, timeout=5):
     return value
 
 
+def hung_probe_evidence(unit, expired):  # Explain a probe that outlived its own runtime limit.
+    evidence = ['probe partial output: ' + repr(((expired.stdout or '') + (expired.stderr or ''))[-600:])]  # Python 3.6 keeps these as text when requested.
+    for label, command, user in (('unit status', ['/usr/bin/systemctl', '--user', 'status', '--no-pager', '--full', unit], True), ('manager journal', ['/usr/bin/journalctl', '--no-pager', '-n', '60', '-u', user_unit], False), ('processes', ['/usr/bin/ps', '-eo', 'pid,ppid,stat,etime,cgroup,args'], False)):  # Fixed read-only views.
+        try:  # Evidence gathering never replaces the timeout failure.
+            done = subprocess.run(command, env=user_environment() if user else None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=10)  # Bound each view.
+            evidence.append(label + ': ' + done.stdout[-1500:])  # Keep the tail, where the stall shows.
+        except (OSError, subprocess.SubprocessError) as error:  # A missing tool is itself a finding.
+            evidence.append(label + ' unavailable: ' + str(error)[-300:])  # Preserve the reason.
+    return evidence
+
+
 def delegated_check(unit):  # Exercise delegation only in this fresh probe service.
     require(os.geteuid() == 65534, 'delegation probe did not run as UID 65534')  # Root success would not prove the required authority.
     parent = membership(Path('/proc/self/cgroup').read_text())  # Discover the actual service path.
@@ -226,7 +237,11 @@ def main():  # Run only in the fixture's root transaction service.
         absent = json.loads(run(as_user(['/usr/bin/python3', __file__, 'unit-state', probe_unit])))  # Require a real manager response before adopting a name.
         require(absent['LoadState'] == 'not-found', 'capability service identity already exists')  # Never stop or reuse another service.
         command = ['/usr/bin/systemd-run', '--user', '--wait', '--pipe', '--collect', '--quiet', '--unit=' + probe_unit, '--property=Type=exec', '--property=Delegate=yes', '--property=MemoryMax=536870912', '--property=MemorySwapMax=0', '--property=TasksMax=64', '--property=RuntimeMaxSec=45', '/usr/bin/python3', __file__, 'delegate', probe_unit]  # Delegate only the fresh sacrificial capability service.
-        result['delegation'] = json.loads(run(as_user(command), timeout=60))  # A failure prevents actual package qualification.
+        try:  # A hung transient service needs manager evidence before it is torn down.
+            result['delegation'] = json.loads(run(as_user(command), timeout=60))  # A failure prevents actual package qualification.
+        except subprocess.TimeoutExpired as expired:  # Keep the original timeout as the authoritative failure.
+            result['errors'].extend(hung_probe_evidence(probe_unit, expired))  # Record what the manager and processes were doing.
+            raise
         probe_group = Path(result['delegation']['cgroup'])  # Retain the path reported by the independently executed user process.
         require(manager_group in probe_group.parents and probe_group.name == probe_unit, 'capability service escaped its manager')  # Confine retirement to this manager's subtree.
         retire_user_unit(probe_unit, probe_group)  # Require --wait/--collect to physically retire the successful probe before package execution.
