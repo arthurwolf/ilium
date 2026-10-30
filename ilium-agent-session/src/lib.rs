@@ -19,7 +19,7 @@ pub mod goal_evidence;
 mod request_evidence;
 pub use codex_thread_name::official_thread_name;
 pub use request_evidence::{
-    genuine_request_text, is_codex_injected_message, GenuineRequestEvidence,
+    genuine_request_text, is_codex_injected_message, unwrap_claude_command, GenuineRequestEvidence,
 };
 
 /// A transcript whose filename, embedded session ID, and project cwd agree.
@@ -101,6 +101,16 @@ pub const INTERACTIVE_TRANSCRIPT_LOOKUP_LIMITS: TranscriptReadLimits = Transcrip
     line_bytes: 64 * 1024,
     total_read_bytes: 8 * 1024 * 1024,
     scanned_entries: 262_144,
+    retained_path_bytes: 1024 * 1024,
+};
+
+/// Budget for lookups that run off the UI thread and may wait: the banner's
+/// prompt history and the cost statistics. A first Claude record can be a
+/// large pasted prompt, which the interactive line limit would reject.
+pub const BACKGROUND_TRANSCRIPT_LOOKUP_LIMITS: TranscriptReadLimits = TranscriptReadLimits {
+    line_bytes: 1024 * 1024,
+    total_read_bytes: 16 * 1024 * 1024,
+    scanned_entries: 1_000_000,
     retained_path_bytes: 1024 * 1024,
 };
 

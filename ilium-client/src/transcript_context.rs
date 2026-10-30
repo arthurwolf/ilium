@@ -119,7 +119,7 @@ impl KindEntries {
     /// of this kind, so the first surviving recent entry's sequence is at
     /// least two past the last earliest entry's, leaving room.
     fn into_entries(self) -> impl Iterator<Item = SequencedEntry> {
-        let gap_marker = (self.dropped_count > 0).then(|| {
+        let gap_marker = (self.dropped_count > 0 && !self.earliest.is_empty()).then(|| {
             let last_earliest = self
                 .earliest
                 .back()
@@ -151,11 +151,12 @@ struct RecentEntries {
 }
 
 impl RecentEntries {
-    /// Keeps up to `user_cap` user entries (no gap marker below twice that)
-    /// while assistant and tool entries keep the usual small windows.
+    /// Keeps the newest `user_cap` user entries with no pinned earliest ones
+    /// and so no gap marker, while assistant and tool entries keep the usual
+    /// small windows.
     fn with_user_cap(user_cap: usize) -> Self {
         Self {
-            user: KindEntries::with_caps(user_cap, user_cap),
+            user: KindEntries::with_caps(0, user_cap),
             ..Self::default()
         }
     }
@@ -226,13 +227,62 @@ pub fn user_prompt_history(
     transcript_path: &Path,
     max_prompts: usize,
 ) -> anyhow::Result<Vec<String>> {
+    Ok(read_user_prompts(class, transcript_path, 0, max_prompts)?.prompts)
+}
+
+/// Prompts read from a transcript, and where the next read should resume.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PromptRead {
+    pub prompts: Vec<String>,
+    /// Byte offset just past the last complete line consumed.
+    pub next_offset: u64,
+    /// `true`: `prompts` is the whole history (replace what is known);
+    /// `false`: `prompts` are only those appended since `from_offset`.
+    pub replace: bool,
+}
+
+/// Reads user prompts, resuming at `from_offset` (a value earlier returned as
+/// `next_offset`) so a growing Claude transcript is tailed instead of parsed
+/// again. A truncated file, offset 0 and Codex (whose event and response
+/// records are deduplicated across the whole stream) read everything.
+pub fn read_user_prompts(
+    class: &AgentClass,
+    transcript_path: &Path,
+    from_offset: u64,
+    max_prompts: usize,
+) -> anyhow::Result<PromptRead> {
+    use std::io::{BufRead, Seek, SeekFrom};
+
     if !matches!(class, AgentClass::Claude | AgentClass::Codex) {
-        return Ok(Vec::new());
+        return Ok(PromptRead {
+            prompts: Vec::new(),
+            next_offset: 0,
+            replace: true,
+        });
     }
-    let file = std::fs::File::open(transcript_path)?;
-    #[allow(clippy::lines_filter_map_ok)]
-    let lines = BufReader::new(file).lines().filter_map(Result::ok);
+    let mut file = std::fs::File::open(transcript_path)?;
+    let length = file.metadata()?.len();
+    let incremental =
+        matches!(class, AgentClass::Claude) && from_offset > 0 && from_offset <= length;
+    let start = if incremental { from_offset } else { 0 };
+    file.seek(SeekFrom::Start(start))?;
+    let mut reader = BufReader::new(file);
+    let mut offset = start;
+    let mut lines = Vec::new();
+    let mut buffer = Vec::new();
+    loop {
+        buffer.clear();
+        let read = reader.read_until(b'\n', &mut buffer)?;
+        // A line still being written has no terminator yet: leave it for the
+        // next read instead of parsing half of it.
+        if read == 0 || buffer.last() != Some(&b'\n') {
+            break;
+        }
+        offset += read as u64;
+        lines.push(String::from_utf8_lossy(&buffer).into_owned());
+    }
     let recent = RecentEntries::with_user_cap(max_prompts.max(1));
+    let lines = lines.into_iter();
     let entries = match class {
         AgentClass::Claude => claude_entries_into(lines, recent),
         _ => codex_entries_into(lines, recent),
@@ -240,12 +290,16 @@ pub fn user_prompt_history(
     let mut prompts: Vec<String> = entries
         .into_iter()
         .filter(|entry| entry.kind == TranscriptEntryKind::User)
-        .map(|entry| entry.content)
+        .map(|entry| ilium_agent_session::unwrap_claude_command(&entry.content))
         .collect();
     if prompts.len() > max_prompts {
         prompts.drain(..prompts.len() - max_prompts);
     }
-    Ok(prompts)
+    Ok(PromptRead {
+        prompts,
+        next_offset: offset,
+        replace: !incremental,
+    })
 }
 
 /// Compatibility-shaped projection used by project restructuring, which only
@@ -506,6 +560,72 @@ mod tests {
 
     fn lines_of(text: &str) -> impl Iterator<Item = String> + '_ {
         text.lines().map(str::to_string)
+    }
+
+    #[test]
+    fn user_prompt_history_shows_goal_as_typed_and_has_no_gap_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let mut lines = vec![
+            r#"{"type":"user","message":{"content":"<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>ship it</command-args>"}}"#.to_string(),
+        ];
+        for index in 0..25 {
+            lines.push(format!(
+                r#"{{"type":"user","message":{{"content":"prompt {index}"}}}}"#
+            ));
+        }
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+
+        let all = user_prompt_history(&AgentClass::Claude, &path, 50).unwrap();
+        assert_eq!(all[0], "/goal ship it");
+        assert_eq!(all.len(), 26);
+
+        let newest = user_prompt_history(&AgentClass::Claude, &path, 5).unwrap();
+        assert_eq!(newest.len(), 5);
+        assert_eq!(newest[4], "prompt 24");
+        assert!(newest.iter().all(|prompt| prompt.starts_with("prompt ")));
+    }
+
+    #[test]
+    fn read_user_prompts_tails_appended_lines_and_skips_a_partial_one() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"content\":\"one\"}}\n",
+        )
+        .unwrap();
+
+        let first = read_user_prompts(&AgentClass::Claude, &path, 0, 50).unwrap();
+        assert_eq!(first.prompts, vec!["one"]);
+        assert!(first.replace);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(
+            b"{\"type\":\"user\",\"message\":{\"content\":\"two\"}}\n{\"type\":\"user\",\"mess",
+        )
+        .unwrap();
+        let second = read_user_prompts(&AgentClass::Claude, &path, first.next_offset, 50).unwrap();
+        assert_eq!(second.prompts, vec!["two"]);
+        assert!(!second.replace);
+
+        file.write_all(b"age\":{\"content\":\"three\"}}\n").unwrap();
+        let third = read_user_prompts(&AgentClass::Claude, &path, second.next_offset, 50).unwrap();
+        assert_eq!(third.prompts, vec!["three"]);
+
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"content\":\"fresh\"}}\n",
+        )
+        .unwrap();
+        let truncated =
+            read_user_prompts(&AgentClass::Claude, &path, third.next_offset, 50).unwrap();
+        assert_eq!(truncated.prompts, vec!["fresh"]);
+        assert!(truncated.replace);
     }
 
     #[test]

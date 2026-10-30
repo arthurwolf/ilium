@@ -493,3 +493,43 @@ mod partial_history_tests {
         );
     }
 }
+
+/// A Claude slash command is stored as `<command-name>/x</command-name>` plus
+/// message and argument tags; returns it the way the user typed it
+/// (`/goal ship it`). Text without a command tag is returned unchanged.
+pub fn unwrap_claude_command(text: &str) -> String {
+    let tag = |name: &str| -> Option<&str> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let start = text.find(&open)? + open.len();
+        let end = text[start..].find(&close)? + start;
+        Some(text[start..end].trim())
+    };
+    let Some(command) = tag("command-name") else {
+        return text.to_string();
+    };
+    match tag("command-args").filter(|args| !args.is_empty()) {
+        Some(args) => format!("{command} {args}"),
+        None => command.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod unwrap_command_tests {
+    use super::unwrap_claude_command;
+
+    #[test]
+    fn goal_command_with_arguments_reads_as_typed() {
+        let raw = "<command-name>/goal</command-name>\n <command-message>goal</command-message>\n <command-args>ship it</command-args>";
+        assert_eq!(unwrap_claude_command(raw), "/goal ship it");
+    }
+
+    #[test]
+    fn plain_text_and_bare_commands_are_handled() {
+        assert_eq!(unwrap_claude_command("hello"), "hello");
+        assert_eq!(
+            unwrap_claude_command("<command-name>/compact</command-name>"),
+            "/compact"
+        );
+    }
+}
