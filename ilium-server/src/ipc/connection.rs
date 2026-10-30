@@ -1148,9 +1148,15 @@ async fn write_resynchronization<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    let no_visible_panes = HashSet::new();
     let (events, producer_storage) = match handlers::admitted_resynchronization_events(
         state,
         delivered_terminal_sequences,
+        match terminal_stream_selection {
+            TerminalStreamSelection::All => None,
+            TerminalStreamSelection::Visible(panes) => Some(panes),
+            TerminalStreamSelection::None => Some(&no_visible_panes),
+        },
     )
     .await
     {

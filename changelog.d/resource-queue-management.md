@@ -28,3 +28,4 @@
 - Reject older terminal protocol layouts after integrating screen previews, preventing event misinterpretation between mismatched client and server builds.
 - Close the resource link form after a successful save when a newer catalog update arrives first, while retaining the form if the binding was subsequently removed.
 - Retry initial resource snapshots after temporary shared-catalog contention so project resource rows recover without a reconnect.
+- Limit terminal recovery admission to panes a client subscribes to, keeping large sessions responsive while preserving complete tree metadata.

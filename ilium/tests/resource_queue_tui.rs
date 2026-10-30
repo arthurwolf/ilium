@@ -711,7 +711,12 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
             "edited metadata did not persist: {}",
             tui.screen_text()
         );
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        // A busy result leaves the form open with the exact mutation retained.
+        // Retry that envelope as a user would, without changing its request key.
+        if tui.screen_text().contains("busy: Project identity is busy") {
+            tui.write(b"\x12").unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
     tui.write(b"\x1b").unwrap();
     dialog_closed(&tui).await;
@@ -1555,16 +1560,38 @@ async fn independent_candidate_server_processes_share_one_authoritative_catalog(
     let queued_id = queued["reservation_id"].as_str().unwrap();
     let waiting = blocking_wait(&second, queued_agent, queued_id);
     attached_wait(&mut second_control, queued_agent, queued_id).await;
-    first
-        .cli(&[
-            "resource",
-            "gate",
-            "board",
-            "unavailable",
-            "--reason",
-            "Synthetic alpha maintenance only",
-        ])
-        .await;
+    // Attaching the wait can advance the shared catalog after the CLI's
+    // guarded read. A revision conflict requires a fresh command/read, not
+    // replaying a stale confirmation or ignoring the requested gate.
+    let gate_deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let output = first
+            .command()
+            .args([
+                "resource",
+                "gate",
+                "board",
+                "unavailable",
+                "--reason",
+                "Synthetic alpha maintenance only",
+            ])
+            .output()
+            .await
+            .unwrap();
+        if output.status.success() {
+            break;
+        }
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            result["code"], "revision_conflict",
+            "unexpected gate error: {result}"
+        );
+        assert!(
+            tokio::time::Instant::now() < gate_deadline,
+            "gate kept conflicting: {result}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
     let beta_retained = second
         .cli(&[
             "resource",
