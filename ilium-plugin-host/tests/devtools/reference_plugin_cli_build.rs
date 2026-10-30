@@ -145,11 +145,11 @@ fn dev_302_api_version_section_is_three_big_endian_u16() {
 #[test]
 fn dev_302_a_component_world_that_differs_from_the_manifest_fails_with_world_mismatch() {
     let (_root, env, dir) = new_project("rust", "server");
-    let mut manifest: Value = serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+    let mut manifest: Value = serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     manifest["server"]["world"] = Value::String("ilium:server/other@0.1.0".to_owned());
     write_text(
         &dir,
-        "ilium-plugin.json",
+        "manifest.json",
         &serde_json::to_string_pretty(&manifest).unwrap(),
     );
     let output = build(&env, &dir, &[]);
@@ -272,9 +272,9 @@ fn dev_305_manifest_edit_also_changes_the_hash() {
     let (_root, env, dir) = new_project("rust", "server");
     build(&env, &dir, &[]);
     let before = build_json(&dir)["input_hash"].clone();
-    let text = read_text(&dir, "ilium-plugin.json")
+    let text = read_text(&dir, "manifest.json")
         .replace("\"version\": \"0.1.0\"", "\"version\": \"0.1.1\"");
-    write_text(&dir, "ilium-plugin.json", &text);
+    write_text(&dir, "manifest.json", &text);
     build(&env, &dir, &[]);
     assert_ne!(build_json(&dir)["input_hash"], before);
 }

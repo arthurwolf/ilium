@@ -55,7 +55,7 @@ fn all_text(dir: &std::path::Path) -> Vec<(String, String)> {
 }
 
 fn manifest_of(dir: &std::path::Path) -> Value {
-    serde_json::from_str(&read_text(dir, "ilium-plugin.json")).expect("manifest json")
+    serde_json::from_str(&read_text(dir, "manifest.json")).expect("manifest json")
 }
 
 /// REQ: DEV-260

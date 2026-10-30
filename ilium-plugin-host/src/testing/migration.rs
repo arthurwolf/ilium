@@ -19,7 +19,7 @@ use crate::cli::local_install::factory;
 use crate::cli::{self, CliEnv, CliOutput};
 use crate::install::{Consent, ConsentDecision, ConsentRequest};
 use crate::package::write_package;
-use crate::testing::wat::wat_component;
+use crate::testing::wat::{files_inventory, plugin_component};
 use crate::registry_client::{FetchError, Fetcher};
 use crate::storage::{PluginStorage, StorageContext, BUCKET_MAX_BYTES};
 
@@ -365,11 +365,19 @@ fn package_bytes(spec: &PluginSpec) -> Vec<u8> {
                 .unwrap_or_else(|error| panic!("data_version JSON {text}: {error}"));
         }
     }
+    // A data version above 1 requires the `migrator` export in the manifest and the component
+    // (PKG-045); a plugin with nothing to migrate exports a migrator that returns ok.
+    let needs_migrator = match &spec.data_version {
+        DataVersionField::Absent => false,
+        DataVersionField::Number(version) => *version > 1,
+        DataVersionField::Json(text) => text.trim().parse::<u64>().is_ok_and(|version| version > 1),
+    };
+    let optional: &[&str] = if needs_migrator { &["migrator"] } else { &[] };
+    manifest["server"]["exports"] = serde_json::json!(optional);
+    let mut files = vec![("server.wasm".to_owned(), plugin_component(optional))];
+    manifest["files"] = files_inventory(&files);
     let manifest_text = serde_json::to_string_pretty(&manifest).expect("manifest serializes");
-    let files = vec![
-        ("manifest.json".to_owned(), manifest_text.into_bytes()),
-        ("server.wasm".to_owned(), wat_component("(component)")),
-    ];
+    files.push(("manifest.json".to_owned(), manifest_text.into_bytes()));
     write_package(&files).unwrap_or_else(|diagnostic| panic!("migration package failed: {diagnostic:?}"))
 }
 

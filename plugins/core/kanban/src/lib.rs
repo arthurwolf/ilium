@@ -4,12 +4,79 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Bodies follow the manual; behaviour beyond activation is driven by host events.
 
+use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::UiTree;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider};
+
+/// The kernel Settings tab this plugin owns (core-plugin-kanban.md "Kernel tabs this plugin owns").
+const KERNEL_TAB: &str = "kanban-board";
+/// The plugin service the client calls to write that tab.
+const SET_SETTING_SERVICE: &str = "ilium.core.kanban/set-setting";
+
+/// The server side of `ilium.core.kanban` (core-plugin-kanban.md "Server part", world
+/// `ilium:server/base@0.1.0`). Its one job is to validate and write the Kanban Board settings tab.
+#[ilium_plugin(side = "server", exports = ["service-provider"])]
+#[derive(Default)]
+pub struct KanbanServer;
+
+impl Lifecycle for KanbanServer {
+    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
+        validate_settings(&context.settings_json)
+    }
+}
+
+impl Handler for KanbanServer {
+    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+        Vec::new()
+    }
+}
+
+impl ServiceProvider for KanbanServer {
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        if call.service != SET_SETTING_SERVICE || call.method != "set" {
+            return ServiceReply::Done(error_reply("not-found", "unknown service method"));
+        }
+        ServiceReply::Done(match check_set_setting(&call.payload_json) {
+            Ok(()) => "{}".to_string(),
+            Err(message) => error_reply("invalid-argument", &message),
+        })
+    }
+}
+
+/// Validates the `set` parameters `{ tab, key, value }` (all strings) against the tab's rows.
+fn check_set_setting(payload_json: &str) -> Result<(), String> {
+    let payload: serde_json::Value =
+        serde_json::from_str(payload_json).map_err(|_| "the payload is not JSON".to_string())?;
+    let text_of = |name: &str| {
+        payload
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("{name} is required and must be a string"))
+    };
+    let (tab, key, value) = (text_of("tab")?, text_of("key")?, text_of("value")?);
+    if tab != KERNEL_TAB {
+        return Err(format!("tab {tab} is not owned by this plugin"));
+    }
+    match key {
+        "card_preview" => value
+            .parse::<bool>()
+            .map(|_| ())
+            .map_err(|_| "card_preview must be true or false".to_string()),
+        "column_width" => match value.parse::<i64>() {
+            Ok(width) if (12..=60).contains(&width) => Ok(()),
+            _ => Err("column_width must be a whole number from 12 to 60".to_string()),
+        },
+        other => Err(format!("unknown setting {other}")),
+    }
+}
+
+fn error_reply(code: &str, message: &str) -> String {
+    serde_json::json!({"error": {"code": code, "message": message}}).to_string()
+}
 
 /// The client side of `ilium.core.kanban` (core-plugin-kanban.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = [])]

@@ -383,7 +383,7 @@ fn lif_068_declined_review_runs_no_package_code_review_declined() {
     let rig = rig();
     let marker = rig.scratch_dir().join("start-ran.txt");
     let spec = pkg(NOTES, "1.0.0")
-        .high_risk_grant("process.spawn")
+        .high_risk_grant("process.run:git")
         .start_writes_file(&marker);
     let path = rig.write_package(&spec);
     let path_text = path.to_string_lossy().into_owned();
@@ -421,7 +421,7 @@ fn lif_068_check_command_runs_no_package_code() {
 fn lif_068_no_instance_exists_before_the_review_is_answered() {
     let rig = rig();
     let server = rig.start_server("s1");
-    let path = rig.write_package(&pkg(NOTES, "1.0.0").high_risk_grant("process.spawn"));
+    let path = rig.write_package(&pkg(NOTES, "1.0.0").high_risk_grant("process.run:git"));
     let path_text = path.to_string_lossy().into_owned();
     let _declined = rig.cli_tty(&["install", &path_text, "--allow-unsigned"], &["n"]);
     assert!(server.activations(NOTES).is_empty());
@@ -537,7 +537,7 @@ fn lif_070_install_with_no_network_interfaces_succeeds() {
 fn lif_070_install_makes_no_network_attempt() {
     let rig = rig();
     rig.block_network();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     assert_eq!(rig.network_attempts(), 0);
 }
 
@@ -560,7 +560,7 @@ fn lif_071_bad_manifest_and_bad_signature_report_manifest_schema_only() {
 fn lif_071_no_prompt_appears_for_a_package_refused_at_an_earlier_stage() {
     let rig = rig();
     let spec = pkg(NOTES, "1.0.0")
-        .high_risk_grant("process.spawn")
+        .high_risk_grant("process.run:git")
         .bad_manifest();
     let path = rig.write_package(&spec);
     let path_text = path.to_string_lossy().into_owned();
@@ -989,12 +989,12 @@ fn lif_077_skip_list_survives_in_the_registry_across_restarts() {
 #[test]
 fn lif_078_declined_extra_grant_keeps_the_old_version_and_update_staged() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let server = rig.start_server("s1");
     let path = rig.write_package(
         &pkg(NOTES, "1.1.0")
-            .grant("fs.read")
-            .high_risk_grant("process.spawn"),
+            .grant("fs.read:project")
+            .high_risk_grant("process.run:git"),
     );
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["update", &path_text, "--allow-unsigned"], &["n"]);
@@ -1005,40 +1005,40 @@ fn lif_078_declined_extra_grant_keeps_the_old_version_and_update_staged() {
     );
     rig.advance(secs(3));
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.0.0"));
-    assert!(!server.granted(NOTES).contains(&"process.spawn".to_owned()));
+    assert!(!server.granted(NOTES).contains(&"process.run:git".to_owned()));
 }
 
 /// REQ: LIF-078
 #[test]
 fn lif_078_review_dialog_shows_only_the_new_capabilities() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let path = rig.write_package(
         &pkg(NOTES, "1.1.0")
-            .grant("fs.read")
-            .high_risk_grant("process.spawn"),
+            .grant("fs.read:project")
+            .high_risk_grant("process.run:git"),
     );
     let path_text = path.to_string_lossy().into_owned();
     let _output = rig.cli_tty(&["update", &path_text, "--allow-unsigned"], &["y"]);
-    assert_eq!(rig.last_review(), vec!["process.spawn".to_owned()]);
+    assert_eq!(rig.last_review(), vec!["process.run:git".to_owned()]);
 }
 
 /// REQ: LIF-078
 #[test]
 fn lif_078_accepted_extra_grant_reaches_the_new_version() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let server = rig.start_server("s1");
     let path = rig.write_package(
         &pkg(NOTES, "1.1.0")
-            .grant("fs.read")
-            .high_risk_grant("process.spawn"),
+            .grant("fs.read:project")
+            .high_risk_grant("process.run:git"),
     );
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["update", &path_text, "--allow-unsigned"], &["y"]);
     assert_eq!(output.exit_code, 0);
     rig.advance(secs(3));
-    assert!(server.granted(NOTES).contains(&"process.spawn".to_owned()));
+    assert!(server.granted(NOTES).contains(&"process.run:git".to_owned()));
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.1.0"));
 }
 
@@ -1047,7 +1047,7 @@ fn lif_078_accepted_extra_grant_reaches_the_new_version() {
 fn lif_078_unanswerable_review_ends_with_install_needs_input_and_a_staged_update() {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
-    let path = rig.write_package(&pkg(NOTES, "1.1.0").high_risk_grant("process.spawn"));
+    let path = rig.write_package(&pkg(NOTES, "1.1.0").high_risk_grant("process.run:git"));
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli(&["update", &path_text, "--allow-unsigned", "--yes"]);
     assert_eq!(output.exit_code, 1);
@@ -1059,9 +1059,9 @@ fn lif_078_unanswerable_review_ends_with_install_needs_input_and_a_staged_update
 #[test]
 fn lif_078_update_without_new_grants_shows_no_review() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let before = rig.prompt_count();
-    update(&rig, &pkg(NOTES, "1.1.0").grant("fs.read"));
+    update(&rig, &pkg(NOTES, "1.1.0").grant("fs.read:project"));
     assert_eq!(rig.prompt_count(), before);
 }
 
@@ -1251,7 +1251,7 @@ fn lif_081_rollback_of_a_first_install_fails_install_no_previous_exit_5() {
 
 fn installed_with_data() -> OpsRig {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     rig.plant_data(NOTES, 1);
     rig.plant_settings(NOTES, "theme", "dark");
     rig.plant_backup(NOTES, "0.9.0");
@@ -1351,7 +1351,7 @@ fn lif_083_uninstall_deletes_the_grants_entry() {
 #[test]
 fn lif_083_reinstall_after_uninstall_asks_for_grants_again() {
     let rig = rig();
-    let spec = pkg(NOTES, "1.0.0").high_risk_grant("process.spawn");
+    let spec = pkg(NOTES, "1.0.0").high_risk_grant("process.run:git");
     let path = rig.write_package(&spec);
     let path_text = path.to_string_lossy().into_owned();
     let first = rig.cli_tty(&["install", &path_text, "--allow-unsigned"], &["y"]);
@@ -1368,7 +1368,7 @@ fn lif_083_reinstall_after_uninstall_asks_for_grants_again() {
 fn lif_083_uninstall_deletes_first_use_answers_durable_timers_and_failure_counters() {
     let rig = installed_with_data();
     let server = rig.start_server("s1");
-    rig.plant_first_use_answer(NOTES, "net.http");
+    rig.plant_first_use_answer(NOTES, "http:example.invalid");
     rig.plant_durable_timer(NOTES, 60_000);
     server.fail(NOTES, Side::Server);
     assert_eq!(server.failure_count(NOTES, Side::Server), 1);
@@ -1376,7 +1376,7 @@ fn lif_083_uninstall_deletes_first_use_answers_durable_timers_and_failure_counte
     rig.advance(secs(3));
     assert!(rig.first_use_answers(NOTES).is_empty());
     assert!(rig.durable_timers(NOTES).is_empty());
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     rig.advance(secs(3));
     assert_eq!(server.failure_count(NOTES, Side::Server), 0);
 }
@@ -1715,7 +1715,7 @@ fn lif_087_successful_install_prints_a_result_line_with_id_version_and_state() {
 #[test]
 fn lif_087_declined_review_exits_1_with_install_review_declined() {
     let rig = rig();
-    let path = rig.write_package(&pkg(NOTES, "1.0.0").high_risk_grant("process.spawn"));
+    let path = rig.write_package(&pkg(NOTES, "1.0.0").high_risk_grant("process.run:git"));
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["install", &path_text, "--allow-unsigned"], &["n"]);
     assert_eq!(output.exit_code, 1);

@@ -5,7 +5,11 @@
 //! activation state and answer event batches with no submissions.
 
 use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::host::log::Level;
+use ilium_plugin_sdk::types::{
+    EditorOpenSpec, EditorPlacement, FsPath, Intent, RenameNodeSpec, Submission, TitleOrigin,
+    TitleSource,
+};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
@@ -26,9 +30,44 @@ impl Lifecycle for TerminalServer {
 }
 
 impl Handler for TerminalServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::PaneExited(exit) => {
+                    ilium_plugin_sdk::log::log(
+                        Level::Info,
+                        &format!(
+                            "pane {} exited status={:?} signal={:?}",
+                            exit.node.0, exit.status, exit.signal
+                        ),
+                    );
+                }
+                Event::PaneTitleChanged(change) if change.source == TitleOrigin::Osc => {
+                    submissions.push(Submission::keyed(
+                        Intent::RenameNode(RenameNodeSpec {
+                            node: change.node,
+                            title: change.title,
+                            source: TitleSource::Inferred,
+                            expected_revision: None,
+                        }),
+                        format!("osc-title-{}", change.node.0),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        submissions
     }
+}
+
+/// Splits `path:line` text of the `path-line` detector; the line must be a `u32`.
+fn parse_path_line(text: &str) -> Option<(&str, u32)> {
+    let (path, line) = text.rsplit_once(':')?;
+    if path.is_empty() || line.is_empty() || !line.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some((path, line.parse().ok()?))
 }
 
 /// The client side of `ilium.core.terminal` (core-plugin-terminal.md, world `ilium:client/base@0.1.0`).
@@ -47,8 +86,28 @@ impl Lifecycle for TerminalClient {
 }
 
 impl Handler for TerminalClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::LinkActivated(link) = event else {
+                continue;
+            };
+            if link.detector_id != "path-line" {
+                continue;
+            }
+            let Some((path, line)) = parse_path_line(&link.text) else {
+                continue;
+            };
+            submissions.push(Submission::new(Intent::EditorOpen(EditorOpenSpec {
+                path: FsPath {
+                    scope: "project".to_string(),
+                    path: path.to_string(),
+                },
+                line: Some(line.saturating_sub(1)),
+                placement: EditorPlacement::Split,
+            })));
+        }
+        submissions
     }
 }
 

@@ -185,8 +185,8 @@ fn dev_764_check_exits_3_for_findings_and_lint_deny_exits_3_for_warnings() {
         3
     );
     let manifest =
-        read_text(&dir, "ilium-plugin.json").replace("\"description\":", "\"description_x\":");
-    write_text(&dir, "ilium-plugin.json", &manifest);
+        read_text(&dir, "manifest.json").replace("\"description\":", "\"description_x\":");
+    write_text(&dir, "manifest.json", &manifest);
     let plain = run(&env, &["lint", dir.to_str().unwrap(), "--json"]);
     assert!(
         records_of(&plain, "lint")

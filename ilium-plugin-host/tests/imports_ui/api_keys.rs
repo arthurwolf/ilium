@@ -7,7 +7,7 @@ use proptest::prelude::*;
 
 use crate::common::*;
 
-const GRANTS: &[&str] = &["keys.grab", "keys.intercept"];
+const GRANTS: &[&str] = &["keys.intercept"];
 
 fn spec(chords: &[&str]) -> GrabSpec {
     GrabSpec {
@@ -113,7 +113,7 @@ fn wit_keys_grab_chord_held_by_another_plugin_conflict() {
 /// REQ: WIT:ilium:host/keys.grab
 #[test]
 fn wit_keys_grab_declined_grant_not_permitted() {
-    let rig = declined_rig(&["keys.grab"]);
+    let rig = declined_rig(&["keys.intercept"]);
     assert_eq!(
         code_of(rig.host.keys().grab(spec(&["ctrl+k"]))),
         ErrorCode::NotPermitted

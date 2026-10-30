@@ -30,12 +30,12 @@ The snapshot files, the rolling backups, the ordered event journal and the `iliu
 ### What the user sees
 
 <figure>
-<pre class="term">╭─ Restored ─────────────────────────────────────╮
-│ Panes restored ………………………………………………… <span class="t-ok">7 of 8</span>      │
-│ Agents resumed ………………………………………………… <span class="t-ok">3 of 3</span>      │
-│ <span class="t-warn">Docs sweep is frozen</span>                           │
-│ <span class="t-dim">  Its folder is missing. Press u to unfreeze.</span>  │
-╰────────────────────────────────────────────────╯
+<pre class="term">╭─ Restored ───────────────────────────────────╮
+│ Panes restored ………………………………………………………… <span class="t-ok">7 of 8</span> │
+│ Agents resumed ………………………………………………………… <span class="t-ok">3 of 3</span> │
+│ <span class="t-warn">Docs sweep is frozen</span>                         │
+│ <span class="t-dim">  Its folder is missing. Press u to unfreeze.</span>│
+╰──────────────────────────────────────────────╯
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. The restore summary: panes restored, agents resumed and one pane frozen.</figcaption>
 </figure>

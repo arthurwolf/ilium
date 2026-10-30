@@ -4,6 +4,7 @@
 pub mod dedup;
 pub mod events;
 pub mod generated;
+mod host_handle;
 pub mod intents;
 pub mod log;
 pub mod plugin;
@@ -13,7 +14,7 @@ pub mod task;
 pub mod ui;
 
 pub use plugin::{
-    host, set_host, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
+    clear_host, host, no_host, set_host, HostHandle, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
     InferenceProvider, JobRunner, Lifecycle, LifecycleState, MenuProvider, Migrator, NativeEntry,
     NativeRenderer, Plugin, Renderer, SceneRenderer, ServiceProvider, SettingsValidate,
     TokenProvider, Views, VirtualRowsProvider,

@@ -161,7 +161,7 @@ fn lif_193_removing_the_id_from_the_policy_lets_the_plugin_run_again() {
 #[test]
 fn lif_193_policy_block_keeps_grants_and_settings() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     rig.plant_settings(NOTES, "theme", "dark");
     let grants = rig.grants_json();
     rig.write_policy(&format!("[plugins]\ndeny_ids = [\"{NOTES}\"]\n"));

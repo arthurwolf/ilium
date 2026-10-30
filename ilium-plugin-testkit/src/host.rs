@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use ilium_plugin_sdk_core::exports::{HookCall, HookReply, MenuContext, MenuEntry};
+use ilium_plugin_sdk_core::exports::{HookCall, HookReply, MenuContext, MenuEntry, ServiceCall, ServiceReply};
 use ilium_plugin_sdk_core::generated::host::{Bucket, InstanceState};
 use ilium_plugin_sdk_core::host::inference::{Completion, CompletionRequest};
 use ilium_plugin_sdk_core::host::keymap::Binding;
@@ -452,6 +452,9 @@ trait ErasedPlugin {
     fn activate(&mut self, activation: Activation) -> Result<(), PluginError>;
     fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>>;
     fn on_events(&mut self, events: Vec<Event>) -> Vec<Submission>;
+    fn run_job(&mut self, kind: String, input: Vec<u8>) -> Option<Result<Vec<u8>, PluginError>>;
+    fn handle_service(&mut self, call: ServiceCall) -> Option<ServiceReply>;
+    fn handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>>;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
@@ -467,6 +470,15 @@ impl<P: NativeEntry + 'static> ErasedPlugin for NativeWrapper<P> {
     fn on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
         self.0.native_on_events(events)
     }
+    fn run_job(&mut self, kind: String, input: Vec<u8>) -> Option<Result<Vec<u8>, PluginError>> {
+        self.0.native_run_job(kind, input)
+    }
+    fn handle_service(&mut self, call: ServiceCall) -> Option<ServiceReply> {
+        self.0.native_handle_service(call)
+    }
+    fn handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>> {
+        self.0.native_handle_hook(call)
+    }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         &mut self.0
     }
@@ -481,6 +493,8 @@ struct PendingRequest {
     needed_grant: Option<&'static str>,
     fixed: Option<Outcome>,
 }
+
+mod bridge;
 
 /// One plugin on one side with deterministic fakes.
 #[derive(Debug)]
@@ -527,6 +541,7 @@ pub struct FakeHost {
     restart_due: Option<u64>,
     disabled_by_failure: bool,
     disabled_by_user: bool,
+    stub_started: bool,
     diagnostics: Vec<Diagnostic>,
     pending_trap: Option<String>,
     crash_armed: bool,
@@ -552,6 +567,7 @@ pub struct FakeHost {
     panes: FakePanes,
     sessions: FakeSessions,
     recording: Option<PathBuf>,
+    bridge: bridge::BridgeState,
 }
 
 impl FakeHost {
@@ -605,6 +621,7 @@ impl FakeHost {
             restart_due: None,
             disabled_by_failure: false,
             disabled_by_user: false,
+            stub_started: false,
             diagnostics: Vec::new(),
             pending_trap: None,
             crash_armed: false,
@@ -629,6 +646,7 @@ impl FakeHost {
             workspace: FakeWorkspace::default(),
             panes: FakePanes::default(),
             sessions: FakeSessions::default(),
+            bridge: bridge::BridgeState::default(),
             recording: None,
         }
     }
@@ -645,9 +663,14 @@ impl FakeHost {
 
     /// Fails with `harness.not-active` unless the plugin has been activated at least once.
     fn require_started(&self, what: &str) {
-        if self.instance == 0 {
+        if self.instance == 0 && !self.stub_started {
             fail(codes::NOT_ACTIVE, &format!("{what} was called before activate"));
         }
+    }
+
+    /// Marks a session-installed stub as started, so `deliver` and `settle` accept it without a plugin object.
+    pub(crate) fn mark_stub_started(&mut self) {
+        self.stub_started = true;
     }
 
     /// Takes id, side, grants and tier from a manifest (DEV-411).
@@ -930,7 +953,11 @@ impl FakeHost {
         self.instance += 1;
         self.state = InstanceState::Activating;
         let activation = self.build_activation(None);
-        if let Err(error) = plugin.activate(activation) {
+        let activated = {
+            let _bridge = bridge::enter(self);
+            plugin.activate(activation)
+        };
+        if let Err(error) = activated {
             self.state = InstanceState::Failed;
             return Err(error);
         }
@@ -982,7 +1009,10 @@ impl FakeHost {
             fail(codes::NOT_ACTIVE, "deactivate was called on a host with no active plugin");
         };
         self.state = InstanceState::Deactivating;
-        let bytes = plugin.deactivate(reason);
+        let bytes = {
+            let _bridge = bridge::enter(self);
+            plugin.deactivate(reason)
+        };
         self.state = InstanceState::Stopped;
         bytes
     }
@@ -1031,10 +1061,10 @@ impl FakeHost {
             self.record_failure(&code, "injected by the test");
             return Vec::new();
         }
-        let outcome = match self.plugin.0.as_mut() {
-            Some(plugin) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                plugin.on_events(accepted)
-            })),
+        let outcome = match self.call_plugin(|plugin| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.on_events(accepted)))
+        }) {
+            Some(outcome) => outcome,
             None => return Vec::new(),
         };
         let submissions = match outcome {
@@ -1202,7 +1232,11 @@ impl FakeHost {
         self.state = InstanceState::Activating;
         self.restored = restored.clone();
         let activation = self.build_activation(restored);
-        match plugin.activate(activation) {
+        let activated = {
+            let _bridge = bridge::enter(self);
+            plugin.activate(activation)
+        };
+        match activated {
             Ok(()) => {
                 self.plugin.0 = Some(plugin);
                 self.state = InstanceState::Active;
@@ -1429,11 +1463,18 @@ impl FakeHost {
         let Some(mut plugin) = self.plugin.0.take() else {
             return;
         };
-        let _ = plugin.deactivate(reason);
+        {
+            let _bridge = bridge::enter(self);
+            let _ = plugin.deactivate(reason);
+        }
         self.instance += 1;
         self.state = InstanceState::Activating;
         let activation = self.build_activation(None);
-        match plugin.activate(activation) {
+        let activated = {
+            let _bridge = bridge::enter(self);
+            plugin.activate(activation)
+        };
+        match activated {
             Ok(()) => {
                 self.plugin.0 = Some(plugin);
                 self.state = InstanceState::Active;
@@ -1716,7 +1757,22 @@ impl FakeHost {
             .entry(call.point.clone())
             .or_default()
             .push(call.payload_json.clone());
-        let (reply, trap) = self.extensions.answer_hook(&call);
+        let (reply, trap) = if self.extensions.has_hook_stub(&call.point) {
+            self.extensions.answer_hook(&call)
+        } else if let Some(result) = self
+            .call_plugin(|plugin| plugin.handle_hook(call.clone()))
+            .flatten()
+        {
+            match result {
+                Ok(reply) => (reply, false),
+                Err(error) => {
+                    self.record_failure("trap.panic", &format!("the hook handler failed: {}", error.message));
+                    (HookReply::Pass, false)
+                }
+            }
+        } else {
+            self.extensions.answer_hook(&call)
+        };
         self.extensions.hook_log.push(call);
         if trap {
             self.record_failure("trap.panic", "the hook handler trapped");
@@ -1809,7 +1865,30 @@ impl FakeHost {
         self.call_order
             .calls
             .push(format!("service:{service}.{method}"));
+        if !self.extensions.has_service_stub(service, method) {
+            if let Some(ServiceReply::Done(reply)) = self.dispatch_service(service, method, payload_json) {
+                return Ok(reply);
+            }
+        }
         self.extensions.answer_service(service, method)
+    }
+
+    /// Hands a service call to the plugin when it exports `service-provider`.
+    pub(crate) fn dispatch_service(
+        &mut self,
+        service: &str,
+        method: &str,
+        payload_json: &str,
+    ) -> Option<ServiceReply> {
+        self.call_order.next_request += 1;
+        let call = ServiceCall {
+            call: self.call_order.next_request,
+            service: service.to_string(),
+            method: method.to_string(),
+            payload_json: payload_json.to_string(),
+            caller: ilium_plugin_sdk_core::types::PluginId(self.plugin_id.clone()),
+        };
+        self.call_plugin(|plugin| plugin.handle_service(call)).flatten()
     }
 
     /// Calls the plugin's own single-method service.
@@ -1860,10 +1939,28 @@ impl FakeHost {
     ) -> Result<Vec<u8>, PluginError> {
         let request = self.jobs_next_request();
         self.jobs.record(request, kind, input.as_ref());
+        if let Some(Some(result)) =
+            self.call_plugin(|plugin| plugin.run_job(kind.to_string(), input.as_ref().to_vec()))
+        {
+            return result;
+        }
         Err(PluginError::new(
             ErrorCode::Unsupported,
             format!("the native entry has no job runner for {kind}"),
         ))
+    }
+
+    /// Runs one call into the plugin with the host bridge installed, so its `host()` calls reach the
+    /// fakes. The plugin is moved out of the host for the span; `None` when no plugin is loaded.
+    fn call_plugin<R>(&mut self, call: impl FnOnce(&mut dyn ErasedPlugin) -> R) -> Option<R> {
+        let mut plugin = self.plugin.0.take()?;
+        let guard = bridge::enter(self);
+        let result = call(&mut *plugin);
+        drop(guard);
+        if self.plugin.0.is_none() {
+            self.plugin.0 = Some(plugin);
+        }
+        Some(result)
     }
 
     fn jobs_next_request(&mut self) -> u64 {
@@ -2291,6 +2388,36 @@ pub struct FakeInference {
 }
 
 impl FakeInference {
+    /// Records a request the plugin made and answers it the way the test scripted: a registered
+    /// completion for an equal request, then the next scripted text, then the fixed reply text.
+    pub(crate) fn ask(
+        &mut self,
+        id: RequestId,
+        request: CompletionRequest,
+    ) -> Result<Completion, PluginError> {
+        self.requests.push((id, request.clone()));
+        if let Some(message) = self.failure.take() {
+            return Err(PluginError::new(ErrorCode::Internal, message));
+        }
+        if let Some((_, completion)) = self.completions.iter().find(|(known, _)| *known == request) {
+            return Ok(completion.clone());
+        }
+        let text = if self.scripted.is_empty() {
+            self.text.clone().unwrap_or_default()
+        } else {
+            match self.scripted.remove(0) {
+                Ok(text) => text,
+                Err(error) => return Err(error),
+            }
+        };
+        Ok(Completion {
+            text,
+            model: "fake".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+        })
+    }
+
     /// Completes a request with a completion.
     pub fn complete_inference(&mut self, request: RequestId, completion: Completion) {
         self.replies.push((request.0, Ok(completion)));
@@ -2509,6 +2636,15 @@ impl FakeExtensions {
     }
 
     /// Chooses the reply for a hook call; the flag is true when the handler traps.
+    /// True when the test configured any reply, trap, handler or chain for the point.
+    fn has_hook_stub(&self, point: &str) -> bool {
+        self.traps.contains(point)
+            || self.handlers.contains_key(point)
+            || self.conditional_replies.contains_key(point)
+            || self.replies.contains_key(point)
+            || self.chains.contains_key(point)
+    }
+
     fn answer_hook(&mut self, call: &HookCall) -> (HookReply, bool) {
         let payload: Value = serde_json::from_str(&call.payload_json).unwrap_or(Value::Null);
         if let Some(chain) = self.chains.get_mut(&call.point) {
@@ -2537,6 +2673,15 @@ impl FakeExtensions {
             }
         }
         (HookReply::Pass, false)
+    }
+
+    /// True when the test stubbed or failed the service method.
+    fn has_service_stub(&self, service: &str, method: &str) -> bool {
+        self.failed_services.contains(service)
+            || self.service_replies.contains_key(service)
+            || self
+                .service_stubs
+                .contains_key(&(service.to_string(), method.to_string()))
     }
 
     /// Chooses the reply for a service call.
@@ -2950,6 +3095,26 @@ pub struct FakeKeys {
 }
 
 impl FakeKeys {
+    /// Records a grab the plugin took and returns its id.
+    pub(crate) fn take(&mut self, chords: Vec<String>, pane: Option<u64>, until_release: bool) -> u64 {
+        let id = self.grabs.len() as u64 + 1;
+        self.grabs.push(KeyGrab {
+            id,
+            released: false,
+            chords,
+            pane,
+            until_release,
+        });
+        id
+    }
+
+    /// Marks a grab released.
+    pub(crate) fn release(&mut self, id: u64) {
+        if let Some(grab) = self.grabs.iter_mut().find(|grab| grab.id == id) {
+            grab.released = true;
+        }
+    }
+
     /// Grabs made so far.
     pub fn grabs(&self) -> Vec<KeyGrab> {
         self.grabs.clone()

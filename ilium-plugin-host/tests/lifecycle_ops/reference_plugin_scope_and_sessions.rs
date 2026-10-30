@@ -144,7 +144,7 @@ fn lif_162_plugins_toml_naming_an_uninstalled_package_installs_nothing() {
 #[test]
 fn lif_162_plugins_toml_grants_nothing() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").high_risk_grant("process.spawn"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").high_risk_grant("process.run:git"));
     let before = rig.grants_json();
     rig.write_project_plugins_toml(&format!(
         "[plugins.\"{NOTES}\"]\nenabled = true\ngrants = [\"process.spawn\"]\n"
@@ -152,7 +152,7 @@ fn lif_162_plugins_toml_grants_nothing() {
     let server = rig.start_server("s1");
     rig.advance(secs(3));
     assert_eq!(rig.grants_json(), before);
-    assert!(!server.granted(NOTES).contains(&"process.spawn".to_owned()));
+    assert!(!server.granted(NOTES).contains(&"process.run:git".to_owned()));
 }
 
 /// REQ: LIF-162
@@ -340,39 +340,39 @@ fn lif_165_calls_to_the_plugin_in_session_b_still_succeed() {
 #[test]
 fn lif_166_grant_change_applies_to_every_session() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let a = rig.start_server("a");
     let b = rig.start_server("b");
     rig.advance(secs(3));
-    rig.cli(&["revoke", NOTES, "fs.read"]);
+    rig.cli(&["revoke", NOTES, "fs.read:project"]);
     rig.advance(secs(3));
-    assert!(!a.granted(NOTES).contains(&"fs.read".to_owned()));
-    assert!(!b.granted(NOTES).contains(&"fs.read".to_owned()));
+    assert!(!a.granted(NOTES).contains(&"fs.read:project".to_owned()));
+    assert!(!b.granted(NOTES).contains(&"fs.read:project".to_owned()));
 }
 
 /// REQ: LIF-166
 #[test]
 fn lif_166_not_now_counter_is_shared_between_sessions() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").first_use_prompt("net.http"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").first_use_prompt("http:example.invalid"));
     let a = rig.start_server("a");
     let b = rig.start_server("b");
     rig.advance(secs(3));
-    a.answer_first_use(NOTES, "net.http", "not-now");
-    assert_eq!(b.not_now_count(NOTES, "net.http"), 1);
-    b.answer_first_use(NOTES, "net.http", "not-now");
-    assert_eq!(a.not_now_count(NOTES, "net.http"), 2);
+    a.answer_first_use(NOTES, "http:example.invalid", "not-now");
+    assert_eq!(b.not_now_count(NOTES, "http:example.invalid"), 1);
+    b.answer_first_use(NOTES, "http:example.invalid", "not-now");
+    assert_eq!(a.not_now_count(NOTES, "http:example.invalid"), 2);
 }
 
 /// REQ: LIF-166
 #[test]
 fn lif_166_answer_in_one_session_means_the_other_session_does_not_ask_again() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").first_use_prompt("net.http"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").first_use_prompt("http:example.invalid"));
     let a = rig.start_server("a");
-    a.answer_first_use(NOTES, "net.http", "allow");
+    a.answer_first_use(NOTES, "http:example.invalid", "allow");
     let b = rig.start_server("b");
     rig.advance(secs(3));
-    assert_eq!(b.prompts_for(NOTES, "net.http"), 0);
-    assert!(b.granted(NOTES).contains(&"net.http".to_owned()));
+    assert_eq!(b.prompts_for(NOTES, "http:example.invalid"), 0);
+    assert!(b.granted(NOTES).contains(&"http:example.invalid".to_owned()));
 }

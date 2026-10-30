@@ -2127,6 +2127,7 @@ impl OpsRig {
     fn cli_with(&self, args: &[&str], interactive: bool, answers: &[&str]) -> CliOutput {
         let owned: Vec<String> = args.iter().map(|argument| (*argument).to_owned()).collect();
         let stripped = owned.strip_prefix(&["plugin".to_owned()]).unwrap_or(&owned);
+        let allow_unsigned = stripped.iter().any(|argument| argument == "--allow-unsigned");
         let approve_flag = stripped.iter().any(|argument| argument == "--yes");
         let arguments: Vec<String> = stripped
             .iter()
@@ -2153,7 +2154,12 @@ impl OpsRig {
                 session: "rig".to_owned(),
                 actor: crate::audit::AuditActor { kind: "cli".to_owned(), pane: None, plugin: None },
             };
-            if let Ok(backend) = crate::cli::local_install::factory(&env, consent, context) {
+            if let Ok(backend) = crate::cli::local_install::factory_with_options(
+                &env,
+                consent,
+                context,
+                crate::install::InstallOptions { allow_unsigned },
+            ) {
                 env.installer = Some(backend);
             }
         }
@@ -2199,7 +2205,7 @@ impl OpsRig {
     fn package_files(spec: &PackageSpec) -> Vec<(String, Vec<u8>)> {
         use sha2::{Digest, Sha256};
         // A genuine empty component carrying the API-version custom section.
-        let component = b"\0asm\r\0\x01\0\0\x18\x11ilium:api-version\0\0\0\x01\0\0".to_vec();
+        let component = crate::testing::wat::plugin_component(&[]);
         let entry = if spec.client_side { "client.wasm" } else { "server.wasm" };
         let mut files = vec![(entry.to_owned(), component)];
         if spec.padding_bytes > 0 {
@@ -2211,8 +2217,10 @@ impl OpsRig {
         for marker in &spec.content_markers {
             files.push((format!("markers/{marker}"), marker.as_bytes().to_vec()));
         }
-        let inventory: Vec<serde_json::Value> = files
-            .iter()
+        let mut listed: Vec<&(String, Vec<u8>)> = files.iter().collect();
+        listed.sort_by(|left, right| left.0.cmp(&right.0));
+        let inventory: Vec<serde_json::Value> = listed
+            .into_iter()
             .map(|(path, bytes)| {
                 let length = match (path.as_str(), spec.declared_size) {
                     ("padding.bin", Some(declared)) => declared,

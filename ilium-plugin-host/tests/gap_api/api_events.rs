@@ -5,7 +5,7 @@ use serde_json::json;
 
 fn host() -> HarnessHandle {
     HostHarness::new()
-        .grants(&["events.subscribe"])
+        .grants(&["topics.subscribe:pane-lifecycle"])
         .build()
         .expect("build harness")
 }

@@ -48,7 +48,7 @@ fn lint_dir(
 fn dev_780_new_ships_readme_changelog_and_one_topic_per_help_entry() {
     let (_root, _env, dir) = fresh("server");
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let files = tree_of(&dir);
     assert!(files.contains(&"README.md".to_owned()) && files.contains(&"CHANGELOG.md".to_owned()));
     for entry in manifest["contributes"]["help"]
@@ -173,7 +173,7 @@ fn dev_783_fresh_changelog_uses_keep_a_changelog_headings_and_a_matching_top_sec
         assert!(allowed.contains(&heading.as_str()), "{heading}");
     }
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let top = headings(&text)
         .into_iter()
         .find(|h| h.starts_with("## "))
@@ -199,7 +199,7 @@ fn dev_783_the_manual_example_changelog_follows_the_same_headings() {
 fn dev_785_title_equal_to_the_manifest_entry_passes_and_a_different_one_warns() {
     let (_root, env, dir) = fresh("server");
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let title = manifest["contributes"]["help"][0]["title"]
         .as_str()
         .unwrap()
@@ -246,7 +246,7 @@ fn topic_of_size(
     bytes: usize,
 ) -> ilium_plugin_host::cli::CliOutput {
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(dir, "manifest.json")).unwrap();
     let title = manifest["contributes"]["help"][0]["title"]
         .as_str()
         .unwrap()
@@ -290,7 +290,7 @@ fn dev_786_topic_one_byte_over_20_kib_warns() {
 fn dev_787_link_to_an_unshipped_topic_warns() {
     let (_root, env, dir) = fresh("server");
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let title = manifest["contributes"]["help"][0]["title"]
         .as_str()
         .unwrap()
@@ -312,7 +312,7 @@ fn dev_787_link_to_an_unshipped_topic_warns() {
 fn dev_787_link_to_a_shipped_topic_does_not_warn() {
     let (_root, env, dir) = fresh("server");
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let title = manifest["contributes"]["help"][0]["title"]
         .as_str()
         .unwrap()
@@ -334,7 +334,7 @@ fn dev_787_link_to_a_shipped_topic_does_not_warn() {
 fn dev_788_fresh_topic_names_each_command_the_plugin_adds() {
     let (_root, _env, dir) = fresh("server");
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let topic = read_text(&dir, "help/overview.md");
     let commands = manifest["contributes"]["commands"]
         .as_array()
@@ -355,9 +355,9 @@ fn dev_788_fresh_topic_names_each_command_the_plugin_adds() {
 fn dev_790_a_settings_row_without_help_warns_and_one_with_help_does_not() {
     let (_root, env, dir) = fresh("server");
     let mut manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     manifest["contributes"]["settings"] = json!([{ "id": "main", "title": "Agent tools", "schema": { "type": "object", "properties": { "refresh_seconds": { "type": "integer", "default": 5 } } } }]);
-    write_text(&dir, "ilium-plugin.json", &manifest.to_string());
+    write_text(&dir, "manifest.json", &manifest.to_string());
     assert!(has_rule(
         &lint_dir(&env, &dir),
         "lint",
@@ -365,7 +365,7 @@ fn dev_790_a_settings_row_without_help_warns_and_one_with_help_does_not() {
     ));
     manifest["contributes"]["settings"][0]["schema"]["properties"]["refresh_seconds"]["help"] =
         json!("overview");
-    write_text(&dir, "ilium-plugin.json", &manifest.to_string());
+    write_text(&dir, "manifest.json", &manifest.to_string());
     assert!(!has_rule(
         &lint_dir(&env, &dir),
         "lint",
@@ -400,7 +400,7 @@ fn dev_791_every_template_command_title_is_sentence_case_without_a_final_period(
     ] {
         let (_root, _env, dir) = fresh(template);
         let manifest: serde_json::Value =
-            serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+            serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
         for command in manifest["contributes"]["commands"]
             .as_array()
             .cloned()
@@ -433,9 +433,9 @@ fn dev_791_the_sentence_case_predicate_rejects_title_case_and_final_periods() {
 fn dev_795_extension_point_in_the_readme_or_extending_md_is_documented() {
     let (_root, env, dir) = fresh("server");
     let mut manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     manifest["contributes"]["extension_points"] = json!([{ "id": "before-open", "kind": "hook", "mode": "veto", "title": "Before open", "deadline_ms": 20, "max_handlers": 8, "version": "0.1.0" }]);
-    write_text(&dir, "ilium-plugin.json", &manifest.to_string());
+    write_text(&dir, "manifest.json", &manifest.to_string());
     assert!(has_rule(
         &lint_dir(&env, &dir),
         "lint",
@@ -535,13 +535,13 @@ fn dev_796_the_manual_example_changelog_dates_use_the_iso_form() {
 fn dev_790_a_settings_row_named_in_a_help_topic_does_not_warn() {
     let (_root, env, dir) = fresh("server");
     let mut manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     manifest["contributes"]["settings"] = json!([{
         "id": "main",
         "title": "Agent tools",
         "schema": { "type": "object", "properties": { "refresh_seconds": { "type": "integer" } } }
     }]);
-    write_text(&dir, "ilium-plugin.json", &manifest.to_string());
+    write_text(&dir, "manifest.json", &manifest.to_string());
     let topic = read_text(&dir, "help/overview.md");
     write_text(
         &dir,

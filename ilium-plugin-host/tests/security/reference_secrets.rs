@@ -295,7 +295,7 @@ fn sec_244_the_review_dialog_and_json_output_never_hold_a_secret() {
 #[test]
 fn sec_245_a_secret_is_not_forwarded_through_any_inter_plugin_channel() {
     let rig = setup(&[]).secret("token", SECRET).start();
-    for channel in ["messages.peer", "services", "topics", "extension-points"] {
+    for channel in ["messages.peer:acme.other", "services", "topics", "extension-points"] {
         assert!(
             !rig.host.channel_payload_text(channel).contains(SECRET),
             "{channel}"

@@ -6,8 +6,8 @@ use crate::common::*;
 #[test]
 fn lif_281_uninstall_removes_the_plugin_grants_from_grants_json() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
-    install_ok(&rig, &pkg(OTHER, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
+    install_ok(&rig, &pkg(OTHER, "1.0.0").grant("fs.read:project"));
     rig.cli(&["uninstall", NOTES]);
     let grants = rig.grants_json();
     assert!(grants[NOTES].is_null());

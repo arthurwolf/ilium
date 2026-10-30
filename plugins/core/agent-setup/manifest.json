@@ -23,22 +23,22 @@
   "capabilities": {
     "server": [
       "fs.read:agent-config:claude",
-      "fs.write:agent-config:claude",
+      "agent-config.propose:claude",
       "fs.read:agent-config:codex",
-      "fs.write:agent-config:codex",
+      "agent-config.propose:codex",
       "fs.read:project",
       "fs.write:project",
-      "projects.read",
-      "settings.read-kernel:agent-setup",
+      "tree.read",
+      "settings.read-kernel:setup",
       "services.provide:ilium.core.agent-setup/install",
       "extensions.provide:ilium.core.agent-setup/instruction-blocks",
       "extensions.provide:ilium.core.agent-setup/targets",
-      "extensions.provide:ilium.core.agent-setup/before-install"
+      "extensions.provide:ilium.core.agent-setup/before-install",
+      "settings.write-kernel:setup"
     ],
     "client": [
       "ui.panels",
-      "help.read",
-      "settings.write-kernel:setup"
+      "help.read"
     ]
   },
   "activation": [

@@ -4,8 +4,15 @@
   "name": "Editor",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Editor plugin (ilium.core.editor, side client) owns editor panes: buffers, syntax highlighting through a token provider, line numbers and the minimap, Markdown source and rendered views, the file explorer and picker, and creating an age",
+  "description": "The Editor plugin (ilium.core.editor, client plus a small server part) owns editor panes: buffers, syntax highlighting through a token provider, line numbers and the minimap, Markdown source and rendered views, the file explorer and picker, and creating an age",
   "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
   "client": {
     "entry": "client.wasm",
     "world": "ilium:client/base@0.1.0",
@@ -19,16 +26,148 @@
     "client": [
       "editor.read",
       "editor.edit",
-      "editor.provide",
       "fs.read:project",
       "panes.create",
+      "panes.create-command:claude",
       "terminal.write",
       "ui.panels",
+      "services.use:ilium.core.editor/set-setting",
+      "extensions.provide:ilium.core.editor/before-save",
+      "extensions.provide:ilium.core.editor/file-openers",
+      "extensions.provide:ilium.core.editor/line-badges"
+    ],
+    "server": [
+      "services.provide:ilium.core.editor/set-setting",
       "settings.write-kernel:editor"
     ]
   },
   "activation": [
     "pane-kind:editor"
   ],
+  "unstable": [
+    "plugin-services"
+  ],
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-save",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Before save",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "buffer",
+            "path",
+            "language",
+            "text"
+          ],
+          "properties": {
+            "buffer": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "file-openers",
+        "kind": "collect",
+        "title": "File openers",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "extensions",
+            "pane_kind",
+            "priority"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pane_kind": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "integer"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "line-badges",
+        "kind": "collect",
+        "title": "Line badges",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "regex",
+            "glyph",
+            "tooltip"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            },
+            "glyph": {
+              "type": "string"
+            },
+            "tooltip": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.editor/set-setting",
+          "version": "0.1.0",
+          "schema": "schemas/set-setting.json"
+        }
+      ]
+    }
+  },
   "limits_tier": "first-party"
 }

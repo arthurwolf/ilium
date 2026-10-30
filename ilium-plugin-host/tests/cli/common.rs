@@ -75,6 +75,11 @@ impl ToolProbe for FakeProbe {
 /// The smallest valid-looking component bytes (core wasm header).
 pub const WASM_HEADER: &[u8] = b"\0asm\x0d\0\x01\0";
 
+/// A genuine component that installs: the required exports and the API version section.
+pub fn component_bytes() -> Vec<u8> {
+    ilium_plugin_host::testing::plugin_component(&[])
+}
+
 /// A build runner that succeeds, or fails at one named stage with a message.
 pub struct FakeBuilder {
     pub fail_stage: Option<&'static str>,
@@ -214,7 +219,7 @@ impl BuildRunner for FakeBuilder {
         if self.fail_stage == Some(stage) {
             return Err(format!("error: stage {stage} failed"));
         }
-        Ok(WASM_HEADER.to_vec())
+        Ok(component_bytes())
     }
 }
 
@@ -397,10 +402,11 @@ pub fn write_dist(dir: &Path, sides: &[&str], profile: &str) {
     let hash = cli::project_input_hash(dir).expect("input hash");
     let mut side_entries = Vec::new();
     for side in sides {
-        std::fs::write(dir.join("dist").join(format!("{side}.wasm")), WASM_HEADER)
+        let component = component_bytes();
+        std::fs::write(dir.join("dist").join(format!("{side}.wasm")), &component)
             .expect("write component");
         side_entries.push(serde_json::json!({
-            "name": side, "bytes": WASM_HEADER.len(), "sha256": "0".repeat(64)
+            "name": side, "bytes": component.len(), "sha256": "0".repeat(64)
         }));
     }
     write_json(
@@ -455,7 +461,7 @@ pub fn raised_interrupt() -> Arc<AtomicBool> {
 }
 
 /// A grant the grant catalogue rates high risk (see API_GAPS.md: the exact id comes from the grants page).
-pub const HIGH_RISK_GRANT: &str = "process.spawn";
+pub const HIGH_RISK_GRANT: &str = "process.run:git";
 
 /// Like `packed_project`, but the manifest also requests `HIGH_RISK_GRANT`.
 pub fn packed_project_with_high_risk(env: &CliEnv, root: &Path) -> (PathBuf, PathBuf) {

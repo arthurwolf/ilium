@@ -8,7 +8,7 @@ use crate::common::*;
 
 fn signed_install(rig: &OpsRig) {
     rig.trust_publisher("key-a");
-    install_ok(rig, &pkg(NOTES, "1.0.0").signed("key-a").grant("fs.read"));
+    install_ok(rig, &pkg(NOTES, "1.0.0").signed("key-a").grant("fs.read:project"));
     rig.plant_data(NOTES, 1);
     rig.plant_settings(NOTES, "theme", "dark");
 }

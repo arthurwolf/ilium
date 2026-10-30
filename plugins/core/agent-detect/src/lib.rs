@@ -5,6 +5,9 @@
 //! Normal and Attention display modes. Plugin structs stay unit structs (tests build them as
 //! literals), so per-instance state lives in thread-local cells.
 
+pub mod identify;
+pub mod screen;
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -50,54 +53,33 @@ const SIGNATURES: &[SignatureEntry] = &[
     SignatureEntry { id: "example-agent", needles: &["example-agent", "example"] },
 ];
 
-fn file_stem_lowercase(argument: &str) -> String {
-    let base = argument.rsplit('/').next().unwrap_or(argument);
-    base.to_lowercase()
+/// The registry signature a lowercase name matches, if any.
+fn signature_of_name(candidate: &str) -> Option<&'static str> {
+    SIGNATURES
+        .iter()
+        .find(|entry| entry.needles.iter().any(|needle| candidate.contains(needle)))
+        .map(|entry| entry.id)
 }
 
-/// The signature id for one process: its name first, then the first two argv entries (a node launcher).
-fn signature_of_process(process: &DetectorProcess) -> Option<&'static str> {
-    let mut candidates = vec![process.name.to_lowercase()];
-    candidates.extend(process.argv.iter().take(2).map(|argument| file_stem_lowercase(argument)));
-    for candidate in &candidates {
-        for entry in SIGNATURES {
-            if entry.needles.iter().any(|needle| candidate.contains(needle)) {
-                return Some(entry.id);
-            }
-        }
-    }
-    None
+/// The signature of one process and whether it was only inferred from an interpreter's arguments.
+fn signature_of_process(process: &DetectorProcess) -> Option<(bool, &'static str)> {
+    identify::identifying_names(&process.name, &process.argv)
+        .iter()
+        .enumerate()
+        .find_map(|(index, candidate)| signature_of_name(candidate).map(|id| (index > 0, id)))
 }
 
-fn screen_text(screen: &DetectorScreen) -> Vec<&str> {
-    screen.rows.iter().map(String::as_str).collect()
-}
-
-fn is_interrupt_marker(line: &str) -> bool {
-    line.contains("esc to interrupt")
-}
-
-/// True for an elapsed-time token such as `48s`, `3m`, `1h` or `2m` directly after a digit.
-fn has_elapsed_token(line: &str) -> bool {
-    let characters: Vec<char> = line.chars().collect();
-    characters.windows(2).enumerate().any(|(index, pair)| {
-        pair[0].is_ascii_digit()
-            && matches!(pair[1], 's' | 'm' | 'h')
-            && characters
-                .get(index + 2)
-                .is_none_or(|next| !next.is_alphanumeric())
-    })
-}
-
-/// Claude and generic live status: an ellipsis and an elapsed time on one line.
-fn is_live_status_line(line: &str) -> bool {
-    line.contains('…') && has_elapsed_token(line) && !line.contains("Goal not yet met")
-}
-
-/// Codex present-tense status: `Working (18m 26s ...`.
-fn is_codex_live_status_line(line: &str) -> bool {
-    let trimmed = line.trim_start_matches(|c: char| !c.is_alphanumeric()).trim_start();
-    trimmed.starts_with("Working (") && has_elapsed_token(trimmed)
+/// A process list names an agent when one of its processes does; a natively named process beats an interpreter
+/// wrapper, then the earlier process wins.
+fn identify_processes(processes: &[DetectorProcess]) -> Option<&'static str> {
+    processes
+        .iter()
+        .enumerate()
+        .filter_map(|(position, process)| {
+            signature_of_process(process).map(|(inferred, id)| ((inferred, position), id))
+        })
+        .min_by_key(|(key, _)| *key)
+        .map(|(_, id)| id)
 }
 
 fn is_approval_line(line: &str) -> bool {
@@ -118,60 +100,57 @@ fn is_approval_line(line: &str) -> bool {
     MARKERS.iter().any(|marker| line.contains(marker))
 }
 
-/// Classifies the activity: the newest of working and approval evidence wins; approval wins a tie.
-fn classify_activity(signature: &str, rows: &[&str]) -> AgentActivity {
-    let is_codex = signature == "codex";
+/// Maps the vendored screen rules onto the six-case WIT activity. Background waits and settling turns are still
+/// working from the user's point of view.
+fn activity_of_turn(turn: screen::AgentTurn) -> AgentActivity {
+    match turn {
+        screen::AgentTurn::Working
+        | screen::AgentTurn::WaitingSubagents
+        | screen::AgentTurn::Settling => AgentActivity::Working,
+        screen::AgentTurn::WaitingApproval => AgentActivity::AwaitingApproval,
+        screen::AgentTurn::Idle => AgentActivity::Idle,
+    }
+}
+
+/// Classifies the activity of one screen. Signatures without vendored provider rules (custom agents) also honour
+/// the generic approval markers: the newest of working and approval evidence wins, approval wins a tie.
+fn classify_activity(signature: &str, screen_text: &str) -> AgentActivity {
+    let class = screen::AgentClass::from_signature(signature);
+    let classified = screen::classify_activity_for_agent_detailed(&class, screen_text);
+    let activity = activity_of_turn(classified.turn);
+    if !matches!(class, screen::AgentClass::Other(_)) {
+        return activity;
+    }
     let mut last_approval: Option<usize> = None;
     let mut last_working: Option<usize> = None;
-    for (index, row) in rows.iter().enumerate() {
+    for (index, row) in screen_text.lines().enumerate() {
         if is_approval_line(row) {
             last_approval = Some(index);
         }
-        let working = is_interrupt_marker(row)
-            || if is_codex {
-                is_codex_live_status_line(row)
-            } else {
-                is_live_status_line(row)
-            };
-        if working {
+        if row.contains("esc to interrupt") {
             last_working = Some(index);
         }
     }
     match (last_approval, last_working) {
         (Some(approval), Some(working)) if approval >= working => AgentActivity::AwaitingApproval,
-        (Some(_), None) => AgentActivity::AwaitingApproval,
-        (_, Some(_)) => AgentActivity::Working,
-        (None, None) => AgentActivity::Idle,
+        (Some(_), None) if activity == AgentActivity::Idle => AgentActivity::AwaitingApproval,
+        _ => activity,
     }
 }
 
-/// Claude shows its goal on a shared indicator row that ends with `◎ /goal <state>`.
-fn claude_goal(rows: &[&str]) -> Option<String> {
-    rows.iter().rev().take(8).find_map(|row| {
-        let trimmed = row.trim_end();
-        let at = trimmed.rfind("◎ /goal")?;
-        let text = trimmed[at + "◎ ".len()..].trim();
-        Some(text.to_string())
-    })
-}
-
-/// Codex shows its goal in the footer after the status segments: `Pursuing goal (5m)`, `Goal paused (...)`.
-fn codex_goal(rows: &[&str]) -> Option<String> {
-    const TOKENS: [&str; 3] = ["Pursuing goal (", "Goal paused (", "Goal stalled ("];
-    rows.iter().rev().take(6).find_map(|row| {
-        for token in TOKENS {
-            if let Some(at) = row.find(token) {
-                // Prose that merely starts with the words is not a footer.
-                if row[..at].trim().is_empty() {
-                    continue;
-                }
-                let rest = &row[at..];
-                let end = rest.find(')').map(|close| close + 1).unwrap_or(rest.len());
-                return Some(rest[..end].to_string());
-            }
-        }
-        None
-    })
+/// The goal text of a screen: the provider's goal line while a goal phase is visible.
+fn screen_goal(signature: &str, screen_text: &str) -> Option<String> {
+    let class = screen::AgentClass::from_signature(signature);
+    let goal = screen::goal_evidence_for_agent_detailed(&class, screen_text);
+    match goal.evidence {
+        screen::GoalEvidence::State(state) => Some(
+            goal.matched_line
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .unwrap_or_else(|| format!("goal {state:?}").to_lowercase()),
+        ),
+        screen::GoalEvidence::Inactive | screen::GoalEvidence::Unknown => None,
+    }
 }
 
 fn plain_text(content: &str) -> Vec<Span> {
@@ -295,23 +274,15 @@ impl Handler for AgentDetectServer {
 
 impl Detector for AgentDetectServer {
     fn identify(&mut self, processes: Vec<DetectorProcess>) -> Option<String> {
-        processes
-            .iter()
-            .find_map(signature_of_process)
-            .map(str::to_string)
+        identify_processes(&processes).map(str::to_string)
     }
 
     fn classify(&mut self, signature: String, screen: DetectorScreen) -> Classification {
-        let rows = screen_text(&screen);
-        let goal = match signature.as_str() {
-            "claude" => claude_goal(&rows),
-            "codex" => codex_goal(&rows),
-            _ => None,
-        };
+        let screen_text = screen.rows.join("\n");
         Classification {
-            activity: classify_activity(&signature, &rows),
+            activity: classify_activity(&signature, &screen_text),
             objective: None,
-            goal,
+            goal: screen_goal(&signature, &screen_text),
         }
     }
 }
@@ -349,7 +320,7 @@ fn agent_entry(state: &mut PanelState, node: NodeId) -> &mut PanelAgent {
 }
 
 /// The client side of `ilium.core.agent-detect` (core-plugin-agent-detect.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct AgentDetectClient;
 

@@ -3,8 +3,12 @@
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+use ilium_plugin_sdk::generated::host::log::Level;
 use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::types::{
+    ActionKind, ActionValue, CreateFolderSpec, CreateGroupSpec, ErrorCode, Intent, NodeId,
+    Outcome, Placement, SetNodeLockedSpec, Submission,
+};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
@@ -21,9 +25,53 @@ impl Lifecycle for TreeServer {
 }
 
 impl Handler for TreeServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::Message(message) => {
+                    if let Some(submission) = creation_from_message(&message.channel, &message.payload)
+                    {
+                        submissions.push(submission);
+                    }
+                }
+                Event::RequestCompleted(result) => {
+                    if let Outcome::Refused(error) = result.outcome {
+                        if error.code == ErrorCode::Conflict {
+                            ilium_plugin_sdk::log::log(
+                                Level::Info,
+                                "manual name kept; not retrying",
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        submissions
     }
+}
+
+/// Turns a `new-group` / `new-folder` message (8 little-endian bytes: the parent node) into a
+/// creation keyed `<channel>-<parent>`.
+fn creation_from_message(channel: &str, payload: &[u8]) -> Option<Submission> {
+    let bytes: [u8; 8] = payload.try_into().ok()?;
+    let parent = u64::from_le_bytes(bytes);
+    let intent = match channel {
+        "new-group" => Intent::CreateGroup(CreateGroupSpec {
+            parent: Some(NodeId(parent)),
+            title: "New group".to_string(),
+            placement: Placement::InsideLast,
+            children: Vec::new(),
+        }),
+        "new-folder" => Intent::CreateFolder(CreateFolderSpec {
+            parent: Some(NodeId(parent)),
+            title: "New folder".to_string(),
+            path: None,
+        }),
+        _ => return None,
+    };
+    Some(Submission::keyed(intent, format!("{channel}-{parent}")))
 }
 
 /// The client side of `ilium.core.tree` (core-plugin-tree.md, world `ilium:client/base@0.1.0`).
@@ -38,8 +86,40 @@ impl Lifecycle for TreeClient {
 }
 
 impl Handler for TreeClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::UiAction(action) = event else {
+                continue;
+            };
+            if action.kind != ActionKind::Activated {
+                continue;
+            }
+            let Some(node) = action
+                .key
+                .strip_prefix("row-")
+                .and_then(|digits| digits.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let Some(ActionValue::Text(item)) = action.value else {
+                continue;
+            };
+            let intent = match item.as_str() {
+                "lock" => Intent::SetNodeLocked(SetNodeLockedSpec {
+                    node: NodeId(node),
+                    locked: true,
+                }),
+                "unlock" => Intent::SetNodeLocked(SetNodeLockedSpec {
+                    node: NodeId(node),
+                    locked: false,
+                }),
+                "close" => Intent::CloseNode(NodeId(node)),
+                _ => continue,
+            };
+            submissions.push(Submission::new(intent));
+        }
+        submissions
     }
 }
 

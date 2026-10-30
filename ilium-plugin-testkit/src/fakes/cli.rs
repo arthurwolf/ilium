@@ -87,6 +87,31 @@ impl FakeCli {
         }
     }
 
+    /// Appends plugin output to a running invocation; false when the id is unknown.
+    pub(crate) fn append(&mut self, invocation: u64, stderr: bool, text: &str) -> bool {
+        let Some(output) = self.outputs.get(&invocation) else {
+            return false;
+        };
+        let mut output = output.borrow_mut();
+        if stderr {
+            output.stderr.push_str(text);
+        } else {
+            output.stdout.push_str(text);
+        }
+        true
+    }
+
+    /// Sets the exit code of a running invocation; false when the id is unknown.
+    pub(crate) fn finish(&mut self, invocation: u64, exit_code: u8) -> bool {
+        match self.outputs.get(&invocation) {
+            Some(output) => {
+                output.borrow_mut().exit_code = Some(exit_code);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The current output and exit code of an earlier invocation (lane hook, see manual_gaps_fakes.md; DEV-473).
     pub fn refresh(&self, invocation: &Invocation) -> Invocation {
         invocation.clone()

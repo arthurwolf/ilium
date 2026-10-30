@@ -14,7 +14,7 @@ fn lif_727_auto_update_skips_each_excluded_case_and_logs_one_line_per_applied_up
         "Auto-update MUST apply only at a safe point",
     );
     let excluded_cases: Vec<(&str, PackageSpec)> = vec![
-        ("adds a grant", pkg(NOTES, "1.1.0").grant("net.http")),
+        ("adds a grant", pkg(NOTES, "1.1.0").grant("http:example.invalid")),
         (
             "changes the publisher key",
             pkg(NOTES, "1.1.0").signed("key-other"),

@@ -80,7 +80,10 @@ fn manifest_050_server_grants_in_page_order() {
             "panes.read",
             "panes.lifecycle",
             "tree.restructure",
-            "agent.read"
+            "agent.read",
+            "settings.write-kernel:session",
+            "extensions.provide:ilium.core.sessions/snapshot-sections",
+            "extensions.provide:ilium.core.sessions/before-restore"
         ]
     );
 }
@@ -91,10 +94,11 @@ fn manifest_050_fragment_grants_equal_the_complete_manifest_grants() {
     let blocks = json_blocks(&page_text());
     let fragment: serde_json::Value = serde_json::from_str(&blocks[0]).expect("fragment is JSON");
     assert_eq!(fragment["id"], PLUGIN_ID);
-    assert_eq!(
-        fragment["capabilities"]["server"],
-        manifest_value()["capabilities"]["server"]
-    );
+    // The fragment lists the contributions; the complete manifest adds the kernel-tab and
+    // extension-point grants after them (page "Manifest" and "Complete manifest").
+    let fragment_grants = strings(&fragment["capabilities"]["server"]);
+    let complete_grants = strings(&manifest_value()["capabilities"]["server"]);
+    assert_eq!(complete_grants[..fragment_grants.len()], fragment_grants[..]);
 }
 
 /// REQ: COR-050
@@ -141,10 +145,11 @@ fn manifest_050_core_plugins_index_lists_sessions_as_server_side() {
 #[test]
 fn manifest_030_client_holds_the_session_kernel_tab_grant() {
     let manifest = manifest_value();
-    assert_eq!(
-        strings(&manifest["capabilities"]["client"]),
-        ["settings.write-kernel:session"]
-    );
+    // Page: the server side holds the grant, the client side needs no grants of its own.
+    assert!(manifest["capabilities"].get("client").is_none());
+    assert!(strings(&manifest["capabilities"]["server"])
+        .iter()
+        .any(|grant| grant == "settings.write-kernel:session"));
 }
 
 /// REQ: COR-030
@@ -153,8 +158,10 @@ fn manifest_030_only_the_session_tab_is_written_by_this_plugin() {
     let manifest = manifest_value();
     let all: Vec<String> = ["server", "client"]
         .iter()
+        .filter(|side| manifest["capabilities"].get(**side).is_some())
         .flat_map(|side| strings(&manifest["capabilities"][side]))
         .filter(|grant| grant.starts_with("settings.write-kernel:"))
         .collect();
     assert_eq!(all, ["settings.write-kernel:session"]);
+    assert!(manifest["capabilities"].get("client").is_none());
 }

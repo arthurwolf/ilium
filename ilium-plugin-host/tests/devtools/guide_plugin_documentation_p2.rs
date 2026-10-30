@@ -61,7 +61,7 @@ fn dev_797_fresh_project_changelog_has_unreleased_or_the_newest_version_on_top()
         .find(|l| l.starts_with("## "))
         .expect("a release heading");
     let manifest: serde_json::Value =
-        serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
     let version = manifest["version"].as_str().unwrap();
     assert!(
         first.contains("Unreleased") || first.contains(version),

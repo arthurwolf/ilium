@@ -1404,7 +1404,7 @@ mod tests {
         let fixture = ImportsFixture::builder()
             .tier(Tier::T1)
             .side(Side::Server)
-            .grants(&["fs", "http"])
+            .grants(&["fs.read:project", "http:example.invalid"])
             .manifest_json("{}")
             .project_root(Path::new("."))
             .limit("fs_write_mib", 1)

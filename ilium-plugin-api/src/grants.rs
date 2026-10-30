@@ -495,6 +495,15 @@ static GRANTS: &[GrantInfo] = &[
         &["ilium:host/fs@0.1.0"]
     ),
     row!(
+        "agent-config.propose",
+        true,
+        High,
+        &Tier::ALL,
+        &[Side::Server, Side::Client],
+        None,
+        &["ilium:host/fs@0.1.0"]
+    ),
+    row!(
         "fs.pick",
         false,
         Low,
@@ -1016,6 +1025,15 @@ fn validate_argument(grant: &Grant) -> Result<(), Diagnostic> {
         ));
     }
     let valid = match family {
+        "agent-config.propose" => {
+            if !matches!(argument, "claude" | "codex" | "gemini" | "antigravity") {
+                return Err(grant_error(
+                    "manifest.grant-scope",
+                    "unknown agent for a configuration proposal",
+                ));
+            }
+            true
+        }
         "fs.read" | "fs.write" | "fs.watch" => {
             if !valid_scope(family, argument) {
                 return Err(grant_error(

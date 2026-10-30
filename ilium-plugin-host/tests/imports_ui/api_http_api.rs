@@ -7,7 +7,7 @@ use ilium_plugin_api::ErrorCode;
 
 use crate::common::*;
 
-const GRANTS: &[&str] = &["http-api.token"];
+const GRANTS: &[&str] = &["http-api.route:/demo"];
 
 fn open_call(rig: &Rig) -> u64 {
     rig.kernel.start_http_call("GET", "/x")

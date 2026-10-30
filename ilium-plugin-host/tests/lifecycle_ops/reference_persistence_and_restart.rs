@@ -53,7 +53,7 @@ fn expected(event: LifeEvent) -> Vec<(Marker, bool)> {
 
 fn run_matrix_column(event: LifeEvent) {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read").restore_bytes(8));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project").restore_bytes(8));
     let server = rig.start_server("s1");
     rig.advance(secs(3));
     rig.set_all_markers(NOTES, &server);

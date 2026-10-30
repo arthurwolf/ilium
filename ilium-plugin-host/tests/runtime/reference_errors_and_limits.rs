@@ -939,7 +939,7 @@ fn api_071_window_survives_a_restart_of_the_plugin_side() {
 #[test]
 fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
     let host = HostHarness::new()
-        .grants(&["topics.publish:demo"])
+        .grants(&[])
         .with_native_guest(Box::new(QuietGuest))
         .build()
         .expect("host");
@@ -995,7 +995,7 @@ fn api_071_journal_log_event_allows_20_per_second_and_refuses_the_21st() {
 #[test]
 fn api_071_geocode_allows_one_per_second() {
     let mut host = HostHarness::new()
-        .grants(&["geocode"])
+        .grants(&["location.geocode"])
         .with_native_guest(Box::new(QuietGuest))
         .build()
         .expect("host");

@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
 serde_json = "1.0.151"
+unicode-width = "0.2.2"
 
 [dev-dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }

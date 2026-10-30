@@ -16,7 +16,7 @@ use proptest::prelude::*;
 use crate::common::*;
 
 const READ: &[&str] = &["editor.read"];
-const EDIT: &[&str] = &["editor.read", "editor.edit", "fs.read", "fs.write"];
+const EDIT: &[&str] = &["editor.read", "editor.edit", "fs.read:project", "fs.write:data"];
 
 fn text_of(lines: usize) -> String {
     (0..lines).map(|index| format!("line {index}\n")).collect()

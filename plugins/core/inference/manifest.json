@@ -10,20 +10,148 @@
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0"
   },
-  "client": {
-    "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
-  },
   "capabilities": {
     "server": [
       "inference.provide",
       "http:api.openai.com",
-      "http:localhost"
+      "http:localhost",
+      "extensions.provide:ilium.core.inference/before-request",
+      "extensions.provide:ilium.core.inference/after-response"
     ],
     "client": [
       "ui.panels",
       "settings.write-kernel:inference",
-      "settings.write-kernel:llm-instructions"
+      "settings.write-kernel:llm-instructions",
+      "extensions.provide:ilium.core.inference/provider-profiles"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-request",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Rewrite or refuse an outgoing model request",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "messages_length": {
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "purpose",
+            "provider",
+            "model",
+            "messages_length",
+            "text"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "after-response",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Learn that a model request finished",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "input_tokens": {
+              "type": "integer"
+            },
+            "output_tokens": {
+              "type": "integer"
+            },
+            "millis": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "purpose",
+            "provider",
+            "model",
+            "input_tokens",
+            "output_tokens",
+            "millis"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "provider-profiles",
+        "kind": "collect",
+        "title": "Ready-made provider setups for the provider chooser",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "models_path": {
+              "type": "string"
+            },
+            "key_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "base_url",
+            "models_path",
+            "key_name"
+          ]
+        },
+        "risk": "high",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [

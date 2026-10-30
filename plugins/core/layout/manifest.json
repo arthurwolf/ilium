@@ -19,11 +19,74 @@
       "panes.read",
       "panes.lifecycle",
       "panes.create",
-      "tree.restructure"
+      "tree.restructure",
+      "extensions.provide:ilium.core.layout/layout-presets",
+      "extensions.provide:ilium.core.layout/before-split"
     ],
     "client": [
       "panes.read",
       "ui.panels"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "layout-presets",
+        "kind": "collect",
+        "title": "Layout presets",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "template": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "template"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-split",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before split",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "node": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string"
+            },
+            "pane_count": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "node",
+            "direction",
+            "pane_count"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [

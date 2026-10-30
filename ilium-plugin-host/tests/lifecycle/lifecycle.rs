@@ -461,12 +461,12 @@ fn lif_041_revoke_during_restart_keeps_timer_and_shortens_granted() {
     let mut host = LifeHost::new();
     host.install(
         PluginSpec::new(A)
-            .grants(&["fs.read", "net.http"])
+            .grants(&["fs.read", "http:example.invalid"])
             .startup(),
     );
     host.start(StartMode::Normal);
     trap(&mut host, A);
-    host.revoke(A, "net.http");
+    host.revoke(A, "http:example.invalid");
     assert_eq!(restart_in_ms(&host, A), Some(1000));
     host.advance_ms(1000);
     assert_eq!(
@@ -1089,13 +1089,13 @@ fn lif_041_revoke_during_restart_does_not_reset_the_timer() {
     let mut host = LifeHost::new();
     host.install(
         PluginSpec::new(A)
-            .grants(&["fs.read", "net.http"])
+            .grants(&["fs.read", "http:example.invalid"])
             .startup(),
     );
     host.start(StartMode::Normal);
     trap(&mut host, A);
     host.advance_ms(500);
-    host.revoke(A, "net.http");
+    host.revoke(A, "http:example.invalid");
     assert_eq!(
         restart_in_ms(&host, A),
         Some(500),

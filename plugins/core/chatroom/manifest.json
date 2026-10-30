@@ -29,11 +29,13 @@
       "fs.watch:project",
       "topics.subscribe:chatroom",
       "services.use:ilium.core.agent-setup",
-      "cli.contribute"
+      "cli.contribute",
+      "extensions.provide:ilium.core.chatroom/before-post"
     ],
     "client": [
       "topics.subscribe:chatroom",
-      "ui.panels"
+      "ui.panels",
+      "extensions.provide:ilium.core.chatroom/message-renderers"
     ]
   },
   "activation": [
@@ -42,12 +44,84 @@
   ],
   "limits_tier": "first-party",
   "contributes": {
-    "cli": [{
-      "name": "chat",
-      "summary": "Project chatroom: init, send, context, tail",
-      "output": "text",
-      "stdin": "none",
-      "requires_server": false
-    }]
+    "cli": [
+      {
+        "name": "chat",
+        "summary": "Project chatroom: init, send, context, tail",
+        "output": "text",
+        "stdin": "none",
+        "requires_server": false
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "before-post",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Change a message before it is written to the room",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "author",
+            "text",
+            "kind"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "message-renderers",
+        "kind": "collect",
+        "title": "Draw a message kind in a special way",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "view": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "view"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ]
   }
 }

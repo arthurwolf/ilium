@@ -1,9 +1,14 @@
 //! Plugin traits and the host handle (manual: rust-sdk.md "Traits", "Calling the host").
 
 use crate::generated::anim::FrameInput;
-use crate::generated::exports::ExportLifecycle;
-use crate::generated::host::InstanceState;
-use crate::generated::types::{Activation, DeactivationReason, Event, PluginError, Submission};
+use crate::generated::exports::{ExportLifecycle, HookCall, HookReply, ServiceCall, ServiceReply};
+use crate::generated::host::{
+    HostClock, HostCli, HostFs, HostHttp, HostInference, HostJobs, HostKeys, HostLog, HostProcess,
+    HostSettings, HostStorage, HostTimers, InstanceState,
+};
+use crate::generated::types::{
+    Activation, DeactivationReason, ErrorCode, Event, PluginError, Submission,
+};
 
 /// The lifecycle state of an instance, as `host::plugins` reports it (reference-wit.md section 5.31).
 pub type LifecycleState = InstanceState;
@@ -61,10 +66,38 @@ pub use crate::generated::exports::ExportVirtualRowsProvider as VirtualRowsProvi
 pub trait Plugin: Default + Lifecycle {}
 impl<T: Default + Lifecycle> Plugin for T {}
 
-/// All host imports in one trait (rust-sdk.md "Calling the host"). The skeleton keeps it empty: the
-/// implementation phase makes it a supertrait of every generated `Host*` trait with a blanket impl.
-pub trait HostCalls {}
-impl<T: ?Sized> HostCalls for T {}
+/// All host imports in one trait (rust-sdk.md "Calling the host"): every generated `Host*` trait the
+/// SDK exposes, so `host().fetch(..)`, `host().read(..)` and the other calls resolve on the handle.
+pub trait HostCalls:
+    HostLog
+    + HostClock
+    + HostTimers
+    + HostStorage
+    + HostSettings
+    + HostFs
+    + HostHttp
+    + HostJobs
+    + HostProcess
+    + HostInference
+    + HostCli
+    + HostKeys
+{
+}
+impl<T: ?Sized> HostCalls for T where
+    T: HostLog
+        + HostClock
+        + HostTimers
+        + HostStorage
+        + HostSettings
+        + HostFs
+        + HostHttp
+        + HostJobs
+        + HostProcess
+        + HostInference
+        + HostCli
+        + HostKeys
+{
+}
 
 /// The host handle that `host()` returns; the testkit FakeHost implements it (reference-test-harness.md).
 pub trait HostApi: HostCalls {}
@@ -76,9 +109,16 @@ pub fn host() -> Box<dyn HostApi> {
     Box::new(HostHandle { installed })
 }
 
+/// Error every fallible call returns while no backend is installed.
+pub fn no_host() -> PluginError {
+    PluginError::new(ErrorCode::Unsupported, "no host is installed on this thread")
+}
+
+type Backend = std::rc::Rc<std::cell::RefCell<Box<dyn HostApi>>>;
+
 /// Handle returned by `host()`; clones share the installed host of the thread.
 pub struct HostHandle {
-    installed: Option<std::rc::Rc<dyn HostApi>>,
+    installed: Option<Backend>,
 }
 
 impl HostHandle {
@@ -86,16 +126,34 @@ impl HostHandle {
     pub fn is_installed(&self) -> bool {
         self.installed.is_some()
     }
+
+    /// The installed backend that receives the calls, when there is one.
+    pub(crate) fn backend(&self) -> Option<&Backend> {
+        self.installed.as_ref()
+    }
 }
 
 thread_local! {
-    static INSTALLED_HOST: std::cell::RefCell<Option<std::rc::Rc<dyn HostApi>>> =
+    static INSTALLED_HOST: std::cell::RefCell<Option<Backend>> =
         const { std::cell::RefCell::new(None) };
 }
 
-/// Installs the host handle for the current thread; the testkit calls this in native mode.
-pub fn set_host(handle: Box<dyn HostApi>) {
-    INSTALLED_HOST.with(|slot| *slot.borrow_mut() = Some(std::rc::Rc::from(handle)));
+/// Installs the host handle for the current thread; the testkit calls this in native mode. A
+/// `Box<dyn HostApi>` becomes the backend of every call; any other value only marks a host as
+/// present and its calls report `unsupported`.
+pub fn set_host(handle: Box<dyn std::any::Any>) {
+    let backend = match handle.downcast::<Box<dyn HostApi>>() {
+        Ok(backend) => backend,
+        Err(_) => Box::new(Box::new(HostHandle { installed: None }) as Box<dyn HostApi>),
+    };
+    INSTALLED_HOST.with(|slot| {
+        *slot.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(*backend)));
+    });
+}
+
+/// Removes the installed host of the current thread.
+pub fn clear_host() {
+    INSTALLED_HOST.with(|slot| *slot.borrow_mut() = None);
 }
 
 /// Pixel buffer a native scene renderer draws into (reference-test-harness.md "FakeScene").
@@ -135,6 +193,21 @@ pub trait NativeEntry: Sized {
     fn native_deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>>;
     /// Dispatches `on-events`.
     fn native_on_events(&mut self, batch: Vec<Event>) -> Vec<Submission>;
+    /// Dispatches `job-runner.run`; `None` when the plugin does not export `job-runner`.
+    fn native_run_job(&mut self, kind: String, input: Vec<u8>) -> Option<Result<Vec<u8>, PluginError>> {
+        let _ = (kind, input);
+        None
+    }
+    /// Dispatches `service-provider.handle`; `None` when the plugin does not export `service-provider`.
+    fn native_handle_service(&mut self, call: ServiceCall) -> Option<ServiceReply> {
+        let _ = call;
+        None
+    }
+    /// Dispatches `hook-handler.handle-hook`; `None` when the plugin does not export `hook-handler`.
+    fn native_handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>> {
+        let _ = call;
+        None
+    }
 }
 
 #[cfg(test)]

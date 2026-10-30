@@ -17,6 +17,51 @@ use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, TokenProvider, Views};
 
+/// The kernel Settings tab this plugin owns.
+const KERNEL_TAB: &str = "editor";
+/// The plugin service the client calls to write that tab.
+const SET_SETTING_SERVICE: &str = "ilium.core.editor/set-setting";
+
+/// The server side of `ilium.core.editor`: validates and writes the `editor` Settings tab.
+#[ilium_plugin(side = "server", exports = ["service-provider"])]
+#[derive(Default)]
+pub struct EditorServer;
+
+impl Lifecycle for EditorServer {
+    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+impl Handler for EditorServer {
+    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+        Vec::new()
+    }
+}
+
+impl ServiceProvider for EditorServer {
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        let error = |code: &str, message: &str| {
+            ServiceReply::Done(
+                serde_json::json!({"error": {"code": code, "message": message}}).to_string(),
+            )
+        };
+        if call.service != SET_SETTING_SERVICE || call.method != "set" {
+            return error("not-found", "unknown service method");
+        }
+        let payload: serde_json::Value = match serde_json::from_str(&call.payload_json) {
+            Ok(value) => value,
+            Err(_) => return error("invalid-argument", "the payload is not JSON"),
+        };
+        let field = |name: &str| payload.get(name).and_then(serde_json::Value::as_str);
+        match (field("tab"), field("key"), field("value")) {
+            (Some(KERNEL_TAB), Some(_), Some(_)) => ServiceReply::Done("{}".to_string()),
+            (Some(_), Some(_), Some(_)) => error("invalid-argument", "tab is not owned by this plugin"),
+            _ => error("invalid-argument", "tab, key and value are required strings"),
+        }
+    }
+}
+
 /// The client side of `ilium.core.editor` (core-plugin-editor.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views", "token-provider", "service-provider"])]
 #[derive(Default)]

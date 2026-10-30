@@ -1284,7 +1284,7 @@ impl HarnessHandle {
             ("panes", "send-input") => "terminal.write".into(),
             ("panes", "send-raw") => "terminal.raw-input".into(),
             ("panes", _) => "panes.read".into(),
-            ("process", _) => "process.spawn".into(),
+            ("process", _) => "process.run:git".into(),
             ("clipboard", "read") => "clipboard.read".into(),
             ("clipboard", _) => "clipboard.write".into(),
             ("commands", "register") => "commands.register".into(),

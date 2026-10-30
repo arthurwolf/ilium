@@ -64,6 +64,13 @@ impl FakeStorage {
         map.insert(key.to_string(), value.to_vec());
     }
 
+    /// Removes one value as the plugin asked; a missing key is not an error.
+    pub(crate) fn remove(&mut self, bucket: Bucket, key: &str) {
+        if let Some(map) = self.buckets.get_mut(bucket_name(bucket)) {
+            map.remove(key);
+        }
+    }
+
     /// Whole content as `{bucket: {key: bytes}}`, for snapshots; empty buckets are left out.
     pub(crate) fn dump_all(&self) -> BTreeMap<String, BTreeMap<String, Vec<u8>>> {
         self.buckets

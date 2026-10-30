@@ -70,7 +70,7 @@ fn depth_host(command: Option<Intent>) -> (HarnessHandle, Arc<AtomicUsize>, Reco
         command,
     };
     let host = HostHarness::new()
-        .grants(&["commands.invoke"])
+        .grants(&["commands.invoke:demo.run"])
         .with_native_guest(Box::new(guest))
         .build()
         .expect("the harness builds a host for a native guest");

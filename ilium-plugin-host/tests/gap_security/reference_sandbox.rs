@@ -56,7 +56,7 @@ fn sec_708_compilation_runs_in_the_helper_and_a_bad_digest_artifact_is_refused()
 #[test]
 fn sec_709_helper_rlimits_are_nofile_64_fsize_quota_and_memlock_zero() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("storage.write"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0"));
     let limits = rig.helper_rlimits(NOTES);
     assert_eq!(limits["RLIMIT_NOFILE"], 64);
     assert_eq!(limits["RLIMIT_MEMLOCK"], 0);
@@ -74,7 +74,6 @@ fn sec_709_a_call_over_the_fsize_limit_returns_quota_exceeded_with_the_limit_nam
     install_ok(
         &rig,
         &pkg(NOTES, "1.0.0")
-            .grant("storage.write")
             .write_over_quota(),
     );
     let server = rig.start_server("s1");

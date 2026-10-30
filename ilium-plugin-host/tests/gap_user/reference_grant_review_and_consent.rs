@@ -70,7 +70,7 @@ fn usr_321_review_dialog_shows_full_wording_and_keeps_confirm_disabled_until_scr
     for grant in [
         "fs.read",
         "fs.write",
-        "net.http",
+        "http:example.invalid",
         "clipboard",
         "notify",
         "audio",

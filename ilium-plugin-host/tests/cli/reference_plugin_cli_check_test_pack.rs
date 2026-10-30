@@ -889,7 +889,11 @@ fn dev_097_packed_manifest_lists_length_and_sha256_of_every_other_entry() {
     let (_, package) = packed_project(&env, root.path());
     let archive = read_package(&std::fs::read(package).expect("read")).expect("valid package");
     assert!(!archive.manifest.files.is_empty());
-    for entry in &archive.entries {
+    for entry in archive
+        .entries
+        .iter()
+        .filter(|entry| entry.path != "manifest.json" && entry.path != "signature")
+    {
         let listed = archive
             .manifest
             .files
@@ -1033,10 +1037,10 @@ fn dev_101_a_package_over_300_mib_fails_package_size_limit() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
-    write_dist(&dir, &["server"], "release");
     let big = vec![0xa5u8; (300 * 1024 * 1024) + 1];
     std::fs::create_dir_all(dir.join("assets")).expect("create");
     std::fs::write(dir.join("assets/blob.bin"), &big).expect("write");
+    write_dist(&dir, &["server"], "release");
     let output = run_in(&env, &dir, &["pack"]);
     assert_eq!(code(&output).as_deref(), Some("package.size-limit"));
 }
@@ -1047,10 +1051,10 @@ fn dev_101_a_package_at_100_mib_packs_with_a_size_cap_warning() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
-    write_dist(&dir, &["server"], "release");
     let big = vec![0xa5u8; 101 * 1024 * 1024];
     std::fs::create_dir_all(dir.join("assets")).expect("create");
     std::fs::write(dir.join("assets/blob.bin"), &big).expect("write");
+    write_dist(&dir, &["server"], "release");
     let output = run_in(&env, &dir, &["pack"]);
     assert_eq!(output.exit_code, 0);
     assert_eq!(warning_codes(&output), ["pack.size-cap"]);

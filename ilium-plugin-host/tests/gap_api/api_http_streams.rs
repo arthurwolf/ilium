@@ -5,7 +5,7 @@ use serde_json::json;
 
 fn host() -> HarnessHandle {
     HostHarness::new()
-        .grants(&["http.open-stream"])
+        .grants(&["http:example.invalid"])
         .build()
         .expect("build harness")
 }

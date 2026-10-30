@@ -19,10 +19,63 @@
       "panes.read",
       "panes.lifecycle",
       "tree.restructure",
-      "agent.read"
-    ],
-    "client": [
-      "settings.write-kernel:session"
+      "agent.read",
+      "settings.write-kernel:session",
+      "extensions.provide:ilium.core.sessions/snapshot-sections",
+      "extensions.provide:ilium.core.sessions/before-restore"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "snapshot-sections",
+        "kind": "collect",
+        "title": "Snapshot sections",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "max_bytes"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "max_bytes": {
+              "type": "integer"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-restore",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Before restore",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "session",
+            "pane_count"
+          ],
+          "properties": {
+            "session": {
+              "type": "string"
+            },
+            "pane_count": {
+              "type": "integer"
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [

@@ -22,8 +22,8 @@ const EGRESS_GRANTS: [&str; 6] = [
     "inference",
     "notify.desktop",
     "clipboard.write",
-    "messages.peer",
-    "services.use",
+    "messages.peer:acme.other",
+    "services.use:demo",
 ];
 
 /// REQ: SEC-001
@@ -100,7 +100,7 @@ fn sec_002_malformed_input_at_the_plugin_boundary_is_invalid_argument() {
 /// REQ: SEC-002
 #[test]
 fn sec_002_identity_comes_from_the_channel_not_from_the_message() {
-    let rig = t3(&["messages.peer"]);
+    let rig = t3(&["messages.peer:acme.other"]);
     let result = rig.value(
         "ilium:host/messages.send-peer",
         json!({ "peer": "other.plugin", "from": "ilium.core.sessions", "payload": "aGk=" }),
@@ -350,7 +350,7 @@ fn sec_006_the_host_classifies_every_listed_grant_into_exactly_its_list() {
 fn sec_007_the_review_dialog_shows_receives_data_from_other_plugins() {
     let rig = t3(&[]);
     for grants in [
-        vec!["messages.peer"],
+        vec!["messages.peer:acme.other"],
         vec!["services.use:other.plugin/svc"],
         vec!["topics.subscribe:other.topic"],
     ] {
@@ -370,7 +370,7 @@ fn sec_007_the_review_dialog_shows_receives_data_from_other_plugins() {
 /// REQ: SEC-007
 #[test]
 fn sec_007_messages_from_ids_not_in_accepts_messages_from_are_dropped_with_a_log_line() {
-    let rig = setup(&["messages.peer"])
+    let rig = setup(&["messages.peer:acme.other"])
         .accepts_messages_from(&["friend.plugin"])
         .start();
     rig.host.deliver_peer_message("stranger.plugin", b"hi");

@@ -8,7 +8,7 @@ use ilium_plugin_sdk::exports::ProviderCall;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::host::catalogs::{CatalogPage, CatalogQuery};
-use ilium_plugin_sdk::types::Activation;
+use ilium_plugin_sdk::types::{Activation, CatalogItem, ErrorCode};
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
 use ilium_plugin_sdk::{
@@ -18,11 +18,17 @@ use ilium_plugin_sdk::{
 /// The server side of `ilium.core.inference` (core-plugin-inference.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["inference-provider", "catalog-provider"])]
 #[derive(Default)]
-pub struct InferenceServer;
+pub struct InferenceServer {
+    settings: serde_json::Value,
+    loaded_models: Vec<String>,
+}
 
 impl Lifecycle for InferenceServer {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
-        validate_settings(&context.settings_json)
+        validate_settings(&context.settings_json)?;
+        self.settings = serde_json::from_str(&context.settings_json)
+            .unwrap_or(serde_json::Value::Null);
+        Ok(())
     }
 }
 
@@ -43,14 +49,77 @@ impl InferenceProvider for InferenceServer {
     }
 
     fn models(&mut self) -> Vec<String> {
-        Vec::new()
+        self.offered_models()
     }
 }
 
 /// The `catalog-provider` export of the server (core-plugin-inference.md "Model catalog", reference-wit.md section 8.10).
 impl CatalogProvider for InferenceServer {
-    fn query_catalog(&mut self, _query: CatalogQuery) -> Result<CatalogPage, PluginError> {
-        Ok(CatalogPage::default())
+    fn query_catalog(&mut self, query: CatalogQuery) -> Result<CatalogPage, PluginError> {
+        if query.catalog != "models" {
+            return Err(error(ErrorCode::NotFound, "unknown catalogue"));
+        }
+        if !(1..=256).contains(&query.limit) {
+            return Err(error(ErrorCode::InvalidArgument, "limit must be 1 to 256"));
+        }
+        let filter = query.filter.to_lowercase();
+        let matching: Vec<String> = self
+            .offered_models()
+            .into_iter()
+            .filter(|name| name.to_lowercase().contains(&filter))
+            .collect();
+        let start = match &query.cursor {
+            None => 0,
+            Some(cursor) => cursor
+                .parse::<usize>()
+                .map_err(|_| error(ErrorCode::InvalidArgument, "cursor is not valid"))?,
+        };
+        let end = (start + usize::from(query.limit)).min(matching.len());
+        let items = matching
+            .get(start.min(end)..end)
+            .unwrap_or_default()
+            .iter()
+            .map(|name| CatalogItem {
+                id: name.clone(),
+                title: name.clone(),
+                ..CatalogItem::default()
+            })
+            .collect();
+        Ok(CatalogPage {
+            items,
+            next: (end < matching.len()).then(|| end.to_string()),
+            total: Some(matching.len() as u32),
+        })
+    }
+}
+
+impl InferenceServer {
+    /// The saved model of the selected provider, then the loaded list, sorted and without duplicates.
+    fn offered_models(&self) -> Vec<String> {
+        let mut names = self.loaded_models.clone();
+        let selected = self.settings["selected_provider"].as_str().unwrap_or("");
+        let table = match selected {
+            "open_ai" => "openai",
+            "ollama" => "ollama",
+            "kilo_gateway" => "kilo_gateway",
+            _ => "",
+        };
+        if let Some(saved) = self.settings[table]["model"].as_str() {
+            if !saved.is_empty() {
+                names.push(saved.to_string());
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+}
+
+fn error(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_string(),
+        retry_after_ms: None,
     }
 }
 

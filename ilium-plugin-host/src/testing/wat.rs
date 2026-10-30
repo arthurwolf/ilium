@@ -5,6 +5,56 @@ pub fn wat_component(text: &str) -> Vec<u8> {
     wat::parse_str(text).unwrap_or_else(|error| panic!("invalid component fixture: {error}"))
 }
 
+/// A genuine component for install tests: it exports the required `lifecycle` and `handler`
+/// interfaces plus the given optional exports, and carries the `ilium:api-version` custom
+/// section for API 0.1.0 (reference-manifest.md, PKG-042 and PKG-043).
+pub fn plugin_component(optional_exports: &[&str]) -> Vec<u8> {
+    let mut text = String::from("(component\n");
+    for (index, name) in ["lifecycle", "handler"]
+        .iter()
+        .chain(optional_exports.iter())
+        .enumerate()
+    {
+        text.push_str(&format!(
+            "  (instance $e{index})\n  (export \"ilium:exports/{name}@0.1.0\" (instance $e{index}))\n"
+        ));
+    }
+    text.push(')');
+    let mut bytes = wat_component(&text);
+    // Custom section: id 0, size, name length, name, then major.minor.patch as three big-endian u16.
+    let name = b"ilium:api-version";
+    let payload = [0u8, 0, 0, 1, 0, 0];
+    bytes.push(0);
+    bytes.push((1 + name.len() + payload.len()) as u8);
+    bytes.push(name.len() as u8);
+    bytes.extend_from_slice(name);
+    bytes.extend_from_slice(&payload);
+    bytes
+}
+
+/// The `files` inventory of a package: length and SHA-256 of every entry except `manifest.json`
+/// and `signature`, bytewise sorted by path as the manifest reference requires.
+pub fn files_inventory(files: &[(String, Vec<u8>)]) -> serde_json::Value {
+    use sha2::{Digest, Sha256};
+    let mut listed: Vec<_> = files
+        .iter()
+        .filter(|(path, _)| path != "manifest.json" && path != "signature")
+        .collect();
+    listed.sort_by(|left, right| left.0.cmp(&right.0));
+    serde_json::Value::Array(
+        listed
+            .into_iter()
+            .map(|(path, bytes)| {
+                serde_json::json!({
+                    "path": path,
+                    "length": bytes.len(),
+                    "sha256": format!("{:x}", Sha256::digest(bytes)),
+                })
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::wat_component;

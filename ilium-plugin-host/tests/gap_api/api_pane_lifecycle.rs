@@ -7,7 +7,7 @@ use serde_json::json;
 #[test]
 fn api_216_import_targeting_a_pane_closed_before_apply_is_refused_not_found() {
     let handle = HostHarness::new()
-        .grants(&["pane.primitive"])
+        .grants(&["terminal.write"])
         .build()
         .expect("build harness");
     let pane_id = handle.open_pane_for_test("notes-pane");
@@ -25,7 +25,7 @@ fn api_216_import_targeting_a_pane_closed_before_apply_is_refused_not_found() {
 #[test]
 fn api_216_reused_screen_position_pane_is_not_affected_by_stale_import() {
     let handle = HostHarness::new()
-        .grants(&["pane.primitive"])
+        .grants(&["terminal.write"])
         .build()
         .expect("build harness");
     let closed_pane = handle.open_pane_for_test("old-pane");

@@ -21,7 +21,7 @@ use super::{
 use crate::{
     audit::{AuditContext, AuditLog, AuditRecord, AuditRetention},
     install::{
-        Consent, InstallEffects, InstallGrantDecision, InstallProvenance, Installer,
+        Consent, InstallEffects, InstallOptions, InstallGrantDecision, InstallProvenance, Installer,
         TrustedInstallContext,
     },
     policy::{PolicyEngine, PolicyInput, PolicySourceKind},
@@ -45,6 +45,16 @@ pub fn factory(
     env: &CliEnv,
     consent: Arc<dyn Consent + Send + Sync>,
     audit_context: AuditContext,
+) -> Result<Arc<dyn InstallCommandBackend>, Diagnostic> {
+    factory_with_options(env, consent, audit_context, InstallOptions::default())
+}
+
+/// Like `factory`, with explicit installer switches decided by the host (not by command flags).
+pub fn factory_with_options(
+    env: &CliEnv,
+    consent: Arc<dyn Consent + Send + Sync>,
+    audit_context: AuditContext,
+    options: InstallOptions,
 ) -> Result<Arc<dyn InstallCommandBackend>, Diagnostic> {
     for root in [&env.data_dir, &env.state_dir, &env.config_dir] {
         if !root.is_absolute()
@@ -91,6 +101,7 @@ pub fn factory(
         audit_context,
         host_version,
         trust_path,
+        options,
         gate: Mutex::new(()),
     }))
 }
@@ -101,6 +112,7 @@ struct LocalInstall {
     audit_context: AuditContext,
     host_version: ApiVersion,
     trust_path: PathBuf,
+    options: InstallOptions,
     gate: Mutex<()>,
 }
 impl InstallCommandBackend for LocalInstall {
@@ -234,6 +246,7 @@ impl LocalInstall {
         Installer::new(PackageStore {
             root: plugin_root.join("store"),
         })
+        .with_install_options(self.options.clone())
         .install_with_context(&bytes, &mut context, self.consent.as_ref())
         .map_err(fail)
     }

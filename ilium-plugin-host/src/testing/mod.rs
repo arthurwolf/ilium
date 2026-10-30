@@ -39,4 +39,4 @@ pub use harness::{
 };
 pub use menu::{MenuHarness, MenuOpening};
 pub use native_guest::NativeGuest;
-pub use wat::wat_component;
+pub use wat::{files_inventory, plugin_component, wat_component};

@@ -65,6 +65,7 @@ pub mod owned_worker;
 pub mod paths;
 pub mod process_control;
 pub mod process_info;
+pub mod random;
 pub mod provider_admission; // Native-account finite-provider slot ownership.
 pub mod pty_io;
 pub mod resource_fs;

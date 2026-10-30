@@ -24,11 +24,13 @@
       "panes.read",
       "agent.read",
       "messages.peer:ilium.core.notifications",
-      "services.use:ilium.core.cost/usage"
+      "services.use:ilium.core.cost/usage",
+      "settings.write-kernel:api",
+      "extensions.provide:ilium.core.fleet/selectors",
+      "extensions.provide:ilium.core.fleet/before-broadcast"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:api"
+      "ui.panels"
     ]
   },
   "activation": [
@@ -72,6 +74,79 @@
       {
         "id": "ask-for-update",
         "title": "Ask for update"
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "selectors",
+        "kind": "collect",
+        "title": "Selectors",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "rule"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "object"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-broadcast",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Before broadcast",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "message",
+            "targets",
+            "source"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "message"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
       }
     ]
   },

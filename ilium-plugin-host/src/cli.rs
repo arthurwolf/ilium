@@ -15,8 +15,13 @@ use crate::telemetry::{HourBucket, InspectNode, MemoryView, TraceRecord};
 pub mod check_command;
 pub mod install_command;
 pub mod local_install;
+pub mod keys_command;
+pub mod new_command;
+pub mod pack_command;
+pub mod session_install;
 mod offline;
 pub mod project_inputs;
+pub mod registry_command;
 pub mod session_commands;
 pub mod verify_install;
 
@@ -228,16 +233,16 @@ fn run_inner(args: &[String], env: &CliEnv) -> CliOutput {
     if command == "install" {
         return match &env.installer {
             Some(installer) => install_command::run(&args[1..], &env.cwd, installer.as_ref()),
-            None => offline::failure(
-                "command.context-required",
-                "No trusted installation service was supplied",
-                1,
-            ),
+            None => session_install::run(&args[1..], env),
         };
     }
     match command {
         "check" | "lint" => check_command::run(command, &args[1..], env),
         "inspect" | "verify" => offline::run(command, &args[1..], env),
+        "new" => new_command::run(&args[1..], env),
+        "keygen" | "sign" | "trust" | "publish" => keys_command::run(command, &args[1..], env),
+        "pack" => pack_command::run(&args[1..], env),
+        "registry" => registry_command::run(&args[1..], env),
         "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs"
         | "log-level" | "trace" | "profile"
             if env.session.is_none() =>
@@ -503,6 +508,12 @@ pub enum SessionRequest {
     SetLogLevel {
         id: String,
         level: String,
+    },
+    /// A trust decision removed the key that signed this plugin; it stays installed but
+    /// untrusted (DEV-127).
+    MarkUntrusted {
+        id: String,
+        reason: String,
     },
 }
 
@@ -1353,6 +1364,9 @@ impl SessionBackend for MemorySession {
                 self.record_deactivation(&id, &reason, &state)
                     .map(|()| SessionResponse::Done)
             }
+            SessionRequest::MarkUntrusted { id, reason } => self
+                .record_deactivation(&id, &reason, "untrusted")
+                .map(|()| SessionResponse::Done),
             SessionRequest::Restart { id } => {
                 self.require_runtime_outcome(&id, "restart")?;
                 self.record_restart(&id).map(|()| SessionResponse::Done)

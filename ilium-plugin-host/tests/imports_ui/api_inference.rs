@@ -12,7 +12,7 @@ use ilium_plugin_api::{ErrorCode, PluginError};
 
 use crate::common::*;
 
-const GRANTS: &[&str] = &["inference.complete", "inference.provide"];
+const GRANTS: &[&str] = &["inference", "inference.provide"];
 
 fn request() -> CompletionRequest {
     CompletionRequest {
@@ -171,7 +171,7 @@ fn wit_inference_complete_just_before_120_seconds_still_pending() {
 /// REQ: WIT:ilium:host/inference.complete
 #[test]
 fn wit_inference_complete_declined_grant_not_permitted() {
-    let rig = declined_rig(&["inference.complete"]);
+    let rig = declined_rig(&["inference"]);
     assert_eq!(
         code_of(rig.host.inference().complete(request())),
         ErrorCode::NotPermitted
@@ -235,7 +235,7 @@ fn wit_inference_models_no_provider_selected_not_found() {
 /// REQ: WIT:ilium:host/inference.models
 #[test]
 fn wit_inference_models_declined_grant_not_permitted() {
-    let rig = declined_rig(&["inference.complete"]);
+    let rig = declined_rig(&["inference"]);
     assert_eq!(
         code_of(rig.host.inference().models()),
         ErrorCode::NotPermitted
@@ -375,7 +375,7 @@ fn wit_inference_provider_complete_export_can_be_called_directly() {
 /// REQ: WIT:ilium:exports/inference-provider.complete
 #[test]
 fn wit_inference_provider_complete_export_not_provided_not_found() {
-    let rig = rig(&["inference.complete"]);
+    let rig = rig(&["inference"]);
     let call = ProviderCall {
         call: 5,
         request: request(),

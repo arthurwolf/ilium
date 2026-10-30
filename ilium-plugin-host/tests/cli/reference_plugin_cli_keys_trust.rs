@@ -344,7 +344,14 @@ fn dev_117_signing_leaves_the_manifest_bytes_untouched() {
     run(&env, &["sign", s(&package), "--key", s(&key)]);
     let after = read_package(&std::fs::read(&package).expect("read")).expect("valid");
     assert_eq!(before.manifest, after.manifest);
-    assert_eq!(before.entries, after.entries);
+    let unsigned = |entries: &[ilium_plugin_host::package::ArchiveEntry]| {
+        entries
+            .iter()
+            .filter(|entry| entry.path != "signature")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(unsigned(&before.entries), unsigned(&after.entries));
 }
 
 /// REQ: DEV-118

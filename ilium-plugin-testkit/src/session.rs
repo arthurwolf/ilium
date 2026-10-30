@@ -162,6 +162,13 @@ impl FakeSession {
 
     /// Installs the stub of a bundled core plugin; unknown names fail with `harness.core-unknown` (DEV-483).
     pub fn install_core(&mut self, name: &str) -> &mut FakeSession {
+        let qualified;
+        let name = if name.contains('.') {
+            name
+        } else {
+            qualified = format!("ilium.core.{name}");
+            qualified.as_str()
+        };
         let Some(stub) = core_stubs::find(name) else {
             session_fail(codes::CORE_UNKNOWN, &format!("{name} is not a bundled core plugin"));
         };
@@ -183,6 +190,8 @@ impl FakeSession {
         for plugin in &mut self.plugins {
             if !plugin.disabled {
                 plugin.active = true;
+                plugin.server.mark_stub_started();
+                plugin.client.mark_stub_started();
             }
         }
         self
@@ -233,7 +242,7 @@ impl FakeSession {
         caller_id: impl IntoPluginId,
         name: &str,
         _version_range: &str,
-        _request_json: &str,
+        request_json: &str,
     ) -> Result<ServiceReply, PluginError> {
         let caller = caller_id.into_plugin_id().0;
         let is_installed = self.plugins.iter().any(|plugin| plugin.id == caller);
@@ -244,7 +253,11 @@ impl FakeSession {
             ));
         }
         let Some(provider) = self.plugins.iter().find(|plugin| {
-            plugin.active && !plugin.disabled && plugin.services.iter().any(|service| service == name)
+            plugin.active
+                && !plugin.disabled
+                && plugin.services.iter().any(|service| {
+                    service == name || name == format!("{}/{service}", plugin.id)
+                })
         }) else {
             return Err(PluginError::new(
                 ErrorCode::NotFound,
@@ -264,6 +277,14 @@ impl FakeSession {
             .iter()
             .find(|((plugin, service, _), _)| *plugin == key.0 && *service == key.1)
             .map(|(_, reply)| reply.clone());
+        if stub.is_none() {
+            let provider_id = key.0.clone();
+            if let Some(provider) = self.plugins.iter_mut().find(|plugin| plugin.id == provider_id) {
+                if let Some(reply) = provider.server.dispatch_service(name, "call", request_json) {
+                    return Ok(reply);
+                }
+            }
+        }
         match stub {
             Some(Ok(reply)) => Ok(ServiceReply::Done(reply)),
             Some(Err(error)) => Err(error),

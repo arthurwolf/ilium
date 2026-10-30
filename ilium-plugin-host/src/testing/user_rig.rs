@@ -544,7 +544,8 @@ impl PackageSpec {
         if !self.grants.is_empty() {
             manifest["capabilities"] = serde_json::json!(self.grants);
         }
-        let wasm_bytes = crate::testing::wat::wat_component("(component)");
+        let wasm_bytes = crate::testing::wat::plugin_component(&[]);
+        manifest["files"] = crate::testing::wat::files_inventory(&[("server.wasm".to_owned(), wasm_bytes.clone())]);
         if self.corrupt_file_hash {
             // The inventory lists server.wasm with a SHA-256 that is one digit off the real one.
             let mut digest = format!("{:x}", Sha256::digest(&wasm_bytes));

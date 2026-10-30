@@ -1,20 +1,66 @@
 //! Core plugin `ilium.core.sessions` (manual page core-plugin-sessions.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
-//! activation state and answer event batches with no submissions.
+//! The server side freezes restored panes until every one of them reports `running`, then thaws
+//! them together (sample "Freeze panes during a restore"). Resuming agent sessions, the graceful
+//! stop and the attach-aware poll need the SDK `host()` calls (agent session, pane list, timers),
+//! which the SDK lane has not implemented yet.
+
+use std::collections::BTreeSet;
 
 use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::types::intents::{
+    FreezePaneSpec, Intent, Submission, UnfreezePaneSpec,
+};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{NodeId, PaneLifecycleState};
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+
+/// Restored panes that were frozen and the ones that still have to report `running`.
+#[derive(Debug, Default)]
+struct RestoreWait {
+    /// Frozen panes in the order they were restored.
+    frozen: Vec<NodeId>,
+    /// Frozen panes that have not reported `running` yet.
+    waiting: BTreeSet<u64>,
+}
+
+impl RestoreWait {
+    fn freeze(&mut self, pane: NodeId) -> Option<Submission> {
+        if self.frozen.contains(&pane) {
+            return None;
+        }
+        self.frozen.push(pane);
+        self.waiting.insert(pane.0);
+        Some(Submission::keyed(
+            Intent::FreezePane(FreezePaneSpec { pane }),
+            format!("freeze-{}", pane.0),
+        ))
+    }
+
+    /// Records a `running` report; returns the thaw submissions once every frozen pane runs.
+    fn running(&mut self, pane: NodeId) -> Vec<Submission> {
+        if !self.waiting.remove(&pane.0) || !self.waiting.is_empty() {
+            return Vec::new();
+        }
+        std::mem::take(&mut self.frozen)
+            .into_iter()
+            .map(|pane| {
+                Submission::keyed(
+                    Intent::UnfreezePane(UnfreezePaneSpec { pane }),
+                    format!("thaw-{}", pane.0),
+                )
+            })
+            .collect()
+    }
+}
 
 /// The server side of `ilium.core.sessions` (core-plugin-sessions.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
 #[derive(Default)]
 pub struct SessionsServer {
     activated: bool,
+    restore: RestoreWait,
 }
 
 impl Lifecycle for SessionsServer {
@@ -26,8 +72,22 @@ impl Lifecycle for SessionsServer {
 }
 
 impl Handler for SessionsServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::PaneCreated(info) if info.is_restored => {
+                    submissions.extend(self.restore.freeze(info.node));
+                }
+                Event::PaneLifecycleChanged(change)
+                    if change.state == PaneLifecycleState::Running =>
+                {
+                    submissions.extend(self.restore.running(change.pane));
+                }
+                _ => {}
+            }
+        }
+        submissions
     }
 }
 

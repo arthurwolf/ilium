@@ -58,22 +58,32 @@ fn manifest_050_identity_and_api_version() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_runs_on_the_client_side_only() {
+fn manifest_050_draws_on_the_client_with_a_small_server_part_for_settings() {
     let manifest = manifest();
     assert_eq!(
         manifest["client"],
         json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
     );
-    assert!(
-        manifest.get("server").is_none(),
-        "the page says the plugin runs on the client side"
+    assert_eq!(
+        manifest["server"],
+        json!({
+            "entry": "server.wasm",
+            "world": "ilium:server/base@0.1.0",
+            "exports": ["service-provider"]
+        })
     );
-    assert!(manifest["capabilities"].get("server").is_none());
+    assert_eq!(
+        manifest["capabilities"]["server"],
+        json!([
+            "services.provide:ilium.core.kanban/set-setting",
+            "settings.write-kernel:kanban-board"
+        ])
+    );
 }
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_client_grants_are_the_eight_kanban_grants_in_order() {
+fn manifest_050_client_grants_are_the_ten_kanban_grants_in_order() {
     assert_eq!(
         client_grants(),
         [
@@ -84,7 +94,9 @@ fn manifest_050_client_grants_are_the_eight_kanban_grants_in_order() {
             "fs.pick",
             "fs.read:picked",
             "editor.read",
-            "settings.write-kernel:kanban-board",
+            "services.use:ilium.core.kanban/set-setting",
+            "extensions.provide:ilium.core.kanban/card-actions",
+            "extensions.provide:ilium.core.kanban/card-moved",
         ]
     );
 }
@@ -116,9 +128,9 @@ fn manifest_050_description_is_the_first_sentence_of_the_page() {
     let description = manifest["description"].as_str().expect("description");
     assert_eq!(
         description,
-        "The Kanban plugin has the id ilium.core.kanban and runs on the client side."
+        "The Kanban plugin has the id ilium.core.kanban. It draws on the client side and has a small server part for settings."
     );
-    assert!(page_text().contains(description));
+    assert!(page_text().contains("The Kanban plugin has the id `ilium.core.kanban`."));
 }
 
 /// REQ: F-024
@@ -157,7 +169,7 @@ fn feature_024_the_board_pane_keeps_only_metadata_in_the_snapshot() {
 
 /// REQ: F-024
 #[test]
-fn feature_024_contributes_only_pane_kinds_and_settings() {
+fn feature_024_contributes_pane_kinds_settings_services_and_extension_points() {
     let manifest = manifest();
     let mut keys: Vec<&String> = manifest["contributes"]
         .as_object()
@@ -165,7 +177,10 @@ fn feature_024_contributes_only_pane_kinds_and_settings() {
         .keys()
         .collect();
     keys.sort();
-    assert_eq!(keys, ["pane_kinds", "settings"]);
+    assert_eq!(
+        keys,
+        ["extension_points", "pane_kinds", "services", "settings"]
+    );
 }
 
 /// REQ: F-024
@@ -193,11 +208,22 @@ fn feature_025_holds_the_picker_and_file_grants_for_boards_from_files() {
 /// REQ: COR-030, COR-033
 #[test]
 fn manifest_033_holds_the_write_grant_of_its_one_kernel_tab() {
-    let kernel: Vec<String> = client_grants()
-        .into_iter()
-        .filter(|grant| grant.starts_with("settings.write-kernel:"))
-        .collect();
-    assert_eq!(kernel, ["settings.write-kernel:kanban-board"]);
+    let manifest = manifest();
+    let kernel_of = |side: &str| -> Vec<String> {
+        manifest["capabilities"][side]
+            .as_array()
+            .map(|grants| {
+                grants
+                    .iter()
+                    .filter_map(|grant| grant.as_str())
+                    .filter(|grant| grant.starts_with("settings.write-kernel:"))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert!(kernel_of("client").is_empty());
+    assert_eq!(kernel_of("server"), ["settings.write-kernel:kanban-board"]);
 }
 
 /// REQ: COR-030
@@ -272,9 +298,11 @@ fn manifest_050_the_manifest_is_valid_json_with_no_unknown_top_level_key() {
         "publisher",
         "description",
         "license",
+        "server",
         "client",
         "capabilities",
         "activation",
+        "unstable",
         "contributes",
         "limits_tier",
     ];

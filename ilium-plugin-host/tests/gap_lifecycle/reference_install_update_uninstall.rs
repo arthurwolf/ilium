@@ -100,7 +100,7 @@ fn lif_711_update_staged_candidate_expires_after_30_days_and_is_logged() {
     );
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
-    update(&rig, &pkg(NOTES, "2.0.0").grant("net.http"));
+    update(&rig, &pkg(NOTES, "2.0.0").grant("http:example.invalid"));
     assert_eq!(list_row(&rig, NOTES)["state"], "update-staged");
     rig.jump_wall_clock(31 * 86_400);
     let server = rig.start_server("default");
@@ -299,7 +299,7 @@ fn lif_708_update_to_c_replaces_update_staged_b_and_keeps_the_grant_request_of_c
     );
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
-    update(&rig, &pkg(NOTES, "2.0.0").grant("net.http"));
+    update(&rig, &pkg(NOTES, "2.0.0").grant("http:example.invalid"));
     assert_eq!(list_row(&rig, NOTES)["state"], "update-staged");
     let replaced = update(&rig, &pkg(NOTES, "3.0.0"));
     assert_eq!(
@@ -324,7 +324,7 @@ fn lif_711_update_staged_candidate_is_still_staged_at_29_days_with_no_expiry_log
     );
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
-    update(&rig, &pkg(NOTES, "2.0.0").grant("net.http"));
+    update(&rig, &pkg(NOTES, "2.0.0").grant("http:example.invalid"));
     rig.jump_wall_clock(29 * 86_400);
     let server = rig.start_server("default");
     assert!(

@@ -257,6 +257,12 @@ impl Installer {
         }
     }
 
+    /// Replaces the installer switches of this installer (PKG-262).
+    pub fn with_install_options(mut self, options: InstallOptions) -> Installer {
+        self.options = options;
+        self
+    }
+
     /// An installer over a package store with a state directory and options (PKG-262).
     pub fn with_options(
         store: PackageStore,

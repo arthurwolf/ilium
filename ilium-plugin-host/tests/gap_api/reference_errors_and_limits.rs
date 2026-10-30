@@ -7,7 +7,7 @@ use serde_json::json;
 
 fn host() -> HarnessHandle {
     HostHarness::new()
-        .grants(&["fs.write"])
+        .grants(&["fs.write:data"])
         .build()
         .expect("build harness")
 }
@@ -19,7 +19,7 @@ fn api_200_empty_bucket_returns_busy_rate_limited_with_retry_after() {
     let mut last = None;
     for index in 0..1000 {
         let result = handle.call_import(
-            "fs.write",
+            "fs.write:data",
             json!({"path": "burst.txt", "content": format!("{index}")}),
         );
         if result.error_code().as_deref() == Some("busy") {
@@ -46,7 +46,7 @@ fn api_200_bucket_refills_after_retry_after_elapses() {
     let mut limited = None;
     for index in 0..1000 {
         let result = handle.call_import(
-            "fs.write",
+            "fs.write:data",
             json!({"path": "refill.txt", "content": format!("{index}")}),
         );
         if result.error_code().as_deref() == Some("busy") {
@@ -59,7 +59,7 @@ fn api_200_bucket_refills_after_retry_after_elapses() {
         .retry_after_ms()
         .expect("a rate-limited refusal must carry retry-after-ms");
     handle.advance_clock(Duration::from_millis(u64::from(retry_after)));
-    let after = handle.call_import("fs.write", json!({"path": "refill.txt", "content": "ok"}));
+    let after = handle.call_import("fs.write:data", json!({"path": "refill.txt", "content": "ok"}));
     assert!(
         after.error_code().is_none(),
         "the call after retry-after-ms must be admitted by the refilled bucket"
@@ -72,16 +72,16 @@ fn api_200_each_plugin_owns_its_own_named_bucket() {
     let handle = host();
     for index in 0..1000 {
         let _ = handle.call_import(
-            "fs.write",
+            "fs.write:data",
             json!({"path": "own.txt", "content": format!("{index}")}),
         );
     }
     assert!(
-        handle.shared_bucket_exists("fs.write"),
+        handle.shared_bucket_exists("fs.write:data"),
         "the effectful import must own a named token bucket"
     );
-    let peer = handle.peer("com.example.other", &["fs.write"]);
-    let admitted = peer.call_import("fs.write", json!({"path": "peer.txt", "content": "x"}));
+    let peer = handle.peer("com.example.other", &["fs.write:data"]);
+    let admitted = peer.call_import("fs.write:data", json!({"path": "peer.txt", "content": "x"}));
     assert!(
         admitted.error_code().is_none(),
         "another plugin must not be refused by this plugin's exhausted bucket"

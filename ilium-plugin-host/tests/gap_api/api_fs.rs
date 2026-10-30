@@ -5,7 +5,7 @@ use serde_json::json;
 
 fn host() -> HarnessHandle {
     HostHarness::new()
-        .grants(&["fs.write", "fs.read"])
+        .grants(&["fs.write:data", "fs.read:project"])
         .build()
         .expect("build harness")
 }
@@ -17,12 +17,12 @@ fn api_203_four_mib_write_applies_completely() {
     let payload = "a".repeat(4 * 1024 * 1024);
     handle
         .call_import_value(
-            "fs.write",
+            "fs.write:data",
             json!({"path": "big.txt", "content": payload.clone()}),
         )
         .expect("a 4 MiB write must be accepted");
     let stored = handle
-        .call_import_value("fs.read", json!({"path": "big.txt"}))
+        .call_import_value("fs.read:project", json!({"path": "big.txt"}))
         .expect("the written file must be readable");
     assert_eq!(
         stored
@@ -39,15 +39,15 @@ fn api_203_four_mib_write_applies_completely() {
 fn api_203_interrupted_write_leaves_previous_content_intact() {
     let handle = host();
     handle
-        .call_import_value("fs.write", json!({"path": "keep.txt", "content": "old"}))
+        .call_import_value("fs.write:data", json!({"path": "keep.txt", "content": "old"}))
         .expect("the first write must succeed");
     handle.kernel().interrupt_next_write();
     let _ = handle.call_import(
-        "fs.write",
+        "fs.write:data",
         json!({"path": "keep.txt", "content": "new-content"}),
     );
     let stored = handle
-        .call_import_value("fs.read", json!({"path": "keep.txt"}))
+        .call_import_value("fs.read:project", json!({"path": "keep.txt"}))
         .expect("the file must still be readable");
     assert_eq!(
         stored.get("content").and_then(|value| value.as_str()),
@@ -61,7 +61,7 @@ fn api_203_interrupted_write_leaves_previous_content_intact() {
 fn api_203_successful_write_result_carries_the_new_content_hash() {
     let handle = host();
     let result = handle
-        .call_import_value("fs.write", json!({"path": "hash.txt", "content": "hello"}))
+        .call_import_value("fs.write:data", json!({"path": "hash.txt", "content": "hello"}))
         .expect("the write must succeed");
     let hash = result
         .get("content-hash")

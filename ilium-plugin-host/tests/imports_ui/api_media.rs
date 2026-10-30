@@ -6,7 +6,7 @@ use ilium_plugin_api::ErrorCode;
 
 use crate::common::*;
 
-const GRANTS: &[&str] = &["media.video", "fs.read"];
+const GRANTS: &[&str] = &["media.video", "fs.read:project"];
 
 fn clip(path: &str) -> FsPath {
     FsPath {

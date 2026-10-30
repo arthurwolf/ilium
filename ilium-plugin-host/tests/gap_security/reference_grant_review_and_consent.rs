@@ -13,9 +13,9 @@ fn update_non_interactive(rig: &OpsRig, spec: &PackageSpec) -> ilium_plugin_host
 #[test]
 fn sec_717_expired_grant_is_treated_as_absent_and_audited_as_grant_expired() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let until = rig.clock_now_rfc3339_plus_secs(60);
-    let stored = rig.cli(&["plugin", "grant", NOTES, "fs.read", "--until", &until]);
+    let stored = rig.cli(&["plugin", "grant", NOTES, "fs.read:project", "--until", &until]);
     assert_eq!(stored.exit_code, 0, "the grant with --until must be stored");
     rig.advance(secs(120));
     let server = rig.start_server("s1");
@@ -35,9 +35,9 @@ fn sec_717_expired_grant_is_treated_as_absent_and_audited_as_grant_expired() {
 #[test]
 fn sec_717_plugins_screen_shows_an_expired_grant_for_30_days_after_expiry() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let until = rig.clock_now_rfc3339_plus_secs(60);
-    rig.cli(&["plugin", "grant", NOTES, "fs.read", "--until", &until]);
+    rig.cli(&["plugin", "grant", NOTES, "fs.read:project", "--until", &until]);
     rig.advance(secs(60 + 29 * 86_400));
     let screen = rig.plugins_screen();
     let row = screen
@@ -46,7 +46,7 @@ fn sec_717_plugins_screen_shows_an_expired_grant_for_30_days_after_expiry() {
     assert!(
         row.grant_states()
             .iter()
-            .any(|(grant, state)| grant == "fs.read" && state == "expired"),
+            .any(|(grant, state)| grant == "fs.read:project" && state == "expired"),
         "the grant must show as expired, got {:?}",
         row.grant_states()
     );
@@ -122,13 +122,13 @@ fn sec_719_unanswered_consent_prompt_auto_denies_after_120_seconds_with_consent_
 #[test]
 fn sec_720_widening_update_keeps_the_old_version_and_old_grants_until_the_user_answers() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let server = rig.start_server("s1");
     rig.advance(secs(2));
     let grants_before = rig.grants_json()[NOTES].clone();
     update_non_interactive(
         &rig,
-        &pkg(NOTES, "1.1.0").grant("fs.read").grant("net.connect"),
+        &pkg(NOTES, "1.1.0").grant("fs.read:project").grant("net.connect"),
     );
     rig.advance(secs(2));
     assert_eq!(
@@ -147,7 +147,7 @@ fn sec_720_widening_update_keeps_the_old_version_and_old_grants_until_the_user_a
 #[test]
 fn sec_720_non_interactive_session_denies_the_widening_and_keeps_the_old_version() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read:project"));
     let output = update_non_interactive(&rig, &pkg(NOTES, "1.1.0").grant("net.connect"));
     assert_ne!(
         output.exit_code, 0,

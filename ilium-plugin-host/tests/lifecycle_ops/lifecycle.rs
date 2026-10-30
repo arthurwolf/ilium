@@ -155,8 +155,8 @@ fn lif_223_deactivations_during_a_reload_use_the_upgrade_reason() {
 fn lif_224_a_new_grant_produces_a_review_prompt_in_the_dev_terminal() {
     let (rig, _server) = dev_rig();
     let dev = rig.dev_start(&pkg(NOTES, "1.0.0"), &[]);
-    dev.reload(&pkg(NOTES, "1.0.1").high_risk_grant("process.spawn"));
-    assert_eq!(dev.prompts(), vec!["process.spawn".to_owned()]);
+    dev.reload(&pkg(NOTES, "1.0.1").high_risk_grant("process.run:git"));
+    assert_eq!(dev.prompts(), vec!["process.run:git".to_owned()]);
 }
 
 /// REQ: LIF-224
@@ -174,11 +174,11 @@ fn lif_224_a_grant_removed_from_the_manifest_is_revoked_without_a_prompt() {
 #[test]
 fn lif_224_grant_flag_accepts_the_named_grant_without_a_prompt() {
     let (rig, server) = dev_rig();
-    let dev = rig.dev_start(&pkg(NOTES, "1.0.0"), &["--grant", "process.spawn"]);
-    dev.reload(&pkg(NOTES, "1.0.1").high_risk_grant("process.spawn"));
+    let dev = rig.dev_start(&pkg(NOTES, "1.0.0"), &["--grant", "process.run:git"]);
+    dev.reload(&pkg(NOTES, "1.0.1").high_risk_grant("process.run:git"));
     assert!(dev.prompts().is_empty());
     rig.advance(secs(3));
-    assert!(server.granted(NOTES).contains(&"process.spawn".to_owned()));
+    assert!(server.granted(NOTES).contains(&"process.run:git".to_owned()));
 }
 
 /// REQ: LIF-224
@@ -190,12 +190,12 @@ fn lif_224_a_declined_high_risk_grant_is_not_granted_and_the_reload_continues() 
     dev.reload(
         &pkg(NOTES, "1.0.1")
             .grant("fs.read")
-            .high_risk_grant("process.spawn"),
+            .high_risk_grant("process.run:git"),
     );
     rig.advance(secs(3));
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.0.1"));
     assert!(server.granted(NOTES).contains(&"fs.read".to_owned()));
-    assert!(!server.granted(NOTES).contains(&"process.spawn".to_owned()));
+    assert!(!server.granted(NOTES).contains(&"process.run:git".to_owned()));
 }
 
 /// REQ: LIF-224
@@ -204,9 +204,9 @@ fn lif_224_a_grant_flag_for_a_different_name_does_not_accept_the_new_grant() {
     let (rig, server) = dev_rig();
     let dev = rig.dev_start(&pkg(NOTES, "1.0.0"), &["--grant", "fs.write"]);
     dev.answer_prompts("n");
-    dev.reload(&pkg(NOTES, "1.0.1").high_risk_grant("process.spawn"));
+    dev.reload(&pkg(NOTES, "1.0.1").high_risk_grant("process.run:git"));
     rig.advance(secs(3));
-    assert!(!server.granted(NOTES).contains(&"process.spawn".to_owned()));
+    assert!(!server.granted(NOTES).contains(&"process.run:git".to_owned()));
 }
 
 /// REQ: LIF-225
@@ -420,7 +420,7 @@ fn lif_271_a_trap_releases_the_input_lock_stream_and_child_process() {
     let rig = rig();
     install_ok(
         &rig,
-        &pkg(NOTES, "1.0.0").grant("process.spawn").grant("net.http"),
+        &pkg(NOTES, "1.0.0").grant("process.run:git").grant("http:example.invalid"),
     );
     let server = rig.start_server("s1");
     rig.advance(secs(3));
@@ -438,7 +438,7 @@ fn lif_271_a_trap_releases_the_input_lock_stream_and_child_process() {
 #[test]
 fn lif_271_effects_of_the_dead_instance_are_released_too_not_only_the_new_one() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("process.spawn"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("process.run:git"));
     let server = rig.start_server("s1");
     rig.advance(secs(3));
     let held = server.hold_effects(NOTES);
@@ -451,7 +451,7 @@ fn lif_271_effects_of_the_dead_instance_are_released_too_not_only_the_new_one() 
 #[test]
 fn lif_271_a_stop_by_disable_releases_the_same_effects() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("process.spawn"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("process.run:git"));
     let server = rig.start_server("s1");
     rig.advance(secs(3));
     server.hold_effects(NOTES);
@@ -465,27 +465,27 @@ fn lif_271_a_stop_by_disable_releases_the_same_effects() {
 fn lif_275_an_update_resets_the_not_now_counter_of_a_bundled_plugin() {
     let rig = rig();
     let server = rig.start_server("s1");
-    rig.install_bundled(&pkg("ilium.bundled.demo", "1.0.0").first_use_prompt("net.http"));
+    rig.install_bundled(&pkg("ilium.bundled.demo", "1.0.0").first_use_prompt("http:example.invalid"));
     rig.advance(secs(3));
-    server.answer_first_use("ilium.bundled.demo", "net.http", "not-now");
-    server.answer_first_use("ilium.bundled.demo", "net.http", "not-now");
-    assert_eq!(server.not_now_count("ilium.bundled.demo", "net.http"), 2);
-    rig.update_bundled(&pkg("ilium.bundled.demo", "1.1.0").first_use_prompt("net.http"));
+    server.answer_first_use("ilium.bundled.demo", "http:example.invalid", "not-now");
+    server.answer_first_use("ilium.bundled.demo", "http:example.invalid", "not-now");
+    assert_eq!(server.not_now_count("ilium.bundled.demo", "http:example.invalid"), 2);
+    rig.update_bundled(&pkg("ilium.bundled.demo", "1.1.0").first_use_prompt("http:example.invalid"));
     rig.advance(secs(3));
-    assert_eq!(server.not_now_count("ilium.bundled.demo", "net.http"), 0);
-    server.trigger_first_use("ilium.bundled.demo", "net.http");
-    assert_eq!(server.prompts_for("ilium.bundled.demo", "net.http"), 3);
+    assert_eq!(server.not_now_count("ilium.bundled.demo", "http:example.invalid"), 0);
+    server.trigger_first_use("ilium.bundled.demo", "http:example.invalid");
+    assert_eq!(server.prompts_for("ilium.bundled.demo", "http:example.invalid"), 3);
 }
 
 /// REQ: LIF-275
 #[test]
 fn lif_275_an_update_of_a_non_bundled_plugin_keeps_the_counter() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").first_use_prompt("net.http"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").first_use_prompt("http:example.invalid"));
     let server = rig.start_server("s1");
     rig.advance(secs(3));
-    server.answer_first_use(NOTES, "net.http", "not-now");
-    update(&rig, &pkg(NOTES, "1.1.0").first_use_prompt("net.http"));
+    server.answer_first_use(NOTES, "http:example.invalid", "not-now");
+    update(&rig, &pkg(NOTES, "1.1.0").first_use_prompt("http:example.invalid"));
     rig.advance(secs(3));
-    assert_eq!(server.not_now_count(NOTES, "net.http"), 1);
+    assert_eq!(server.not_now_count(NOTES, "http:example.invalid"), 1);
 }

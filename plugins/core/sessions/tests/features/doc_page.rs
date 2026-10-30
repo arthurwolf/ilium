@@ -111,10 +111,10 @@ fn doc_076_before_restore_is_a_standard_observe_hook() {
 fn doc_076_core_extension_points_page_agrees_on_both_points() {
     let page = points_page();
     assert!(page.contains(
-        "| `ilium.core.sessions/snapshot-sections` | collect | standard | Store extra JSON in the session snapshot and receive it back on restore. |"
+        "| `ilium.core.sessions/snapshot-sections` | collect | standard | server | 0.1.0 (default) | none | 64 entries (default) | no (default) | no | Store extra JSON in the session snapshot and receive it back on restore. |"
     ));
     assert!(page.contains(
-        "| `ilium.core.sessions/before-restore` | hook: observe | standard | Learn that a restore starts, to prepare state. |"
+        "| `ilium.core.sessions/before-restore` | hook: observe | standard | server | 0.1.0 (default) | 20 ms (default) | 8 handlers (default) | no (default) | no | Learn that a restore starts, to prepare state. |"
     ));
 }
 
@@ -154,7 +154,7 @@ fn doc_076_page_says_the_plugin_is_not_replaceable() {
 fn doc_076_harness_core_stub_exposes_the_two_points_and_no_service() {
     let page = page("reference-test-harness");
     assert!(page.contains(
-        "| `ilium.core.sessions` | `snapshot-sections` (collect), `before-restore` (observe) | none | collect: empty list; hooks: `pass` |"
+        "| `ilium.core.sessions` | `snapshot-sections` (collect), `before-restore` (observe) | `snapshots` (list, save, restore) | collect: empty list; hooks: `pass`; service: `{\"ok\":true}` |"
     ));
 }
 
@@ -207,7 +207,7 @@ fn doc_032_section_entry_shape_is_id_title_max_bytes() {
 fn doc_276_core_plugins_page_lists_sessions_among_the_essential_plugins() {
     let page = page("core-plugins");
     assert!(page.contains(
-        "except the essential set: `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions`"
+        "The four essential plugins cannot be: `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions`"
     ));
 }
 

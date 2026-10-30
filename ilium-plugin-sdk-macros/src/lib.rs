@@ -100,6 +100,44 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
             ::std::vec::Vec::new()
         }
     };
+    let has = |name: &str| exports.iter().any(|export| export == name);
+    let run_job_fn = if has("job-runner") {
+        quote! {
+            fn native_run_job(
+                &mut self,
+                kind: ::std::string::String,
+                input: ::std::vec::Vec<u8>,
+            ) -> ::core::option::Option<::core::result::Result<::std::vec::Vec<u8>, #krate::types::PluginError>> {
+                ::core::option::Option::Some(<Self as #krate::JobRunner>::run(self, kind, input))
+            }
+        }
+    } else {
+        quote! {}
+    };
+    let handle_service_fn = if has("service-provider") {
+        quote! {
+            fn native_handle_service(
+                &mut self,
+                call: #krate::exports::ServiceCall,
+            ) -> ::core::option::Option<#krate::exports::ServiceReply> {
+                ::core::option::Option::Some(<Self as #krate::ServiceProvider>::handle(self, call))
+            }
+        }
+    } else {
+        quote! {}
+    };
+    let handle_hook_fn = if has("hook-handler") {
+        quote! {
+            fn native_handle_hook(
+                &mut self,
+                call: #krate::exports::HookCall,
+            ) -> ::core::option::Option<::core::result::Result<#krate::exports::HookReply, #krate::types::PluginError>> {
+                ::core::option::Option::Some(<Self as #krate::HookHandler>::handle_hook(self, call))
+            }
+        }
+    } else {
+        quote! {}
+    };
     quote! {
         #item_struct
 
@@ -127,6 +165,10 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
             ) -> ::std::vec::Vec<#krate::types::Submission> {
                 #on_events_body
             }
+
+            #run_job_fn
+            #handle_service_fn
+            #handle_hook_fn
         }
     }
     .into()

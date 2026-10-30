@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::common::*;
 
-const GRANTS: &[&str] = &["services.use"];
+const GRANTS: &[&str] = &["services.use:demo"];
 
 fn item(id: &str) -> CatalogItem {
     CatalogItem {

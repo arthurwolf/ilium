@@ -23,7 +23,7 @@ fn lif_170_installed_plugins_load_activate_and_run_with_no_network() {
 #[test]
 fn lif_170_a_plugin_that_fails_a_network_call_is_not_counted_as_failed_by_the_host() {
     let rig = rig();
-    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("net.http"));
+    install_ok(&rig, &pkg(NOTES, "1.0.0").grant("http:example.invalid"));
     rig.block_network();
     let server = rig.start_server("s1");
     rig.advance(secs(5));

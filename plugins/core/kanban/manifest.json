@@ -4,8 +4,15 @@
   "name": "Kanban",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Kanban plugin has the id ilium.core.kanban and runs on the client side.",
+  "description": "The Kanban plugin has the id ilium.core.kanban. It draws on the client side and has a small server part for settings.",
   "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
   "client": {
     "entry": "client.wasm",
     "world": "ilium:client/base@0.1.0"
@@ -19,13 +26,31 @@
       "fs.pick",
       "fs.read:picked",
       "editor.read",
+      "services.use:ilium.core.kanban/set-setting",
+      "extensions.provide:ilium.core.kanban/card-actions",
+      "extensions.provide:ilium.core.kanban/card-moved"
+    ],
+    "server": [
+      "services.provide:ilium.core.kanban/set-setting",
       "settings.write-kernel:kanban-board"
     ]
   },
   "activation": [
     "pane-kind:board"
   ],
+  "unstable": [
+    "plugin-services"
+  ],
   "contributes": {
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.kanban/set-setting",
+          "version": "0.1.0",
+          "schema": "schemas/set-setting.json"
+        }
+      ]
+    },
     "pane_kinds": [
       {
         "id": "board",
@@ -60,6 +85,69 @@
             "default": 24
           }
         ]
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "card-actions",
+        "kind": "collect",
+        "title": "Card actions",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "command"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "card-moved",
+        "kind": "hook",
+        "mode": "observe",
+        "title": "Card moved",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "board": {
+              "type": "string"
+            },
+            "card": {
+              "type": "string"
+            },
+            "from_column": {
+              "type": "string"
+            },
+            "to_column": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "board",
+            "card",
+            "from_column",
+            "to_column"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
       }
     ]
   },

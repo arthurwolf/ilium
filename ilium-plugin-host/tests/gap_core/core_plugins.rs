@@ -348,7 +348,7 @@ fn cor_221_the_permissions_listing_of_a_core_plugin_matches_its_manifest_grants(
 fn cor_221_the_user_cannot_grant_an_extra_capability_to_a_core_plugin() {
     let rig = OpsRig::new();
     let _server = rig.start_server("s1");
-    let output = rig.cli(&["grant", TREE, "net.http"]);
+    let output = rig.cli(&["grant", TREE, "http:example.invalid"]);
     assert_ne!(
         output.exit_code, 0,
         "granting to a core plugin must be refused"

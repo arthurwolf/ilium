@@ -43,7 +43,7 @@ fn api_214_same_command_id_from_second_plugin_returns_conflict_and_keeps_both() 
 #[test]
 fn api_214_unregister_during_own_invocation_lets_handler_finish_and_deliver_result() {
     let handle = HostHarness::new()
-        .grants(&["commands.invoke"])
+        .grants(&["commands.invoke:demo.run"])
         .build()
         .expect("build harness");
     let outcome = handle.invoke_command_that_unregisters_itself("notes.self-remove");

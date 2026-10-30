@@ -6,7 +6,6 @@ use ilium_plugin_api::ErrorCode;
 use crate::common::*;
 
 const GRANTS: &[&str] = &[
-    "audio.devices",
     "audio.capture",
     "audio.loopback",
     "audio.playback",
@@ -36,7 +35,7 @@ fn wit_audio_devices_lists_the_scripted_devices() {
 /// REQ: WIT:ilium:host/audio.devices
 #[test]
 fn wit_audio_devices_without_the_grant_is_empty() {
-    let rig = declined_rig(&["audio.devices"]);
+    let rig = declined_rig(&["audio.capture"]);
     rig.kernel.set_audio_devices(vec![device("mic", true)]);
     assert!(rig.host.audio().devices().is_empty());
     // Positive control: the same scripted device is listed once the grant is held.

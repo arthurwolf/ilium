@@ -4,8 +4,15 @@
   "name": "Ambient look",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Ambient look plugin (id ilium.core.ambient, side: client) is the plugin form of the shared look of animated backgrounds.",
+  "description": "The Ambient look plugin (id ilium.core.ambient, sides: client and server) is the plugin form of the shared look of animated backgrounds.",
   "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
   "client": {
     "entry": "client.wasm",
     "world": "ilium:client/base@0.1.0",
@@ -18,13 +25,92 @@
       "location.geocode",
       "media.video",
       "ui.panels",
+      "services.use:ilium.core.ambient/set-setting",
+      "extensions.provide:ilium.core.ambient/palettes",
+      "extensions.provide:ilium.core.ambient/style-presets"
+    ],
+    "server": [
+      "services.provide:ilium.core.ambient/set-setting",
       "settings.write-kernel:animations"
     ]
   },
   "activation": [
     "startup"
   ],
+  "unstable": [
+    "plugin-services"
+  ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "palettes",
+        "kind": "collect",
+        "title": "Palettes",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "stops"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "stops": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "style-presets",
+        "kind": "collect",
+        "title": "Style presets",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "values"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "values": {
+              "type": "object"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.ambient/set-setting",
+          "version": "0.1.0",
+          "schema": "schemas/set-setting.json"
+        }
+      ]
+    },
     "panels": [
       {
         "id": "gallery",

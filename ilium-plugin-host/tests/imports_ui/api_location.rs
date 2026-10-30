@@ -7,7 +7,7 @@ use crate::common::*;
 /// REQ: WIT:ilium:host/location.current
 #[test]
 fn wit_location_current_returns_the_configured_point() {
-    let rig = rig(&["location.current"]);
+    let rig = rig(&["location.observer"]);
     rig.kernel.set_location(Some((48.8566, 2.3522)));
     assert_eq!(rig.host.location().current(), Some((48.8566, 2.3522)));
 }
@@ -15,7 +15,7 @@ fn wit_location_current_returns_the_configured_point() {
 /// REQ: WIT:ilium:host/location.current
 #[test]
 fn wit_location_current_unset_location_is_none() {
-    let rig = rig(&["location.current"]);
+    let rig = rig(&["location.observer"]);
     rig.kernel.set_location(None);
     assert_eq!(rig.host.location().current(), None);
 }
@@ -23,7 +23,7 @@ fn wit_location_current_unset_location_is_none() {
 /// REQ: WIT:ilium:host/location.current
 #[test]
 fn wit_location_current_declined_grant_is_none() {
-    let rig = declined_rig(&["location.current"]);
+    let rig = declined_rig(&["location.observer"]);
     rig.kernel.set_location(Some((1.0, 2.0)));
     assert_eq!(rig.host.location().current(), None);
 }
