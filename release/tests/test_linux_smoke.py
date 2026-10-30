@@ -465,6 +465,9 @@ class linux_smoke_shell_tests(unittest.TestCase):  # Run actual generated shell 
                     path.chmod(0o755)  # Permit only these owned programs to run.
                     receipt['package_files'][name] = hashlib.sha256(path.read_bytes()).hexdigest()  # Freeze their real bytes before testing output variations.
                 (tree / 'usr/bin').mkdir()  # Supply the real relative launcher contract.
+                manager = tree / 'usr/bin/systemd-run'
+                manager.write_text('#!/bin/sh\nset -eu\ndelegated=no\nwhile [ "$#" -gt 0 ]; do\n case "$1" in --property=Delegate=yes) delegated=yes; shift;; --*) shift;; *) break;; esac\ndone\ntest "$delegated" = yes\nexec "$@"\n')
+                manager.chmod(0o755)  # Simulate the user service without touching the host manager.
                 for name in ('ilium', 'ilium-server'):  # Both installed commands must resolve the audited pair.
                     (tree / 'usr/bin' / name).symlink_to('../lib/ilium/' + name)  # Point only to the owned synthetic executables.
                 checks = tree / 'checks'  # Keep generated acceptance inputs separate from the payload.

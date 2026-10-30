@@ -45,6 +45,13 @@ RPM_IMAGES = ('fedora:41', 'opensuse/leap:15.6')
 APPIMAGE_IMAGE = 'ubuntu:24.04'
 ROOT_PACKAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 UNPRIVILEGED = 'setpriv --reuid=65534 --regid=65534 --clear-groups env PATH=/usr/bin:/bin'
+# The animation sandbox requires a delegated cgroup; setpriv alone retains the root service's cgroup.
+DELEGATED_PROBE = (UNPRIVILEGED + ' /usr/bin/systemd-run --user --wait --pipe --collect --quiet'
+                   ' --property=Type=exec --property=Delegate=yes --setenv=PATH=/usr/bin:/bin' + ''.join(
+                       ' --setenv="%s=${%s:-}"' % (name, name) for name in (
+                           'HOME', 'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
+                           'XDG_CACHE_HOME', 'TMPDIR', 'ILIUM_SMOKE_BASE',
+                           'APPIMAGE_EXTRACT_AND_RUN', 'ILIUM_SMOKE_IMAGE')))
 
 
 def require(condition, message):
@@ -441,7 +448,7 @@ def installed_body(version):  # Share complete FHS installed behavior across deb
         'test "$(/usr/bin/ilium-server --version)" = %s # Check the installed server.' % shlex.quote('ilium-server ' + version),  # Repair the RPM server-version omission.
         'test "$(/usr/lib/ilium/ilium-animation-helper --version)" = %s # Check the installed animation helper.' % shlex.quote(release_tool.helper_version_record(version)),
         'printf "ILIUM_ANIMATION_BEGIN\\n" # Delimit the native installed helper IPC proof.',
-        UNPRIVILEGED + ' /usr/bin/ilium release-animation-probe # Exercise both approved packages as the disposable account.',
+        DELEGATED_PROBE + ' /usr/bin/ilium release-animation-probe # Exercise both approved packages in a delegated user service.',
         'printf "ILIUM_ANIMATION_END\\n" # A failed probe cannot reach this marker under sh -e.',
         'test "$(readlink /usr/bin/ilium)" = ../lib/ilium/ilium # Bind the client launcher.',  # Preserve the builder's exact symlink contract.
         'test "$(readlink /usr/bin/ilium-server)" = ../lib/ilium/ilium-server # Bind the server launcher.',  # Reject redirected sibling launchers.
@@ -498,7 +505,7 @@ def appimage_script(name, version, *, offline=False):  # Keep extract-and-run as
         'export APPIMAGE_EXTRACT_AND_RUN=1 ILIUM_SMOKE_IMAGE="$work/ilium.AppImage" # Select only this container\'s extraction execution mode.',  # The host mode explicitly clears extraction overrides.
         'test "$(%s sh "$work/client.sh" --version)" = %s # Verify client, cached bytes and sibling server.' % (UNPRIVILEGED, shlex.quote('ilium ' + version)),  # The wrapper checks the exact server version too.
         'printf "ILIUM_ANIMATION_BEGIN\\n" # Delimit the installed AppImage cache proof.',
-        '%s sh "$work/client.sh" release-animation-probe # Use the real image launcher and cache.' % UNPRIVILEGED,
+        '%s sh "$work/client.sh" release-animation-probe # Use the real image launcher and cache in a delegated user service.' % DELEGATED_PROBE,
         'printf "ILIUM_ANIMATION_END\\n" # Preserve the failure-sensitive shell contract.',
         '%s sh /smoke/lifecycle.sh sh "$work/client.sh" # Retain real extract-and-run lifecycle coverage.' % UNPRIVILEGED,  # The wrapper hashes each lifecycle cache before it disappears.
         'rm -rf "$work" # Remove only the owned image, extraction and cache.',  # AppImage has no package-manager registration.
