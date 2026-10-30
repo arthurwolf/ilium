@@ -785,6 +785,13 @@ def expect_version(command, expected, log, label, environment):  # Check a real 
     require(result.stdout.rstrip('\n') == expected, 'installed version differs: expected %r, got %r' % (expected, result.stdout))  # Do not accept a different successful binary.
 
 
+def delegated_service(command, child_env):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
+    uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
+    return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
+            '--property=Type=exec', '--property=Delegate=yes', '--property=WorkingDirectory=' + os.getcwd(),
+            *('--setenv=%s=%s' % item for item in sorted(child_env.items())), *[str(part) for part in command]]
+
+
 def installed_animation(arguments, receipt, log, label, package_format, payload_root,
                         executable_root, launcher, environment):
     supplied_audit = getattr(arguments, 'audit_report', None)
@@ -799,7 +806,7 @@ def installed_animation(arguments, receipt, log, label, package_format, payload_
                            format=package_format, executable_root=Path(executable_root)),
         command=[str(part) for part in launcher] + ['release-animation-probe'],
         environment=environment,
-        executor=lambda command, child_env, timeout: checked(command, log, label,
+        executor=lambda command, child_env, timeout: checked(delegated_service(command, child_env), log, label,
                                                                env=child_env, timeout=timeout))
     require(qualified['installed_files']['ilium'] == receipt['package_files']['ilium'] and
             qualified['installed_files']['ilium-animation-helper'] ==
