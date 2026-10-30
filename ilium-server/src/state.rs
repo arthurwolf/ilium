@@ -296,6 +296,8 @@ pub struct ServerState {
     pub sound_requests: PlaybackSender,
     pub tree: std::sync::Arc<RwLock<Tree>>,
     pub panes: std::sync::Arc<RwLock<PaneRegistry>>,
+    /// Monotonic activity observations, including unsubscribed terminal output.
+    pub(crate) recent_activity: std::sync::Mutex<crate::recent_activity::RecentActivity>,
     /// Server-owned, pane-keyed semantic debug history. It is separate from
     /// the hot tree snapshot transported after structural changes.
     pub agent_debug: std::sync::Arc<AgentDebugRecorder>,
@@ -568,6 +570,7 @@ impl ServerState {
             sound_requests: options.sound_requests,
             tree: std::sync::Arc::new(RwLock::new(tree)),
             panes: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            recent_activity: std::sync::Mutex::default(),
             agent_debug: std::sync::Arc::new(AgentDebugRecorder::new(
                 options.agent_debug_menu_enabled,
             )),

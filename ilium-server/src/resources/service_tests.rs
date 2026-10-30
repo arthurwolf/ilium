@@ -2085,3 +2085,61 @@ async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
         "a different live process in another daemon's same-numbered pane is not death evidence"
     );
 }
+
+#[tokio::test]
+async fn stale_owner_recovery_is_one_step_and_refuses_a_live_owner() {
+    let fixture = fixture(None).await;
+    drop(create(&fixture).await);
+    reserve_synthetic(&fixture);
+    let recover = |revision: u64| {
+        let mut recovery = request(
+            &fixture,
+            ResourceCommand::RecoverStaleOwner {
+                resource_id: "test-gpu".into(),
+                reason: "Synthetic owner process is gone".into(),
+            },
+        );
+        recovery.expected_revision = Some(revision);
+        recovery
+    };
+    let live_revision = store(&fixture).snapshot().unwrap().revision;
+    assert_eq!(
+        execute(&fixture.state, recover(live_revision))
+            .await
+            .unwrap_err()
+            .code,
+        "owner_live"
+    );
+    let now = clock().unwrap();
+    store(&fixture)
+        .transact(
+            ResourceCommand::ReconcileInvocation {
+                agent: synthetic_agent(&fixture),
+                evidence: InvocationEligibility::Dead,
+            },
+            MutationContext {
+                request_id: key(&now),
+                clock: now,
+                actor: ResourceActor::System,
+                expected_revision: None,
+                eligibility: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    let stale = store(&fixture).snapshot().unwrap();
+    assert!(matches!(
+        stale.resources[&"test-gpu".into()].reservations[0].state,
+        ReservationState::NeedsAttention { .. }
+    ));
+    execute(&fixture.state, recover(stale.revision))
+        .await
+        .unwrap();
+    let recovered = store(&fixture).snapshot().unwrap();
+    let record = &recovered.resources[&"test-gpu".into()];
+    assert!(matches!(
+        record.reservations[0].state,
+        ReservationState::Revoked { .. }
+    ));
+    assert!(!record.clearance_required);
+    assert_eq!(record.gate, ResourceGate::Open);
+}

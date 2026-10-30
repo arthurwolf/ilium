@@ -196,6 +196,14 @@ Claude Code and Codex support a long-term `/goal`. Ilium reads the provider's ow
 - A progress monitor's result message never pauses, resumes or otherwise changes the agent's goal.
 - Each of the five goal states has its own icon row in Settings -> Agent Monitoring.
 
+When a current goal is known, the last-prompt banner offers **Prompt** and **Goal** tabs. Click a tab or use the configured leader followed by `G` to switch the focused pane. The toolbar's flag opens goal details: hover for a preview, click to pin or unpin it, or use the leader followed by `U`. A pinned view accepts arrow keys, Page Up/Down, Home, End and Escape while focused; click outside it to return keyboard focus to the terminal. Scroll the view to read long objectives. These shortcuts can be remapped in Keyboard settings.
+
+The goal tab and toolbar flag have separate switches in User Interface settings. They are enabled by default. If Ilium cannot recover text for the current session, it says so; a temporarily unavailable provider may leave the last known text marked stale. Goal text is read locally and is not sent to a model by this feature. Claude lifecycle state comes from the visible agent status; accepted main-session goal commands can provide its text. Codex goal details come from its verified thread's local goal state when safe access is available; the screen-derived goal indicator remains available otherwise.
+
+To bound local memory use, an individual Claude transcript record larger than 8 MiB is treated as unavailable; Ilium does not display a truncated objective as if it were complete. After an oversized Claude record, later verified goal commands can restore the text. A Codex objective larger than 1 MiB is likewise treated as unavailable rather than truncated.
+
+On 64-bit Linux with comparable process handles, Ilium checks the running agent's process identity, home and provider configuration directory before reading goal details. For Claude Code 2.1.312, a verified session record bound to a socket owned by that process can establish the current session even when its transcript is not open. Otherwise, Ilium requires an unambiguous verified main transcript held open by the agent. A custom provider directory can be read when the agent's session has also been verified. Where the process identity, environment, transcript ownership or session binding cannot be verified, goal text is unavailable and the existing screen-derived indicator remains available.
+
 ## Progress monitors and progress displays
 
 A *task* is a long-running job that an agent registered with the `ilium progress` command from inside its pane. The detached Ilium server, not the agent, then runs a small probe command on a timer and shows the result as a footer on the pane and an icon in the tree.
@@ -246,7 +254,7 @@ All under **Settings -> Agent Monitoring**.
 | Hide completed progress after | `[ui].completed_progress_hide_after_seconds` | 60 | Steps of 30 seconds; `0` = Never |
 | Progress fill style | `[ui].task_progress_frames` | Braille | Braille, Blocks, Moons, Quarters or custom |
 
-Hide-after behaviour: the delay starts from the server's final observation and does not restart when a client reconnects. Hiding changes presentation only. Text disappears but the reserved rows remain; error details, unread indicators, retained results and queued notifications are untouched, and the child terminal is not resized.
+Hide-after behaviour: the delay starts from the server's final observation and does not restart when a client reconnects. Hiding releases the footer rows and resizes the child terminal; error details, unread indicators, retained results and queued notifications are untouched.
 
 ## Reserved terminal space
 

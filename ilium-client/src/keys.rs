@@ -859,6 +859,10 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
         return;
     }
 
+    if matches!(app.mode, Mode::Normal) && app.handle_goal_popover_key(key) {
+        return;
+    }
+
     if key.code == KeyCode::Enter
         && app.focus == FocusTarget::Pane
         && app
@@ -1069,6 +1073,22 @@ fn execute_action(app: &mut App, action: Action) {
         Action::AttentionNext => app.action_attention_press(),
         Action::AttentionPanel => app.action_toggle_attention_panel(),
         Action::AttentionOverview => app.action_open_attention_overview(),
+        Action::ToggleGoalPopover => {
+            if let Some(pane_id) = app.focused_pane_id() {
+                app.toggle_goal_popover(pane_id);
+            }
+        }
+        Action::ToggleGoalTab => match app.focused_pane_id() {
+            Some(pane_id)
+                if app.ui_settings.goal_tab_enabled
+                    && app.shows_last_prompt_banner(pane_id)
+                    && app.current_goal_phase(pane_id).is_some()
+                    && !app.goal_tab_selected.remove(&pane_id) =>
+            {
+                app.goal_tab_selected.insert(pane_id);
+            }
+            _ => {}
+        },
     }
 }
 
@@ -2635,6 +2655,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
         app.mode = Mode::Settings(Box::new(state));
         crate::onboarding::integration::open(app, true);
+        return;
+    }
+    if state.tab == SettingsTab::Toolbar
+        && crate::tree_toolbar_settings::handle_key(app, &mut state, *key)
+    {
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     if state.tab == SettingsTab::Icons

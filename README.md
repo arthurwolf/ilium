@@ -73,27 +73,27 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Transfer a terminal screen between panes</strong></p>
-<p><a href="assets/demos/05-screen-transfer.gif?raw=true"><img src="assets/demos/05-screen-transfer.gif" alt="Ilium transfers a complete visible report to a local terminal fixture; the receiver verifies the bytes." width="100%"></a></p>
+<p><a href="assets/demos/05-screen-transfer.gif?raw=true"><img src="assets/demos/05-screen-transfer.gif" alt="Ilium transfers terminal output into a real Codex prompt without submitting it. Setup is cut, with reading holds and captions." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p><strong>Inspect agent usage and recorded costs (historical capture)</strong></p>
-<p><a href="assets/demos/06-cost-and-stats.gif?raw=true"><img src="assets/demos/06-cost-and-stats.gif" alt="Historical Costs and Stats capture from an older Ilium build; current-build live-resume acceptance remains unverified." width="100%"></a></p>
+<p><strong>Inspect agent usage and recorded costs</strong></p>
+<p><a href="assets/demos/06-cost-and-stats.gif?raw=true"><img src="assets/demos/06-cost-and-stats.gif" alt="Costs and Stats for retained Claude and Codex sessions in current Ilium. Setup is cut, and a local file-link target and an account notice are redacted. Claude is logged out during the replay." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Track agent status and current goals</strong></p>
-<p><a href="assets/demos/08-agent-activity.gif?raw=true"><img src="assets/demos/08-agent-activity.gif" alt="Local scripted agent fixtures change status and show a sample goal in the tree; no live provider session is shown." width="100%"></a></p>
+<p><a href="assets/demos/08-agent-activity.gif?raw=true"><img src="assets/demos/08-agent-activity.gif" alt="Real Claude and Codex agents show a goal, approval wait and unread completion. Pane names are staged; setup and part of a wait are cut, with a reading hold and a labelled status redaction." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Use agents, editors, and terminals side by side</strong></p>
-<p><a href="assets/demos/10-mixed-splits.gif?raw=true"><img src="assets/demos/10-mixed-splits.gif" alt="View terminal, editor, and board panes together in a split view" width="100%"></a></p>
+<p><a href="assets/demos/10-mixed-splits.gif?raw=true"><img src="assets/demos/10-mixed-splits.gif" alt="A terminal, editor, and two idle agent panes remain in a split after visiting another pane; setup is cut and an account notice is redacted." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Select and copy terminal output</strong></p>
-<p><a href="assets/demos/11-smart-copy.gif?raw=true"><img src="assets/demos/11-smart-copy.gif" alt="Ilium Smart Copy selects a complete lot code from a local fixture ledger; local fixtures and clipboard readback verify the copied bytes." width="100%"></a></p>
+<p><a href="assets/demos/11-smart-copy.gif?raw=true"><img src="assets/demos/11-smart-copy.gif" alt="Smart Copy uses local inference to select and paste a code from real Codex output. Setup and a model wait are cut, with reading holds and labelled redactions; automatic pane naming did not apply." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Queue prompts for an agent</strong></p>
@@ -103,21 +103,21 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Get results from background tasks</strong></p>
-<p><a href="assets/demos/14-progress-monitor.gif?raw=true"><img src="assets/demos/14-progress-monitor.gif" alt="A local Codex-shaped fixture runs a monitored five-card census task in current Ilium and delivers its result" width="100%"></a></p>
+<p><a href="assets/demos/14-progress-monitor.gif?raw=true"><img src="assets/demos/14-progress-monitor.gif" alt="A real Claude agent monitors a ten-card task and receives its completed result. Setup is cut and an account notice is redacted." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Search agents, files, and terminals</strong></p>
-<p><a href="assets/demos/17-workspace-search.gif?raw=true"><img src="assets/demos/17-workspace-search.gif" alt="Find agents, files, and terminals, then jump to a match" width="100%"></a></p>
+<p><a href="assets/demos/17-workspace-search.gif?raw=true"><img src="assets/demos/17-workspace-search.gif" alt="Search real agent output, a shell history, and an open file, then jump to matches. Setup is cut and reading holds are added; automatic restructuring is disabled." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>See live agent goals in the project tree</strong></p>
-<p><a href="assets/demos/22-goal-indicators.gif?raw=true"><img src="assets/demos/22-goal-indicators.gif" alt="A live Codex goal changes the objective icon in the project tree" width="100%"></a></p>
+<p><a href="assets/demos/22-goal-indicators.gif?raw=true"><img src="assets/demos/22-goal-indicators.gif" alt="A real Codex goal changes from active to paused and back in the project tree. Setup is cut; captions, a closing hold and labelled account and path redactions are added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Resume agent sessions after a reboot</strong></p>
-<p><a href="assets/demos/24-agents-survive-reboots.gif?raw=true"><img src="assets/demos/24-agents-survive-reboots.gif" alt="After a reboot sequence, Ilium restores the pane layout and resumes Claude and Codex" width="100%"></a></p>
+<p><a href="assets/demos/24-agents-survive-reboots.gif?raw=true"><img src="assets/demos/24-agents-survive-reboots.gif" alt="A staged reboot montage leads to retained footage of Ilium restoring the pane layout and resuming Claude and Codex." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -127,53 +127,53 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Schedule input for a pane</strong></p>
-<p><a href="assets/demos/04-scheduled-input.gif?raw=true"><img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends ping to a labelled local echo-only terminal fixture." width="100%"></a></p>
+<p><a href="assets/demos/04-scheduled-input.gif?raw=true"><img src="assets/demos/04-scheduled-input.gif" alt="Schedule input for a real Claude agent and a local terminal fixture in separate takes; setup is cut, reading holds are added, and local paths are redacted." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Set interface and board preferences</strong></p>
-<p><a href="assets/demos/07a-settings-tour-a.gif?raw=true"><img src="assets/demos/07a-settings-tour-a.gif" alt="Current Ilium Settings: interface, terminal, editor, animation, and Kanban controls across tabs 1–17; the optional custom prompt dialog is not shown." width="100%"></a></p>
+<p><a href="assets/demos/07a-settings-tour-a.gif?raw=true"><img src="assets/demos/07a-settings-tour-a.gif" alt="Ilium Settings: interface, terminal, editor, animation and board controls. Agent Cost, Optimization and Remote are omitted to protect local data; setup is cut and reading holds are added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Configure voice and AI providers</strong></p>
-<p><a href="assets/demos/07b-settings-tour-b.gif?raw=true"><img src="assets/demos/07b-settings-tour-b.gif" alt="Current Ilium Settings: sound, voice, reset, inference, and instruction tabs; provider credentials are unconfigured." width="100%"></a></p>
+<p><a href="assets/demos/07b-settings-tour-b.gif?raw=true"><img src="assets/demos/07b-settings-tour-b.gif" alt="Ilium Settings: voice, reset, inference, and instruction pages. Provider credentials are unconfigured; setup is cut and reading holds are added." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Configure automatic titles</strong></p>
-<p><a href="assets/demos/07c-settings-tour-c.gif?raw=true"><img src="assets/demos/07c-settings-tour-c.gif" alt="Current Ilium Settings: titles, triggers, debugging, API, and setup across tabs 21–27; setup paths belong to the isolated demo workspace." width="100%"></a></p>
+<p><a href="assets/demos/07c-settings-tour-c.gif?raw=true"><img src="assets/demos/07c-settings-tour-c.gif" alt="Ilium Settings: titles, triggers, custom agents, debugging, API, and setup. Setup paths belong to the isolated demo; other pages are cut and reading holds are added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Move panes without stopping their processes</strong></p>
-<p><a href="assets/demos/09-pane-tree.gif?raw=true"><img src="assets/demos/09-pane-tree.gif" alt="Ilium moves the Tests fixture pane into Exhibits above Build; local fixture shells keep running through the move." width="100%"></a></p>
+<p><a href="assets/demos/09-pane-tree.gif?raw=true"><img src="assets/demos/09-pane-tree.gif" alt="Ilium moves a running fixture pane; setup is cut, captions and a hold are added, and automatic naming and restructuring are disabled." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Request updates from active agents</strong></p>
-<p><a href="assets/demos/12-ask-for-update.gif?raw=true"><img src="assets/demos/12-ask-for-update.gif" alt="Ilium asks two idle local agent fixtures for a status update and skips a working fixture; no provider agents are used." width="100%"></a></p>
+<p><a href="assets/demos/12-ask-for-update.gif?raw=true"><img src="assets/demos/12-ask-for-update.gif" alt="Ilium asks idle Claude and Codex agents for updates while skipping an agent awaiting approval; pane names were staged, setup and waits were cut, and a reading pause was added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Track work on a Kanban board</strong></p>
-<p><a href="assets/demos/15-kanban.gif?raw=true"><img src="assets/demos/15-kanban.gif" alt="Move a Kanban card to Doing, mark it complete, edit its note, then reopen the board and verify the saved Markdown file" width="100%"></a></p>
+<p><a href="assets/demos/15-kanban.gif?raw=true"><img src="assets/demos/15-kanban.gif" alt="Move a staged Kanban card to Doing, mark it complete, add a note, then reopen the board and verify the saved Markdown file. Setup is cut; column width is 15 cells, with added captions, pointer, arrows and holds." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Start a Codex agent from a TODO</strong></p>
-<p><a href="assets/demos/16-agent-from-line.gif?raw=true"><img src="assets/demos/16-agent-from-line.gif" alt="Start Codex from a TODO line and have it repair the source" width="100%"></a></p>
+<p><a href="assets/demos/16-agent-from-line.gif?raw=true"><img src="assets/demos/16-agent-from-line.gif" alt="Start Codex from a TODO line and repair the source. Setup is cut and reading holds are added; automatic title inference reports no user transcript." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Detach and reconnect while agents keep running</strong></p>
-<p><a href="assets/demos/18-detach-reattach.gif?raw=true"><img src="assets/demos/18-detach-reattach.gif" alt="Reattach while agents and panes keep running" width="100%"></a></p>
+<p><a href="assets/demos/18-detach-reattach.gif?raw=true"><img src="assets/demos/18-detach-reattach.gif" alt="A real Claude agent continues writing files while Ilium is detached, then reappears on reconnect. Setup and waiting are cut, an account notice is redacted, and automatic naming and restructuring are disabled." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Edit Markdown in a pane</strong></p>
-<p><a href="assets/demos/19-markdown-editor.gif?raw=true"><img src="assets/demos/19-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="100%"></a></p>
+<p><a href="assets/demos/19-markdown-editor.gif?raw=true"><img src="assets/demos/19-markdown-editor.gif" alt="Edit and preview a staged Markdown note in Ilium, then read the saved file in a terminal. Setup is cut; captions, pointer, arrows and holds are added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Coordinate Claude and Codex with Chatroom</strong></p>
@@ -183,7 +183,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Respond to confirmation prompts automatically</strong></p>
-<p><a href="assets/demos/21-text-triggers.gif?raw=true"><img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent confirmation question" width="100%"></a></p>
+<p><a href="assets/demos/21-text-triggers.gif?raw=true"><img src="assets/demos/21-text-triggers.gif" alt="A real Claude agent receives an automatic text-trigger reply. Setup and an idle wait are cut, with reading holds added; automatic naming and restructuring are disabled in the isolated demo." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Restore panes and resume agent sessions</strong></p>
@@ -197,8 +197,15 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Convert a session between Claude and Codex</strong></p>
-<p><a href="assets/demos/26-convert-session.gif?raw=true"><img src="assets/demos/26-convert-session.gif" alt="A Claude session converts to Codex, which still remembers the secret word, then converts back to Claude" width="100%"></a></p>
+<p><a href="assets/demos/26-convert-session.gif?raw=true"><img src="assets/demos/26-convert-session.gif" alt="Real Claude and Codex sessions recall a fictional mascot after conversion in both directions. Setup and idle wait are cut; an account notice is redacted." width="100%"></a></p>
 </td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<p><strong>Queue access to a shared resource</strong></p>
+<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two agents reserve a demonstration resource: one waits, takes ownership when it is released, then releases it. The recording is cropped and pauses are shortened." width="100%"></a></p>
+</td>
+<td width="50%" valign="top"></td>
 </tr>
 </tbody>
 </table>

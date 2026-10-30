@@ -190,6 +190,11 @@ pub(super) fn record_lifecycle(
             ResourceLifecycleKind::RecoveryConfirmed,
             "User confirmed physical clearance and reopened the resource",
         )),
+        ResourceCommand::RecoverStaleOwner { resource_id, .. } => Some((
+            resource_id.clone(),
+            ResourceLifecycleKind::RecoveryConfirmed,
+            "Stale owner cleared by the project's agent or user; resource reopened",
+        )),
         _ => None,
     };
     if let Some((resource, kind, message)) = administrative {

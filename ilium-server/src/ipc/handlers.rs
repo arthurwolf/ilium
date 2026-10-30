@@ -1365,6 +1365,16 @@ pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     // that snapshot, taken moments earlier, is not safe to reuse here.
     state.prune_stale_restructure_undo().await;
     state.prune_blocking_errors(&snapshot);
+    {
+        // Use a fresh tree guard: a different structural change can happen
+        // after the snapshot above was cloned.
+        let tree = state.tree.read().await;
+        state
+            .recent_activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|node_id| tree.get(node_id).is_some());
+    }
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
 }
@@ -1444,6 +1454,8 @@ async fn record_terminal_output_activity(
         || update.became_unread_since_focus
     {
         publish_node_activity_update(state, node_id, update);
+    } else {
+        record_recent_activity(state, node_id, update.activity_revision);
     }
     Ok(update.activity_revision)
 }
@@ -1460,9 +1472,45 @@ pub(crate) fn publish_node_activity_update(
         node_id,
         activity_revision: update.activity_revision,
     });
+    record_recent_activity(state, node_id, update.activity_revision);
     if update.became_unrestructured || update.became_unread_since_focus {
         state.request_snapshot_save();
     }
+}
+
+fn record_recent_activity(state: &ServerState, node_id: NodeId, revision: u64) {
+    let publish = state
+        .recent_activity
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .record(node_id, revision, std::time::Instant::now());
+    if publish {
+        state.broadcast(ServerEvent::PaneRecentActivity {
+            pane_id: node_id,
+            revision,
+            age_millis: 0,
+        });
+    }
+}
+
+fn recent_activity_replay(state: &ServerState, tree: &Tree) -> Vec<ServerEvent> {
+    let now = std::time::Instant::now();
+    state
+        .recent_activity
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .snapshot()
+        .iter()
+        .filter(|(node_id, _)| tree.get(**node_id).is_some())
+        .map(|(node_id, observation)| ServerEvent::PaneRecentActivity {
+            pane_id: *node_id,
+            revision: observation.revision,
+            age_millis: now
+                .saturating_duration_since(observation.observed_at)
+                .as_millis()
+                .min(u64::MAX as u128) as u64,
+        })
+        .collect()
 }
 
 /// Validates and persists one timer before waking the detached executor. The
@@ -2336,7 +2384,7 @@ async fn admitted_state_synchronization_events(
     // whether pane output, the pane set or the tree kept moving.
     let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
-        let (captures, snapshot_bytes) = {
+        let (captures, snapshot_bytes, activity_event_count) = {
             let tree = state.tree.read().await;
             let panes = state.panes.read().await;
             let captures: Vec<_> = panes
@@ -2362,7 +2410,7 @@ async fn admitted_state_synchronization_events(
             let Some(snapshot_bytes) = snapshot_bytes else {
                 return Err("state snapshot admission size overflow".to_owned());
             };
-            (captures, snapshot_bytes)
+            (captures, snapshot_bytes, tree.all_ids().count())
         };
         let mut estimates = HashMap::new();
         for (pane_id, capture) in &captures {
@@ -2394,7 +2442,12 @@ async fn admitted_state_synchronization_events(
         let admission = reserve_connection_event_storage(
             state,
             estimated_payload_bytes,
-            estimates.len().saturating_add(1),
+            // An explicit node-activity request can target any tree node, so
+            // the replay can contain one additional event per node.
+            estimates
+                .len()
+                .saturating_add(activity_event_count)
+                .saturating_add(1),
             ConnectionEventStorageClass::General,
             None,
         );
@@ -2510,6 +2563,7 @@ async fn admitted_state_synchronization_events(
                                     pane_id: *pane_id,
                                     session_id,
                                     process_id: runtime.session_process_id,
+                                    process_identity_inode: runtime.session_process_identity_inode,
                                     title_generation: runtime.title_generation,
                                     transcript_path: runtime.session_transcript_path.clone(),
                                 });
@@ -2540,6 +2594,10 @@ async fn admitted_state_synchronization_events(
                         tree: snapshot,
                         detection_evidence,
                     }];
+                    if let ServerEvent::PaneStateSnapshot { tree, .. } = &events[0] {
+                        let activity = recent_activity_replay(state, tree);
+                        events.extend(activity);
+                    }
                     events.extend(replay_events);
                     events.extend(recap_events);
                     let statuses = state.workspace_git_status_cache.read().await;
@@ -2680,6 +2738,7 @@ async fn state_synchronization_events(
                             pane_id: *pane_id,
                             session_id,
                             process_id: runtime.session_process_id,
+                            process_identity_inode: runtime.session_process_identity_inode,
                             title_generation: runtime.title_generation,
                             transcript_path: runtime.session_transcript_path.clone(),
                         });
@@ -2706,6 +2765,10 @@ async fn state_synchronization_events(
         tree: snapshot,
         detection_evidence,
     }];
+    if let ServerEvent::PaneStateSnapshot { tree, .. } = &events[0] {
+        let activity = recent_activity_replay(state, tree);
+        events.extend(activity);
+    }
     events.extend(replay_events);
     events.extend(recap_events);
     let statuses = state.workspace_git_status_cache.read().await;
@@ -11907,12 +11970,19 @@ mod tests {
             Ok(ServerEvent::NodeActivityChanged { node_id, activity_revision })
                 if node_id == pane_id && activity_revision == first_revision
         ));
+        assert!(matches!(events.recv().await,
+            Ok(ServerEvent::PaneRecentActivity { pane_id: observed, revision, .. })
+                if observed == pane_id && revision == first_revision));
 
         let second_revision = record_terminal_output_activity(&state, pane_id)
             .await
             .expect("later hidden output is accepted");
         assert_eq!(second_revision, first_revision + 1);
         assert!(events.try_recv().is_err());
+        assert_eq!(
+            state.recent_activity.lock().unwrap().snapshot()[&pane_id].revision,
+            second_revision
+        );
         assert_eq!(
             state
                 .tree

@@ -115,11 +115,14 @@ enum ResourceCommandArgs {
     Repair {
         resource: String,
     },
-    /// Guarded user recovery. Does not stop workloads or reset devices.
+    /// Recover a resource. An agent clears its own project's stale owner
+    /// (after a reboot or a dead process) in one step; a live owner needs the
+    /// user's typed confirmation. Does not stop workloads or reset devices.
     Recover {
         resource: String,
+        /// Defaults to the current catalog revision.
         #[arg(long)]
-        expected_revision: u64,
+        expected_revision: Option<u64>,
         #[arg(long)]
         reason: String,
     },
@@ -826,7 +829,16 @@ pub(crate) async fn run(args: ResourceArgs, cwd: &Path) -> Result<(), CliError> 
             reason,
         } => {
             let id = resolve(&resource)?;
-            recover(&mut connection, id, expected_revision, reason, &key).await?;
+            recover(
+                &mut connection,
+                &snapshot,
+                id,
+                pane,
+                expected_revision,
+                reason,
+                &key,
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -875,21 +887,14 @@ pub(crate) async fn run(args: ResourceArgs, cwd: &Path) -> Result<(), CliError> 
 
 async fn recover(
     connection: &mut Connection,
+    snapshot: &ResourceReply,
     resource_id: ResourceId,
-    expected_revision: u64,
+    pane: Option<NodeId>,
+    expected_revision: Option<u64>,
     reason: String,
     key: &str,
 ) -> Result<(), CliError> {
     const OP: &str = "resource_recover";
-    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
-        return Err(error(
-            OP,
-            key,
-            "interactive_confirmation_required",
-            "Recovery requires an interactive terminal; no headless confirmation flag is supported",
-            2,
-        ));
-    }
     if reason.trim().is_empty() {
         return Err(error(
             OP,
@@ -899,6 +904,52 @@ async fn recover(
             2,
         ));
     }
+    let occupied: Vec<_> = snapshot
+        .catalog
+        .resources
+        .get(&resource_id)
+        .map(|r| {
+            r.reservations
+                .iter()
+                .filter(|q| q.state.occupied())
+                .collect()
+        })
+        .unwrap_or_default();
+    // The server already proved these claims ownerless (boot change or dead
+    // invocation); the project's own agent may clear them without a human.
+    let only_stale = !occupied.is_empty()
+        && occupied
+            .iter()
+            .all(|q| matches!(q.state, ReservationState::NeedsAttention { .. }));
+    if let (Some(pane), true) = (pane, only_stale) {
+        let mut request = ResourceRequest::new(
+            None,
+            ResourceOperation::Mutate(ResourceCommand::RecoverStaleOwner {
+                resource_id,
+                reason,
+            }),
+        );
+        request.pane_id = Some(pane);
+        request.expected_revision = Some(expected_revision.unwrap_or(snapshot.catalog.revision));
+        request.request_key = Some(key.into());
+        let reply = exchange(connection, request, key, OP, false).await?;
+        println!(
+            "{}",
+            result_json(&reply, OP, key, reply.reservation.as_ref())
+        );
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        let why = if occupied.is_empty() {
+            "nothing is waiting for recovery on this resource"
+        } else if only_stale {
+            "run it from an agent pane of this project, or from an interactive terminal"
+        } else {
+            "the owner is still live: only a user at an interactive terminal may revoke it"
+        };
+        return Err(error(OP, key, "interactive_confirmation_required", why, 2));
+    }
+    let expected_revision = expected_revision.unwrap_or(snapshot.catalog.revision);
     let mut prepared = exchange(
         connection,
         ResourceRequest::new(

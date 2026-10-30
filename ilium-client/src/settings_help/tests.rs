@@ -115,6 +115,8 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "AP", 1, 26);
     ids.insert("AP-33".to_owned());
     ids.insert("AP-36".to_owned());
+    ids.insert("AP-37".to_owned());
+    ids.insert("AP-38".to_owned());
     ids.insert("AP-34".to_owned());
     add_range(&mut ids, "COST", 24, 27);
     for id in crate::animation_rows::help_ids() {

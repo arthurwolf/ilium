@@ -1,5 +1,15 @@
 [
   {
+    "id": "TOOLBAR-01",
+    "title": "Tree toolbar",
+    "explanation": "Arrange the tree toolbar and choose how long a terminal remains active after its last output.",
+    "specimen": "Search  ↑ ↓ ×\nEye  ↑ ↓ ×\n+ Add button\nInactive after 15 minutes",
+    "states": "Use the arrows or Shift+Up/Down to reorder, Delete to remove, and + to add a button. The preview updates immediately.",
+    "frames": ["Search  ↑ ↓ ×\nEye  ↑ ↓ ×\n+ Add button"],
+    "motion": "None.",
+    "caveat": "The activity filter starts off; removing its eye button also turns the filter off."
+  },
+  {
     "id": "CUSTOMAGENT-01",
     "title": "Custom agent profiles",
     "explanation": "Create named Claude or Codex profiles with their own icon and environment variables.",
@@ -1129,6 +1139,26 @@
     "frames": [
       "Use a detected-agent pane with a banner above its transcript. Provide a manually stepped sequence:\n\nThe banner contains “Explain this test”; a new draft is being entered, but the banner remains unchanged.\n\n“Summarize this log” is successfully submitted and exactly reconstructed; the banner updates.\n\nLater input is not reconstructable; the transcript may change, but the banner still says “Summarize this log.”\n\nWith the setting off, the same transcript appears without the banner.\n\nRepeat the recognized-submission specimen with typed and pasted sample input."
     ]
+  },
+  {
+    "id": "AP-37",
+    "title": "Goal tab",
+    "explanation": "Offer a selectable goal tab alongside the last prompt when the agent has a current goal.",
+    "specimen": "Compare the same agent pane with the Goal tab enabled and disabled; show the Prompt and Goal choices when a goal is available.",
+    "states": "Off and on, current goal and no current goal, available and unavailable goal text.",
+    "motion": "None.",
+    "caveat": "Goal information belongs to the verified current session and can be unavailable.",
+    "frames": ["Show the same agent pane with the Goal tab enabled and disabled."]
+  },
+  {
+    "id": "AP-38",
+    "title": "Goal toolbar icon",
+    "explanation": "Show a goal flag in the agent toolbar when a current goal is known.",
+    "specimen": "Compare the same agent pane with the goal flag enabled and disabled, and show its readable goal popover.",
+    "states": "Off and on, hover preview and pinned popover, available and unavailable goal text.",
+    "motion": "None.",
+    "caveat": "The goal flag is independent of the Goal tab setting.",
+    "frames": ["Show the same agent toolbar with and without its goal flag."]
   },
   {
     "id": "AP-19",

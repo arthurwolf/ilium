@@ -125,6 +125,7 @@ pub enum TreeToolbarAction {
     Project,
     Split,
     Folder,
+    ActivityFilter,
     /// Triggers `App::action_request_restructure` -- one independent LLM
     /// regroup-and-retitle call per non-empty project (see
     /// `crate::restructure`'s module docs). Anchored next to `Settings`
@@ -151,6 +152,7 @@ impl TreeToolbarAction {
             Self::Folder => 10,
             Self::Restructure => 11,
             Self::Settings => 12,
+            Self::ActivityFilter => 13,
         }
     }
 
@@ -175,7 +177,7 @@ impl TreeToolbarAction {
     /// Single glyph shown on the button. Agent launchers resolve through the
     /// same persisted icon assignment as their tree rows, keeping both
     /// surfaces synchronized when the user changes a provider icon.
-    fn glyph(self, icons: &IconSettings) -> &str {
+    pub(crate) fn glyph(self, icons: &IconSettings) -> &str {
         match self {
             Self::Search => icons.glyph(IconTarget::ToolbarSearch),
             Self::Shell => icons.glyph(IconTarget::Terminal),
@@ -190,6 +192,7 @@ impl TreeToolbarAction {
             Self::Folder => icons.glyph(IconTarget::Folder),
             Self::Restructure => icons.glyph(IconTarget::ToolbarRestructure),
             Self::Settings => icons.glyph(IconTarget::ToolbarSettings),
+            Self::ActivityFilter => "👁",
         }
     }
 
@@ -197,7 +200,7 @@ impl TreeToolbarAction {
     /// others (and from the status colors already used for pane state --
     /// yellow/working, cyan/waiting, green/idle) that the five buttons read
     /// as five different things at a glance instead of one repeated shape.
-    fn accent(self) -> Color {
+    pub(crate) fn accent(self) -> Color {
         match self {
             Self::Search => Color::Cyan,
             Self::Shell => Color::Gray,
@@ -212,6 +215,7 @@ impl TreeToolbarAction {
             Self::Folder => Color::Cyan,
             Self::Restructure => Color::Yellow,
             Self::Settings => Color::Gray,
+            Self::ActivityFilter => Color::Cyan,
         }
     }
 
@@ -230,6 +234,7 @@ impl TreeToolbarAction {
             Self::Folder => "open folder",
             Self::Restructure => "restructure with AI",
             Self::Settings => "settings",
+            Self::ActivityFilter => "show or hide inactive terminals",
         }
     }
 }
@@ -649,9 +654,13 @@ impl PaintedTreeRows {
     ) {
         self._metadata = hold;
     }
-    pub(crate) fn toolbar_at(&self, position: Position) -> Option<TreeToolbarAction> {
+    pub(crate) fn toolbar_at(
+        &self,
+        position: Position,
+        layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+    ) -> Option<TreeToolbarAction> {
         self.toolbar.then_some(())?;
-        toolbar_action_at(self.area, position)
+        configured_toolbar_action_at(self.area, position, layout)
     }
     pub(crate) fn node_at(&self, position: Position) -> Option<TreeNodeHit> {
         self.list.contains(position).then_some(())?;
@@ -767,6 +776,8 @@ pub struct TreeHoverState {
 /// All transient presentation state for one tree render. Grouping it keeps
 /// the renderer's stable tree/state inputs distinct from redraw-only UI data.
 pub struct TreeRenderOptions<'a> {
+    pub visibility: Option<&'a HashSet<NodeId>>,
+    pub toolbar_layout: &'a crate::tree_toolbar_layout::TreeToolbarLayout,
     pub custom_toolbar_profiles: Option<&'a [ilium_core::custom_agent::CustomAgentProfile]>,
     pub custom_toolbar_selected: Option<&'a str>,
     pub custom_toolbar_hovered: Option<&'a str>,
@@ -902,6 +913,7 @@ fn layout_tree_row(
 /// together prevents each new presentation concern from widening every
 /// recursive helper's signature independently.
 struct TreeItemBuildContext<'a> {
+    visibility: Option<&'a HashSet<NodeId>>,
     custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     layout: Option<&'a RowLayoutBuild<'a>>,
     elapsed_ms: u128,
@@ -1082,6 +1094,12 @@ fn build_children(
     let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
     identifier_path.extend_from_slice(ancestor_path);
     for child_id in children.iter().copied() {
+        if context
+            .visibility
+            .is_some_and(|visible| !visible.contains(&child_id))
+        {
+            continue;
+        }
         if context.resources.is_some_and(|resources| resources.grouping && !tree.get(parent).is_some_and(Node::is_split_view) && resources.rows.targets.values().any(|target|matches!(target,crate::resource_queue::ResourceRowTarget::Participant{pane_id:Some(pane),..} if *pane==child_id))) { continue; }
         if is_compact_worktree(tree, child_id) {
             items.extend(build_children(tree, child_id, context, ancestor_path));
@@ -1101,11 +1119,16 @@ fn build_children(
 }
 
 /// Unlabeled stand-ins for a collapsed container's direct children.
-fn collapsed_placeholder_children(tree: &Tree, parent: NodeId) -> Vec<TreeItem<'static, NodeId>> {
+fn collapsed_placeholder_children(
+    tree: &Tree,
+    parent: NodeId,
+    visibility: Option<&HashSet<NodeId>>,
+) -> Vec<TreeItem<'static, NodeId>> {
     tree.children_of(parent)
         .map(|children| {
             children
                 .iter()
+                .filter(|child_id| visibility.is_none_or(|visible| visible.contains(*child_id)))
                 .map(|child_id| {
                     let displayed = if is_compact_worktree(tree, *child_id) {
                         tree.children_of(*child_id)
@@ -1141,7 +1164,7 @@ fn build_item(
             let mut children = if context.opened_paths.contains(identifier_path) {
                 build_children(tree, node.id, context, identifier_path)
             } else {
-                collapsed_placeholder_children(tree, node.id)
+                collapsed_placeholder_children(tree, node.id, context.visibility)
             };
             if let ContainerKind::Project { .. } = &container.kind {
                 if let Some(resources) = context.resources {
@@ -1160,6 +1183,7 @@ fn build_item(
                             resources.grouping,
                             context.icons,
                             context.use_stable_glyphs,
+                            context.visibility,
                         );
                         for resource_item in &mut resource_items {
                             if resources.observation_error.is_some() {
@@ -1417,11 +1441,8 @@ fn build_item(
                 node.is_bookmarked,
                 context.icons,
             );
-            let display_name = title_with_frozen_agent(
-                display_name,
-                context.frozen_panes.contains(&node.id),
-                context.icons,
-            );
+            let is_frozen = context.frozen_panes.contains(&node.id);
+            let display_name = title_with_frozen_agent(display_name, is_frozen, context.icons);
             let label = pane_label_with_icons(
                 status,
                 &display_name,
@@ -1467,7 +1488,7 @@ fn build_item(
             } else {
                 label
             };
-            let label = apply_unread_title_bold(
+            let mut label = apply_unread_title_bold(
                 label,
                 should_apply_unread_title_bold(
                     status,
@@ -1475,6 +1496,11 @@ fn build_item(
                     context.focused_pane_id == Some(node.id),
                 ),
             );
+            if is_frozen {
+                if let Some(title) = label.spans.get_mut(3) {
+                    title.style = title.style.fg(Color::DarkGray);
+                }
+            }
             let title_offset = context
                 .layout
                 .filter(|layout| !layout.settings.is_default())
@@ -2656,6 +2682,101 @@ pub fn toolbar_button_rects(area: Rect) -> Vec<(TreeToolbarAction, Rect)> {
     buttons
 }
 
+impl From<crate::tree_toolbar_layout::TreeToolbarEntry> for TreeToolbarAction {
+    fn from(entry: crate::tree_toolbar_layout::TreeToolbarEntry) -> Self {
+        use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
+        match entry {
+            Entry::Search => Self::Search,
+            Entry::Project => Self::Project,
+            Entry::Shell => Self::Shell,
+            Entry::Claude => Self::Agent(BuiltinAgentProvider::Claude),
+            Entry::Codex => Self::Agent(BuiltinAgentProvider::Codex),
+            Entry::Antigravity => Self::Agent(BuiltinAgentProvider::Antigravity),
+            Entry::Editor => Self::Editor,
+            Entry::Board => Self::Board,
+            Entry::Group => Self::Group,
+            Entry::Split => Self::Split,
+            Entry::Folder => Self::Folder,
+            Entry::ActivityFilter => Self::ActivityFilter,
+            Entry::Restructure => Self::Restructure,
+            Entry::Settings => Self::Settings,
+        }
+    }
+}
+
+/// One layout supplies drawing, previews and pointer targets. The default
+/// suffix stays at the right edge so the eye and settings remain reachable in
+/// a narrow tree; a custom order is laid out in the exact requested order.
+pub(crate) fn configured_toolbar_button_rects(
+    area: Rect,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Vec<(TreeToolbarAction, Rect)> {
+    configured_toolbar_rects_in_strip(toolbar_area(area), layout)
+}
+
+pub(crate) fn configured_toolbar_rects_in_strip(
+    toolbar: Rect,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Vec<(TreeToolbarAction, Rect)> {
+    use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
+    let visible_width = TOOLBAR_BUTTON_WIDTH - 1;
+    if toolbar.width < visible_width {
+        return Vec::new();
+    }
+    let suffix = [Entry::ActivityFilter, Entry::Restructure, Entry::Settings];
+    let anchored = layout.entries.ends_with(&suffix);
+    let left_count = if anchored {
+        layout.entries.len() - suffix.len()
+    } else {
+        layout.entries.len()
+    };
+    let reserved = if anchored {
+        (suffix.len() as u16 * TOOLBAR_BUTTON_WIDTH - 1).min(toolbar.width)
+    } else {
+        0
+    };
+    let left_end = toolbar.right().saturating_sub(reserved);
+    let mut buttons = Vec::new();
+    for (index, entry) in layout.entries.iter().take(left_count).enumerate() {
+        let x = toolbar
+            .x
+            .saturating_add((index as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
+        if x.saturating_add(visible_width) > left_end {
+            break;
+        }
+        buttons.push((
+            (*entry).into(),
+            Rect::new(x, toolbar.y, visible_width, toolbar.height),
+        ));
+    }
+    if anchored {
+        for (index, entry) in suffix.into_iter().rev().enumerate() {
+            let offset =
+                visible_width.saturating_add((index as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
+            if offset > toolbar.width {
+                break;
+            }
+            let x = toolbar.right().saturating_sub(offset);
+            buttons.push((
+                entry.into(),
+                Rect::new(x, toolbar.y, visible_width, toolbar.height),
+            ));
+        }
+        buttons.sort_by_key(|(_, rect)| rect.x);
+    }
+    buttons
+}
+
+pub(crate) fn configured_toolbar_action_at(
+    area: Rect,
+    position: Position,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Option<TreeToolbarAction> {
+    configured_toolbar_button_rects(area, layout)
+        .into_iter()
+        .find_map(|(action, button)| button.contains(position).then_some(action))
+}
+
 /// Whether `id` has an automatic title source `TreeRowAction::Retitle` can
 /// actually (re-)trigger -- an agent pane, or a plain-shell terminal (see
 /// `crate::terminal_naming`). A group has no title-inference worker at all,
@@ -2883,7 +3004,7 @@ impl TreeItemCache {
             tree_order,
             opened_paths,
             (&HashMap::new(), 0),
-            (&Default::default(), &HashSet::new(), None),
+            (&Default::default(), &HashSet::new(), None, None),
         )
     }
 
@@ -2900,10 +3021,11 @@ impl TreeItemCache {
             &crate::filesystem::sidebar::SidebarSnapshot,
             &HashSet<NodeId>,
             Option<&crate::resource_queue::ResourceUi>,
+            Option<&HashSet<NodeId>>,
         ),
     ) -> &[TreeItem<'static, NodeId>] {
         let (cost_ranks, cost_epoch) = cost;
-        let (sidebar_files, chatroom_projects, resources) = filesystem;
+        let (sidebar_files, chatroom_projects, resources, visibility) = filesystem;
         if self.version != Some(version)
             || self.tree_order != Some(tree_order)
             || self.cost_epoch != cost_epoch
@@ -2915,6 +3037,7 @@ impl TreeItemCache {
             self.items = build_tree_items(
                 tree,
                 TreeItemBuildContext {
+                    visibility,
                     custom_agent_labels: None,
                     layout: None,
                     elapsed_ms: 0,
@@ -3022,6 +3145,7 @@ pub(crate) fn render(
     let items = build_tree_items(
         tree,
         TreeItemBuildContext {
+            visibility: options.visibility,
             custom_agent_labels: options.custom_agent_labels,
             layout: Some(&layout),
             elapsed_ms: options.elapsed_ms,
@@ -3089,6 +3213,7 @@ pub(crate) fn render(
         let presentation_items = build_tree_items(
             presentation_tree,
             TreeItemBuildContext {
+                visibility: options.visibility,
                 custom_agent_labels: options.custom_agent_labels,
                 layout: Some(&layout),
                 elapsed_ms: options.elapsed_ms,
@@ -3227,6 +3352,7 @@ pub(crate) fn render(
         draw_toolbar(
             frame,
             area,
+            (options.toolbar_layout, options.visibility.is_some()),
             options.hover.toolbar_action,
             options.hover.pending_toolbar,
             options.terminal_activity_elapsed_ms,
@@ -3647,17 +3773,20 @@ fn draw_row_actions(
 fn draw_toolbar(
     frame: &mut Frame,
     area: Rect,
+    layout_and_filter: (&crate::tree_toolbar_layout::TreeToolbarLayout, bool),
     hovered: Option<TreeToolbarAction>,
     pending: u16,
     spinner_elapsed_ms: u128,
     icons: &IconSettings,
 ) {
+    let (layout, filter_active) = layout_and_filter;
     let toolbar = toolbar_area(area);
     let caption_row = Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1);
 
-    for (action, button_area) in toolbar_button_rects(area) {
+    for (action, button_area) in configured_toolbar_button_rects(area, layout) {
         let is_hovered = hovered == Some(action);
-        let style = if is_hovered {
+        let style = if is_hovered || (filter_active && action == TreeToolbarAction::ActivityFilter)
+        {
             Style::new()
                 .fg(theme::accent_fg())
                 .bg(action.accent())
@@ -3883,6 +4012,7 @@ mod tests {
                     draw_toolbar(
                         frame,
                         area,
+                        (&Default::default(), false),
                         None,
                         pending,
                         elapsed_ms,
@@ -3952,7 +4082,9 @@ mod tests {
             Some((first, TreeRowAction::Close))
         );
         assert!(painted.action_at(Position::new(strip.area.x, 5)).is_none());
-        assert!(painted.toolbar_at(Position::new(1, 0)).is_none());
+        assert!(painted
+            .toolbar_at(Position::new(1, 0), &Default::default())
+            .is_none());
     }
 
     #[test]
@@ -4319,6 +4451,8 @@ mod tests {
                     tree,
                     state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_hovered: None,
@@ -5564,6 +5698,8 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_hovered: None,
@@ -5626,6 +5762,8 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_hovered: None,
@@ -5716,6 +5854,8 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_hovered: None,
@@ -6567,6 +6707,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -6729,6 +6870,7 @@ mod tests {
         let root_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -6772,6 +6914,7 @@ mod tests {
         let first_level_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -6815,6 +6958,7 @@ mod tests {
         let deep_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -6881,6 +7025,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -7140,6 +7285,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -7442,6 +7588,7 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
                 custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
@@ -7699,6 +7846,8 @@ mod cost_indicator_tests {
                     tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_hovered: None,
@@ -8065,6 +8214,40 @@ mod attention_button_tests {
         assert_eq!(list_area(area).bottom(), button.y);
         set_attention_button_large(false);
         set_attention_button_reserved(false);
+    }
+
+    #[test]
+    fn activity_filter_keeps_chatroom_for_an_active_project() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/activity-test"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "active", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let visible = crate::tree_activity_projection::visible_nodes(&tree, &HashSet::from([pane]));
+        let opened = HashSet::from([vec![project]]);
+        let ranks = HashMap::new();
+        let sidebar = Default::default();
+        let chatrooms = HashSet::from([project]);
+        let mut cache = TreeItemCache::default();
+        let items = cache.get_or_build_ranked(
+            &tree,
+            1,
+            TreeOrder::Manual,
+            &opened,
+            (&ranks, 0),
+            (&sidebar, &chatrooms, None, Some(&visible)),
+        );
+        assert_eq!(items.len(), 1);
+        assert!(items[0]
+            .children()
+            .iter()
+            .any(|child| *child.identifier() == chatroom_node_id(project)));
+        assert!(items[0]
+            .children()
+            .iter()
+            .any(|child| *child.identifier() == pane));
     }
 
     #[test]
