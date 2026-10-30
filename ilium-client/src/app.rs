@@ -1469,6 +1469,14 @@ pub enum ContextMenuAction {
     AddChatroom,
     NewResource,
     LinkResource,
+    /// Resource-row section of the tree context menu.
+    ResourceOpenPanel,
+    ResourceEdit,
+    ResourcePause,
+    ResourceResume,
+    ResourceMarkOffline,
+    ResourceUnlink,
+    ResourceDelete,
     ChangeProjectFolder,
     /// Sets a durable bookmark on the context-menu target. The desired state
     /// is captured while the menu opens, making the server mutation idempotent
@@ -1525,6 +1533,12 @@ impl ContextMenuAction {
             Self::AddChatroom => (2, 6),
             Self::NewResource => (2, 7),
             Self::LinkResource => (2, 8),
+            Self::ResourceOpenPanel => (7, 0),
+            Self::ResourceEdit => (7, 1),
+            Self::ResourcePause | Self::ResourceResume => (7, 2),
+            Self::ResourceMarkOffline => (7, 3),
+            Self::ResourceUnlink => (7, 4),
+            Self::ResourceDelete => (7, 5),
             Self::Worktree => (3, 0),
             Self::ManageWorktrees => (3, 1),
             Self::ChangeProjectFolder => (3, 2),
@@ -1582,6 +1596,13 @@ impl ContextMenuAction {
             Self::NewEditor => IconTarget::Editor,
             Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
             Self::AddChatroom | Self::NewResource | Self::LinkResource => IconTarget::Project,
+            Self::ResourceOpenPanel
+            | Self::ResourceEdit
+            | Self::ResourcePause
+            | Self::ResourceResume
+            | Self::ResourceMarkOffline
+            | Self::ResourceUnlink
+            | Self::ResourceDelete => IconTarget::Project,
             Self::SetBookmark { .. } => IconTarget::Bookmark,
             Self::SetNodeLockedClosed { .. } => IconTarget::Lock,
             Self::Rename => IconTarget::RowRename,
@@ -1619,6 +1640,13 @@ impl ContextMenuAction {
             Self::AddChatroom => "Add chatroom to project".to_string(),
             Self::NewResource => "New resource…".to_string(),
             Self::LinkResource => "Link existing resource…".to_string(),
+            Self::ResourceOpenPanel => "Resource: open control panel".to_string(),
+            Self::ResourceEdit => "Resource: edit name and details…".to_string(),
+            Self::ResourcePause => "Resource: pause the queue…".to_string(),
+            Self::ResourceResume => "Resource: resume the queue…".to_string(),
+            Self::ResourceMarkOffline => "Resource: mark hardware offline…".to_string(),
+            Self::ResourceUnlink => "Resource: remove from this project…".to_string(),
+            Self::ResourceDelete => "Resource: delete…".to_string(),
             Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
             Self::SetBookmark {
                 is_bookmarked: true,
@@ -2159,12 +2187,50 @@ pub(crate) const FROZEN_DIALOG_BUTTON_LABEL: &str = "      [ Unfreeze agent ]   
 /// Shown while an unfreeze replacement is in flight; cleared once the replacement pane takes its tree slot.
 pub(crate) const UNFREEZING_AGENT_STATUS: &str = "Unfreezing agent…";
 
-/// Earlier prompts of one agent session, read from its transcript off the
-/// UI thread.
+/// Prompts of one agent session, read from its transcript off the UI thread.
 struct LastPromptBackfill {
     pane_id: NodeId,
     session_id: String,
-    prompts: Vec<String>,
+    /// `None` when the transcript could not be located or read; the read is
+    /// then retried after [`LAST_PROMPT_BACKFILL_RETRY`].
+    read: Option<(std::path::PathBuf, crate::transcript_context::PromptRead)>,
+}
+
+/// Where the prompt history of one pane stands in its session transcript.
+/// The transcript is tailed, not read once: the agent's own prompts never
+/// reach the server's `last_prompt`, so the transcript is the only source.
+struct PromptTail {
+    session_id: String,
+    /// Verified transcript, once located.
+    path: Option<std::path::PathBuf>,
+    /// Byte offset the next incremental read resumes at.
+    offset: u64,
+    next_read_at: Instant,
+    /// Delay between successful reads, set from the agent class.
+    interval: Duration,
+    in_flight: bool,
+}
+
+/// How long a failed prompt-history read waits before the next attempt (the
+/// transcript may not exist yet, or may be momentarily unreadable).
+const LAST_PROMPT_BACKFILL_RETRY: Duration = Duration::from_secs(30);
+
+/// Delay between tail reads of a Claude transcript (a stat plus the appended
+/// bytes). Codex transcripts are re-read whole, so they wait longer.
+const LAST_PROMPT_TAIL_INTERVAL: Duration = Duration::from_secs(3);
+const LAST_PROMPT_TAIL_INTERVAL_CODEX: Duration = Duration::from_secs(15);
+
+impl PromptTail {
+    fn new(session_id: String, now: Instant) -> Self {
+        Self {
+            session_id,
+            path: None,
+            offset: 0,
+            next_read_at: now,
+            interval: LAST_PROMPT_TAIL_INTERVAL,
+            in_flight: false,
+        }
+    }
 }
 
 pub struct App {
@@ -2521,9 +2587,8 @@ pub struct App {
     pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
     /// Submitted prompts per agent pane, navigated by the banner toolbar.
     pub last_prompt_history: HashMap<NodeId, crate::last_prompt_toolbar::PromptHistory>,
-    /// Agent session whose transcript was already requested for each pane's
-    /// prompt history, so each session is read once.
-    last_prompt_backfill_requested: HashMap<NodeId, String>,
+    /// Transcript read position of each pane's prompt history.
+    last_prompt_tails: HashMap<NodeId, PromptTail>,
     last_prompt_backfill_sender: tokio::sync::mpsc::UnboundedSender<LastPromptBackfill>,
     last_prompt_backfill_receiver: tokio::sync::mpsc::UnboundedReceiver<LastPromptBackfill>,
     /// Panes whose last-prompt banner the user closed. Per agent and per
@@ -3165,7 +3230,7 @@ impl App {
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
             last_prompt_history: HashMap::new(),
-            last_prompt_backfill_requested: HashMap::new(),
+            last_prompt_tails: HashMap::new(),
             last_prompt_backfill_sender: last_prompt_backfill_channel.0,
             last_prompt_backfill_receiver: last_prompt_backfill_channel.1,
             last_prompt_banner_closed: HashSet::new(),
@@ -5028,75 +5093,116 @@ impl App {
         }
     }
 
-    /// Starts one background read of the transcript of every agent pane
-    /// whose session has not been read yet; its earlier prompts become the
-    /// banner's browsable history.
+    /// Starts a background read of the transcript of every agent pane whose
+    /// history is due: the first read of a session loads its earlier
+    /// prompts, later reads append what was typed since.
     fn request_last_prompt_backfills(&mut self) {
         let Some(home_dir) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
         else {
             return;
         };
+        let now = Instant::now();
         let pane_ids: Vec<NodeId> = self.panes.keys().copied().collect();
+        self.last_prompt_tails
+            .retain(|pane_id, _| self.panes.contains_key(pane_id));
         for pane_id in pane_ids {
             let Some((agent_class, session_id, project_path)) =
                 self.known_agent_history_context(pane_id)
             else {
                 continue;
             };
-            if self.last_prompt_backfill_requested.get(&pane_id) == Some(&session_id) {
+            let transcript_hint = self.agent_transcript_paths.get(&pane_id).cloned();
+            let tail = self
+                .last_prompt_tails
+                .entry(pane_id)
+                .and_modify(|tail| {
+                    if tail.session_id != session_id {
+                        *tail = PromptTail::new(session_id.clone(), now);
+                    }
+                })
+                .or_insert_with(|| PromptTail::new(session_id.clone(), now));
+            tail.interval = if matches!(agent_class, ilium_core::AgentClass::Codex) {
+                LAST_PROMPT_TAIL_INTERVAL_CODEX
+            } else {
+                LAST_PROMPT_TAIL_INTERVAL
+            };
+            if tail.in_flight || tail.next_read_at > now {
                 continue;
             }
-            self.last_prompt_backfill_requested
-                .insert(pane_id, session_id.clone());
-            let transcript_hint = self.agent_transcript_paths.get(&pane_id).cloned();
+            tail.in_flight = true;
+            let known_path = tail.path.clone();
+            let offset = tail.offset;
             let sender = self.last_prompt_backfill_sender.clone();
             let home_dir = home_dir.clone();
             let spawned = std::thread::Builder::new()
                 .name("last-prompt-history".into())
                 .spawn(move || {
-                    let Some(path) =
-                        crate::agent_history_path::verified_jsonl_history_path_with_hint(
-                            &home_dir,
-                            &project_path,
-                            &agent_class,
-                            &session_id,
-                            transcript_hint.as_deref(),
-                        )
-                    else {
-                        return;
-                    };
-                    let Ok(prompts) = crate::transcript_context::user_prompt_history(
-                        &agent_class,
-                        &path,
-                        crate::last_prompt_toolbar::MAX_HISTORY_ENTRIES,
-                    ) else {
-                        return;
-                    };
+                    let read = known_path
+                        .filter(|path| path.is_file())
+                        .or_else(|| {
+                            crate::agent_history_path::verified_background_jsonl_history_path_with_hint(
+                                &home_dir,
+                                &project_path,
+                                &agent_class,
+                                &session_id,
+                                transcript_hint.as_deref(),
+                            )
+                        })
+                        .and_then(|path| {
+                            crate::transcript_context::read_user_prompts(
+                                &agent_class,
+                                &path,
+                                offset,
+                                crate::last_prompt_toolbar::MAX_HISTORY_ENTRIES,
+                            )
+                            .ok()
+                            .map(|read| (path, read))
+                        });
                     // The receiver is gone only when the app is shutting down.
                     let _ = sender.send(LastPromptBackfill {
                         pane_id,
                         session_id,
-                        prompts,
+                        read,
                     });
                 });
             if spawned.is_err() {
-                self.last_prompt_backfill_requested.remove(&pane_id);
+                if let Some(tail) = self.last_prompt_tails.get_mut(&pane_id) {
+                    tail.in_flight = false;
+                    tail.next_read_at = now + LAST_PROMPT_BACKFILL_RETRY;
+                }
             }
         }
     }
 
     fn apply_last_prompt_backfills(&mut self) {
         while let Ok(backfill) = self.last_prompt_backfill_receiver.try_recv() {
+            let now = Instant::now();
+            let Some(tail) = self.last_prompt_tails.get_mut(&backfill.pane_id) else {
+                continue;
+            };
             // A pane that moved to another session meanwhile is not this result's.
-            if self.last_prompt_backfill_requested.get(&backfill.pane_id)
-                != Some(&backfill.session_id)
-            {
+            if tail.session_id != backfill.session_id {
                 continue;
             }
-            self.last_prompt_history
+            tail.in_flight = false;
+            let Some((path, read)) = backfill.read else {
+                tail.next_read_at = now + LAST_PROMPT_BACKFILL_RETRY;
+                continue;
+            };
+            tail.next_read_at = now + tail.interval;
+            tail.path = Some(path);
+            tail.offset = read.next_offset;
+            let history = self
+                .last_prompt_history
                 .entry(backfill.pane_id)
-                .or_default()
-                .backfill(&backfill.prompts);
+                .or_default();
+            if read.replace {
+                history.backfill(&read.prompts);
+            } else {
+                for prompt in &read.prompts {
+                    history.record(prompt);
+                }
+            }
         }
     }
 
@@ -14812,7 +14918,26 @@ impl App {
     /// mouse position `(column, row)` -- sized to fit its action list and
     /// clamped inside the screen.
     pub fn open_context_menu(&mut self, target: NodeId, column: u16, row: u16) {
-        let actions = self.context_actions_for(target);
+        let mut actions = self.context_actions_for(target);
+        if let Some(resource_id) = self.resources.context_resource.clone() {
+            let paused = self.resources.record(&resource_id).is_some_and(|record| {
+                !matches!(record.gate, ilium_core::resource_queue::ResourceGate::Open)
+            });
+            let mut section = vec![
+                ContextMenuAction::ResourceOpenPanel,
+                ContextMenuAction::ResourceEdit,
+                if paused {
+                    ContextMenuAction::ResourceResume
+                } else {
+                    ContextMenuAction::ResourcePause
+                },
+                ContextMenuAction::ResourceMarkOffline,
+                ContextMenuAction::ResourceUnlink,
+                ContextMenuAction::ResourceDelete,
+            ];
+            section.extend(actions);
+            actions = section;
+        }
         if actions.is_empty() {
             return;
         }
@@ -17166,6 +17291,13 @@ impl App {
             ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
             ContextMenuAction::NewResource => self.open_resource_dialog(target, false),
             ContextMenuAction::LinkResource => self.open_resource_dialog(target, true),
+            ContextMenuAction::ResourceOpenPanel
+            | ContextMenuAction::ResourceEdit
+            | ContextMenuAction::ResourcePause
+            | ContextMenuAction::ResourceResume
+            | ContextMenuAction::ResourceMarkOffline
+            | ContextMenuAction::ResourceUnlink
+            | ContextMenuAction::ResourceDelete => self.run_resource_context_action(target, action),
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
             ContextMenuAction::SetBookmark { is_bookmarked } => {
                 self.request_set_node_bookmarked(target, is_bookmarked);

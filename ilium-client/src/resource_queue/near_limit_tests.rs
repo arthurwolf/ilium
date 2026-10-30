@@ -155,7 +155,7 @@ async fn near_limit_snapshot_admission_projection_replacement_and_fresh_attach_r
             app.show_resource(fixture.project, ResourceId::from("gpu"));
             let detail = rendered_text(&app, fixture.pane, true);
             let strip = rendered_text(&app, fixture.pane, false);
-            assert!(detail.contains("Shared resource queue"));
+            assert!(detail.contains("Resource control panel"), "{detail}");
             assert!(strip.contains("queue position 8192"), "{strip}");
             let record = app.resources.record(&ResourceId::from("gpu")).unwrap();
             assert_eq!(

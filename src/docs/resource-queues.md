@@ -55,6 +55,12 @@ ilium resource rebind <project-id> <canonical-new-path> --expected-revision <rev
 
 Rebinding updates linked paths and repairs instructions while preserving reservation identities and ticket order. A moved project cannot mutate its claims until this explicit reconciliation succeeds. Copying a project’s resource identity into another independently used directory requires resolving that identity collision before both can coordinate safely.
 
+## The resource control panel
+
+Click a resource in the tree to open its control panel, or right-click it for a section of resource actions (open the panel, edit, pause or resume the queue, mark the hardware offline, remove from this project, delete). The panel shows a status badge, summary cards (status, who holds it, how many wait, how busy it was in the last 24 hours), the queue table, a graph of recent hold times, the details of every request, the projects using the resource and an activity log. Buttons are grouped as Resource, Queue, Recovery and Remove. Hover a button for a plain explanation; a greyed button explains why it cannot be used now, and clicking it shows the same reason. Each button also has a keyboard key, listed in the help (`?`).
+
+In plain words: "Take back" removes a stuck owner and pauses the queue, "Confirm safe" says the hardware is safe so the next agent can start, "Pause queue" stops new grants without taking the hardware from its holder, and "Mark offline" means the hardware is unavailable. "Delete" removes the resource from this project and then deletes it; it is refused while agents still use or wait for it, or while another project shares it.
+
 ## Estimates and recovery
 
 Estimates are advisory. An overdue owner still owns the resource, and following start estimates become unknown. A missing server or uncertain process observation cannot prove hardware is free. An owner's definitive exit or an unclean reboot requires attention because a child workload or device state may survive the agent.

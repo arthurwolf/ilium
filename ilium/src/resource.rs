@@ -376,7 +376,22 @@ fn stable_id(prefix: &str, key: &str) -> String {
     format!("{prefix}-{:x}", Sha256::digest(key.as_bytes()))
 }
 
-pub(crate) async fn run(args: ResourceArgs, cwd: &Path) -> Result<(), CliError> {
+/// A command inherits the server of the Ilium pane it runs in only when the
+/// caller named no project, session or `--cwd`. Any explicit target must win,
+/// otherwise test and capture commands silently reach the live server.
+fn uses_inherited_pane_server(
+    explicit_project: bool,
+    explicit_session: bool,
+    explicit_cwd: bool,
+) -> bool {
+    !(explicit_project || explicit_session || explicit_cwd)
+}
+
+pub(crate) async fn run(
+    args: ResourceArgs,
+    cwd: &Path,
+    cwd_explicit: bool,
+) -> Result<(), CliError> {
     let key = args.request_id.clone().unwrap_or_else(request_key);
     let operation = match &args.command {
         ResourceCommandArgs::List { .. } => "resource_list",
@@ -436,7 +451,11 @@ pub(crate) async fn run(args: ResourceArgs, cwd: &Path) -> Result<(), CliError> 
             ));
         }
     }
-    let use_inherited = args.project.is_none() && selected_session.is_none();
+    let use_inherited = uses_inherited_pane_server(
+        args.project.is_some(),
+        selected_session.is_some(),
+        cwd_explicit,
+    );
     let (socket, session_name, pane) = if use_inherited {
         if let Some(identity) = inherited.as_ref() {
             (
@@ -1077,5 +1096,18 @@ mod tests {
             stable_id("reservation", "123:abc"),
             stable_id("reservation", "123:def")
         );
+    }
+}
+
+#[cfg(test)]
+mod inherited_server_tests {
+    use super::uses_inherited_pane_server;
+
+    #[test]
+    fn explicit_cwd_project_or_session_never_uses_the_pane_server() {
+        assert!(uses_inherited_pane_server(false, false, false));
+        assert!(!uses_inherited_pane_server(false, false, true));
+        assert!(!uses_inherited_pane_server(true, false, false));
+        assert!(!uses_inherited_pane_server(false, true, false));
     }
 }

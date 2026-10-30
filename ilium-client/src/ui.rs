@@ -92,6 +92,7 @@ pub(crate) fn draw_at_with_cursor(
         if app.hovered_status_slot.is_some()
             || app.hovered_progress.is_some()
             || app.hovered_goal_resume.is_some()
+            || app.resources.hovered_action.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
             || app.goal_popover.is_some()

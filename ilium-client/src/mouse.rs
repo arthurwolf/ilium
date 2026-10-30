@@ -194,6 +194,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             app.resource_key(&Event::Mouse(mouse));
             return;
         }
+        app.resources.hovered_action = None;
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
             && app.open_resource_from_wait_footer(Position::new(mouse.column, mouse.row))
         {
@@ -1306,7 +1307,13 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 .tree_node_at(position)
                 .map(|hit| hit.id)
                 .unwrap_or(ROOT_ID);
+            app.resources.context_resource = None;
             if let Some(target) = app.resources.rows.targets.get(&selected_target).cloned() {
+                if let crate::resource_queue::ResourceRowTarget::Resource { resource_id, .. } =
+                    &target
+                {
+                    app.resources.context_resource = Some(resource_id.clone());
+                }
                 let target = match target {
                     crate::resource_queue::ResourceRowTarget::Participant {
                         pane_id: Some(pane),

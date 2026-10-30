@@ -901,6 +901,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
             &app.session_name,
             &app.resources.local_invocations,
         );
+        app.open_new_resource_rows();
     }
     if let Some(selected_setup_row) = selected_setup_row {
         let current_rows = app.agent_setup_rows();

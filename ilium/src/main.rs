@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand};
+use clap::{parser::ValueSource, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use ilium::error::CliError;
 use ilium_core::BuiltinAgentProvider;
@@ -72,6 +72,12 @@ struct Cli {
     /// canonical project directory.
     #[arg(long, global = true, default_value = ".")]
     cwd: PathBuf,
+
+    /// True when `--cwd` was typed on the command line (not the `.` default).
+    /// An explicit project must never be overridden by the pane identity this
+    /// process inherited from the Ilium pane it happens to run in.
+    #[arg(skip)]
+    cwd_explicit: bool,
 
     /// Replace this project's running server before attaching while retaining
     /// its snapshot. Useful after installing a new server binary.
@@ -382,7 +388,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+    cli.cwd_explicit = matches.value_source("cwd") == Some(ValueSource::CommandLine);
     if matches!(&cli.command, Some(Command::ClipboardHelper)) {
         return match ilium_client::terminal_clipboard::run_helper() {
             Ok(()) => ExitCode::SUCCESS,
@@ -561,7 +569,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             }
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
-        Some(Command::Resource(args)) => resource::run(args, &cli.cwd).await,
+        Some(Command::Resource(args)) => resource::run(args, &cli.cwd, cli.cwd_explicit).await,
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait {
@@ -633,6 +641,19 @@ fn read_hook_input() -> HookInput {
 }
 
 fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
+    let pane_worktree = std::env::var_os(ilium_ipc::pane_env::WORKTREE)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    chat_with_pane_worktree(command, cwd, pane_worktree.as_deref())
+}
+
+/// `chat` with the pane's worktree passed in, so tests need not mutate the
+/// process environment.
+fn chat_with_pane_worktree(
+    command: ChatCommand,
+    cwd: &Path,
+    pane_worktree: Option<&Path>,
+) -> Result<(), CliError> {
     // `paths::canonicalize` strips Windows' extended-length `\\?\` prefix:
     // this value is printed straight to the user below ("chatroom ready at
     // ...") and written into `CHATROOM.md`, neither of which should show it.
@@ -647,7 +668,7 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             Ok(())
         }
         ChatCommand::Send { message, author } => {
-            let project_root = chatroom_project_root(&cwd);
+            let project_root = chatroom_project_root(&cwd, pane_worktree);
             let author = author.unwrap_or_else(default_chatroom_author);
             ilium_client::chatroom::append_message(&project_root, &author, &message)?;
             println!("chatroom message sent");
@@ -659,7 +680,7 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             max_bytes,
             reader,
         } => {
-            let project_root = chatroom_project_root(&cwd);
+            let project_root = chatroom_project_root(&cwd, pane_worktree);
             let hook_input = if since_last_read {
                 read_hook_input()
             } else {
@@ -691,7 +712,10 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             Ok(())
         }
         ChatCommand::Tail { limit } => {
-            let project_root = chatroom_project_root(&cwd);
+            let project_root = chatroom_project_root(&cwd, pane_worktree);
+            // Unlike the hook-driven `context`, `tail` is run on purpose, so a
+            // directory with no room is an error rather than empty output.
+            ilium_client::chatroom::require_room(&project_root)?;
             for message in ilium_client::chatroom::read_messages(&project_root, limit)? {
                 println!(
                     "{} | {} | {}",
@@ -703,13 +727,12 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
     }
 }
 
-/// Finds the nearest owning room so a provider hook also works when an agent
-/// starts in a project subdirectory rather than exactly at the project root.
-fn chatroom_project_root(cwd: &Path) -> PathBuf {
-    cwd.ancestors()
-        .find(|ancestor| ilium_client::chatroom::exists(ancestor))
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| cwd.to_path_buf())
+/// Finds the owning room so a provider hook also works when an agent starts in
+/// a project subdirectory, in a linked worktree (the room is git-ignored and
+/// lives only in the main checkout), or in a shell that left its pane's
+/// worktree. See `ilium_client::chatroom_root` for the lookup order.
+fn chatroom_project_root(cwd: &Path, pane_worktree: Option<&Path>) -> PathBuf {
+    ilium_client::chatroom_root::resolve_project_root(cwd, pane_worktree)
 }
 
 fn default_chatroom_author() -> String {
@@ -2484,7 +2507,42 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         ilium_client::chatroom::initialize(project.path()).unwrap();
 
-        assert_eq!(chatroom_project_root(&nested), project.path());
+        assert_eq!(chatroom_project_root(&nested, None), project.path());
+    }
+
+    #[test]
+    fn tail_and_send_report_a_missing_room_but_context_stays_silent() {
+        let project = tempfile::tempdir().unwrap();
+
+        let tail =
+            chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
+                .unwrap_err();
+        assert!(tail
+            .to_string()
+            .ends_with(ilium_client::chatroom_root::NO_CHATROOM_MESSAGE));
+        let send = chat_with_pane_worktree(
+            ChatCommand::Send {
+                message: "hello".to_string(),
+                author: Some("test".to_string()),
+            },
+            project.path(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(send.to_string(), tail.to_string());
+        // Lifecycle hooks run in every project, including ones without a room.
+        chat_with_pane_worktree(
+            ChatCommand::Context {
+                limit: 5,
+                since_last_read: false,
+                max_bytes: None,
+                reader: None,
+            },
+            project.path(),
+            None,
+        )
+        .unwrap();
+        assert!(!project.path().join("CHATROOM.md").exists());
     }
 
     /// `ilium progress` only works run from inside a pane ilium itself

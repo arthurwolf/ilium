@@ -6,12 +6,15 @@ mod dialog;
 mod help;
 #[cfg(test)]
 mod near_limit_tests;
+mod panel;
+mod panel_actions;
 mod presentation;
 pub mod segments;
 pub(crate) mod tree;
 use crate::app::{App, FocusTarget, RightPanelTarget};
 pub use dialog::ResourceDialog;
 use ilium_core::{resource_queue::*, NodeId};
+pub use panel_actions::ResourceAction;
 use std::collections::HashMap;
 pub use tree::{ResourceRowTarget, ResourceRows};
 // Terminal presentation must never interpret catalog text as control sequences.
@@ -65,6 +68,10 @@ pub struct ResourceUi {
     pub previous_target: Option<RightPanelTarget>,
     pub recovery_intent: Option<(NodeId, ResourceCommand)>,
     pub selected_reservation: Option<ReservationId>,
+    /// Resource whose right-click menu is open (the menu target stays the project).
+    pub context_resource: Option<ResourceId>,
+    /// Panel button under the pointer, with the pointer position, for tooltips.
+    pub hovered_action: Option<(panel_actions::ResourceAction, ratatui::layout::Position)>,
 }
 impl ResourceUi {
     pub fn record(&self, id: &ResourceId) -> Option<&ResourceRecord> {
@@ -141,6 +148,7 @@ impl App {
             .rebuild(&self.tree, &catalog, &self.session_name, &local_invocations);
         self.resources.local_invocations = local_invocations;
         self.resources.catalog = Some(catalog);
+        self.open_new_resource_rows();
         if let Some(ResourceRowTarget::Participant {
             pane_id,
             project_id,
@@ -350,6 +358,20 @@ impl App {
         self.resources.error = None;
         self.resource_request(project_id, ilium_ipc::resource::ResourceOperation::Snapshot);
     }
+    /// Resource folders start expanded so an agent that takes a resource stays
+    /// visible; each folder is opened once, so a later user collapse sticks.
+    pub(crate) fn open_new_resource_rows(&mut self) {
+        let mut opened = false;
+        for (project, resource_row) in self.resources.rows.take_unopened_resource_rows() {
+            let mut path = self.path_to(project);
+            path.push(resource_row);
+            opened |= self.tree_state.open(path);
+        }
+        if opened {
+            self.bump_tree_version();
+        }
+    }
+
     pub fn settings_toggle_resource_grouping(&mut self) {
         let mut ui = self.ui_settings.clone();
         ui.resource_queue_grouping = !ui.resource_queue_grouping;
@@ -446,7 +468,23 @@ impl App {
                         .as_mut()
                         .filter(|dialog| dialog.submitted)
                     {
-                        if matches!(dialog.kind, dialog::DialogKind::Edit(_)) {
+                        if let Some(resource_id) = dialog.then_archive.take() {
+                            let project = dialog.project;
+                            self.resources.dialog = None;
+                            let revision = self
+                                .resources
+                                .catalog
+                                .as_ref()
+                                .map(|catalog| catalog.revision);
+                            self.resource_request_with_token(
+                                project,
+                                ilium_ipc::resource::ResourceOperation::Mutate(
+                                    ResourceCommand::Archive { resource_id },
+                                ),
+                                None,
+                                revision,
+                            );
+                        } else if matches!(dialog.kind, dialog::DialogKind::Edit(_)) {
                             dialog.submitted = false;
                             dialog.dirty_at = None;
                             dialog.expected_revision = self
@@ -597,6 +635,36 @@ impl App {
     pub fn resource_overlay(&self, frame: &mut ratatui::Frame) {
         dialog::render(self, frame);
         help::render(self, frame);
+        self.render_panel_tooltip(frame);
+    }
+    fn render_panel_tooltip(&self, frame: &mut ratatui::Frame) {
+        let Some((action, anchor)) = self.resources.hovered_action else {
+            return;
+        };
+        if self.resources.dialog.is_some() || self.resources.help_open {
+            return;
+        }
+        let RightPanelTarget::Resource {
+            ref resource_id, ..
+        } = self.right_panel_target
+        else {
+            return;
+        };
+        let Some(record) = self.resources.record(resource_id) else {
+            return;
+        };
+        let (title, body) = action.tooltip(record);
+        let reason = action.availability(self, record).err();
+        crate::status_icons::render_tooltip(
+            frame,
+            frame.area(),
+            anchor,
+            &crate::status_icons::TooltipContent {
+                title: title.to_owned(),
+                body: body.to_owned(),
+                reason: reason.map(|reason| format!("Unavailable now: {reason}")),
+            },
+        );
     }
     pub fn resource_wait_footer(
         &self,
@@ -607,6 +675,39 @@ impl App {
         detail::render_wait(self, frame, area, pane);
     }
 }
+impl App {
+    /// Runs a resource action chosen from the tree context menu.
+    pub fn run_resource_context_action(
+        &mut self,
+        project_id: NodeId,
+        action: crate::app::ContextMenuAction,
+    ) {
+        use crate::app::ContextMenuAction as Action;
+        let Some(resource_id) = self.resources.context_resource.clone() else {
+            return;
+        };
+        if matches!(action, Action::ResourceOpenPanel) {
+            self.show_resource(project_id, resource_id);
+            return;
+        }
+        let code = match action {
+            Action::ResourceEdit => 'e',
+            Action::ResourcePause | Action::ResourceResume => 'p',
+            Action::ResourceMarkOffline => 'u',
+            Action::ResourceUnlink => 'l',
+            Action::ResourceDelete => 'a',
+            _ => return,
+        };
+        self.show_resource(project_id, resource_id.clone());
+        detail::perform_key(
+            self,
+            project_id,
+            resource_id,
+            crossterm::event::KeyCode::Char(code),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,6 +719,33 @@ mod tests {
         );
         assert!(app.ui_settings.resource_queue_grouping);
         assert!(app.resources.catalog.is_none());
+    }
+    #[test]
+    fn new_resource_folders_open_once_and_a_manual_collapse_sticks() {
+        let mut app = App::new(
+            "test".into(),
+            std::path::PathBuf::from("/synthetic-resource-project"),
+        );
+        let project = NodeId(7);
+        let row = NodeId((1_u64 << 61) | 1);
+        app.resources.rows.targets.insert(
+            row,
+            ResourceRowTarget::Resource {
+                project_id: project,
+                resource_id: ResourceId::from("gpu"),
+            },
+        );
+        app.resources.rows.projects.insert(project, vec![row]);
+        let path = {
+            let mut path = app.path_to(project);
+            path.push(row);
+            path
+        };
+        app.open_new_resource_rows();
+        assert!(app.tree_state.opened().contains(&path));
+        app.tree_state.close(&path);
+        app.open_new_resource_rows();
+        assert!(!app.tree_state.opened().contains(&path));
     }
     #[test]
     fn recovery_confirmation_keeps_original_project_and_revision() {
