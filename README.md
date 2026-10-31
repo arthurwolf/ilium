@@ -53,7 +53,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Find the next agent that needs you</strong></p>
-<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Real Claude and Codex sessions show questions, blocked goals, background-agent waits and unread completed turns in one attention queue; setup and idle gaps are cut, with reading holds" width="100%"></a></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
