@@ -227,7 +227,7 @@ def appimage_wrapper(image, checks, version):  # Check the actual cache used by 
         shlex.quote(str(image)) + ' "$@" # Exercise the actual AppImage launcher.',  # The host or container environment chooses its declared execution mode.
         'identity=$(cat %s) # Read the receipt-bound cache identity.' % shlex.quote(str(Path(checks) / 'identity')),  # Use exactly the builder's key.
         'target=$XDG_DATA_HOME/ilium/appimage/$identity # Locate this invocation\'s materialized pair.',  # Lifecycle may change XDG_DATA_HOME between runs.
-        'sh %s "$target" >&2 # Verify actual materialized runtime bytes.' % shlex.quote(str(Path(checks) / 'check-core.sh')),  # Keep ls stdout usable by the lifecycle contract.
+        'sh %s "$target" >%s 2>&1 || { cat %s >&2; exit 1; } # Verify actual materialized runtime bytes; the animation gate requires an empty stderr on success.' % (shlex.quote(str(Path(checks) / 'check-core.sh')), shlex.quote(str(Path(checks) / 'check-core.out')), shlex.quote(str(Path(checks) / 'check-core.out'))),  # Keep ls stdout usable by the lifecycle contract.
         'test "$("$target/ilium-server" --version)" = %s # Check the installed sibling server.' % shlex.quote('ilium-server ' + version),  # Preserve exact server-version expectations.
         'test "$("$target/ilium-animation-helper" --version)" = %s # Check the installed animation helper.' % shlex.quote(release_tool.helper_version_record(version)),
     ]) + '\n'  # Return complete executable wrapper source.
@@ -796,8 +796,11 @@ DELEGATED_LEAF = (  # The runner's shell fails the cgroup.procs write with EIO w
     'os.execvp(sys.argv[1], sys.argv[1:])\n')
 
 
-def delegated_service(command, child_env):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
+def delegated_service(command, child_env, own_bus=False):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
     uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
+    if own_bus:  # Flatpak's session helper spawns the server, so it must be started by a bus that lives inside this service's cgroup.
+        child_env = {key: value for key, value in child_env.items() if key != 'DBUS_SESSION_BUS_ADDRESS'}
+        command = ['dbus-run-session', '--', *command]
     return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
             '--property=Type=exec', '--property=Delegate=cpu memory pids', '--property=MemoryMax=6G', '--property=TasksMax=4096', '--property=CPUWeight=100', '--property=WorkingDirectory=' + os.getcwd(),
             *('--setenv=%s=%s' % item for item in sorted(child_env.items())), '/usr/bin/python3', '-c', DELEGATED_LEAF,
@@ -818,7 +821,7 @@ def installed_animation(arguments, receipt, log, label, package_format, payload_
                            format=package_format, executable_root=Path(executable_root)),
         command=[str(part) for part in launcher] + ['release-animation-probe'],
         environment=environment,
-        executor=lambda command, child_env, timeout: checked(delegated_service(command, child_env), log, label,
+        executor=lambda command, child_env, timeout: checked(delegated_service(command, child_env, own_bus=package_format == 'flatpak'), log, label,
                                                                env=child_env, timeout=timeout))
     require(qualified['installed_files']['ilium'] == receipt['package_files']['ilium'] and
             qualified['installed_files']['ilium-animation-helper'] ==
