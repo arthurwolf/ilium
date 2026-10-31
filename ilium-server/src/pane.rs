@@ -1241,18 +1241,16 @@ pub struct PromptTranscriptEpoch {
     pub session_id: String,
 }
 
-/// Start times are derived from a boot time that the process table can report
-/// a couple of seconds apart across reads on a loaded machine, so a difference
-/// of up to three seconds is the same process. A replacement differs in class,
-/// PID or by more than that; a recycled PID of the same class within seconds
-/// does not occur.
+/// Start times are derived from a boot time that the kernel can report one
+/// second apart across reads, so a one-second difference is the same process.
+/// A replacement differs in class, PID or by more than one second.
 fn is_same_agent_process(current: &AgentProcessKey, next: &AgentProcessKey) -> bool {
     current.class == next.class
         && current.process_id == next.process_id
         && current
             .started_at_unix_seconds
             .abs_diff(next.started_at_unix_seconds)
-            <= 3
+            <= 1
 }
 
 pub(crate) fn agent_process_key(identity: &ilium_detect::AgentIdentity) -> AgentProcessKey {
@@ -1648,7 +1646,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_start_time_that_drifts_by_a_few_seconds_keeps_the_same_agent_process() {
+    fn a_start_time_that_drifts_by_one_second_keeps_the_same_agent_process() {
         let directory = tempfile::tempdir().expect("isolated directory");
         let session = ilium_pty::PtySession::spawn(
             ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
@@ -1674,8 +1672,8 @@ mod tests {
         runtime.is_session_identity_invalidated = true;
         runtime.invalidated_session_id = Some("old".to_owned());
         // The boot time the process table derives start times from can move
-        // by seconds between reads; that is the same process, not a new one.
-        identity.started_at_unix_seconds += 3;
+        // by a second between reads; that is the same process, not a new one.
+        identity.started_at_unix_seconds += 1;
         assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
         assert!(runtime.is_session_identity_invalidated);
         assert_eq!(runtime.invalidated_session_id.as_deref(), Some("old"));
