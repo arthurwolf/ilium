@@ -347,12 +347,42 @@ if [ -z "$version" ]; then
     requested_version=$version
 fi
 download "$origin/download/v$version/SHA256SUMS" "$work/SHA256SUMS"
-download "$origin/download/v$version/$archive_name" "$work/$archive_name"
 stage=checksum
 expected=$(awk -v selected="$archive_name" -v inventory="$checksum_archives" '
     BEGIN {count=split(inventory,names," ");for(i=1;i<=count;i++)required[names[i]]=1}
     {if (length($0)!=66+length($2) || length($1)!=64 || $1 !~ /^[0-9a-f]+$/ || substr($0,65,2)!="  " || !required[$2] || seen[$2]++) bad=1; if ($2==selected) {hash=$1; matches++}}
-    END {if (bad || matches!=1 || NR!=count) exit 1; print hash}' "$work/SHA256SUMS") || fail "Malformed, duplicate or missing checksum record"
+    END {if (bad || matches!=1 || NR!=count) exit 1; print hash}' "$work/SHA256SUMS") || {
+    # A shortened checksum inventory is valid only with an explicit,
+    # version-bound declaration accounting for every approved archive.
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o "$work/AVAILABILITY" "$origin/download/v$version/AVAILABILITY" 2> "$work/download-error" || fail "Malformed, duplicate or missing checksum record"
+    availability_size=$(wc -c < "$work/AVAILABILITY" | tr -d ' ')
+    [ "$availability_size" -gt 0 ] && [ "$availability_size" -le 16384 ] || fail "Malformed availability inventory"
+    last_byte=$(dd if="$work/AVAILABILITY" bs=1 skip="$((availability_size - 1))" count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+    [ "$last_byte" = 10 ] || fail "Malformed availability inventory"
+    sums_hash=$(hash_file "$work/SHA256SUMS") || fail "SHA-256 tool failed"
+    expected=$(awk -v selected="$archive_name" -v inventory="$checksum_archives" -v tag="v$version" -v digest="$sums_hash" '
+        BEGIN { count=split(inventory,names," "); for(i=1;i<=count;i++) approved[names[i]]=1 }
+        FNR==NR {
+            if (NR==1) { if ($0!="ilium-availability-v1") bad=1; next }
+            if (NR==2) { if ($0!="tag " tag) bad=1; next }
+            if (NR==3) { if ($1!="commit" || length($2)!=40 || $2 !~ /^[0-9a-f]+$/ || $0!=$1 " " $2) bad=1; next }
+            if (NR==4) { if ($1!="selection-sha256" || length($2)!=64 || $2 !~ /^[0-9a-f]+$/ || $0!=$1 " " $2) bad=1; next }
+            if (NR==5) { if ($0!="checksums-sha256 " digest) bad=1; next }
+            if (($1!="available" && $1!="omitted") || !approved[$2] || declared[$2]++ || $0!=$1 " " $2) bad=1
+            state[$2]=$1; if ($1=="available") { available++; if ($2 ~ /^ilium-linux-/) linux=1; if ($2 ~ /^ilium-windows-/) windows=1 }
+            next
+        }
+        { if (length($0)!=66+length($2) || length($1)!=64 || $1 !~ /^[0-9a-f]+$/ || substr($0,65,2)!="  " || state[$2]!="available" || seen[$2]++) bad=1; if ($2==selected) hash=$1; sums++ }
+        END {
+            if (NR-FNR!=count+5 || sums!=available || !linux || !windows) bad=1
+            for (i=1;i<=count;i++) if (declared[names[i]]!=1 || (state[names[i]]=="available" && seen[names[i]]!=1)) bad=1
+            if (bad) exit 1; if (state[selected]=="omitted") print "OMITTED"; else if (hash!="") print hash; else exit 1
+        }' "$work/AVAILABILITY" "$work/SHA256SUMS") || fail "Malformed or inconsistent availability inventory"
+    [ "$expected" != OMITTED ] || fail "This platform is not ready yet for the requested release"
+}
+stage=download
+download "$origin/download/v$version/$archive_name" "$work/$archive_name"
+stage=checksum
 actual=$(hash_file "$work/$archive_name") || fail "SHA-256 tool failed"
 [ "$actual" = "$expected" ] || fail "Archive SHA-256 mismatch"
 
