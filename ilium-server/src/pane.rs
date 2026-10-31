@@ -534,6 +534,12 @@ impl TerminalPaneRuntime {
             .checked_add(1)
             .ok_or("agent invocation generation exhausted")?;
         let replaced = self.agent_process_key.is_some();
+        if replaced {
+            eprintln!(
+                "diagnostic: agent process replaced: {:?} -> {:?}",
+                self.agent_process_key, key
+            );
+        }
         self.agent_generation = next;
         self.agent_process_key = Some(key);
         self.agent_input_available = false;

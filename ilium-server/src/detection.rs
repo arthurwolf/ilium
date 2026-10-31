@@ -2505,6 +2505,10 @@ async fn run_due_panes_with_hook(
             let mut cleared_session_id = None;
             if should_clear_session_id && runtime.session_id.is_some() {
                 cleared_session_id = runtime.session_id.clone();
+                eprintln!(
+                    "diagnostic: detection clears {:?} invalidated={} ambiguous={session_is_ambiguously_claimed} class_mismatch={session_belongs_to_different_class} owner_changed={owning_process_changed_without_reverification}",
+                    runtime.session_id, runtime.is_session_identity_invalidated
+                );
                 if session_is_ambiguously_claimed {
                     runtime.invalidated_session_id = runtime.session_id.clone();
                     runtime.is_session_identity_invalidated = true;
@@ -2541,6 +2545,15 @@ async fn run_due_panes_with_hook(
             if let Some(discovered) = discovered_session {
                 let session_id = &discovered.session_id;
                 if runtime.session_id.as_ref() != Some(session_id) {
+                    eprintln!(
+                        "diagnostic: binding {session_id} source={:?} invalidated={} invalidated_id={:?} session_pid={:?} identity_pid={:?} replaced={process_was_replaced} generation={}",
+                        discovered.source,
+                        runtime.is_session_identity_invalidated,
+                        runtime.invalidated_session_id,
+                        runtime.session_process_id,
+                        classified_pane.identity.as_ref().map(|identity| identity.pid),
+                        runtime.title_generation
+                    );
                     let invalidated_session_id = runtime.invalidated_session_id.clone();
                     let correlation_id = runtime.pending_session_transition_correlation_id.take();
                     runtime.session_id = Some(session_id.clone());
