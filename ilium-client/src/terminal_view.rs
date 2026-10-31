@@ -1571,7 +1571,10 @@ impl TerminalState {
                 .back_mut()
                 .and_then(|segment| Arc::get_mut(&mut segment.bytes))
             {
+                let previous_capacity = segment.capacity();
                 segment.reserve_exact(bytes.len());
+                // Charge the reservation now: trimming subtracts the whole capacity.
+                self.history_allocation_bytes += segment.capacity() - previous_capacity;
             }
             cursor.replay_started = true;
         }

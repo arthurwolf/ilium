@@ -337,6 +337,39 @@ fn allocation_caches_follow_segment_growth_rotation_replay_and_link_eviction() {
 }
 
 #[test]
+fn replay_large_history_tracks_allocation_capacity_and_trims_without_underflow() {
+    let mut state = TerminalState::new(4, 80);
+    let mut cursor = OrderedOutputCursor::default();
+    // 256 KiB replay reserves capacity on its initial segment
+    let replay_bytes = vec![b'a'; 256 * 1024];
+    state
+        .apply_ordered_replay(&replay_bytes, 1, &mut cursor, |_, _| Ok(()))
+        .unwrap();
+
+    assert_eq!(
+        state.history_allocation_bytes,
+        state
+            .history_segments
+            .iter()
+            .map(|segment| segment.bytes.capacity())
+            .sum::<usize>()
+    );
+
+    // Trimming the budget down to 1 KiB must not underflow history_allocation_bytes
+    state.history_budget_bytes = 1024;
+    state.trim_history_to_budget();
+
+    assert_eq!(
+        state.history_allocation_bytes,
+        state
+            .history_segments
+            .iter()
+            .map(|segment| segment.bytes.capacity())
+            .sum::<usize>()
+    );
+}
+
+#[test]
 fn inert_escape_runs_use_bounded_quanta_without_executing_pending_commands() {
     let mut state = TerminalState::new(4, 80);
     let mut expected = TerminalState::new(4, 80);
