@@ -346,8 +346,8 @@ if [ -z "$version" ]; then
     valid_version "$version" || fail "Latest release tag is not a safe version"
     requested_version=$version
 fi
-download "$origin/download/v$version/$archive_name" "$work/$archive_name"
 download "$origin/download/v$version/SHA256SUMS" "$work/SHA256SUMS"
+download "$origin/download/v$version/$archive_name" "$work/$archive_name"
 stage=checksum
 expected=$(awk -v selected="$archive_name" -v inventory="$checksum_archives" '
     BEGIN {count=split(inventory,names," ");for(i=1;i<=count;i++)required[names[i]]=1}
