@@ -2518,8 +2518,8 @@ mod tests {
                 };
                 if let Some((through_sequence, bytes)) = replay {
                     if bytes
-                        .windows(b"writer-prefix".len())
-                        .any(|window| window == b"writer-prefix")
+                        .windows(b"writer-prefix\r\n".len())
+                        .any(|window| window == b"writer-prefix\r\n")
                     {
                         break (through_sequence, bytes);
                     }
@@ -2561,8 +2561,8 @@ mod tests {
                 if let Some((through_sequence, bytes)) = replay {
                     if through_sequence > prefix_sequence
                         && bytes
-                            .windows(b"writer-tail".len())
-                            .any(|window| window == b"writer-tail")
+                            .windows(b"writer-tail\r\n".len())
+                            .any(|window| window == b"writer-tail\r\n")
                     {
                         if let Some(ServerEvent::ScreenUpdate {
                             first_sequence,
