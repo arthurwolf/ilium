@@ -14,6 +14,7 @@ use ilium_plugin_api::generated::host::process::{
 };
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{ChildId, RequestId};
+use ilium_plugin_api::generated::types::Outcome;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -53,7 +54,7 @@ const RESERVED_ENVIRONMENT_KEYS: &[&str] = &[
 pub struct ProcessImport;
 
 /// A finished run waiting for `take-exit`.
-type ExitSlot = Arc<Mutex<Option<(Instant, ProcessExit)>>>;
+type ExitSlot = Arc<Mutex<Option<(Instant, ProcessExit, Option<ErrorCode>)>>>;
 
 /// One long-lived child.
 struct ChildEntry {
@@ -140,7 +141,7 @@ fn read_capped(mut pipe: impl Read, limit: usize) -> (Vec<u8>, bool) {
 }
 
 /// Runs one spec to completion or timeout; never panics, a failure to start is a non-zero exit.
-fn execute_one_shot(spec: &ProcessSpec) -> ProcessExit {
+fn execute_one_shot(spec: &ProcessSpec) -> (ProcessExit, Option<ErrorCode>) {
     let mut command = command_of(spec);
     command
         .stdin(if spec.stdin.is_some() {
@@ -153,12 +154,20 @@ fn execute_one_shot(spec: &ProcessSpec) -> ProcessExit {
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(spawn_error) => {
-            return ProcessExit {
-                status: Some(127),
-                signal: None,
-                stdout: Vec::new(),
-                stderr: spawn_error.to_string().into_bytes(),
+            let code = if spawn_error.kind() == std::io::ErrorKind::NotFound {
+                ErrorCode::NotFound
+            } else {
+                ErrorCode::Io
             };
+            return (
+                ProcessExit {
+                    status: Some(127),
+                    signal: None,
+                    stdout: Vec::new(),
+                    stderr: spawn_error.to_string().into_bytes(),
+                },
+                Some(code),
+            );
         }
     };
     if let (Some(bytes), Some(mut stdin)) = (spec.stdin.clone(), child.stdin.take()) {
@@ -189,10 +198,10 @@ fn execute_one_shot(spec: &ProcessSpec) -> ProcessExit {
             Err(_) => break None,
         }
     };
-    let (stdout, _) = stdout_reader
+    let (stdout, stdout_capped) = stdout_reader
         .and_then(|handle| handle.join().ok())
         .unwrap_or_default();
-    let (stderr, _) = stderr_reader
+    let (stderr, stderr_capped) = stderr_reader
         .and_then(|handle| handle.join().ok())
         .unwrap_or_default();
     let signal = if timed_out {
@@ -200,11 +209,45 @@ fn execute_one_shot(spec: &ProcessSpec) -> ProcessExit {
     } else {
         exit_status.as_ref().and_then(signal_name_of)
     };
-    ProcessExit {
-        status: exit_status.and_then(|status| status.code()),
-        signal,
-        stdout,
-        stderr,
+    let failure = if timed_out {
+        Some(ErrorCode::TimedOut)
+    } else if stdout_capped || stderr_capped {
+        Some(ErrorCode::QuotaExceeded)
+    } else {
+        None
+    };
+    (
+        ProcessExit {
+            status: exit_status.and_then(|status| status.code()),
+            signal,
+            stdout,
+            stderr,
+        },
+        failure,
+    )
+}
+
+/// Waits up to `budget` for a one-shot request to finish and maps it to its completion outcome
+/// (`ok`, or `failed(code)` per api-process-control.md); `None` when the request is unknown here
+/// or still running after the budget. The exit stays available for `take-exit`.
+pub fn await_outcome(request: RequestId, budget: Duration) -> Option<Outcome> {
+    let slot = PENDING.with(|pending| pending.borrow().get(&request.0).cloned())?;
+    let deadline = Instant::now() + budget;
+    loop {
+        let finished = slot
+            .lock()
+            .ok()
+            .and_then(|held| held.as_ref().map(|(_, _, failure)| *failure));
+        if let Some(failure) = finished {
+            return Some(match failure {
+                None => Outcome::Ok,
+                Some(code) => Outcome::Failed(error(code, "the process request failed")),
+            });
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(2));
     }
 }
 
@@ -243,9 +286,9 @@ impl HostProcess for ProcessImport {
         let slot: ExitSlot = Arc::new(Mutex::new(None));
         let worker_slot = Arc::clone(&slot);
         std::thread::spawn(move || {
-            let exit = execute_one_shot(&spec);
+            let (exit, failure) = execute_one_shot(&spec);
             if let Ok(mut held) = worker_slot.lock() {
-                *held = Some((Instant::now(), exit));
+                *held = Some((Instant::now(), exit, failure));
             }
         });
         PENDING.with(|pending| pending.borrow_mut().insert(request_number, slot));
@@ -259,14 +302,14 @@ impl HostProcess for ProcessImport {
             let ready = {
                 let held = slot.lock().ok()?;
                 held.as_ref()
-                    .is_some_and(|(finished_at, _)| finished_at.elapsed() >= EXIT_DELIVERY_DELAY)
+                    .is_some_and(|(finished_at, _, _)| finished_at.elapsed() >= EXIT_DELIVERY_DELAY)
             };
             if !ready {
                 return None;
             }
             let slot = pending.remove(&request.0)?;
             let exit = slot.lock().ok()?.take();
-            exit.map(|(_, exit)| exit)
+            exit.map(|(_, exit, _)| exit)
         })
     }
 

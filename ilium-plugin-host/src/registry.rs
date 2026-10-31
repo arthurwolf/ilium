@@ -115,26 +115,39 @@ impl InstalledRegistry {
         let _lock = lock(&self.path.with_file_name("installed.lock"))?;
         let mut value = self.read()?;
         let rows = value["plugins"].as_array_mut().ok_or_else(corrupt)?;
-        let row = rows
-            .iter_mut()
-            .find(|row| row["id"] == record.id)
-            .ok_or_else(|| {
-                error(
-                    "install.metadata-required",
-                    "new installation requires complete admission metadata",
-                )
-            })?;
-        // A version change requires fresh hashes and signer admission, unavailable in this projection.
-        if row["active_version"] != record.version
-            || row["source"] != record.source
-            || row["channel"] != record.channel
-        {
-            return Err(error(
-                "install.metadata-required",
-                "changing package identity requires complete admission metadata",
-            ));
+        // The projection API upserts identity fields only. A new row carries no admission
+        // evidence (zero hashes, no signer); `put_complete_record` stores admitted rows.
+        match rows.iter_mut().find(|row| row["id"] == record.id) {
+            Some(row) => {
+                row["active_version"] = json!(record.version);
+                row["source"] = json!(record.source);
+                row["channel"] = json!(record.channel);
+                row["pinned"] = json!(record.pinned);
+            }
+            None => {
+                let no_hash = "0".repeat(64);
+                rows.push(json!({
+                    "id": record.id,
+                    "active_version": record.version,
+                    "previous_version": null,
+                    "state": "installed-enabled",
+                    "source": record.source,
+                    "source_url": null,
+                    "channel": record.channel,
+                    "publisher_id": null,
+                    "key_id": null,
+                    "package_sha256": no_hash,
+                    "manifest_sha256": no_hash,
+                    "pinned": record.pinned,
+                    "skip": [],
+                    "declined": [],
+                    "failure_stopped": [],
+                    "installed_at": "1970-01-01T00:00:00Z",
+                    "update": null,
+                }));
+                rows.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+            }
         }
-        row["pinned"] = json!(record.pinned);
         write_json(&self.path, &value)
     }
     /// Persists an admitted complete canonical row. The caller owns package/trust validation.

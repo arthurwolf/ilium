@@ -28,7 +28,9 @@ pub mod pack_command;
 pub mod session_install;
 mod offline;
 pub mod project_inputs;
+pub mod registry_access;
 pub mod registry_command;
+pub mod search_command;
 pub mod session_commands;
 pub mod verify_install;
 
@@ -314,7 +316,7 @@ fn run_inner(raw_args: &[String], env: &CliEnv) -> CliOutput {
         command,
         "list" | "logs" | "grants" | "audit" | "uninstall" | "enable" | "disable" | "log-level"
             | "dev" | "trace" | "profile"
-    ) || (command == "install" && env.installer.is_none());
+    );
     if uses_session {
         if let Some(output) = session_name_error(&flags, env) {
             return output;
@@ -358,6 +360,7 @@ fn run_inner(raw_args: &[String], env: &CliEnv) -> CliOutput {
         "trace" => devtools_command::trace(&args[1..], env),
         "profile" => devtools_command::profile(&args[1..], env),
         "registry" => registry_command::run(&args[1..], env),
+        "search" => search_command::run(&args[1..], env),
         "install" | "uninstall" | "enable" | "disable" | "grants" | "list" | "dev" | "logs"
         | "log-level" | "trace" | "profile"
             if env.session.is_none() =>

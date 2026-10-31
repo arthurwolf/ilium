@@ -25,6 +25,7 @@ use ilium_plugin_api::generated::host::fs::{
     Revisioned, ScannedEntry, ScopeRoot, TailChunk, WriteMode,
 };
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use ilium_plugin_api::generated::types::Outcome;
 use ilium_plugin_api::generated::types::ids::{LockId, RequestId, WatchId};
 use ilium_plugin_api::generated::types::paths::FsPath;
 use regex::Regex;
@@ -118,6 +119,12 @@ struct FsState {
     watches: HashSet<u64>,
     /// Held advisory locks: lock id to (scope-qualified path, exclusive).
     held_locks: HashMap<u64, (String, bool)>,
+    /// Outcomes of finished asynchronous requests, until the test harness reads them.
+    completed: HashMap<u64, Outcome>,
+    /// When set, new requests stay pending (the harness holds completions).
+    hold: bool,
+    /// Requests accepted while completions were held.
+    held: Vec<u64>,
 }
 
 impl Drop for FsState {
@@ -177,6 +184,24 @@ pub fn configure_project_scope(
     Ok(())
 }
 
+/// The outcome of a finished asynchronous request of the current thread, if it has finished.
+pub fn completed_outcome(request: RequestId) -> Option<Outcome> {
+    with_state(|state| state.completed.get(&request.0).cloned())
+}
+
+/// Holds (or releases) the completion of new asynchronous requests of the current thread.
+/// Releasing finishes every held request.
+pub fn hold_completions(on: bool) {
+    with_state(|state| {
+        state.hold = on;
+        if !on {
+            for id in std::mem::take(&mut state.held) {
+                state.completed.insert(id, Outcome::Ok);
+            }
+        }
+    });
+}
+
 fn plugin_error(code: ErrorCode, message: impl Into<String>) -> PluginError {
     let message: String = message.into();
     PluginError {
@@ -197,7 +222,41 @@ fn io_error(error: std::io::Error) -> PluginError {
     plugin_error(code, error.to_string())
 }
 
+/// Largest number of asynchronous fs requests pending at once.
+const PENDING_REQUEST_CAP: usize = 64;
+
 impl FsState {
+    /// Refuses a new asynchronous request while `PENDING_REQUEST_CAP` are pending.
+    fn require_capacity(&self) -> Result<(), PluginError> {
+        if self.held.len() >= PENDING_REQUEST_CAP {
+            return Err(plugin_error(
+                ErrorCode::Busy,
+                "too many fs requests are pending",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Records a request as finished, or pending while completions are held.
+    fn finish_with(&mut self, id: u64, outcome: Outcome) {
+        if self.hold {
+            self.held.push(id);
+        } else {
+            self.completed.insert(id, outcome);
+        }
+    }
+
+    fn finish(&mut self, id: u64) {
+        self.finish_with(id, Outcome::Ok);
+    }
+
+    /// Allocates a request id for an operation that has no result to take.
+    fn complete_new(&mut self) -> u64 {
+        let id = self.allocate_id();
+        self.finish(id);
+        id
+    }
+
     fn allocate_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
@@ -564,7 +623,17 @@ fn walk_matching(
 
 impl HostFs for FsImport {
     fn roots(&mut self) -> Vec<ScopeRoot> {
-        vec![
+        let project = with_state(|state| {
+            state.project.as_ref().and_then(|project| {
+                let readable = project.allows(Access::Read);
+                let writable = project.allows(Access::Write);
+                (readable || writable).then(|| ScopeRoot {
+                    scope: SCOPE_PROJECT.to_owned(),
+                    writable,
+                })
+            })
+        });
+        let mut roots = vec![
             ScopeRoot {
                 scope: SCOPE_PACKAGE.to_owned(),
                 writable: false,
@@ -577,7 +646,9 @@ impl HostFs for FsImport {
                 scope: SCOPE_CACHE.to_owned(),
                 writable: true,
             },
-        ]
+        ];
+        roots.extend(project);
+        roots
     }
 
     fn metadata(&mut self, path: FsPath) -> Result<FsMetadata, PluginError> {
@@ -641,11 +712,13 @@ impl HostFs for FsImport {
     }
 
     fn read_all(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         let resolved = resolve(&path, Access::Read)?;
         let content = read_whole_file(&resolved.target)?;
         Ok(with_state(|state| {
             let id = state.allocate_id();
             state.bytes.insert(id, content);
+            state.finish(id);
             RequestId(id)
         }))
     }
@@ -656,6 +729,7 @@ impl HostFs for FsImport {
         glob: String,
         max_entries: u32,
     ) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         if max_entries > SCAN_MAX_ENTRIES {
             return Err(plugin_error(
                 ErrorCode::InvalidArgument,
@@ -690,6 +764,7 @@ impl HostFs for FsImport {
         Ok(with_state(|state| {
             let id = state.allocate_id();
             state.entries.insert(id, found);
+            state.finish(id);
             RequestId(id)
         }))
     }
@@ -700,6 +775,7 @@ impl HostFs for FsImport {
         data: Vec<u8>,
         mode: WriteMode,
     ) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         let resolved = resolve(&path, Access::Write)?;
         check_write_size(data.len())?;
         resolved.require_writable()?;
@@ -729,7 +805,7 @@ impl HostFs for FsImport {
                 file.write_all(&data).map_err(io_error)?;
             }
         }
-        Ok(with_state(|state| RequestId(state.allocate_id())))
+        Ok(with_state(|state| RequestId(state.complete_new())))
     }
 
     fn create_dir(&mut self, path: FsPath) -> Result<(), PluginError> {
@@ -743,6 +819,7 @@ impl HostFs for FsImport {
     }
 
     fn remove(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         let resolved = resolve(&path, Access::Write)?;
         if resolved.is_scope_root {
             return Err(plugin_error(
@@ -757,10 +834,11 @@ impl HostFs for FsImport {
         } else {
             fs::remove_file(&resolved.target).map_err(io_error)?;
         }
-        Ok(with_state(|state| RequestId(state.allocate_id())))
+        Ok(with_state(|state| RequestId(state.complete_new())))
     }
 
     fn rename(&mut self, source: FsPath, target: FsPath) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         if source.scope != target.scope {
             return Err(plugin_error(
                 ErrorCode::InvalidArgument,
@@ -785,7 +863,7 @@ impl HostFs for FsImport {
             ));
         }
         fs::rename(&resolved_source.target, &resolved_target.target).map_err(io_error)?;
-        Ok(with_state(|state| RequestId(state.allocate_id())))
+        Ok(with_state(|state| RequestId(state.complete_new())))
     }
 
     fn watch(&mut self, path: FsPath, _recursive: bool) -> Result<WatchId, PluginError> {
@@ -810,6 +888,7 @@ impl HostFs for FsImport {
         exclusive: bool,
         timeout_millis: u32,
     ) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         if timeout_millis > LOCK_MAX_TIMEOUT_MILLIS {
             return Err(plugin_error(
                 ErrorCode::InvalidArgument,
@@ -824,17 +903,22 @@ impl HostFs for FsImport {
             });
             if conflicts {
                 // No other holder can release while this call runs, so waiting would only expire.
-                let code = if timeout_millis == 0 {
-                    ErrorCode::Busy
-                } else {
-                    ErrorCode::TimedOut
-                };
-                return Err(plugin_error(code, "path is locked by another holder"));
+                if timeout_millis == 0 {
+                    return Err(plugin_error(
+                        ErrorCode::Conflict,
+                        "path is locked by another holder",
+                    ));
+                }
+                let request_id = state.allocate_id();
+                let error = plugin_error(ErrorCode::TimedOut, "the lock was still held at the timeout");
+                state.finish_with(request_id, Outcome::Failed(error));
+                return Ok(RequestId(request_id));
             }
             let lock_id = state.allocate_id();
             state.held_locks.insert(lock_id, (resolved.key, exclusive));
             let request_id = state.allocate_id();
             state.lock_answers.insert(request_id, LockId(lock_id));
+            state.finish(request_id);
             Ok(RequestId(request_id))
         })
     }
@@ -853,12 +937,14 @@ impl HostFs for FsImport {
     }
 
     fn read_with_revision(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         let resolved = resolve(&path, Access::Read)?;
         let bytes = read_whole_file(&resolved.target)?;
         let revision = revision_of(&bytes);
         Ok(with_state(|state| {
             let id = state.allocate_id();
             state.revisioned.insert(id, Revisioned { bytes, revision });
+            state.finish(id);
             RequestId(id)
         }))
     }
@@ -869,6 +955,7 @@ impl HostFs for FsImport {
         data: Vec<u8>,
         expected: Option<RevisionToken>,
     ) -> Result<RequestId, PluginError> {
+        with_state(|state| state.require_capacity())?;
         let resolved = resolve(&path, Access::Write)?;
         check_write_size(data.len())?;
         resolved.require_writable()?;
@@ -912,6 +999,7 @@ impl HostFs for FsImport {
         Ok(with_state(|state| {
             let id = state.allocate_id();
             state.written.insert(id, revision);
+            state.finish(id);
             RequestId(id)
         }))
     }

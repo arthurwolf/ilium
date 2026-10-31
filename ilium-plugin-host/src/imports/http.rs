@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use ilium_plugin_api::generated::types::Header;
 use ilium_plugin_api::generated::types::errors::ErrorCode;
+use ilium_plugin_api::generated::types::Outcome;
 
 /// Longest URL, in bytes.
 const MAX_URL_BYTES: usize = 8 * 1024;
@@ -228,6 +229,22 @@ fn parse_response(raw: &[u8]) -> Result<HttpResponse, PluginError> {
 /// Host side of the `http` interface.
 #[derive(Debug)]
 pub struct HttpImport;
+
+/// Waits up to `budget` for a fetch to finish and maps it to its completion outcome (`ok` for
+/// any HTTP status, `failed(code)` for a transport failure); `None` when the request is unknown
+/// here or still running after the budget. The response stays available for `take-response`.
+pub fn await_outcome(request: RequestId, budget: Duration) -> Option<Outcome> {
+    let slot = HTTP_STATE.with(|state| state.borrow().requests.get(&request.0).cloned())?;
+    let (lock, ready) = &*slot;
+    let guard = lock.lock().ok()?;
+    let (guard, _) = ready
+        .wait_timeout_while(guard, budget, |held| held.is_none())
+        .ok()?;
+    match guard.as_ref()? {
+        Ok(_) => Some(Outcome::Ok),
+        Err(failure) => Some(Outcome::Failed(failure.clone())),
+    }
+}
 
 impl HostHttp for HttpImport {
     fn fetch(&mut self, request: HttpRequest) -> Result<RequestId, PluginError> {

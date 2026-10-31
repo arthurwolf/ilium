@@ -878,6 +878,7 @@ impl ImportsFixture {
     /// Keeps async requests pending.
     pub fn hold_async_completions(&mut self, on: bool) {
         // The kernel hook holds only the next request; releasing clears that hold.
+        crate::imports::fs::hold_completions(on);
         if on {
             self.harness.kernel().hold_next_request();
         } else {
@@ -888,6 +889,15 @@ impl ImportsFixture {
     /// Waits for the outcome of a request.
     pub fn wait_outcome(&mut self, request: RequestId, timeout: Duration) -> Option<Outcome> {
         if let Some(outcome) = self.jobs_import.outcome_of(request) {
+            return Some(outcome);
+        }
+        if let Some(outcome) = crate::imports::fs::completed_outcome(request) {
+            return Some(outcome);
+        }
+        if let Some(outcome) = crate::imports::process::await_outcome(request, timeout) {
+            return Some(outcome);
+        }
+        if let Some(outcome) = crate::imports::http::await_outcome(request, timeout) {
             return Some(outcome);
         }
         self.harness.advance_clock(timeout);

@@ -349,14 +349,15 @@ pub fn packed_manifest(files: &[(&str, &[u8])]) -> Vec<u8> {
     serde_json::to_vec_pretty(&manifest).expect("json")
 }
 
-/// An unsigned `.iliumpkg` of the base manifest holding `dist/server.wasm`.
+/// An unsigned `.iliumpkg` of the base manifest holding `server.wasm` (a package keeps its
+/// component at the top level, reference-package-format.md PKG-123; `dist/` is the build folder).
 pub fn unsigned_package(component: &[u8]) -> Vec<u8> {
     ilium_plugin_host::package::write_package(&[
         (
             "manifest.json".to_owned(),
-            packed_manifest(&[("dist/server.wasm", component)]),
+            packed_manifest(&[("server.wasm", component)]),
         ),
-        ("dist/server.wasm".to_owned(), component.to_vec()),
+        ("server.wasm".to_owned(), component.to_vec()),
     ])
     .expect("package")
 }

@@ -7,7 +7,6 @@ use proptest::prelude::*;
 
 use crate::common::*;
 
-const GRANTS: &[&str] = &["settings.read-kernel:*", "keymap.read"];
 
 const TAB_IDS: [&str; 25] = [
     "user-interface",
@@ -37,12 +36,22 @@ const TAB_IDS: [&str; 25] = [
     "setup",
 ];
 
-const WRITE_GRANTS: &[&str] = &["settings.read-kernel:*", "settings.write-kernel:terminal"];
+/// A rig holding `settings.read-kernel:<tab>` for every kernel tab (the grant takes exactly one
+/// tab and has no wildcard, capability-settings-read-kernel.md) plus the extra grants.
+fn rig_with(extra: &[&str]) -> Rig {
+    let grants: Vec<String> = TAB_IDS
+        .iter()
+        .map(|tab| format!("settings.read-kernel:{tab}"))
+        .chain(extra.iter().map(|grant| (*grant).to_owned()))
+        .collect();
+    let refs: Vec<&str> = grants.iter().map(String::as_str).collect();
+    rig(&refs)
+}
 
 /// REQ: WIT:ilium:host/kernel-settings.write
 #[test]
 fn wit_kernel_settings_write_sets_one_key_and_reads_it_back() {
-    let rig = rig(WRITE_GRANTS);
+    let rig = rig_with(&["settings.write-kernel:terminal"]);
     rig.kernel
         .set_kernel_tab("terminal", "{\"scrollback\":5000}");
     rig.host
@@ -67,7 +76,7 @@ fn wit_kernel_settings_write_sets_one_key_and_reads_it_back() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_returns_a_json_object() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     rig.kernel
         .set_kernel_tab("terminal", "{\"scrollback\":5000}");
     let json = rig
@@ -84,7 +93,7 @@ fn wit_kernel_settings_read_returns_a_json_object() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_every_documented_tab_id_resolves() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     for tab in TAB_IDS {
         rig.kernel.set_kernel_tab(tab, "{}");
         let json = rig
@@ -99,7 +108,7 @@ fn wit_kernel_settings_read_every_documented_tab_id_resolves() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_unknown_tab_not_found() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     assert_eq!(
         code_of(rig.host.kernel_settings().read("no-such-tab".to_owned())),
         ErrorCode::NotFound
@@ -109,7 +118,7 @@ fn wit_kernel_settings_read_unknown_tab_not_found() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_secrets_are_redacted() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     rig.kernel
         .set_kernel_tab_secret("inference", "api_key", "sk-live-123");
     let json = rig
@@ -124,7 +133,7 @@ fn wit_kernel_settings_read_secrets_are_redacted() {
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_declined_grant_not_permitted() {
-    let rig = declined_rig(&["settings.read-kernel:*"]);
+    let rig = declined_rig(&["settings.read-kernel:terminal"]);
     assert_eq!(
         code_of(rig.host.kernel_settings().read("terminal".to_owned())),
         ErrorCode::NotPermitted
@@ -134,7 +143,7 @@ fn wit_kernel_settings_read_declined_grant_not_permitted() {
 /// REQ: WIT:ilium:host/keymap.bindings
 #[test]
 fn wit_keymap_bindings_lists_commands_with_their_chords() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     rig.kernel.set_keymap(vec![Binding {
         command: "example.notes/new-note".to_owned(),
         chords: vec!["ctrl+n".to_owned(), "ctrl+shift+n".to_owned()],
@@ -150,7 +159,7 @@ fn wit_keymap_bindings_lists_commands_with_their_chords() {
 /// REQ: WIT:ilium:host/keymap.bindings
 #[test]
 fn wit_keymap_bindings_empty_keymap_is_empty() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     rig.kernel.set_keymap(Vec::new());
     assert!(rig.host.keymap().bindings().is_empty());
 }
@@ -166,7 +175,7 @@ fn wit_keymap_bindings_declined_grant_is_empty() {
 /// REQ: WIT:ilium:host/keymap.chord-label
 #[test]
 fn wit_keymap_chord_label_capitalises_modifiers_and_key() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     assert_eq!(
         rig.host.keymap().chord_label("ctrl+shift+k".to_owned()),
         "Ctrl+Shift+K"
@@ -176,14 +185,14 @@ fn wit_keymap_chord_label_capitalises_modifiers_and_key() {
 /// REQ: WIT:ilium:host/keymap.chord-label
 #[test]
 fn wit_keymap_chord_label_single_key() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     assert_eq!(rig.host.keymap().chord_label("f5".to_owned()), "F5");
 }
 
 /// REQ: WIT:ilium:host/keymap.chord-label
 #[test]
 fn wit_keymap_chord_label_is_idempotent_on_its_own_output() {
-    let rig = rig(GRANTS);
+    let rig = rig_with(&["keymap.read"]);
     let once = rig.host.keymap().chord_label("alt+enter".to_owned());
     assert_eq!(rig.host.keymap().chord_label(once.clone()), once);
 }
@@ -194,7 +203,7 @@ proptest! {
     fn wit_keymap_chord_label_keeps_one_segment_per_chord_part(
         parts in proptest::collection::vec("[a-z][a-z0-9]{0,5}", 1..4)
     ) {
-        let rig = rig(GRANTS);
+        let rig = rig_with(&["keymap.read"]);
         let label = rig.host.keymap().chord_label(parts.join("+"));
         prop_assert_eq!(label.split('+').count(), parts.len());
     }
@@ -203,7 +212,7 @@ proptest! {
 /// REQ: WIT:ilium:host/kernel-settings.write
 #[test]
 fn wit_kernel_settings_write_without_the_tab_write_grant_is_refused() {
-    let rig = rig(&["settings.read-kernel:*"]);
+    let rig = rig_with(&[]);
     rig.kernel
         .set_kernel_tab("terminal", "{\"scrollback\":5000}");
     let result = rig.host.kernel_settings().write(

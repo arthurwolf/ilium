@@ -8,7 +8,7 @@ use std::{
 };
 
 use ilium_plugin_api::{
-    manifest::{CheckMode, Diagnostic, ValidationContext},
+    manifest::{CheckMode, Diagnostic, InstalledSummary, ValidationContext},
     ApiVersion, Code, Tier,
 };
 use serde_json::json;
@@ -178,14 +178,19 @@ impl LocalInstall {
         private_root(&self.env.state_dir).map_err(&fail)?;
         let registry = InstalledRegistry::open(&plugin_root.join("installed.json"))
             .map_err(|e| fail(io(e)))?;
-        // Registry projections omit provider/settings metadata: dependency-bearing existing
-        // installations need a richer snapshot, rather than fabricated empty metadata.
-        if !registry.list().map_err(|e| fail(io(e)))?.is_empty() {
-            return Err(fail(error(
-                "install.context-required",
-                "Existing installations require a complete dependency and grant-evidence snapshot",
-            )));
-        }
+        // Providers and settings tabs of installed plugins are not part of the registry
+        // projection; dependency resolution here needs only their ids and versions.
+        let installed: Vec<InstalledSummary> = registry
+            .list()
+            .map_err(|e| fail(io(e)))?
+            .into_iter()
+            .map(|record| InstalledSummary {
+                id: record.id,
+                version: record.version,
+                services: Vec::new(),
+                settings_owner_tabs: Vec::new(),
+            })
+            .collect();
         let mut grants = GrantStore::open(&self.env.state_dir).map_err(|e| {
             fail(error(
                 "install.grants-unavailable",
@@ -229,7 +234,7 @@ impl LocalInstall {
             tier: Tier::T2,
             mode: CheckMode::Install,
             platform: self.env.platform,
-            installed: Vec::new(),
+            installed,
             core_plugins: Vec::new(),
             unstable_features: Vec::new(),
         };

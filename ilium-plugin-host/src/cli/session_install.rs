@@ -40,24 +40,18 @@ impl Consent for SessionConsent {
 }
 
 pub(super) fn run(args: &[String], env: &CliEnv) -> CliOutput {
-    let mut allow_unsigned = false;
-    let mut yes = false;
-    let mut remaining = Vec::new();
-    for argument in args {
-        match argument.as_str() {
-            "--allow-unsigned" => allow_unsigned = true,
-            "--yes" => yes = true,
-            "--allow-downgrade" => {}
-            _ => remaining.push(argument.clone()),
-        }
-    }
-    let Some(session) = &env.session else {
+    let (flags, remaining) = match install_command::parse_install_flags(args) {
+        Ok(parsed) => parsed,
+        Err(output) => return output,
+    };
+    let (allow_unsigned, yes) = (flags.allow_unsigned, flags.yes);
+    if !yes && env.session.is_none() && env.is_ci && !flags.dry_run {
         return offline::failure(
-            "command.context-required",
-            "No trusted installation service was supplied",
+            "install.needs-input",
+            "The review needs an answer; pass --yes in a non-interactive run",
             1,
         );
-    };
+    }
     let context = AuditContext {
         session: "cli".to_owned(),
         actor: AuditActor {
@@ -82,9 +76,12 @@ pub(super) fn run(args: &[String], env: &CliEnv) -> CliOutput {
         }
     };
     let output = install_command::run(&remaining, &env.cwd, backend.as_ref());
-    if output.exit_code != 0 {
+    if output.exit_code != 0 || flags.dry_run {
         return output;
     }
+    let Some(session) = &env.session else {
+        return output;
+    };
     let plugin = output
         .stdout_jsonl
         .iter()

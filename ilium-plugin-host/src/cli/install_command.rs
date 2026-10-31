@@ -16,19 +16,96 @@ pub trait InstallCommandBackend: Send + Sync {
     fn install(&self, path: &Path) -> CliOutput;
 }
 
-/// Parse file-install arguments before invoking any service or reading a file.
-/// Registry sources and updates require separate admission contexts. Unsigned
-/// admission and noninteractive consent are deliberately not command switches
-/// on this bounded adapter: an injected service must establish those policies.
+/// The flags of `ilium plugin install` (reference-plugin-distribution-cli.md PKG-425).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InstallFlags {
+    /// `--yes`: skip the review dialog.
+    pub yes: bool,
+    /// `--allow-unsigned`.
+    pub allow_unsigned: bool,
+    /// `--allow-downgrade`.
+    pub allow_downgrade: bool,
+    /// `--locked`.
+    pub locked: bool,
+    /// `--dry-run`.
+    pub dry_run: bool,
+    /// `--offline`.
+    pub offline: bool,
+    /// `--no-backup`.
+    pub no_backup: bool,
+    /// `--unskip`.
+    pub unskip: bool,
+    /// `--trust <key_id>`.
+    pub trust: Option<String>,
+    /// `--channel <stable|beta|dev>`.
+    pub channel: Option<String>,
+    /// `--registry <url>`.
+    pub registry: Option<String>,
+    /// `--from-bundle <dir>`.
+    pub from_bundle: Option<String>,
+    /// `--grant <grant>` (repeatable).
+    pub grants: Vec<String>,
+}
+
+/// Splits install arguments into flags and positional operands.
+pub fn parse_install_flags(args: &[String]) -> Result<(InstallFlags, Vec<String>), CliOutput> {
+    let mut flags = InstallFlags::default();
+    let mut positional = Vec::new();
+    let mut iterator = args.iter();
+    while let Some(arg) = iterator.next() {
+        let mut value = |name: &str| {
+            iterator.next().cloned().ok_or_else(|| {
+                offline::failure("usage.missing-argument", format!("{name} needs a value"), 2)
+            })
+        };
+        match arg.as_str() {
+            "--json" | "--quiet" | "--no-color" => {}
+            "--yes" => flags.yes = true,
+            "--allow-unsigned" => flags.allow_unsigned = true,
+            "--allow-downgrade" => flags.allow_downgrade = true,
+            "--locked" => flags.locked = true,
+            "--dry-run" => flags.dry_run = true,
+            "--offline" => flags.offline = true,
+            "--no-backup" => flags.no_backup = true,
+            "--unskip" => flags.unskip = true,
+            "--trust" => flags.trust = Some(value("--trust")?),
+            "--registry" => flags.registry = Some(value("--registry")?),
+            "--from-bundle" => flags.from_bundle = Some(value("--from-bundle")?),
+            "--grant" => flags.grants.push(value("--grant")?),
+            "--channel" => {
+                let channel = value("--channel")?;
+                if !matches!(channel.as_str(), "stable" | "beta" | "dev") {
+                    return Err(offline::failure(
+                        "usage.invalid-value",
+                        format!("{channel} is not stable, beta or dev"),
+                        2,
+                    ));
+                }
+                flags.channel = Some(channel);
+            }
+            flag if flag.starts_with('-') => {
+                return Err(offline::failure(
+                    "usage.unknown-flag",
+                    format!("Unknown install flag: {flag}"),
+                    2,
+                ))
+            }
+            _ => positional.push(arg.clone()),
+        }
+    }
+    Ok((flags, positional))
+}
+
+/// Parse install arguments before invoking any service or reading a file. Registry sources and
+/// updates require separate admission contexts. Consent and unsigned admission are decided by
+/// the caller that built `backend` from the parsed flags.
 pub fn run(args: &[String], cwd: &Path, backend: &dyn InstallCommandBackend) -> CliOutput {
+    let (flags, positional) = match parse_install_flags(args) {
+        Ok(parsed) => parsed,
+        Err(output) => return output,
+    };
     let mut source = None;
-    for arg in args {
-        if matches!(arg.as_str(), "--json" | "--quiet" | "--no-color") {
-            continue;
-        }
-        if arg.starts_with('-') {
-            return offline::failure("usage.unknown-flag", "Unsupported file-install flag", 2);
-        }
+    for arg in &positional {
         if source.replace(arg.as_str()).is_some() {
             return offline::failure(
                 "usage.argument-unexpected",
@@ -60,7 +137,33 @@ pub fn run(args: &[String], cwd: &Path, backend: &dyn InstallCommandBackend) -> 
             1,
         );
     }
+    if flags.dry_run {
+        return dry_run(&cwd.join(source));
+    }
     backend.install(&cwd.join(source))
+}
+
+/// `--dry-run`: reads and parses the package and reports it without any effect.
+fn dry_run(path: &Path) -> CliOutput {
+    let bytes = match read_install_file(path) {
+        Ok(bytes) => bytes,
+        Err(output) => return output,
+    };
+    match crate::package::read_package(&bytes) {
+        Ok(archive) => offline::finish(
+            vec![json!({"type":"plugin","id":archive.manifest.id,
+                "version":archive.manifest.version.to_string(),"state":"dry-run","dry_run":true})],
+            0,
+        ),
+        Err(diagnostics) => {
+            let first = diagnostics.first();
+            offline::failure(
+                first.map_or("package.invalid", |d| d.code.as_str()),
+                first.map_or("invalid package", |d| d.message.as_str()),
+                1,
+            )
+        }
+    }
 }
 
 /// Read an actual regular package file with the PKG-130 bound, including growth

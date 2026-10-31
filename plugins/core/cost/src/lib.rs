@@ -4,6 +4,13 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+mod chart;
+mod model;
+mod port;
+mod stats_types;
+mod timeline;
+mod tokens;
+
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;
@@ -27,8 +34,8 @@ impl Lifecycle for CostServer {
 }
 
 impl Handler for CostServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        batch.iter().filter_map(port::answer).collect()
     }
 }
 
@@ -50,8 +57,8 @@ impl Lifecycle for CostClient {
 }
 
 impl Handler for CostClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        batch.iter().filter_map(port::answer).collect()
     }
 }
 

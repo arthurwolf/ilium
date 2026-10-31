@@ -2211,13 +2211,13 @@ impl OpsRig {
         let entry = if spec.client_side { "client.wasm" } else { "server.wasm" };
         let mut files = vec![(entry.to_owned(), component)];
         if spec.padding_bytes > 0 {
-            files.push(("padding.bin".to_owned(), vec![0; spec.padding_bytes as usize]));
+            files.push(("assets/padding.bin".to_owned(), vec![0; spec.padding_bytes as usize]));
         }
         for name in &spec.extra_files {
             files.push((name.clone(), name.as_bytes().to_vec()));
         }
         for marker in &spec.content_markers {
-            files.push((format!("markers/{marker}"), marker.as_bytes().to_vec()));
+            files.push((format!("assets/markers/{marker}"), marker.as_bytes().to_vec()));
         }
         let mut listed: Vec<&(String, Vec<u8>)> = files.iter().collect();
         listed.sort_by(|left, right| left.0.cmp(&right.0));
@@ -2225,7 +2225,7 @@ impl OpsRig {
             .into_iter()
             .map(|(path, bytes)| {
                 let length = match (path.as_str(), spec.declared_size) {
-                    ("padding.bin", Some(declared)) => declared,
+                    ("assets/padding.bin", Some(declared)) => declared,
                     _ => bytes.len() as u64,
                 };
                 serde_json::json!({"path": path, "length": length, "sha256": format!("{:x}", Sha256::digest(bytes))})
