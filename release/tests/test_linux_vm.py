@@ -175,7 +175,7 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
         return result, guest_commands, commands, logs, events  # Return only observations from the real orchestration path.
 
     def test_actual_cloud_init_keeps_decoder_bus_and_independent_vm_host_gates(self):  # Read generated boot input and actual guest argv through safe adapters.
-        required = {'python3', 'bubblewrap', 'ffmpeg', 'dbus-user-session', 'flatpak', 'squashfs-tools', 'libfuse2', 'fuse3', 'rpm', 'rpm2cpio', 'cpio', 'snapd'}  # Preserve every original prerequisite and both required additions.
+        required = {'python3', 'python3-tomli', 'bubblewrap', 'ffmpeg', 'dbus-user-session', 'flatpak', 'squashfs-tools', 'libfuse2', 'fuse3', 'rpm', 'rpm2cpio', 'cpio', 'snapd'}  # Preserve every original prerequisite and both required additions.
         for accelerator in ('kvm', 'tcg'):  # Distinguish hardware acceleration from a real CPU-emulated QEMU guest.
             with self.subTest(accelerator=accelerator):  # Neither mode may substitute distribution-container proof.
                 result, guest, commands, _logs, _events = self.run_vm(accelerator=accelerator)  # Execute actual orchestration with the existing transport adapters.

@@ -41,7 +41,7 @@ users:
     ssh_authorized_keys:
       - {key}
 package_update: true
-packages: [python3, bubblewrap, ffmpeg, dbus-user-session, flatpak, squashfs-tools, libfuse2, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
+packages: [python3, python3-tomli, bubblewrap, ffmpeg, dbus-user-session, flatpak, squashfs-tools, libfuse2, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
 runcmd:
   - [touch, /var/lib/cloud/instance/ilium-ready]
 '''

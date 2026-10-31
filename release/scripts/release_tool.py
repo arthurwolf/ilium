@@ -16,8 +16,12 @@ import stat
 import sys
 import tarfile
 import tempfile
-import tomllib
 import zipfile
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 (Ubuntu 22.04 guest) ships tomli instead.
+    import tomli as tomllib
 
 
 TARGET_FIELDS = frozenset(
