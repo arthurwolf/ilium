@@ -2259,9 +2259,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, default_workspace_path, join_for_shell,
-        json_string, pane_identity_from_values, pane_progress_json, progress_report_json, session,
-        shell_join, workspace_provider, Cli, Command, ProgressCommand,
+        chat_with_pane_worktree, chatroom_project_root, client_restart_args,
+        default_workspace_path, join_for_shell, json_string, pane_identity_from_values,
+        pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
+        ChatCommand, Cli, Command, ProgressCommand,
     };
     use clap::Parser;
 
@@ -2514,9 +2515,8 @@ mod tests {
     fn tail_and_send_report_a_missing_room_but_context_stays_silent() {
         let project = tempfile::tempdir().unwrap();
 
-        let tail =
-            chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
-                .unwrap_err();
+        let tail = chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
+            .unwrap_err();
         assert!(tail
             .to_string()
             .ends_with(ilium_client::chatroom_root::NO_CHATROOM_MESSAGE));
