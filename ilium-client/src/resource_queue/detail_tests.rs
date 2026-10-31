@@ -455,14 +455,3 @@ fn clicking_a_queue_row_selects_that_request() {
         assert_eq!(app.resources.selected_reservation.as_ref(), Some(expected));
     }
 }
-
-#[test]
-fn dump_rendered_panel_for_review() {
-    for (width, height) in [(120, 40), (80, 24)] {
-        let (app, _, _) = fixture();
-        println!(
-            "=== {width}x{height} ===\n{}",
-            text(&capture(&app, width, height, None))
-        );
-    }
-}
