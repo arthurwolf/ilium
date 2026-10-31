@@ -139,10 +139,16 @@ jobs:
       run: python release/scripts/native_sandbox_runner.py --artifact-directory native-linux/evidence --helper native-linux/candidate/ilium-animation-helper --workspace Cargo.toml --output "$RUNNER_TEMP/native-sandbox"
     - name: Select the VM accelerator # Software emulation is too slow for the animation helper deadline, so use hardware acceleration when the runner exposes it.
       run: |
+        mkdir -p "$RUNNER_TEMP/package-smoke-vm"
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
         sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+        if [ -e /dev/kvm ]; then sudo chmod 0666 /dev/kvm; fi
         accelerator=tcg; if [ -w /dev/kvm ]; then accelerator=kvm; fi
-        echo "VM accelerator: $accelerator"
+        {
+          echo "VM accelerator: $accelerator"
+          ls -la /dev/kvm 2>&1 || true
+          echo "cpuinfo vmx/svm cores: $(grep -cE 'vmx|svm' /proc/cpuinfo)  nproc: $(nproc)"
+        } | tee "$RUNNER_TEMP/package-smoke-vm/accelerator-decision.txt"
         echo "accelerator=$accelerator" >> "$GITHUB_ENV"
     - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
       run: 'set -o pipefail

@@ -141,7 +141,7 @@ class PosixInstallTests(unittest.TestCase):
             with self.subTest(kernel=kernel, arch=arch):
                 self.success(self.invoke("--version", "0.1.0", env={"FIXTURE_KERNEL": kernel, "FIXTURE_ARCH": arch}))
                 requests = [json.loads(line)["url"] for line in (self.downloads / "requests.jsonl").read_text().splitlines()]
-                self.assertTrue(requests[-2].endswith("/v0.1.0/" + archive))
+                self.assertTrue(requests[-1].endswith("/v0.1.0/" + archive))
 
     def test_latest_resolves_once_then_downloads_same_pinned_release(self):
         self.success(self.invoke())
@@ -194,6 +194,44 @@ class PosixInstallTests(unittest.TestCase):
             sums.write_text(text)
             self.failure(self.invoke("--version", "0.2.0"), "checksum", previous=True)
             self.assertFalse((self.install_root / "versions/0.2.0").exists())
+
+    def test_partial_release_installs_only_declared_available_archives(self):
+        release = self.downloads / "v0.1.0"
+        selected = {"ilium-linux-x86_64.tar.gz", "ilium-windows-x86_64.zip"}
+        sums = release / "SHA256SUMS"
+        lines = [line for line in sums.read_text().splitlines() if line.split("  ")[1] in selected]
+        sums.write_text("\n".join(lines) + "\n")
+        digest = hashlib.sha256(sums.read_bytes()).hexdigest()
+        inventory = ["ilium-availability-v1", "tag v0.1.0", "commit " + "a" * 40,
+                     "selection-sha256 " + "b" * 64, "checksums-sha256 " + digest]
+        inventory.extend(("available " if row["archive"] in selected else "omitted ") + row["archive"]
+                         for row in self.targets)
+        availability = release / "AVAILABILITY"
+        original_inventory = "\n".join(inventory) + "\n"
+        availability.write_text(original_inventory)
+
+        self.success(self.invoke("--version", "0.1.0"))
+        result = self.invoke("--version", "0.1.0", env={"FIXTURE_KERNEL": "Darwin", "FIXTURE_ARCH": "arm64"})
+        self.failure(result, previous=True)
+        self.assertIn("not ready yet", result.stderr)
+        self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
+
+        malformed = [original_inventory.replace("tag v0.1.0", "tag v0.2.0"),
+                     original_inventory + inventory[-1] + "\n",
+                     original_inventory.replace(inventory[-1] + "\n", ""),
+                     original_inventory.replace(inventory[-1], "omitted unknown.zip"),
+                     original_inventory.replace("commit " + "a" * 40, "commit " + "a" * 39),
+                     original_inventory.rstrip("\n")]
+        for content in malformed:
+            with self.subTest(content=content):
+                availability.write_text(content)
+                self.failure(self.invoke("--version", "0.1.0"), previous=True)
+                self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
+        availability.write_text(original_inventory)
+
+        sums.write_text(sums.read_text().replace(lines[0][:64], "0" * 64))
+        self.failure(self.invoke("--version", "0.1.0"), previous=True)
+        self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
 
     def test_hostile_archive_inventory_is_rejected_before_extraction(self):
         mutations = {
