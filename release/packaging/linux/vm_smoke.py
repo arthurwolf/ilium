@@ -250,7 +250,11 @@ def main(argv=None):
             return 1
         emit('result', command='vm-inputs', state='passed', files=len(manifest))
         if arguments.native_directory is not None:
-            command = 'loginctl enable-linger tester && systemctl start user@$(id -u tester).service'
+            # The guest's user manager delegates only memory and pids; a user service needs cpu too.
+            command = ('loginctl enable-linger tester && systemctl start user@$(id -u tester).service && '
+                       'uid=$(id -u tester) && for group in /sys/fs/cgroup /sys/fs/cgroup/user.slice '
+                       '/sys/fs/cgroup/user.slice/user-$uid.slice /sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service; '
+                       'do echo +cpu > $group/cgroup.subtree_control || exit 1; done')
             prepared = capture_command(lambda: ssh(port, key, 'sudo sh -c ' + shlex.quote(command), timeout=60))
             (log / 'vm-sandbox-user-manager.log').write_text(prepared.stdout + prepared.stderr)
             if prepared.returncode != 0:
