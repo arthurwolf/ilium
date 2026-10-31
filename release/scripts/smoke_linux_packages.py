@@ -227,7 +227,7 @@ def appimage_wrapper(image, checks, version):  # Check the actual cache used by 
         shlex.quote(str(image)) + ' "$@" # Exercise the actual AppImage launcher.',  # The host or container environment chooses its declared execution mode.
         'identity=$(cat %s) # Read the receipt-bound cache identity.' % shlex.quote(str(Path(checks) / 'identity')),  # Use exactly the builder's key.
         'target=$XDG_DATA_HOME/ilium/appimage/$identity # Locate this invocation\'s materialized pair.',  # Lifecycle may change XDG_DATA_HOME between runs.
-        'sh %s "$target" >%s 2>&1 || { cat %s >&2; exit 1; } # Verify actual materialized runtime bytes; the animation gate requires an empty stderr on success.' % (shlex.quote(str(Path(checks) / 'check-core.sh')), shlex.quote(str(Path(checks) / 'check-core.out')), shlex.quote(str(Path(checks) / 'check-core.out'))),  # Keep ls stdout usable by the lifecycle contract.
+        'check=$(sh %s "$target" 2>&1) || { printf "%%s\\n" "$check" >&2; exit 1; } # Verify actual materialized runtime bytes; the animation gate requires an empty stderr on success.' % shlex.quote(str(Path(checks) / 'check-core.sh')),  # Keep ls stdout usable by the lifecycle contract.
         'test "$("$target/ilium-server" --version)" = %s # Check the installed sibling server.' % shlex.quote('ilium-server ' + version),  # Preserve exact server-version expectations.
         'test "$("$target/ilium-animation-helper" --version)" = %s # Check the installed animation helper.' % shlex.quote(release_tool.helper_version_record(version)),
     ]) + '\n'  # Return complete executable wrapper source.
