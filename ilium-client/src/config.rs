@@ -3554,6 +3554,8 @@ mod tests {
                 name: "Work".into(),
                 icon: "★".into(),
                 base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: vec![EnvironmentEntry {
                     key: "TOKEN".into(),
                     value: "s".repeat(256 * 1024),
@@ -3582,6 +3584,8 @@ mod tests {
                 name: "Example".into(),
                 icon: "★".into(),
                 base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: vec![EnvironmentEntry {
                     key: "EXAMPLE_VALUE".into(),
                     value: "literal = 'text'\n☃".into(),
@@ -3621,6 +3625,8 @@ mod tests {
             name: id.into(),
             icon: "★".into(),
             base_provider: ilium_core::BuiltinAgentProvider::Claude,
+            command: String::new(),
+            arguments: String::new(),
             environment: Vec::new(),
         };
         let original = CustomAgentSettings {

@@ -3828,6 +3828,8 @@ mod tests {
                 name: format!("Agent {index}"),
                 icon: "✦".into(),
                 base_provider: BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: Vec::new(),
             })
             .collect();

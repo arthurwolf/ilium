@@ -3501,17 +3501,18 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             + 1,
                         |editor| editor.rows().len(),
                     );
-                    if let Some(index) = line.checked_sub(4).filter(|index| *index < count) {
+                    let view = crate::settings_ui::custom_agent_view(app, &state);
+                    if let Some(index) = view
+                        .row_lines
+                        .iter()
+                        .position(|row_line| *row_line == line)
+                        .filter(|index| *index < count)
+                    {
                         state.selected_row = index;
                         let delete_start = if state.custom_agent_editor.is_none() {
                             app.custom_agents.profiles.get(index).map(|profile| {
-                                let prefix = format!(
-                                    "› {} {}  ({:?}, {} variables)  ",
-                                    profile.icon,
-                                    profile.name,
-                                    profile.base_provider,
-                                    profile.environment.len()
-                                );
+                                let prefix =
+                                    crate::settings_ui::custom_agent_list_prefix(profile, true);
                                 unicode_width::UnicodeWidthStr::width(prefix.as_str())
                             })
                         } else {

@@ -21111,6 +21111,8 @@ mod tests {
                 name: id.into(),
                 icon: "✦".into(),
                 base_provider: BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: vec![EnvironmentEntry {
                     key: "TOKEN".into(),
                     value: "private-sentinel".into(),

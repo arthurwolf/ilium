@@ -67,7 +67,7 @@ The tabs appear in this order:
 | Titles | Title style and entry-naming instructions | `[inference]` |
 | Triggers | Which events run AI titling and tree organization | `[triggers]` |
 | Text Triggers | Regular-expression rules that send text to panes | `[text_triggers]` |
-| Custom Agents | Named Claude or Codex profiles, icons and environment variables | `[custom_agents]` |
+| Custom Agents | Named Claude or Codex profiles, icons, command override, extra arguments and environment variables | `[custom_agents]` |
 | Debug | File logging | `[debug]` |
 | API | Port of the local HTTP agent-creation API | `[api]` |
 | About | Version and project information | none |
@@ -322,7 +322,7 @@ Rules pairing a regular expression with a literal message. When an enabled regex
 
 ### Custom Agents
 
-Create a named profile for Claude or Codex, choose its icon, and add environment rows. Select a profile to edit it, or select the add row to create one. Values are masked by default; the editor can reveal them. Select an environment row's remove control to delete it. Save validates the entire draft; duplicate names or keys, invalid keys, and reserved variables are rejected. Empty values and literal spaces, quotes, equals signs, newlines and Unicode are preserved when supported by the platform.
+Create a named profile for Claude or Codex, choose its icon, and optionally set a **Command** and **Arguments** before adding environment rows. The editor groups these into Identity, Launch, Environment and Actions sections; a `Runs:` line previews the resulting command. **Command** replaces the program name (for example `my_claude` instead of `claude`); leave it empty for the default. **Arguments** are extra command-line text such as `--yolo`, inserted right after the program on every start, restart and resume (`my_claude --yolo --resume <id>`). Neither field may contain control characters, and the base agent still decides how sessions are resumed. Select a profile to edit it, or select the add row to create one. Values are masked by default; the editor can reveal them. Select an environment row's remove control to delete it. Save validates the entire draft; duplicate names or keys, invalid keys, and reserved variables are rejected. Empty values and literal spaces, quotes, equals signs, newlines and Unicode are preserved when supported by the platform.
 
 Saved profiles appear as additional icons in the tree toolbar. Use the arrows on that row to reach profiles that do not fit; hover an icon to see its name and click it to launch. With the tree focused, `Alt+Left` and `Alt+Right` select a profile and `Alt+Enter` starts it. Right-click a profile icon to open the new-worktree dialog; selecting an existing worktree before launching opens the existing-worktree dialog. The tree context menu also lists each profile under its Claude or Codex new-agent submenu, with choices for launching here or in a new or existing worktree.
 

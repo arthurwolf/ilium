@@ -520,7 +520,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             render_scrollable(
                 frame,
                 layout.content_area,
-                custom_agent_lines(app, state),
+                custom_agent_view(app, state).lines,
                 state.scroll,
             );
         }
@@ -1615,103 +1615,265 @@ struct TextTriggerView {
     add_line: usize,
 }
 
-fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
+/// Rendered custom-agent settings plus the line each selectable row sits on,
+/// so keyboard scrolling and mouse hits agree with the spacing of the layout.
+pub(crate) struct CustomAgentView {
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) row_lines: Vec<usize>,
+}
+
+const CUSTOM_AGENT_LABEL_WIDTH: usize = 26;
+
+fn dim(text: impl Into<String>) -> Span<'static> {
+    Span::styled(text.into(), Style::new().add_modifier(Modifier::DIM))
+}
+
+fn section_heading(title: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        title.to_owned(),
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// Control characters would corrupt the terminal grid, so show them escaped.
+fn printable(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\n' => "\\n".to_owned(),
+            '\r' => "\\r".to_owned(),
+            '\t' => "\\t".to_owned(),
+            other if other.is_control() => "�".to_owned(),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+/// One aligned `label ……… value` row; an empty value shows its dim placeholder.
+fn custom_agent_form_row(
+    label: &str,
+    value: &str,
+    placeholder: &str,
+    selected: bool,
+    editing: bool,
+) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let label_style = if selected {
+        theme::selected_style()
+    } else {
+        Style::new()
+    };
+    let padding = CUSTOM_AGENT_LABEL_WIDTH.saturating_sub(label.chars().count());
+    let value_span = if value.is_empty() && !editing {
+        dim(placeholder.to_owned())
+    } else {
+        Span::raw(printable(value))
+    };
+    let mut spans = vec![
+        Span::raw("  "),
+        Span::styled(format!("{marker} {label}"), label_style),
+        leader_span(padding),
+        value_span,
+    ];
+    if editing {
+        spans.push(Span::styled("▏", Style::new().fg(theme::accent_bg())));
+    }
+    Line::from(spans)
+}
+
+/// A button-like row (`[ Save ]`) without a leader, indented like form rows.
+fn custom_agent_action_row(label: &str, selected: bool) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let style = if selected {
+        theme::selected_style()
+    } else {
+        Style::new()
+    };
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(format!("{marker} [ {label} ]"), style),
+    ])
+}
+
+/// The profile line shown in the list; the mouse hit-test uses its prefix width.
+pub(crate) fn custom_agent_list_prefix(
+    profile: &ilium_core::custom_agent::CustomAgentProfile,
+    selected: bool,
+) -> String {
+    format!(
+        "{} {} {}  {}",
+        if selected { "›" } else { " " },
+        profile.icon,
+        profile.name,
+        dim_summary(profile)
+    )
+}
+
+fn dim_summary(profile: &ilium_core::custom_agent::CustomAgentProfile) -> String {
+    format!(
+        "({:?} · {} · {} variables)  ",
+        profile.base_provider,
+        profile.command_preview(),
+        profile.environment.len()
+    )
+}
+
+pub(crate) fn custom_agent_view(app: &App, state: &SettingsState) -> CustomAgentView {
     use crate::custom_agent_editor::EditorRow;
     let mut lines = vec![
         Line::from(Span::styled(
-            "CUSTOM AGENTS",
+            if state.custom_agent_editor.is_some() {
+                "CUSTOM AGENTS › PROFILE"
+            } else {
+                "CUSTOM AGENTS"
+            },
             Style::new()
                 .fg(theme::accent_bg())
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("Values are plaintext in Ilium's owner-only configuration file."),
-        Line::from("Changes apply on the next launch or restart."),
+        Line::from(dim(
+            "Values are plaintext in Ilium's owner-only configuration file.",
+        )),
+        Line::from(dim("Changes apply on the next launch or restart.")),
         Line::from(""),
     ];
+    let mut row_lines = Vec::new();
     if let Some(editor) = &state.custom_agent_editor {
-        for (index, row) in editor.rows().into_iter().enumerate() {
-            let (label, value) = match row {
-                EditorRow::Name => ("Name".to_owned(), editor.draft.name.clone()),
-                EditorRow::Icon => ("Icon".to_owned(), editor.draft.icon.clone()),
-                EditorRow::Provider => (
-                    "Base".to_owned(),
-                    format!("{:?}", editor.draft.base_provider),
+        let rows = editor.rows();
+        for (index, row) in rows.iter().copied().enumerate() {
+            // Each group starts with a heading and a blank line above it.
+            let heading = match row {
+                EditorRow::Name => Some(("Identity", None)),
+                EditorRow::Command => Some((
+                    "Launch",
+                    Some("Replace the program and add flags; both are shell text."),
+                )),
+                EditorRow::EnvironmentKey(0) => Some((
+                    "Environment",
+                    Some("Variables set only for this agent's process."),
+                )),
+                EditorRow::AddEnvironment if editor.draft.environment.is_empty() => Some((
+                    "Environment",
+                    Some("Variables set only for this agent's process."),
+                )),
+                EditorRow::Save => Some(("Actions", None)),
+                _ => None,
+            };
+            if let Some((title, hint)) = heading {
+                if !row_lines.is_empty() {
+                    lines.push(Line::from(""));
+                }
+                lines.push(section_heading(title));
+                if let Some(hint) = hint {
+                    lines.push(Line::from(dim(hint)));
+                }
+            } else if matches!(row, EditorRow::EnvironmentKey(position) if position > 0)
+                || (row == EditorRow::AddEnvironment && !editor.draft.environment.is_empty())
+            {
+                // A blank line separates one variable's name/value/remove trio from the next.
+                lines.push(Line::from(""));
+            }
+            let selected = index == state.selected_row;
+            let editing = selected && state.custom_agent_editing;
+            row_lines.push(lines.len());
+            lines.push(match row {
+                EditorRow::Name => {
+                    custom_agent_form_row("Name", &editor.draft.name, "required", selected, editing)
+                }
+                EditorRow::Icon => {
+                    custom_agent_form_row("Icon", &editor.draft.icon, "none", selected, false)
+                }
+                EditorRow::Provider => custom_agent_form_row(
+                    "Base agent",
+                    &format!("{:?}", editor.draft.base_provider),
+                    "",
+                    selected,
+                    false,
                 ),
-                EditorRow::EnvironmentKey(index) => (
-                    format!("Variable {} name", index + 1),
-                    editor.draft.environment[index].key.clone(),
+                EditorRow::Command => custom_agent_form_row(
+                    "Command",
+                    &editor.draft.command,
+                    &format!(
+                        "{} (default)",
+                        ilium_core::AgentProvider::command_line(editor.draft.base_provider)
+                    ),
+                    selected,
+                    editing,
                 ),
-                EditorRow::EnvironmentValue(index) => (
-                    format!("Variable {} value", index + 1),
-                    editor.displayed_value(index).unwrap_or_default(),
+                EditorRow::Arguments => custom_agent_form_row(
+                    "Arguments",
+                    &editor.draft.arguments,
+                    "none",
+                    selected,
+                    editing,
                 ),
-                EditorRow::RemoveEnvironment(index) => (
-                    format!("Remove variable {}", index + 1),
-                    "[ Remove ]".to_owned(),
+                EditorRow::EnvironmentKey(position) => custom_agent_form_row(
+                    &format!("Variable {} name", position + 1),
+                    &editor.draft.environment[position].key,
+                    "NAME",
+                    selected,
+                    editing,
                 ),
-                EditorRow::AddEnvironment => ("Add variable".to_owned(), "[ Add ]".to_owned()),
-                EditorRow::RevealValues => (
-                    "Show values".to_owned(),
-                    if editor.reveal_values { "On" } else { "Off" }.to_owned(),
+                EditorRow::EnvironmentValue(position) => custom_agent_form_row(
+                    &format!("Variable {} value", position + 1),
+                    &editor.displayed_value(position).unwrap_or_default(),
+                    "empty",
+                    selected,
+                    editing,
                 ),
-                EditorRow::Save => (
-                    "Save profile".to_owned(),
+                EditorRow::RemoveEnvironment(position) => {
+                    custom_agent_action_row(&format!("Remove variable {}", position + 1), selected)
+                }
+                EditorRow::AddEnvironment => custom_agent_action_row("Add variable", selected),
+                EditorRow::RevealValues => custom_agent_form_row(
+                    "Show values",
+                    if editor.reveal_values { "On" } else { "Off" },
+                    "",
+                    selected,
+                    false,
+                ),
+                EditorRow::Save => custom_agent_action_row(
                     if state.custom_agent_save_pending {
                         "Saving…"
                     } else {
-                        "[ Save ]"
-                    }
-                    .to_owned(),
-                ),
-                EditorRow::Cancel => ("Cancel".to_owned(), "[ Cancel ]".to_owned()),
-            };
-            let value = value
-                .chars()
-                .map(|character| match character {
-                    '\n' => "\\n".to_owned(),
-                    '\r' => "\\r".to_owned(),
-                    '\t' => "\\t".to_owned(),
-                    other if other.is_control() => "�".to_owned(),
-                    other => other.to_string(),
-                })
-                .collect::<String>();
-            let selected = index == state.selected_row;
-            let padding = 30usize.saturating_sub(label.chars().count());
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{} {label}", if selected { "›" } else { " " }),
-                    if selected {
-                        theme::selected_style()
-                    } else {
-                        Style::new()
+                        "Save profile"
                     },
+                    selected,
                 ),
-                leader_span(padding),
-                Span::raw(value),
-            ]));
+                EditorRow::Cancel => custom_agent_action_row("Cancel", selected),
+            });
+            if row == EditorRow::Arguments {
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    dim(format!(
+                        "Runs: {}",
+                        printable(&editor.draft.command_preview())
+                    )),
+                ]));
+            }
         }
-        lines.push(Line::from(if state.custom_agent_editing {
+        lines.push(Line::from(""));
+        lines.push(Line::from(dim(if state.custom_agent_editing {
             "Type to edit; Enter finishes; Esc cancels editing."
         } else {
             "Enter edits or activates; arrows navigate; Esc cancels."
-        }));
+        })));
     } else {
         for (index, profile) in app.custom_agents.profiles.iter().enumerate() {
-            lines.push(Line::from(format!(
-                "{} {} {}  ({:?}, {} variables)  [Delete]",
-                if index == state.selected_row {
-                    "›"
-                } else {
-                    " "
-                },
-                profile.icon,
-                profile.name,
-                profile.base_provider,
-                profile.environment.len()
-            )));
+            row_lines.push(lines.len());
+            lines.push(Line::from(vec![
+                Span::raw(custom_agent_list_prefix(
+                    profile,
+                    index == state.selected_row,
+                )),
+                Span::raw("[Delete]"),
+            ]));
         }
         let missing = crate::custom_agent_settings::missing_profiles(app);
         for (index, identity) in missing.iter().enumerate() {
+            row_lines.push(lines.len());
             lines.push(Line::from(format!(
                 "{} [ Restore missing profile {} ({:?}) ]",
                 if state.selected_row == app.custom_agents.profiles.len() + index {
@@ -1723,6 +1885,8 @@ fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
                 identity.base_provider
             )));
         }
+        lines.push(Line::from(""));
+        row_lines.push(lines.len());
         lines.push(Line::from(format!(
             "{} [ Add custom agent ]",
             if state.selected_row == app.custom_agents.profiles.len() + missing.len() {
@@ -1731,13 +1895,18 @@ fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
                 " "
             }
         )));
-        lines.push(Line::from(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." }));
+        lines.push(Line::from(""));
+        lines.push(Line::from(dim(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." })));
     }
-    lines
+    CustomAgentView { lines, row_lines }
 }
 
 pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Rect) -> u16 {
-    (custom_agent_lines(app, state).len().min(u16::MAX as usize) as u16).saturating_sub(area.height)
+    (custom_agent_view(app, state)
+        .lines
+        .len()
+        .min(u16::MAX as usize) as u16)
+        .saturating_sub(area.height)
 }
 
 /// Readable, measured list surface for server-executed regexp responses.
@@ -1922,7 +2091,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             .lines
             .len() as u16,
         SettingsTab::CustomAgents => match &app.mode {
-            crate::app::Mode::Settings(state) => custom_agent_lines(app, state).len() as u16,
+            crate::app::Mode::Settings(state) => custom_agent_view(app, state).lines.len() as u16,
             _ => 0,
         },
         SettingsTab::Appearance => {

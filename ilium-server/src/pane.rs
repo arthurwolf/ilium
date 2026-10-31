@@ -1600,7 +1600,7 @@ pub(crate) fn spawn_terminal_session_with_environment(
     cwd: &Path,
     identity: &PaneIdentityEnv<'_>,
     quota: &ilium_execution::QuotaGroup,
-    environment: &[ilium_core::custom_agent::EnvironmentEntry],
+    custom_launch: Option<&ilium_core::custom_agent::ResolvedCustomAgentLaunch>,
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin, |session_id| {
@@ -1608,7 +1608,14 @@ pub(crate) fn spawn_terminal_session_with_environment(
             ilium_agent_session::claude_transcript_path(base.home_dir(), cwd, session_id).is_file()
         })
     });
-    let command = match launch_plan.command_line {
+    // A profile may swap the program word and add arguments; the plan's session
+    // identity is unaffected because only the leading word is rewritten.
+    let command_line = match (launch_plan.command_line, custom_launch) {
+        (Some(line), Some(launch)) => Some(launch.customize_command_line(&line)),
+        (line, _) => line,
+    };
+    let environment = custom_launch.map_or(&[][..], |launch| launch.environment.as_slice());
+    let command = match command_line {
         None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
         Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
             .arg(command_flag)

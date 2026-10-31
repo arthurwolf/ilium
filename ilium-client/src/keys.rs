@@ -2629,7 +2629,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             let content =
                 crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state)
                     .content_area;
-            let line = state.selected_row.saturating_add(4).min(u16::MAX as usize) as u16;
+            let line = crate::settings_ui::custom_agent_view(app, &state)
+                .row_lines
+                .get(state.selected_row)
+                .copied()
+                .unwrap_or(0)
+                .min(u16::MAX as usize) as u16;
             if line < state.scroll {
                 state.scroll = line;
             } else if line >= state.scroll.saturating_add(content.height) {
