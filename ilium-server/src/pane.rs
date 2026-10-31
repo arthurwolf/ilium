@@ -529,6 +529,22 @@ impl TerminalPaneRuntime {
         {
             return Ok(false);
         }
+        // A launcher and the agent it starts share a class and a start second;
+        // detection can report either one. Moving between them is a hand-off of
+        // the same invocation, not a replacement, so the session quarantine and
+        // the session's owning PID follow it.
+        if let Some(previous_process_id) = self
+            .agent_process_key
+            .as_ref()
+            .filter(|current| is_launcher_handoff(current, &key))
+            .map(|current| current.process_id)
+        {
+            if self.session_process_id == Some(previous_process_id) {
+                self.session_process_id = Some(key.process_id);
+            }
+            self.agent_process_key = Some(key);
+            return Ok(false);
+        }
         let next = self
             .agent_generation
             .checked_add(1)
@@ -1253,6 +1269,15 @@ fn is_same_agent_process(current: &AgentProcessKey, next: &AgentProcessKey) -> b
             <= 1
 }
 
+fn is_launcher_handoff(current: &AgentProcessKey, next: &AgentProcessKey) -> bool {
+    current.class == next.class
+        && current.process_id != next.process_id
+        && current
+            .started_at_unix_seconds
+            .abs_diff(next.started_at_unix_seconds)
+            <= 1
+}
+
 pub(crate) fn agent_process_key(identity: &ilium_detect::AgentIdentity) -> AgentProcessKey {
     AgentProcessKey {
         class: identity.class.clone(),
@@ -1678,6 +1703,46 @@ mod tests {
         assert!(runtime.is_session_identity_invalidated);
         assert_eq!(runtime.invalidated_session_id.as_deref(), Some("old"));
         identity.started_at_unix_seconds += 5;
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(true));
+        assert!(!runtime.is_session_identity_invalidated);
+        runtime.session.kill().expect("close fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_launcher_handing_off_to_its_agent_keeps_the_session_quarantine() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("fixture PTY");
+        let mut runtime = TerminalPaneRuntime::new(
+            session,
+            TerminalOrigin::PlainShell,
+            None,
+            Duration::from_secs(1),
+        );
+        let mut identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Claude,
+            pid: 123,
+            started_at_unix_seconds: 456,
+            process_name: "claude".to_owned(),
+            matched_signature: "claude".to_owned(),
+            process_tree_depth: 1,
+        };
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
+        runtime.session_process_id = Some(123);
+        runtime.is_session_identity_invalidated = true;
+        runtime.invalidated_session_id = Some("old".to_owned());
+        identity.pid = 124;
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
+        assert!(runtime.is_session_identity_invalidated);
+        assert_eq!(runtime.invalidated_session_id.as_deref(), Some("old"));
+        assert_eq!(runtime.session_process_id, Some(124));
+        identity.started_at_unix_seconds += 5;
+        identity.pid = 125;
         assert_eq!(runtime.adopt_agent_process(&identity), Ok(true));
         assert!(!runtime.is_session_identity_invalidated);
         runtime.session.kill().expect("close fixture");
