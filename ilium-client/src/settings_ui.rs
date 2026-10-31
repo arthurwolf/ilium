@@ -1400,6 +1400,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
         SettingsTab::Inference => "Models",
         SettingsTab::LlmInstructions => "LLM text",
         SettingsTab::TextTriggers => "Triggers",
+        SettingsTab::CustomAgents => "Custom",
         _ => tab.label(),
     }
 }
@@ -6702,11 +6703,18 @@ pub fn simple_content_hit(
 fn about_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
+        Line::from(vec![
+            Span::styled("ilium", Style::new().add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(
+                format!("v{}", env!("CARGO_PKG_VERSION")),
+                Style::new().add_modifier(Modifier::DIM),
+            ),
+        ]),
         Line::from(Span::styled(
-            "ilium",
-            Style::new().add_modifier(Modifier::BOLD),
+            "  ───────────────────────────────────",
+            theme::border_style(false),
         )),
-        Line::from(format!("Version {}", env!("CARGO_PKG_VERSION"))),
         Line::from(""),
         Line::from("A terminal multiplexer with a tree-structured pane list and AI"),
         Line::from(
@@ -7359,9 +7367,10 @@ mod tests {
             assert_eq!(tab_icon(tab), expected_icon, "semantic icon for {tab:?}");
         }
 
-        let area = Rect::new(0, 0, 30, 56);
+        let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+        let area = Rect::new(0, 0, 30, spacious_height);
         for active in SettingsTab::ALL {
-            let mut terminal = Terminal::new(TestBackend::new(30, 56)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(30, spacious_height)).unwrap();
             terminal
                 .draw(|frame| render_tab_list(frame, area, active))
                 .unwrap();
@@ -7559,7 +7568,8 @@ mod tests {
 
     #[test]
     fn compact_navigation_keeps_distinct_icon_labels_readable() {
-        let area = Rect::new(0, 0, 12, 56);
+        let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+        let area = Rect::new(0, 0, 12, spacious_height);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
             .draw(|frame| render_tab_list(frame, area, SettingsTab::Appearance))
