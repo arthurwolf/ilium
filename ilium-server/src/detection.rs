@@ -2527,7 +2527,18 @@ async fn run_due_panes_with_hook(
             }
 
             let mut newly_resolved_session = None;
-            if let Some(discovered) = discovered_session_ids.get(&pane_id) {
+            // Evidence gathered before a session command can still name the
+            // identity that command just invalidated; re-check the quarantine
+            // now that the live runtime is locked.
+            let discovered_session = discovered_session_ids.get(&pane_id).filter(|discovered| {
+                !(runtime.is_session_identity_invalidated
+                    && runtime.invalidated_session_id.as_ref() == Some(&discovered.session_id)
+                    && classified_pane
+                        .identity
+                        .as_ref()
+                        .is_some_and(|identity| Some(identity.pid) == runtime.session_process_id))
+            });
+            if let Some(discovered) = discovered_session {
                 let session_id = &discovered.session_id;
                 if runtime.session_id.as_ref() != Some(session_id) {
                     let invalidated_session_id = runtime.invalidated_session_id.clone();
