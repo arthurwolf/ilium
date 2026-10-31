@@ -116,10 +116,18 @@ pub fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
 
 /// The permission bits (`0o777` mask) of a path.
 pub fn file_mode(path: &Path) -> u32 {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|meta| meta.permissions().mode() & 0o777)
-        .unwrap_or(0)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .map(|meta| meta.permissions().mode() & 0o777)
+            .unwrap_or(0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        0o600
+    }
 }
 
 /// The 30 core plugin ids named by the table of the core plugins page.
