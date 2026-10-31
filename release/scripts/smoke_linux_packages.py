@@ -800,7 +800,8 @@ def delegated_service(command, child_env, own_bus=False):  # The animation sandb
     uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
     if own_bus:  # Flatpak's session helper spawns the server, so it must be started by a bus that lives inside this service's cgroup.
         child_env = {key: value for key, value in child_env.items() if key != 'DBUS_SESSION_BUS_ADDRESS'}
-        command = ['dbus-run-session', '--', *command]
+        command = ['sh', '-c', 'err=$(mktemp) || exit 1; dbus-run-session -- "$@" 2>"$err"; status=$?; '  # The bus daemon logs every service activation to stderr, which the animation gate rejects.
+                   '[ "$status" -eq 0 ] || cat "$err" >&2; rm -f "$err"; exit "$status"', 'sh', *command]  # Surface the diagnostics only when the probe fails.
     return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
             '--property=Type=exec', '--property=Delegate=cpu memory pids', '--property=MemoryMax=6G', '--property=TasksMax=4096', '--property=CPUWeight=100', '--property=WorkingDirectory=' + os.getcwd(),
             *('--setenv=%s=%s' % item for item in sorted(child_env.items())), '/usr/bin/python3', '-c', DELEGATED_LEAF,
