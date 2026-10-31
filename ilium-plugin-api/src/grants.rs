@@ -75,6 +75,22 @@ pub struct GrantInfo {
     pub world_interfaces: &'static [&'static str],
 }
 
+/// Parsing and display go through the same validation and text as `Grant::parse` and `as_str`,
+/// so `text.parse::<Grant>()` and `grant.to_string()` round-trip the manifest spelling.
+impl std::str::FromStr for Grant {
+    type Err = Diagnostic;
+
+    fn from_str(text: &str) -> Result<Grant, Diagnostic> {
+        Grant::parse(text)
+    }
+}
+
+impl std::fmt::Display for Grant {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 impl Grant {
     /// Parses a grant string; an unknown family is `manifest.grant-unknown` (ABI-023).
     pub fn parse(text: &str) -> Result<Grant, Diagnostic> {

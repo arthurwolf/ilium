@@ -571,6 +571,7 @@ impl HeapBytes for crate::resource::ResourceReply {
 impl HeapBytes for ServerEvent {
     fn heap_bytes(&self) -> usize {
         match self {
+            Self::PaneRecentActivity { .. } => 0,
             Self::ResourceObservationFailed { message } => message.heap_bytes(),
             Self::ResourceSnapshot {
                 catalog,
@@ -621,12 +622,14 @@ impl HeapBytes for ServerEvent {
                 pane_id,
                 session_id,
                 process_id,
+                process_identity_inode,
                 title_generation,
                 transcript_path,
             } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(session_id.heap_bytes())
                 .saturating_add(process_id.heap_bytes())
+                .saturating_add(process_identity_inode.heap_bytes())
                 .saturating_add(title_generation.heap_bytes())
                 .saturating_add(transcript_path.heap_bytes()),
             Self::PaneSessionIdCleared {

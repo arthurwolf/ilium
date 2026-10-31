@@ -1653,26 +1653,7 @@ fn claude_prompt_text(content: &Value) -> Option<String> {
         _ => return None,
     };
     let text = text.trim();
-    (!text.is_empty()).then(|| unwrap_claude_command(text))
-}
-
-/// A slash command is stored as `<command-name>/x</command-name>` plus
-/// message and argument tags; show it the way the user typed it.
-fn unwrap_claude_command(text: &str) -> String {
-    let tag = |name: &str| -> Option<&str> {
-        let open = format!("<{name}>");
-        let close = format!("</{name}>");
-        let start = text.find(&open)? + open.len();
-        let end = text[start..].find(&close)? + start;
-        Some(text[start..end].trim())
-    };
-    let Some(command) = tag("command-name") else {
-        return text.to_string();
-    };
-    match tag("command-args").filter(|args| !args.is_empty()) {
-        Some(args) => format!("{command} {args}"),
-        None => command.to_string(),
-    }
+    (!text.is_empty()).then(|| ilium_agent_session::unwrap_claude_command(text))
 }
 
 /// Harness-injected text that arrives as a user record without being typed:

@@ -258,7 +258,8 @@ ilium chat tail [--limit <n>]
 Details:
 
 - Timestamps are local time with an offset, like `2026-10-04 14:32:10 +02:00`.
-- `send`, `context` and `tail` look for the nearest `CHATROOM.md` in the working directory or any parent, so they work from a subdirectory of the project. If none exists `send` and the read commands fall back to the current directory (where `send` then fails because no room exists).
+- `send`, `context` and `tail` look for the nearest `CHATROOM.md` in the working directory or any parent, so they work from a subdirectory of the project. `CHATROOM.md` is git-ignored and lives only in the main checkout, so from inside a linked Git worktree they use the main checkout's room instead. A shell that left its pane's worktree (for example in a scratch build folder) is mapped through the pane's `ILIUM_WORKTREE` variable the same way.
+- If no room is found, `send` and `tail` fail with `this project does not have a chatroom`. `context` prints nothing, because session hooks run it in every project, including ones without a room.
 - Appends take an advisory lock, so several agents can post at once without interleaving.
 - Fields are sanitised to one line each; control characters in a human-edited file are neutralised before they reach a model.
 - A row for the Chatroom also appears in the project tree when a project has one.
@@ -818,6 +819,6 @@ ilium --reset-session new-session scratch
 | `resource cancel RESERVATION` | Cancel the agent's queued claim |
 | `resource estimate RESERVATION DURATION` | Update the estimate without extending or expiring ownership |
 | `resource gate SLUG open\|paused\|unavailable [--reason TEXT]` | Change availability without clearing occupancy |
-| `resource recover SLUG --expected-revision N --reason TEXT` | Interactive, revision-bound revocation or subsequent clearance confirmation |
+| `resource recover SLUG --reason TEXT [--expected-revision N]` | From an agent pane of the project: clears a stale (rebooted or dead) owner in one step. For a live owner: interactive, typed confirmation by the user |
 
 Mutations return a timestamped request key. Reuse it with `--request-id KEY` when retrying an uncertain response; changing the payload under the same key is rejected. Durations use explicit units, for example `20m` or `1h30m`, from one second through seven days. Interrupted waits retain reservations. Estimates never expire ownership or prove that hardware is safe. User cancellation additionally requires `--reason TEXT --expected-revision N` and fresh interactive confirmation. See [Resource queues](resource-queues.md) for recovery and GPU/USB-board workflows.

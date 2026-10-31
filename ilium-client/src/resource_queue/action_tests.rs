@@ -232,6 +232,42 @@ fn collapsing_resource_hides_participants_and_reopening_restores_navigation_with
 }
 
 #[test]
+fn resource_row_right_click_adds_a_resource_section_with_delete_and_pause() {
+    let mut fixture = fixture();
+    let row = fixture.resource;
+    let point = position(&mut fixture.app, row);
+    mouse(
+        &mut fixture.app,
+        point,
+        MouseEventKind::Down(MouseButton::Right),
+    );
+    let Mode::ContextMenu(menu) = &fixture.app.mode else {
+        panic!("right click must open a context menu");
+    };
+    for action in [
+        ContextMenuAction::ResourceOpenPanel,
+        ContextMenuAction::ResourceEdit,
+        ContextMenuAction::ResourcePause,
+        ContextMenuAction::ResourceMarkOffline,
+        ContextMenuAction::ResourceUnlink,
+        ContextMenuAction::ResourceDelete,
+    ] {
+        assert!(menu.actions.contains(&action), "{action:?}");
+    }
+    assert!(!menu.actions.contains(&ContextMenuAction::ResourceResume));
+    let project = menu.target;
+    fixture
+        .app
+        .execute_context_action(ContextMenuAction::ResourceDelete, project);
+    // Delete never acts silently: it either opens a confirmation or explains why not.
+    assert!(
+        fixture.app.resources.dialog.is_some() || fixture.app.status_message.is_some(),
+        "delete must confirm or explain"
+    );
+    assert!(fixture.app.take_outbound_requests().is_empty());
+}
+
+#[test]
 fn context_actions_resolve_resource_and_reference_to_project_and_local_row_to_real_pane() {
     for kind in ["resource", "reference", "local", "ordinary"] {
         for action in [

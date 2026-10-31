@@ -42,6 +42,8 @@ pub struct ResourceDialog {
     pub request_key: String,
     pub create_id: ResourceId,
     pub actor: Option<AgentIdentity>,
+    /// Delete flow: after the unlink in `kind` succeeds, archive the resource.
+    pub then_archive: Option<ResourceId>,
 }
 impl ResourceDialog {
     pub fn create(project: NodeId) -> Self {
@@ -65,6 +67,7 @@ impl ResourceDialog {
             request_key: super::new_mutation_key(),
             create_id: ResourceId(uuid::Uuid::new_v4().to_string()),
             actor: None,
+            then_archive: None,
         }
     }
     pub fn link(project: NodeId) -> Self {
@@ -84,6 +87,7 @@ impl ResourceDialog {
             request_key: super::new_mutation_key(),
             create_id: ResourceId(uuid::Uuid::new_v4().to_string()),
             actor: None,
+            then_archive: None,
         }
     }
     pub fn edit(project: NodeId, definition: &ResourceDefinition) -> Self {
@@ -107,6 +111,7 @@ impl ResourceDialog {
             request_key: super::new_mutation_key(),
             create_id: ResourceId(uuid::Uuid::new_v4().to_string()),
             actor: None,
+            then_archive: None,
         }
     }
     pub fn confirm(project: NodeId, command: ResourceCommand, token: Option<String>) -> Self {
@@ -126,7 +131,32 @@ impl ResourceDialog {
             request_key: super::new_mutation_key(),
             create_id: ResourceId(uuid::Uuid::new_v4().to_string()),
             actor: None,
+            then_archive: None,
         }
+    }
+    /// Delete = remove the resource from this project, then archive it.
+    pub fn delete(
+        project: NodeId,
+        resource_id: ResourceId,
+        link: Option<ResourceProjectId>,
+    ) -> Self {
+        let command = match link {
+            Some(project_id) => ResourceCommand::Unlink {
+                project_id,
+                resource_id: resource_id.clone(),
+            },
+            None => ResourceCommand::Archive {
+                resource_id: resource_id.clone(),
+            },
+        };
+        let mut dialog = Self::confirm(project, command, None);
+        if matches!(
+            dialog.kind,
+            DialogKind::Confirm { ref command, .. } if matches!(command.as_ref(), ResourceCommand::Unlink { .. })
+        ) {
+            dialog.then_archive = Some(resource_id);
+        }
+        dialog
     }
     pub fn own_action(
         project: NodeId,
@@ -158,7 +188,10 @@ impl ResourceDialog {
             DialogKind::Link { .. } => {
                 &["Search existing resources", "Local slug (blank uses title)"]
             }
-            DialogKind::Confirm { .. } => &["Type CONFIRM", "Reason (required for recovery)"],
+            DialogKind::Confirm { .. } => &[
+                "Type CONFIRM to proceed",
+                "Reason (required when taking back or confirming safe)",
+            ],
             _ => &[
                 "Title",
                 "Local slug (create only)",
@@ -655,6 +688,59 @@ fn fit_line(text: &str, width: u16) -> String {
         })
         .collect()
 }
+/// Plain-language headline and consequence for a confirmation dialog.
+pub(super) fn describe_command(command: &ResourceCommand, deleting: bool) -> (String, String) {
+    let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+    match command {
+        ResourceCommand::Unlink { .. } if deleting => pair(
+            "Delete this resource",
+            "The resource is removed from this project and deleted. Its past history stays in the activity log. It cannot be restored from Ilium.",
+        ),
+        ResourceCommand::Unlink { .. } => pair(
+            "Remove from this project",
+            "This project stops using the resource and its instructions are cleaned up. The resource itself stays for other projects.",
+        ),
+        ResourceCommand::Archive { .. } => pair(
+            "Delete this resource",
+            "The resource is deleted. Its past history stays in the activity log. It cannot be restored from Ilium.",
+        ),
+        ResourceCommand::Revoke { .. } => pair(
+            "Take back ownership",
+            "The current owner loses the hardware immediately. Nobody else can use it until you confirm it is safe. This does not stop the owner's program.",
+        ),
+        ResourceCommand::ConfirmClear { .. } => pair(
+            "Confirm the hardware is safe",
+            "Tell the queue the hardware is idle and safe so the next waiting agent may start. This does not stop any program.",
+        ),
+        ResourceCommand::CancelByUser { .. } => pair(
+            "Cancel this waiting request",
+            "The agent leaves the queue without using the hardware. Agents behind it move up.",
+        ),
+        ResourceCommand::SetGate { gate, .. } => match gate {
+            ResourceGate::Open => pair(
+                "Resume the queue",
+                "Waiting agents may be given the hardware again, in order.",
+            ),
+            ResourceGate::Paused { .. } => pair(
+                "Pause the queue",
+                "No new agent is given the hardware. The current owner keeps it until it finishes.",
+            ),
+            ResourceGate::Unavailable { .. } => pair(
+                "Mark the hardware offline",
+                "Nobody is given the hardware until you resume the queue. Use this when it is unplugged, broken or being serviced.",
+            ),
+        },
+        ResourceCommand::Cancel { .. } => pair(
+            "Cancel your waiting request",
+            "You leave the queue without using the hardware.",
+        ),
+        ResourceCommand::Release { .. } => pair(
+            "Release the hardware",
+            "You give the hardware back so the next agent can start. Stop your workload first.",
+        ),
+        _ => pair("Confirm this action", "This change is applied to the shared resource."),
+    }
+}
 fn content(
     app: &App,
     dialog: &ResourceDialog,
@@ -774,10 +860,12 @@ fn content(
                     .map_or("unknown".into(), |revision| revision.to_string())
             )));
         }
-        lines.push(Line::from(format!("Action: {command:?}")));
-        lines.push(Line::from(
-            "Confirm hardware is safe before clearance. This does not stop a workload.",
-        ));
+        let (headline, consequence) = describe_command(command, dialog.then_archive.is_some());
+        lines.push(Line::from(Span::styled(
+            headline,
+            Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+        )));
+        lines.push(Line::from(consequence));
     }
     let mut ranges = Vec::new();
     for (index, label) in dialog.labels().iter().enumerate() {
@@ -832,7 +920,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         DialogKind::Create => "New shared resource",
         DialogKind::Link { .. } => "Link existing resource",
         DialogKind::Edit(_) => "Edit shared resource — global",
-        DialogKind::Confirm { .. } => "Confirm resource management action",
+        DialogKind::Confirm { .. } => "Please confirm",
     };
     frame.render_widget(Clear, area);
     let block = crate::theme::block(true).title(title);

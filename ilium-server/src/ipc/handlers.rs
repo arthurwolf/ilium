@@ -1365,6 +1365,16 @@ pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     // that snapshot, taken moments earlier, is not safe to reuse here.
     state.prune_stale_restructure_undo().await;
     state.prune_blocking_errors(&snapshot);
+    {
+        // Use a fresh tree guard: a different structural change can happen
+        // after the snapshot above was cloned.
+        let tree = state.tree.read().await;
+        state
+            .recent_activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|node_id| tree.get(node_id).is_some());
+    }
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
 }
@@ -1426,6 +1436,41 @@ async fn record_input_activity_if_current(
     Ok(true)
 }
 
+/// Output from an agent pane in the slow idle tier means it may have started a
+/// turn on its own, with no keystroke for `force_check` to react to. Peeks
+/// under the read lock so the common case (pane not idle-tier) never takes the
+/// write lock.
+async fn wake_idle_agent_detection(state: &ServerState, pane_id: NodeId, input: &PtyInput) {
+    {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return;
+        };
+        if !runtime.detection_schedule.wake_on_output
+            || !input.same_session(&runtime.session.input_handle())
+        {
+            return;
+        }
+    }
+    let woke = {
+        let mut panes = state.panes.write().await;
+        match panes.get_mut(&pane_id) {
+            Some(PaneResource::Terminal(runtime))
+                if input.same_session(&runtime.session.input_handle()) =>
+            {
+                crate::detection::wake_for_output(
+                    &mut runtime.detection_schedule,
+                    std::time::Instant::now(),
+                )
+            }
+            _ => false,
+        }
+    };
+    if woke {
+        state.detection_schedule_changed.notify_one();
+    }
+}
+
 /// Advances output activity without broadcasting revisions a hidden pane's
 /// clients cannot render. The first unread/unrestructured edge is always
 /// published; a later visible-pane subscription explicitly synchronizes the
@@ -1444,6 +1489,8 @@ async fn record_terminal_output_activity(
         || update.became_unread_since_focus
     {
         publish_node_activity_update(state, node_id, update);
+    } else {
+        record_recent_activity(state, node_id, update.activity_revision);
     }
     Ok(update.activity_revision)
 }
@@ -1460,9 +1507,45 @@ pub(crate) fn publish_node_activity_update(
         node_id,
         activity_revision: update.activity_revision,
     });
+    record_recent_activity(state, node_id, update.activity_revision);
     if update.became_unrestructured || update.became_unread_since_focus {
         state.request_snapshot_save();
     }
+}
+
+fn record_recent_activity(state: &ServerState, node_id: NodeId, revision: u64) {
+    let publish = state
+        .recent_activity
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .record(node_id, revision, std::time::Instant::now());
+    if publish {
+        state.broadcast(ServerEvent::PaneRecentActivity {
+            pane_id: node_id,
+            revision,
+            age_millis: 0,
+        });
+    }
+}
+
+fn recent_activity_replay(state: &ServerState, tree: &Tree) -> Vec<ServerEvent> {
+    let now = std::time::Instant::now();
+    state
+        .recent_activity
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .snapshot()
+        .iter()
+        .filter(|(node_id, _)| tree.get(**node_id).is_some())
+        .map(|(node_id, observation)| ServerEvent::PaneRecentActivity {
+            pane_id: *node_id,
+            revision: observation.revision,
+            age_millis: now
+                .saturating_duration_since(observation.observed_at)
+                .as_millis()
+                .min(u64::MAX as u128) as u64,
+        })
+        .collect()
 }
 
 /// Validates and persists one timer before waking the detached executor. The
@@ -2336,7 +2419,7 @@ async fn admitted_state_synchronization_events(
     // whether pane output, the pane set or the tree kept moving.
     let mut discarded_attempts: Vec<(&'static str, Option<NodeId>)> = Vec::new();
     for _attempt in 0..8 {
-        let (captures, snapshot_bytes) = {
+        let (captures, snapshot_bytes, activity_event_count) = {
             let tree = state.tree.read().await;
             let panes = state.panes.read().await;
             let captures: Vec<_> = panes
@@ -2362,7 +2445,7 @@ async fn admitted_state_synchronization_events(
             let Some(snapshot_bytes) = snapshot_bytes else {
                 return Err("state snapshot admission size overflow".to_owned());
             };
-            (captures, snapshot_bytes)
+            (captures, snapshot_bytes, tree.all_ids().count())
         };
         let mut estimates = HashMap::new();
         for (pane_id, capture) in &captures {
@@ -2394,7 +2477,12 @@ async fn admitted_state_synchronization_events(
         let admission = reserve_connection_event_storage(
             state,
             estimated_payload_bytes,
-            estimates.len().saturating_add(1),
+            // An explicit node-activity request can target any tree node, so
+            // the replay can contain one additional event per node.
+            estimates
+                .len()
+                .saturating_add(activity_event_count)
+                .saturating_add(1),
             ConnectionEventStorageClass::General,
             None,
         );
@@ -2510,6 +2598,7 @@ async fn admitted_state_synchronization_events(
                                     pane_id: *pane_id,
                                     session_id,
                                     process_id: runtime.session_process_id,
+                                    process_identity_inode: runtime.session_process_identity_inode,
                                     title_generation: runtime.title_generation,
                                     transcript_path: runtime.session_transcript_path.clone(),
                                 });
@@ -2540,6 +2629,10 @@ async fn admitted_state_synchronization_events(
                         tree: snapshot,
                         detection_evidence,
                     }];
+                    if let ServerEvent::PaneStateSnapshot { tree, .. } = &events[0] {
+                        let activity = recent_activity_replay(state, tree);
+                        events.extend(activity);
+                    }
                     events.extend(replay_events);
                     events.extend(recap_events);
                     let statuses = state.workspace_git_status_cache.read().await;
@@ -2680,6 +2773,7 @@ async fn state_synchronization_events(
                             pane_id: *pane_id,
                             session_id,
                             process_id: runtime.session_process_id,
+                            process_identity_inode: runtime.session_process_identity_inode,
                             title_generation: runtime.title_generation,
                             transcript_path: runtime.session_transcript_path.clone(),
                         });
@@ -2706,6 +2800,10 @@ async fn state_synchronization_events(
         tree: snapshot,
         detection_evidence,
     }];
+    if let ServerEvent::PaneStateSnapshot { tree, .. } = &events[0] {
+        let activity = recent_activity_replay(state, tree);
+        events.extend(activity);
+    }
     events.extend(replay_events);
     events.extend(recap_events);
     let statuses = state.workspace_git_status_cache.read().await;
@@ -6534,6 +6632,12 @@ async fn forward_output_with_recovery<Recovery>(
                         tracing::warn!("{error}");
                     }
                 }
+                // Outside the activity gate on purpose: a turn that starts by
+                // itself is often one repaint arriving under 500ms after the
+                // previous chunk, and no later chunk follows to be recorded.
+                // The wake has its own spacing, and its cheap read-lock peek
+                // returns at once for every pane outside the idle agent tier.
+                wake_idle_agent_detection(&state, pane_id, &input).await;
                 // The PTY reader already parsed and journaled these bytes.
                 // Hidden panes still feed Text Triggers even without clients.
                 if !subscription_cache.has_subscribers(&state, pane_id) {
@@ -11907,12 +12011,19 @@ mod tests {
             Ok(ServerEvent::NodeActivityChanged { node_id, activity_revision })
                 if node_id == pane_id && activity_revision == first_revision
         ));
+        assert!(matches!(events.recv().await,
+            Ok(ServerEvent::PaneRecentActivity { pane_id: observed, revision, .. })
+                if observed == pane_id && revision == first_revision));
 
         let second_revision = record_terminal_output_activity(&state, pane_id)
             .await
             .expect("later hidden output is accepted");
         assert_eq!(second_revision, first_revision + 1);
         assert!(events.try_recv().is_err());
+        assert_eq!(
+            state.recent_activity.lock().unwrap().snapshot()[&pane_id].revision,
+            second_revision
+        );
         assert_eq!(
             state
                 .tree
@@ -12019,6 +12130,76 @@ mod tests {
             teardown_pane_resource(resource_pane_id, resource);
         }
         sound_task.abort();
+    }
+
+    /// Fix for idle agent panes that start a turn on their own: PTY output from
+    /// an unfocused pane in the slow agent tier must pull its next detection
+    /// check forward, with no keystroke involved.
+    #[tokio::test]
+    async fn pty_output_wakes_a_slow_tier_agent_pane_check() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("output-wake").await;
+        let far_future = std::time::Instant::now() + Duration::from_secs(999);
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture pane is a terminal");
+            };
+            runtime.detection_schedule.wake_on_output = true;
+            runtime.detection_schedule.next_due = far_future;
+        }
+        // Not a line submission, so only the output wake can move the deadline;
+        // `cat` echoes the byte back as PTY output.
+        write_key_input(&state, pane_id, b"x", None)
+            .await
+            .expect("write terminal input");
+        let woke = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let due = match state.panes.read().await.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => runtime.detection_schedule.next_due,
+                    _ => panic!("fixture pane is a terminal"),
+                };
+                if due < far_future {
+                    break due;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("output must wake the slow-tier pane");
+        assert!(
+            woke <= std::time::Instant::now() + crate::detection::OUTPUT_WAKE_DELAY,
+            "the wake is delayed by at most the output settle delay"
+        );
+        teardown_state_panes(&state);
+    }
+
+    /// Server-side prompt writes (prompt queue, scheduled input, goal resume)
+    /// all reach `write_key_input_unlocked`; a submitted line must recheck the
+    /// pane at once even when it is in the slow tier and not woken by output.
+    #[tokio::test]
+    async fn submitted_line_rechecks_a_slow_tier_pane_immediately() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("submit-wake").await;
+        let far_future = std::time::Instant::now() + Duration::from_secs(999);
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture pane is a terminal");
+            };
+            runtime.detection_schedule.wake_on_output = false;
+            runtime.detection_schedule.next_due = far_future;
+        }
+        write_key_input(&state, pane_id, b"hello\r", None)
+            .await
+            .expect("write terminal input");
+        let due = match state.panes.read().await.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => runtime.detection_schedule.next_due,
+            _ => panic!("fixture pane is a terminal"),
+        };
+        assert!(
+            due < far_future,
+            "a submitted line must pull the slow-tier check forward"
+        );
+        teardown_state_panes(&state);
     }
 
     /// Builds a session with one live `cat` terminal pane, ready for

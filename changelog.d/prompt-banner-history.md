@@ -1,0 +1,4 @@
+### Fixed
+- The "last prompt" and "goal" bar at the top of Claude Code panes was always empty: Ilium only accepted Claude's per-process session record when Claude reported exactly version 2.1.312, so every newer Claude Code never got a session binding and its prompt history, goal text and transcript were never looked up. The version pin is gone; the record is still tied to the live process by PID, process start time, project directory and socket ownership.
+- The prompt bar now follows the session transcript while it runs (new prompts appear within a few seconds instead of only at start), retries a failed first lookup every 30 seconds, uses the same larger transcript budget as the cost statistics (sessions that start with a big pasted prompt are found), and shows a `/goal` prompt as typed (`/goal ship it`) instead of raw command markup.
+- Browsing prompt history no longer shows a synthetic "earlier entries omitted" line for sessions with very many prompts.

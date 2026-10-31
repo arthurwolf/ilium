@@ -1403,6 +1403,13 @@ impl PtySession {
         self.process_id
     }
 
+    /// Birth identity captured when this terminal's original child was spawned.
+    pub fn process_birth_identity(
+        &self,
+    ) -> Option<Arc<ilium_platform::process_control::PtyProcessIdentity>> {
+        self.pty_process_identity.clone()
+    }
+
     /// Capture child control under a short registry guard. Invoke its native
     /// operations only after releasing that guard, on an owned worker.
     pub fn termination_handle(&self) -> PtyTerminationHandle {

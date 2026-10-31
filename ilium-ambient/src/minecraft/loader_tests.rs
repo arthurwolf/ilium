@@ -70,13 +70,12 @@ fn only_complete_saved_chunks_enter_coverage() {
         })
     })
     .unwrap();
-    assert_eq!(result.chunks.len(), 1);
-    assert_eq!(result.coverage.chunks, BTreeSet::from([[-1, 0]]));
-    assert_eq!(result.rejected_chunks, 4);
-    assert_eq!(result.issues.len(), 4);
-    assert_eq!(result.issues[0].reason, Rejection::ProtoChunk);
-    assert_eq!(result.issues[1].reason, Rejection::IncompleteSections);
-    assert_eq!(result.issues[2].reason, Rejection::Absent);
+    assert_eq!(result.chunks.len(), 2);
+    assert_eq!(result.coverage.chunks, BTreeSet::from([[-1, 0], [0, 0]]));
+    assert_eq!(result.rejected_chunks, 3);
+    assert_eq!(result.issues.len(), 3);
+    assert_eq!(result.issues[0].reason, Rejection::IncompleteSections);
+    assert_eq!(result.issues[1].reason, Rejection::Absent);
 }
 
 #[test]

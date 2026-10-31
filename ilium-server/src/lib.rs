@@ -45,6 +45,7 @@ mod progress_monitor;
 mod progress_watchdog;
 mod prompt_queue;
 mod ready_log;
+mod recent_activity;
 mod recovery;
 mod repo_facts_cache;
 pub mod resources;

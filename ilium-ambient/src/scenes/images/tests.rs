@@ -19,10 +19,19 @@ fn write_png(path: &Path, color: [u8; 3]) {
 }
 
 fn scene_for(settings: &ImagesSettings, cache: &Path) -> ImagesScene {
-    ImagesScene::new(
-        settings,
-        &SceneEnv::for_test(cache.to_path_buf(), crate::resources::test_resources()),
-    )
+    let resources = crate::resources::test_resources();
+    crate::resources::retry_while_busy(|| {
+        ImagesScene::new(
+            settings,
+            &SceneEnv::for_test(cache.to_path_buf(), resources.clone()),
+        )
+        .map_err(|error| match error {
+            ImagesStartError::Admission(ilium_execution::RejectReason::Busy) => {
+                ilium_execution::RejectReason::Busy
+            }
+            other => panic!("explicit fixture image capture admission: {other:?}"),
+        })
+    })
     .expect("explicit fixture image capture admission")
 }
 

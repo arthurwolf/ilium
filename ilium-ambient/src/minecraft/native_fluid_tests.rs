@@ -369,6 +369,7 @@ fn captured_projected_palette_waterlogging_preserves_source_water_and_dry_state(
         "minecraft:mossy_stone_brick_slab",
         "minecraft:mossy_stone_brick_stairs",
         "minecraft:pointed_dripstone",
+        "minecraft:polished_deepslate_stairs",
         "minecraft:spruce_slab",
         "minecraft:stone_brick_slab",
         "minecraft:stone_brick_stairs",

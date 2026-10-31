@@ -182,21 +182,26 @@ fn one_row_native_footer_keeps_a_selected_segment_beside_the_queue_label() {
 
 #[test]
 fn action_hit_regions_are_bounded_disjoint_and_open_contextual_help() {
-    for (width, height) in [(40, 12), (80, 24), (120, 40)] {
+    for (width, height) in [(40, 30), (80, 40), (120, 50)] {
         let (mut app, _, _) = fixture();
         let area = Rect::new(3, 2, width, height);
         app.layout.pane_area = area;
-        let regions = action_regions(area);
-        assert_eq!(regions.len(), 16);
-        for (index, (_, label, rect)) in regions.iter().enumerate() {
+        let record = app
+            .resources
+            .record(&ResourceId::from("gpu"))
+            .unwrap()
+            .clone();
+        let panel = super::super::panel::layout(&app, &record, area);
+        assert_eq!(panel.buttons.len(), 16, "{width}x{height}");
+        for (index, button) in panel.buttons.iter().enumerate() {
+            let rect = button.rect;
             assert!(area.contains(ratatui::layout::Position::new(rect.x, rect.y)));
             assert!(rect.right() <= area.right() && rect.bottom() <= area.bottom());
-            assert_eq!(usize::from(rect.width), label.width());
-            for (_, _, other) in &regions[index + 1..] {
-                assert!(rect.intersection(*other).is_empty());
+            for other in &panel.buttons[index + 1..] {
+                assert!(rect.intersection(other.rect).is_empty());
             }
         }
-        let help = regions[0].2;
+        let help = panel.buttons[0].rect;
         assert!(handle_event(
             &mut app,
             &Event::Mouse(crossterm::event::MouseEvent {
@@ -217,6 +222,49 @@ fn action_hit_regions_are_bounded_disjoint_and_open_contextual_help() {
             RightPanelTarget::Resource { .. }
         ));
     }
+}
+
+#[test]
+fn hovering_a_button_records_it_and_disabled_buttons_explain_why() {
+    let (mut app, _, _) = fixture();
+    let area = Rect::new(0, 0, 100, 50);
+    app.layout.pane_area = area;
+    let record = app
+        .resources
+        .record(&ResourceId::from("gpu"))
+        .unwrap()
+        .clone();
+    let panel = super::super::panel::layout(&app, &record, area);
+    let confirm = panel
+        .buttons
+        .iter()
+        .find(|button| button.action == super::super::ResourceAction::ConfirmSafe)
+        .unwrap();
+    assert!(confirm.enabled.is_err());
+    let moved = Event::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: confirm.rect.x,
+        row: confirm.rect.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert!(handle_event(&mut app, &moved));
+    assert_eq!(
+        app.resources.hovered_action.map(|(action, _)| action),
+        Some(super::super::ResourceAction::ConfirmSafe)
+    );
+    let click = Event::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        ..match moved {
+            Event::Mouse(mouse) => mouse,
+            _ => unreachable!(),
+        }
+    });
+    assert!(handle_event(&mut app, &click));
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("No safety check is pending.")
+    );
+    assert!(app.resources.dialog.is_none());
 }
 
 #[test]
@@ -375,4 +423,46 @@ fn untrusted_terminal_text_is_sanitized_without_mutating_authoritative_utf8() {
     );
     let lines = super::super::sanitized_lines(vec![Line::from(hostile.to_owned())]);
     assert!(!lines[0].spans[0].content.chars().any(char::is_control));
+}
+
+#[test]
+fn clicking_a_queue_row_selects_that_request() {
+    let (mut app, _, _) = fixture();
+    let area = Rect::new(3, 2, 120, 50);
+    app.layout.pane_area = area;
+    let record = app
+        .resources
+        .record(&ResourceId::from("gpu"))
+        .unwrap()
+        .clone();
+    let ordered_ids: Vec<_> = super::super::tree::ordered(&record)
+        .into_iter()
+        .map(|claim| claim.id.clone())
+        .collect();
+    assert!(ordered_ids.len() >= 2);
+    let panel = super::super::panel::layout(&app, &record, area);
+    for (index, expected) in ordered_ids.iter().enumerate() {
+        let row = panel.queue_row(index).expect("queue row is visible");
+        assert!(handle_event(
+            &mut app,
+            &Event::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: row.x + 1,
+                row: row.y,
+                modifiers: KeyModifiers::NONE,
+            })
+        ));
+        assert_eq!(app.resources.selected_reservation.as_ref(), Some(expected));
+    }
+}
+
+#[test]
+fn dump_rendered_panel_for_review() {
+    for (width, height) in [(120, 40), (80, 24)] {
+        let (app, _, _) = fixture();
+        println!(
+            "=== {width}x{height} ===\n{}",
+            text(&capture(&app, width, height, None))
+        );
+    }
 }

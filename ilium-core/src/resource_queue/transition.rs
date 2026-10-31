@@ -927,6 +927,62 @@ pub fn apply_resource_command(
             promote(r, ctx)?;
             resource_id = Some(id.clone());
         }
+        ResourceCommand::RecoverStaleOwner {
+            resource_id: id,
+            reason: why,
+        } => {
+            // Agents may clear only claims the server already proved ownerless
+            // (boot change or dead invocation both produce NeedsAttention);
+            // a live Owned claim still needs the user's guarded revoke.
+            if matches!(ctx.actor, ResourceActor::System) {
+                return Err(error(
+                    "agent_or_user_required",
+                    "stale-owner recovery is requested by an agent or the user",
+                ));
+            }
+            reason(why)?;
+            if ctx.expected_revision.is_none() {
+                return Err(error(
+                    "revision_required",
+                    "recovery needs a fresh expected revision",
+                ));
+            }
+            let r = record_mut(&mut c, id)?;
+            if r.reservations
+                .iter()
+                .any(|q| q.state == ReservationState::Owned)
+            {
+                return Err(error(
+                    "owner_live",
+                    "the owner is not proven gone; a user must revoke a live owner",
+                ));
+            }
+            if !r
+                .reservations
+                .iter()
+                .any(|q| matches!(q.state, ReservationState::NeedsAttention { .. }))
+            {
+                return Err(error(
+                    "nothing_to_recover",
+                    "no stale owner is waiting for recovery",
+                ));
+            }
+            for q in &mut r.reservations {
+                if matches!(q.state, ReservationState::NeedsAttention { .. }) {
+                    q.state = ReservationState::Revoked {
+                        reason: why.clone(),
+                    };
+                    q.terminal_at = Some(ctx.clock.unix_millis);
+                    q.acquisition_pending = false
+                }
+            }
+            if r.clearance_required {
+                r.clearance_required = false;
+                r.gate = ResourceGate::Open;
+            }
+            promote(r, ctx)?;
+            resource_id = Some(id.clone());
+        }
         ResourceCommand::ReconcileInvocation { agent, evidence } => {
             if !matches!(ctx.actor, ResourceActor::System) {
                 return Err(error(

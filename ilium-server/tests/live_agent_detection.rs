@@ -2264,3 +2264,105 @@ async fn unopened_claude_with_truncated_custom_footer_stays_idle_and_refreshes_o
         .unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
+
+/// A turn that starts by itself (goal continuation, background-task
+/// notification) sends no keystroke, so only its PTY output can tell the
+/// server the idle, unfocused agent became active. With a 600 s idle interval
+/// the agent tier still caps at 15 s, so the wake must beat that ceiling by a
+/// wide margin to count.
+#[tokio::test]
+async fn idle_unfocused_agent_that_starts_a_turn_by_itself_is_seen_working_quickly() {
+    let fake_bin_dir = tempfile::tempdir().expect("isolated fixture directory");
+    let start_marker = fake_bin_dir.path().join("start-marker");
+    let codex = install(
+        fake_bin_dir.path(),
+        "codex",
+        &FixtureBehavior::IdleThenWorkingOnMarker {
+            marker_path: start_marker.clone(),
+        },
+    );
+    let session = "self-started-turn-wake";
+    let server = TestServer::start_with_detection_config(
+        session,
+        DetectionConfig {
+            working_poll_interval: Duration::from_secs(10),
+            idle_poll_interval: Duration::from_secs(600),
+            auto_answer_interstitial_prompts: true,
+        },
+    )
+    .await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session.to_string(),
+            hello: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            request_id: 0,
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(codex.path.to_string_lossy().to_string()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let ServerEvent::TreeSnapshot(tree) =
+        expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::TreeSnapshot(_))
+        })
+        .await
+    else {
+        unreachable!("tree snapshot predicate");
+    };
+    let pane_id = first_launch_project_pane(&tree);
+    // Deliberately never focused: the pane sits in the slow tier.
+    let is_turn = |event: &ServerEvent, wanted: ilium_core::AgentTurn| {
+        matches!(
+            event,
+            ServerEvent::PaneDetectedStateChanged { pane_id: changed, status, .. }
+                if *changed == pane_id
+                    && matches!(status, PaneStatus::Agent(agent) if agent.turn == wanted)
+        )
+    };
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        is_turn(event, ilium_core::AgentTurn::Idle)
+    })
+    .await;
+
+    std::fs::write(&start_marker, b"go").expect("start the self-started turn");
+    let started = std::time::Instant::now();
+    let mut timeline = Vec::new();
+    let seen_working = tokio::time::timeout(WAIT_TIMEOUT, async {
+        loop {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("live background detection event");
+            if let ServerEvent::PaneDetectedStateChanged {
+                pane_id: changed,
+                status,
+                ..
+            } = &event
+            {
+                if *changed == pane_id {
+                    timeline.push(format!("{:?}: {status:?}", started.elapsed()));
+                    if is_turn(&event, ilium_core::AgentTurn::Working) {
+                        return started.elapsed();
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("never seen Working; state changes: {timeline:#?}"));
+    assert!(
+        seen_working < Duration::from_secs(5),
+        "a self-started turn took {seen_working:?} to show as Working; state changes: {timeline:#?}"
+    );
+}

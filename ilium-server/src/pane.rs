@@ -6,6 +6,7 @@
 //! and for other attached clients to know what's open).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::{
@@ -410,6 +411,12 @@ pub struct TerminalPaneRuntime {
     /// Latest manual Enter eligible for a provider transcript correction.
     pub prompt_transcript_epoch: Option<PromptTranscriptEpoch>,
     pub session_process_started_at_unix_seconds: Option<u64>,
+    pub session_process_identity_inode: Option<u64>,
+    /// Revisit Claude session evidence periodically without tying I/O to every screen refresh.
+    pub next_claude_session_recheck: Instant,
+    /// Held while the session binding is cached, so PID reuse cannot recreate
+    /// ownership even if the replacement has the same kernel start tick.
+    pub session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -488,6 +495,8 @@ impl TerminalPaneRuntime {
                 client_focused: false,
                 last_forced: None,
                 request_generation: 0,
+                wake_on_output: false,
+                last_output_wake: None,
                 identity_system_generation: None,
                 cached_identity: None,
                 cached_screen_classification: None,
@@ -511,6 +520,9 @@ impl TerminalPaneRuntime {
             legacy_prompt_fallback_blocked: false,
             prompt_transcript_epoch: None,
             session_process_started_at_unix_seconds: None,
+            session_process_identity_inode: None,
+            next_claude_session_recheck: Instant::now(),
+            session_process_identity: None,
             session_process_id: None,
             session_transcript_path: None,
             auto_answer_attempt: None,
@@ -1344,6 +1356,13 @@ pub struct DetectionSchedule {
     /// coalesced by the debounce window. A detection pass captures this value
     /// and cannot overwrite a newer request with its stale deadline/status.
     pub request_generation: u64,
+    /// Set by the detection loop while this pane holds an agent that is not
+    /// mid-turn and is not focused, i.e. while it sits in the slow idle tier.
+    /// Only then does PTY output wake the pane early (see
+    /// `crate::detection::wake_for_output`).
+    pub wake_on_output: bool,
+    /// Start of the current output-wake spacing window.
+    pub last_output_wake: Option<Instant>,
     /// Process identity result associated with one refreshed `System` table.
     pub identity_system_generation: Option<u64>,
     pub cached_identity: Option<ilium_detect::AgentIdentity>,
