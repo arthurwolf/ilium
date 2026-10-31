@@ -594,7 +594,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('--packages linux-packages', vm['run'])
         self.assertIn('--native-directory native-linux', vm['run'])
         self.assertIn('--arch x86_64', vm['run'])
-        self.assertIn('--accelerator tcg', vm['run'])
+        self.assertIn('--accelerator "$accelerator"', vm['run'])
         self.assertIn('--audit-report native-linux/native-audit.json', vm['run'])
         self.assertIn('--workspace Cargo.toml', vm['run'])
         self.assertIn('--manifest release/targets.toml', vm['run'])

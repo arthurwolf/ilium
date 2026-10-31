@@ -137,12 +137,19 @@ jobs:
         done
     - name: Execute every declared native Linux sandbox case
       run: python release/scripts/native_sandbox_runner.py --artifact-directory native-linux/evidence --helper native-linux/candidate/ilium-animation-helper --workspace Cargo.toml --output "$RUNNER_TEMP/native-sandbox"
+    - name: Select the VM accelerator # Software emulation is too slow for the animation helper deadline, so use hardware acceleration when the runner exposes it.
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+        sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+        accelerator=tcg; if [ -w /dev/kvm ]; then accelerator=kvm; fi
+        echo "VM accelerator: $accelerator"
+        echo "accelerator=$accelerator" >> "$GITHUB_ENV"
     - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
       run: 'set -o pipefail
 
         mkdir -p "$RUNNER_TEMP/package-smoke-vm"
 
-        python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
+        python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator "$accelerator" | tee package-vm.jsonl
 
         '
     - name: Qualify a fresh direct tarball installation and retire its owned process boundary
