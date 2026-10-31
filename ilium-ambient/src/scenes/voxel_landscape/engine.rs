@@ -227,8 +227,15 @@ impl VoxelLandscapeScene {
                                     )
                                 }) {
                                     stream_session = None;
-                                    stream_session = Some(GeneratedViewportSession::open(
+                                    let plan = horizon_plan(
+                                        &worker_settings,
                                         request.region,
+                                        request.time,
+                                        scale,
+                                        request.size,
+                                    )?;
+                                    stream_session = Some(GeneratedViewportSession::open_plan(
+                                        plan,
                                         scale,
                                         request.size,
                                         &resolved,
@@ -449,8 +456,17 @@ impl VoxelLandscapeScene {
     fn request(&mut self, region: Region, size: [usize; 2], camera: [f64; 3], time: Duration) {
         let scale = Self::scale(&self.settings);
         let stream = requires_streamed_viewport(region, scale, size);
+        // A streamed session spans the whole pan horizon, so a region that only
+        // drifted (camera height follows the terrain) must not cancel a session
+        // that is still opening: it would never finish.
+        let same_target = self.requested == Some((region, size))
+            || (stream
+                && self.stream_pending
+                && self
+                    .requested
+                    .is_some_and(|(_, requested_size)| requested_size == size));
         if self.worker.is_none()
-            || (self.requested == Some((region, size))
+            || (same_target
                 && (!stream
                     || self.stream_pending
                     || self.streamed.as_ref().is_some_and(|snapshot| {
@@ -468,7 +484,12 @@ impl VoxelLandscapeScene {
             }
             self.prepared_request = None;
         }
-        if self.streamed_request != Some((region, size)) {
+        // Keep showing the held streamed frame while a newer one is prepared.
+        let keep_streamed = stream
+            && self
+                .streamed_request
+                .is_some_and(|(_, shown_size)| shown_size == size);
+        if !keep_streamed && self.streamed_request != Some((region, size)) {
             self.streamed = None;
             self.streamed_request = None;
         }
@@ -487,6 +508,36 @@ impl VoxelLandscapeScene {
         self.requested = Some((region, size));
         self.stream_pending = stream;
     }
+}
+
+/// How far ahead of the current camera a streamed session pre-generates, so
+/// one session serves the slow pan for minutes instead of being reopened
+/// whenever the region (which follows terrain height) shifts.
+const STREAM_HORIZON: Duration = Duration::from_secs(600);
+
+/// Tiles for the current region and for the cameras along the pan horizon,
+/// falling back to the current region alone when the wider plan exceeds the
+/// tile budget.
+fn horizon_plan(
+    settings: &VoxelLandscapeSettings,
+    region: Region,
+    time: Duration,
+    scale: f32,
+    size: [usize; 2],
+) -> Result<surface_viewport::TilePlan> {
+    let own_camera = [surface_viewport::relative_camera(region)];
+    let mut grid = region;
+    let mut cameras = own_camera.to_vec();
+    for step in 1..=20u32 {
+        let camera = VoxelLandscapeScene::camera(settings, time + STREAM_HORIZON * step / 20);
+        let Ok(ahead) = surface_viewport::region(camera, scale, size) else {
+            continue;
+        };
+        grid = surface_viewport::union_region(grid, ahead);
+        cameras.push(surface_viewport::relative_camera(ahead));
+    }
+    surface_viewport::plan_tiles(grid, &cameras, scale, size)
+        .or_else(|_| surface_viewport::plan_tiles(region, &own_camera, scale, size))
 }
 
 fn requires_streamed_viewport(region: Region, scale: f32, size: [usize; 2]) -> bool {
@@ -510,7 +561,10 @@ impl Scene for VoxelLandscapeScene {
             }
         };
         self.request(region, size, camera, frame.time);
-        if self.streamed_request == Some((region, size)) {
+        if self
+            .streamed_request
+            .is_some_and(|(_, shown_size)| shown_size == size)
+        {
             if let Some(streamed) = &self.streamed {
                 color::composite_selected(
                     &streamed.colors,
@@ -738,6 +792,48 @@ mod tests {
             .unwrap();
         assert!(report.shutdown_complete);
         assert_eq!(report.remaining_workers, 0);
+    }
+
+    #[test]
+    fn pending_stream_survives_region_drift_and_held_frame_is_kept() {
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
+        let settings = VoxelLandscapeSettings {
+            zoom_percent: 25,
+            ..Default::default()
+        };
+        let env = SceneEnv::for_test(
+            std::env::temp_dir().join("ilium-viewport-drift-test"),
+            resources,
+        );
+        let mut scene = VoxelLandscapeScene::new(&settings, &env);
+        let region = Region {
+            minimum: [0, 0],
+            maximum: [96, 96],
+        };
+        let drifted = Region {
+            minimum: [0, 0],
+            maximum: [112, 96],
+        };
+        scene.request(region, [160, 96], [64.0, 64.0, 80.0], Duration::ZERO);
+        let first = scene.revision.load(Ordering::Acquire);
+        // The terrain-following camera height shifted the region while the
+        // session was still opening: the open must not be cancelled.
+        scene.request(
+            drifted,
+            [160, 96],
+            [65.0, 64.0, 96.0],
+            Duration::from_millis(83),
+        );
+        assert_eq!(scene.revision.load(Ordering::Acquire), first);
+        // A resize is a different target and does supersede it.
+        scene.request(
+            drifted,
+            [200, 96],
+            [65.0, 64.0, 96.0],
+            Duration::from_millis(166),
+        );
+        assert_eq!(scene.revision.load(Ordering::Acquire), first + 1);
+        finish_scene(scene, &mut execution);
     }
 
     #[test]
