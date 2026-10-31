@@ -312,7 +312,7 @@ class native_smoke_tests(unittest.TestCase):  # Native actions are represented e
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)  # Require the fixture itself to execute successfully.
             rows = (base / 'capture').read_text().splitlines()  # Inspect actual environment/argv expansion rather than source substrings.
             self.assertEqual(rows[:4], [str(base / 'private-install'), fixed['HOME'], fixed['XDG_DATA_HOME'], fixed['XDG_RUNTIME_DIR']])  # Pin launcher installation and session context.
-            self.assertEqual(rows[4:8], ['run', '--user', '--arch=x86_64', '--branch=' + smoke.packages.FLATPAK_BRANCH])  # Select the exact private native application variant.
+            self.assertEqual(rows[4:9], ['run', '--user', '--no-documents-portal', '--arch=x86_64', '--branch=' + smoke.packages.FLATPAK_BRANCH])  # Select the exact private native application variant.
             for key in keys:  # Every intended client state value must cross the sandbox boundary explicitly.
                 self.assertIn('--env=' + key + '=' + environment[key], rows)  # Preserve lifecycle values while fixing launcher-side environment.
             self.assertEqual(rows[-4:], [smoke.packages.APP_ID, '--cwd', '/fixture-project', 'ls'])  # Preserve the exact application and original command arguments.

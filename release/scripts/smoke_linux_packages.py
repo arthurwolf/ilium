@@ -928,7 +928,7 @@ def flatpak_wrapper(user_directory, host_environment, architecture, command=None
     fixed += [key + '=' + host_environment[key] for key in ('HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'TMPDIR') if key in host_environment]  # Keep launcher-side state stable and owned.
     if host_environment.get('XDG_RUNTIME_DIR'):  # Preserve the real session runtime needed by Flatpak itself.
         fixed.append('XDG_RUNTIME_DIR=' + host_environment['XDG_RUNTIME_DIR'])  # Do not replace the launcher's session context with lifecycle scratch.
-    fixed += ['flatpak', 'run', '--user', '--arch=' + architecture, '--branch=' + packages.FLATPAK_BRANCH]  # Exclude same-ID system or other-architecture applications.
+    fixed += ['flatpak', 'run', '--user', '--no-documents-portal', '--arch=' + architecture, '--branch=' + packages.FLATPAK_BRANCH]  # Exclude same-ID system or other-architecture applications.
     if command is not None:  # The client exercises the metadata's default command.
         fixed.append('--command=' + command)  # Server-version readback uses the documented command override.
     return '#!/bin/sh\n' + 'exec ' + shlex.join(fixed) + ' --env=HOME="$HOME" --env=XDG_DATA_HOME="$XDG_DATA_HOME" --env=XDG_CONFIG_HOME="$XDG_CONFIG_HOME" --env=XDG_CACHE_HOME="$XDG_CACHE_HOME" --env=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" --env=TMPDIR="$TMPDIR" ' + shlex.quote(packages.APP_ID) + ' "$@" # Run with fixed installation identity and isolated application state.\n'  # Shell expansion captures lifecycle state before env fixes the launcher.
