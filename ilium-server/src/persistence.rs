@@ -778,12 +778,37 @@ fn snapshot_terminal_origin(runtime: &crate::pane::TerminalPaneRuntime) -> Termi
     if let Some(original) = &runtime.deferred_workspace_origin {
         return original.clone();
     }
+    if matches!(runtime.origin, TerminalOrigin::PlainShell) {
+        return plain_shell_resume_origin(
+            runtime.session_id.as_deref(),
+            runtime.session_agent_class.as_ref(),
+            runtime.is_session_identity_invalidated,
+        )
+        .unwrap_or(TerminalOrigin::PlainShell);
+    }
     snapshot_origin_from_identity(
         &runtime.origin,
         runtime.session_id.as_deref(),
         runtime.pending_generated_session_id.as_deref(),
         runtime.is_session_identity_invalidated,
     )
+}
+
+/// A shell pane in which the user started a built-in agent CLI has no launch
+/// command to rewrite, but detection has resolved that CLI's session. Save the
+/// provider's resume command so a restore reopens the same conversation.
+fn plain_shell_resume_origin(
+    session_id: Option<&str>,
+    session_agent_class: Option<&ilium_core::AgentClass>,
+    is_session_identity_invalidated: bool,
+) -> Option<TerminalOrigin> {
+    if is_session_identity_invalidated {
+        return None;
+    }
+    let provider = session_agent_class?.provider()?;
+    Some(TerminalOrigin::Command(
+        provider.resume_command(&shell_quote(session_id?)),
+    ))
 }
 
 /// Rebuilds only commands ilium itself owns as agent launch/resume forms.
@@ -2653,6 +2678,36 @@ root:
             command_for(verified_pane),
             format!("codex resume '{session_id}'"),
             "an earlier unverified duplicate must not block a later pane's verified resume"
+        );
+    }
+
+    #[test]
+    fn plain_shell_with_resolved_agent_session_saves_resume_command() {
+        let session_id = "55555555-5555-4555-8555-555555555555";
+        let claude = ilium_core::AgentClass::Claude;
+        let codex = ilium_core::AgentClass::Codex;
+        assert_eq!(
+            plain_shell_resume_origin(Some(session_id), Some(&claude), false),
+            Some(TerminalOrigin::Command(format!(
+                "claude --resume {}",
+                shell_quote(session_id)
+            )))
+        );
+        assert_eq!(
+            plain_shell_resume_origin(Some(session_id), Some(&codex), false),
+            Some(TerminalOrigin::Command(format!(
+                "codex resume {}",
+                shell_quote(session_id)
+            )))
+        );
+        assert_eq!(plain_shell_resume_origin(None, Some(&claude), false), None);
+        assert_eq!(
+            plain_shell_resume_origin(Some(session_id), None, false),
+            None
+        );
+        assert_eq!(
+            plain_shell_resume_origin(Some(session_id), Some(&claude), true),
+            None
         );
     }
 
