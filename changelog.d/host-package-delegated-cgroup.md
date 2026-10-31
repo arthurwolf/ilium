@@ -7,3 +7,4 @@
 - Fixed the AppImage host check failing on the byte-check lines its wrapper wrote to stderr, and the Flatpak host check running its server outside the delegated cgroup.
 - Fixed the Flatpak host check failing because its throwaway D-Bus session could not mount the document portal; the check now runs `flatpak run` with `--no-documents-portal`.
 - Fixed the Flatpak host check failing on the D-Bus daemon's service-activation log lines; they are now shown only when the probe itself fails.
+- Fixed the installed-animation gate rejecting a Flatpak client that reports its host deployment path instead of `/app/lib/ilium`; the reported path must still be inside the audited payload with matching hashes.

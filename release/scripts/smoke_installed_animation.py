@@ -132,8 +132,8 @@ def validate_receipt(receipt: dict, *, target: dict, tag: str, package_format: s
     catalogue, renders = parse_probe_output(output)
     client_name, helper_name = target['executables'][0], target['executables'][2]
     require(catalogue == receipt['catalogue'] and renders == receipt['renders']
-            and catalogue.get('client_path') == str(executable_root / client_name)
-            and catalogue.get('helper_path') == str(executable_root / helper_name)
+            and catalogue.get('client_path') in {str(root / client_name) for root in (executable_root, installed_root)}
+            and catalogue.get('helper_path') in {str(root / helper_name) for root in (executable_root, installed_root)}
             and catalogue.get('client_sha256') == audit['files'][client_name]
             and catalogue.get('helper_sha256') == audit['files'][helper_name],
             'installed animation process or sibling helper differs from audited payload')
