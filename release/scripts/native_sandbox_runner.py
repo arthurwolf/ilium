@@ -127,6 +127,10 @@ def main(argv=None):
         if (sha(binary) != artifact.get('sha256') or sha(helper) != artifact.get('helper_sha256')
                 or sha(source) != artifact.get('source_sha256')):
             raise ValueError('native sandbox executable, helper or test source checksum differs')
+        # Artifact download drops the execute bit; the checksums above already
+        # prove these are the compiled files, so restore it before the check.
+        for executable in (binary, helper):
+            executable.chmod(executable.stat().st_mode | 0o111)
         if not os.access(binary, os.X_OK) or not os.access(helper, os.X_OK):
             raise ValueError('native sandbox input is not executable')
         receipt.update(target=artifact['target'], tag=artifact['tag'],
