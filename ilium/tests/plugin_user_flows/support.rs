@@ -115,6 +115,7 @@ pub fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
 }
 
 /// The permission bits (`0o777` mask) of a path.
+#[cfg(unix)]
 pub fn file_mode(path: &Path) -> u32 {
     #[cfg(unix)]
     {
@@ -128,6 +129,11 @@ pub fn file_mode(path: &Path) -> u32 {
         let _ = path;
         0o600
     }
+}
+
+#[cfg(not(unix))]
+pub fn file_mode(_path: &Path) -> u32 {
+    0
 }
 
 /// The 30 core plugin ids named by the table of the core plugins page.
