@@ -8,13 +8,13 @@
 
 ## Quick start
 
-Linux x86_64 preview target: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1). The six pinned package downloads and SHA256SUMS are usable only after this immutable prerelease is published and its public hashes are verified. Until then, [build from source](src/docs/building-from-source.md). This preview never activates `latest`; full cross-platform v0.1.1 remains reserved.
+Linux x86_64 preview: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1) provides six packages and SHA256SUMS. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-**Not ready for this preview:** hosted installers, Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
+**Not yet available for this preview:** hosted installers, Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
 
-Plugin code is present for future integration and is not ready for use.
+Plugin code is present for future integration and is not yet available for use.
 
-**Hosted installers are not ready for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.1.
+**Hosted installers are not yet available for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.1.
 
 Linux and macOS:
 
@@ -28,21 +28,21 @@ Windows PowerShell:
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-Windows downloads are **not ready yet**: per-user [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe), [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi), and [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip).
+Windows downloads are **not yet available**: per-user setup `.exe`, `.msi`, and ZIP.
 
-Direct downloads (Linux x86_64 preview target; other systems not ready):
+Direct downloads (Linux x86_64 preview; other systems not yet available):
 
 | System | Downloads / availability |
 | --- | --- |
 | Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) |
-| Linux ARM64 | **Not ready** |
-| macOS Apple Silicon | **Not ready** |
-| macOS Intel | **Not ready** |
-| Windows x86_64 | **Not ready** |
+| Linux ARM64 | **Not yet available** |
+| macOS Apple Silicon | **Not yet available** |
+| macOS Intel | **Not yet available** |
+| Windows x86_64 | **Not yet available** |
 
-The preview checksum file [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS) has the same publication and public-verification prerequisite as the six packages. Details: [Installation](src/docs/installation.md).
+Verify packages using the preview checksum file [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS). Details: [Installation](src/docs/installation.md).
 
-The [GitHub Packages release bundle](https://github.com/users/arthurwolf/packages/container/package/ilium-release) is **not ready yet**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
+The GitHub Packages release bundle is **not yet available**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
 
 Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package; the hosted installer is not available.
 

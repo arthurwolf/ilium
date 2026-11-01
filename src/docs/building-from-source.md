@@ -2,7 +2,7 @@ For local background commands on aquarelle, apply the scheduling policy in `~/.c
 
 # Building from source
 
-This page shows how to compile Ilium on Linux, macOS and Windows, install the result with `make install`, and place the bundled animations so they are discovered. Building is optional when [release packages](installation.md) are available, and is the only route until a release is published.
+This page shows how to compile Ilium on Linux, macOS and Windows, install the result with `make install`, and place the bundled animations so they are discovered. Building is optional when [release packages](installation.md) are available, and remains an option for platforms without published packages.
 
 ## Contents
 
