@@ -790,7 +790,7 @@ class WorkflowTests(unittest.TestCase):
             permissions = job.get('permissions', {'contents': 'read'})
             if name == 'attest':
                 self.assertEqual(permissions, {'contents': 'read', 'id-token': 'write', 'attestations': 'write'})
-            elif name in ('draft', 'publish', 'latest', 'recover'):
+            elif name in ('draft', 'publish', 'latest', 'recover', 'publish-linux-preview'):
                 self.assertEqual(permissions, {'contents': 'write'})
             elif name == 'ghcr-package':
                 self.assertEqual(permissions, {'contents': 'read', 'packages': 'write'})

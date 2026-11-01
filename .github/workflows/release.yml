@@ -1,5 +1,5 @@
 # Action commits read back from official GitHub tag refs on 2026-09-29.
-# workflow_dispatch is strictly nonpublishing. Automatic native receipts replace
+# workflow_dispatch is strictly nonpublishing except the explicit Linux preview publish input. Automatic native receipts replace
 # manual qualification. Latest activation precedes literal default-command tests
 # because those commands resolve /releases/latest; five default-preview installs
 # gate production deployment; five literal production commands gate completion.
@@ -15,6 +15,11 @@ name: Native release and installation
         description: Optional tag matching workspace version; dispatch never publishes
         required: false
         type: string
+      publish_linux_preview:
+        description: Publish the verified Linux preview prerelease (only with release_tag v0.1.1-linux.1)
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -36,6 +41,34 @@ jobs:
     uses: ./.github/workflows/linux-preview.yml
     with:
       release_tag: ${{ inputs.release_tag }}
+  publish-linux-preview:
+    # Dry-run unless publish_linux_preview is set; publication needs every qualification job green.
+    needs:
+    - linux-preview
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.1'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-x86_64-unknown-linux-gnu
+        path: preview-native
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: linux-packages-x86_64
+        path: preview-packages
+    - name: Verify and publish the Linux preview prerelease
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PUBLISH_LINUX_PREVIEW: ${{ inputs.publish_linux_preview && 'publish' || 'dry-run' }}
+      run: |
+        set -o pipefail
+        python release/scripts/publish_linux_preview.py "$PUBLISH_LINUX_PREVIEW" --tag "${{ inputs.release_tag }}" --commit "${{ github.sha }}" --native-directory preview-native --packages-directory preview-packages --work "$RUNNER_TEMP/preview-publish"
   source:
     if: github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.1'
     runs-on: ubuntu-22.04
