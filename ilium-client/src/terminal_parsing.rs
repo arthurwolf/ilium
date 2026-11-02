@@ -1022,11 +1022,13 @@ impl TerminalParsing {
     pub(crate) fn purge_released_commands(&self) {
         let mut purged: Vec<Command> = Vec::new();
         {
-            let mut queue = self
-                .shared
-                .queue
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
+            // The client must never block its event loop behind the parser.
+            // Retiring claims remain charged, so a later collection can retry.
+            let mut queue = match self.shared.queue.try_lock() {
+                Ok(queue) => queue,
+                Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => return,
+            };
             let mut index = 0;
             while index < queue.commands.len() {
                 if queue.commands[index].target.alive.load(Ordering::Acquire) {
