@@ -63,6 +63,11 @@ def sha(path):
     return value.hexdigest()
 
 
+def write_release_text(path, content):
+    """Write portable release metadata without platform newline conversion."""
+    Path(path).write_bytes(content.encode('ascii'))
+
+
 def retain_native_sandbox_artifact(cargo_log, output_directory):
     """Retain compilation evidence; executing native resource tests is separate."""
     artifacts = []
@@ -807,8 +812,8 @@ def aggregate(arguments):
         macos_bindings[row['rust_target']] = binding
     for name in sorted(macos_hashes):
         shutil.copyfile(macos_directory / name, output / name)
-    (output / 'SHA256SUMS').write_text(''.join(archives[name] + '  ' + name + '\n' for name in sorted(archives)), encoding='ascii')
-    (output / 'VERSION').write_text(version + '\n', encoding='ascii')
+    write_release_text(output / 'SHA256SUMS', ''.join(archives[name] + '  ' + name + '\n' for name in sorted(archives)))
+    write_release_text(output / 'VERSION', version + '\n')
     for name in ('install.sh', 'install.ps1'):
         shutil.copyfile(root / 'release' / name, output / name)
     import smoke_installed_animation as animation_gate

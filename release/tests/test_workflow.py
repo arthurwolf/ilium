@@ -879,7 +879,7 @@ class PipelineTests(unittest.TestCase):
             run.assert_not_called()
     def test_candidate_rejects_version_file_different_from_workspace(self):
         (self.root / 'candidate.json').write_text('{"tag":"v0.1.1"}')
-        (self.root / 'VERSION').write_text('0.1.0\n')
+        (self.root / 'VERSION').write_bytes(b'0.1.0\n')
         with patch.object(pipeline.release_tool, 'load_targets', return_value=self.targets), \
              patch.object(pipeline.release_tool, 'workspace_version', return_value='0.1.1'):
             with self.assertRaisesRegex(ValueError, 'candidate VERSION differs'):
@@ -888,7 +888,7 @@ class PipelineTests(unittest.TestCase):
     def test_candidate_rejects_a_different_checkout_commit(self):
         (self.root / 'candidate.json').write_text(json.dumps(
             {'schema': 1, 'tag': 'v0.1.1', 'commit': 'a' * 40}))
-        (self.root / 'VERSION').write_text('0.1.1\n')
+        (self.root / 'VERSION').write_bytes(b'0.1.1\n')
         with (patch.object(pipeline.release_tool, 'load_targets', return_value=self.targets),
               patch.object(pipeline.release_tool, 'workspace_version', return_value='0.1.1'),
               patch.object(pipeline, 'git_identity', return_value='b' * 40)):
