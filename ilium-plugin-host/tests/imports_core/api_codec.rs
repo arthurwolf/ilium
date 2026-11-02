@@ -102,7 +102,7 @@ fn codec_inflate_output_exactly_at_max_output_is_returned() {
 
 /// REQ: WIT:ilium:host/codec.inflate
 #[test]
-fn codec_inflate_output_one_byte_over_max_output_invalid_argument() {
+fn codec_inflate_output_one_byte_over_max_output_quota_exceeded() {
     let mut fixture = fixture_t2(&[]);
     let packed = expect_ok(
         fixture
@@ -111,7 +111,7 @@ fn codec_inflate_output_one_byte_over_max_output_invalid_argument() {
     );
     assert_eq!(
         expect_code(fixture.codec().inflate(Compression::Zlib, packed, 1000)),
-        ErrorCode::InvalidArgument
+        ErrorCode::QuotaExceeded
     );
 }
 
@@ -141,6 +141,76 @@ fn codec_inflate_truncated_stream_invalid_argument() {
     packed.truncate(packed.len() / 2);
     assert_eq!(
         expect_code(fixture.codec().inflate(Compression::Gzip, packed, 100_000)),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_rejects_every_truncated_stream_and_trailing_bytes() {
+    let mut fixture = fixture_t2(&[]);
+    for format in ALL {
+        let packed = expect_ok(
+            fixture
+                .codec()
+                .deflate(format, b"bounded stream".to_vec(), 6),
+        );
+        for end in 0..packed.len() {
+            assert_eq!(
+                expect_code(fixture.codec().inflate(format, packed[..end].to_vec(), 14)),
+                ErrorCode::InvalidArgument,
+                "{format:?} truncated at {end}"
+            );
+        }
+        let mut trailing = packed;
+        trailing.push(0);
+        assert_eq!(
+            expect_code(fixture.codec().inflate(format, trailing, 14)),
+            ErrorCode::InvalidArgument,
+            "{format:?} trailing byte"
+        );
+    }
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_zero_limit_accepts_empty_stream_and_rejects_output() {
+    let mut fixture = fixture_t2(&[]);
+    for format in ALL {
+        let empty = expect_ok(fixture.codec().deflate(format, Vec::new(), 6));
+        assert!(expect_ok(fixture.codec().inflate(format, empty, 0)).is_empty());
+        let nonempty = expect_ok(fixture.codec().deflate(format, vec![1], 6));
+        assert_eq!(
+            expect_code(fixture.codec().inflate(format, nonempty, 0)),
+            ErrorCode::QuotaExceeded
+        );
+    }
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_validates_checksums_even_at_the_output_limit() {
+    let mut fixture = fixture_t2(&[]);
+    for format in [Compression::Zlib, Compression::Gzip] {
+        let mut packed = expect_ok(fixture.codec().deflate(format, vec![42; 8192], 6));
+        let last = packed.len() - 1;
+        packed[last] ^= 1;
+        assert_eq!(
+            expect_code(fixture.codec().inflate(format, packed, 8192)),
+            ErrorCode::InvalidArgument,
+            "{format:?} corrupt trailer"
+        );
+    }
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_rejects_a_nonfinal_empty_deflate_block() {
+    let mut fixture = fixture_t2(&[]);
+    // A complete empty stored block with BFINAL clear requires a following block.
+    let raw = vec![0x00, 0x00, 0x00, 0xff, 0xff];
+    assert_eq!(
+        expect_code(fixture.codec().inflate(Compression::DeflateRaw, raw, 0)),
         ErrorCode::InvalidArgument
     );
 }

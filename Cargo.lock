@@ -3766,6 +3766,7 @@ version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
+ "flate2",
  "ilium-execution",
  "ilium-logging",
  "ilium-platform",
