@@ -1245,7 +1245,13 @@ fn pkg_274_reinstall_rewrites_the_store_folder_from_the_package() {
         permissions.set_mode(permissions.mode() | 0o200);
     }
     #[cfg(windows)]
-    permissions.set_readonly(false);
+    #[allow(
+        clippy::permissions_set_readonly_false,
+        reason = "Windows clears the read-only attribute without changing Unix mode bits"
+    )]
+    {
+        permissions.set_readonly(false);
+    }
     std::fs::set_permissions(&wasm, permissions).expect("chmod");
     std::fs::write(&wasm, b"damaged").expect("damage");
     let out = fx.install_with(&spec, &["--reinstall"]);

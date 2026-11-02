@@ -106,6 +106,10 @@ fn tamper_installed(fixture: &CliFixture) {
         .expect("installed server.wasm");
     ilium_platform::secure_fs::restrict_file_to_owner(&path).expect("owner permissions");
     #[cfg(windows)]
+    #[allow(
+        clippy::permissions_set_readonly_false,
+        reason = "Windows clears the read-only attribute without changing Unix mode bits"
+    )]
     {
         let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
         permissions.set_readonly(false);
