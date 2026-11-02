@@ -171,6 +171,8 @@ Custom agents are profiles, not additional detection signatures. A stable profil
 
 [Detailed design](architecture/detection-design.md).
 
+Custom tree status icons use ordered client-side rules over shared pane facts and revision-fenced screen-match observations from the server; the detection design describes the boundary.
+
 ## Scaling to hundreds of agents
 
 [Detailed design](architecture/scaling-to-hundreds-of-agents.md).

@@ -1,6 +1,6 @@
 # Agent monitoring
 
-Ilium watches every terminal pane for an AI coding agent, works out which agent it is and what that agent is doing, and shows the answer in the project tree. This page explains how identity and activity are detected, what each status indicator means, how Normal and Attention display modes differ, how the `/goal` badge, progress footers and reserved terminal space behave, how to recover work when an agent stops, and which agent CLIs are supported. Detection is read-only: Ilium observes processes and the visible screen and never controls the agent.
+Ilium watches every terminal pane for an AI coding agent, works out which agent it is and what that agent is doing, and shows the answer in the project tree. This page explains detection, status indicators, the Normal, Attention and Custom display modes, goals and progress monitors, and recovery when an agent stops. Detection is read-only: Ilium observes processes and the visible screen and never controls the agent.
 
 Contents:
 
@@ -9,6 +9,7 @@ Contents:
 - [The three icon slots in the tree](#the-three-icon-slots-in-the-tree)
 - [Status indicators and their defaults](#status-indicators-and-their-defaults)
 - [Normal mode and Attention mode](#normal-mode-and-attention-mode)
+- [Custom status rules](#custom-status-rules)
 - [The `/goal` badge](#the-goal-badge)
 - [Progress monitors and progress displays](#progress-monitors-and-progress-displays)
 - [Reserved terminal space](#reserved-terminal-space)
@@ -160,7 +161,7 @@ A monitored task's progress icon is drawn from a family of frames. **Settings ->
 
 ## Normal mode and Attention mode
 
-**Settings -> Agent Monitoring -> Display mode** (`[ui].agent_monitoring_mode`, `"normal"` or `"attention"`; default `normal`).
+**Settings -> Agent Monitoring -> Display mode** (`[ui].agent_monitoring_mode`, `"normal"`, `"attention"` or `"custom"`; default `normal`).
 
 - **Normal** shows the objective and now slots side by side.
 - **Attention** shows one status icon: the highest-priority signal. Agent identity stays separate. The underlying evidence is unchanged, so a paused goal that is also waiting for approval is still paused; Attention just shows the approval.
@@ -188,6 +189,18 @@ When nothing in that list applies and the agent is simply working, Attention wou
 | `title_accent` | Title accent | No glyph; the title takes an accent colour and italics |
 
 Normal mode ignores this setting and always shows the working animation.
+
+## Custom status rules
+
+Select **Custom** in Agent Monitoring and open **Configure custom icons** to choose the status shown beside each agent. Custom displays one status icon, separate from the agent identity. Rules are global and are saved as you edit them; they apply to all projects.
+
+Rules are evaluated from top to bottom. The first enabled rule whose conditions match supplies the icon, so move a more specific rule above a broader one. Within a rule, NOT applies to one condition and AND binds more tightly than OR: `A OR B AND C` means `A OR (B AND C)`. A condition whose evidence is unavailable is unknown, not false; negating it does not make it match. The supplied defaults start with an independently designed set of rules. Reset restores those defaults after confirmation.
+
+Conditions can use detected agent and goal states, progress monitor and attention information, and other available pane facts. A screen regular expression can match text currently visible in the pane; it does not search scrollback. The server evaluates patterns against the visible screen and sends match results, not the screen text, for these observations. Rules accept up to 16 distinct screen patterns of at most 256 characters each. Invalid patterns cannot be saved. If the screen cannot be observed or exceeds the observation limit, the result is unknown until it can be observed again.
+
+For panes with multiple monitors, the selected monitored task and progress conditions refer to Ilium's representative monitor. Separate **any monitored task** and **any monitor has failed** conditions inspect all registered monitors; they are false when there are none. Conditions joined with AND are independent: two separate **any** conditions can be satisfied by different monitors.
+
+Each rule can select a static symbol, a Braille animation, an animation made from symbol frames, or frames driven by monitored progress. Colour and bold or dim styling are configurable. The application's motion setting also controls animated rule visuals. The editor offers Live tree and Demo tree previews; the latter uses example states rather than your agents. If no rule matches, the default rules configuration leaves the custom status slot empty.
 
 ## The `/goal` badge
 
@@ -269,7 +282,7 @@ To reclaim or change the space, turn a display off or lower its row limit in Set
 
 | Row | What it does |
 | --- | --- |
-| Display mode | Normal or Attention |
+| Display mode | Normal, Attention or Custom status rules |
 | Attention running indicator | What a quietly working agent shows in Attention mode |
 | Working poll interval | Seconds between checks while working or awaiting approval |
 | Idle poll interval | Seconds between checks while idle |
@@ -329,6 +342,8 @@ For a detected Claude Code or Codex pane, the second icon in the pane header ope
 
 The popover has four tabs: **Overview**, **Tokens**, **Activity** and **Prompts**. All data is parsed locally from the agent's own JSONL transcript on a low-priority worker thread; nothing is sent to the server or any network. Large transcripts are read incrementally. Dollar figures here appear only when the agent itself recorded them (Claude Code's own cost snapshot); the cost indicators described in [Agent cost](agent-cost.md) price tokens separately.
 
+Previously read statistics remain visible while the same session refreshes. Ilium also keeps a bounded private local cache of statistics and read positions, so it can resume reading after a restart or when an in-memory entry is discarded. The cache can include recent prompts. If the cache is unavailable or its transcript checks fail, Ilium reads the transcript again; figures may take longer to appear.
+
 ## Configuration reference
 
 ```toml
@@ -342,7 +357,7 @@ process_name = "myagent"
 agent_class  = "other"
 
 [ui]
-agent_monitoring_mode = "normal"          # or "attention"
+agent_monitoring_mode = "normal"          # or "attention" or "custom"
 attention_running_indicator = "icon"
 progress_max_lines = 4                    # 1 to 20
 completed_progress_hide_after_seconds = 60  # 0 = never hide

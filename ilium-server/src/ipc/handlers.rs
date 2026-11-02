@@ -233,6 +233,8 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Connection-owned subscriptions are intercepted by the reader.
+        ClientRequest::SetStatusScreenWatches { .. } => false,
         ClientRequest::Resource {
             request_id,
             request,

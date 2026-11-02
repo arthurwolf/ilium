@@ -25,6 +25,14 @@ enum SelectionReconciliation {
 /// there is one. State is always applied before the occurrence is returned.
 pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
     match event {
+        ServerEvent::StatusScreenObserved(observation) => {
+            if app.tree.get(observation.pane_id).is_some()
+                && app.custom_status_screen_observations.update(observation)
+            {
+                app.bump_tree_version();
+            }
+            None
+        }
         ServerEvent::PaneRecentActivity {
             pane_id,
             revision,
@@ -118,6 +126,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         } => {
             apply_tree_snapshot(app, tree);
             app.pane_detection_evidence = detection_evidence.into_iter().collect();
+            // A repair snapshot can replace pane state without a TreeSnapshot.
+            // Re-establish screen watches and fence observations from before it.
+            app.refresh_custom_status_screen_watches();
             None
         }
         ServerEvent::BlockingErrorsSnapshot { errors } => {
@@ -138,6 +149,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         ServerEvent::TreeSnapshot(tree) => {
             apply_tree_snapshot(app, tree);
+            app.refresh_custom_status_screen_watches();
             None
         }
         ServerEvent::PaneNodeChanged(pane) => {
@@ -458,6 +470,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 }
             }
             let changed = app.agent_session_ids.get(&pane_id) != Some(&session_id);
+            if app.agent_session_ids.contains_key(&pane_id) {
+                app.invalidate_last_prompt_transcript(pane_id, changed);
+            }
             match transcript_path {
                 Some(transcript_path) => {
                     app.agent_transcript_paths.insert(pane_id, transcript_path);
@@ -514,6 +529,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             title_generation,
         } => {
             let prompt_was_visible = app.shows_last_prompt_banner(pane_id);
+            app.invalidate_last_prompt_transcript(pane_id, true);
             app.session_goals.invalidate(pane_id);
             app.claude_goals.invalidate(pane_id);
             app.agent_title_generations
@@ -1251,6 +1267,49 @@ mod tests {
             Some("poll interval rejected")
         );
         assert!(!app.agent_detection_settings_pending);
+    }
+
+    #[test]
+    fn screen_observations_update_only_current_tree_panes_and_revisions() {
+        use ilium_core::status_rule_expression::{Condition, Observation, ScreenPattern, ScreenRegion};
+
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree.add_pane(group, "shell", PaneContentKind::Terminal).unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        let pattern = ScreenPattern { pattern: "error".into(), ignore_case: false, region: ScreenRegion::All };
+        let mut rules = ilium_core::status_rule_expression::default_rules();
+        let rule = rules.rules.iter_mut().find(|rule| rule.id == "screen-error-example").unwrap();
+        rule.enabled = true;
+        rule.any_of[0].all_of[0].condition = Condition::ScreenMatches(pattern.clone());
+        app.custom_status_rules = rules;
+        let (revision, watches) = app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
+        let observation = ilium_ipc::StatusScreenObservation {
+            pane_id, revision, screen_generation: 3, matched: vec![watches[0].id], unknown: vec![],
+        };
+        let before = app.tree_version;
+        apply(&mut app, ServerEvent::StatusScreenObserved(observation.clone()));
+        assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::True);
+        assert_ne!(app.tree_version, before);
+        let before_stale = app.tree_version;
+        apply(&mut app, ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
+            revision: revision.wrapping_sub(1), ..observation.clone()
+        }));
+        apply(&mut app, ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
+            pane_id: NodeId(u64::MAX), ..observation
+        }));
+        assert_eq!(app.tree_version, before_stale);
+        let repaired_tree = app.tree.clone();
+        apply(&mut app, ServerEvent::PaneStateSnapshot {
+            tree: repaired_tree,
+            detection_evidence: Vec::new(),
+        });
+        assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::Unknown);
+        apply(&mut app, ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
+            pane_id, revision, screen_generation: 4, matched: vec![watches[0].id], unknown: vec![],
+        }));
+        assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::Unknown);
     }
 
     #[test]
@@ -2437,6 +2496,7 @@ mod tests {
         );
         app.title_inference_attempts
             .insert((pane_id, "session-1".to_string()), 1);
+        app.record_last_prompt(pane_id, Some("previous session prompt"));
 
         apply(
             &mut app,
@@ -2453,6 +2513,7 @@ mod tests {
         assert!(!app
             .title_inference_attempts
             .contains_key(&(pane_id, "session-1".to_string())));
+        assert!(!app.last_prompt_history.contains_key(&pane_id));
     }
 
     #[test]
@@ -2623,6 +2684,7 @@ mod tests {
             .insert(pane_id, "session-1".to_string());
         app.titles_loading.insert(pane_id);
         app.frozen_panes.insert(pane_id);
+        app.record_last_prompt(pane_id, Some("previous session prompt"));
 
         apply(
             &mut app,
@@ -2639,6 +2701,7 @@ mod tests {
             .contains_key(&(pane_id, "session-1".to_string())));
         assert!(!app.inferred_title_session_ids.contains_key(&pane_id));
         assert!(!app.titles_loading.contains(&pane_id));
+        assert!(!app.last_prompt_history.contains_key(&pane_id));
         assert!(app.frozen_panes.contains(&pane_id));
     }
 

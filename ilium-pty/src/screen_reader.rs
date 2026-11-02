@@ -67,7 +67,13 @@ impl ScreenReader {
     /// Nonblocking current-only text, with a preflight before allocation.
     /// Oversized or busy screens stay unavailable rather than becoming partial evidence.
     pub fn try_text_with_limit(&self, limit: usize) -> Option<Result<String, &'static str>> {
-        self.try_with_screen(|screen| {
+        self.try_text_with_generation_and_limit(limit).map(|(_, text)| text)
+    }
+
+    /// Read the generation under the same parser guard as the visible text so
+    /// consumers can reject out-of-order observations without a race.
+    pub fn try_text_with_generation_and_limit(&self, limit: usize) -> Option<(u64, Result<String, &'static str>)> {
+        self.try_with_frame(|screen, generation| (generation, (|| {
             let (rows, columns) = screen.size();
             if usize::from(rows).saturating_mul(usize::from(columns)) > limit {
                 return Err("terminal evidence geometry exceeds limit");
@@ -92,7 +98,7 @@ impl ScreenReader {
                 return Err("terminal evidence text exceeds limit");
             }
             Ok(text)
-        })
+        })()))
     }
 
     /// Reads current screen geometry and its session-local resize epoch under
@@ -189,6 +195,9 @@ mod tests {
             assert!(screen.cell(0, 0).unwrap().dim());
         });
         drop(writer);
+        let (generation, text) = reader.try_text_with_generation_and_limit(1024).unwrap();
+        assert_eq!(generation, 8);
+        assert_eq!(text.unwrap(), "oldnew");
         assert_eq!(
             reader.clone().try_with_screen(|screen| screen.contents()),
             Some("oldnew".into())
