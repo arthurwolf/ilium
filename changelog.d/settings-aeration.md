@@ -1,2 +1,3 @@
+### Changed
 - Polish settings pages layout, typography, and visual breathing room across tabs.
 - Document settings design and aeration principles in `CLAUDE.md`.
