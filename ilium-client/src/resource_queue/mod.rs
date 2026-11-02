@@ -70,6 +70,8 @@ pub struct ResourceUi {
     pub selected_reservation: Option<ReservationId>,
     /// Resource whose right-click menu is open (the menu target stays the project).
     pub context_resource: Option<ResourceId>,
+    /// Project, resource and request under a right-clicked participant row.
+    pub context_participant: Option<(NodeId, ResourceId, ReservationId)>,
     /// Panel button under the pointer, with the pointer position, for tooltips.
     pub hovered_action: Option<(panel_actions::ResourceAction, ratatui::layout::Position)>,
 }
@@ -171,6 +173,21 @@ impl App {
                 .find(|id| self.tree.get(*id).is_some_and(|node| node.is_project()));
             if let Some(project) = project {
                 self.select_node(project);
+            }
+        }
+        // A deleted or unlinked resource loses its tree row; its control panel must not linger.
+        if let crate::app::RightPanelTarget::Resource {
+            project_id,
+            resource_id,
+        } = &self.right_panel_target
+        {
+            let still_listed = self.resources.rows.targets.values().any(|target| {
+                matches!(target, ResourceRowTarget::Resource { project_id: project, resource_id: resource }
+                    if project == project_id && resource == resource_id)
+            });
+            if !still_listed {
+                self.right_panel_target = crate::app::RightPanelTarget::Empty;
+                self.status_message = Some("The resource was removed from this project".into());
             }
         }
         self.bump_tree_version();
@@ -683,6 +700,34 @@ impl App {
         action: crate::app::ContextMenuAction,
     ) {
         use crate::app::ContextMenuAction as Action;
+        if matches!(
+            action,
+            Action::ResourceRequestShow
+                | Action::ResourceRequestCancel
+                | Action::ResourceRequestRelease
+        ) {
+            let Some((project, resource_id, reservation_id)) =
+                self.resources.context_participant.clone()
+            else {
+                return;
+            };
+            self.show_resource(project, resource_id.clone());
+            self.resources.selected_reservation = Some(reservation_id);
+            let code = match action {
+                Action::ResourceRequestCancel => Some('x'),
+                Action::ResourceRequestRelease => Some('o'),
+                _ => None,
+            };
+            if let Some(code) = code {
+                detail::perform_key(
+                    self,
+                    project,
+                    resource_id,
+                    crossterm::event::KeyCode::Char(code),
+                );
+            }
+            return;
+        }
         let Some(resource_id) = self.resources.context_resource.clone() else {
             return;
         };
@@ -1008,7 +1053,6 @@ mod review_regressions {
                 ownership_generation: 13,
             },
         );
-        form.fields[0] = "CONFIRM".into();
         form.expected_revision = Some(7);
         app.resources.dialog = Some(form);
         dialog::handle_event(
@@ -1053,14 +1097,13 @@ mod review_regressions {
                 ..
             })
         ));
-        let mut cancel = ResourceDialog::own_action(
+        let cancel = ResourceDialog::own_action(
             project,
             &reservation,
             ResourceCommand::Cancel {
                 reservation_id: reservation.id.clone(),
             },
         );
-        cancel.fields[0] = "CONFIRM".into();
         assert!(matches!(
             dialog::command(&app, &cancel),
             Ok(ResourceCommand::Cancel { .. })

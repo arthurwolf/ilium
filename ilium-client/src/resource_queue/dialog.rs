@@ -121,7 +121,7 @@ impl ResourceDialog {
                 command: Box::new(command),
                 token,
             },
-            fields: vec![String::new(), String::new()],
+            fields: vec![String::new()],
             field: 0,
             submitted: false,
             expected_revision: None,
@@ -188,10 +188,16 @@ impl ResourceDialog {
             DialogKind::Link { .. } => {
                 &["Search existing resources", "Local slug (blank uses title)"]
             }
-            DialogKind::Confirm { .. } => &[
-                "Type CONFIRM to proceed",
-                "Reason (required when taking back or confirming safe)",
-            ],
+            DialogKind::Confirm { ref command, .. } => match command.as_ref() {
+                ResourceCommand::Revoke { .. }
+                | ResourceCommand::CancelByUser { .. }
+                | ResourceCommand::ConfirmClear { .. }
+                | ResourceCommand::SetGate {
+                    gate: ResourceGate::Paused { .. } | ResourceGate::Unavailable { .. },
+                    ..
+                } => &["Reason (optional)"],
+                _ => &[],
+            },
             _ => &[
                 "Title",
                 "Local slug (create only)",
@@ -551,32 +557,21 @@ pub(super) fn command(app: &App, dialog: &ResourceDialog) -> Result<ResourceComm
     }
 
     if let DialogKind::Confirm { command, .. } = &dialog.kind {
-        if dialog.fields[0] != "CONFIRM" {
-            return Err("Type CONFIRM to apply this revision-bound action".into());
-        }
         let mut command = *command.clone();
-        let reason = dialog.fields[1].trim();
-        match &mut command {
-            ResourceCommand::Revoke { reason: target, .. }
-            | ResourceCommand::CancelByUser { reason: target, .. }
-            | ResourceCommand::ConfirmClear { reason: target, .. } => {
-                if reason.is_empty() {
-                    return Err("Enter a reason for this recovery action".into());
-                }
-                *target = reason.into();
+        let reason = dialog.fields[0].trim();
+        if !reason.is_empty() {
+            match &mut command {
+                ResourceCommand::Revoke { reason: target, .. }
+                | ResourceCommand::CancelByUser { reason: target, .. }
+                | ResourceCommand::ConfirmClear { reason: target, .. } => *target = reason.into(),
+                ResourceCommand::SetGate {
+                    gate:
+                        ResourceGate::Paused { reason: target }
+                        | ResourceGate::Unavailable { reason: target },
+                    ..
+                } => *target = reason.into(),
+                _ => {}
             }
-            ResourceCommand::SetGate {
-                gate:
-                    ResourceGate::Paused { reason: target }
-                    | ResourceGate::Unavailable { reason: target },
-                ..
-            } => {
-                if reason.is_empty() {
-                    return Err("Enter a reason for changing resource availability".into());
-                }
-                *target = reason.into();
-            }
-            _ => {}
         }
         return Ok(command);
     }
@@ -1058,7 +1053,7 @@ mod autosave_tests {
 mod recovery_and_link_tests {
     use super::*;
     #[test]
-    fn recovery_requires_authored_reason_and_preserves_action() {
+    fn recovery_accepts_confirmation_without_typing_and_preserves_optional_reason() {
         let mut app = App::new(
             "test".into(),
             std::path::PathBuf::from("/synthetic-resource-project"),
@@ -1071,11 +1066,12 @@ mod recovery_and_link_tests {
             },
             Some("token".into()),
         );
-        dialog.fields[0] = "CONFIRM".into();
-        assert!(command(&app, &dialog).unwrap_err().contains("reason"));
-        dialog.fields[1] = "Inspected fixture; no work remains".into();
         assert!(
-            matches!(command(&app,&dialog).unwrap(),ResourceCommand::ConfirmClear{reason,..} if reason==dialog.fields[1])
+            matches!(command(&app, &dialog).unwrap(), ResourceCommand::ConfirmClear { reason, .. } if reason == "placeholder")
+        );
+        dialog.fields[0] = "Inspected fixture; no work remains".into();
+        assert!(
+            matches!(command(&app, &dialog).unwrap(), ResourceCommand::ConfirmClear { reason, .. } if reason == "Inspected fixture; no work remains")
         );
         app.resources.dialog = Some(dialog);
         assert!(handle_event(

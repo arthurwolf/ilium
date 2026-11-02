@@ -268,6 +268,38 @@ fn resource_row_right_click_adds_a_resource_section_with_delete_and_pause() {
 }
 
 #[test]
+fn participant_row_right_click_adds_a_request_section_that_opens_the_panel_on_that_request() {
+    let mut fixture = fixture();
+    let row = fixture.local_row;
+    let point = position(&mut fixture.app, row);
+    mouse(
+        &mut fixture.app,
+        point,
+        MouseEventKind::Down(MouseButton::Right),
+    );
+    let Mode::ContextMenu(menu) = &fixture.app.mode else {
+        panic!("right click must open a context menu");
+    };
+    assert!(menu
+        .actions
+        .contains(&ContextMenuAction::ResourceRequestShow));
+    assert!(!menu.actions.contains(&ContextMenuAction::ResourceDelete));
+    let (project, _, reservation) = fixture.app.resources.context_participant.clone().unwrap();
+    let target = menu.target;
+    fixture
+        .app
+        .execute_context_action(ContextMenuAction::ResourceRequestShow, target);
+    assert!(matches!(
+        fixture.app.right_panel_target,
+        RightPanelTarget::Resource { project_id, .. } if project_id == project
+    ));
+    assert_eq!(
+        fixture.app.resources.selected_reservation.as_ref(),
+        Some(&reservation)
+    );
+}
+
+#[test]
 fn context_actions_resolve_resource_and_reference_to_project_and_local_row_to_real_pane() {
     for kind in ["resource", "reference", "local", "ordinary"] {
         for action in [

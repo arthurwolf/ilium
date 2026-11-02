@@ -222,6 +222,6 @@ Real Claude and Codex sessions are converted in both directions and recall a fic
 
 ## Queue access to a shared resource
 
-![Two agents queue for a shared resource and release it in turn](../../assets/demos/28-resource-queue.gif)
+![Two projects queue for a shared resource and release it in turn](../../assets/demos/28-resource-queue.gif)
 
-Two real agents reserve an isolated demonstration resource: one waits, takes ownership after the first releases it, then releases it. The recording is cropped and pauses are shortened. Explained in [Resource queues](resource-queues.md).
+Two projects share an isolated demonstration resource through local fixture agents (no model or provider calls): one reserves it, the other queues, takes ownership after the first releases it, then releases it. The recording shows the full interface; long pauses are shortened and nothing else is edited. Explained in [Resource queues](resource-queues.md).
