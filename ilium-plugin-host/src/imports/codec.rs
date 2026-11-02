@@ -1,4 +1,4 @@
-//! Host implementation of `ilium:host/codec`; image and text operations remain stubs.
+//! Host implementation of `ilium:host/codec`; text rasterization remains a stub.
 //!
 //! Written once by the skeleton lane from the generated `HostCodec` trait; hand-owned afterwards.
 
@@ -140,17 +140,17 @@ impl HostCodec for CodecImport {
         result.map_err(|_| PluginError::new(ErrorCode::Internal, "compression failed"))
     }
 
-    fn image_info(&mut self, _data: Vec<u8>) -> Result<ImageInfo, PluginError> {
-        unimplemented!("host::imports::codec::image_info")
+    fn image_info(&mut self, data: Vec<u8>) -> Result<ImageInfo, PluginError> {
+        super::codec_image::info(&data)
     }
 
     fn decode_image(
         &mut self,
-        _data: Vec<u8>,
-        _frame: u32,
-        _max_pixels: u32,
+        data: Vec<u8>,
+        frame: u32,
+        max_pixels: u32,
     ) -> Result<DecodedImage, PluginError> {
-        unimplemented!("host::imports::codec::decode_image")
+        super::codec_image::decode(&data, frame, max_pixels)
     }
 
     fn sha256(&mut self, data: Vec<u8>) -> Vec<u8> {

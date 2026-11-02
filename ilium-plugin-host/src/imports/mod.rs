@@ -10,6 +10,7 @@ pub mod client_requests;
 pub mod clipboard;
 pub mod clock;
 pub mod codec;
+mod codec_image;
 pub mod commands;
 pub mod editor;
 pub mod extensions;

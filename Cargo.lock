@@ -3772,6 +3772,7 @@ dependencies = [
  "ilium-platform",
  "ilium-plugin-api",
  "ilium-plugin-testkit",
+ "image",
  "loom",
  "proptest",
  "regex",
