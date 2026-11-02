@@ -1323,6 +1323,17 @@ def require_remote_tag(tag, commit):
             'remote tag does not resolve to candidate commit')
 
 
+def release_notes(assets):
+    """Describe exactly the verified files attached to this release."""
+    require(isinstance(assets, dict) and bool(assets) and
+            all(isinstance(name, str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]*', name)
+                for name in assets), 'invalid release notes asset inventory')
+    return ('Native five-target release. Checksums, source-bound qualification and build '
+            'attestations accompany these assets. See candidate.json and qualification.json '
+            'for exact identities.\n\n## Release assets\n\n' +
+            ''.join('- `' + name + '`\n' for name in sorted(assets)))
+
+
 def draft(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
     qualification = release_tool.read_json(arguments.candidate / 'qualification.json')
@@ -1333,8 +1344,9 @@ def draft(arguments):
     require_remote_tag(metadata['tag'], metadata['commit'])
     repository = github('immutable-releases')
     require(repository.get('enabled') is True, 'repository release immutability is not enabled')
-    write_json(arguments.output.with_suffix('.intent.json'), {'schema': 1, 'operation': 'create-draft', 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID'), 'assets': asset_hashes(publication_files(arguments.candidate))})
-    release = github('releases', method='POST', payload={'tag_name': metadata['tag'], 'target_commitish': metadata['commit'], 'name': 'Ilium ' + metadata['tag'], 'body': 'Native five-target release; checksums, source-bound qualification and build attestations accompany these assets. See candidate.json and qualification.json for exact identities.', 'draft': True, 'prerelease': True, 'make_latest': 'false'})
+    assets = asset_hashes(publication_files(arguments.candidate))
+    write_json(arguments.output.with_suffix('.intent.json'), {'schema': 1, 'operation': 'create-draft', 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID'), 'assets': assets})
+    release = github('releases', method='POST', payload={'tag_name': metadata['tag'], 'target_commitish': metadata['commit'], 'name': 'Ilium ' + metadata['tag'], 'body': release_notes(assets), 'draft': True, 'prerelease': True, 'make_latest': 'false'})
     write_json(arguments.output.with_suffix('.owned.json'), {'schema': 1, 'owned_release_id': release['id'], 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID')})
     upload = release['upload_url'].split('{', 1)[0]
     for file in publication_files(arguments.candidate):
