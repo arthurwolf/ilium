@@ -1564,15 +1564,6 @@ impl TerminalState {
                 self.osc_allocation = OscAllocation::default();
             }
             self.scrollback_total = 0;
-            // The fresh segment is uniquely owned, so its exact size is reserved here.
-            // Growing it by doubling would charge up to twice the replay's history.
-            if let Some(segment) = self
-                .history_segments
-                .back_mut()
-                .and_then(|segment| Arc::get_mut(&mut segment.bytes))
-            {
-                segment.reserve_exact(bytes.len());
-            }
             cursor.replay_started = true;
         }
         while cursor.consumed < bytes.len() {
