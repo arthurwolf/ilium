@@ -153,14 +153,30 @@ impl ProjectionRetention {
             PaneProgressChanged { pane_id, .. } => (Slot::Progress, Some(*pane_id)),
             ResourceObservationFailed { .. } => (Slot::ResourceObservation, None),
             ResourceSnapshot { catalog, .. } => {
-                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>catalog.revision){return update;}
-                (Slot::Resources,None)
+                if app
+                    .resources
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|old| old.revision > catalog.revision)
+                {
+                    return update;
+                }
+                (Slot::Resources, None)
             }
-            ResourceResult { result:Ok(reply), .. } => {
-                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>reply.catalog.revision){return update;}
-                (Slot::Resources,None)
+            ResourceResult {
+                result: Ok(reply), ..
+            } => {
+                if app
+                    .resources
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|old| old.revision > reply.catalog.revision)
+                {
+                    return update;
+                }
+                (Slot::Resources, None)
             }
-            ResourceResult { result:Err(_), .. } => (Slot::ResourceObservation,None),
+            ResourceResult { result: Err(_), .. } => (Slot::ResourceObservation, None),
             ResourceWaitChanged { pane_id, .. } => (Slot::ResourceWait, Some(*pane_id)),
             PaneGitStatusChanged { pane_id, .. } => (Slot::Git, Some(*pane_id)),
             PaneDebugLogSnapshot {
