@@ -268,25 +268,33 @@ pub fn read_user_prompts(
     file.seek(SeekFrom::Start(start))?;
     let mut reader = BufReader::new(file);
     let mut offset = start;
-    let mut lines = Vec::new();
     let mut buffer = Vec::new();
-    loop {
+    let mut read_error = None;
+    let lines = std::iter::from_fn(|| {
         buffer.clear();
-        let read = reader.read_until(b'\n', &mut buffer)?;
+        let read = match reader.read_until(b'\n', &mut buffer) {
+            Ok(read) => read,
+            Err(error) => {
+                read_error = Some(error);
+                return None;
+            }
+        };
         // A line still being written has no terminator yet: leave it for the
         // next read instead of parsing half of it.
         if read == 0 || buffer.last() != Some(&b'\n') {
-            break;
+            return None;
         }
         offset += read as u64;
-        lines.push(String::from_utf8_lossy(&buffer).into_owned());
-    }
+        Some(String::from_utf8_lossy(&buffer).into_owned())
+    });
     let recent = RecentEntries::with_user_cap(max_prompts.max(1));
-    let lines = lines.into_iter();
     let entries = match class {
         AgentClass::Claude => claude_entries_into(lines, recent),
         _ => codex_entries_into(lines, recent),
     };
+    if let Some(error) = read_error {
+        return Err(error.into());
+    }
     let mut prompts: Vec<String> = entries
         .into_iter()
         .filter(|entry| entry.kind == TranscriptEntryKind::User)
