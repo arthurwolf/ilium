@@ -3,15 +3,20 @@
 //! No objective or provider response is logged. The caller must verify thread
 //! ownership and fence completions against its pane generation.
 
-use ilium_agent_session::goal_evidence::{codex_database_snapshot, GoalLookup};
+#[cfg(target_os = "linux")]
+use ilium_agent_session::goal_evidence::codex_database_snapshot;
+use ilium_agent_session::goal_evidence::GoalLookup;
+#[cfg(target_os = "linux")]
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 const MAX_RESPONSE: usize = 8 * 1024 * 1024;
+#[cfg(target_os = "linux")]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const QUEUE_CAPACITY: usize = 32;
 
@@ -272,6 +277,7 @@ async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
     use std::process::Stdio;
 
     #[test]

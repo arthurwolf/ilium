@@ -145,9 +145,9 @@ pub fn sync_parent_directory_if_supported(path: &Path) -> io::Result<DirectorySy
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 thread_local! {static RESOURCE_TEST_DIRECTORY_SYNC_FAILURE:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 pub(crate) fn fail_next_replacement_directory_sync_for_test() {
     RESOURCE_TEST_DIRECTORY_SYNC_FAILURE.with(|failure| failure.set(true));
 }
