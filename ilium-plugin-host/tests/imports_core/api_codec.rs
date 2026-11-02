@@ -582,6 +582,40 @@ proptest! {
 
 // ---- rasterize-text --------------------------------------------------------------------------
 
+/// Text must contain visible white ink, not just a correctly sized empty buffer.
+#[test]
+fn codec_rasterize_text_draws_white_ink() {
+    let mut fixture = fixture_t2(&[]);
+    let image = expect_ok(fixture.codec().rasterize_text(raster("Hello", 24, 400)));
+    let ink: Vec<_> = image
+        .rgba
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] != 0)
+        .collect();
+    assert!(!ink.is_empty());
+    assert!(ink.iter().all(|pixel| pixel[..3] == [255, 255, 255]));
+}
+
+/// Empty input still has a valid transparent raster.
+#[test]
+fn codec_rasterize_empty_text_is_transparent() {
+    let mut fixture = fixture_t2(&[]);
+    let image = expect_ok(fixture.codec().rasterize_text(raster("", 16, 400)));
+    assert!(image.width > 0 && image.height > 0);
+    assert!(image.rgba.chunks_exact(4).all(|pixel| pixel[3] == 0));
+}
+
+/// A request whose raster exceeds the session memory ceiling is refused before allocation.
+#[test]
+fn codec_rasterize_text_rejects_oversized_output() {
+    let mut fixture = fixture_t2(&[]);
+    let text = "W".repeat(4096);
+    assert_eq!(
+        expect_code(fixture.codec().rasterize_text(raster(&text, 512, 16_384))),
+        ErrorCode::QuotaExceeded
+    );
+}
+
 /// REQ: WIT:ilium:host/codec.rasterize-text
 #[test]
 fn codec_rasterize_text_returns_rgba_of_matching_length() {

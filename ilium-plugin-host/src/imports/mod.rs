@@ -11,6 +11,7 @@ pub mod clipboard;
 pub mod clock;
 pub mod codec;
 mod codec_image;
+mod codec_text;
 pub mod commands;
 pub mod editor;
 pub mod extensions;

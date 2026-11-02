@@ -1,4 +1,4 @@
-//! Host implementation of `ilium:host/codec`; text rasterization remains a stub.
+//! Host implementation of `ilium:host/codec`.
 //!
 //! Written once by the skeleton lane from the generated `HostCodec` trait; hand-owned afterwards.
 
@@ -157,7 +157,7 @@ impl HostCodec for CodecImport {
         Sha256::digest(data).to_vec()
     }
 
-    fn rasterize_text(&mut self, _request: RasterText) -> Result<DecodedImage, PluginError> {
-        unimplemented!("host::imports::codec::rasterize_text")
+    fn rasterize_text(&mut self, request: RasterText) -> Result<DecodedImage, PluginError> {
+        super::codec_text::rasterize(&request)
     }
 }

@@ -74,6 +74,7 @@ The native crates behind the import are flate2, the image decoders, sha2 and cos
 | `rasterize-text` text | 64 KiB | `invalid-argument` |
 | `rasterize-text` `size-px` | 1 to 512 | `invalid-argument` |
 | `rasterize-text` `max-width-px` | 1 to 16,384 | `invalid-argument` |
+| `rasterize-text` output | at most 1 GiB of RGBA bytes | `quota-exceeded` |
 
 ### Example 1: decode a PNG into a surface
 
