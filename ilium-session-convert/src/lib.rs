@@ -34,7 +34,7 @@ use report::Reporter;
 
 /// Hard ceiling for source transcripts, parser buffers, and generated output.
 /// Reads use this limit before allocating complete transcript strings.
-pub(crate) const MAX_TRANSCRIPT_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_TRANSCRIPT_BYTES: u64 = 128 * 1024 * 1024;
 pub(crate) const MAX_IMPORT_LEDGER_BYTES: u64 = 16 * 1024 * 1024;
 
 /// What to convert and where the agents keep their data.
