@@ -2657,6 +2657,122 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         app.mode = Mode::Settings(Box::new(state));
         return;
     }
+    if state.tab == SettingsTab::AgentMonitoring {
+        if let Some(mut editor) = app.custom_status_rules_editor.take() {
+            if editor.confirm_reset {
+                if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter) {
+                    let defaults = ilium_core::status_rule_expression::default_rules();
+                    match app.settings_save_custom_status_rules(defaults) {
+                        Ok(()) => editor = crate::status_rules_editor::EditorState::new(&app.custom_status_rules),
+                        Err(error) => { editor.confirm_reset = false; editor.save_error = Some(error); }
+                    }
+                } else if matches!(key.code, KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N')) {
+                    editor.confirm_reset = false;
+                }
+                app.custom_status_rules_editor = Some(editor);
+                app.mode = Mode::Settings(Box::new(state));
+                return;
+            }
+            if let Some(mut draft) = editor.parameter_draft.take() {
+                match key.code {
+                    KeyCode::Esc => { editor.save_error = None; }
+                    KeyCode::Enter => {
+                        let mut rules = app.custom_status_rules.clone();
+                        let edit = match editor.draft_target {
+                            crate::status_rules_editor::DraftTarget::Condition => editor.set_parameter(&mut rules, &draft),
+                            crate::status_rules_editor::DraftTarget::Visual => editor.set_visual_value(&mut rules, &draft),
+                            crate::status_rules_editor::DraftTarget::Colour => editor.set_colour(&mut rules, &draft),
+                            crate::status_rules_editor::DraftTarget::RuleName => editor.set_rule_name(&mut rules, &draft),
+                        };
+                        match edit.and_then(|()| app.settings_save_custom_status_rules(rules)) {
+                            Ok(()) => editor.save_error = None,
+                            Err(error) => { editor.save_error = Some(error); editor.parameter_draft = Some(draft); }
+                        }
+                    }
+                    KeyCode::Backspace => { draft.pop(); editor.parameter_draft = Some(draft); }
+                    KeyCode::Char(character) if !character.is_control() && draft.chars().count() < 256 => {
+                        draft.push(character); editor.parameter_draft = Some(draft);
+                    }
+                    _ => editor.parameter_draft = Some(draft),
+                }
+                app.custom_status_rules_editor = Some(editor);
+                app.mode = Mode::Settings(Box::new(state));
+                return;
+            }
+            if key.code == KeyCode::Esc {
+                app.mode = Mode::Settings(Box::new(state));
+                return;
+            }
+            let previous_editor = editor.clone();
+            let mut rules = app.custom_status_rules.clone();
+            use crate::status_rules_editor::EditorColumn;
+            let changed = if key.code == KeyCode::Tab {
+                editor.column = match editor.column { EditorColumn::Rules => EditorColumn::ConditionAndVisual, EditorColumn::ConditionAndVisual => EditorColumn::Preview, EditorColumn::Preview => EditorColumn::Rules };
+                false
+            } else if editor.column == EditorColumn::ConditionAndVisual {
+                match key.code {
+                    KeyCode::Up => { editor.selected_condition = editor.selected_condition.saturating_sub(1); false },
+                    KeyCode::Down => { let count = editor.expression(&rules).map_or(0, |(terms, _)| terms.len()); editor.selected_condition = (editor.selected_condition + 1).min(count.saturating_sub(1)); false },
+                    KeyCode::Left => editor.cycle_condition(&mut rules, -1).is_ok(),
+                    KeyCode::Right => editor.cycle_condition(&mut rules, 1).is_ok(),
+                    KeyCode::Char('a') => editor.add_condition(&mut rules).is_ok(),
+                    KeyCode::Delete => editor.remove_condition(&mut rules).is_ok(),
+                    KeyCode::Char('n') => editor.negate_condition(&mut rules).is_ok(),
+                    KeyCode::Char('o') => editor.toggle_connector(&mut rules).is_ok(),
+                    KeyCode::Char('e') => { editor.draft_target = crate::status_rules_editor::DraftTarget::Condition; editor.parameter_draft = editor.parameter(&rules); false },
+                    KeyCode::Char('i') => editor.toggle_screen_case(&mut rules).is_ok(),
+                    KeyCode::Char('v') => editor.cycle_visual(&mut rules),
+                    KeyCode::Char('g') => { editor.draft_target = crate::status_rules_editor::DraftTarget::Visual; editor.parameter_draft = editor.visual_value(&rules); false },
+                    KeyCode::Char('c') => { editor.draft_target = crate::status_rules_editor::DraftTarget::Colour; editor.parameter_draft = editor.selected_rule.and_then(|index| rules.rules.get(index)).map(|rule| rule.then.style.color.clone().unwrap_or_default()); false },
+                    KeyCode::Char('b') => editor.toggle_weight(&mut rules, true),
+                    KeyCode::Char('d') => editor.toggle_weight(&mut rules, false),
+                    KeyCode::Char('+') => editor.adjust_animation_speed(&mut rules, 1),
+                    KeyCode::Char('-') => editor.adjust_animation_speed(&mut rules, -1),
+                    KeyCode::Char('p') => editor.toggle_ping_pong(&mut rules),
+                    _ => false,
+                }
+            } else if editor.column == EditorColumn::Rules { match key.code {
+                KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => editor.move_selected(&mut rules, -1),
+                KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => editor.move_selected(&mut rules, 1),
+                KeyCode::Up => { editor.selected_rule = editor.selected_rule.map(|index| index.saturating_sub(1)); editor.selected_condition = 0; false },
+                KeyCode::Down => { editor.selected_rule = editor.selected_rule.map(|index| (index + 1).min(rules.rules.len().saturating_sub(1))); editor.selected_condition = 0; false },
+                KeyCode::Char('a') => editor.add_rule(&mut rules),
+                KeyCode::Char('n') => { editor.draft_target = crate::status_rules_editor::DraftTarget::RuleName; editor.parameter_draft = editor.selected_rule.and_then(|index| rules.rules.get(index)).map(|rule| rule.name.clone()); false },
+                KeyCode::Char('r') => { editor.confirm_reset = true; false },
+                KeyCode::Char(' ') => editor.toggle_selected(&mut rules),
+                KeyCode::Delete => editor.delete_selected(&mut rules),
+                KeyCode::Char('u') => editor.undo_delete(&mut rules),
+                _ => false,
+            }} else {
+                if key.code == KeyCode::Char('t') || key.code == KeyCode::Left || key.code == KeyCode::Right {
+                    editor.preview_tab = match editor.preview_tab { crate::status_rules_editor::PreviewTab::Live => crate::status_rules_editor::PreviewTab::Demo, crate::status_rules_editor::PreviewTab::Demo => crate::status_rules_editor::PreviewTab::Live };
+                } else if editor.preview_tab == crate::status_rules_editor::PreviewTab::Demo {
+                    match key.code {
+                        KeyCode::Up => editor.scroll_demo(-1),
+                        KeyCode::Down => editor.scroll_demo(1),
+                        _ => {}
+                    }
+                }
+                false
+            };
+            if changed {
+                if let Err(error) = app.settings_save_custom_status_rules(rules) {
+                    editor = previous_editor;
+                    editor.save_error = Some(error);
+                } else {
+                    editor.save_error = None;
+                }
+            }
+            app.custom_status_rules_editor = Some(editor);
+            app.mode = Mode::Settings(Box::new(state));
+            return;
+        }
+        if key.code == KeyCode::Char('c') && app.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom {
+            app.custom_status_rules_editor = Some(crate::status_rules_editor::EditorState::new(&app.custom_status_rules));
+            app.mode = Mode::Settings(Box::new(state));
+            return;
+        }
+    }
     if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
         app.mode = Mode::Settings(Box::new(state));
         crate::onboarding::integration::open(app, true);
@@ -3503,6 +3619,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                                 crate::agent_monitoring::AgentMonitoringMode::Attention
                             }
                             crate::agent_monitoring::AgentMonitoringMode::Attention => {
+                                crate::agent_monitoring::AgentMonitoringMode::Custom
+                            }
+                            crate::agent_monitoring::AgentMonitoringMode::Custom => {
                                 crate::agent_monitoring::AgentMonitoringMode::Normal
                             }
                         };

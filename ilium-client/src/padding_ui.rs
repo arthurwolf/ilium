@@ -170,18 +170,6 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn card_border_style(is_selected: bool, is_hovered: bool) -> Style {
-    if is_selected {
-        Style::new()
-            .fg(theme::accent_bg())
-            .add_modifier(Modifier::BOLD)
-    } else if is_hovered {
-        theme::border_style(true)
-    } else {
-        theme::border_style(false)
-    }
-}
-
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let settings = &app.padding_settings;
     let ui = &state.padding;
@@ -227,7 +215,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(card_border_style(is_selected, is_hovered))
+            .border_style(crate::selectable_cards::border_style(is_selected, is_hovered))
             .title(Line::from(Span::styled(
                 format!(" {marker} {} ", mode.label()),
                 title_style,
