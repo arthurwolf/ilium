@@ -63,9 +63,7 @@ def sha(path):
     return value.hexdigest()
 
 
-def write_release_text(path, content):
-    """Write portable release metadata without platform newline conversion."""
-    Path(path).write_bytes(content.encode('ascii'))
+write_release_text = release_tool.write_release_text
 
 
 def retain_native_sandbox_artifact(cargo_log, output_directory):

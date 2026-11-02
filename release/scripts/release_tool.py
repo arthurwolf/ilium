@@ -45,6 +45,11 @@ class ReleaseError(ValueError):
     """Invalid CLI input or release policy."""
 
 
+def write_release_text(path, content):
+    """Write portable release metadata without platform newline conversion."""
+    Path(path).write_bytes(content.encode('ascii'))
+
+
 def emit(record):
     print(json.dumps(record, ensure_ascii=True, separators=(",", ":")))
 
