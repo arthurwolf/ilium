@@ -27086,8 +27086,12 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        // The toolbar, prompt and footer sections each add a rule row.
-        let expected_rows = 27 - 3 * u16::from(crate::theme::section_frames_enabled());
+        // These panes have no prompt or progress footer; only the toolbar is shown.
+        assert!(!app.shows_last_prompt_banner(first));
+        assert!(!app.shows_progress_footer(first));
+        assert!(!app.shows_last_prompt_banner(second));
+        assert!(!app.shows_progress_footer(second));
+        let expected_rows = 36 - u16::from(crate::theme::section_frames_enabled());
         assert_eq!(resize_requests.len(), 2);
         assert!(
             resize_requests
