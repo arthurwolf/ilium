@@ -70,6 +70,11 @@ jobs:
         name: Test (Linux)
         runs-on: ubuntu-latest
         timeout-minutes: 90
+        # Full debug symbols exhausted the hosted runner's disk before tests.
+        # Keep every target and test, but omit symbols in this disposable job.
+        env:
+            CARGO_PROFILE_DEV_DEBUG: '0'
+            CARGO_PROFILE_TEST_DEBUG: '0'
         steps:
             - uses: actions/checkout@v4
 
@@ -113,6 +118,8 @@ jobs:
                     --setenv="PATH=$PATH" \
                     --setenv="CARGO_TERM_COLOR=$CARGO_TERM_COLOR" \
                     --setenv="CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
+                    --setenv="CARGO_PROFILE_DEV_DEBUG=$CARGO_PROFILE_DEV_DEBUG" \
+                    --setenv="CARGO_PROFILE_TEST_DEBUG=$CARGO_PROFILE_TEST_DEBUG" \
                     --setenv="RUST_BACKTRACE=$RUST_BACKTRACE" \
                     /usr/bin/env cargo test --workspace --no-fail-fast --lib --bins
 
@@ -130,6 +137,8 @@ jobs:
                     --setenv="PATH=$PATH" \
                     --setenv="CARGO_TERM_COLOR=$CARGO_TERM_COLOR" \
                     --setenv="CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
+                    --setenv="CARGO_PROFILE_DEV_DEBUG=$CARGO_PROFILE_DEV_DEBUG" \
+                    --setenv="CARGO_PROFILE_TEST_DEBUG=$CARGO_PROFILE_TEST_DEBUG" \
                     --setenv="RUST_BACKTRACE=$RUST_BACKTRACE" \
                     --setenv="RUST_TEST_THREADS=$RUST_TEST_THREADS" \
                     --setenv="ILIUM_PTY_SMOKE_BINARY=$ILIUM_PTY_SMOKE_BINARY" \
