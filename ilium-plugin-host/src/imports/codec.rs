@@ -1,4 +1,4 @@
-//! Host implementation of `ilium:host/codec` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/codec`; operations other than SHA-256 remain stubs.
 //!
 //! Written once by the skeleton lane from the generated `HostCodec` trait; hand-owned afterwards.
 
@@ -6,6 +6,7 @@ use ilium_plugin_api::generated::host::codec::{
     Compression, DecodedImage, HostCodec, ImageInfo, RasterText,
 };
 use ilium_plugin_api::generated::types::errors::PluginError;
+use sha2::{Digest, Sha256};
 
 /// Host side of the `codec` interface.
 #[derive(Debug)]
@@ -43,8 +44,8 @@ impl HostCodec for CodecImport {
         unimplemented!("host::imports::codec::decode_image")
     }
 
-    fn sha256(&mut self, _data: Vec<u8>) -> Vec<u8> {
-        unimplemented!("host::imports::codec::sha256")
+    fn sha256(&mut self, data: Vec<u8>) -> Vec<u8> {
+        Sha256::digest(data).to_vec()
     }
 
     fn rasterize_text(&mut self, _request: RasterText) -> Result<DecodedImage, PluginError> {

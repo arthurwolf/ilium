@@ -5,6 +5,7 @@
 use super::fake_kernel::FakeKernel;
 use crate::imports::{
     basic::BasicImport,
+    codec::CodecImport,
     log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
     storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
 };
@@ -338,6 +339,7 @@ impl ImportsFixtureBuilder {
             }
         }
         Ok(ImportsFixture {
+            codec_import: CodecImport,
             log_import,
             logger,
             budget,
@@ -483,6 +485,7 @@ impl JobInstance {
 /// One plugin instance with every host import bound to it (test plan lane imports-core).
 pub struct ImportsFixture {
     // Last: adapters drop before the owned directory is removed.
+    codec_import: CodecImport,
     log_import: LogImport,
     logger: Arc<Mutex<PluginLogger>>,
     budget: Arc<Mutex<PluginLogInstanceBudget>>,
@@ -675,7 +678,7 @@ impl ImportsFixture {
 
     /// The `codec` import.
     pub fn codec(&mut self) -> &mut dyn HostCodec {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::codec")
+        &mut self.codec_import
     }
 
     /// The `fs` import.
