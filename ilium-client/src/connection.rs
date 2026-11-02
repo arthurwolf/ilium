@@ -2519,7 +2519,7 @@ mod tests {
                 .expect("registry growth alone fits"),
         );
         let previous_tree = app.tree.clone();
-        let error = crate::incoming_projection::ProjectionRetention::prepare_owned(
+        let error = crate::incoming_projection::ProjectionRetention::prepare_owned_with_test_key(
             received.view(),
             &mut app,
             Some(owner),

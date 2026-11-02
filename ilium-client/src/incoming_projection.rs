@@ -272,7 +272,31 @@ impl ProjectionRetention {
         app: &mut App,
         owner: Option<&EventRetention>,
     ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
+        let update = Self::prepare(event, app);
+        Self::prepare_update(event, app, owner, update)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_owned_with_test_key(
+        event: &ServerEvent,
+        app: &mut App,
+        owner: Option<&EventRetention>,
+    ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
+        // Exercise a future event that both derives data and retains a key.
         let mut update = Self::prepare(event, app);
+        update.keys.push(Key {
+            slot: Slot::Global(std::mem::discriminant(event)),
+            scope: None,
+        });
+        Self::prepare_update(event, app, owner, update)
+    }
+
+    fn prepare_update(
+        event: &ServerEvent,
+        app: &mut App,
+        owner: Option<&EventRetention>,
+        mut update: ProjectionUpdate,
+    ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
         let derivation_bytes = app.incoming_derivation_bytes(event);
         let registry = &mut app.incoming_projection;
         let target = registry
