@@ -33,7 +33,7 @@ The edit intents are submitted, not called. They are listed in the next table wi
 
 | Intent | Payload | Outcomes |
 |---|---|---|
-| `editor-apply-edits` | `buffer: buffer-id`, `base-revision: u64`, `edits: list<text-edit>` | `ok`; `refused(not-found)`, `refused(conflict)`, `refused(invalid-argument)` |
+| `editor-apply-edits` | `buffer: buffer-id`, `base-revision: u64`, `edits: list<text-edit>` | `ok`; `refused(not-found)`, `refused(conflict)`, `refused(invalid-argument)`; `failed(not-found)` (the buffer closed after the edit was accepted) |
 | `editor-open` | `path: fs-path`, `line: option<u32>`, `placement: editor-placement` | `ok-node(node-id)`, the pane that opened; `refused(not-permitted)`, `failed(not-found)`, `failed(io)` |
 
 The payload records are defined in `ilium:types/editing` and in the `editor-placement` enum:
@@ -349,5 +349,5 @@ The manifest requests the grant on the client side, together with the read grant
 - [File access](/pages/file-access/) and [fs.read](/pages/capability-fs-read/): the file scopes that load and open calls need.
 - [fs.write](/pages/capability-fs-write/): the write grant that `save-buffer` needs.
 - [Code view](/pages/widgets-media-and-embedded/): showing a buffer in a pane.
-- [Errors and limits](/pages/errors-and-limits/): the error codes and caps used on this page.
+- [Errors and limits](/pages/reference-errors-and-limits/): the error codes and caps used on this page.
 - [Tutorial 05: TODO scanner](/pages/tutorial-05-todo-scanner/): opening files with `editor-open`.

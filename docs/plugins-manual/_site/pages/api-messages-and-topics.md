@@ -60,7 +60,7 @@ Limits that apply to this surface:
 
 ### Topic names and patterns
 
-A topic id is the publisher's plugin id, a `/`, and a name, for example `example.notes/saved`. A plugin may publish only topics that start with its own plugin id followed by `/`. The kernel publishes its own topics under the kernel plugin ids, for example `ilium.progress/finished`.
+A topic id is the publisher's plugin id, a `/`, and a name, for example `example.notes/saved`. A plugin may publish only topics that start with its own plugin id followed by `/`. The kernel publishes its own topics under reserved kernel namespaces, which are ids that no installed plugin can take, for example `ilium.progress/finished`. The kernel namespace `ilium.progress` is not the id of the core plugin `ilium.core.progress`: the core plugin publishes only under its own id, as `ilium.core.progress/changed`, and no plugin may publish under `ilium.progress/`.
 
 A subscription pattern takes one of three forms:
 

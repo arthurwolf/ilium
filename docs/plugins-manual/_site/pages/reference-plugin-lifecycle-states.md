@@ -26,7 +26,7 @@ A package state decides which instance states are allowed. An instance can be `a
 | `disabled-blocked` | `installed.json`, `state` | The signing key was revoked as `compromised`, or a registry takedown named this version. It leaves this state only with `enable <id> --accept-risk`, or with an update signed by another trusted key of the same publisher. |
 | `disabled-by-policy` | policy file, or the start flags | An administrator rule or safe mode forbids it for this run. Not written to `installed.json`. |
 | `refused-at-load` | recomputed at every load | The host checked the package and refused to run it. The reason is a code, for example `package.api-unsupported`, `trust.key-revoked`, `policy.tier-denied`, `package.corrupt` or `policy.blocked`. |
-| `update-staged` | `plugins/staging/` | A newer version is unpacked and verified, and the swap has not happened. |
+| `update-staged` | `plugins/store/<id>/<version>/` | A newer version is unpacked and verified, and the swap has not happened. |
 | `uninstall-pending` | `installed.json`, `state` | The user asked for removal and an instance is still stopping. |
 
 Rules for package states:
@@ -144,6 +144,8 @@ The trigger column names who or what causes the change. The effect column is wha
 | I16 | `inactive` | activation trigger fires | a required plugin, or the provider of a required service, is not `active` | Set `waiting-dependency`. Start the wait of `wait_ms` per provider. Activate the missing requirement if it is lazy. | none | log `activate.waiting` | Row shows `waiting for <name>` |
 | I17 | `waiting-dependency` | every requirement is `active` | none | Run I1. | none | log `activate.begin` | none |
 | I18 | `waiting-dependency` | `wait_ms` runs out | none | Set `inactive` with the reason `dependency.unresolved`. Retry when a requirement becomes `active`, and after 1 s, 5 s and 30 s, then every 60 s without end while the plugin is enabled. | none | log `activate.wait-expired` | Row keeps `waiting for <name>` |
+| I19 | `inactive` | disable | none | Record the desired state. Cancel pending retries. No `deactivate` call, there is no instance. | none | `plugin-state-changed` reason `user` | Switch off, contributions withdrawn |
+| I20 | `waiting-dependency` | disable | none | Record the desired state. Cancel the wait. No `deactivate` call, there is no instance. | none | `plugin-state-changed` reason `user` | Switch off, `waiting for <name>` cleared |
 
 - [LIF-011] The host MUST apply row I2 when the session memory pool cannot admit the instance, and MUST NOT count that refusal as a failure. Test: fill the pool with other plugins, trigger activation and assert the failure window of the refused plugin is empty.
 - [LIF-012] A trap, an error from `activate` or a deadline breach in `activating` or `active` MUST follow rows I4 or I5 and MUST drop the instance without calling `deactivate`. Test: trap in `on-events` and assert no `deactivate` call is logged.

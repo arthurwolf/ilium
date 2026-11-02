@@ -138,7 +138,8 @@ Show the provider attribution that the host supplies next to results, as the pro
 | More than 1 request per second | `rate-limited` with `retry-after-ms` | Wait for the delay. |
 | Provider unreachable | `network` | Retry later. |
 | Provider slower than 10 s | `timed-out` | Retry later. |
-| `limit` above 8 | clamped to 8 | Nothing. |
+| `text` shorter than 2 or longer than 200 characters | `invalid-argument` | Fix the input before calling. |
+| `limit` below 1 or above 8 | `invalid-argument` (not clamped; [WIT](/pages/reference-wit/)) | Pass a limit from 1 to 8. |
 
 Results are cached for 24 hours by query text, so repeating a search is free.
 

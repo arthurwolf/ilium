@@ -398,9 +398,9 @@
 <h2 id="what-you-need">What you need</h2>
 <ul>
 <li>A plugin package with a <code>server</code>, <code>client</code> or <code>scene</code> side. The <code>log</code> import needs no grant.</li>
-<li>Rust: the crate <code>ilium-plugin-sdk</code> (S1). TypeScript: <code>@ilium/plugin-sdk</code> with Bun 1.2 or later (S14).</li>
+<li>Rust: the crate <code>ilium-plugin-sdk</code>. TypeScript: <code>@ilium/plugin-sdk</code> with Bun 1.2 or later.</li>
 <li>The <code>ilium</code> binary. The <code>plugin</code> subcommands are part of it (U5), so nothing else is installed.</li>
-<li>Background reading: <a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and the restart rule, and <a href="/pages/lifecycle/">Lifecycle</a> for <code>activate</code> and <code>deactivate</code>.</li>
+<li>Background reading: <a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and the restart rule, and <a href="/pages/lifecycle/">Lifecycle</a> for <code>activate</code> and <code>deactivate</code>.</li>
 </ul>
 <h2 id="the-log-import">The log import</h2>
 <p>The import is <code>ilium:host/log</code>. It has one function and one enum.</p>
@@ -441,7 +441,7 @@
 <li>A line break in the message is written as the two characters <code>\n</code>, so each entry stays on one line.</li>
 <li>An empty message is accepted and writes an entry with no text after the plugin id.</li>
 <li>The rate is 200 lines per second for an ordinary plugin and 1,000 for a trusted T1 plugin. Lines over the rate are dropped and counted. Once per second, with lines dropped, the host writes one <code>warn</code> entry, <code>&lt;n&gt; lines dropped in the last second</code>. That summary does not use the rate budget.</li>
-<li>WASI standard output is written at level <code>info</code> and standard error at level <code>error</code>. Both share the rate budget and the size cap.</li>
+<li>WASI standard output is written at level <code>info</code> and standard error at level <code>warn</code>. Both share the rate budget. A captured WASI line longer than 16 KiB is cut and marked <code>[cut]</code> (HST-078); the <code>…[truncated]</code> marker above applies to <code>log::log</code> messages only.</li>
 <li>Log entries carry no source position. The Rust <code>log!</code> macros of the SDK add <code>file:line</code> to the message themselves.</li>
 </ul>
 <p>Write each message as <code>operation: object</code>, for example <code>sync: 3 notes saved to data/notes.json</code>, so that the line can be read without the source code.</p>
@@ -461,7 +461,7 @@
 <tbody>
 <tr>
 <td>Your log call, stdout, stderr</td>
-<td>as given, <code>info</code>, <code>error</code></td>
+<td>as given, <code>info</code>, <code>warn</code></td>
 <td>Your text.</td>
 </tr>
 <tr>
@@ -487,7 +487,7 @@
 <tr>
 <td>Restart</td>
 <td><code>warn</code></td>
-<td><code>restarting in &lt;1 or 5 or 30&gt; s (failure &lt;n&gt; of 3 in 10 minutes)</code>.</td>
+<td><code>restarting in &lt;1 or 5&gt; s (failure &lt;n&gt; of 3 in 10 minutes)</code>.</td>
 </tr>
 <tr>
 <td>Dropped lines</td>
@@ -517,7 +517,7 @@
 <p>A trap ends the instance at once. The host drops the instance, withdraws its dynamic contributions, cancels its pending requests and starts a new instance after a delay. A trap is caused by one of these:</p>
 <ul>
 <li>A call to an import that the manifest never requested. A declined grant does not trap: the import returns <code>not-permitted</code>. A call without any request in the manifest does trap.</li>
-<li>An invalid <code>ui-tree</code>: a child index out of range, or two nodes with the same <code>key</code> in one tree (UI3). The SDK builder cannot produce a bad index, so this comes from hand-written <code>raw</code> code or a duplicate key.</li>
+<li>An invalid <code>ui-tree</code>: a child index out of range, or two nodes with the same <code>key</code> in one tree. The SDK builder cannot produce a bad index, so this comes from hand-written <code>raw</code> code or a duplicate key.</li>
 <li>More than 256 submissions returned from one <code>on-events</code> call.</li>
 <li>A deadline breach on an export that traps (see the table below).</li>
 <li>Exceeding <code>memory_mib</code> or <code>table_elements</code>, or a Rust panic or a thrown TypeScript exception in an export that has no outcome.</li>
@@ -577,7 +577,7 @@
 </tr>
 </tbody>
 </table>
-<p>A job that runs past its deadline does not trap the plugin. The job request fails with <code>timed-out</code>, and the failure does not count toward the restart rule (A22). Move slow work into a job, as described on the <a href="/pages/background-jobs/">background jobs page</a>.</p>
+<p>A job that runs past its deadline does not trap the plugin. The job request fails with <code>timed-out</code>, and the failure does not count toward the restart rule. Move slow work into a job, as described on the <a href="/pages/background-jobs/">background jobs page</a>.</p>
 <h3 id="stuck-plugins">Stuck plugins</h3>
 <p>Each side has an event queue of 1,024 entries for events that are never dropped. When the queue overflows, the plugin is treated as stuck. The host writes <code>event queue full at 1,024 events; restarting</code> at level <code>error</code>, and restarts the plugin. The new instance gets a <code>tree-changed</code> event for every node and reads its state again. The restart counts as a failure.</p>
 <h3 id="failures-that-do-not-count">Failures that do not count</h3>
@@ -590,7 +590,7 @@
 </ul>
 <p>Release builds strip the debug information. Their frames show function names only, as <code>at handle_batch</code>. The host reads the source map only to write frame entries. The sources under <code>src/</code> are never loaded or run, and log entries are never mapped.</p>
 <h2 id="development-reload">Development reload</h2>
-<p><code>ilium plugin dev</code> watches the package directory. A plugin installed this way has tier T3 and shows a <code>dev</code> badge (U3). Each save follows these steps:</p>
+<p><code>ilium plugin dev</code> watches the package directory. A plugin installed this way has tier T3 and shows a <code>dev</code> badge. Each save follows these steps:</p>
 <figure>
 <svg viewBox="0 0 400 290" role="img" aria-label="Development reload loop in five steps" width="600" height="435">
   <defs>
@@ -632,7 +632,7 @@
 <p>Keep in the restore bytes only the state that the host does not keep. Settings, storage and node metadata already persist across the reload, so most plugins need a few bytes at most.</p>
 <h2 id="worked-example-server-side-plugin">Worked example: server-side plugin</h2>
 <p><strong>Rust</strong></p>
-<p>The plugin logs each agent start, keeps a count across reloads and warns about a bad restore. The <code>log::log</code> calls use the SDK paths of S4 and S7.</p>
+<p>The plugin logs each agent start, keeps a count across reloads and warns about a bad restore. The <code>log::log</code> calls use the SDK path <code>ilium_plugin_sdk::host::log</code>.</p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::host::log::{self, Level};
 use ilium_plugin_sdk::types::events::AgentActivityEvent;
@@ -780,7 +780,7 @@ export const { lifecycle, handler } = definePlugin({
 </thead>
 <tbody>
 <tr>
-<td>The render traps, the previous view stays and the plugin log has <code>invalid-argument</code></td>
+<td>The render traps, the previous view stays and the plugin log has <code>ui.invalid-tree</code> or another <code>ui.*</code> code</td>
 <td>A tree or widget cap: 4,096 nodes, 1,024 KiB, 256 <code>check-list</code> items, 64 <code>list-editor</code> items, 4 popups</td>
 <td>The log entry names the cap. Page the data with a virtual-row or catalogue provider.</td>
 </tr>
@@ -857,7 +857,7 @@ function timedProvider&lt;T&gt;(name: string, work: () =&gt; T): T {
 <ul>
 <li><a href="/pages/testing/">Testing plugins</a></li>
 <li><a href="/pages/lifecycle/">Lifecycle</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/background-jobs/">Background jobs</a></li>
 </ul>
 <p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>

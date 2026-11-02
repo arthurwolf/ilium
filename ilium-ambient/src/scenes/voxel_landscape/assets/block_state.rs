@@ -7,12 +7,14 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
+/// Clones share one identity and property map. A saved world repeats the same
+/// few states across millions of cells, so cloning must not copy their strings.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(try_from = "StateWire", into = "StateWire")]
 pub struct BlockState {
-    id: ResourceId,
-    properties: BTreeMap<String, String>,
+    id: Arc<ResourceId>,
+    properties: Arc<BTreeMap<String, String>>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,15 +79,15 @@ impl BlockState {
             }
         }
         Ok(Self {
-            id,
-            properties: sorted,
+            id: Arc::new(id),
+            properties: Arc::new(sorted),
         })
     }
     pub fn id(&self) -> &ResourceId {
-        &self.id
+        self.id.as_ref()
     }
     pub fn properties(&self) -> &BTreeMap<String, String> {
-        &self.properties
+        self.properties.as_ref()
     }
     pub fn property(&self, name: &str) -> Option<&str> {
         self.properties.get(name).map(String::as_str)
@@ -105,7 +107,7 @@ impl BlockState {
     /// ground, not the old world module's second ground-axis parameter naming.
     pub fn rotated(&self, turns: u8) -> Result<Self> {
         let turns = turns % 4;
-        let mut properties = self.properties.clone();
+        let mut properties = self.properties().clone();
         if let Some(facing) = self.property("facing") {
             let directions = ["north", "east", "south", "west"];
             if let Some(index) = directions.iter().position(|value| *value == facing) {
@@ -139,7 +141,7 @@ impl BlockState {
                 );
             }
         }
-        Self::new(self.id.clone(), properties)
+        Self::new(self.id().clone(), properties)
     }
 }
 impl TryFrom<StateWire> for BlockState {
@@ -151,8 +153,8 @@ impl TryFrom<StateWire> for BlockState {
 impl From<BlockState> for StateWire {
     fn from(value: BlockState) -> Self {
         Self {
-            id: value.id,
-            properties: value.properties,
+            id: value.id().clone(),
+            properties: value.properties().clone(),
         }
     }
 }

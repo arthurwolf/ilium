@@ -24,7 +24,7 @@ The scene host, the cached loops and the frame pacing are part of the client ker
 
 ### See it
 
-<figure><img src="/assets/demos/26-animations.gif" alt="Animated scenes behind the panes, switched from the Animations tab" loading="lazy"><figcaption>Scenes behind the panes. The shared look comes from the Animations tab, not from the scene.</figcaption></figure>
+<figure><img src="/assets/demos/26-animations.gif" alt="Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified." loading="lazy"><figcaption>Historical gallery capture. The current-build Voxel preview has not passed visual review.</figcaption></figure>
 
 ### What the user sees
 

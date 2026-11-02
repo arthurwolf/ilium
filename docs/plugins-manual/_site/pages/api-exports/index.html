@@ -649,7 +649,7 @@ enum deactivation-reason { shutdown, disabled, upgrade, crash-restart, revoked, 
 activate: func(context: activation) -&gt; result&lt;_, plugin-error&gt;;
 deactivate: func(reason: deactivation-reason) -&gt; option&lt;list&lt;u8&gt;&gt;;
 </code></pre>
-<p>The record <code>activation</code> is defined once in the <a href="/pages/reference-wit/#413-lifecycle">WIT reference</a>. It has the fields <code>plugin</code>, <code>api</code>, <code>instance</code>, <code>side</code>, <code>settings-json</code>, <code>granted</code> and <code>restored</code>.</p>
+<p>The record <code>activation</code> is defined once in the <a href="/pages/reference-wit/">WIT reference</a> (<code>lifecycle</code>, <a href="/pages/reference-wit/#413-lifecycle">section 4.13</a>). It has the fields <code>plugin</code>, <code>api</code>, <code>instance</code>, <code>side</code>, <code>settings-json</code>, <code>granted</code> and <code>restored</code>.</p>
 <p><code>granted</code> lists the capabilities actually granted, so a plugin can hide features it cannot use. The bytes that <code>deactivate</code> returns come back as <code>restored</code> on the next activation. Use them to keep state across a restart.</p>
 <table>
 <thead>
@@ -754,8 +754,8 @@ export const { lifecycle, handler } = definePlugin({
 <p>The host calls <code>activate</code> first, then <code>on-events</code> with the first batch. A <code>deactivate</code> with <code>shutdown</code> returns the count, and the next <code>activate</code> receives those bytes as <code>restored</code>.</p>
 <pre class="term">
 <span class="t-prompt">$</span> ilium plugin logs example.skeleton --tail 3
-<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-ok">info </span> activated example.skeleton with 2 grants
-<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-dim">debug</span> on-events batch: 3 events, 1 submission
+<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-ok">info </span> activated example.skeleton with 0 grants
+<span class="t-dim">2026-10-11 08:31:02</span> <span class="t-dim">debug</span> on-events batch: 3 events, 0 submissions
 <span class="t-dim">2026-10-11 09:45:19</span> <span class="t-ok">info </span> deactivating: shutdown, 0 bytes returned
 <span class="t-prompt">$</span> <span class="t-dim">3 lines shown</span>
 </pre>
@@ -906,7 +906,7 @@ export const { lifecycle, handler, detector } = definePlugin({
 <td>previous classification kept; the third breach in a row traps</td>
 </tr>
 <tr>
-<td><code>lifecycle.migrate</code></td>
+<td><code>migrator.migrate</code></td>
 <td>30,000 ms (60,000 ms), key <code>migrate_deadline_ms</code></td>
 <td>the migration fails, the backup is restored; not a failure</td>
 </tr>

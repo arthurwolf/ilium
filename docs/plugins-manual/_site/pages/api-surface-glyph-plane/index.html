@@ -397,7 +397,7 @@
 <h3 id="what-you-need">What you need</h3>
 <ul>
 <li><strong>Grant.</strong> None for the surface. Video from bytes needs <code>media.video</code> (see <a href="/pages/api-media/">media</a>).</li>
-<li><strong>Manifest.</strong> In <code>contributes.scenes</code>: <code>glyph_plane: true</code> for the glyph plane, and <code>prerender: { frames, fps, cache_mib }</code> for a looped scene. <code>prerender</code> and <code>wants-pointer</code> exclude each other (<code>manifest.scene-prerender</code>).</li>
+<li><strong>Manifest.</strong> In <code>contributes.scenes</code>: <code>glyph_plane: true</code> for the glyph plane, and <code>prerender: { frames, fps, cache_mib }</code> for a looped scene. A <code>prerender</code> scene gets no pointer: if it answers <code>true</code> from <code>wants-pointer</code> at runtime, <code>pointer</code> returns <code>none</code> and the host logs a warning.</li>
 <li><strong>Sides.</strong> The scene (A) world. Fonts are always available there.</li>
 </ul>
 <pre><code class="language-json">&quot;contributes&quot;: { &quot;scenes&quot;: [{ &quot;id&quot;: &quot;lanes&quot;, &quot;title&quot;: &quot;Lanes&quot;, &quot;glyph_plane&quot;: true }] }
@@ -557,7 +557,7 @@ export function markLanes(surface: Surface, width: number, height: number): void
 <td><code>manifest.asset-size</code></td>
 </tr>
 <tr>
-<td><code>prerender</code> out of range or with <code>wants-pointer</code></td>
+<td><code>prerender</code> out of range</td>
 <td><code>manifest.scene-prerender</code></td>
 </tr>
 </tbody>

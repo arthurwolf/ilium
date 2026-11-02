@@ -92,8 +92,10 @@ pub(crate) fn draw_at_with_cursor(
         if app.hovered_status_slot.is_some()
             || app.hovered_progress.is_some()
             || app.hovered_goal_resume.is_some()
+            || app.resources.hovered_action.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
+            || app.goal_popover.is_some()
             || app.recap_popover.is_some()
             || app.hovered_recap_refresh.is_some()
             || popover_visible
@@ -107,6 +109,7 @@ pub(crate) fn draw_at_with_cursor(
         draw_goal_resume_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
+        app.draw_goal_popover(frame);
         draw_recap_tooltips(frame, app);
         if popover_visible {
             if let Some(popover) = &app.agent_popover {
@@ -171,6 +174,7 @@ pub(crate) fn draw_at_with_cursor(
         app.animation_frame.discard_composed_receipt();
         return None;
     }
+    app.resource_overlay(frame);
     cursor
 }
 
@@ -847,12 +851,55 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let agent_models = app.current_tree_models();
     // Read before `render` takes `&mut app.tree_state`; the hover state only needs the mask.
     let pending_toolbar = app.pending_toolbar_mask();
+    let mut custom_toolbar_pending: std::collections::HashSet<String> = app
+        .pending_pane_creations
+        .values()
+        .filter(|pending| !pending.uncertainty_reported)
+        .filter_map(|pending| pending.custom_profile_id.clone())
+        .collect();
+    if app.active_workspace_create_request_id.is_some() {
+        if let Mode::CreateAgentWorkspace(state) = &app.mode {
+            if let Some(identity) = &state.custom_agent {
+                custom_toolbar_pending.insert(identity.profile_id.clone());
+            }
+        }
+    }
+    let profiles_by_id: std::collections::HashMap<_, _> = app
+        .custom_agents
+        .profiles
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect();
+    let custom_agent_labels: std::collections::HashMap<_, _> = app
+        .custom_agent_panes
+        .iter()
+        .map(|(pane_id, identity)| {
+            let label = profiles_by_id
+                .get(identity.profile_id.as_str())
+                .map(|profile| (profile.icon.clone(), profile.name.clone()))
+                .unwrap_or_else(|| {
+                    (
+                        "?".to_string(),
+                        format!("Missing profile ({})", identity.profile_id),
+                    )
+                });
+            (*pane_id, label)
+        })
+        .collect();
+    let tree_visibility = app.active_tree_projection(std::time::Instant::now());
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
         &app.tree,
         &mut app.tree_state,
         tree_ui::TreeRenderOptions {
+            visibility: tree_visibility.as_ref(),
+            toolbar_layout: &app.ui_settings.tree_toolbar_layout,
+            custom_toolbar_profiles: Some(&app.custom_agents.profiles),
+            custom_toolbar_selected: app.custom_toolbar_selected.as_deref(),
+            custom_toolbar_hovered: app.custom_toolbar_hovered.as_deref(),
+            custom_toolbar_pending: Some(&custom_toolbar_pending),
+            custom_agent_labels: Some(&custom_agent_labels),
             focused: tree_focused,
             elapsed_ms: if matches!(
                 app.ui_settings.motion_level,
@@ -899,6 +946,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             sidebar_files: &app.sidebar_snapshot,
             chatroom_projects: &app.chatroom_projects,
+            resources: Some(&app.resources),
             panes: &app.panes,
         },
     );
@@ -1727,7 +1775,7 @@ fn draw_context_menu(
         let item = &submenu.items[index];
         let checked = if matches!(submenu.parent, crate::app::ContextMenuAction::OrderBy) {
             Some(
-                matches!(item.action, SubmenuItemAction::SetTreeOrder(order) if order == current_tree_order),
+                matches!(&item.action, SubmenuItemAction::SetTreeOrder(order) if *order == current_tree_order),
             )
         } else {
             None
@@ -2601,6 +2649,10 @@ fn draw_pane_sources(
         crate::agent_debug_ui::render(frame, area, app, state);
         return Vec::new();
     }
+    if matches!(app.right_panel_target, RightPanelTarget::Resource { .. }) {
+        app.resource_detail(frame, area);
+        return Vec::new();
+    }
     if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
         crate::chatroom_ui::render(frame, area, app, *project_id);
         return Vec::new();
@@ -2950,6 +3002,8 @@ fn draw_pane_runtime(
                         show_labels: app.ui_settings.show_toolbar_labels,
                         selection_enabled: app.ui_settings.terminal_text_selection_enabled,
                         show_prompt_reopen: app.last_prompt_reopen_available(viewport.pane_id),
+                        show_goal: app.ui_settings.goal_toolbar_icon_enabled
+                            && app.current_goal_phase(viewport.pane_id).is_some(),
                     },
                     hovered,
                 );
@@ -2965,16 +3019,53 @@ fn draw_pane_runtime(
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_last_prompt_banner(viewport.pane_id)
         {
+            let tabs = app.ui_settings.goal_tab_enabled
+                && app.current_goal_phase(viewport.pane_id).is_some()
+                && crate::last_prompt_banner::tab_rects(
+                    last_prompt_area,
+                    crate::last_prompt_toolbar::has_toolbar(last_prompt_area.width),
+                )
+                .is_some();
+            let selected_goal = tabs && app.goal_tab_selected.contains(&viewport.pane_id);
+            let goal_text = selected_goal.then(|| {
+                app.goal_observation(viewport.pane_id)
+                    .map(crate::session_goal_display::goal_banner_text)
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{}: Goal text unavailable",
+                            app.current_goal_phase(viewport.pane_id).map_or(
+                                "Status unavailable",
+                                crate::session_goal_display::phase_label
+                            )
+                        )
+                    })
+            });
+            let prompt = if selected_goal {
+                goal_text.as_deref()
+            } else {
+                app.display_last_agent_prompt(viewport.pane_id)
+                    .or(tabs.then_some(""))
+            };
             crate::last_prompt_banner::render(
                 frame,
                 last_prompt_area,
-                app.display_last_agent_prompt(viewport.pane_id),
+                prompt,
                 app.ui_settings.last_prompt_max_lines.into(),
                 app.ui_settings.color_scheme,
-                crate::last_prompt_toolbar::has_toolbar(last_prompt_area.width)
-                    .then(|| app.last_prompt_toolbar_visibility(viewport.pane_id)),
-                app.hovered_last_prompt_button
-                    .and_then(|(pane_id, button)| (pane_id == viewport.pane_id).then_some(button)),
+                crate::last_prompt_banner::BannerControls {
+                    toolbar: crate::last_prompt_toolbar::has_toolbar(last_prompt_area.width)
+                        .then(|| app.last_prompt_toolbar_visibility(viewport.pane_id)),
+                    hovered: app
+                        .hovered_last_prompt_button
+                        .and_then(|(pane_id, button)| {
+                            (pane_id == viewport.pane_id).then_some(button)
+                        }),
+                    selected_tab: tabs.then_some(if selected_goal {
+                        crate::last_prompt_banner::BannerTab::Goal
+                    } else {
+                        crate::last_prompt_banner::BannerTab::Prompt
+                    }),
+                },
             );
         }
     }
@@ -3011,9 +3102,33 @@ fn draw_pane_runtime(
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_progress_footer(viewport.pane_id)
         {
+            let native_rows = app.resource_wait_footer_rows(viewport.pane_id, progress_area.height);
+            let native_wait = native_rows > 0;
+            let ordinary_area = if native_wait {
+                Rect::new(
+                    progress_area.x,
+                    progress_area.y.saturating_add(native_rows),
+                    progress_area.width,
+                    progress_area.height.saturating_sub(native_rows),
+                )
+            } else {
+                progress_area
+            };
+            if native_wait {
+                app.resource_wait_footer(
+                    frame,
+                    Rect::new(
+                        progress_area.x,
+                        progress_area.y,
+                        progress_area.width,
+                        native_rows,
+                    ),
+                    viewport.pane_id,
+                );
+            }
             crate::progress_bar::render_monitors(
                 frame,
-                progress_area,
+                ordinary_area,
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,
@@ -3879,6 +3994,35 @@ mod tests {
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
+
+    #[test]
+    fn split_orientation_dialog_shows_complete_cancel_instruction_at_demo_size() {
+        let mut terminal = Terminal::new(TestBackend::new(163, 51)).unwrap();
+        let state = CreateSplitOrientationState {
+            orientation: SplitOrientation::Vertical,
+        };
+        terminal
+            .draw(|frame| {
+                draw_create_split_orientation(
+                    frame,
+                    frame.area(),
+                    &state,
+                    &crate::icon_settings::IconSettings::default(),
+                );
+            })
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(
+            rendered.contains("Esc cancel"),
+            "the cancel instruction must be fully visible"
+        );
+    }
 
     #[test]
     fn terminal_placeholder_prioritizes_concrete_blocking_failure() {

@@ -547,8 +547,8 @@
 </tr>
 <tr>
 <td>USR-014</td>
-<td>The first-start prompt MUST appear at most once per start, MUST NOT block other plugins, and after Not now MUST appear at most 3 more times in total.</td>
-<td>answer Not now at four consecutive starts and assert that the fifth start shows no prompt.</td>
+<td>The first-start prompt MUST appear at most once per start, MUST NOT block other plugins, and after Not now MUST stop appearing after the third Not now answer (three in total, counted per plugin, as in SEC-111).</td>
+<td>answer Not now at three consecutive starts and assert that the fourth start shows no prompt.</td>
 <td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
 </tr>
 <tr>
@@ -602,7 +602,7 @@
 <tr>
 <td>USR-041</td>
 <td>The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why.</td>
-<td>press Space on <code>ilium.core.tree</code> and assert the refusal text. (Pending decision: the set of "no" plugins.)</td>
+<td>press Space on <code>ilium.core.tree</code> and assert the refusal text.</td>
 <td><a href="/pages/user-core-plugins/">user-core-plugins</a></td>
 </tr>
 <tr>
@@ -631,8 +631,8 @@
 </tr>
 <tr>
 <td>USR-052</td>
-<td>A hook that times out, traps or errors MUST count as "no change", and a timeout MUST NOT block or veto.</td>
-<td>let a veto handler sleep past its deadline and assert the action goes ahead.</td>
+<td>A hook that times out, traps or errors MUST count as "no change", and a timeout MUST NOT block or veto, except at a high-risk veto point whose owner declared <code>on_failure: "refuse"</code> (SEC-287), where it refuses a plugin-initiated action.</td>
+<td>let a veto handler sleep past its deadline and assert the action goes ahead. Then let a handler at a high veto point with <code>on_failure: "refuse"</code> sleep past its deadline and assert <code>extension.vetoed</code> with reason <code>guard-failed</code>.</td>
 <td><a href="/pages/user-extensions-tab/">user-extensions-tab</a></td>
 </tr>
 <tr>
@@ -661,14 +661,14 @@
 </tr>
 <tr>
 <td>USR-062</td>
-<td>Install, verify, update, uninstall and list MUST NOT use the network.</td>
+<td>Install, verify, update, uninstall and list of local packages MUST NOT use the network (a user-configured registry fetch by the store is the only exception).</td>
 <td>run each in a network namespace without interfaces and assert success.</td>
 <td><a href="/pages/user-privacy/">user-privacy</a></td>
 </tr>
 <tr>
 <td>USR-070</td>
 <td>A policy MUST only restrict. No key of the policy MAY enable a plugin, grant or tier that Ilium refuses without a policy.</td>
-<td>set <code>allowed_tiers = ["T3"]</code> on Windows and assert that T3 is still refused.</td>
+<td>set <code>allowed_tiers = ["t3"]</code> on Windows and assert that tier t3 is still refused.</td>
 <td><a href="/pages/guide-administration/">guide-administration</a></td>
 </tr>
 <tr>
@@ -775,20 +775,20 @@
 </tr>
 <tr>
 <td>USR-120</td>
-<td>Ilium MUST show the full key fingerprint on request and the short form (first 4 and last 4 characters joined by an ellipsis) in the prompt, and MUST NOT trust a key without an explicit user answer.</td>
+<td>Ilium MUST show the full key fingerprint (64 lowercase hexadecimal characters in groups of 4) in the prompt, and the short form (the first 8 characters) only beside a full form or in the trust list (SEC-177), and MUST NOT trust a key without an explicit user answer.</td>
 <td>install a package signed by an unknown key and assert that the prompt appears and that declining installs nothing.</td>
 <td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
 </tr>
 <tr>
 <td>USR-121</td>
-<td>Removing a trusted key MUST NOT remove, disable or change any installed plugin, and MUST mark plugins that it signed as <code>untrusted</code> in <code>ilium plugin list</code>.</td>
+<td>Removing a trusted key MUST NOT uninstall any plugin or change its files, grants or data. The plugins it signed stop loading at the next activation (SEC-144) and MUST be marked plugins that it signed as <code>untrusted</code> in <code>ilium plugin list</code>.</td>
 <td>remove the key and list.</td>
 <td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
 </tr>
 <tr>
 <td>USR-122</td>
-<td>An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced silently by a different key.</td>
-<td>install version 1 signed by key A, then offer version 2 signed by unknown key B, and assert that the trust prompt appears and that the dialog names both fingerprints.</td>
+<td>An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced by a different key unless the old key endorsed it with a rotation statement (SEC-142); otherwise the update is refused with <code>package.publisher-key-changed</code>.</td>
+<td>install version 1 signed by key A, then offer version 2 signed by unendorsed key B, and assert that the update is refused with <code>package.publisher-key-changed</code>.</td>
 <td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
 </tr>
 <tr>
@@ -805,14 +805,14 @@
 </tr>
 <tr>
 <td>USR-125</td>
-<td>Ilium MUST NOT check for, download or install updates by itself.</td>
-<td>with two plugins installed, run for one hour with request logging and assert that no update request is made.</td>
+<td>Ilium MUST NOT check for, download or install updates by itself unless the user has set <code>[plugins] auto_update</code> to <code>notify</code> or <code>install</code>; the default is <code>off</code>.</td>
+<td>with two plugins installed and the default setting, run for one hour with request logging and assert that no update request is made; then set <code>auto_update = notify</code> and assert that a check is made.</td>
 <td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
 </tr>
 <tr>
 <td>USR-126</td>
-<td>An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the user trusts after seeing both fingerprints.</td>
-<td>offer an update signed by a second key and assert the prompt shows the old and the new fingerprint.</td>
+<td>An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the old key endorsed with a rotation statement (SEC-142). Any other key MUST be refused with <code>package.publisher-key-changed</code>.</td>
+<td>offer an update signed by an unendorsed second key and assert it is refused with <code>package.publisher-key-changed</code>.</td>
 <td><a href="/pages/packages/">packages</a></td>
 </tr>
 <tr>
@@ -823,7 +823,7 @@
 </tr>
 <tr>
 <td>USR-128</td>
-<td>A T2 package whose key was removed from the trust list MUST keep running and MUST show <code>untrusted</code> in <code>ilium plugin list</code>. A later update MUST ask for trust again.</td>
+<td>A T2 package whose key was removed from the trust list MUST stop loading at the next activation and show <code>Publisher no longer trusted</code> (SEC-144); it is not uninstalled and its data stays. Trusting the key again reactivates it. A later update MUST ask for trust again.</td>
 <td>remove the key, list, and offer an update.</td>
 <td><a href="/pages/packages/">packages</a></td>
 </tr>
@@ -856,6 +856,30 @@
 <td>A pane whose plugin is gone MUST stay in the tree with a placeholder and MUST come back to life when the plugin is installed again.</td>
 <td>remove, check the placeholder, reinstall, check the pane.</td>
 <td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
+</tr>
+<tr>
+<td>USR-174</td>
+<td>A plugin whose key was revoked as <code>compromised</code>, or whose installed version a registry takedown names, MUST stop at once, MUST show <code>Blocked</code> with the reason <code>trust.key-revoked</code> or <code>registry.takedown</code>, and MUST keep its grants, settings and data.</td>
+<td>revoke the signing key as <code>compromised</code>, assert stopped and <code>Blocked</code>, compare grants, settings and data.</td>
+<td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
+</tr>
+<tr>
+<td>USR-175</td>
+<td><code>ilium plugin enable &lt;id&gt;</code> on a blocked plugin MUST fail with <code>plugin.blocked</code> and leave it blocked. <code>ilium plugin enable &lt;id&gt; --accept-risk</code> MUST turn it on and clear the block.</td>
+<td>enable without the flag, then with it.</td>
+<td><a href="/pages/user-install-and-manage/">user-install-and-manage</a></td>
+</tr>
+<tr>
+<td>USR-176</td>
+<td>The troubleshooting table MUST tell a user whose plugin shows <code>Blocked</code> that the block is not a failure and how to leave it.</td>
+<td>read the page text, block a plugin and list.</td>
+<td><a href="/pages/user-troubleshooting/">user-troubleshooting</a></td>
+</tr>
+<tr>
+<td>USR-177</td>
+<td>A publisher guide MUST state that key revocation or takedown blocks installed copies and how users leave the block.</td>
+<td>read the page text.</td>
+<td><a href="/pages/guide-publishing/">guide-publishing</a></td>
 </tr>
 <tr>
 <td>USR-143</td>
@@ -919,8 +943,8 @@
 </tr>
 <tr>
 <td>USR-200</td>
-<td>The host MUST resolve <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code> and <code>&lt;cache&gt;</code> with the <code>directories</code> crate for the project name <code>ilium</code>, and MUST NOT write plugin files anywhere else.</td>
-<td>start Ilium with <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code> and <code>XDG_CACHE_HOME</code> pointing at three empty folders, install a plugin, and assert that no plugin file appears outside those folders and the project's <code>.ilium</code> folder.</td>
+<td>The host MUST resolve <code>&lt;config&gt;</code>, <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code> and <code>&lt;state&gt;</code> with the <code>directories</code> crate for the project name <code>ilium</code> (<code>&lt;state&gt;</code> is the per-OS state folder of SEC-112), and MUST NOT write plugin files anywhere else.</td>
+<td>start Ilium with <code>XDG_CONFIG_HOME</code>, <code>XDG_DATA_HOME</code>, <code>XDG_CACHE_HOME</code> and <code>XDG_STATE_HOME</code> pointing at four empty folders, install a plugin, and assert that no plugin file appears outside those folders and the project's <code>.ilium</code> folder.</td>
 <td><a href="/pages/reference-plugin-files/">reference-plugin-files</a></td>
 </tr>
 <tr>
@@ -1070,11 +1094,6 @@
 <td>Audit log</td>
 <td>Always on, with rotation and retention set by <code>audit.max_mib</code> and <code>audit.keep_days</code>.</td>
 <td><a href="/pages/reference-plugin-policy/">Plugin policy</a></td>
-</tr>
-<tr>
-<td>Which core plugins a user can turn off</td>
-<td>The "can you turn it off" column of the core plugin tables.</td>
-<td><a href="/pages/user-core-plugins/">Core plugins for users</a></td>
 </tr>
 <tr>
 <td>Data choice at uninstall</td>

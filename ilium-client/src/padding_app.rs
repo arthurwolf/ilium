@@ -90,15 +90,24 @@ impl App {
         if next == self.padding_settings {
             return;
         }
-        self.padding_settings = next;
-        self.sync_padding();
-        // Padding changes the interior of every panel, so terminals must be
-        // told their new size even though the outer layout is unchanged.
-        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+        self.apply_padding_settings(next);
         self.persist_configuration(
             ConfigurationChange::Padding(self.padding_settings),
             "Padding settings",
         );
+    }
+
+    /// Applies padding to runtime consumers without starting a second write.
+    /// Shared numeric settings admission owns persistence for threshold edits.
+    pub(crate) fn apply_padding_settings(&mut self, settings: PaddingSettings) {
+        if settings == self.padding_settings {
+            return;
+        }
+        self.padding_settings = settings;
+        self.sync_padding();
+        // Padding changes the interior of every panel, so terminals must be
+        // told their new size even though the outer layout is unchanged.
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
     pub fn padding_set_mode(&mut self, mode: PaddingMode) {

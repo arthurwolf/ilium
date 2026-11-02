@@ -51,6 +51,8 @@ High risk. A bundled T1 plugin still needs an explicit grant. Prefer [agent.read
 | `agent.take-transcript` | function | Returns `option<list<transcript-turn>>`. |
 | `transcript-turn` | record | `{ role, text, tool?, at?, tokens? }`; `role` is `user`, `assistant`, `tool` or `system`. |
 
+On the wire, `transcript` returns a `request-id`; the turns arrive after `request-completed` through `take-transcript` (the WIT in [Agent transcript](/pages/primitives-agent-transcript/) is authoritative). The `agent::transcript(query).block_on()` form and the TypeScript `await transcript(...)` in the examples below are SDK wrappers that submit the request, wait for `request-completed` and call `take-transcript` once, so they yield the turn list directly or the request's error.
+
 See [Agent primitives](/pages/primitives-agent/) and [Requests and outcomes](/pages/requests-and-outcomes/).
 
 ### Manifest
@@ -91,7 +93,7 @@ impl Handler for Recap {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.recap/count" { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             let query = TranscriptQuery { pane, last_turns: 20, max_bytes: 262_144 };
             match agent::transcript(query).block_on() {
                 Ok(turns) => {
@@ -118,9 +120,9 @@ export const { lifecycle, handler } = definePlugin({
   side: 'server',
   async onEvents(batch: Event[]): Promise<Submission[]> {
     for (const event of batch) {
-      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.recap/count' || event.val.pane === undefined) continue;
+      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.recap/count' || event.val.context.pane === undefined) continue;
       try {
-        const turns = await transcript({ pane: event.val.pane, lastTurns: 20, maxBytes: 262144 });
+        const turns = await transcript({ pane: event.val.context.pane, lastTurns: 20, maxBytes: 262144 });
         log('info', `${turns.filter((turn) => turn.role === 'assistant').length} assistant turns`);
       } catch (error) {
         log('warn', `transcript failed: ${String(error)}`);
@@ -142,7 +144,8 @@ Do not copy transcript text into the plugin's storage unless the user asked for 
 | `last-turns` above 512 or `max-bytes` above 4 MiB | `invalid-argument` | Ask for less. |
 | Pane is not an agent pane | `not-found` | Check the pane kind. |
 | Session file not written yet | empty list | Try again after the first turn. |
-| Grant revoked later | `revoked` | Discard cached turns. |
+| Grant revoked while a call is in flight | `revoked` | Discard cached turns. |
+| Call made after the grant was revoked | `not-permitted` | Discard cached turns and use `agent.read` data only. |
 
 Turns come from the agent's file, so they can lag the screen by a moment.
 

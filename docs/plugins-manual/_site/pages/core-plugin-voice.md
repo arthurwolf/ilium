@@ -14,7 +14,7 @@ Voice is the plugin form of Ilium's voice control. Hold F8 or press the voice bu
 
 ### See it
 
-<figure><img src="/assets/demos/02-voice-control.gif" alt="A voice command is spoken and Ilium runs it after the transcript appears" loading="lazy"><figcaption>Voice control: speak, read the transcript, run the command.</figcaption></figure>
+<figure><img src="/assets/demos/02-voice-control.gif" alt="Typed voice commands drive current Ilium through scripted local tools" loading="lazy"><figcaption>Typed commands pass through a scripted loopback model to real Ilium tools and a real shell running ls -lh. Agent panes are local fixtures; no microphone or hosted inference. F8 stops voice after Settings closes.</figcaption></figure>
 
 ### What the user sees
 
@@ -52,7 +52,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "capabilities": {
     "server": ["cli.contribute"],
     "client": ["audio.microphone", "keys.intercept", "commands.invoke:*",
-               "inference", "jobs.run"]
+               "inference", "jobs.run", "settings.write-kernel:voice-control"]
   }
 }
 ```
@@ -99,12 +99,18 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   ],
   "limits_tier": "first-party",
   "contributes": {
-    "cli": {
+    "commands": [
+      { "id": "voice.toggle", "title": "Toggle voice control" }
+    ],
+    "cli": [{
       "name": "voice",
       "summary": "Voice control: say",
       "output": "jsonl",
       "requires_server": true
-    }
+    }],
+    "jobs": [
+      { "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }
+    ]
   }
 }
 ```
@@ -386,7 +392,7 @@ use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::{CliInvokedEvent, ClientRequestEvent};
 
 // server manifest: "capabilities": { "server": ["cli.contribute"] },
-//   "contributes": { "cli": { "name": "voice", "output": "jsonl", ... } }
+//   "contributes": { "cli": [{ "name": "voice", "output": "jsonl", ... }] }
 // client manifest: "client_requests": [{ "id": "voice-say", "timeout_ms": 5000 }]
 impl Handler for VoiceServer {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
@@ -432,7 +438,7 @@ import * as cli from '@ilium/plugin-sdk/host/cli';
 import * as clientRequests from '@ilium/plugin-sdk/host/client-requests';
 
 // server manifest: "capabilities": { "server": ["cli.contribute"] },
-//   "contributes": { "cli": { "name": "voice", "output": "jsonl", ... } }
+//   "contributes": { "cli": [{ "name": "voice", "output": "jsonl", ... }] }
 // client manifest: "client_requests": [{ "id": "voice-say", "timeout_ms": 5000 }]
 let client: bigint | undefined;
 const pending = new Map<bigint, bigint>(); // request id -> invocation
@@ -483,7 +489,7 @@ Other plugins change what `ilium.core.voice` does through the points below. The 
 
 - `ilium.core.voice/heard`: { text, command }
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.voice"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.voice"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds the phrase `open the board`
 
@@ -527,6 +533,18 @@ A package adds this entry in its manifest. It needs no code.
 - [Core plugins](/pages/core-plugins/)
 - [Inference providers](/pages/core-plugin-inference/)
 - [Security](/pages/security/)
+
+### Data and privacy
+
+Voice handles two kinds of data: the audio you speak and the transcript made from it.
+
+- Audio stays in memory. It is never written to disk, a log or a crash report, and the buffer is released when the transcription job ends, fails or is cancelled. [COR-080]
+- With a local transcription provider nothing leaves your machine. With a remote provider the audio is sent to the host you configured, and the voice strip shows a "remote" marker while it is. [COR-081]
+- Settings names the provider and whether it is local or remote before the first capture. A failing provider never makes Voice switch to a remote one on its own. [COR-082]
+- A transcript lives in memory for the current voice session, is not written to the log at Info level or above, and is dropped when the session ends. [COR-083]
+- Audio and transcripts are not published on a topic, sent in an event or shown to other plugins. Only the command id a transcript maps to leaves the plugin. [COR-084]
+
+See [Plugin privacy](/pages/user-privacy/#core-plugins-and-ai-providers).
 
 ### Security
 

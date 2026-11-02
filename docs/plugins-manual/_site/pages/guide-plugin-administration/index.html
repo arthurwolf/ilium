@@ -501,7 +501,7 @@
 <tbody>
 <tr>
 <td>[PKG-473]</td>
-<td>A mirror MUST NOT be signed by the mirror operator. Clients check the signatures of the original registry.</td>
+<td>A full mirror MUST NOT be signed by the mirror operator. Clients check the signatures of the original registry. The one exception is a partial mirror ([PKG-409]), which signs with its own keys and its own <code>root.json</code>; clients verify that mirror against its own root, set in <code>[plugins.registry]</code>.</td>
 </tr>
 <tr>
 <td>[PKG-474]</td>

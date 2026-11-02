@@ -618,11 +618,11 @@
 </tr>
 <tr>
 <td>The helper epoch deadline fires</td>
-<td>The helper traps the instance and sends <code>CallResult</code> with <code>host.deadline</code></td>
+<td>The helper traps the instance and sends <code>CallResult</code> with <code>trap.deadline</code></td>
 </tr>
 <tr>
 <td>No <code>CallResult</code> arrives within 500 ms after the deadline</td>
-<td>The host sends SIGKILL (SIGTERM first is not used) and treats it as <code>helper.hung</code>. One failure is counted</td>
+<td>The host terminates the helper (SIGTERM, then SIGKILL after 2 s, as in HST-171) and treats it as <code>helper.hung</code>. One failure is counted</td>
 </tr>
 <tr>
 <td>Three heartbeats in a row are missed</td>
@@ -661,9 +661,9 @@
 </tbody>
 </table>
 <p>When the charge for an activation would pass <code>session_memory_mib</code>, the activation is refused with <code>session.memory-exceeded</code>. This refusal does not count as a failure, because the plugin did nothing wrong. The side stays <code>inactive</code> with the reason <code>host-capacity</code> and activation is retried, as in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
-<p>With cgroup v2 delegated, the kernel enforces <code>memory.max</code>. Without it, the helper uses <code>RLIMIT_AS</code> and the host samples RSS once a second. An out-of-memory kill is reported as a trap <code>limit-exceeded(memory)</code> and counts as a failure.</p>
+<p>With cgroup v2 delegated, the kernel enforces <code>memory.max</code>. Without it, the helper uses <code>RLIMIT_AS</code> and the host samples RSS once a second. An out-of-memory kill is reported as a <code>trap.memory</code> and counts as a failure.</p>
 <ul>
-<li><strong>[HST-164]</strong> The host MUST charge <code>memory_mib + 32</code> MiB per helper to <code>session_memory_mib</code> at spawn and release it at exit.</li>
+<li><strong>[HST-164]</strong> The host MUST charge the sum of the hosted instances' <code>memory_mib</code> plus 32 MiB per helper to <code>session_memory_mib</code> at spawn and release it at exit.</li>
 <li><strong>[HST-165]</strong> An activation that would exceed <code>session_memory_mib</code> MUST be refused with <code>session.memory-exceeded</code>, MUST NOT count as a failure, and MUST leave the side <code>inactive</code> with the reason <code>host-capacity</code>.</li>
 </ul>
 <h2 id="helper-count">Helper count</h2>

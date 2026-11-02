@@ -80,7 +80,7 @@ The signal values map to POSIX signals as follows:
 | `kill` | `SIGKILL` | no | Stop a process that ignored `terminate`. |
 | `hangup` | `SIGHUP` | yes | Tell a process that its terminal went away. |
 
-Escalate in order: send `interrupt`, then `terminate`, and send `kill` only when `terminate` has failed to end the process. The signal goes to the child process that the pane started. An `ok` outcome means the signal was sent, not that the process exited. To confirm the exit, wait for the `pane-exited` event. It carries `status` and `signal`, for example `SIGKILL`, and `status` is `None` when a signal ended the process.
+Escalate in order: send `interrupt`, then `terminate`, and send `kill` only when no `pane-exited` event has arrived 2 seconds after `terminate`. The signal goes to the child process that the pane started. An `ok` outcome means the signal was sent, not that the process exited. To confirm the exit, wait for the `pane-exited` event. It carries `status` and `signal`, for example `SIGKILL`, and `status` is `None` when a signal ended the process.
 
 Each submission completes exactly once. The completion arrives as a `request-completed` event whose request reference is `submission(<correlation>)`. The `signal-pane` intent does not need a dedup key, because only `send-input` and `agent-action` require one. Without a key, every submission sends its signal. With a key, a repeat of that key within 10 minutes completes as `duplicate` and sends nothing.
 
@@ -98,7 +98,7 @@ Edge cases to handle in code:
 
 - **Refused batches.** When the grant is missing, the whole batch is refused, including other submissions such as `send-input`. Submit signals in their own batch when the other submissions must still run.
 - **Pane closed before the host handles the signal.** The outcome is `refused(not-found)`. Treat the pane as already stopped.
-- **Ignored signals.** A program may ignore `interrupt` or `terminate`. Escalate only after the process has had time to respond, and check `pane-exited` first.
+- **Ignored signals.** A program may ignore `interrupt` or `terminate`. Check `pane-exited` first, then escalate only after a grace of 2 seconds (the same grace as [long-lived processes](/pages/capability-process-long-lived/)) has passed without it.
 - **Revocation.** The user can revoke the grant in Settings > Plugins > the plugin > Capabilities, or with `ilium plugin grants <id> --revoke panes.signal`. The plugin then receives `deactivate(revoked)`. Pending requests that need the revoked capability complete as `failed(revoked)`.
 - **Grant added later.** When the user grants `panes.signal` after install, the plugin receives `deactivate(granted)` and is re-activated with the new set.
 
@@ -243,7 +243,7 @@ No first-party feature in v1 requests `panes.signal`. The progress monitor runs 
 - [panes.read](/pages/capability-panes-read/) for the pane events that supply pane ids and exit status.
 - [Process control](/pages/api-process-control/) for the `process` import and the same `signal-pane` intent in context.
 - [Intents](/pages/api-intents/) for submissions, correlation numbers and the outcome shapes.
-- [Errors and limits](/pages/errors-and-limits/) for the full error code table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error code table.
 - [Security](/pages/security/) for the risk tiers behind high-risk grants.
 
 Checked against the API version `ilium:plugin@0.1.0`.

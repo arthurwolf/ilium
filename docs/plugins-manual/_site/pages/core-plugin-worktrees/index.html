@@ -397,14 +397,14 @@
 <p>The kernel never runs Git itself. The plugin runs <code>git worktree add</code> through process control and then registers the result with the kernel, as described on the <a href="/pages/api-workspace/">workspace</a> page.</p>
 <h3 id="what-it-covers">What it covers</h3>
 <ul>
-<li>Start an agent in a new worktree or in an existing one, described in the worktrees guide.</li>
+<li>Start an agent in a new worktree or in an existing one, described under "New agent in a worktree (Ctrl+B W)" and "Create the worktree and the pane" below.</li>
 <li>The status and branch line in the tree.</li>
-<li>Cleanup: pruning, the removal blockers and branch deletion.</li>
+<li>Cleanup: removal blockers (uncommitted changes or a running process refuse removal), shown under "Git settings and removal blockers" below. Pruning and branch deletion are not offered by this plugin; they stay with the user's own Git commands.</li>
 <li>Copying local files with <code>.worktreeinclude</code> and running the post-create command.</li>
 <li>The Git settings tab, with the default worktree path and the post-create command.</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/25-worktree-agent.gif" alt="A new agent starts in a fresh Git worktree and its branch shows in the tree" loading="lazy"><figcaption>The command creates the worktree, opens a pane inside it and shows the branch in the tree.</figcaption></figure>
+<figure><img src="/assets/demos/25-worktree-agent.gif" alt="Ilium creates a Git worktree; a local Codex-shaped fixture runs inside it and the terminal shows its branch and file diff. Typing is shortened and three editorial captions were added." loading="lazy"><figcaption>A documented local Codex-shaped fixture runs from its absolute path inside the worktree; the built-in provider launch is not intercepted or represented. Typing is shortened, and three editorial captions were added.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -571,10 +571,10 @@ async fn add_worktree(&amp;mut self, repository: FsPath, folder: FsPath, host_pa
     let git = ProcessSpec {
         program: &quot;git&quot;.into(),
         arguments: vec![&quot;worktree&quot;.into(), &quot;add&quot;.into(), &quot;-b&quot;.into(), branch.clone(), host_path, &quot;HEAD&quot;.into()],
-        cwd: Some(repository), stdin: None, environment: Vec::new(), timeout_millis: 60_000,
+        cwd: Some(repository.clone()), stdin: None, environment: Vec::new(), timeout_millis: 60_000,
     };
     process::run(git).await?;
-    self.pending.insert(branch.clone(), folder.clone());
+    self.pending.insert(branch.clone(), (repository, folder.clone())); // (repository, folder), both needed by workspace::register
     Ok(Submission::new(Intent::CreatePane(CreatePaneSpec {
         parent: None, title: branch, content_kind: &quot;ilium.terminal&quot;.into(),
         cwd: Some(folder), command: Some(vec![&quot;claude&quot;.into()]), initial_input: None,
@@ -582,7 +582,7 @@ async fn add_worktree(&amp;mut self, repository: FsPath, folder: FsPath, host_pa
 }
 }
 
-// Event::PaneCreated(pane): look up pane.title in self.pending, then
+// Event::PaneCreated(pane): look up pane.title in self.pending (the stored repository and folder), then
 // workspace::register(WorkspaceSpec { repository, path, branch, base: Some(&quot;HEAD&quot;.into()), owner: Some(pane.node) }).
 </code></pre>
 <p><strong>TypeScript</strong></p>
@@ -611,31 +611,56 @@ export async function addWorktree(
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::fs::{self, WriteMode};
 use ilium_plugin_sdk::types::paths::FsPath;
+use ilium_plugin_sdk::{ErrorCode, PluginError};
 
 async fn copy_includes(worktree_dir: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
     let list_path = FsPath { scope: &quot;project&quot;.into(), path: &quot;.worktreeinclude&quot;.into() };
-    let list = String::from_utf8_lossy(&amp;fs::read(&amp;list_path).await?).to_string();
+    let list = match fs::read(&amp;list_path).await {
+        Ok(bytes) =&gt; String::from_utf8_lossy(&amp;bytes).to_string(),
+        Err(error) if error.code == ErrorCode::NotFound =&gt; return Ok(()),
+        Err(error) =&gt; return Err(error),
+    };
     for relative in list.lines().map(str::trim).filter(|l| !l.is_empty() &amp;&amp; !l.starts_with('#')) {
         let source = FsPath { scope: &quot;project&quot;.into(), path: relative.into() };
         let target = FsPath { scope: &quot;worktrees&quot;.into(), path: format!(&quot;{worktree_dir}/{relative}&quot;) };
-        let bytes = fs::read(&amp;source).await?;
+        // A missing file or a path outside the project is skipped; the other entries still copy.
+        let bytes = match fs::read(&amp;source).await {
+            Ok(bytes) =&gt; bytes,
+            Err(error) if matches!(error.code, ErrorCode::NotFound | ErrorCode::InvalidArgument | ErrorCode::NotPermitted) =&gt; continue,
+            Err(error) =&gt; return Err(error),
+        };
         fs::write(&amp;target, bytes, WriteMode::Replace).await?;
     }
     Ok(())
 }
 </code></pre>
 <p><strong>TypeScript</strong></p>
-<pre><code class="language-ts">import { read, write } from '@ilium/plugin-sdk/host/fs';
+<pre><code class="language-ts">import type { PluginError } from '@ilium/plugin-sdk';
+import { read, write } from '@ilium/plugin-sdk/host/fs';
 
 export async function copyIncludes(worktreeDir: string): Promise&lt;void&gt; {
-  const list = new TextDecoder().decode(await read({ scope: 'project', path: '.worktreeinclude' }));
+  let list: string;
+  try {
+    list = new TextDecoder().decode(await read({ scope: 'project', path: '.worktreeinclude' }));
+  } catch (error) {
+    if ((error as PluginError).code === 'not-found') return;
+    throw error;
+  }
   const lines = list.split('\n').map((l) =&gt; l.trim()).filter((l) =&gt; l &amp;&amp; !l.startsWith('#'));
   for (const relative of lines) {
-    const bytes = await read({ scope: 'project', path: relative });
+    let bytes: Uint8Array;
+    try {
+      bytes = await read({ scope: 'project', path: relative });
+    } catch (error) {
+      const code = (error as PluginError).code;
+      if (code === 'not-found' || code === 'invalid-argument' || code === 'not-permitted') continue;
+      throw error;
+    }
     await write({ scope: 'worktrees', path: `${worktreeDir}/${relative}` }, bytes, 'replace');
   }
 }
 </code></pre>
+<p>The copy has three defined failure cases. When the project has no <code>.worktreeinclude</code>, the plugin copies nothing and reports no error. When a listed file does not exist, the plugin skips that entry and copies the others. When an entry points outside the project scope (an absolute path or a <code>..</code> segment), <code>fs.read</code> refuses it with <code>invalid-argument</code> or <code>not-permitted</code>, and the plugin skips it too. Any other error, such as <code>io</code> or <code>quota-exceeded</code>, stops the copy and is returned to the caller.</p>
 <h4 id="status-and-branch-line">Status and branch line</h4>
 <p>The client renders one <code>leader-row</code> per worktree. An <code>icon</code> marks the branch and the state is the value, joined to the label by the dotted leader. See <a href="/pages/widgets-text/">text widgets</a> and <a href="/pages/widgets-status-and-feedback/">status and feedback widgets</a>.</p>
 <p><strong>Rust</strong></p>
@@ -711,15 +736,17 @@ export const gitRows = [
 </tr>
 </tbody>
 </table>
+<p><strong>Post-create failure.</strong> Post-create steps (the <code>post_create</code> setting and every <code>post-create-steps</code> entry) run in priority order inside the new worktree. When a step exits non-zero, later steps are skipped, the worktree is kept, the create call still succeeds with a warning naming the failed step and its exit code, and the user sees that warning as a notice in the Git settings and the pane. The worktree is never deleted because a step failed.</p>
 <p><strong>Services</strong> (grant <code>services.use:&lt;name&gt;</code>):</p>
 <ul>
-<li><code>ilium.core.worktrees/create</code>: create: create a worktree and return its path</li>
+<li><code>ilium.core.worktrees/create</code>: request <code>{ repo, branch, base?, agent? }</code>, response <code>{ path, branch }</code>. It runs the <code>before-create</code> hook, creates the worktree, then runs the post-create steps. Errors: <code>worktrees.refused</code> (a <code>before-create</code> contributor refused), <code>worktrees.branch-exists</code>, <code>worktrees.not-a-repository</code>, <code>worktrees.git-failed</code> (git exited non-zero; nothing is left on disk) and <code>worktrees.denied</code> (the caller lacks the grant). A failed create returns the error and creates no pane.</li>
+<li><code>ilium.core.worktrees/remove</code>: request <code>{ path, force? }</code>, response <code>{ removed }</code>. It reads the worktree state (<code>dirty</code>, <code>merged</code>, running processes) and runs the <code>before-remove</code> hook. Errors: <code>worktrees.dirty</code> (uncommitted changes), <code>worktrees.in-use</code> (a process is running in it), <code>worktrees.vetoed</code> (a <code>before-remove</code> contributor refused; the reason is returned) and <code>worktrees.not-found</code>. On any error the worktree stays untouched. <code>force</code> skips only the <code>dirty</code> and <code>merged</code> checks, never <code>in-use</code> or a veto.</li>
 </ul>
 <p><strong>Topics</strong> (list under <code>contributes.topics.subscribes</code>):</p>
 <ul>
 <li><code>ilium.core.worktrees/changed</code>: { path, state }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.worktrees"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.worktrees"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-runs-bun-install-in-every-new-worktree">Example: Runs <code>bun install</code> in every new worktree</h4>
 <p>A package adds this entry in its manifest. It needs no code.</p>
 <pre><code class="language-json">{

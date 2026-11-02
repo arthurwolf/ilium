@@ -768,7 +768,7 @@ export const { lifecycle, handler } = definePlugin({
 <td><code>quota-exceeded</code>. Cancel an unused timer and retry.</td>
 </tr>
 <tr>
-<td><code>set</code> returns <code>internal</code>, <code>revoked</code> or <code>not-permitted</code></td>
+<td><code>set</code> returns <code>internal</code></td>
 <td>The plugin has no timer. Treat the failure like any other host error.</td>
 </tr>
 <tr>
@@ -797,7 +797,7 @@ export const { lifecycle, handler } = definePlugin({
 
 <p>Illustrative, not generated. A plugin that asks for a 20 ms interval logs the refusal from its own error handler.</p>
 <h3 id="time-zones-and-locale">Time zones and locale</h3>
-<p><code>now-unix-millis</code> is UTC. <code>ilium:plugin@0.1.0</code> has no function for the user's UTC offset, time zone or locale, and a clock import does not add one. A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time. [AUT-616] Patterns for formatting are in <a href="/pages/guide-internationalisation/">Internationalisation</a>. The test clock starts at 2030-01-01 00:00:00 UTC and moves only with <code>advance_clock</code>. See <a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a> for debounce, throttle and retry built on timers.</p>
+<p><code>now-unix-millis</code> is UTC. <code>ilium:plugin@0.1.0</code> has no function for the user's UTC offset, time zone or locale, and a clock import does not add one. A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time. Test: render the view with the test clock fixed and assert the text carries the zone name or a relative phrase such as <code>5 min ago</code>. [AUT-616] Patterns for formatting are in <a href="/pages/guide-internationalisation/">Internationalisation</a>. The test clock starts at 2030-01-01 00:00:00 UTC and moves only with <code>advance_clock</code>. See <a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a> for debounce, throttle and retry built on timers.</p>
 <h3 id="used-by">Used by</h3>
 <ul>
 <li>Sound alerts (feature 47) and desktop notifications (feature 48) use timers to coalesce bursts of activity.</li>
@@ -812,7 +812,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/api-events/">Events</a> for the <code>timer-fired</code> delivery policy.</li>
 <li><a href="/pages/lifecycle/">Lifecycle</a> for <code>activate</code> and <code>deactivate</code>, where timers are armed and cancelled.</li>
 <li><a href="/pages/api-durable-timers/">Durable timers and input journal</a> for timers that survive a restart.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the event deadline and the full error code list.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the event deadline and the full error code list.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK reference</a> and <a href="/pages/typescript-sdk/">TypeScript SDK reference</a> for the binding rules.</li>
 </ul>
 <p>Contract: <code>ilium:plugin@0.1.0</code>.</p>

@@ -59,7 +59,7 @@ The first colon in the grant separates the name from the pattern, and the patter
 
 ## Surface
 
-The grant unlocks four call forms and one intent. The Rust and TypeScript wrappers wait for the outcome, so most plugins use them. The raw forms return the request id at once, and the outcome arrives later as an event.
+The grant unlocks five call forms and one intent. The Rust and TypeScript wrappers wait for the outcome, so most plugins use them. The raw forms return the request id at once, and the outcome arrives later as an event.
 
 | Form | Side | Signature | Returns |
 |---|---|---|---|
@@ -156,7 +156,7 @@ Each call returns one of these codes, either at once or as the outcome of the re
 | `conflict` | The command is disabled by its owner. The `invoke-command` intent gives `refused(conflict)`. | Retry after the owner enables it. |
 | `invalid-argument` | The arguments are not one JSON object, are over 64 KiB, or fail the target's schema. | Fix the call. Do not retry it unchanged. |
 | `timed-out` | The command did not reply within 30 s. The outcome is `failed(timed-out)`. | Retry later. The command may still finish, so make the action idempotent. |
-| `busy` | The plugin's pending request limit is full. | Retry after a short delay. See [errors-and-limits](/pages/errors-and-limits/) for the limits. |
+| `busy` | The plugin's pending request limit is full. | Retry after a short delay. See [errors-and-limits](/pages/reference-errors-and-limits/) for the limits. |
 | `quota-exceeded` | The plugin's CPU budget is spent. | Retry after `retry-after-ms`. |
 
 Three more rules apply:
@@ -190,7 +190,7 @@ When a call is refused, the palette shows nothing new. The refusal goes to the p
 
 <pre class="term"><span class="t-prompt">$</span> ilium plugin logs example-notes
 <span class="t-warn">warn</span> 2026-10-11 09:14:02 invoke refused, command outside grant
-{"type":"refusal","capability":"commands.invoke:ilium.compaction/compact",
+{"type":"refusal","grant":"commands.invoke:ilium.compaction/compact",
  "function":"commands.invoke","reason":"not-granted"}
 </pre>
 

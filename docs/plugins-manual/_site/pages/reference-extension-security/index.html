@@ -409,7 +409,7 @@
 </ol>
 <p>A third-party owner cannot choose <code>standard</code> for a point that meets these criteria: the host raises the risk to <code>high</code> at install and refuses a manifest that declares <code>risk: "standard"</code> for such a point with <code>manifest.point-risk</code>.</p>
 <p><strong>[SEC-281]</strong> Data classes. Each field of <code>payload_schema</code> and <code>entry_schema</code> MAY carry an annotation <code>x-ilium-data</code> with one of: <code>terminal-text</code>, <code>agent-prompt</code>, <code>file-content</code>, <code>path</code>, <code>secret</code>, <code>user-text</code>. A point with any field of class <code>terminal-text</code>, <code>agent-prompt</code>, <code>file-content</code> or <code>secret</code> is <code>high</code>. The review dialog lists the classes in the contributor's <strong>Adds to other plugins</strong> row.</p>
-<p><strong>[SEC-282]</strong> A contributor to a point with a sensitive data class MUST also hold the grant that would let it read the same data directly: <code>terminal.read-screen</code> or <code>terminal.history</code> for <code>terminal-text</code>, <code>agent.read-prompts</code> for <code>agent-prompt</code>, a matching <code>fs.read</code> for <code>file-content</code>. A contributor that lacks the grant is refused at install with <code>manifest.grant-dependency</code>. This closes data laundering through an owner (class A5).</p>
+<p><strong>[SEC-282]</strong> A contributor to a point with a sensitive data class MUST also hold the grant that would let it read the same data directly: <code>terminal.read-screen</code> or <code>terminal.history</code> for <code>terminal-text</code>, <code>agent.read-prompts</code> for <code>agent-prompt</code>, a matching <code>fs.read</code> for <code>file-content</code>. A contributor that lacks the grant is refused at install with <code>manifest.grant-dependency</code>. Class <code>secret</code> has no read grant, so it needs no grant dependency: it raises the point to <code>high</code> and the review dialog lists it, nothing more. This closes data laundering through an owner (class A5).</p>
 <p><strong>[SEC-283]</strong> An entry that drives a privileged action of a T1 owner (a post-create step, an instruction block, a target file, a rule pack that sends text, a provider profile that redirects inference) MUST be validated by the owner with an explicit allowlist of what an entry can make it do. The review dialog shows a line <code>Can make &lt;owner&gt; &lt;action&gt;</code> per such entry type. The owner rejects any entry outside the allowlist with <code>extension.entry-rejected</code>.</p>
 <h2 id="fail-open-and-veto-points">Fail-open and veto points</h2>
 <p><strong>[SEC-287]</strong> Policy for failure. A handler that times out, traps or errors normally counts as a pass (fail open), so a slow handler cannot block the user. This is a deliberate trade between availability and safety. Hooks are <strong>not a security boundary</strong> on standard points; an administrator who needs enforcement uses the admin policy (<code>extensions.deny_points</code>), which the kernel enforces without handler code.</p>
@@ -417,7 +417,7 @@
 <p><strong>[SEC-288]</strong> Order key. The run order is: user order first, then tier band (T1 before T2 and T3), then priority, then plugin id, then extension id. Declared priorities are kept and <code>ExtensionEntry.priority</code> returns the declared value. A T2 or T3 contributor therefore never runs before a T1 contributor of the same point unless the user moves it, and its priority orders it only among its own tier band.</p>
 <p><strong>[SEC-284]</strong> A transform handler's output is validated against <code>payload_schema</code> before the next handler runs, and every field not listed in <code>reply_schema.properties</code> must equal its input value. A failing output is treated as a pass and logged <code>extension.schema-mismatch</code>. For a point of mode <code>transform</code> whose result drives a privileged action, the owner MAY set <code>final_check: true</code>: after all transform handlers have run, the host calls once each contributor entry that declared <code>guard: true</code> on the final payload; any <code>refuse(reason)</code> refuses the action (<code>refused(conflict)</code>, <code>extension.vetoed</code>). This makes sure a guard sees the data the action will use.</p>
 <p><strong>[SEC-286]</strong> On <code>veto</code> points the handler sees the final payload (veto points have no transforms). On a point with <code>final_check</code> the guard sees the output of the transform chain, not the original.</p>
-<p><strong>[SEC-285]</strong> Withdrawn, see [HST-472]. The chain cap is a hard 100 ms: a handler that starts before 100 ms runs until its own <code>deadline_ms</code>, and handlers not started at 100 ms are skipped as <code>pass</code>.</p>
+<p><strong>[SEC-285]</strong> Withdrawn, see [HST-472].</p>
 <p><strong>[SEC-289]</strong> Nesting. A handler can start another hook chain with <code>run-hook</code>. The outermost chain is depth 1. A <code>run-hook</code> from a handler at depth 3 fails at once with <code>extension-error</code> <code>reentrant</code>, base code <code>conflict</code> and a message that starts with <code>extension.depth-exceeded</code>. It counts as a pass for the handler that caused it and not as a breach. A <code>run-hook</code> on any point already on the current chain stack, directly or indirectly, fails with <code>extension.reentrant</code>. The inner chain runs after the handler returns and its time does not count toward the outer deadline.</p>
 <p><strong>[SEC-290]</strong> Budgets. Per point the owner may call <code>run-hook</code> at most 200 times per second; further calls return <code>rate-limited</code>. Per handler, CPU time is limited to 50 ms per second; above it, calls to that handler are skipped for the rest of the second and count as a breach. A <strong>breach</strong> is defined in <a href="/pages/api-extension-points/#rules-for-payloads-deadlines-ordering-and-failure">Extension points</a>: a timeout, a trap, an error return, a reply over 64 KiB, a schema failure, a CPU budget overrun, or a skip because the contributor's instance was busy. Three consecutive breaches stop the extension until the contributor's instance restarts or the user presses Reset. The notice that announces the stop is drawn by the kernel and lists the plugin, the point and the cause. The audit log records <code>extension-disabled-after-breaches</code>.</p>
 <p><strong>[SEC-291]</strong> Vetoes of user actions. A chain is <strong>user-started</strong> when the payload field <code>source</code> is <code>user</code>, <code>paste</code>, <code>mouse</code>, <code>keys</code> or <code>manual-trigger</code>, or, for points without <code>source</code>, when the action came from a key, a click or a command the user invoked. A veto on a user-started action can be overridden by the user on these points: <code>ilium.core.tree/before-close</code>, <code>ilium.core.tree/before-move</code>, <code>ilium.core.worktrees/before-remove</code>, <code>ilium.core.layout/before-split</code>, <code>ilium.core.compaction/before-compact</code> and <code>ilium.core.terminal/before-send-input</code> (sources <code>user</code> and <code>paste</code> only). The kernel shows <code>&lt;plugin&gt; refused: &lt;reason&gt;. Continue anyway?</code> with default focus on <strong>No</strong>. An override is audited with the plugin and point. After an override the chain completes <code>ok</code> with no reply, and the owner's log gets <code>extension.veto-overridden</code> with the contributor and the point. The <strong>User override</strong> column of <a href="/pages/reference-core-extension-points/">Core extension points</a> marks these points.</p>
@@ -474,7 +474,7 @@
 <td><code>ilium.core.fleet/before-broadcast</code></td>
 <td>high</td>
 <td>Text to many agents</td>
-<td>Existing</td>
+<td>Class <code>agent-prompt</code></td>
 </tr>
 <tr>
 <td><code>ilium.core.inference/before-request</code></td>
@@ -497,14 +497,14 @@
 <tr>
 <td><code>ilium.core.scheduler/before-send-scheduled</code></td>
 <td>high</td>
-<td>Existing</td>
-<td>Existing</td>
+<td>Rewrites or refuses input that is sent later, without the user watching</td>
+<td>Class <code>agent-prompt</code>; the veto only refuses, so it cannot add text</td>
 </tr>
 <tr>
 <td><code>ilium.core.text-triggers/before-fire</code></td>
 <td>high</td>
-<td>Existing</td>
-<td>Existing</td>
+<td>Can stop a rule that is about to send text to a terminal</td>
+<td>Veto only: it refuses or ends the rule and cannot change the text</td>
 </tr>
 <tr>
 <td><code>ilium.core.text-triggers/rule-packs</code></td>
@@ -533,8 +533,8 @@
 <tr>
 <td><code>ilium.core.agent-setup/before-install</code></td>
 <td>high</td>
-<td>Existing</td>
-<td>Existing</td>
+<td>Can refuse writing an instruction block to an agent file</td>
+<td>Veto only: it refuses the write and cannot change the block or the path</td>
 </tr>
 <tr>
 <td><code>ilium.core.worktrees/post-create-steps</code></td>
@@ -570,7 +570,7 @@
 <p>A <strong>project value</strong> is a setting stored in a repository's <code>.ilium/</code> folder. A cloned repository is attacker-controlled input (class A7). Plugin rows with <code>scope: "project"</code> and files such as <code>.ilium/team-rules.json</code> read by plugins would otherwise take effect when the user opens the folder.</p>
 <p><strong>[SEC-310]</strong> A project folder is <strong>untrusted</strong> until the user trusts it. When the user opens a project whose <code>.ilium/</code> holds plugin values, rules or sessions, the kernel asks once: <code>Trust this project? It contains plugin settings that could change how plugins behave.</code> The answer is stored per canonical path in the project trust store ([SEC-112]) and can be revoked in Settings &gt; Plugins &gt; Projects.</p>
 <p><strong>[SEC-311]</strong> In an untrusted project, project-scope plugin values are ignored: plugins read their defaults or user values. The <code>get</code> call reports <code>source: "default"</code> or <code>"user"</code>. A notice on the Plugins screen shows how many values were ignored.</p>
-<p><strong>[SEC-312]</strong> Even in a trusted project, rows whose type is <code>path</code>, <code>url</code>, <code>host</code> or command-like text, and any row marked <code>trust_sensitive: true</code>, take project values only with the extra step that the first use of each value is shown to the user (the same consent as <code>http:setting</code>, D23).</p>
+<p><strong>[SEC-312]</strong> Even in a trusted project, rows whose type is <code>path</code>, <code>url</code>, <code>host</code> or command-like text, and any row marked <code>trust_sensitive: true</code>, take project values only with the extra step that the first use of each value is shown to the user (the same consent as <code>http:setting</code>, SEC-074).</p>
 <p><strong>[SEC-313]</strong> Secrets never come from project files ([SEC-242]).</p>
 <p><strong>[SEC-314]</strong> The policy <code>[projects] allow_project_values = false</code> ignores all project values regardless of trust.</p>
 <p><strong>[SEC-315]</strong> Plugins that read files under <code>.ilium/</code> themselves, such as the rule file of tutorial 20, MUST ask the host for the project trust state (<code>project.trusted()</code> in the SDK) and MUST ignore the file when it is false. They validate the file: at most 64 KiB, at most 200 rules, schema checked, each rule's fields length-capped, and no regex outside the limits of [SEC-046].</p>
@@ -582,7 +582,7 @@
 <p><strong>[SEC-380]</strong> Every plugin-supplied text shown by the client (labels, titles, toast text, reasons, status segments, help text) is sanitised: C0 and C1 control characters, escape sequences, bidirectional override characters (U+202A to U+202E, U+2066 to U+2069), zero-width characters and box-drawing characters in sequences of three or more are removed or replaced with a space. Text is clipped to its field limit with an ellipsis.</p>
 <p><strong>[SEC-381]</strong> Display names are 3 to 40 characters, must not equal or start with <code>Ilium</code> or <code>Kernel</code> unless the plugin id starts with <code>ilium.</code>, and are checked at install (<code>manifest.display-name</code>).</p>
 <h2 id="worked-example-a-guard-that-times-out">Worked example: a guard that times out</h2>
-<p>A T2 plugin contributes a veto handler to <code>ilium.core.terminal/before-send-input</code>, sleeping for its whole deadline on each call. With <code>on_failure: refuse</code> (the default for the point), every plugin-initiated send is refused with <code>guard-failed</code> after 20 ms; the user's own paste shows <code>A guard did not answer. Continue anyway?</code> once, and the user can say yes. After three consecutive breaches the extension is stopped, the kernel draws the notice, and the audit log records it. With the previous fail-open rule, the handler would have been a free way to disable a guard. The test cases are in <a href="/pages/reference-security-testing/">Security testing</a>.</p>
+<p>A T2 plugin contributes a veto handler to <code>ilium.core.terminal/before-send-input</code>, sleeping for its whole deadline on each call. With <code>on_failure: refuse</code> (the default for the point), every plugin-initiated send is refused with <code>extension.vetoed</code> (reason <code>guard-failed</code>) after 20 ms; the user's own paste shows <code>A guard did not answer. Continue anyway?</code> once, and the user can say yes. After three consecutive breaches the extension is stopped, the kernel draws the notice, and the audit log records it. With the previous fail-open rule, the handler would have been a free way to disable a guard. The test cases are in <a href="/pages/reference-security-testing/">Security testing</a>.</p>
 <h2 id="edge-cases">Edge cases</h2>
 <table>
 <thead>

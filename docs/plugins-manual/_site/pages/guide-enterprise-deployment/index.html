@@ -449,7 +449,7 @@ max_risk = &quot;normal&quot;
 [grants.preapproved]
 &quot;example.git-tools&quot; = [&quot;process.run:git&quot;]
 </code></pre>
-<p><code>max_risk = "normal"</code> refuses high-risk grants. The preapproved list shows that a specific plugin may still receive <code>process.run:git</code>. A grant in <code>preapproved</code> is not checked against <code>max_risk</code>, so list only what you reviewed.</p>
+<p><code>max_risk = "normal"</code> refuses high-risk grants. To give one plugin a high-risk grant such as <code>process.run:git</code>, leave <code>max_risk</code> at <code>high</code> and list the grant in <code>preapproved</code>. <code>max_risk</code> has no exception: it locks off every high-risk grant, and a <code>preapproved</code> entry for such a grant is locked off too ([SEC-198]). Use <code>preapproved</code> for normal-risk grants you reviewed.</p>
 <h3 id="an-offline-site">An offline site</h3>
 <pre><code class="language-toml">version = 1
 [network]
@@ -472,7 +472,7 @@ allowed_sources = [&quot;/srv/ilium-plugins/&quot;]
 <p><strong>[SEC-196]</strong> Sockets and runtime directories are per user (<code>$XDG_RUNTIME_DIR/ilium/</code>, mode 0700). Sessions of one user are not visible to another, and <code>sessions.cross</code> lists only the same user's sessions.</p>
 <p><strong>[SEC-197]</strong> Do not run Ilium as root. The server refuses T2 and T3 plugins when its effective uid is 0 ([SEC-056]).</p>
 <h2 id="ci-and-headless-use">CI and headless use</h2>
-<p>Where no client is attached, no one can approve a dialog ([SEC-116]). Use <code>preapproved</code> for the exact plugins your pipeline needs, and set <code>allow_unsigned = false</code>. A pipeline step that tries <code>ilium plugin install --yes</code> fails with <code>approval.no-client</code>. Pipelines can verify packages without installing:</p>
+<p>Where no client is attached, no one can approve a dialog ([SEC-116]). Use <code>preapproved</code> for the exact plugins your pipeline needs, and set <code>allow_unsigned = false</code>. <code>ilium plugin install --yes</code> skips the review dialog for normal grants only. A high-risk grant needs <code>--grant &lt;grant&gt;</code> and a new key needs <code>--trust &lt;key_id&gt;</code>. <code>install.review-required</code> appears only when no client is attached and <code>--yes</code> is not given. Pipelines can verify packages without installing:</p>
 <pre><code class="language-text">ilium plugin inspect ./dist/example.team-rules-1.0.0.iliumpkg
 </code></pre>
 <h2 id="verify-the-policy">Verify the policy</h2>

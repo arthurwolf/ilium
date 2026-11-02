@@ -118,7 +118,7 @@ Codes 7 (policy) and 8 (network) are added by [Distribution commands](/pages/ref
 - **[DEV-021]** The `step` field of `progress` MUST be one of `toolchain`, `compile`, `bundle`, `component`, `api-version`, `strip`, `inventory`, `pack`, `sign`, `check`, `lint`, `test`, `install`, `watch`.
 - **[DEV-022]** The `kind` field of `artifact` MUST be one of `component`, `package`, `source-map`, `build-info`, `key`, `public-key`, `signature`, `replay`.
 - **[DEV-023]** The `severity` field of `check` and `lint` MUST be `error` or `warn`. A `lint` record MAY also use `info`.
-- **[DEV-024]** The `status` field of `test-case` MUST be `pass`, `fail`, `trap` or `skip`. The `status` field of `doctor-check` MUST be `ok`, `warn` or `fail`.
+- **[DEV-024]** The `status` field of `test-case` MUST be `pass`, `fail`, `trap` or `skipped`. The `status` field of `doctor-check` MUST be `ok`, `warn` or `fail`.
 - **[DEV-025]** The `side` field MUST be `server`, `client`, `scene` or `host`. `host` marks an entry that the host itself wrote.
 
 A build that succeeds prints:
@@ -228,6 +228,10 @@ Runs the install checks without installing. The rules are in [Check and lint rul
 
 `ilium plugin check [<dir> | <file.iliumpkg>] [--side <side>] [--json]`
 
+`ilium plugin check --print-schema`
+
+The second form takes no directory or archive. It writes the manifest JSON Schema that ships with the host to standard output and exits with 0; it never reads the network ([reference-manifest-schema](/pages/reference-manifest-schema/), PKG-563).
+
 - **[DEV-070]** `check` MUST run offline and MUST report the same rule codes (`manifest.*`, `package.*`, `signature.*`) that the install path reports, plus the component rules (`component.*`).
 - **[DEV-071]** `check` on a project directory MUST validate the source manifest and the built components in `dist/`. A missing `dist/` for a declared side MUST be reported as `component.missing`, not as an error of the command.
 - **[DEV-072]** `check` on a `.iliumpkg` file MUST validate the archive as the install path does, without checking trust.
@@ -248,7 +252,7 @@ Reports advisory problems.
 
 Runs fixtures against the plugin. The harness behind it is in [Test harness reference](/pages/reference-test-harness/). The fixture and expectation formats are in the same page.
 
-`ilium plugin test [<dir>] [--fixture <glob>]... [--expect <glob>] [--grants <list> | --grant-manifest] [--side <side>] [--component <file>] [--replay <file>] [--update] [--seed <n>] [--conformance [--subject <subject>] [--case <id>]] [--coverage [--min-coverage <percent>]]`
+`ilium plugin test [<dir>] [--fixture <glob>]... [--expect <glob>] [--grants <list> | --grant-manifest] [--side <side>] [--component <file>] [--replay <file>] [--update] [--record <file>] [--seed <n>] [--conformance [--subject <subject>] [--case <id>]] [--coverage [--min-coverage <percent>]]`
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
@@ -260,6 +264,7 @@ Runs fixtures against the plugin. The harness behind it is in [Test harness refe
 | `--component` | file | `dist/<side>.wasm` | Runs the built component in component mode. Without it, `test` uses the component in `dist/`. |
 | `--replay` | file | none | Replays a replay file. Conflicts with `--fixture`. |
 | `--update` | switch | off | Writes missing or different expectation and golden files. |
+| `--record` | file | none | With `--fixture`, writes the replay file of the run and prints an `artifact` of kind `replay` ([DEV-088]). |
 | `--seed` | integer | 1 | The seed of the harness random source. |
 | `--conformance` | switch | off | Runs the [conformance suite](/pages/reference-conformance-suite/) instead of the fixtures. `--subject` and `--case` narrow it. |
 | `--coverage` | switch | off | Also runs the project's own tests (`cargo test`, `bun test`) under a coverage tool and writes `.ilium/coverage/`. |
@@ -288,7 +293,7 @@ Writes the `.iliumpkg` file.
 - **[DEV-098]** `pack` MUST NOT store `src/**` unless `--include-src` is given. With it, `pack` MUST store the sources named by the project's `src/` folder and the source maps of a debug build under `src/`.
 - **[DEV-099]** `pack` MUST be reproducible. Two runs on the same inputs MUST produce byte-identical files. The archive format already fixes entry order, timestamps and compression (see [Packages](/pages/packages/)).
 - **[DEV-100]** `pack` MUST NOT sign. The default output path is `dist/<id>-<version>.iliumpkg`, and the command prints one `artifact` of kind `package`.
-- **[DEV-101]** `pack` MUST fail with `pack.size-cap` when the package is larger than 128 MiB, and MUST print a `warning` with the same code at 100 MiB. See `lint.package-size-near-cap`.
+- **[DEV-101]** `pack` MUST fail with `package.size-limit` when the package is larger than 300 MiB (the package format cap, PKG-130), and MUST print a `warning` with the separate code `pack.size-cap` at 100 MiB. See `lint.package-size-near-cap`.
 - **[DEV-102]** `pack --out <file>` MUST refuse to overwrite a file that is not a package of the same id, with `pack.out-exists`.
 
 ## keygen, sign and trust
@@ -297,7 +302,7 @@ Writes the `.iliumpkg` file.
 
 - **[DEV-110]** `keygen` MUST create `publisher.key` (PKCS#8 PEM, mode 0600) and `publisher.pub` (`ilium-pub/1` JSON) with Ed25519, as defined in [Signing and trust](/pages/reference-signing-and-trust/). It MUST refuse to overwrite either file with `trust.key-exists`.
 - **[DEV-111]** The file forms of the secret and public key are defined only in [Signing and trust](/pages/reference-signing-and-trust/) (requirements PKG-210 to PKG-215).
-- **[DEV-112]** The fingerprint of a key is its `key_id`, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form shows the first 4 and the last 4 characters joined by `…`, for example `3f2a…9c01`.
+- **[DEV-112]** The fingerprint of a key is its `key_id`, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form is the first 8 digits, for example `3f2a91c0`, shown only beside the full form or in `trust list` (SEC-177).
 
 `ilium plugin sign <file.iliumpkg> [--key <file>] [--replace]`
 
@@ -321,19 +326,23 @@ Writes the `.iliumpkg` file.
 
 ## install, uninstall, enable, disable
 
-`ilium plugin install <file.iliumpkg> [--allow-unsigned] [--allow-downgrade] [--yes] [--grant <grant>]...`
+`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--unskip]`
 
-- **[DEV-140]** `install` MUST run the validation pipeline of [Package format](/pages/reference-package-format/#the-validation-pipeline) before it runs any plugin code, print every failure as an `error` with the code of that pipeline, and exit with the code of [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes). Sources other than a file are defined there.
+- **[DEV-140]** `install` MUST run the validation pipeline of [Package format](/pages/reference-package-format/#the-validation-order) before it runs any plugin code, print every failure as an `error` with the code of that pipeline, and exit with the code of [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes). Sources other than a file are defined there.
 - **[DEV-141]** `install` MUST show the review dialog in the attached client unless `--yes` is given. With `--yes`, it MUST grant every requested grant whose risk is not high, and MUST grant a high-risk grant only when it is named with `--grant`.
 - **[DEV-142]** `install` with no attached client and no `--yes` MUST fail with `install.review-required`.
-- **[DEV-143]** A declined review MUST fail with `install.review-declined`. A declined key trust MUST fail with `trust.declined`. An unsigned package without `--allow-unsigned` MUST fail with `install.unsigned`. A lower version without `--allow-downgrade` MUST fail with `install.downgrade`.
+- **[DEV-143]** A declined review MUST fail with `install.review-declined`. A declined key trust MUST fail with `trust.declined`. An unsigned package without `--allow-unsigned` MUST fail with `install.unsigned`. A lower version without `--allow-downgrade` MUST fail with `package.downgrade`.
 - **[DEV-144]** A successful `install` MUST print one `plugin` record for the installed plugin and exit with 0. The plugin is enabled after install.
 
-`ilium plugin uninstall <id> [--purge]`
+`ilium plugin uninstall <id> [--purge | --keep-data]`
 
-- **[DEV-155]** `uninstall` MUST deactivate the plugin with reason `disabled`, withdraw its contributions and remove the package. Without `--purge` the `data` folder, the storage and the settings values MUST stay on disk for a later reinstall.
+- **[DEV-155]** `uninstall` MUST deactivate the plugin with reason `disabled`, withdraw its contributions and remove the package. Without `--purge` the `data` folder, the storage and the settings values MUST stay on disk for a later reinstall. `--keep-data` is accepted, means the same as the default, and MUST NOT ask a question; it excludes `--purge`, and giving both fails with `usage.conflict` and exit 2 ([USR-209], [LIF-082]).
 - **[DEV-156]** `uninstall --purge` MUST also delete the `data` and `cache` folders, the storage buckets, the settings values and the plugin log. It MUST print each removed item as a `warning` with code `uninstall.purged`.
 - **[DEV-157]** `uninstall` of an unknown id MUST fail with `plugin.not-found` and exit 5.
+
+`ilium plugin reinstall <id>`
+
+`reinstall` repairs the store entry of an installed or registry-listed plugin from the cached package and prints one `plugin` record. It exits 0 on success, 5 for an unknown id, and 1 with `package.cache-missing` when no cached package exists ([LIF-093]).
 
 `ilium plugin enable <id>` and `ilium plugin disable <id>`
 
@@ -344,7 +353,7 @@ Writes the `.iliumpkg` file.
 
 `ilium plugin list [--json]` prints the installed plugins.
 
-- **[DEV-165]** `list` text mode MUST print one line per plugin with the id, the version, the tier, the state (`running`, `disabled`, `stopped`, `untrusted`) and the grant count. A `[dev]` badge MUST mark a plugin installed by `dev`.
+- **[DEV-165]** `list` text mode MUST print one line per plugin with the id, the version, the tier, the state and the grant count. The state word maps from the lifecycle states: `running` is `installed-enabled` with an active instance, `stopped` is `installed-enabled` with no active instance (including `stopped-by-failure`), `disabled` is `installed-disabled-by-user` or `disabled-by-policy`, and `untrusted` is `disabled-untrusted` or `disabled-blocked`. `list --json` MUST print the lifecycle state name itself (LIF-001). A `[dev]` badge MUST mark a plugin installed by `dev`.
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin list
@@ -506,7 +515,8 @@ These codes are in addition to the `manifest.*` codes of [Packages](/pages/packa
 | `pack.not-built` | A component is missing from `dist/` | Run `build` | 1 |
 | `pack.stale-build` | `dist/` does not match the sources | Run `build` | 1 |
 | `pack.debug-build` | The build is a debug build | Build with `--release` | 1 |
-| `pack.size-cap` | The package is over 128 MiB | Remove assets | 1 |
+| `package.size-limit` | The package is over 300 MiB | Remove assets | 1 |
+| `pack.size-cap` (warning) | The package is over 100 MiB | Remove assets | 0 |
 | `pack.out-exists` | `--out` names a different file | Choose another path | 1 |
 | `sign.key-unreadable` | The key file does not parse | Check the file | 1 |
 | `sign.key-permissions` | The key is readable by others | `chmod 600` | 1 |
@@ -527,7 +537,7 @@ These codes are in addition to the `manifest.*` codes of [Packages](/pages/packa
 | `install.review-declined` | The user declined | none | 1 |
 | `trust.declined` | The user declined the key | none | 1 |
 | `install.unsigned` | An unsigned package without `--allow-unsigned` | Sign it | 1 |
-| `install.downgrade` | A lower version without `--allow-downgrade` | Use the flag | 1 |
+| `package.downgrade` | A lower version without `--allow-downgrade` | Use the flag | 1 |
 | `grants.not-requested` | The grant is not in the manifest | Request it | 1 |
 | `uninstall.purged` | An item was removed (warning) | none | 0 |
 | `trace.unredacted-denied` | `--unredacted` on a non-dev plugin | Use a dev install | 1 |

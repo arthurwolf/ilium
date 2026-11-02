@@ -301,7 +301,7 @@ Keys: `title` (required), `rows` (1 to 12, no nested group), `collapsed`. Enter 
 
 Keys: `item` (one primitive type, or an object of at most eight primitive fields), `max_items` (at most 64), `default` (array). Enter opens the list editor.
 
-Further keys: `item_format` for string items (`glob`, `url`, `host`, `path`, `regex` or `chord`; checked on commit, and an invalid item is shown with `✗` and the reason and is not written), `style` (`"rows"`, the `list-editor` widget, or `"inline"`, one text field), `separator` (inline style, default `;`), `reorderable` (default true), `remote` (each committed item shows as pending until the plugin confirms it with `set-item-states`), `item_status` (reserves a status cell per item). Object items have four fields.
+Further keys: `item_format` for string items (`glob`, `url`, `host`, `path`, `regex` or `chord`; checked on commit, and an invalid item is shown with `✗` and the reason and is not written), `style` (`"rows"`, the `list-editor` widget, or `"inline"`, one text field), `separator` (inline style, default `;`), `reorderable` (default true), `remote` (each committed item shows as pending until the plugin confirms it with `set-item-states`), `item_status` (reserves a status cell per item). Object items have at most eight fields.
 
 ```json
 { "type": "list", "key": "ignore_patterns", "title": "Ignore patterns", "item": { "type": "string", "max_length": 200 }, "max_items": 32, "default": [] }
@@ -427,7 +427,7 @@ A false `depends_on` leaves the row on the screen, read-only, with the descripti
 | Toggle, choice, dialog confirm | at once | at once |
 | Number step | at once | 600 ms after the last step |
 | Number or text typed | as typed | 600 ms after the last keystroke, or `debounce_ms` |
-| Text-area | as typed | 1 s after the last keystroke |
+| Text-area | as typed | 1 s after the last keystroke, or `debounce_ms` |
 | `set-json` from the plugin | at once | at once |
 
 While a write is pending, the control shows a dim `◌` after the value. A failed change keeps the old value, and the message replaces the description line in the warning style. Closing Settings writes every pending change first.
@@ -471,6 +471,10 @@ settings-validate: func(patch: string, merged: string) -> result<_, list<field-e
 ```
 
 It runs only for `user` and `reset` origins, after the schema check. Its deadline is 100 ms. A timeout, trap or stopped plugin refuses the save with `Could not check this value: <plugin name> did not answer.`
+
+### Data schema subset
+
+Every data schema in a manifest (row schemas, extension-point payload, entry and reply schemas, method schemas) may use only the keywords in the keyword table of [Plugin settings, row schemas](/pages/api-settings/): `type`, `enum`, `enum_titles`, `items`, `maxItems`, `title`, `help`, `description`, `default`, `minimum`, `maximum`, `step`, `unit` and the other rows of that table. Any other keyword fails the install with `manifest.schema-keyword`. The per-use size caps are on the page that uses the schema.
 
 ### Limits
 
@@ -524,7 +528,7 @@ Install errors refuse the package and name the JSON path of the entry.
 | `manifest.settings-glyph` | Glyph not one 1 or 2 cell grapheme |
 | `manifest.settings-limit` | Limit exceeded |
 | `manifest.catalog-unknown` | A `source` names an unknown catalogue |
-| `manifest.settings-source` | `source` together with `options` |
+| `manifest.settings-source` | A `choice` row has both or neither of `options` and `source` (it needs exactly one) |
 | `manifest.schema-keyword` | Keyword outside the subset |
 
 Runtime and load codes:
@@ -535,6 +539,8 @@ Runtime and load codes:
 | `invalid-argument` | A `set-info`, `set-choices` or `set-row-note` call breaks a rule the plugin can check, such as text over 120 characters |
 | `not-found` | A row-update call names an unknown key or id |
 | `rate-limited` | More than 10 row-update calls per second per plugin, all kinds together |
+| `settings.section-dropped` | A built-in tab already shows six plugin sections; the section is not drawn (warning) |
+| `settings.tab-dropped` | 16 plugin tabs are already shown; the tab is not drawn (warning) |
 | `settings.value-ignored` | A stored value no longer matches its row (warning) |
 | `settings.anchor-missing` | An own-section anchor is gone, so the section moves to `end` (warning) |
 

@@ -130,12 +130,12 @@ Call `bindings()` again on every `keymap-changed` event instead of caching label
 |---|---|---|
 | Grant missing or declined | `not-permitted` | Show no shortcut hint. |
 | Command has no binding | empty chord list | Show no hint. |
-| Server side requests the grant | install refused, the grant is client-only | Move the code to the client side. |
+| Server side requests the grant | install refused with `manifest.grant-side`, the grant is client-only | Move the code to the client side. |
 | Unknown chord string | `invalid-argument` | Use chords taken from `bindings()`. |
 | Grant revoked later | `revoked` | Drop cached labels. |
 | Keymap changes while reading | a `keymap-changed` event follows | Re-read. |
 
-Bindings that conflict with another plugin's chord follow the keymap conflict rule; the user's remap always wins.
+Bindings that conflict with another plugin's chord are resolved by the kernel, not by this grant: a plugin chord grab that another plugin already holds in the same scope fails with `conflict` (see [Keys](/pages/api-keys/)), and a binding the user remaps always wins over a plugin's. `bindings()` reports the chord in effect after that resolution.
 
 ### What the user sees
 

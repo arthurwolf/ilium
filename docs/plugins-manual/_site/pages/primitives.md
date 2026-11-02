@@ -256,7 +256,7 @@ The editor is native. Plugins reach it through the interface that a later editor
 | `create_buffer(initial, language)` / `createBuffer` | `editor.edit` | `result<buffer-id>`. Up to 16 MiB, 64 buffers per plugin. |
 | `load_file(path)` / `loadFile` | `editor.edit`, `fs.read` | Request id, then `take_buffer(request)` gives the buffer id. |
 | `save_buffer(buffer, path)` / `saveBuffer` | `editor.edit`, `fs.write` | Request id. `conflict` when the file changed on disk since load. |
-| `close_buffer(buffer)` / `closeBuffer` | `editor.read` (the spec lists no other grant) | No result. |
+| `close_buffer(buffer)` / `closeBuffer` | `editor.edit` | No result. |
 
 Edits go through the intent `editor-apply-edits` with a base revision. A stale revision gives `conflict`. Decorations and gutter layers belong to the plugin that set them and are cleared when it stops.
 
@@ -313,7 +313,7 @@ The editor stays native because every keystroke passes through it, and it keeps 
 | Edit on a stale revision, or save after an outside change | `conflict`. Read the state again. |
 | Filter matches above the rate | Dropped and counted in `events-dropped`. |
 
-Every function that returns a result can also return `not-permitted`, `revoked` and `internal`. See [Errors and limits](/pages/errors-and-limits/).
+Every function that returns a result can also return `not-permitted`, `revoked` and `internal`. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ## What the user sees
 

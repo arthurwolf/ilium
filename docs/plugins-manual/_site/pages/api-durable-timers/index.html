@@ -395,7 +395,7 @@
 
 <p>Ordinary timers (see <a href="/pages/api-clock-and-timers/">clock and timers</a>) live in memory and vanish when Ilium restarts. Two features survive a restart. A durable timer fires at a wall-clock time, even if Ilium was not running at that time. The pane journal records events per pane, and a <code>send-input</code> marked <code>journal: true</code> is recorded before it is written, so a crash between the write and its outcome is reported instead of lost.</p>
 <p>Both features live in the snapshot that the server keeps. They are always granted: a plugin needs no capability for its own durable timers or its own journal entries. Reading the journal entries of the host or of other plugins needs the <code>journal.read</code> grant.</p>
-<p>This page covers the durable timer, the journal and the input journal. The settings row state and meter calls that share section 6.33 of the spec (<code>set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-info-rich</code>, <code>set-meter</code>) belong to the settings pages (see <a href="/pages/api-settings/">settings</a>).</p>
+<p>This page covers the durable timer, the journal and the input journal. The settings row state and meter calls (<code>set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-info-rich</code>, <code>set-meter</code>) belong to the settings pages (see <a href="/pages/api-settings/">settings</a>).</p>
 <figure>
 <svg viewBox="0 0 440 250" role="img" aria-label="Durable timer across a restart" width="660" height="375">
   <defs>
@@ -475,7 +475,7 @@ read:      func(pane: option&lt;node-id&gt;, since: epoch-ms, limit: u32) -&gt; 
 <td><code>read</code></td>
 <td><code>journal::read(pane: Option&lt;NodeId&gt;, since: u64, limit: u32) -&gt; Vec&lt;JournalEntry&gt;</code></td>
 <td><code>journal.read(pane: bigint \| undefined, since: bigint, limit: number): JournalEntry[]</code></td>
-<td>Returns entries from <code>since</code> on, at most <code>limit</code>. Without <code>journal.read</code> these are the plugin's own entries.</td>
+<td>Returns entries from <code>since</code> on, at most <code>limit</code>. A <code>limit</code> above 1,000 is clamped to 1,000 (the per-call read cap); page with <code>since</code>. Without <code>journal.read</code> these are the plugin's own entries.</td>
 </tr>
 </tbody>
 </table>
@@ -729,13 +729,8 @@ export function recent(pane: bigint): string[] {
 </tr>
 <tr>
 <td><code>log-event</code></td>
-<td><code>quota-exceeded</code></td>
-<td>The <code>journal_entries</code> quota is full.</td>
-</tr>
-<tr>
-<td><code>log-event</code></td>
 <td><code>rate-limited</code></td>
-<td>Too many entries in a short time.</td>
+<td>More than 20 <code>log-event</code> calls per second per plugin (see the rate table in the <a href="/pages/reference-errors-and-limits/">errors and limits reference</a>). When <code>journal_entries</code> is full the oldest entries are trimmed, with no error.</td>
 </tr>
 <tr>
 <td><code>cancel-durable</code>, <code>read</code></td>
@@ -780,7 +775,7 @@ export function recent(pane: bigint): string[] {
 </tr>
 </tbody>
 </table>
-<p><code>durable_timers</code> and <code>journal_entries</code> are requestable in the manifest <code>limits</code> up to the ceiling for the tier. Beyond <code>journal_entries</code>, the oldest entries are trimmed.</p>
+<p><code>journal.read</code> returns at most 1,000 entries per call (a larger <code>limit</code> is clamped). <code>durable_timers</code> and <code>journal_entries</code> are requestable in the manifest <code>limits</code> up to the ceiling for the tier. Beyond <code>journal_entries</code>, the oldest entries are trimmed.</p>
 <h3 id="edge-cases">Edge cases</h3>
 <table>
 <thead>
@@ -819,7 +814,7 @@ export function recent(pane: bigint): string[] {
 <li><a href="/pages/api-events/">Events</a> for the delivery policy of <code>durable-timer-fired</code> and <code>input-uncertain</code>.</li>
 <li><a href="/pages/lifecycle/">Lifecycle</a> for the <code>durable-timer</code> activation trigger.</li>
 <li><a href="/pages/api-storage/">storage</a> for keeping the job's pane and text across restarts.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full code list.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full code list.</li>
 </ul>
 <p>Interface version: <code>ilium:host/timers</code> and <code>ilium:host/journal</code>, version 0.1.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-command-palette/"><small>Previous</small>Command palette</a><a class="next" href="/pages/api-tree-chrome/"><small>Next</small>Tree and window chrome</a></nav>

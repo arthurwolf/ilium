@@ -9,19 +9,15 @@ ilium is built around two ideas tmux doesn't have:
 
 Everything else (detach/reattach, persistent sessions, PTY handling, keybindings) follows tmux's model closely enough that tmux muscle memory should mostly transfer.
 
+Detailed design chapters live in [`architecture/`](architecture/). This index keeps the existing section anchors.
+
 ## Prior art — why not just use X
 
-This space already has prior art, researched before writing this doc:
-
-- **[Zellij](https://github.com/zellij-org/zellij)** — the reference architecture for a modern Rust multiplexer: client/server over a Unix socket, WASM plugin system, floating panes. No tree-of-groups pane list, no agent-state detection. ilium borrows its client/server split.
-- **[tmux-based agent managers — claude-squad](https://github.com/smtg-ai/claude-squad)** — wraps tmux + git worktrees to run multiple Claude Code / Codex / Aider sessions with a dashboard. Not a multiplexer itself; it drives tmux.
-- **[herdr](https://www.linuxlinks.com/herdr-terminal-based-agent-multiplexer/)** — a Rust, single-binary terminal multiplexer with a sidebar that classifies each pane as blocked / working / done / idle via process-name + output heuristics, zero-config, ~15 agents supported out of the box. This is the closest existing project to ilium's second feature — it validates the approach (process-name + text heuristics is viable and is what real tools ship) but doesn't have the tree/group pane model, only a flat sidebar list.
-- **[RMUX (Helvesec)](https://github.com/Helvesec/rmux)** — tmux-compatible (90 commands) Rust multiplexer with typed SDKs (Rust/Python/TS) for programmatic control and a `ratatui-rmux` widget for embedding live panes. No agent-state detection, no tree/groups; it's an automation-first tmux clone.
-
-None of these combine a manipulable *tree* of panes with agent-state detection, which is the actual gap ilium fills. Worth knowing herdr exists if the second feature alone is what's wanted — it's shipping today.
+[Detailed design](architecture/prior-art-why-not-just-use-x.md).
 
 ## Core concepts
 
+[Detailed design](architecture/core-concepts.md).
 ```
 Session
  └── Group            (can contain Groups, Split Views, Panes, and folder roots)
@@ -32,6 +28,8 @@ Session
 ```
 
 Each tree node is a `Container`, `Pane`, or persisted folder root. A container is either a normal `Group` or a `SplitView { orientation }`; a pane carries a `PaneContentKind` (`Terminal` | `Editor` | `Board`) and a matching `PaneStatus`. The detection engine drives `PlainShell`/agent statuses for terminal panes; `AgentState` separates turn phase, provider goal, and unread completion when projecting the status into tree icons.
+
+The tree activity filter is a client-side projection of server-owned monotonic activity observations. The server records input, output and detection activity even for unsubscribed terminals, coalesces live updates, and replays the latest revision and age on attachment. The client keeps active terminals and their ancestors, retains auxiliary rows in visible projects, and never mutates the authoritative tree. Toolbar order and the inactivity threshold are persisted UI settings; the filter itself starts disabled for each client.
 
 `PaneStatus::AgentUnavailable` retains a historical `AgentRecovery` separately from live ownership. Its process key includes provider class, OS PID and start time; availability distinguishes a matching owned-child exit receipt, foreground shell evidence and unverified ownership. Missing nested processes do not supply an exit cause. `agent_state()` exposes only a live agent; presentation and retained-session consumers use `known_agent_state()` or the recovery record. Unavailability suppresses live turn/goal completion projection without discarding session, prompt or terminal history.
 
@@ -73,14 +71,16 @@ The left panel renders this tree via `tui-tree-widget`: expand/collapse groups, 
 The right panel renders a normal pane alone, or every child of a selected split view. Two and three children follow the split's orientation; four use a 2 by 2 grid. Selecting a child keeps the whole split visible while making only that child active for keyboard and pointer input.
 
 - For a detected agent, its viewport title includes the real agent PID and its session ID when the CLI exposes one; otherwise it explicitly says that the session is unavailable rather than guessing. Submitting exact `/clear` to Claude or Codex immediately discards that detected session ID and resets an automatic title to `<new>` until the replacement session can be verified and titled. A manually fixed name, short name, icon and ownership survive this reset.
+- Claude session discovery periodically rechecks its process-bound session record after a session is cached. A verified different record triggers bounded project-transcript verification before replacing the binding; an absent or unreadable record does not replace it. This lets stronger evidence supersede an earlier open-transcript fallback without scanning transcripts on every screen refresh.
 - AI project restructuring treats every existing split view as a user-owned atomic layout. It may rebuild ordinary groups around a split and retitle the panes inside it, but it cannot create, remove, replace, reorient, reorder, or change the membership of a split. Because the original split and pane IDs survive the authoritative tree snapshot, a currently focused split and its active pane remain focused through the restructure.
 - Every AI restructure prompt includes the concrete animation catalog and relevant typed scene controls. The reply must supply a deduplicated recommendation table and pointers for the project and every output entry, including groups and split views, even when Semantic rendering is disabled. The client validates concrete kinds, control bounds, conditional dependencies and resource policy before sending an expanded `RecommendedRestructurePlan`. Core checks exact output-path coverage and the captured project generation, builds a candidate tree and publishes structure plus recommendation metadata together. The server serializes apply/undo publication, retains the undo image until restore succeeds and requests the existing debounced snapshot save; an acknowledgement proves the in-memory commit, not completed disk persistence. Recommendations travel in ordinary tree snapshots and survive reattach. Undo restores the previous recommendations while advancing the generation so an older inference cannot overwrite it.
 - Click either panel to focus it. When a terminal application enables an xterm mouse protocol (for example `vim`, `htop`, or `lazygit`), ilium forwards clicks, drags, scrolls, and modifiers to that PTY using its requested encoding.
 - Terminal history can be navigated with the wheel or Shift+PageUp/Shift+PageDown; Shift+End returns immediately to ilium's live output. Full-screen applications that own their mouse history also receive xterm Ctrl+End (Claude Code's native jump-to-bottom shortcut). While ilium history is being inspected, incoming output and agent resize redraws continue in a separate live parser, so neither can move or corrupt the frozen historical viewport.
-- The agent toolbar's Smart Copy action captures an immutable clone of the visible `vt100::Screen`, numbers its visible lines and non-whitespace word runs, and sends only those references to the configured inference provider. The response is streamed as JSONL: every record must resolve wholly against the frozen snapshot before it becomes selectable, so model-authored replacement text and stale live-screen coordinates cannot reach the clipboard. The first valid record dismisses the blocking progress dialog; later records appear incrementally and flash for 500 ms. Overlapping candidates prefer the smallest region and the wheel cycles the alternatives under the pointer. `smart_copy_tokens` adds the pre-scanned fine-grained layer without any model call: per-line regex detectors (URLs, e-mail, IP, endpoints, paths and `file:line` locations, qualified and identifier names, hashes, versions, assignments, flags, quotes, key/value fields, sentences, dates, amounts, phones), a multi-line postal-address matcher, and `vt100` cell-attribute runs (foreground colour, highlight, bold, italic, underline). Path-shaped tokens carry a `PathProbe`; the UI thread resolves them through `PathContext` (pane cwd, its ancestors, the project root, `~`, a few conventional source directories, a bounded stat budget) when the session is built, relabelling hits as `file`/`directory` and dropping implausible misses. Every non-empty line is also a region, and regions are deduplicated by exact geometry with structural, line, detail, token and styled regions in that priority. Clicks toggle a region in a persistent multi-selection that stays inverted and is written to the clipboard on each click. Smart Copy light (`smart_copy_light.rs`, `[terminal] smart_copy_light` / `smart_copy_light_key`, on by default with Ctrl) reuses the same capture and detection but never queues a model request: `App::try_start_smart_copy_light` starts it from a mouse event carrying the configured modifier over a terminal pane, clicks only toggle regions, and `finish_smart_copy_light` copies the selection once on release and installs a `SmartCopyPreview` that `draw_smart_copy_preview` renders with a one-second countdown gauge. Release is inferred (terminals do not report modifier release): a Kitty key-release event, the first mouse event lacking the modifier, focus loss, or `RELEASE_IDLE_GRACE` after the last event once something is selected.
+- The agent toolbar's Smart Copy action captures an immutable clone of the visible `vt100::Screen`, numbers its visible lines and non-whitespace word runs, and sends only those references to the configured inference provider. The response is streamed as JSONL: every record must resolve wholly against the frozen snapshot before it becomes selectable, so model-authored replacement text and stale live-screen coordinates cannot reach the clipboard. The first valid record dismisses the blocking progress dialog; later records appear incrementally and flash for 500 ms. Overlapping candidates prefer the smallest region and the wheel cycles the alternatives under the pointer. `smart_copy_tokens` adds the pre-scanned fine-grained layer without any model call: per-line regex detectors (URLs, e-mail, IP, endpoints, paths and `file:line` locations, qualified and identifier names, hashes, versions, assignments, flags, quotes, key/value fields, sentences, dates, amounts, phones), a multi-line postal-address matcher, and `vt100` cell-attribute runs (foreground colour, highlight, bold, italic, underline). Path-shaped tokens carry a `PathProbe`; the bounded I/O capture worker resolves them through `PathContext` (pane cwd, its ancestors, the project root, `~`, a few conventional source directories, a bounded stat budget) when the session is built, relabelling hits as `file`/`directory` and dropping implausible misses. Every non-empty line is also a region, and regions are deduplicated by exact geometry with structural, line, detail, token and styled regions in that priority. Clicks toggle a region in a persistent multi-selection that stays inverted and is written to the clipboard on each click. Smart Copy light (`smart_copy_light.rs`, `[terminal] smart_copy_light` / `smart_copy_light_key`, on by default with Ctrl) reuses the same capture and detection but never queues a model request: `App::try_start_smart_copy_light` starts it from a mouse event carrying the configured modifier over a terminal pane, clicks only toggle regions, and `finish_smart_copy_light` copies the selection once on release and installs a `SmartCopyPreview` that `draw_smart_copy_preview` renders with a one-second countdown gauge. Release is inferred (terminals do not report modifier release): a Kitty key-release event, the first mouse event lacking the modifier, focus loss, or `RELEASE_IDLE_GRACE` after the last event once something is selected.
 - A terminal pane may own one long-task progress registration. Registration is transactional: the server validates one bounded JSON probe before replacing an existing monitor and returns a correlated acknowledgement with its generation ID. The detached server—not the agent—then performs every recurring probe, keeps task `error` distinct from monitor degradation/failure, persists terminal evidence, and waits for a verified clean agent composer before submitting the result. Each report carries two human-facing descriptions that must make sense without any session context: a one-line `message` (always shown in the footer, followed by a hover marker) and an optional multi-line `details` (What/Why/Now/Next/Watch, at most 8 KiB, shown in a tooltip when the pointer rests on the footer); the managed agent instruction block (`progress-instructions.hbs`, schema version 6) tells agents how to write both. The result message is the monitor's only effect on the agent: it never pauses, resumes, or otherwise touches the agent's `/goal`.
 - ProgressTiming retains up to 64 actual probe observations (reported progress, unchanged successful heartbeat, or failed observation), independently of the percent samples used for ETA. The latest accepted task report and its timestamp survive failed probes; IPC and snapshots carry both histories atomically. The footer warns only about “no probe report” (no accepted probe report for ten intervals, at least ten minutes; unchanged successful reports never stall), the report carries an optional `indeterminate` flag that suppresses the ETA, while the progress-specific popover renders current diagnostics beside the accepted report as a UTF-8 tree and a time-scaled recent-check timeline; compact terminals stack its panels. Probe instructions require real counters/phase descriptions and actual local or remote job identity/result checks rather than inferring liveness from a launcher.
 - The second header icon of a detected Claude Code or Codex pane opens the costs-and-stats popover: hover previews it, a click pins it (non-modal, so keystrokes keep reaching the agent; only pointer events over the popover are claimed), and the icon or its close control dismisses it. Its data never touches the server or the wire: `session_stats` parses the agent's own JSONL transcript into a `SessionStats` value, and `session_stats_store` admits discovery, incremental reads and aggregation as bounded jobs on the process-shared I/O lane; each pane's accumulator resumes at its byte offset and ignores a trailing partial line. `session_stats_ui` draws four tabs (Overview, Tokens, Activity, Prompts) onto a tall off-screen buffer that is windowed into the frame, sized to fill the right-hand panel. Its over-time graphs use `ascii_chart`, a port of the asciichart/rasciigraph plotting algorithm (same glyphs, label precision and NaN gaps, validated against rasciigraph's published outputs) that returns a grid of kind-tagged cells so the caller colours each series, and that can downsample by per-column maximum so spikes survive. Transcripts reach several gigabytes with lines above 30 MB, so the parser filters raw bytes with a regex set before deserialising, counts tool failures from bytes without parsing tool-result lines, and merges Claude's repeated per-block usage by message id rather than summing it. Token counts are normalised across providers (`input` is uncached input, cache read/write are separate, Codex's cached share is subtracted from its inclusive input count). The popover shows dollars only when the agent recorded them (Claude Code's `cost-state` snapshot); the agent-cost indicators below price tokens themselves.
+- Goal visibility remains client-local: `ilium-agent-session` owns pure provider evidence and reconciliation, while the client owns bounded asynchronous acquisition and pane/session/process generation fences. On supported 64-bit Linux kernels, session discovery retains a process handle and carries its verified pidfs inode to clients; readers match it to a live process handle before accessing provider data. Both providers require a server-verified main-transcript path and check its opened file against the agent's descriptors. Session discovery and goal readers obtain provider-home evidence through the platform boundary; the server's discovery runs that read on its bounded I/O lane. Claude objective text comes from paired main-transcript command confirmations and its lifecycle from screen evidence. Codex goal acquisition verifies thread and home binding before and after a bounded, isolated read of version-checked local goal storage; unsupported or ambiguous states retain screen evidence. A successful no-goal response differs from an unavailable read, and stale text is labelled. The banner and toolbar popover share the resulting observation rather than persisting another copy.
 - Agent-cost indicators (Settings > Agent Cost) reuse those same transcript snapshots; nothing about them touches the server or the wire. `session_stats` additionally keeps per-minute, per-model token buckets. Claude Code writes sub-agent and workflow calls to `<session>/subagents/**/*.jsonl` rather than the main transcript (a measured session billed $1,021 while its main file priced at $19), so the store's worker folds those files in through `StatsAccumulator::ingest_extra_file`, each resuming at its own offset and deduplicated by message id; advisor-model calls appear in no transcript and are covered only by the CLI's recorded `cost-state` total. `cost_model` is the pure policy: a longest-prefix `PriceTable` (Anthropic rows from Anthropic's published list, OpenAI rows from third-party reports of its list, user overrides under `[cost.prices]`; an unpriced model marks the figure a lower bound instead of guessing), five calibrations that turn dollars into one of five levels (fixed bands, median of open agents, percentiles of the user's own past sessions, fraction of a budget, burn rate), sparkline bucketing and spike detection. `cost_history` scans past sessions for the history calibration without parsing whole files: Claude Code's last `cost-state` total, or Codex's last cumulative `total_token_usage`, from a bounded tail of each transcript, cached by path, size and mtime, on one lowest-priority worker. The quota metric (`CostMetric::Quota`) swaps the unit, not the machinery: `StatsAccumulator` turns consecutive Codex `rate_limits` readings of one window period into per-minute `QuotaBucket`s (a reset or lower reading only re-baselines), `cost_history` reads each Codex session's first and last reading for history percentiles, and the tracker feeds those series through the same calibrations, sparkline and spike logic with quota cut points, budget and spike floor. Claude Code transcripts carry no quota, so those rows are marked unavailable and draw nothing. `cost_tracker` derives each agent's `PaneCost` from its `SessionStats` only when the snapshot changed or the sparkline window moved, and rebuilds one immutable `CostOverlay` (per-row level, group roll-ups, totals, ranks) that `tree_ui` only reads, so a mouse-move redraw never re-prices. `cost_overlay` decides what a row shows from each option's enabled flag and visibility (always, or only while that entry is hovered) and paints it just left of the hover action buttons; `cost_settings`/`cost_settings_ui` own the `[cost]` table and the tab. Sorting by cost is `TreeOrder::CostDescending`, derived from `[cost].sort_by_cost` rather than persisted as a UI order, with the ranking threaded through `tree_ordering`, the hit-test cache and selection reconciliation so render order and click targets cannot disagree. The row action buttons form one compact strip flush with the list's right edge, and the hover highlight covers the whole entry.
 
 ### Pane states shown in the tree
@@ -110,117 +110,107 @@ The blocked/waiting-for-approval state wasn't explicitly requested but falls out
 
 Claude activity classification treats the latest recognized completed-turn summary as a boundary: earlier working and background-wait rows belong to the previous turn. The summary's own still-running suffix and newer activity stay eligible; approval checks retain the full screen. Goal completion remains independent of current activity.
 
-Terminal panes reserve configured space for enabled prompt and progress displays before input begins, including plain shells that may later start an agent. Metadata arrival, wrapping, clearing, detection changes and visibility changes keep that allocation fixed; explicit settings, split changes and outer-terminal resizing may change the child dimensions. Editors and boards do not reserve terminal metadata space, and small panes preserve a terminal cell where physically possible.
+Terminal panes allocate prompt and progress sections only while their content is visible. The shared viewport drives rendering, hit testing and child terminal dimensions; appearance, removal, expiry and settings changes resize the affected terminals. Editors and boards do not reserve terminal metadata space, and small panes preserve a terminal cell where physically possible.
 
-Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output; their text disappears while the reserved rows remain. Expiry does not resize the child, clear reports, acknowledge results, change sidebar signals or affect queued notification delivery.
+Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output; expiry releases their rows and resizes the child without clearing reports, acknowledging results, changing sidebar signals or affecting queued notification delivery.
 
 ## Form row leaders
 
-- [Form row leaders](architecture/form-row-leaders.md)
+[Detailed design](architecture/form-row-leaders.md).
 
 ## Ambient animation rendering
 
-- [Ambient animation rendering](architecture/ambient-animation-rendering.md)
+[Detailed design](architecture/ambient-animation-rendering.md).
 
 ## Process architecture
 
-- [Process architecture](architecture/process-architecture.md)
+[Detailed design](architecture/process-architecture.md).
+Client/server, like Zellij and tmux itself — this is what makes detach/reattach and session persistence possible instead of "just a TUI app that dies with the terminal."
+
+Custom agents are profiles, not additional detection signatures. A stable profile ID and its Claude or Codex base travel over IPC and remain in the server-owned pane origin; environment rows do not. Before each process start the server reads and validates the current owner-only plaintext configuration, then passes the approved values to the terminal adapter as structured environment entries. The terminal adapter and server retain authority over their reserved variables. Snapshots store only the non-secret identity and resume metadata, so a missing or incompatible profile is a recoverable start failure rather than permission to run the base provider without the profile.
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│  ilium-server (one process per session, spawned on demand)    │
+│                                                                  │
+│  ┌─────────────┐   ┌───────────────┐   ┌─────────────────┐    │
+│  │ ServerState │   │ pane registry │   │ detection loop   │    │
+│  │ (ilium_core│   │ (PaneResource:│   │ (tokio task,     │    │
+│  │  ::Tree --  │   │  PtySession + │   │  adaptive poll   │    │
+│  │  Node/      │   │  vt100 screen │   │  per pane, see   │    │
+│  │  NodeKind)  │   │  per pane)    │   │  config.rs)      │    │
+│  └─────────────┘   └───────────────┘   └─────────────────┘    │
+│ UDS socket: $XDG_RUNTIME_DIR/ilium/<project-slug>-<hash>-<session>.sock │
+└────────────────────────────┬────────────────────────────────┘
+                              │ length-prefixed bincode frames
+                              │ (ilium-ipc: ClientRequest / ServerEvent)
+                  ┌───────────┴────────────┐
+                  │ ilium-client (ratatui  │
+                  │ TUI, one per attached   │
+                  │ terminal)               │
+                  └─────────────────────────┘
+```
 
 ## Crate roles
 
-- [Crate roles](architecture/crate-roles.md)
+[Detailed design](architecture/crate-roles.md).
 
 ## Worker and service execution
 
-- [Worker and service execution, part 1](architecture/worker-and-service-execution-1.md)
-- [Worker and service execution, part 2](architecture/worker-and-service-execution-2.md)
-- [Worker and service execution, part 3](architecture/worker-and-service-execution-3.md)
-- [Worker and service execution, part 4](architecture/worker-and-service-execution-4.md)
+[Part 1](architecture/worker-and-service-execution-01.md), [Part 2](architecture/worker-and-service-execution-02.md), [Part 3](architecture/worker-and-service-execution-03.md), [Part 4](architecture/worker-and-service-execution-04.md), [Part 5](architecture/worker-and-service-execution-05.md).
 
 ## Ordered terminal ownership
 
-- [Ordered terminal ownership](architecture/ordered-terminal-ownership.md)
+[Detailed design](architecture/ordered-terminal-ownership.md).
 
 ## Agent worktrees
 
-- [Agent worktrees](architecture/agent-worktrees.md)
+[Detailed design](architecture/agent-worktrees.md).
 
 ## Detection design
 
-- [Detection design](architecture/detection-design.md)
-
-### Why a process-tree check before text scraping
-
-See [Detection design](architecture/detection-design.md).
-
-### Poll cadence
-
-See [Detection design](architecture/detection-design.md).
+[Detailed design](architecture/detection-design.md).
 
 ## Scaling to hundreds of agents
 
-- [Scaling to hundreds of agents](architecture/scaling-to-hundreds-of-agents.md)
-
-### Principle: cost proportional to change, not to population
-
-See [Scaling to hundreds of agents](architecture/scaling-to-hundreds-of-agents.md).
-
-### Detection
-
-See [Scaling to hundreds of agents](architecture/scaling-to-hundreds-of-agents.md).
-
-### PTY transport
-
-See [Scaling to hundreds of agents](architecture/scaling-to-hundreds-of-agents.md).
-
-### Server to client
-
-See [Scaling to hundreds of agents](architecture/scaling-to-hundreds-of-agents.md).
-
-### Client
-
-See [Scaling to hundreds of agents](architecture/scaling-to-hundreds-of-agents.md).
+[Detailed design](architecture/scaling-to-hundreds-of-agents.md).
 
 ## Key crates
 
-- [Key crates](architecture/key-crates.md)
-
-### A note on the vendored `vt100`
-
-See [Key crates](architecture/key-crates.md).
-
-### Native release boundary
-
-See [Key crates](architecture/key-crates.md).
+[Detailed design](architecture/key-crates.md).
 
 ## Implementation plan
 
-- [Implementation plan](architecture/implementation-plan.md)
+[Detailed design](architecture/implementation-plan.md).
 
 ## Compaction optimizer
 
-- [Compaction optimizer](architecture/compaction-optimizer.md)
+[Detailed design](architecture/compaction-optimizer.md).
 
 ## Guided setup
 
-- [Guided setup](architecture/guided-setup.md)
+[Detailed design](architecture/guided-setup.md).
 
 ## Attention queue
 
-- [Attention queue](architecture/attention-queue.md)
+[Detailed design](architecture/attention-queue.md).
 
 ## Non-goals (for now)
 
-- [Non-goals (for now)](architecture/non-goals-for-now.md)
+[Detailed design](architecture/non-goals-for-now.md).
 
 ## Embedded application prompts
 
-- [Embedded application prompts](architecture/embedded-application-prompts.md)
-
-### Additive user instructions
-
-See [Embedded application prompts](architecture/embedded-application-prompts.md).
+[Detailed design](architecture/embedded-application-prompts.md).
 
 ### Input latency and freeze containment
 
 See [Embedded application prompts](architecture/embedded-application-prompts.md).
+
+## Shared resource queues
+
+`ilium-core::resource_queue` owns the pure, exclusive FIFO state machine, retry receipts, invocation fences, ownership generations and queue estimates. `ilium-server::resources` coordinates it through one user-wide catalog; project settings and managed instructions are projections, never competing authorities. `ilium-platform::resource_fs` owns durable local-filesystem locks, replacement, clocks and process birth proofs. Stable project identities travel with structured project metadata; explicit revision-bound rebinding reconciles directory moves. Bounded durable lifecycle events support detail history. Catalog paths are supplied explicitly by the server composition root so isolated tests cannot use real user data.
+
+A reservation estimate never expires ownership. Dead owners remain occupied and need attention; uncertain invocation evidence blocks promotion. Guarded recovery separates revocation from an explicit clearance confirmation. Pending acquisition receipts survive restarts until acknowledged by an authenticated status or wait request. Native blocking waits use owned connection tasks and broadcast observations, with a bounded cross-project invocation proof before handoff. Resource request and attach workflows use heap-backed future boundaries so their state does not inflate ordinary connection stacks. Duplicate wait attachments have a finite per-reservation limit and share one presentation entry.
+
+`ilium-ipc::resource` carries typed operations and snapshots. The CLI exposes `resource` and `ressource`; the client renders virtual resource rows, queue details, waiting badges and segmented wait progress. Optional grouping changes presentation only, preserving actual pane ancestry and input routing. `ilium-instructions` is the shared atomic writer for resource instructions and existing agent feature blocks. See [the resource guide](src/docs/resource-queues.md) for commands and hardware safety boundaries.

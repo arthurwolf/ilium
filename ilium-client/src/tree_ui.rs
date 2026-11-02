@@ -125,6 +125,7 @@ pub enum TreeToolbarAction {
     Project,
     Split,
     Folder,
+    ActivityFilter,
     /// Triggers `App::action_request_restructure` -- one independent LLM
     /// regroup-and-retitle call per non-empty project (see
     /// `crate::restructure`'s module docs). Anchored next to `Settings`
@@ -151,6 +152,7 @@ impl TreeToolbarAction {
             Self::Folder => 10,
             Self::Restructure => 11,
             Self::Settings => 12,
+            Self::ActivityFilter => 13,
         }
     }
 
@@ -175,7 +177,7 @@ impl TreeToolbarAction {
     /// Single glyph shown on the button. Agent launchers resolve through the
     /// same persisted icon assignment as their tree rows, keeping both
     /// surfaces synchronized when the user changes a provider icon.
-    fn glyph(self, icons: &IconSettings) -> &str {
+    pub(crate) fn glyph(self, icons: &IconSettings) -> &str {
         match self {
             Self::Search => icons.glyph(IconTarget::ToolbarSearch),
             Self::Shell => icons.glyph(IconTarget::Terminal),
@@ -190,6 +192,7 @@ impl TreeToolbarAction {
             Self::Folder => icons.glyph(IconTarget::Folder),
             Self::Restructure => icons.glyph(IconTarget::ToolbarRestructure),
             Self::Settings => icons.glyph(IconTarget::ToolbarSettings),
+            Self::ActivityFilter => "👁",
         }
     }
 
@@ -197,7 +200,7 @@ impl TreeToolbarAction {
     /// others (and from the status colors already used for pane state --
     /// yellow/working, cyan/waiting, green/idle) that the five buttons read
     /// as five different things at a glance instead of one repeated shape.
-    fn accent(self) -> Color {
+    pub(crate) fn accent(self) -> Color {
         match self {
             Self::Search => Color::Cyan,
             Self::Shell => Color::Gray,
@@ -212,6 +215,7 @@ impl TreeToolbarAction {
             Self::Folder => Color::Cyan,
             Self::Restructure => Color::Yellow,
             Self::Settings => Color::Gray,
+            Self::ActivityFilter => Color::Cyan,
         }
     }
 
@@ -230,6 +234,7 @@ impl TreeToolbarAction {
             Self::Folder => "open folder",
             Self::Restructure => "restructure with AI",
             Self::Settings => "settings",
+            Self::ActivityFilter => "show or hide inactive terminals",
         }
     }
 }
@@ -649,9 +654,13 @@ impl PaintedTreeRows {
     ) {
         self._metadata = hold;
     }
-    pub(crate) fn toolbar_at(&self, position: Position) -> Option<TreeToolbarAction> {
+    pub(crate) fn toolbar_at(
+        &self,
+        position: Position,
+        layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+    ) -> Option<TreeToolbarAction> {
         self.toolbar.then_some(())?;
-        toolbar_action_at(self.area, position)
+        configured_toolbar_action_at(self.area, position, layout)
     }
     pub(crate) fn node_at(&self, position: Position) -> Option<TreeNodeHit> {
         self.list.contains(position).then_some(())?;
@@ -767,6 +776,13 @@ pub struct TreeHoverState {
 /// All transient presentation state for one tree render. Grouping it keeps
 /// the renderer's stable tree/state inputs distinct from redraw-only UI data.
 pub struct TreeRenderOptions<'a> {
+    pub visibility: Option<&'a HashSet<NodeId>>,
+    pub toolbar_layout: &'a crate::tree_toolbar_layout::TreeToolbarLayout,
+    pub custom_toolbar_profiles: Option<&'a [ilium_core::custom_agent::CustomAgentProfile]>,
+    pub custom_toolbar_selected: Option<&'a str>,
+    pub custom_toolbar_hovered: Option<&'a str>,
+    pub custom_toolbar_pending: Option<&'a HashSet<String>>,
+    pub custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     pub focused: bool,
     pub elapsed_ms: u128,
     /// Real animation-clock offset even when decorative motion is disabled.
@@ -829,6 +845,7 @@ pub struct TreeRenderOptions<'a> {
     /// composed.
     pub sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
     pub chatroom_projects: &'a HashSet<NodeId>,
+    pub resources: Option<&'a crate::resource_queue::ResourceUi>,
     pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     pub frozen_panes: &'a HashSet<NodeId>,
 }
@@ -896,6 +913,8 @@ fn layout_tree_row(
 /// together prevents each new presentation concern from widening every
 /// recursive helper's signature independently.
 struct TreeItemBuildContext<'a> {
+    visibility: Option<&'a HashSet<NodeId>>,
+    custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     layout: Option<&'a RowLayoutBuild<'a>>,
     elapsed_ms: u128,
     terminal_activity_elapsed_ms: u128,
@@ -926,6 +945,7 @@ struct TreeItemBuildContext<'a> {
     opened_paths: &'a HashSet<Vec<NodeId>>,
     sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
     chatroom_projects: &'a HashSet<NodeId>,
+    resources: Option<&'a crate::resource_queue::ResourceUi>,
     panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     frozen_panes: &'a HashSet<NodeId>,
 }
@@ -1074,6 +1094,13 @@ fn build_children(
     let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
     identifier_path.extend_from_slice(ancestor_path);
     for child_id in children.iter().copied() {
+        if context
+            .visibility
+            .is_some_and(|visible| !visible.contains(&child_id))
+        {
+            continue;
+        }
+        if context.resources.is_some_and(|resources| resources.grouping && !tree.get(parent).is_some_and(Node::is_split_view) && resources.rows.targets.values().any(|target|matches!(target,crate::resource_queue::ResourceRowTarget::Participant{pane_id:Some(pane),..} if *pane==child_id))) { continue; }
         if is_compact_worktree(tree, child_id) {
             items.extend(build_children(tree, child_id, context, ancestor_path));
             continue;
@@ -1092,11 +1119,16 @@ fn build_children(
 }
 
 /// Unlabeled stand-ins for a collapsed container's direct children.
-fn collapsed_placeholder_children(tree: &Tree, parent: NodeId) -> Vec<TreeItem<'static, NodeId>> {
+fn collapsed_placeholder_children(
+    tree: &Tree,
+    parent: NodeId,
+    visibility: Option<&HashSet<NodeId>>,
+) -> Vec<TreeItem<'static, NodeId>> {
     tree.children_of(parent)
         .map(|children| {
             children
                 .iter()
+                .filter(|child_id| visibility.is_none_or(|visible| visible.contains(*child_id)))
                 .map(|child_id| {
                     let displayed = if is_compact_worktree(tree, *child_id) {
                         tree.children_of(*child_id)
@@ -1132,9 +1164,120 @@ fn build_item(
             let mut children = if context.opened_paths.contains(identifier_path) {
                 build_children(tree, node.id, context, identifier_path)
             } else {
-                collapsed_placeholder_children(tree, node.id)
+                collapsed_placeholder_children(tree, node.id, context.visibility)
             };
             if let ContainerKind::Project { .. } = &container.kind {
+                if let Some(resources) = context.resources {
+                    if let Some(catalog) = &resources.catalog {
+                        if resources.grouping {
+                            let grouped = crate::resource_queue::tree::grouped_local_panes(
+                                &resources.rows,
+                                tree,
+                                node.id,
+                            );
+                            children.retain(|child| !grouped.contains(child.identifier()));
+                        }
+                        let mut resource_items = resources.rows.items(
+                            node.id,
+                            catalog,
+                            resources.grouping,
+                            context.icons,
+                            context.use_stable_glyphs,
+                            context.visibility,
+                        );
+                        for resource_item in &mut resource_items {
+                            if resources.observation_error.is_some() {
+                                let title = resources
+                                    .rows
+                                    .targets
+                                    .get(resource_item.identifier())
+                                    .and_then(|target| match target {
+                                        crate::resource_queue::ResourceRowTarget::Resource {
+                                            resource_id,
+                                            ..
+                                        } => catalog.resources.get(resource_id).map(|record| {
+                                            record
+                                                .definition
+                                                .title
+                                                .chars()
+                                                .map(|character| {
+                                                    if character.is_control() {
+                                                        '�'
+                                                    } else {
+                                                        character
+                                                    }
+                                                })
+                                                .collect::<String>()
+                                        }),
+                                        _ => None,
+                                    })
+                                    .unwrap_or_default();
+                                if let Ok(stale) = TreeItem::new(
+                                    *resource_item.identifier(),
+                                    Line::from(format!("⚠ State unknown · {title}")),
+                                    resource_item.children().to_vec(),
+                                ) {
+                                    *resource_item = stale;
+                                }
+                            }
+                            for index in 0..resource_item.children().len() {
+                                let Some(child) = resource_item.child_mut(index) else {
+                                    continue;
+                                };
+                                let id = *child.identifier();
+                                if let Some(
+                                    crate::resource_queue::ResourceRowTarget::Participant {
+                                        pane_id: Some(pane_id),
+                                        resource_id,
+                                        reservation_id,
+                                        ..
+                                    },
+                                ) = resources.rows.targets.get(&id)
+                                {
+                                    if let Some(pane) = tree.get(*pane_id) {
+                                        let position=catalog.resources.get(resource_id).and_then(|record| {let queued=record.reservations.iter().filter(|reservation|matches!(reservation.state,ilium_core::resource_queue::ReservationState::Queued)).count();(queued>1).then(||crate::resource_queue::tree::ordered(record).into_iter().filter(|reservation|matches!(reservation.state,ilium_core::resource_queue::ReservationState::Queued)).position(|reservation|&reservation.id==reservation_id)).flatten()});
+                                        let owner = catalog.resources.get(resource_id).is_some_and(
+                                            |record| {
+                                                record.reservations.iter().any(|reservation| {
+                                                    &reservation.id == reservation_id
+                                                        && reservation.state.occupied()
+                                                })
+                                            },
+                                        );
+                                        let prefix = if owner {
+                                            format!(
+                                                "{} ",
+                                                context.icons.glyph_for_display(
+                                                    IconTarget::ResourceOwner,
+                                                    context.use_stable_glyphs
+                                                )
+                                            )
+                                        } else {
+                                            position.map_or_else(
+                                                || "↳ ".to_string(),
+                                                |position| {
+                                                    format!(
+                                                        "{} {}. ",
+                                                        context.icons.glyph_for_display(
+                                                            IconTarget::ResourceQueued,
+                                                            context.use_stable_glyphs
+                                                        ),
+                                                        position + 1
+                                                    )
+                                                },
+                                            )
+                                        };
+                                        *child = build_item(tree, pane, context, identifier_path)
+                                            .with_identifier(id)
+                                            .with_prefix(prefix);
+                                    }
+                                }
+                            }
+                        }
+                        resource_items.append(&mut children);
+                        children = resource_items;
+                    }
+                }
                 if context.chatroom_projects.contains(&node.id) {
                     children.insert(
                         0,
@@ -1246,6 +1389,35 @@ fn build_item(
                     prompt_queue.len()
                 )
             };
+            let display_name = if let Some((icon, name)) = context
+                .custom_agent_labels
+                .and_then(|labels| labels.get(&node.id))
+            {
+                format!("{icon} {name} · {display_name}")
+            } else {
+                display_name
+            };
+            let display_name = if context
+                .resources
+                .is_some_and(|resources| resources.waiting(node.id))
+            {
+                format!(
+                    "{} {} {display_name}",
+                    context
+                        .icons
+                        .glyph_for_display(IconTarget::ResourceQueued, context.use_stable_glyphs),
+                    if context
+                        .resources
+                        .is_some_and(|resources| resources.waits.contains_key(&node.id))
+                    {
+                        "parked"
+                    } else {
+                        "queued"
+                    }
+                )
+            } else {
+                display_name
+            };
             // A pending scheduled input's countdown is a number, so it belongs
             // in the text; the long-term slot carries its marker only when no
             // goal or task claims that slot.
@@ -1269,11 +1441,8 @@ fn build_item(
                 node.is_bookmarked,
                 context.icons,
             );
-            let display_name = title_with_frozen_agent(
-                display_name,
-                context.frozen_panes.contains(&node.id),
-                context.icons,
-            );
+            let is_frozen = context.frozen_panes.contains(&node.id);
+            let display_name = title_with_frozen_agent(display_name, is_frozen, context.icons);
             let label = pane_label_with_icons(
                 status,
                 &display_name,
@@ -1319,7 +1488,7 @@ fn build_item(
             } else {
                 label
             };
-            let label = apply_unread_title_bold(
+            let mut label = apply_unread_title_bold(
                 label,
                 should_apply_unread_title_bold(
                     status,
@@ -1327,6 +1496,11 @@ fn build_item(
                     context.focused_pane_id == Some(node.id),
                 ),
             );
+            if is_frozen {
+                if let Some(title) = label.spans.get_mut(3) {
+                    title.style = title.style.fg(Color::DarkGray);
+                }
+            }
             let title_offset = context
                 .layout
                 .filter(|layout| !layout.settings.is_default())
@@ -2428,6 +2602,42 @@ pub fn toolbar_area(area: Rect) -> Rect {
     vertical_sections(area)[2]
 }
 
+/// A transient hit target; activation resolves the index to its stable profile ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CustomToolbarHit {
+    Previous,
+    Profile(usize),
+    Next,
+}
+
+/// A scrolling second toolbar row keeps all profiles reachable in narrow trees.
+pub(crate) fn custom_toolbar_buttons(
+    area: Rect,
+    profiles: &[ilium_core::custom_agent::CustomAgentProfile],
+    selected: Option<&str>,
+) -> Vec<(CustomToolbarHit, Rect)> {
+    let toolbar = toolbar_area(area);
+    if profiles.is_empty() || toolbar.height < 2 || toolbar.width < 7 {
+        return Vec::new();
+    }
+    let y = toolbar.y + 1;
+    let selected = selected
+        .and_then(|id| profiles.iter().position(|profile| profile.id == id))
+        .unwrap_or(0);
+    let capacity = usize::from((toolbar.width - 4) / 3).max(1);
+    let start = selected.saturating_sub(capacity - 1);
+    let mut buttons = vec![(CustomToolbarHit::Previous, Rect::new(toolbar.x, y, 2, 1))];
+    for index in start..profiles.len().min(start + capacity) {
+        let x = toolbar.x + 2 + u16::try_from(index - start).unwrap_or(0) * 3;
+        buttons.push((CustomToolbarHit::Profile(index), Rect::new(x, y, 3, 1)));
+    }
+    buttons.push((
+        CustomToolbarHit::Next,
+        Rect::new(toolbar.right() - 2, y, 2, 1),
+    ));
+    buttons
+}
+
 /// Returns the toolbar action at a terminal coordinate, if any.
 pub fn toolbar_action_at(area: Rect, position: Position) -> Option<TreeToolbarAction> {
     toolbar_button_rects(area)
@@ -2470,6 +2680,101 @@ pub fn toolbar_button_rects(area: Rect) -> Vec<(TreeToolbarAction, Rect)> {
     buttons.push((TreeToolbarAction::Restructure, restructure_area));
     buttons.push((TreeToolbarAction::Settings, settings_area));
     buttons
+}
+
+impl From<crate::tree_toolbar_layout::TreeToolbarEntry> for TreeToolbarAction {
+    fn from(entry: crate::tree_toolbar_layout::TreeToolbarEntry) -> Self {
+        use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
+        match entry {
+            Entry::Search => Self::Search,
+            Entry::Project => Self::Project,
+            Entry::Shell => Self::Shell,
+            Entry::Claude => Self::Agent(BuiltinAgentProvider::Claude),
+            Entry::Codex => Self::Agent(BuiltinAgentProvider::Codex),
+            Entry::Antigravity => Self::Agent(BuiltinAgentProvider::Antigravity),
+            Entry::Editor => Self::Editor,
+            Entry::Board => Self::Board,
+            Entry::Group => Self::Group,
+            Entry::Split => Self::Split,
+            Entry::Folder => Self::Folder,
+            Entry::ActivityFilter => Self::ActivityFilter,
+            Entry::Restructure => Self::Restructure,
+            Entry::Settings => Self::Settings,
+        }
+    }
+}
+
+/// One layout supplies drawing, previews and pointer targets. The default
+/// suffix stays at the right edge so the eye and settings remain reachable in
+/// a narrow tree; a custom order is laid out in the exact requested order.
+pub(crate) fn configured_toolbar_button_rects(
+    area: Rect,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Vec<(TreeToolbarAction, Rect)> {
+    configured_toolbar_rects_in_strip(toolbar_area(area), layout)
+}
+
+pub(crate) fn configured_toolbar_rects_in_strip(
+    toolbar: Rect,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Vec<(TreeToolbarAction, Rect)> {
+    use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
+    let visible_width = TOOLBAR_BUTTON_WIDTH - 1;
+    if toolbar.width < visible_width {
+        return Vec::new();
+    }
+    let suffix = [Entry::ActivityFilter, Entry::Restructure, Entry::Settings];
+    let anchored = layout.entries.ends_with(&suffix);
+    let left_count = if anchored {
+        layout.entries.len() - suffix.len()
+    } else {
+        layout.entries.len()
+    };
+    let reserved = if anchored {
+        (suffix.len() as u16 * TOOLBAR_BUTTON_WIDTH - 1).min(toolbar.width)
+    } else {
+        0
+    };
+    let left_end = toolbar.right().saturating_sub(reserved);
+    let mut buttons = Vec::new();
+    for (index, entry) in layout.entries.iter().take(left_count).enumerate() {
+        let x = toolbar
+            .x
+            .saturating_add((index as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
+        if x.saturating_add(visible_width) > left_end {
+            break;
+        }
+        buttons.push((
+            (*entry).into(),
+            Rect::new(x, toolbar.y, visible_width, toolbar.height),
+        ));
+    }
+    if anchored {
+        for (index, entry) in suffix.into_iter().rev().enumerate() {
+            let offset =
+                visible_width.saturating_add((index as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
+            if offset > toolbar.width {
+                break;
+            }
+            let x = toolbar.right().saturating_sub(offset);
+            buttons.push((
+                entry.into(),
+                Rect::new(x, toolbar.y, visible_width, toolbar.height),
+            ));
+        }
+        buttons.sort_by_key(|(_, rect)| rect.x);
+    }
+    buttons
+}
+
+pub(crate) fn configured_toolbar_action_at(
+    area: Rect,
+    position: Position,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Option<TreeToolbarAction> {
+    configured_toolbar_button_rects(area, layout)
+        .into_iter()
+        .find_map(|(action, button)| button.contains(position).then_some(action))
 }
 
 /// Whether `id` has an automatic title source `TreeRowAction::Retitle` can
@@ -2699,7 +3004,7 @@ impl TreeItemCache {
             tree_order,
             opened_paths,
             (&HashMap::new(), 0),
-            (&Default::default(), &HashSet::new()),
+            (&Default::default(), &HashSet::new(), None, None),
         )
     }
 
@@ -2715,10 +3020,12 @@ impl TreeItemCache {
         filesystem: (
             &crate::filesystem::sidebar::SidebarSnapshot,
             &HashSet<NodeId>,
+            Option<&crate::resource_queue::ResourceUi>,
+            Option<&HashSet<NodeId>>,
         ),
     ) -> &[TreeItem<'static, NodeId>] {
         let (cost_ranks, cost_epoch) = cost;
-        let (sidebar_files, chatroom_projects) = filesystem;
+        let (sidebar_files, chatroom_projects, resources, visibility) = filesystem;
         if self.version != Some(version)
             || self.tree_order != Some(tree_order)
             || self.cost_epoch != cost_epoch
@@ -2730,6 +3037,8 @@ impl TreeItemCache {
             self.items = build_tree_items(
                 tree,
                 TreeItemBuildContext {
+                    visibility,
+                    custom_agent_labels: None,
                     layout: None,
                     elapsed_ms: 0,
                     terminal_activity_elapsed_ms: 0,
@@ -2758,6 +3067,7 @@ impl TreeItemCache {
                     opened_paths,
                     sidebar_files,
                     chatroom_projects,
+                    resources,
                     panes: &HashMap::new(),
                 },
             );
@@ -2835,6 +3145,8 @@ pub(crate) fn render(
     let items = build_tree_items(
         tree,
         TreeItemBuildContext {
+            visibility: options.visibility,
+            custom_agent_labels: options.custom_agent_labels,
             layout: Some(&layout),
             elapsed_ms: options.elapsed_ms,
             terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
@@ -2861,6 +3173,7 @@ pub(crate) fn render(
             opened_paths: state.opened(),
             sidebar_files: options.sidebar_files,
             chatroom_projects: options.chatroom_projects,
+            resources: options.resources,
             panes: options.panes,
             frozen_panes: options.frozen_panes,
         },
@@ -2900,6 +3213,8 @@ pub(crate) fn render(
         let presentation_items = build_tree_items(
             presentation_tree,
             TreeItemBuildContext {
+                visibility: options.visibility,
+                custom_agent_labels: options.custom_agent_labels,
                 layout: Some(&layout),
                 elapsed_ms: options.elapsed_ms,
                 terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
@@ -2929,6 +3244,7 @@ pub(crate) fn render(
                 opened_paths: state.opened(),
                 sidebar_files: options.sidebar_files,
                 chatroom_projects: options.chatroom_projects,
+                resources: options.resources,
                 panes: options.panes,
             },
         );
@@ -3036,11 +3352,70 @@ pub(crate) fn render(
         draw_toolbar(
             frame,
             area,
+            (options.toolbar_layout, options.visibility.is_some()),
             options.hover.toolbar_action,
             options.hover.pending_toolbar,
             options.terminal_activity_elapsed_ms,
             options.icons,
         );
+        if let Some(profiles) = options
+            .custom_toolbar_profiles
+            .filter(|profiles| !profiles.is_empty())
+        {
+            let toolbar = toolbar_area(area);
+            if toolbar.height >= 2 {
+                frame.render_widget(
+                    Paragraph::new(" ".repeat(usize::from(toolbar.width))),
+                    Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1),
+                );
+            }
+            for (hit, button) in
+                custom_toolbar_buttons(area, profiles, options.custom_toolbar_selected)
+            {
+                let (text, selected) = match hit {
+                    CustomToolbarHit::Previous => ("‹".to_string(), false),
+                    CustomToolbarHit::Next => ("›".to_string(), false),
+                    CustomToolbarHit::Profile(index) => {
+                        let profile = &profiles[index];
+                        let pending = options
+                            .custom_toolbar_pending
+                            .is_some_and(|ids| ids.contains(&profile.id));
+                        let glyph = if pending {
+                            SPINNER_FRAMES[(options.terminal_activity_elapsed_ms / SPINNER_FRAME_MS)
+                                as usize
+                                % SPINNER_FRAMES.len()]
+                            .to_string()
+                        } else {
+                            profile.icon.clone()
+                        };
+                        (
+                            glyph,
+                            options.custom_toolbar_selected == Some(profile.id.as_str()),
+                        )
+                    }
+                };
+                let style = if selected {
+                    theme::selected_style()
+                } else {
+                    Style::new().fg(Color::Cyan)
+                };
+                frame.render_widget(
+                    Paragraph::new(Span::styled(format!(" {text}"), style)),
+                    button,
+                );
+            }
+            if let Some(profile) = options
+                .custom_toolbar_hovered
+                .and_then(|id| profiles.iter().find(|profile| profile.id == id))
+            {
+                let caption = Rect::new(toolbar.x, toolbar.y, toolbar.width, 1);
+                frame.render_widget(
+                    Paragraph::new(format!(" {} {}", profile.icon, profile.name))
+                        .style(Style::new().fg(Color::Cyan)),
+                    caption,
+                );
+            }
+        }
     }
     painted
 }
@@ -3398,17 +3773,20 @@ fn draw_row_actions(
 fn draw_toolbar(
     frame: &mut Frame,
     area: Rect,
+    layout_and_filter: (&crate::tree_toolbar_layout::TreeToolbarLayout, bool),
     hovered: Option<TreeToolbarAction>,
     pending: u16,
     spinner_elapsed_ms: u128,
     icons: &IconSettings,
 ) {
+    let (layout, filter_active) = layout_and_filter;
     let toolbar = toolbar_area(area);
     let caption_row = Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1);
 
-    for (action, button_area) in toolbar_button_rects(area) {
+    for (action, button_area) in configured_toolbar_button_rects(area, layout) {
         let is_hovered = hovered == Some(action);
-        let style = if is_hovered {
+        let style = if is_hovered || (filter_active && action == TreeToolbarAction::ActivityFilter)
+        {
             Style::new()
                 .fg(theme::accent_fg())
                 .bg(action.accent())
@@ -3440,6 +3818,39 @@ fn draw_toolbar(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn custom_toolbar_scrolls_to_each_stable_profile_in_a_narrow_tree() {
+        use ilium_core::custom_agent::CustomAgentProfile;
+        use ilium_core::BuiltinAgentProvider;
+        let profiles: Vec<_> = (0..24)
+            .map(|index| CustomAgentProfile {
+                id: format!("profile-{index}"),
+                name: format!("Agent {index}"),
+                icon: "✦".into(),
+                base_provider: BuiltinAgentProvider::Claude,
+                environment: Vec::new(),
+            })
+            .collect();
+        let area = ratatui::layout::Rect::new(0, 0, 16, 12);
+        for (index, profile) in profiles.iter().enumerate() {
+            let buttons = super::custom_toolbar_buttons(area, &profiles, Some(&profile.id));
+            assert!(buttons
+                .iter()
+                .any(|(hit, _)| *hit == super::CustomToolbarHit::Profile(index)));
+            assert!(buttons
+                .iter()
+                .any(|(hit, _)| *hit == super::CustomToolbarHit::Previous));
+            assert!(buttons
+                .iter()
+                .any(|(hit, _)| *hit == super::CustomToolbarHit::Next));
+            for (position, (_, first)) in buttons.iter().enumerate() {
+                for (_, second) in buttons.iter().skip(position + 1) {
+                    assert!(first.intersection(*second).is_empty());
+                }
+            }
+        }
+    }
+
     #[test]
     fn custom_tree_row_layout_blocking_warning_is_clipped_and_keeps_tooltip() {
         use crate::status_icons::{StatusSlot, TooltipContent};
@@ -3601,6 +4012,7 @@ mod tests {
                     draw_toolbar(
                         frame,
                         area,
+                        (&Default::default(), false),
                         None,
                         pending,
                         elapsed_ms,
@@ -3670,7 +4082,9 @@ mod tests {
             Some((first, TreeRowAction::Close))
         );
         assert!(painted.action_at(Position::new(strip.area.x, 5)).is_none());
-        assert!(painted.toolbar_at(Position::new(1, 0)).is_none());
+        assert!(painted
+            .toolbar_at(Position::new(1, 0), &Default::default())
+            .is_none());
     }
 
     #[test]
@@ -4037,6 +4451,13 @@ mod tests {
                     tree,
                     state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms,
                         terminal_activity_elapsed_ms: elapsed_ms,
@@ -4073,6 +4494,7 @@ mod tests {
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 ));
@@ -5276,6 +5698,13 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -5309,6 +5738,7 @@ mod tests {
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -5332,6 +5762,13 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -5373,6 +5810,7 @@ mod tests {
                         },
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -5416,6 +5854,13 @@ mod tests {
                     &tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -5449,6 +5894,7 @@ mod tests {
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -6261,6 +6707,8 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6289,6 +6737,7 @@ mod tests {
                 opened_paths: state.opened(),
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6421,6 +6870,8 @@ mod tests {
         let root_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6450,6 +6901,7 @@ mod tests {
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6462,6 +6914,8 @@ mod tests {
         let first_level_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6491,6 +6945,7 @@ mod tests {
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6503,6 +6958,8 @@ mod tests {
         let deep_items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6532,6 +6989,7 @@ mod tests {
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6567,6 +7025,8 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6595,6 +7055,7 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -6824,6 +7285,8 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -6852,6 +7315,7 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -7124,6 +7588,8 @@ mod tests {
         let items = build_tree_items(
             &tree,
             TreeItemBuildContext {
+                visibility: None,
+                custom_agent_labels: None,
                 layout: None,
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
@@ -7152,6 +7618,7 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
                 chatroom_projects: &HashSet::new(),
+                resources: None,
                 panes: &HashMap::new(),
             },
         );
@@ -7379,6 +7846,13 @@ mod cost_indicator_tests {
                     tree,
                     &mut state,
                     TreeRenderOptions {
+                        visibility: None,
+                        toolbar_layout: &Default::default(),
+                        custom_toolbar_profiles: None,
+                        custom_toolbar_selected: None,
+                        custom_toolbar_hovered: None,
+                        custom_toolbar_pending: None,
+                        custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
@@ -7412,6 +7886,7 @@ mod cost_indicator_tests {
                         hover,
                         sidebar_files: &Default::default(),
                         chatroom_projects: &HashSet::new(),
+                        resources: None,
                         panes: &HashMap::new(),
                     },
                 );
@@ -7739,6 +8214,40 @@ mod attention_button_tests {
         assert_eq!(list_area(area).bottom(), button.y);
         set_attention_button_large(false);
         set_attention_button_reserved(false);
+    }
+
+    #[test]
+    fn activity_filter_keeps_chatroom_for_an_active_project() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/activity-test"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "active", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let visible = crate::tree_activity_projection::visible_nodes(&tree, &HashSet::from([pane]));
+        let opened = HashSet::from([vec![project]]);
+        let ranks = HashMap::new();
+        let sidebar = Default::default();
+        let chatrooms = HashSet::from([project]);
+        let mut cache = TreeItemCache::default();
+        let items = cache.get_or_build_ranked(
+            &tree,
+            1,
+            TreeOrder::Manual,
+            &opened,
+            (&ranks, 0),
+            (&sidebar, &chatrooms, None, Some(&visible)),
+        );
+        assert_eq!(items.len(), 1);
+        assert!(items[0]
+            .children()
+            .iter()
+            .any(|child| *child.identifier() == chatroom_node_id(project)));
+        assert!(items[0]
+            .children()
+            .iter()
+            .any(|child| *child.identifier() == pane));
     }
 
     #[test]

@@ -111,6 +111,7 @@ The character set is deliberately ASCII. It removes Unicode normalisation (NFC a
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE` | Documents shown by Settings > Plugins and the store. |
 | `sbom.json` | The software bill of materials. See [Publishing guide](/pages/guide-publishing/). |
 | `build-info.json` | The build record. See [Publishing guide](/pages/guide-publishing/). |
+| `sbom.spdx.json`, `provenance.json` | Optional SPDX dependency and in-toto build statements, listed and hashed as ordinary files (SEC-155). Displayed without establishing trust. |
 
 | Id | Rule |
 |---|---|
@@ -166,7 +167,7 @@ Packing is a pure function of the project directory. The same inputs give the sa
 
 | Id | Rule |
 |---|---|
-| [PKG-143] | **Input set.** `pack` includes: the source `manifest.json`; the built components `server.wasm`, `client.wasm` and `scene.wasm` for each declared side, taken from the build output folder; every file under `assets/`, `help/`, `sounds/`, `screenshots/` and `src/`; and `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE`, `sbom.json` and `build-info.json` when present. Nothing else is included. |
+| [PKG-143] | **Input set.** `pack` includes: the source `manifest.json`; the built components `server.wasm`, `client.wasm` and `scene.wasm` for each declared side, taken from the build output folder; every file under `assets/`, `help/`, `sounds/`, `screenshots/` and `src/`; and `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE`, `sbom.json`, `build-info.json`, `sbom.spdx.json` and `provenance.json` when present. Nothing else is included. |
 | [PKG-144] | **Ignore rules.** Inside the included folders `pack` skips files whose name starts with `.`, `*~`, `*.swp`, `*.tmp`, and the folders `.git`, `target`, `node_modules` and `dist`. A skipped file is reported as a `warning` line. A file that remains and breaks a path rule of this page stops `pack` with the code of that rule. |
 | [PKG-145] | **Manifest serialisation.** `pack` parses the source manifest, removes any `files` key, builds the inventory, and writes the packed manifest as UTF-8 without a byte order mark, with 2-space indentation, `\n` line endings and one final `\n`. Top-level keys are written in the order of the table in [Manifest reference](/pages/reference-manifest/#top-level-keys), and `files` last. Keys of nested objects keep the order of their schema table; unknown nested maps (settings values, extension entries) sort by key in byte order. Arrays hold one item per line, except that an empty array prints `[]` and an empty object prints `{}` on the key line. Strings escape only `"`, `\` and U+0000 to U+001F; the control characters use `\uXXXX` with lowercase hexadecimal, except `\n`, `\t`, `\r`, `\b` and `\f`. Non-ASCII text is written as UTF-8. Numbers are integers in decimal without a sign `+` and without an exponent; a non-integer number is refused. |
 | [PKG-146] | **Archive order and fields.** Entries are written in the order of [PKG-122] with the header values of [PKG-100] to [PKG-108]. |
@@ -233,11 +234,11 @@ The install error catalogue in [Manifest schema](/pages/reference-manifest-schem
 
 ## Offline verification: `ilium plugin verify`
 
-`ilium plugin verify <file>` runs stages 1 to 8 on a package without installing it. It needs no network and changes no state. It prints JSONL lines.
+`ilium plugin verify <file>` runs stages 1 to 7 on a package without installing it. The `tier` it reports comes from a read-only look-up of the signing key in the trust store, not from stage 8. It needs no network and changes no state. It prints JSONL lines.
 
 | Id | Rule |
 |---|---|
-| [PKG-154] | `verify` prints one `progress` line per stage with `stage` (1 to 8) and `name`, then one `error` line per error, then one `result` line. |
+| [PKG-154] | `verify` prints one `progress` line per stage with `stage` (1 to 7) and `name`, then one `error` line per error, then one `result` line. |
 | [PKG-155] | The `result` line has `ok` (boolean), `id`, `version`, `sha256` (of the package file), `manifest_sha256`, `tier` (`T2`, `T3` or `untrusted`), `signer_key_id` (or null) and `publisher_id` (or null). |
 | [PKG-156] | The exit code is 0 when stages 1 to 7 pass, and 1 when any of them fails. For `verify`, a key that is not in the trust store prints `trust.key-unknown` as a `warning` line, reports `tier: untrusted` and keeps the exit code 0. A revoked key prints `trust.key-revoked` as an `error` line and exits 1. During `install`, `trust.key-unknown` without an answer to the trust prompt is an `error` line and exits 1 (PKG-230). |
 

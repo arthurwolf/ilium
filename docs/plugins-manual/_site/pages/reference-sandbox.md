@@ -62,17 +62,17 @@ Every row is a MUST. A helper that cannot be started with all of them is not sta
 |---|---|---|
 | [SEC-021] | The helper runs in new user, mount, PID, IPC, UTS and network namespaces. Inside the user namespace it has no capabilities outside it. | Hostile fixture reads `/proc/self/ns/*` and compares to the server's. All six differ. |
 | [SEC-022] | The network namespace has no interface except a downed loopback. | Fixture calls `socket`+`connect` to loopback and to a public address. Both fail. |
-| [SEC-023] | The mount namespace holds only: read-only `/usr`, `/bin`, `/lib`, `/lib64` and `/etc` (a minimal subset, no `/etc/passwd` home lists beyond uid maps); a fresh `/proc` for the PID namespace; a minimal `/dev` with `null`, `zero`, `urandom`, `full`; a tmpfs `/tmp` capped at 64 MiB; and the granted scopes, read-only for read grants. The `data` and `cache` mounts are `noexec,nosuid,nodev`. | Fixture lists `/`; only these paths exist. Executing a binary from `/data` fails with `EACCES`. |
+| [SEC-023] | The mount namespace holds only: read-only `/usr`, `/bin`, `/lib`, `/lib64` and `/etc` (a minimal subset, no `/etc/passwd` home lists beyond uid maps); a fresh `/proc` for the PID namespace; a minimal `/dev` with `null`, `zero`, `urandom`, `full`; a tmpfs `/tmp` capped at 64 MiB; and the granted scopes, read-only for read grants. Every writable mount (`data`, `cache`, `picked`, any writable scope, and the `/tmp` tmpfs) is `noexec,nosuid,nodev`. | Fixture lists `/`; only these paths exist. Executing a binary from `/data` fails with `EACCES`. |
 | [SEC-024] | The helper sets `no_new_privs`, installs a seccomp allowlist, and drops every capability before it reads the first plugin byte. | Fixture calls `prctl(PR_GET_NO_NEW_PRIVS)`. Result is 1. |
 | [SEC-025] | The sandbox is defence in depth. A bug in Wasmtime that gives native code execution in the helper MUST NOT give access to any asset in the [threat model](/pages/reference-threat-model/) without a second bug in the kernel. | Escape probe suite, see [Security testing](/pages/reference-security-testing/). |
 | [SEC-026] | The helper's `/proc` shows only its own PID namespace. It cannot read `/proc/<pid>/environ` of any process outside. `/sys` is not mounted. | Fixture reads `/proc/1/environ` (its own init) and the server's PID path. The second does not exist. |
 | [SEC-027] | The helper's environment is rebuilt from an allowlist: `HOME` set to the data mount, `TMPDIR=/tmp`, `LANG=C.UTF-8`, `PATH` set to the fixed value `/usr/bin:/bin`, `ILIUM_PLUGIN_ID`. Nothing else is inherited. In particular `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_RUNTIME_DIR`, proxy variables and any `*_TOKEN`, `*_KEY` or `*_SECRET` variable are absent. | Fixture prints `environ`. Only the allowlist appears. |
 | [SEC-028] | All file descriptors except the dispatcher channel and stdio on `/dev/null` are closed before the Wasmtime engine starts (close-range with no exceptions). The helper calls `setsid` and has no controlling terminal. Because the helper has no controlling terminal and cannot open the PTY master (it is not inherited), terminal injection through `TIOCSTI` and `TIOCLINUX` is impossible. The seccomp filter also denies those ioctl numbers. | Fixture enumerates `/proc/self/fd`; only fds 0 to 2 and the channel remain. `ioctl(0, TIOCSTI)` fails. |
-| [SEC-029] | A cgroup v2 leaf is created per helper with: `memory.max` = plugin `memory_mib` plus 32 MiB overhead; `pids.max` = 64 plus 8 per allowed child; `cpu.weight` = 10 (low priority); `cpu.max` = the manifest `cpu_ms_per_s` quota expressed as a period. A memory kill is reported as a trap `limit-exceeded(memory)` and counts as a failure. | Fixture allocates past the limit; helper is killed; the log has the code. |
+| [SEC-029] | A cgroup v2 leaf is created per helper with: `memory.max` = the sum of the hosted instances' `memory_mib` plus 32 MiB overhead; `pids.max` = 64 plus 8 per allowed child; `cpu.weight` = 10 (low priority); `cpu.max` = the manifest `cpu_ms_per_s` quota expressed as a period. A memory kill is reported as a `trap.memory` and counts as a failure. | Fixture allocates past the limit; helper is killed; the log has the code. |
 
 ### The seccomp allowlist
 
-**[SEC-067]** The filter is an allowlist of the system calls that Wasmtime, the allocator and the dispatcher channel need. Everything else returns `EPERM`, or kills the helper for the entries marked kill. The implementation MUST publish the list as a generated file with the release so tests can compare. These calls are always denied, and the fixture suite calls each of them:
+**[SEC-067]** The filter is an allowlist of the system calls that Wasmtime, the allocator and the dispatcher channel need. Everything else returns `EPERM`; no call kills the helper. The implementation MUST publish the list as a generated file with the release so tests can compare. These calls are always denied, and the fixture suite calls each of them:
 
 | Group | Calls |
 |---|---|
@@ -92,7 +92,7 @@ Every row is a MUST. A helper that cannot be started with all of them is not sta
 
 **[SEC-050]** The server MUST treat every message from a helper as hostile. The identity of the plugin comes from the channel the message arrived on, never from a field in the message. A message that names another plugin id is dropped and counts as a failure.
 
-**[SEC-051]** The server MUST enforce a maximum message size of 4 MiB (8 MiB for `terminal-view` frames) and a rate of 5,000 messages per second per helper. A larger or faster message ends the helper.
+**[SEC-051]** The server MUST enforce a maximum message size of 4 MiB (8 MiB for `terminal-view` frames) and a rate of 5,000 messages per second per helper. A larger or faster message ends the helper, and that ending counts as a failure toward the restart-and-disable rule, as in [SEC-052].
 
 **[SEC-052]** A malformed message (bad framing, bad UTF-8, a schema violation, an unknown message kind, an out-of-range resource handle) kills the helper and counts as a failure toward the restart-and-disable rule. The server never tries to repair the message.
 
@@ -103,7 +103,7 @@ Every row is a MUST. A helper that cannot be started with all of them is not sta
 | Linear-memory guard pages | On, 2 GiB guard region on 64-bit |
 | Spectre mitigations | On (bounds-check hardening for table and memory access) |
 | Epoch interruption | On, deadlines set per call; a missed deadline traps |
-| `wasi:sockets`, `wasi:http` imports | Refused at load. A component that imports them is not instantiated |
+| `wasi:sockets`, `wasi:http` imports | Refused at install, and checked again at load; a component that imports them is never instantiated |
 | `wasi:clocks`, `wasi:random` | Virtualised: clocks coarsened ([SEC-370]), random from the host CSPRNG |
 | Wasmtime version | Pinned exactly in the release, recorded in the build metadata, see [Trust and supply chain](/pages/reference-trust-and-supply-chain/) |
 | Memory and table maximums | From the manifest `limits`, clamped to the tier ceiling |
@@ -216,7 +216,7 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 ### Process execution rules
 
-**[SEC-031]** `process.run` and `process.spawn` need a grant for the exact program. A bare name such as `git` is resolved against a fixed system `PATH` that the server captured at start and filtered to system directories (`/usr/bin`, `/bin`, `/usr/local/bin`). It is never resolved against the plugin's own environment or against any writable scope.
+**[SEC-031]** `process.run` and `process.spawn` need a grant for the exact program. A bare name such as `git` is resolved against the fixed system `PATH` `/usr/bin:/bin` (directories `/usr/bin` and `/bin`). It is never resolved against the plugin's own environment or against any writable scope.
 
 **[SEC-032]** Children of T2 and T3 plugins run in the same confinement as the helper and have no network. A program that needs the network, such as `git fetch`, therefore fails by design. A plugin that needs a remote operation uses `http`.
 
@@ -244,7 +244,7 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 **[SEC-045]** `notify.desktop`: the host prefixes the title with the plugin display name and a colon. The plugin cannot supply the prefix.
 
-**[SEC-046]** Regular expressions supplied by plugins (output filters, settings `pattern`, schema `pattern`, `when` expressions) MUST be compiled with a linear-time engine that has Rust `regex` semantics: no backreferences and no lookaround. A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB. A pattern that fails any limit is refused with `invalid-argument` at registration (code `regex.too-large` or `regex.unsupported`). Matching against a 1 MiB input finishes in time proportional to the input.
+**[SEC-046]** Regular expressions supplied by plugins (output filters, settings `pattern`, schema `pattern`, `when` expressions) MUST be compiled with a linear-time engine that has Rust `regex` semantics: no backreferences and no lookaround. A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB. A pattern that fails any limit is refused with `invalid-argument` at registration. Matching against a 1 MiB input finishes in time proportional to the input.
 
 ## Edge cases
 

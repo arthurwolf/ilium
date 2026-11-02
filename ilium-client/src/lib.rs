@@ -56,6 +56,7 @@ mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
+pub mod chatroom_root;
 pub mod chatroom_ui;
 pub mod claude_model_statusline;
 pub mod compaction_app;
@@ -65,6 +66,7 @@ pub mod compaction_ui;
 pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
+mod connection_health;
 mod context_menu_layout;
 pub mod control;
 pub mod cost_app;
@@ -74,6 +76,8 @@ pub mod cost_overlay;
 pub mod cost_settings;
 pub mod cost_settings_ui;
 pub mod cost_tracker;
+pub mod custom_agent_editor;
+mod custom_agent_settings;
 pub mod debug_logging;
 pub mod document_preparation;
 mod editor_capture_budget;
@@ -148,6 +152,7 @@ pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
 pub mod render_cache;
 pub mod reset_planning;
+pub mod resource_queue;
 pub mod restructure;
 pub mod scheduled_input;
 pub mod screen_transfer;
@@ -156,6 +161,12 @@ pub mod search_workers;
 pub mod section_frame;
 mod semantic_animation;
 pub mod session_conversion;
+mod session_goal_claude;
+mod session_goal_codex;
+mod session_goal_custody;
+mod session_goal_display;
+mod session_goal_popover;
+mod session_goal_store;
 mod session_models;
 pub mod session_naming;
 pub mod session_stats;
@@ -211,7 +222,10 @@ pub mod theme;
 pub mod tick;
 pub mod title_inference;
 pub mod transcript_context;
+mod tree_activity_projection;
 pub mod tree_ordering;
+pub mod tree_toolbar_layout;
+mod tree_toolbar_settings;
 pub mod tree_transitions;
 pub mod tree_ui;
 pub mod trigger_execution_lease;
@@ -308,7 +322,7 @@ const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
-const MAX_PENDING_SERVER_EVENTS: usize = 256;
+pub(crate) const MAX_PENDING_SERVER_EVENTS: usize = 256;
 /// Byte ceiling for a same-pane raw-output run merged in one client turn.
 /// Event count alone is insufficient because a server frame can itself carry
 /// a large burst.
@@ -937,6 +951,8 @@ async fn run_inner(
         .configure_execution(statistics_client.clone());
     app.session_models
         .configure_execution(statistics_client.clone());
+    app.claude_goals
+        .configure_execution(statistics_client.clone());
     app.compaction_optimizer
         .configure_execution(statistics_client.clone());
     app.cost_tracker.configure_execution(statistics_client);
@@ -1075,6 +1091,7 @@ async fn run_inner(
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
 
+    app.custom_agents = config.custom_agents;
     app.apply_ui_settings(config.ui);
     app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
@@ -1164,6 +1181,10 @@ async fn run_inner(
             ),
         }
     };
+    // Wait registry revisions are scoped to this server transport incarnation.
+    app.resources.wait_revision=None;
+    app.resources.waits.clear();
+    app.connection_health = Some(std::sync::Arc::clone(&connection.health));
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
     // Tells the server this connection hosts the voice session, so
     // `ilium voice say` can offer typed sentences to it. One-shot CLI

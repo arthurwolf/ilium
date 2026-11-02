@@ -142,17 +142,20 @@ impl ScheduledInputDialogState {
         let _ = text_prompt::handle_key(&mut self.text, code);
     }
 
-    /// Paste uses the same per-character filters as typing, keeping numeric
-    /// fields strict while allowing arbitrary Unicode in the payload field.
+    /// Preserve numeric paste verbatim for validation. Dropping punctuation
+    /// would silently turn a rejected duration such as -1 or 1.5 into another value.
     pub fn paste(&mut self, pasted: &str) {
         for character in pasted.chars() {
             match self.focus {
                 ScheduledInputFocus::Hours
                 | ScheduledInputFocus::Minutes
                 | ScheduledInputFocus::Seconds => {
-                    if character.is_ascii_digit() {
-                        self.handle_numeric_key(KeyCode::Char(character));
-                    }
+                    let prompt = match self.focus {
+                        ScheduledInputFocus::Hours => &mut self.hours,
+                        ScheduledInputFocus::Minutes => &mut self.minutes,
+                        _ => &mut self.seconds,
+                    };
+                    let _ = text_prompt::handle_key(prompt, KeyCode::Char(character));
                 }
                 ScheduledInputFocus::Text => self.handle_text_key(KeyCode::Char(character)),
                 ScheduledInputFocus::SendEnter | ScheduledInputFocus::ScheduleButton => {}
@@ -247,6 +250,18 @@ mod tests {
     use ratatui::layout::Position;
 
     use super::*;
+
+    #[test]
+    fn universal_review_numeric_paste_preserves_invalid_draft_for_validation() {
+        for pasted in ["-1", "1.5", "1e2", "1s", "99999999999999999999999"] {
+            let mut state = ScheduledInputDialogState::new(NodeId(7));
+            state.focus = ScheduledInputFocus::Seconds;
+            state.seconds = TextPromptState::new("");
+            state.paste(pasted);
+            assert_eq!(state.seconds.buf, pasted);
+            assert!(state.validated_request().is_err(), "accepted {pasted}");
+        }
+    }
 
     #[test]
     fn validates_text_only_text_and_enter_and_enter_only() {

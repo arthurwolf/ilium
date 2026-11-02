@@ -400,7 +400,7 @@
 <li>A grant <code>messages.peer:&lt;plugin-id&gt;</code> for each other plugin that the sending side messages. Grants are per side, so the grant goes in <code>capabilities.server</code> or <code>capabilities.client</code>, whichever side sends.</li>
 <li>The id of the receiving plugin, exactly as its manifest <code>id</code> writes it.</li>
 <li>The Rust crate <code>ilium-plugin-sdk</code> or the npm package <code>@ilium/plugin-sdk</code>, both for <code>ilium:plugin@0.1.0</code>.</li>
-<li>Nothing extra on the receiver. A <code>message</code> event from another plugin needs no grant on the receiving side.</li>
+<li>On the receiver, no grant, but its manifest must list the sending plugin in <code>accepts_messages_from</code> ([PKG-579]). A message from an id not on that list, or to a plugin that declares none, is dropped and the sender gets <code>not-permitted</code>.</li>
 </ul>
 <p>The receiver must be installed and enabled. If it is installed but not active, the host activates it first and delivers the message after <code>activate</code> returns.</p>
 <h3 id="grant-syntax">Grant syntax</h3>
@@ -518,7 +518,7 @@
 </tr>
 </tbody>
 </table>
-<p>Message events are never dropped by the host.</p>
+<p>Message events that reach the receiver are never dropped by the host. A message from a sender not on the receiver's <code>accepts_messages_from</code> list is refused at send with <code>not-permitted</code> and is never queued.</p>
 <p><strong>Binding names:</strong></p>
 <table>
 <thead>
@@ -614,7 +614,7 @@
 
 <h3 id="review-and-risk">Review and risk</h3>
 <ul>
-<li>Section 3 of the API does not mark <code>messages.peer</code> as high risk. A plugin with this grant is installed with it checked by default in the review dialog.</li>
+<li>The <a href="/pages/reference-capabilities/">grant risk table</a> does not mark <code>messages.peer</code> as high risk. A plugin with this grant is installed with it checked by default in the review dialog.</li>
 <li>The grant names the receiver, so a sender cannot reach a plugin that was not granted. The review dialog shows each receiver id before the user allows it.</li>
 <li>A T2 or T3 package shows every receiver id in the review dialog. T1 bundled plugins take the grant from their manifest ceiling.</li>
 </ul>
@@ -763,7 +763,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 <tr>
 <td>Batch with more than 256 submissions</td>
-<td>the whole batch is refused as malformed</td>
+<td>the plugin traps and none of the batch is applied</td>
 </tr>
 <tr>
 <td>Same <code>dedup-key</code> within 10 minutes</td>
@@ -777,7 +777,7 @@ export const { lifecycle, handler } = definePlugin({
 </table>
 <p>A <code>message</code> is not a request. An <code>ok</code> outcome means the host queued the message, so the receiver's handler must decide what to do with it.</p>
 <h3 id="who-requests-it">Who requests it</h3>
-<p>No first-party plugin in <code>feature-mapping.md</code> lists <code>messages.peer</code> in its capability column. Feature 52 (<code>ilium voice say</code>) sends an intent <code>message</code> to the plugin's own client side, which needs no grant.</p>
+<p>No first-party plugin in <a href="/pages/reference-feature-traceability/">feature traceability</a> lists <code>messages.peer</code> in its capability column. Feature 52 (<code>ilium voice say</code>) sends an intent <code>message</code> to the plugin's own client side, which needs no grant.</p>
 <h3 id="see-also">See also</h3>
 <ul>
 <li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a> for one-to-many messages that do not name a receiver.</li>
@@ -786,7 +786,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/events-and-intents/">Events and intents</a> for how submissions and outcomes work.</li>
 </ul>
 <h3 id="security">Security</h3>
-<p>A receiver MAY restrict senders with <code>accepts_messages_from</code> ([SEC-050]). Cross-plugin data flows are discussed in <a href="/pages/reference-threat-model/">Threat model</a>.</p>
+<p>A receiver MUST declare <code>accepts_messages_from</code>, a list of plugin ids ([SEC-007], [SEC-050]); a peer message from an id not on the list, or to a plugin that declared none, is refused at send: the sender gets <code>refused(not-permitted)</code> and nothing is queued. Cross-plugin data flows are discussed in <a href="/pages/reference-threat-model/">Threat model</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-media-video/"><small>Previous</small>Capability: media.video</a><a class="next" href="/pages/capability-extensions-provide/"><small>Next</small>Capability: extensions.provide</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

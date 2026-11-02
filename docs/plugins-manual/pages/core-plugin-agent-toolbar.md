@@ -20,7 +20,7 @@ The frame around a pane and the terminal underneath it are kernel-native. The pl
 
 ### See it
 
-<figure><img src="/assets/demos/01-agent-activity.gif" alt="A pane frame shows the last prompt on top while the agent works and a toolbar on the right" loading="lazy"><figcaption>The banner shows the last prompt while the agent works. The same recording shows the activity icons from the Agent detection plugin.</figcaption></figure>
+<figure><img src="/assets/demos/01-agent-activity.gif" alt="Current Ilium displays local scripted agent activity and completion" loading="lazy"><figcaption>Current Ilium renders local scripted fixture panes, activity signals and unread completion. This capture does not show hosted agents or a last-prompt banner.</figcaption></figure>
 
 ### What the user sees
 

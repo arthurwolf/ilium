@@ -458,7 +458,7 @@
 <td>the same values as <code>process.run</code> (<code>manifest.grant-program</code>)</td>
 </tr>
 <tr>
-<td>Exact topic, prefix or all topics (H)</td>
+<td>Exact topic or prefix (normal); bare <code>*</code> for all topics (H)</td>
 <td><code>topics.subscribe:&lt;pattern&gt;</code></td>
 <td><code>topics.subscribe:ilium.progress/*</code></td>
 <td><code>*</code> in another position</td>
@@ -483,7 +483,7 @@
 </tr>
 </tbody>
 </table>
-<p>A wildcard in a position that the table does not allow is refused at install. A <code>*</code> never crosses a <code>/</code> in a command id, except the bare <code>*</code>, which means every command.</p>
+<p>A wildcard in a position that the table does not allow is refused at install with <code>manifest.grant-wildcard</code>. A <code>*</code> never crosses a <code>/</code> in a command id, except the bare <code>*</code>, which means every command.</p>
 <h3 id="file-scopes">File scopes</h3>
 <p>The <code>fs</code> grants take a scope argument. Each scope has a fixed preopen name in the plugin's file view and a root on disk.</p>
 <table>
@@ -541,8 +541,8 @@
 <tr>
 <td><code>agent-config:&lt;agent&gt;</code></td>
 <td><code>/agent-config/&lt;agent&gt;</code></td>
-<td>the agent's configuration folder, read only</td>
-<td>grant, H, read only</td>
+<td>the agent's configuration folder</td>
+<td>grant, H for read and H for write</td>
 </tr>
 <tr>
 <td><code>minecraft-saves</code></td>
@@ -796,8 +796,8 @@ Scope examples: `fs.read:project` reads the project folder. It is a normal-risk 
 <td><a href="/pages/primitives-editor/">primitives-editor</a></td>
 </tr>
 <tr>
-<td><code>editor.provide</code> (reserved, refused in 0.1.0)</td>
-<td>none</td>
+<td><code>editor.provide</code></td>
+<td>none (reserved, refused in 0.1.0)</td>
 <td>C</td>
 <td><strong>H</strong></td>
 <td><a href="/pages/capability-editor-provide/">page</a></td>
@@ -853,7 +853,7 @@ Scope examples: `fs.read:project` reads the project folder. It is a normal-risk 
 </tr>
 <tr>
 <td><code>fs.write:&lt;scope&gt;</code></td>
-<td>scope; <code>agent-sessions</code> and <code>agent-config</code> are refused with <code>manifest.grant-scope</code></td>
+<td>scope; <code>agent-sessions</code> is refused with <code>manifest.grant-scope</code>; <code>agent-config</code> needs an H grant</td>
 <td>S C A</td>
 <td>H outside data and cache</td>
 <td><a href="/pages/capability-fs-write/">page</a></td>
@@ -1150,7 +1150,7 @@ Scope examples: `fs.read:project` reads the project folder. It is a normal-risk 
 </tbody>
 </table>
 <h3 id="newer-grants">Newer grants</h3>
-<p>The grants below extend the base set. Ten of them are high risk and always need an explicit grant, even for a T1 bundled plugin: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code> and <code>settings.write-kernel:&lt;tab-id&gt;</code> (T1 only). The grant <code>gpu.kernels</code> is unstable and exists only in development builds. Both <code>extensions.*</code> grants take exactly one global point id and refuse wildcards (<code>manifest.grant-wildcard</code>). <code>extensions.contribute</code> is high risk only for a point that declares <code>risk: "high"</code>; the review dialog then shows a warning. Four argument forms are less common: <code>http:setting:&lt;key&gt;</code> (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), <code>fs.read:agent-sessions:gemini</code> with <code>fs.read:agent-config:gemini</code>, <code>fs.read:agent-config:antigravity</code>, and <code>settings.read-kernel:&lt;kernel-tab-id&gt;</code> (argument required, no wildcard).</p>
+<p>The grants below extend the base set. Eleven of them are high risk and always need an explicit grant, even for a T1 bundled plugin: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code> and <code>settings.write-kernel:&lt;tab-id&gt;</code> (T1 only) and <code>panes.create-command:&lt;program&gt;</code>. The grant <code>gpu.kernels</code> is unstable and exists only in development builds. Both <code>extensions.*</code> grants take exactly one global point id and refuse wildcards (<code>manifest.grant-wildcard</code>). <code>extensions.contribute</code> is high risk only for a point that declares <code>risk: "high"</code>; the review dialog then shows a warning. Four argument forms are less common: <code>http:setting:&lt;key&gt;</code> (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), <code>fs.read:agent-sessions:gemini</code> with <code>fs.read:agent-config:gemini</code>, <code>fs.read:agent-config:antigravity</code>, and <code>settings.read-kernel:&lt;kernel-tab-id&gt;</code> (argument required, no wildcard).</p>
 <table>
 <thead>
 <tr>
@@ -1532,7 +1532,7 @@ A misspelled host such as `http:api.example.co` is valid syntax. It installs, an
 
 <h2 id="animation-rights-mapping">Animation rights mapping</h2>
 <p>Old animation rights map to grants: <code>network.http</code> becomes <code>http:&lt;host&gt;</code>, and <code>audio.microphone</code> becomes <code>audio.capture</code>. The full list is in <a href="/pages/porting-iliumanim/">Porting from .iliumanim</a>.</p>
-<p>Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-005], [CAP-006], [CAP-007], [CAP-010], [CAP-011], [CAP-012], [CAP-013], [CAP-014], [CAP-015], [CAP-016], [CAP-017], [CAP-018], [CAP-019], [CAP-020], [CAP-021]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<p>Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-005], [CAP-006], [CAP-007], [CAP-010], [CAP-011], [CAP-012], [CAP-013], [CAP-014], [CAP-015], [CAP-016], [CAP-017], [CAP-018]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="/pages/settings-extension/">Plugin settings extension</a> for <code>settings.contribute:&lt;tab-id&gt;</code> and the built-in tab ids</li>

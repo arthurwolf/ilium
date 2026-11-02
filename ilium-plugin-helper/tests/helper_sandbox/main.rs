@@ -9,9 +9,15 @@
 #![cfg(target_os = "linux")]
 
 mod probe_child;
+#[cfg(unix)]
 mod reference_host_helper;
+#[cfg(unix)]
 mod reference_sandbox_confinement;
+#[cfg(unix)]
 mod reference_sandbox_files;
+#[cfg(unix)]
 mod reference_sandbox_hatches;
+#[cfg(unix)]
 mod reference_sandbox_trust;
+#[cfg(unix)]
 mod support;

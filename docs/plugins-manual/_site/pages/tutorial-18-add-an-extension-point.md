@@ -9,7 +9,7 @@ You start a fresh plugin. You need tutorials 1 to 9, and you should have read [S
 ### You will need
 
 - Rust: stable 1.90 or later with the `wasm32-wasip2` target, and the crates `ilium-plugin-sdk`, `serde_json` and `regex-lite`. TypeScript: Bun 1.2 or later and `@ilium/plugin-sdk`. `RegExp` is built in.
-- Grants for the owner: `extensions.provide:example.linkpreview/renderers`, `extensions.provide:example.linkpreview/before-preview`, `services.use:example.linkpreview-github/render` and `topics.subscribe:ilium.extensions/changed`. Nothing else.
+- Grants for the owner: `extensions.provide:example.linkpreview/renderers`, `extensions.provide:example.linkpreview/before-preview`, `services.use:example.linkpreview-github/render`, `topics.subscribe:ilium.extensions/changed` and `notify.toast`. Nothing else.
 - Grants for the contributor: `extensions.contribute:example.linkpreview/renderers` and `services.provide:example.linkpreview-github/render`.
 - Both manifests set `"unstable": ["plugin-services"]` (dev mode, T2 and T3), because the renderer is a plugin-defined service.
 
@@ -159,7 +159,7 @@ Points to notice:
 - The global ids are the plugin id, a slash and the point id: `example.linkpreview/renderers`. Each `extensions.provide` grant names one of them. A grant for a point that starts with another plugin's id is refused at install with `manifest.grant-missing-extension`, and a point without a grant fails the same way.
 - The owner does not list `hook-handler` in `exports`. It runs hooks and does not handle them.
 - `version` is the version of the point's schema. Bump the minor number when you add an optional field. Bump the major number when you remove a field or make a field required. Contributors can ask for a minimum, as step 3 shows.
-- `max_entries` caps the whole list at 32. A 33rd entry is refused with `cap-exceeded`. The default is 64 and the limit is 256.
+- `max_entries` caps the whole list at 32. A 33rd entry is refused with `extension.cap-exceeded`. The default is 64 and the limit is 256.
 - The owner grants itself `services.use` for exactly one renderer service. An entry that names another service is listed, but the call fails with `not-permitted`. Step 2 turns that into a plain preview.
 
 ### Step 2: the owner code
@@ -386,7 +386,7 @@ Points to notice:
 
 ### Step 3: the contributor package
 
-The second package knows GitHub. It fills the point from its manifest, so it needs no code to register. Its service answers the `render` calls. It can also ask for a minimum version of the point: `example.linkpreview/renderers@1.0.0` means the same major version and a minor version of 0 or more.
+The second package knows GitHub. It fills the point from its manifest, so it needs no code to register. Its service answers the `render` calls. It can also ask for a minimum version of the point: `example.linkpreview/renderers@1.0.0` is a caret range: it accepts `>=1.0.0 <2.0.0`.
 
 ```json
 {
@@ -569,7 +569,7 @@ export function addWiki(host: string): void {
 // Remove it later: unregister('example.linkpreview/renderers', 'wiki')
 ```
 
-Registering an id the plugin already used replaces that entry. A plugin can only remove entries it registered, and a call on a point that is not `dynamic` fails with `not-dynamic`. A registered entry does not survive a restart of the contributor, so register again in `activate`. A dynamic entry has the same cap, the same priority rules and the same toggles as a manifest entry.
+Registering an id the plugin already used replaces that entry. A plugin can only remove entries it registered, and a call on a point that is not `dynamic` fails with `extension.not-dynamic` (the WIT case `not-dynamic`). A registered entry does not survive a restart of the contributor, so register again in `activate`. A dynamic entry has the same cap, the same priority rules and the same toggles as a manifest entry.
 
 ### Step 6: change the schema without breaking contributors
 

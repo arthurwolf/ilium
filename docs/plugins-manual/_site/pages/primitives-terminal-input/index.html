@@ -463,7 +463,7 @@ record input-precondition { activity: option&lt;agent-activity&gt;, screen-revis
 <tr>
 <td><code>lock-user-input</code></td>
 <td><code>bool</code></td>
-<td>Hold the user's keys during the stages, at most 2 s.</td>
+<td>Hold the user's keys during the stages. The lock lasts as long as the stages, so a batch with <code>lock-user-input</code> whose total delay is over 2 s is refused with <code>invalid-argument</code>.</td>
 </tr>
 <tr>
 <td><code>journal</code></td>
@@ -476,9 +476,9 @@ record input-precondition { activity: option&lt;agent-activity&gt;, screen-revis
 <h3 id="stages-and-the-two-stage-submit">Stages and the two-stage submit</h3>
 <p>Some agent programs lose text that arrives in the same read as the submit key. A signature can declare a two-stage submit, and <code>stages</code> lets any plugin do the same by hand: first stage <code>typed</code> with the text, a delay of 80 ms, second stage with the submit key. Each stage has its own <code>delivery</code>: <code>typed</code>, <code>submitted</code> or <code>pasted</code>. The host sends stages from one queue per pane, so two intents to the same pane never interleave their stages.</p>
 <h3 id="preconditions">Preconditions</h3>
-<p><code>if-current</code> makes a write conditional. <code>activity</code> must equal the agent activity the host detects, <code>screen-revision</code> must equal the revision from <code>read-cells</code> or <code>read-screen</code>, and <code>foreground</code> must equal the name of the foreground process. The check order is the base checks (shape, grant, duplicate key, pane, rate, prompt epoch), then <code>if-current</code>, then the lock. The refusal is <code>refused(conflict)</code> and names the failed condition, and no key is reserved, so the plugin can retry after reading again.</p>
+<p><code>if-current</code> makes a write conditional. <code>activity</code> must equal the agent activity the host detects, <code>screen-revision</code> must equal the revision from <code>read-cells</code> or <code>read-screen</code>, and <code>foreground</code> must equal the name of the foreground process. The check order is the base checks (shape, grant, duplicate key, pane, pane restored, rate, prompt epoch), then <code>if-current</code>, then the lock. The refusal is <code>refused(conflict)</code> and names the failed condition, and no key is reserved, so the plugin can retry after reading again.</p>
 <h3 id="input-lock">Input lock</h3>
-<p><code>lock-input</code> holds the user's keys in a queue for up to 2,000 ms. The keys are not lost: they are delivered after <code>unlock-input</code> or when the time runs out, in order. Only one lock per pane exists; a second <code>lock-input</code> from another plugin returns <code>conflict</code>. The <code>lock-user-input</code> field of <code>send-input</code> takes the lock for exactly the duration of its stages.</p>
+<p><code>lock-input</code> holds the user's keys in a queue for up to 2,000 ms. The keys are not lost: they are delivered after <code>unlock-input</code> or when the time runs out, in order. Only one lock per pane exists; a second <code>lock-input</code> from another plugin returns <code>conflict</code>. The <code>lock-user-input</code> field of <code>send-input</code> takes the lock for exactly the duration of its stages, so a <code>send-input</code> with <code>lock-user-input</code> and a total stage delay over 2 s is refused with <code>invalid-argument</code>. If another plugin holds the lock when a batch with <code>lock-user-input</code> starts, the whole <code>send-input</code> is <code>refused(conflict)</code> and no stage is sent. When the pane closes or the plugin is disabled, the host drops the stages still queued for that pane, releases the lock the plugin holds and delivers the held user keys; no event is sent. <code>unlock-input</code> has no result and no failure: it does nothing when this plugin holds no lock on the pane or when the pane does not exist.</p>
 <h3 id="journaled-writes">Journaled writes</h3>
 <p>With <code>journal: true</code>, the host writes a journal entry (kind <code>input-sent</code>, with the dedup key) before the PTY write, and completes it with the delivery result. If the server stops between the write and the outcome, the restarted plugin receives <code>input-uncertain { pane, dedup-key }</code> instead of a silent loss, and decides whether to send again. Durable timers and the journal are described in <a href="/pages/lifecycle/">Lifecycle</a>.</p>
 <figure>
@@ -571,6 +571,10 @@ Submission::keyed(Intent::SendInput(spec), format!(&quot;compact-{pane}&quot;))
 <tr>
 <td><code>lock-input</code> over 2,000 ms</td>
 <td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>lock-input</code> on a missing pane</td>
+<td><code>not-found</code></td>
 </tr>
 <tr>
 <td>Lock held by another plugin</td>

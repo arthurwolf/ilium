@@ -9,7 +9,7 @@ Capture and loopback are high-risk (**H**) grants. Capture can record everything
 **You will need:**
 
 - One grant per direction, declared in the manifest under the side that uses it. Client plugins use `capabilities.client`, and animation scenes use `capabilities.scene`.
-- The client world (`ilium:client`) or the animation world (`ilium:anim`). Both accept the three grants (`C A` in section 3 of the API).
+- The client world (`ilium:client/base`) or the animation world (`ilium:anim/base`). Both accept the three grants (`C A` in section 3 of the API).
 - A manifest with `"api": "ilium:plugin@0.1.0"`.
 - The SDK import for the audio functions: `ilium_plugin_sdk::host::audio` in Rust, `@ilium/plugin-sdk/host/audio` in TypeScript. The [audio API page](/pages/api-audio/) lists the full import surface.
 
@@ -34,7 +34,7 @@ Every function below is in the client world. A grant listed in the second column
 | `audio::open_capture(device, sample_rate, channels)` | `audio.openCapture(...)` | `audio.capture` | `Result<u64, PluginError>` | Opens an input device and returns a capture id. `None` selects the default input. |
 | `audio::open_loopback(sample_rate, channels)` | `audio.openLoopback(...)` | `audio.loopback` | `Result<u64, PluginError>` | Opens a capture of the desktop output. |
 | `audio::close_capture(capture)` | `audio.closeCapture(id)` | the grant that opened it | nothing | Stops the stream and releases the device. |
-| `audio::play(samples, sample_rate, channels).await` | `await audio.play(...)` | `audio.playback` | `Result<(), PluginError>` | Plays samples. Completes when playback ends. |
+| `audio::play(samples, sample_rate, channels).await` | `await audio.play(...)` | `audio.playback` | `Result<(), PluginError>` | Plays samples. The WIT function returns `result<request-id, plugin-error>`: a request id at once, and the host delivers `request-completed` with that id when playback ends. The SDK `await` resolves at that completion with this result type. |
 | `Event::AudioFrames(AudioFramesEvent)` | `{ tag: 'audio-frames', val }` | audio capture stream open | event | One chunk of 20 ms of captured audio. |
 
 The records and the event as WIT declares them:
@@ -334,7 +334,7 @@ Illustrative, not generated. The log of a voice plugin that reopens its micropho
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md`:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - 50 Voice session: `audio.capture`.
 - 53 Voice onboarding demo: `audio.capture` and `audio.playback`.
@@ -345,8 +345,8 @@ First-party plugins from `feature-mapping.md`:
 
 - [audio](/pages/api-audio/) for the SDK import, the sample format and the level meter example.
 - [media.video](/pages/capability-media-video/) for the other media decoder.
-- [messages.peer](/pages/capability-messages-peer/) for the voice plugin's messages to its own client side.
+- [messages and topics](/pages/api-messages-and-topics/) for the voice plugin's messages to its own client side, which need no grant.
 - [capabilities](/pages/capabilities/) for the grant model, the H rule and the review dialog.
-- [errors and limits](/pages/errors-and-limits/) for the error codes that every import uses.
+- [errors and limits](/pages/reference-errors-and-limits/) for the error codes that every import uses.
 
 Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).

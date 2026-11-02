@@ -79,7 +79,7 @@ Select a contributor such as `com.example.tickets`. The tab lists, for each poin
 <pre class="term"><span class="t-hi">╭─ com.example.tickets &gt; Extensions ───────────╮</span>
 │ Smart Copy &gt; After copy                      │
 │   [x] strip_tokens                           │
-│   stopped after 3 timeouts          [Reset]  │
+│   stopped after 3 failures          [Reset]  │
 │                                              │
 │ Notes Plus &gt; Export hook                     │
 │   [x] stamp_header                           │
@@ -91,7 +91,7 @@ Select a contributor such as `com.example.tickets`. The tab lists, for each poin
 
 ### Change the order
 
-By default extensions run in the order of their priority, a number the contributor sets. Lower runs first. A tie goes in plugin id order. You can override this. Select a row in the owner view and press `Up` or `Down`. The order you set is saved by Ilium, not by the plugin, and it wins over the priority. A new contributor goes to the end of your order.
+By default extensions run in the order of their priority, a number the contributor sets. Lower runs first, but a contributor from a built-in (T1) plugin always runs before one from a T2 or T3 plugin, whatever the priorities. A tie goes in plugin id order. You can override this. Select a row in the owner view and press `Up` or `Down`. The order you set is saved by Ilium, not by the plugin, and it wins over the priority. A new contributor goes to the end of your order.
 
 - [USR-050] The Extensions tab MUST list contributors of each point in run order, MUST let the user move a contributor up or down, and the user's order MUST win over priority. Test: set priorities 10 and 20, move the second above the first, call the point, and assert the new order.
 - [USR-051] The host, not the plugin, MUST store the user's order and the toggles, and MUST keep them across restarts. Test: reorder, restart, list.
@@ -106,9 +106,9 @@ Turning an extension off does not change the contributor's permissions.
 
 **Waiting for <owner>.** The contributor adds to a point whose owner is not installed or is turned off. The extension does nothing and your switch keeps its setting. When the owner returns, the extension starts working again without any action from you. Installing a plugin never fails because its owner is missing.
 
-**Stopped after 3 timeouts.** An extension must answer quickly: each one gets between 5 ms and 50 ms, 20 ms by default, and a whole chain gets 100 ms. A slow or failing extension is skipped for that call, as if it had said "no change". A veto extension that is slow never blocks. If an extension is slow or fails three times in a row, Ilium stops it, shows a notice, and the row reads "stopped after 3 timeouts" with a **Reset** button. The stop is not saved on disk. It ends when the contributor restarts or when you press Reset.
+**Stopped after 3 failures.** An extension must answer quickly: each one gets between 5 ms and 50 ms, 20 ms by default, and a whole chain gets 100 ms. A slow or failing extension is skipped for that call, as if it had said "no change". A veto extension that is slow never blocks, except at a high-risk veto point whose owner declared `on_failure: "refuse"`: there a timed-out veto refuses a plugin-initiated action, and for an action you started you are asked whether to continue. If an extension is slow or fails three times in a row, Ilium stops it, shows a notice, and the row reads "stopped after 3 failures" with a **Reset** button. The stop is not saved on disk. It ends when the contributor restarts or when you press Reset.
 
-- [USR-052] A hook that times out, traps or errors MUST count as "no change", and a timeout MUST NOT block or veto. Test: let a veto handler sleep past its deadline and assert the action goes ahead.
+- [USR-052] A hook that times out, traps or errors MUST count as "no change", and a timeout MUST NOT block or veto, except at a high-risk veto point whose owner declared `on_failure: "refuse"` (SEC-287), where it refuses a plugin-initiated action. Test: let a veto handler sleep past its deadline and assert the action goes ahead. Then let a handler at a high veto point with `on_failure: "refuse"` sleep past its deadline and assert `extension.vetoed` with reason `guard-failed`.
 - [USR-053] Three breaches in a row MUST stop the extension, MUST show a notice and a Reset button, and the stop MUST NOT be written to disk. Test: cause three breaches, restart the contributor, and assert the extension is active again.
 - [USR-054] An extension whose owner is missing or off MUST show "waiting for <owner>" and MUST become active when the owner returns. Test: remove the owner, check the label, reinstall.
 
@@ -127,7 +127,7 @@ Instead of adding to a core plugin, a plugin may replace it. This is separate fr
 
 | Situation | What happens |
 |---|---|
-| Two contributors have the same priority | Plugin id order decides, until you set an order |
+| Two contributors have the same tier and the same priority | Plugin id order decides, until you set an order |
 | You turn off the owner | The extensions go dormant, "waiting for <owner>" |
 | You turn on a contributor you had switched off | The row stays as you set it, and you switch it on |
 | The contributor is stopped and you restart Ilium | The stop is gone. After three more breaches it stops again |

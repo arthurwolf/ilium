@@ -516,13 +516,13 @@
 <tr>
 <td>[PAN-030]</td>
 <td>create-pane with a cwd whose scope is not granted MUST be refused(not-permitted). With a cwd folder that does not exist it MUST be refused(not-found). With a program that cannot start it MUST complete failed(io).</td>
-<td><a href="/pages/capability-panes-create/#errors-and-edge-cases">errors and edge cases</a></td>
+<td><a href="/pages/capability-panes-create/#edge-cases-and-errors">errors and edge cases</a></td>
 <td>(completion) cwd project/missing -&gt; refused(not-found). command ["nope"] -&gt; failed(io).</td>
 </tr>
 <tr>
 <td>[PAN-031]</td>
 <td>create-pane with command none and content-kind ilium.terminal MUST run the login shell from SHELL, or /bin/sh when SHELL is unset.</td>
-<td><a href="/pages/capability-panes-create/#errors-and-edge-cases">errors and edge cases</a></td>
+<td><a href="/pages/capability-panes-create/#edge-cases-and-errors">errors and edge cases</a></td>
 <td>(screen-text) create with SHELL unset -&gt; /bin/sh prompt.</td>
 </tr>
 <tr>

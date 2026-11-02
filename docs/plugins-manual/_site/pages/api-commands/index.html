@@ -398,7 +398,7 @@
 <p><strong>You will need:</strong></p>
 <ul>
 <li>No grant to contribute a command, handle its <code>command-invoked</code> events, or change its state with <code>set-state</code>.</li>
-<li><code>commands.invoke:&lt;pattern&gt;</code> to invoke any command, including your own. The pattern is an exact global id such as <code>ilium.git/status</code>, a plugin prefix such as <code>ilium.git/*</code>, or a bare <code>*</code> for every command. The bare <code>*</code> is high risk: the review dialog leaves it unchecked by default. See <a href="/pages/capability-commands-invoke/">Capability: commands.invoke</a>.</li>
+<li><code>commands.invoke:&lt;pattern&gt;</code> to invoke a command of another plugin. Invoking your own command needs no grant. The pattern is an exact global id such as <code>ilium.git/status</code>, a plugin prefix such as <code>ilium.git/*</code>, or a bare <code>*</code> for every command. The bare <code>*</code> is high risk: the review dialog leaves it unchecked by default. See <a href="/pages/capability-commands-invoke/">Capability: commands.invoke</a>.</li>
 <li><code>ui.chrome</code> for the contributions that put a button, a row action, a status segment or a frame slot in the kernel's chrome (<code>tree_toolbar</code>, <code>row_actions</code>, <code>status_segments</code>, <code>pane_frame_slots</code>). Menus and toolbar buttons of the agent primitive need no grant.</li>
 <li>The client side for <code>set-state</code> and for handling events. A server instance can call <code>invoke</code> but not <code>set-state</code>.</li>
 <li>The command's provider installed and enabled. An invocation of a command that no installed plugin contributes fails with <code>not-found</code>.</li>
@@ -482,7 +482,7 @@ menu-items: func(context: menu-context) -&gt; list&lt;menu-entry&gt;;      // &l
 </tr>
 </tbody>
 </table>
-<p>The command palette is a kernel surface: it ranks, groups and draws the commands, and a plugin only supplies the entries. A plugin cannot open the palette, add a mode to it, or read what the user typed. <code>category</code> and <code>keywords</code> are the whole contract. A <code>category</code> or <code>keywords</code> value above its limit is refused at install.</p>
+<p>The command palette is a kernel surface: it ranks, groups and draws the commands, and a plugin only supplies the entries. A plugin cannot open the palette, add a mode to it, or read what the user typed. <code>category</code> and <code>keywords</code> are the whole contract. A <code>category</code> or <code>keywords</code> value above its limit is refused at install with <code>manifest.contribution-limit</code>.</p>
 <p>Keybindings name a command and a chord. The <code>mode</code> key is <code>global</code>, <code>prefix</code> (the chord is the key after the prefix) or <code>pane:&lt;kind&gt;</code> (active only in one pane kind). Chords use the grammar of <a href="/pages/api-keys/">keys</a>. When two plugins bind the same chord, the user's remap wins, then built-in bindings, then the earlier installed plugin (the rule of <a href="/pages/reference-manifest/">reference-manifest</a>). A plugin can read the user's current bindings with <a href="/pages/api-kernel-settings-and-keymap/">keymap.bindings</a>.</p>
 <h3 id="context-expressions">Context expressions</h3>
 <p>The <code>when</code> value is a context expression. It is a key compared with a string, combined with <code>&amp;&amp;</code>, <code>||</code>, <code>!</code> and parentheses:</p>
@@ -885,7 +885,7 @@ menu-items: func(context: menu-context) -&gt; list&lt;menu-entry&gt;;      // &l
 </tr>
 </tbody>
 </table>
-<p>The host calls <code>menu-items</code> with the deadline of 20 ms. On a timeout the menu opens with the static entries only, and the breach counts toward the plugin's deadline record. The export is activated by the trigger <code>menu:&lt;id&gt;</code>; until the instance answers, the host shows the static entries. A click arrives as <code>command-invoked</code> with <code>command</code> set to the menu's command and <code>arguments-json</code> <code>{"item": "&lt;id&gt;", ...context}</code>, and <code>context.menu-item</code> carries the entry id. At most 64 entries are shown; further ones are cut with a <code>… N more</code> row.</p>
+<p>The host calls <code>menu-items</code> with the deadline of 20 ms. On a timeout the menu opens with the static entries only, and the breach counts as a deadline breach in the plugin's health record (the breach count that can turn the plugin off, see <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a>). The export is activated by the trigger <code>menu:&lt;id&gt;</code>; until the instance answers, the host shows the static entries. A click arrives as <code>command-invoked</code> with <code>command</code> set to the menu's command and <code>arguments-json</code> <code>{"item": "&lt;id&gt;", ...context}</code>, and <code>context.menu-item</code> carries the entry id. At most 64 entries are shown; further ones are cut with a <code>… N more</code> row.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::exports::menu_provider::MenuContext;
@@ -976,7 +976,7 @@ export function menuItems(context: MenuContext): MenuEntry[] {
 </figure>
 
 <h3 id="palette-keywords-and-categories">Palette, keywords and categories</h3>
-<p>The palette lists a command under its <code>category</code> and finds it by title, id and <code>keywords</code>. The host does the matching, case-insensitively and ranked by prefix first, the same way as for catalogues. A command with <code>palette: false</code> is not listed, but it still runs from keybindings, menus and <code>invoke</code>.</p>
+<p>The palette lists a command under its <code>category</code> and finds it by title, id, <code>category</code> and <code>keywords</code>. The host does the matching, case-insensitively and ranked by prefix first, the same way as for catalogues. A command with <code>palette: false</code> is not listed, but it still runs from keybindings, menus and <code>invoke</code>.</p>
 <figure>
 <pre class="term">╭  ≡ ● · Commands───────────────────────────────────╮
 │ <span class="t-prompt">&gt;</span> note                                            │
@@ -1085,11 +1085,15 @@ export function menuItems(context: MenuContext): MenuEntry[] {
 </tr>
 <tr>
 <td><code>manifest.contribution-limit</code></td>
-<td>More <code>row_actions</code>, <code>tree_toolbar</code> entries and so on than the cap of 4</td>
+<td>More <code>row_actions</code>, <code>tree_toolbar</code> entries and so on than the cap of 4, or a <code>category</code> or <code>keywords</code> value above its limit</td>
 </tr>
 <tr>
 <td><code>manifest.contribution-target</code></td>
 <td><code>row_actions.applies_to</code> names an unknown target</td>
+</tr>
+<tr>
+<td><code>manifest.grant-wildcard</code></td>
+<td>A <code>commands.invoke</code> grant uses a wildcard where the pattern grammar does not allow one, such as <code>*/status</code> or <code>ilium.git/prefix*</code></td>
 </tr>
 </tbody>
 </table>
@@ -1157,7 +1161,7 @@ export function menuItems(context: MenuContext): MenuEntry[] {
 <li>Own commands need no grant, both for <code>set-state</code> and for <code>invoke</code>. A plugin can invoke its own command without holding any <code>commands.invoke</code> grant.</li>
 <li><code>when</code> is not checked by <code>invoke</code>. A plugin can run a command that is hidden from the palette.</li>
 <li>A command returns no data. The completion carries an outcome only. To send data back, use <a href="/pages/api-services/">services</a> or a <a href="/pages/api-messages-and-topics/">topic</a>.</li>
-<li>The <code>*</code> pattern never crosses a slash. <code>*/status</code> and <code>ilium.git/prefix*</code> are rejected at install.</li>
+<li>The <code>*</code> pattern never crosses a slash. <code>*/status</code> and <code>ilium.git/prefix*</code> are refused at install with <code>manifest.grant-wildcard</code>.</li>
 <li><code>set-state</code> changes the state until the next call or until the plugin restarts. A restart resets every command to its manifest state.</li>
 <li>A dynamic menu whose provider is slow shows the static entries for that opening only; the next opening asks again.</li>
 </ul>

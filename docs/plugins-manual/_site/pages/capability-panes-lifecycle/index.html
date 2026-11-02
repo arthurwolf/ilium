@@ -525,7 +525,7 @@ impl Handler for PaneControl {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != &quot;com.example.panecontrol/freeze&quot; { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             submissions.push(Submission::keyed(
                 Intent::FreezePane(FreezePaneSpec { pane }),
                 format!(&quot;freeze-{pane}&quot;),
@@ -544,8 +544,8 @@ export const { lifecycle, handler } = definePlugin({
     const submissions: Submission[] = [];
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.panecontrol/freeze' || event.val.pane === undefined) continue;
-      const pane = event.val.pane;
+      if (event.val.command !== 'com.example.panecontrol/freeze' || event.val.context.pane === undefined) continue;
+      const pane = event.val.context.pane;
       submissions.push({
         intent: { tag: 'freeze-pane', val: { pane } },
         correlation: 1n,
@@ -599,7 +599,7 @@ export const { lifecycle, handler } = definePlugin({
 </tr>
 </tbody>
 </table>
-<p>A process frozen when the plugin stops stays frozen: the pane keeps the frozen mark so the user can resume it. Plugins should unfreeze on deactivation.</p>
+<p>A process frozen when the plugin stops stays frozen: the pane keeps the frozen mark so the user can resume it. Plugins SHOULD unfreeze on deactivation. Observable criterion: a test that freezes a pane, then stops the plugin, asserts that the pane state is still <code>frozen</code> and shows the frozen mark; a plugin that unfroze in <code>deactivate</code> leaves the pane <code>running</code>.</p>
 <h3 id="what-the-user-sees">What the user sees</h3>
 <p>The review dialog lists the grant when a package is installed or first activated. The line is high risk and starts unchecked.</p>
 <figure>
@@ -640,7 +640,7 @@ panes.lifecycle                   high     <span class="t-warn">declined</span>
 <li><a href="/pages/api-intents/">Intents</a>.</li>
 </ul>
 <h3 id="security">Security</h3>
-<p><strong>[SEC-041]</strong> Closing, moving or signalling a pane that another plugin created needs the matching lifecycle grant; the refusal is <code>not-permitted</code>. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
+<p><strong>[SEC-041]</strong> A <code>panes.lifecycle</code> restart with a new command uses the same program grant and the same confirmation as starting that program (<a href="/pages/reference-sandbox/">Sandbox reference</a>). Separately, closing or moving a pane that another plugin created is a tree intent checked against <code>tree.write</code>, and signalling its process needs <code>panes.signal</code> (see <a href="/pages/capability-panes-signal/">panes.signal</a>); each refusal is <code>not-permitted</code>. See <a href="/pages/reference-sandbox/">Sandbox reference</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-terminal-raw-input/"><small>Previous</small>Capability: terminal.raw-input</a><a class="next" href="/pages/capability-tree-restructure/"><small>Next</small>Capability: tree.restructure</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

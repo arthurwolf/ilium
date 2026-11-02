@@ -71,7 +71,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       { "id": "show-plugins", "title": "Manage plugins", "category": "Help" }
     ],
     "keybindings": [
-      { "command": "ilium.core.keys-and-help/show-keys", "chord": "?", "mode": "prefix" }
+      { "command": "ilium.core.keys-and-help/show-keys", "chord": "F1", "mode": "prefix" }
     ],
     "panels": [
       { "id": "keys", "title": "Keys", "modal": false },
@@ -121,7 +121,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "command:keys-and-help.open",
+    "command:ilium.core.keys-and-help/show-keys",
+    "command:ilium.core.keys-and-help/show-plugins",
     "settings:keyboard"
   ],
   "contributes": {
@@ -144,7 +145,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "keybindings": [
       {
         "command": "ilium.core.keys-and-help/show-keys",
-        "chord": "?",
+        "chord": "F1",
         "mode": "prefix"
       }
     ],
@@ -530,6 +531,7 @@ fn toggle(plugin_id: &str, enabled: bool) -> Result<(), PluginError> {
 ```ts
 import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
 import { list, setEnabled } from '@ilium/plugin-sdk/host/plugins';
+import { read as readKernel } from '@ilium/plugin-sdk/host/kernel-settings';
 
 // Manifest: commands with "category": "Help", as in the manifest above.
 let rows: Array<{ id: string; name: string; enabled: boolean }> = [];
@@ -555,7 +557,7 @@ export function toggle(pluginId: string, enabled: boolean): void {
 
 #### 6. Reload hints after a kernel change
 
-The kernel settings tab for keys sends `kernel-settings-changed` with the keys that changed. The plugin reloads only the hint strings for those keys, not the whole reference.
+The Keyboard kernel settings tab (`keyboard`) sends `kernel-settings-changed` with the keys that changed. The plugin reloads only the hint strings for those keys, not the whole reference.
 
 **Rust**
 
@@ -566,9 +568,14 @@ impl Handler for HintCache {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         for event in batch {
             let Event::KernelSettingsChanged(change) = event else { continue };
-            if change.tab != "keys" { continue; }
+            if change.tab != "keyboard" { continue; }
+            // `read` takes the tab only and returns the whole tab as JSON.
+            let Ok(text) = kernel_settings::read("keyboard") else { continue };
+            let Ok(values) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
             for key in &change.keys {
-                self.hints.insert(key.clone(), kernel_settings::read("keys", key));
+                if let Some(value) = values.get(key) {
+                    self.hints.insert(key.clone(), value.to_string());
+                }
             }
         }
         Vec::new()
@@ -581,9 +588,11 @@ impl Handler for HintCache {
 ```ts
 export function onEvents(events: Event[]): Submission[] {
   for (const event of events) {
-    if (event.tag !== 'kernel-settings-changed' || event.val.tab !== 'keys') continue;
+    if (event.tag !== 'kernel-settings-changed' || event.val.tab !== 'keyboard') continue;
+    // `read` takes the tab only and returns the whole tab as JSON.
+    const values = JSON.parse(readKernel('keyboard')) as Record<string, unknown>;
     for (const key of event.val.keys) {
-      hints.set(key, settings.readKernel('keys', key));
+      if (key in values) hints.set(key, JSON.stringify(values[key]));
     }
   }
   return [];
@@ -609,7 +618,7 @@ Other plugins change what `ilium.core.keys-and-help` does through the points bel
 
 `contributes.help` topics and `contributes.keybindings` appear in the key reference.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.keys-and-help"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.keys-and-help"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Shows a hint while a board pane has focus
 

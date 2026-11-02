@@ -35,12 +35,12 @@ A grant is a name, optionally followed by a colon and an argument. The first col
 | Loopback host with a port, plain HTTP allowed (H) | `http:localhost:<port>`, `http:127.0.0.1:<port>` | `http:localhost:8080` | `http:localhost` without a port (`manifest.grant-argument`) |
 | Program name or absolute path | `process.run:<program>` | `process.run:git` | any wildcard, whitespace, an empty value, a relative path with `/`, or `..` (`manifest.grant-program`) |
 | Program name or absolute path, same validation as `process.run` (H) | `panes.create-command:<program>` | `panes.create-command:htop` | the same values as `process.run` (`manifest.grant-program`) |
-| Exact topic, prefix or all topics (H) | `topics.subscribe:<pattern>` | `topics.subscribe:ilium.progress/*` | `*` in another position |
+| Exact topic or prefix (normal); bare `*` for all topics (H) | `topics.subscribe:<pattern>` | `topics.subscribe:ilium.progress/*` | `*` in another position |
 | Exact peer plugin id | `messages.peer:<plugin-id>` | `messages.peer:com.example.logger` | any wildcard |
 | Service name without version | `services.use:<name>` | `services.use:com.example.git/status` | a version suffix |
 | Route path with `{name}` segments | `http-api.route:<path>` | `http-api.route:/notes/{id}` | `*` |
 
-A wildcard in a position that the table does not allow is refused at install. A `*` never crosses a `/` in a command id, except the bare `*`, which means every command.
+A wildcard in a position that the table does not allow is refused at install with `manifest.grant-wildcard`. A `*` never crosses a `/` in a command id, except the bare `*`, which means every command.
 
 ### File scopes
 
@@ -55,7 +55,7 @@ The `fs` grants take a scope argument. Each scope has a fixed preopen name in th
 | `worktrees` | `/worktrees` | the workspace worktree root | grant, H for write |
 | `picked` | `/picked/<n>` | each path the user chose in `fs.pick` | grant per pick |
 | `agent-sessions:<agent>` | `/agent-sessions/<agent>` | the agent's transcript folder, read only | grant, H, read and watch only |
-| `agent-config:<agent>` | `/agent-config/<agent>` | the agent's configuration folder, read only | grant, H, read only |
+| `agent-config:<agent>` | `/agent-config/<agent>` | the agent's configuration folder | grant, H for read and H for write |
 | `minecraft-saves` | `/minecraft-saves` | the Minecraft saves folder | grant |
 | `path:<template>` | `/paths/<n>` | a template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}` or `{worktrees}` | grant |
 
@@ -109,14 +109,14 @@ Every grant is listed once. Capabilities with several grants share one row.
 | `agent.transcript` | none | S C | **H** | [page](/pages/capability-agent-transcript/) | [primitives-agent](/pages/primitives-agent/) |
 | `editor.read` | none | C | normal | [page](/pages/capability-editor-read/) | [primitives-editor](/pages/primitives-editor/) |
 | `editor.edit` | none | C | normal | [page](/pages/capability-editor-edit/) | [primitives-editor](/pages/primitives-editor/) |
-| `editor.provide` (reserved, refused in 0.1.0) | none | C | **H** | [page](/pages/capability-editor-provide/) | [primitives-editor](/pages/primitives-editor/) |
+| `editor.provide` | none (reserved, refused in 0.1.0) | C | **H** | [page](/pages/capability-editor-provide/) | [primitives-editor](/pages/primitives-editor/) |
 | `ui.panels` | none | C | normal | [page](/pages/capability-ui-panels/) | [api-ui](/pages/api-ui/), [widgets-index](/pages/widgets-index/) |
 | `ui.chrome` | none | S C | normal | [page](/pages/capability-ui-chrome/) | [api-ui](/pages/api-ui/), [api-intents](/pages/api-intents/) |
 | `keys.intercept` | none | C | **H** | [page](/pages/capability-keys-intercept/) | [api-keys](/pages/api-keys/) |
 | `keymap.read` | none | C | normal | [page](/pages/capability-keymap-read/) | [api-keys](/pages/api-keys/) |
 | `commands.invoke:<pattern>` | pattern; exact id, plugin-id/*, bare * (high) | S C | H if * | [page](/pages/capability-commands-invoke/) | [api-commands](/pages/api-commands/) |
 | `fs.read:<scope>` | scope, including agent-sessions:gemini, agent-config:gemini, agent-config:antigravity | S C A | normal; H for agent-sessions and agent-config | [page](/pages/capability-fs-read/) | [api-fs](/pages/api-fs/) |
-| `fs.write:<scope>` | scope; `agent-sessions` and `agent-config` are refused with `manifest.grant-scope` | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
+| `fs.write:<scope>` | scope; `agent-sessions` is refused with `manifest.grant-scope`; `agent-config` needs an H grant | S C A | H outside data and cache | [page](/pages/capability-fs-write/) | [api-fs](/pages/api-fs/) |
 | `fs.watch:<scope>` | scope; `agent-config` is refused with `manifest.grant-scope` | S C | same as `fs.read:<scope>`; `package`, `data` and `cache` are always granted | [page](/pages/capability-fs-watch/) | [api-fs](/pages/api-fs/) |
 | `fs.pick` | none | C | normal | [page](/pages/capability-fs-pick/) | [api-fs](/pages/api-fs/) |
 | `jobs.run` | none | S C A | normal | [page](/pages/capability-jobs-run/) | [api-jobs](/pages/api-jobs/) |
@@ -156,7 +156,7 @@ Every grant is listed once. Capabilities with several grants share one row.
 
 ### Newer grants
 
-The grants below extend the base set. Ten of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api` and `settings.write-kernel:<tab-id>` (T1 only). The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are less common: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
+The grants below extend the base set. Eleven of them are high risk and always need an explicit grant, even for a T1 bundled plugin: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api` and `settings.write-kernel:<tab-id>` (T1 only) and `panes.create-command:<program>`. The grant `gpu.kernels` is unstable and exists only in development builds. Both `extensions.*` grants take exactly one global point id and refuse wildcards (`manifest.grant-wildcard`). `extensions.contribute` is high risk only for a point that declares `risk: "high"`; the review dialog then shows a warning. Four argument forms are less common: `http:setting:<key>` (the host comes from one of the plugin's own settings, and the user confirms a changed host before the first request), `fs.read:agent-sessions:gemini` with `fs.read:agent-config:gemini`, `fs.read:agent-config:antigravity`, and `settings.read-kernel:<kernel-tab-id>` (argument required, no wildcard).
 
 | Grant | Page |
 |---|---|
@@ -408,7 +408,7 @@ The figure shows how one import call is decided.
 
 Old animation rights map to grants: `network.http` becomes `http:<host>`, and `audio.microphone` becomes `audio.capture`. The full list is in [Porting from .iliumanim](/pages/porting-iliumanim/).
 
-Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-005], [CAP-006], [CAP-007], [CAP-010], [CAP-011], [CAP-012], [CAP-013], [CAP-014], [CAP-015], [CAP-016], [CAP-017], [CAP-018], [CAP-019], [CAP-020], [CAP-021]. See the [requirements index](/pages/reference-requirements/).
+Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-005], [CAP-006], [CAP-007], [CAP-010], [CAP-011], [CAP-012], [CAP-013], [CAP-014], [CAP-015], [CAP-016], [CAP-017], [CAP-018]. See the [requirements index](/pages/reference-requirements/).
 
 ## See also
 

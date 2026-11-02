@@ -47,6 +47,7 @@ The tabs appear in this order:
 | User Interface | Left panel sizing, tree order, identifiers, colour scheme, motion, density, toolbars, banners, progress footer, selection and tree behaviours | `[ui]`, `[theme]` |
 | Padding | Blank cells between the panel borders and the tree or pane content | `[padding]` |
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
+| Toolbar | Tree toolbar order, buttons and inactivity threshold | `[ui]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
 | Optimization | Scan Codex or Claude Code transcripts and apply the cheapest auto-compaction threshold | none (writes the agent's own config) |
@@ -66,6 +67,7 @@ The tabs appear in this order:
 | Titles | Title style and entry-naming instructions | `[inference]` |
 | Triggers | Which events run AI titling and tree organization | `[triggers]` |
 | Text Triggers | Regular-expression rules that send text to panes | `[text_triggers]` |
+| Custom Agents | Named Claude or Codex profiles, icons and environment variables | `[custom_agents]` |
 | Debug | File logging | `[debug]` |
 | API | Port of the local HTTP agent-creation API | `[api]` |
 | About | Version and project information | none |
@@ -109,6 +111,8 @@ General options:
 | Agent toolbar labels | On / Off | On |
 | Section frames | On / Off. Draws rounded rules joined to the pane border around the agent toolbar, last-prompt banner, progress footer and the left panel's toolbar; Off gives their rows back to the terminal | On |
 | Last prompt banner | On / Off. Shows the last exactly reconstructed prompt submitted to a detected agent | On |
+| Goal tab | On / Off. Adds the current goal to the last-prompt banner | On |
+| Goal toolbar icon | On / Off. Shows a flag for current goal details in the agent toolbar | On |
 | Last prompt banner lines | 1 to 20 | 4 |
 | Terminal text selection | On / Off. Left-drag selects locally instead of forwarding to the foreground app | On |
 | Lock-closed items | On / Off. Allows locking a project, group or folder row closed | On |
@@ -122,7 +126,7 @@ The progress-monitor options (Progress monitor, Progress footer lines, Progress 
 
 Pads the content of the left tree panel and the right panels (terminals and agents, editors, boards) inside their borders. Padding never touches borders, the agent toolbar, the last-prompt banner or the progress footer; it only moves the terminal, tree list, editor or board content inward.
 
-Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers.
+Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers. The threshold uses `- value + *`: the arrows step by one column and `*` opens exact keyboard entry. Confirm with `Enter`; `Esc` cancels without changing the saved mode or threshold. Invalid entries and failed saves retain the draft for correction or retry. A confirmed threshold selects **Size dependent**.
 
 Unless the mode is Disabled, a **Padding fine-tuning** button opens a near-fullscreen dialog. The left column holds the settings and the right column a live preview with a neutral dummy tree and dummy agent. Each panel (tree, right panels) has a **Link all sides** option and four side groups (Left, Right, Top, Bottom), each set to 0 to 3 cells with clickable buttons; linking hides the individual sides. **Share right panels** makes terminals, editors and boards use one setting; turn it off to pick a type and give it its own. The default is one cell on every side.
 
@@ -133,6 +137,12 @@ Press `L` in Icons to open **Tree layout**. Select Identity, Objective, Activity
 Layouts persist under `[ui.tree_row_layout]` with `order` and `hidden` lists containing `identity`, `objective`, `activity` and `title`. Duplicate/missing order entries are normalized; Title cannot be hidden. Direct moves, visibility and preset changes save immediately.
 
 Choose the glyph for each configurable role: group, top-level destination, project, vertical and horizontal split, folder, worktree branch, terminal, editor, board, each agent family, bookmark and locked-closed markers, tree toolbar buttons (Search, Restructure, Settings), hover-row controls (Rename, Move up, Move down, Close, Retitle), project restructure, Ask for update, screen-transfer arrows, Open in OS, and the agent toolbar actions (Compact, Clear, Configure, Stop, Copy screen, Smart Copy, Copy last message, Change effort, Change model, model choices, Exit, Fast mode, Text selection). Up and Down select a role, Left and Right cycle its glyph, and `Enter`, `Space` or `+` opens the icon picker. `R` toggles between the preview and the real rendering. Custom assignments are stored under `[ui.icons]`.
+
+### Toolbar
+
+The tree toolbar can be arranged in Settings → Toolbar. Select a button with Up/Down; use Shift+Up/Down or the arrow buttons to move it, Delete or × to remove it, and + to open the list of available buttons. The live preview follows the chosen order. Press `r` to restore the default arrangement. Changes are saved immediately.
+
+The eye button switches between the normal complete tree and an activity filter. The filter hides inactive terminals and agents, projects without an active terminal, and groups without an active descendant. Visible projects retain their auxiliary rows. The inactivity threshold defaults to 15 minutes and can be adjusted in this tab. The filter starts off each time Ilium opens.
 
 ### Agent Monitoring
 
@@ -310,6 +320,16 @@ The terminal checkpoint fires after every second submitted plain-shell command. 
 
 Rules pairing a regular expression with a literal message. When an enabled regex matches a completed output line, Ilium sends the message plus Enter to the selected target after the rule's **Delay** (whole seconds, default 60, `0` sends immediately). See [Automation](automation.md).
 
+### Custom Agents
+
+Create a named profile for Claude or Codex, choose its icon, and add environment rows. Select a profile to edit it, or select the add row to create one. Values are masked by default; the editor can reveal them. Select an environment row's remove control to delete it. Save validates the entire draft; duplicate names or keys, invalid keys, and reserved variables are rejected. Empty values and literal spaces, quotes, equals signs, newlines and Unicode are preserved when supported by the platform.
+
+Saved profiles appear as additional icons in the tree toolbar. Use the arrows on that row to reach profiles that do not fit; hover an icon to see its name and click it to launch. With the tree focused, `Alt+Left` and `Alt+Right` select a profile and `Alt+Enter` starts it. Right-click a profile icon to open the new-worktree dialog; selecting an existing worktree before launching opens the existing-worktree dialog. The tree context menu also lists each profile under its Claude or Codex new-agent submenu, with choices for launching here or in a new or existing worktree.
+
+The profile values override inherited environment variables. Ilium reserves `TERM`, `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME`, `ILIUM_SESSION_SOCKET`, `ILIUM_WORKTREE`, and `ILIUM_BRANCH`, plus the terminal-filtered `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `TMUX`, `ZELLIJ`, `NO_COLOR`, and variables beginning with `WEZTERM_`, `KITTY_`, `TMUX_` or `ZELLIJ_`. Reserved names are rejected instead of silently ignored.
+
+**Profile values are plaintext in Ilium's owner-only configuration file; they are not encrypted.** The launched agent and its descendants inherit them. Edits apply to future starts and restarts, while a running process keeps its existing environment. Deletion requires confirmation: a running process continues, but its pane cannot restart as that profile until the profile is restored. Session snapshots keep the profile identity and provider rather than the environment values. For a missing profile still referenced by a pane, Settings offers **Restore missing profile** with its original identity; re-enter its name, icon and environment values before saving.
+
 ### Debug
 
 **File logging** (default off). When on, instrumented actions, errors and complete text LLM exchanges are written to a timestamped session log; enabling applies at once to the client and the detached server. See [Inference and privacy](inference-and-privacy.md#logging).
@@ -461,3 +481,7 @@ Most Settings rows have a help affordance. Press `?` on a selected row (or click
 - **Experiments in a temporary configuration.** Run Ilium with `ILIUM_CONFIG_DIR` pointing at an empty directory to start from defaults without touching your real file.
 
 Related: [Getting started](getting-started.md), [Inference and privacy](inference-and-privacy.md), [Voice](voice.md), [Session recovery](session-recovery.md), [CLI reference](cli-reference.md).
+
+## Resource queue grouping
+
+**Group agents under resources** (`[ui].resource_queue_grouping`, default `true`) displays a local owner and waiting agents beneath the resource row, in authoritative queue order. Queue numbers remain global when agents belong to another linked project. Turning this off restores the ordinary pane placement while retaining waiting badges, resource rows, queue details and native wait progress. Grouping changes display only; it does not move real pane parents, alter splits or redirect input. See [Resource queues](resource-queues.md).

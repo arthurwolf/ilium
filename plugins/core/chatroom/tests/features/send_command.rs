@@ -162,11 +162,12 @@ fn output_b10_tail_skips_lines_that_are_not_records() {
 
 /// REQ: chatroom-B10, chatroom-B11
 #[test]
-fn output_b10_tail_without_a_room_prints_nothing_and_exits_0() {
+fn output_b10_tail_without_a_room_says_the_project_has_no_chatroom() {
     let mut host = server_host();
     let run = chat(&mut host, &["tail"]);
     assert_eq!(run.out, "");
-    assert_eq!(run.code, Some(0));
+    assert_eq!(run.code, Some(1));
+    assert_eq!(run.err, "ilium: this project does not have a chatroom\n");
 }
 
 /// REQ: chatroom-B11

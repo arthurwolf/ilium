@@ -79,27 +79,40 @@ This plugin sends the command `com.example.sessionbridge/ping` to every other li
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::Event;
 use ilium_plugin_sdk::types::intents::{Intent, Submission};
-use ilium_plugin_sdk::host::sessions::{self, CrossRequest};
+use ilium_plugin_sdk::host::sessions::{self, CrossRequest, RequestId};
 
 #[ilium_plugin(side = "server")]
 #[derive(Default)]
-struct SessionBridge;
+struct SessionBridge {
+    waiting: std::collections::HashMap<RequestId, String>,
+}
 
 impl Handler for SessionBridge {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         for event in batch {
-            let Event::CommandInvoked(invoked) = event else { continue };
-            if invoked.command != "com.example.sessionbridge/ping" { continue; }
-            for session in sessions::list_live().into_iter().filter(|s| !s.is_self) {
-                let request = CrossRequest {
-                    session: session.name.clone(),
-                    command: "com.example.sessionbridge/pong".into(),
-                    arguments_json: "{}".into(),
-                };
-                match sessions::send(request).block_on() {
-                    Ok(reply) => log::log(Level::Info, &format!("{}: {reply}", session.name)),
-                    Err(error) => log::log(Level::Warn, &format!("{}: {error:?}", session.name)),
+            match event {
+                Event::CommandInvoked(invoked) if invoked.command == "com.example.sessionbridge/ping" => {
+                    for session in sessions::list_live().into_iter().filter(|s| !s.is_self) {
+                        let request = CrossRequest {
+                            session: session.name.clone(),
+                            command: "com.example.sessionbridge/pong".into(),
+                            arguments_json: "{}".into(),
+                        };
+                        // `send` returns the request id, not the reply.
+                        match sessions::send(request) {
+                            Ok(id) => { self.waiting.insert(id, session.name); }
+                            Err(error) => log::log(Level::Warn, &format!("{}: {error:?}", session.name)),
+                        }
+                    }
                 }
+                Event::RequestCompleted(done) => {
+                    let Some(name) = self.waiting.remove(&done.request) else { continue };
+                    match sessions::take_reply(done.request).filter(|_| done.outcome.is_ok()) {
+                        Some(reply) => log::log(Level::Info, &format!("{name}: {reply}")),
+                        None => log::log(Level::Warn, &format!("{name}: no reply")),
+                    }
+                }
+                _ => {}
             }
         }
         Vec::new()
@@ -112,21 +125,30 @@ impl Handler for SessionBridge {
 ```ts
 import { definePlugin } from '@ilium/plugin-sdk';
 import type { Event, Submission } from '@ilium/plugin-sdk/types';
-import { listLive, send } from '@ilium/plugin-sdk/host/sessions';
+import { listLive, send, takeReply } from '@ilium/plugin-sdk/host/sessions';
 import { log } from '@ilium/plugin-sdk/host/log';
+
+const waiting = new Map<bigint, string>();
 
 export const { lifecycle, handler } = definePlugin({
   side: 'server',
-  async onEvents(batch: Event[]): Promise<Submission[]> {
+  onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
-      if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.sessionbridge/ping') continue;
-      for (const session of listLive().filter((s) => !s.isSelf)) {
-        try {
-          const reply = await send({ session: session.name, command: 'com.example.sessionbridge/pong', argumentsJson: '{}' });
-          log('info', `${session.name}: ${reply}`);
-        } catch (error) {
-          log('warn', `${session.name}: ${String(error)}`);
+      if (event.tag === 'command-invoked' && event.val.command === 'com.example.sessionbridge/ping') {
+        for (const session of listLive().filter((s) => !s.isSelf)) {
+          try {
+            // `send` returns the request id, not the reply.
+            waiting.set(send({ session: session.name, command: 'com.example.sessionbridge/pong', argumentsJson: '{}' }), session.name);
+          } catch (error) {
+            log('warn', `${session.name}: ${String(error)}`);
+          }
         }
+      } else if (event.tag === 'request-completed') {
+        const name = waiting.get(event.val.request);
+        if (name === undefined) continue;
+        waiting.delete(event.val.request);
+        const reply = event.val.outcome.tag === 'ok' ? takeReply(event.val.request) : undefined;
+        log(reply === undefined ? 'warn' : 'info', `${name}: ${reply ?? 'no reply'}`);
       }
     }
     return [];
@@ -144,7 +166,7 @@ A reply is a string chosen by the target command. Treat it as untrusted input: i
 | Target session lacks the plugin or the grant | `not-permitted` | Tell the user to enable it there. |
 | Command not declared by the plugin | `not-permitted` | Declare it in `contributes.commands`. |
 | Session closed meanwhile | `not-found` | Call `list-live` again. |
-| No reply within the deadline | `timed-out` | Retry once; do not loop. |
+| No reply within 30,000 ms ([reply deadlines](/pages/reference-errors-and-limits/#reply-deadlines)) | `timed-out` | Retry once; do not loop. |
 | Other user's socket | never listed | Nothing. |
 
 The target session sees the caller's plugin id and session name, so the command can refuse unknown callers.

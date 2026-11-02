@@ -16,7 +16,7 @@ The Smart Copy plugin (`ilium.core.smart-copy`, side both) owns selection and co
 
 ### See it
 
-<figure><img src="/assets/demos/04-smart-copy.gif" alt="A region of terminal output is selected and copied with Smart Copy" loading="lazy"><figcaption>Smart Copy in a terminal pane. The right-click menu offers the recognised regions.</figcaption></figure>
+<figure><img src="/assets/demos/04-smart-copy.gif" alt="Ilium Smart Copy selects a complete recalled lot code in a local fixture ledger" loading="lazy"><figcaption>Smart Copy highlights and copies a complete source lot code. The terminal and inference use disclosed local fixtures; the private clipboard is verified against the source bytes.</figcaption></figure>
 
 ### What the user sees
 

@@ -603,9 +603,9 @@
 </table>
 <h3 id="how-the-helper-runs">How the helper runs</h3>
 <ol>
-<li><strong>Grant check.</strong> A <code>run</code> call that names no program of the plugin's grants is refused at once with <code>invalid-argument</code>. A <code>cwd</code> outside a readable scope is <code>not-permitted</code>.</li>
+<li><strong>Grant check.</strong> A <code>run</code> call that names no program of the plugin's grants is refused at once with <code>not-permitted</code> (a missing grant is always <code>not-permitted</code>). A <code>cwd</code> outside a readable scope is <code>not-permitted</code>.</li>
 <li><strong>Program lookup.</strong> A bare name is resolved through <code>PATH</code>. An absolute path runs exactly that file.</li>
-<li><strong>Environment.</strong> The helper starts with only <code>PATH</code>, <code>HOME</code> and <code>LANG</code>. Each entry in <code>environment</code> replaces the value of the same name.</li>
+<li><strong>Environment.</strong> The helper starts with only <code>PATH</code>, <code>HOME</code> and <code>LANG</code>. Each entry in <code>environment</code> replaces the value of the same name, except that a key refused by [SEC-033] (<code>LD_*</code>, <code>DYLD_*</code>, <code>PATH</code>, <code>IFS</code>, <code>BASH_ENV</code> and the others listed there) makes the whole call fail with <code>invalid-argument</code> before the program starts.</li>
 <li><strong>Priority and quota.</strong> The helper runs at low priority, and its CPU time is charged to the plugin's quota.</li>
 <li><strong>Confinement.</strong> On T2 and T3 packages, the helper runs in a bubblewrap mount namespace. It sees only the plugin's granted scopes (read-only for read grants), plus read-only <code>/usr</code>, <code>/bin</code>, <code>/lib*</code> and <code>/etc</code>. It has no network and a seccomp filter. On T1 bundled plugins, the helper runs unconfined at low priority.</li>
 <li><strong>Timeout.</strong> The helper is killed when <code>timeout_millis</code> passes. The completion is <code>failed(timed-out)</code>.</li>
@@ -819,7 +819,7 @@ spawn: func(spec: spawn-spec) -&gt; result&lt;child, plugin-error&gt;;
 </tr>
 </tbody>
 </table>
-<p>With <code>line-mode: true</code>, each <code>child-output</code> is one whole line. <code>timeout-millis</code> of the <code>process-spec</code> is ignored for a spawned child. The child runs at low priority under the plugin's CPU quota, with the same environment rules as <code>run</code>. When the plugin drops the <code>child</code> handle or stops, the host sends SIGTERM and, after 2 seconds, SIGKILL.</p>
+<p>With <code>line-mode: true</code>, each <code>child-output</code> is one whole line. <code>timeout-millis</code> of the <code>process-spec</code> must still be 1 to 600,000 (else <code>invalid-argument</code>) but is ignored for a spawned child. The child runs at low priority under the plugin's CPU quota, with the same environment rules as <code>run</code>. When the plugin drops the <code>child</code> handle or stops, the host sends SIGTERM and, after 2 seconds, SIGKILL.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::host::process::{self, ProcessSpec, SpawnSpec, Child};
@@ -837,7 +837,7 @@ impl LogFollower {
                 cwd: None,
                 stdin: None,
                 environment: Vec::new(),
-                timeout_millis: 0, // ignored for spawned children
+                timeout_millis: 1, // must still be valid (1..600,000); ignored for spawned children
             },
             stdin_open: false,
             line_mode: true,
@@ -875,7 +875,7 @@ let child: Child | undefined;
 
 export function start(file: string): void {
   child = process.spawn({
-    process: { program: 'tail', arguments: ['-F', file], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 0 },
+    process: { program: 'tail', arguments: ['-F', file], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 1_000 },
     stdinOpen: false,
     lineMode: true,
   });
@@ -980,7 +980,7 @@ export function stop(): void {
 <span class="t-ok">exit</span> request 5, status 0, stdout 0 bytes
 <span class="t-ok">exit</span> request 6, status 0, stdout 12 bytes
 <span class="t-dim">       " M notes.md"</span>
-<span class="t-err">refused</span> process.run sh: invalid-argument, no grant
+<span class="t-err">refused</span> process.run sh: not-permitted, no grant
 </pre>
 
 <p>Illustrative, not generated. A plugin log for two git runs and one refused run. The refusal names <code>sh</code>, because no grant of this plugin names it.</p>
@@ -996,8 +996,13 @@ export function stop(): void {
 <tbody>
 <tr>
 <td>Sync, <code>run</code></td>
+<td><code>not-permitted</code></td>
+<td>Program matches no <code>process.run:&lt;program&gt;</code> grant.</td>
+</tr>
+<tr>
+<td>Sync, <code>run</code></td>
 <td><code>invalid-argument</code></td>
-<td>Program matches no grant, timeout is 0 or over 600,000 ms, stdin over 4 MiB, too many arguments or variables.</td>
+<td>Timeout is 0 or over 600,000 ms, stdin over 4 MiB, too many arguments or variables.</td>
 </tr>
 <tr>
 <td>Sync, <code>run</code></td>
@@ -1076,7 +1081,7 @@ export function stop(): void {
 <li><a href="/pages/capability-process-run/">Capability: process run</a> for grant rules, confinement and the review dialog.</li>
 <li><a href="/pages/capability-panes-signal/">Capability: signal panes</a> for the <code>panes.signal</code> grant.</li>
 <li><a href="/pages/api-workspace/">Workspace</a> for worktree custody records, which go with <code>git</code> work.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error table.</li>
 <li><a href="/pages/security/">Security</a> for the risk tiers behind high-risk grants.</li>
 </ul>
 <p>Targets <code>ilium:plugin@0.1.0</code>.</p>

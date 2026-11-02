@@ -156,6 +156,7 @@ fn native_waterlogged_source(name: &str) -> bool {
             | "minecraft:mossy_stone_brick_slab"
             | "minecraft:mossy_stone_brick_stairs"
             | "minecraft:pointed_dripstone"
+            | "minecraft:polished_deepslate_stairs"
             | "minecraft:spruce_slab"
             | "minecraft:stone_brick_slab"
             | "minecraft:stone_brick_stairs"

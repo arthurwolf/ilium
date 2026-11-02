@@ -206,8 +206,12 @@ The text lines are those of the client's choice dialog (`value_dialog.rs`). Swat
 | `query`, `query-async` | `not-found` | The catalogue does not exist. |
 | `query`, `query-async` | `invalid-argument` | `limit` is 0 or above 256. |
 | `query-async`, export | `timed-out` | The provider missed its 20 ms deadline. |
-| `query`, `query-async` | `not-permitted` | `ilium.models` without `inference`, or another plugin's catalogue without `services.use`. |
+| `query` | `not-permitted` | The catalogue belongs to a plugin. The synchronous `query` serves host catalogues only and has no deadline; use `query-async` for a plugin catalogue. |
+| `query`, `query-async` | `not-permitted` | `ilium.models` without `inference`. |
+| `query-async` | `not-permitted` | Another plugin's catalogue without `services.use`. |
 | any | `internal` | A host bug. |
+
+Failure path of `query-async`: the failure never comes back from `take-page`, which returns only a page or nothing. When the provider misses its deadline, the host completes the request with the outcome `failed(timed-out)` (see [requests and outcomes](/pages/requests-and-outcomes/)) and `take-page` for that request id returns `none` from then on. A plugin calls `take-page` only after it saw the completion, and treats `none` after a `failed` completion as the end of the request.
 
 Caps: 8 catalogues per plugin, 256 items per page, `description` 120 characters, `group` 32, `disabled-reason` 40, 8 keywords per item. Install errors: `manifest.catalog-unknown`, `manifest.contribution-limit`.
 

@@ -398,7 +398,7 @@
 <h3 id="you-will-need">You will need</h3>
 <ul>
 <li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code>, <code>serde_json</code> and <code>regex-lite</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>. <code>RegExp</code> is built in.</li>
-<li>Grants for the owner: <code>extensions.provide:example.linkpreview/renderers</code>, <code>extensions.provide:example.linkpreview/before-preview</code>, <code>services.use:example.linkpreview-github/render</code> and <code>topics.subscribe:ilium.extensions/changed</code>. Nothing else.</li>
+<li>Grants for the owner: <code>extensions.provide:example.linkpreview/renderers</code>, <code>extensions.provide:example.linkpreview/before-preview</code>, <code>services.use:example.linkpreview-github/render</code>, <code>topics.subscribe:ilium.extensions/changed</code> and <code>notify.toast</code>. Nothing else.</li>
 <li>Grants for the contributor: <code>extensions.contribute:example.linkpreview/renderers</code> and <code>services.provide:example.linkpreview-github/render</code>.</li>
 <li>Both manifests set <code>"unstable": ["plugin-services"]</code> (dev mode, T2 and T3), because the renderer is a plugin-defined service.</li>
 </ul>
@@ -582,7 +582,7 @@
 <li>The global ids are the plugin id, a slash and the point id: <code>example.linkpreview/renderers</code>. Each <code>extensions.provide</code> grant names one of them. A grant for a point that starts with another plugin's id is refused at install with <code>manifest.grant-missing-extension</code>, and a point without a grant fails the same way.</li>
 <li>The owner does not list <code>hook-handler</code> in <code>exports</code>. It runs hooks and does not handle them.</li>
 <li><code>version</code> is the version of the point's schema. Bump the minor number when you add an optional field. Bump the major number when you remove a field or make a field required. Contributors can ask for a minimum, as step 3 shows.</li>
-<li><code>max_entries</code> caps the whole list at 32. A 33rd entry is refused with <code>cap-exceeded</code>. The default is 64 and the limit is 256.</li>
+<li><code>max_entries</code> caps the whole list at 32. A 33rd entry is refused with <code>extension.cap-exceeded</code>. The default is 64 and the limit is 256.</li>
 <li>The owner grants itself <code>services.use</code> for exactly one renderer service. An entry that names another service is listed, but the call fails with <code>not-permitted</code>. Step 2 turns that into a plain preview.</li>
 </ul>
 <h3 id="step-2-the-owner-code">Step 2: the owner code</h3>
@@ -800,7 +800,7 @@ export const { lifecycle, handler } = definePlugin({
 <li>With no handler, <code>run_hook</code> returns nothing and the owner keeps its own preview. A full plugin returns an <code>Intent::Toast</code> from the next batch (<a href="/pages/tutorial-04-finished-notice/">tutorial 4</a>).</li>
 </ul>
 <h3 id="step-3-the-contributor-package">Step 3: the contributor package</h3>
-<p>The second package knows GitHub. It fills the point from its manifest, so it needs no code to register. Its service answers the <code>render</code> calls. It can also ask for a minimum version of the point: <code>example.linkpreview/renderers@1.0.0</code> means the same major version and a minor version of 0 or more.</p>
+<p>The second package knows GitHub. It fills the point from its manifest, so it needs no code to register. Its service answers the <code>render</code> calls. It can also ask for a minimum version of the point: <code>example.linkpreview/renderers@1.0.0</code> is a caret range: it accepts <code>&gt;=1.0.0 &lt;2.0.0</code>.</p>
 <pre><code class="language-json">{
   &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
   &quot;id&quot;: &quot;example.linkpreview-github&quot;,
@@ -959,7 +959,7 @@ export function addWiki(host: string): void {
 
 // Remove it later: unregister('example.linkpreview/renderers', 'wiki')
 </code></pre>
-<p>Registering an id the plugin already used replaces that entry. A plugin can only remove entries it registered, and a call on a point that is not <code>dynamic</code> fails with <code>not-dynamic</code>. A registered entry does not survive a restart of the contributor, so register again in <code>activate</code>. A dynamic entry has the same cap, the same priority rules and the same toggles as a manifest entry.</p>
+<p>Registering an id the plugin already used replaces that entry. A plugin can only remove entries it registered, and a call on a point that is not <code>dynamic</code> fails with <code>extension.not-dynamic</code> (the WIT case <code>not-dynamic</code>). A registered entry does not survive a restart of the contributor, so register again in <code>activate</code>. A dynamic entry has the same cap, the same priority rules and the same toggles as a manifest entry.</p>
 <h3 id="step-6-change-the-schema-without-breaking-contributors">Step 6: change the schema without breaking contributors</h3>
 <p>Point versions let you grow the schema. Suppose you want to add an optional <code>icon</code> field to renderer entries.</p>
 <ol>

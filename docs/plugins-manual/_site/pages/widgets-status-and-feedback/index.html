@@ -406,7 +406,7 @@
 <tr>
 <td><code>badge</code></td>
 <td>A dot, a label or a count</td>
-<td><code>activated</code> when focusable</td>
+<td><code>activated</code> when it has a <code>key</code> (a keyed badge is focusable)</td>
 </tr>
 <tr>
 <td><code>spinner</code></td>
@@ -447,7 +447,7 @@
 <td><code>info</code></td>
 <td><code>ℹ</code></td>
 <td><code>i</code></td>
-<td><code>accent</code></td>
+<td><code>info</code> (token of <code>theme-extras</code>)</td>
 </tr>
 <tr>
 <td><code>success</code></td>
@@ -539,7 +539,7 @@
 <tbody>
 <tr>
 <td>Enter</td>
-<td>Activates a focusable badge.</td>
+<td>Activates a badge that has a <code>key</code>.</td>
 </tr>
 <tr>
 <td>Left click</td>
@@ -628,7 +628,7 @@ let custom = tree.spinner().frames(SpinnerFrames::Custom(vec![&quot;-&quot;.into
 const custom = spinner({ frames: { tag: 'custom', val: ['-', '\\', '|', '/'] }, intervalMs: 120 });
 </code></pre>
 <h4 id="notice">notice</h4>
-<p><strong>Purpose.</strong> An inline banner inside a view. It has a tone, an optional title, rich text, up to three action buttons and an optional dismiss <code>✗</code>. The <code>notice</code> row of the Settings screen is the same widget. A dismissal is stored per <code>id</code> when the notice is a settings row.</p>
+<p><strong>Purpose.</strong> An inline banner inside a view. It has a tone, an optional title, rich text, up to three action buttons and an optional dismiss <code>✗</code>. The <code>notice</code> row of the Settings screen is a reduced form of this widget: it has only <code>id</code> (required), <code>text</code>, <code>tone</code> and <code>dismissible</code>, so it has no title, no actions and no <code>muted</code> tone. A dismissal is stored per <code>id</code> when the notice is a settings row.</p>
 <table>
 <thead>
 <tr>
@@ -860,11 +860,11 @@ const star = icon('★', { tone: 'warning' });
 </tr>
 <tr>
 <td>A notice with more than 3 actions</td>
-<td><code>invalid-argument</code> on render.</td>
+<td>The render traps the instance with <code>ui.invalid-tree</code> (render has no result; see <a href="/pages/ui-model/">UI model</a>).</td>
 </tr>
 <tr>
 <td>A spinner with fewer than 2 or more than 16 custom frames</td>
-<td><code>invalid-argument</code> on render.</td>
+<td>The render traps the instance with <code>ui.invalid-tree</code>.</td>
 </tr>
 <tr>
 <td>A spinner <code>interval-ms</code> outside 80 to 1,000</td>

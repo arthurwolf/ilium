@@ -545,7 +545,7 @@
 </tr>
 <tr>
 <td>[API-071]</td>
-<td>Rate rules MUST be enforced per plugin as listed: toast 3 per 10 s, geocode 1 per second, notify 6 per minute, play-sound 4 per second, topics.publish 100 per second, journal.log-event 20 per second, send-input 20 per second per pane. Each rate MUST be a sliding window; a refused operation MUST NOT enter the window; and the refusal MUST carry <code>retry-after-ms</code> until the oldest counted operation leaves the window.</td>
+<td>Rate rules MUST be enforced per plugin as listed: toast 3 per 10 s, geocode 1 per second, notify 6 per minute, open-external 10 per minute, play-sound 4 per second, topics.publish 100 per second, journal.log-event 20 per second, send-input 20 per second per pane. Each rate MUST be a sliding window; a refused operation MUST NOT enter the window; and the refusal MUST carry <code>retry-after-ms</code> until the oldest counted operation leaves the window.</td>
 <td><a href="/pages/reference-errors-and-limits/#requestable-limits">requestable limits</a></td>
 <td>(sync-return) call notify 7 times in one minute -&gt; the 7th returns rate-limited; call notify 6 times at second 55 and once at second 65 -&gt; the call at second 65 is refused.</td>
 </tr>
@@ -553,12 +553,12 @@
 <td>[API-072]</td>
 <td>The execution quota group MUST be a token bucket of 2,000 ms of CPU time refilling at 500 ms per second. The bucket is empty at a balance of 0 or less, and the balance MAY go negative. An empty bucket MUST make submissions and request-id calls return quota-exceeded with retry-after-ms = max(100, ceil_10(-balance_ms * 2)).</td>
 <td><a href="/pages/reference-errors-and-limits/#requestable-limits">requestable limits</a></td>
-<td>(sync-return) spend 2,500 ms CPU in jobs, then submit -&gt; quota-exceeded with retry-after-ms between 100 and 400; drive the balance to -100 ms, submit -&gt; retry-after-ms 200.</td>
+<td>(sync-return) spend 2,150 ms CPU in jobs from a full bucket (balance -150 ms), then submit -&gt; quota-exceeded with retry-after-ms 300; drive the balance to -100 ms, submit -&gt; retry-after-ms 200.</td>
 </tr>
 <tr>
 <td>[API-073]</td>
 <td>Pending requests MUST be limited to 64 per plugin by default. A request MUST count from the return of its id to the enqueue of its completion; refused submissions and synchronous calls MUST NOT count. A further call MUST return busy.</td>
-<td><a href="/pages/reference/#limits">Reference summary</a></td>
+<td><a href="/pages/reference/#quick-lookup">Reference summary</a></td>
 <td>(sync-return) start 65 slow calls -&gt; the 65th returns busy.</td>
 </tr>
 <tr>
@@ -570,12 +570,12 @@
 <tr>
 <td>[API-080]</td>
 <td>The install MUST stop at the first failing step and MUST report every failure found inside that step, in the documented order. The exit code MUST be 1 when any error line was printed.</td>
-<td><a href="/pages/reference-manifest/#install-checks-and-error-codes">install checks and error codes</a></td>
+<td><a href="/pages/reference-manifest/#validation-and-error-model">install checks and error codes</a></td>
 <td>(install-error) a package with a bad id and an unknown key -&gt; only the id code. A package with two unknown keys -&gt; both codes.</td>
 </tr>
 <tr>
 <td>[API-081]</td>
-<td>A trap MUST carry exactly one of the eight codes <code>trap.deadline</code>, <code>trap.memory</code>, <code>trap.table</code>, <code>trap.submission-batch</code>, <code>trap.invalid-ui-tree</code>, <code>trap.import-not-requested</code>, <code>trap.abi</code> and <code>trap.panic</code>, and the log line of the trap MUST name it.</td>
+<td>A trap MUST carry exactly one of the seven trap codes <code>trap.deadline</code>, <code>trap.memory</code>, <code>trap.table</code>, <code>trap.submission-batch</code>, <code>trap.invalid-ui-tree</code>, <code>trap.abi</code> and <code>trap.panic</code>, or with <code>host.capability-not-requested</code> for a call of a never-requested capability, and the log line of the trap MUST name it.</td>
 <td><a href="/pages/reference-errors-and-limits/#trap-codes">trap codes</a></td>
 <td>provoke each trap and read the code in <code>ilium plugin logs</code></td>
 </tr>

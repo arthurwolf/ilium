@@ -95,7 +95,7 @@ impl Handler for PaneControl {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.panecontrol/freeze" { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             submissions.push(Submission::keyed(
                 Intent::FreezePane(FreezePaneSpec { pane }),
                 format!("freeze-{pane}"),
@@ -117,8 +117,8 @@ export const { lifecycle, handler } = definePlugin({
     const submissions: Submission[] = [];
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.panecontrol/freeze' || event.val.pane === undefined) continue;
-      const pane = event.val.pane;
+      if (event.val.command !== 'com.example.panecontrol/freeze' || event.val.context.pane === undefined) continue;
+      const pane = event.val.context.pane;
       submissions.push({
         intent: { tag: 'freeze-pane', val: { pane } },
         correlation: 1n,
@@ -143,7 +143,7 @@ Pair every freeze with a visible way to unfreeze. A frozen pane shows the frozen
 | `grace-ms` above 10,000 | `refused(invalid-argument)` | Use a shorter grace period. |
 | Pane not found | `refused(not-found)` | Drop the pane id. |
 
-A process frozen when the plugin stops stays frozen: the pane keeps the frozen mark so the user can resume it. Plugins should unfreeze on deactivation.
+A process frozen when the plugin stops stays frozen: the pane keeps the frozen mark so the user can resume it. Plugins SHOULD unfreeze on deactivation. Observable criterion: a test that freezes a pane, then stops the plugin, asserts that the pane state is still `frozen` and shows the frozen mark; a plugin that unfroze in `deactivate` leaves the pane `running`.
 
 ### What the user sees
 
@@ -190,4 +190,4 @@ The user can change the grant at any time in Settings > Plugins > com.example.pa
 
 ### Security
 
-**[SEC-041]** Closing, moving or signalling a pane that another plugin created needs the matching lifecycle grant; the refusal is `not-permitted`. See [Sandbox reference](/pages/reference-sandbox/).
+**[SEC-041]** A `panes.lifecycle` restart with a new command uses the same program grant and the same confirmation as starting that program ([Sandbox reference](/pages/reference-sandbox/)). Separately, closing or moving a pane that another plugin created is a tree intent checked against `tree.write`, and signalling its process needs `panes.signal` (see [panes.signal](/pages/capability-panes-signal/)); each refusal is `not-permitted`. See [Sandbox reference](/pages/reference-sandbox/).

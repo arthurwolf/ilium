@@ -393,7 +393,7 @@
 <p class="crumbs"><b>Host API</b></p>
 <h1>fs: atomic write, revisions, tail, agent homes</h1>
 
-<p>The <code>fs</code> import also offers four things for plugins that share files with other programs: a read that returns a revision token, a write that succeeds only when the file is still at that revision, a cursor-based <code>tail</code> for growing files, and three more agent home scopes. They are specified in section 6.29. The base functions (<code>read</code>, <code>write</code>, <code>lock</code>, <code>watch</code> and the scopes) are on the <a href="/pages/api-fs/">fs</a> page; read that first.</p>
+<p>The <code>fs</code> import also offers four things for plugins that share files with other programs: a read that returns a revision token, a write that succeeds only when the file is still at that revision, a cursor-based <code>tail</code> for growing files, and three more agent home scopes. They are specified in the <code>fs</code> interface of the <a href="/pages/reference-wit/">WIT reference</a>. The base functions (<code>read</code>, <code>write</code>, <code>lock</code>, <code>watch</code> and the scopes) are on the <a href="/pages/api-fs/">fs</a> page; read that first.</p>
 <h3 id="what-you-need">What you need</h3>
 <table>
 <thead>
@@ -448,7 +448,7 @@
 <tr>
 <td><code>agent-config:antigravity</code></td>
 <td><code>/agent-config/antigravity</code></td>
-<td>the Antigravity configuration directory</td>
+<td>the Antigravity configuration directory, <code>~/.gemini/antigravity</code> (a directory root, not a single file)</td>
 <td>normal for read, high for write</td>
 </tr>
 </tbody>
@@ -822,7 +822,7 @@ await writeAtomic(settings, addHook(current.bytes), current.revision);
 <li><a href="/pages/capability-fs-read/">Capability: fs.read</a>, <a href="/pages/capability-fs-write/">fs.write</a> and <a href="/pages/capability-fs-watch/">fs.watch</a> for the grants.</li>
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for how the async calls complete.</li>
 <li><a href="/pages/api-events/">Events</a> for <code>fs-changed</code>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the shared codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the shared codes.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-sessions/"><small>Previous</small>sessions</a><a class="next" href="/pages/api-http-streams/"><small>Next</small>http streams</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

@@ -70,7 +70,7 @@ The `cli` key holds one object. This is the whole manifest for the smallest vers
     "server": ["cli.contribute"]
   },
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "hello",
       "summary": "Print a greeting as JSON lines",
       "arguments_schema": {
@@ -82,7 +82,7 @@ The `cli` key holds one object. This is the whole manifest for the smallest vers
       "output": "jsonl",
       "stdin": "none",
       "requires_server": false
-    }
+    }]
   }
 }
 ```

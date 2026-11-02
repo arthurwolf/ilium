@@ -20,8 +20,9 @@ fn read_candidate(path: &Path) -> Result<Option<TextTriggerSettings>, String> {
     if contents.len() as u64 > READ_LIMIT {
         return Err("durable Text Trigger configuration exceeds the 512 KiB read limit".to_owned());
     }
-    let document: toml::Value = toml::from_str(&contents)
-        .map_err(|error| format!("could not parse durable configuration: {error}"))?;
+    let document: toml::Value = toml::from_str(&contents).map_err(|_error| {
+        "could not parse durable configuration; values are omitted from this error".to_owned()
+    })?;
     let Some(value) = document.get("text_triggers") else {
         // An absent table is unspecified; only an explicit empty list clears.
         return Ok(None);

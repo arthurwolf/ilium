@@ -6,7 +6,7 @@ The TypeScript SDK, `@ilium/plugin-sdk`, gives a TypeScript plugin generated typ
 
 The host loads a plugin as a WebAssembly component. It calls the plugin's exports with batches of events and applies the submissions the plugin returns. The SDK maps both directions to ordinary functions, objects and promises.
 
-The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the Rust SDK reference page mirrors this one section by section; see [Rust SDK reference](/pages/rust-sdk/). The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and nineteen grants.
+The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the Rust SDK reference page mirrors this one section by section; see [Rust SDK reference](/pages/rust-sdk/). The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and 23 grants.
 
 ### You will need
 
@@ -50,7 +50,7 @@ ilium-plugin-sdk = { version = "0.1", features = ["testing"] }
 }
 ```
 
-The generated files are `manifest.json`, `Cargo.toml` and `src/lib.rs` for Rust, and `manifest.json`, `package.json` and `src/main.ts` for TypeScript. `ilium plugin new` does not run `bun install`; run it yourself. A folder that holds both `Cargo.toml` and `package.json` stops the build with `toolchain.language-ambiguous`.
+The generated files are `manifest.json`, `Cargo.toml` and `src/lib.rs` for Rust, and `manifest.json`, `package.json` and `src/<side>.ts` for TypeScript (`src/server.ts`, `src/client.ts` or `src/scene.ts`). `ilium plugin new` does not run `bun install`; run it yourself. A folder that holds both `Cargo.toml` and `package.json` stops the build with `toolchain.language-ambiguous`.
 
 ## How a plugin is built
 
@@ -584,7 +584,7 @@ The spinner steps its frames in the host (`⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ �
 // types::ui::{VideoSource, MediaFit}
 let clip = tree.video(VideoSource::Asset("loops/shore.webm".into()))
     .autoplay(true).looped(true).fit(MediaFit::Cover).key("clip");
-let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key("term"); // needs terminal.raw-input
+let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key("term"); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 ```
 
 **TypeScript**
@@ -593,7 +593,7 @@ let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(
 import { video, terminalView } from '@ilium/plugin-sdk/ui/build';
 
 const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, { key: 'clip', autoplay: true, loop: true, fit: 'cover' });
-const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.raw-input
+const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 ```
 
 ### Hover, pointer, drag feedback, popovers and theme tokens
@@ -745,11 +745,11 @@ let ids = vector::embed(&["notes on retries".to_string()], "search").await?;
 let child = process::spawn(SpawnSpec { process: spec, stdin_open: true, line_mode: true })?;
 child.write_stdin(b"ping\n")?;
 // durable timers and journal.
-timers::at("nightly", 86_400_000, true)?;
-journal::log_event("moved", &payload)?;
+timers::at(1_790_000_000_000, "nightly")?; // epoch in ms, then the timer name
+journal::log_event(None, "moved", &payload)?;
 // kernel settings and keymap (read-only).
-let value = kernel_settings::read("terminal.scrollback")?;
-let chord = keymap::bindings("palette.open")?;
+let value = kernel_settings::read("terminal")?; // the tab; JSON text
+let bindings = keymap::bindings();
 // client requests: ask the attached client to do something.
 let answer = client_requests::request("pick-file", &args).await?;
 // sessions (server): list and send to another session.
@@ -799,7 +799,7 @@ Terminal, agent, editor and basic primitives gain the following functions, each 
 | cli | additions listed on [cli](/pages/api-cli/) | same, camelCase | `cli` |
 | ui | `open_popup_with`, `theme_extras` | `openPopupWith`, `themeExtras` | `ui.chrome` for chrome surfaces |
 
-`gpu` is `@unstable`: import it only from a scene and expect it to change. Ten of the 23 grants are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api` and `settings.write-kernel:<tab-id>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
+`gpu` is `@unstable`: import it only from a scene and expect it to change. Eleven of the 23 grants are high risk and prompt the user with a separate consent line: `terminal.history`, `terminal.input-lock`, `terminal.raw-input`, `panes.lifecycle`, `tree.restructure`, `sessions.cross`, `process.long-lived`, `agent.transcript`, `settings.read-kernel:api`, `settings.write-kernel:<tab-id>` and `panes.create-command:<program>`. See [Capabilities](/pages/reference-capabilities/) and [Security](/pages/security/).
 
 ## Settings rows, meters and row state
 
@@ -902,7 +902,7 @@ use ilium_plugin_sdk::exports::HookHandler;
 
 // Owner: needs extensions.provide:com.example.notes/after-save
 let entries = extensions::list("com.example.notes/recognisers")?;
-let request = extensions::run_hook("com.example.notes/after-save", &payload_json).await;
+let outcome = extensions::run_hook("com.example.notes/after-save", &payload_json).await;
 // Outcome ok: take the reply. refused(extension.vetoed): do not perform the action.
 
 // Contributor: needs extensions.contribute:com.example.notes/after-save
@@ -1091,7 +1091,7 @@ The SDK does not build packages. The `ilium plugin` command does that, from the 
 
 ## SDK versioning policy
 
-The SDK version has its own number, separate from the contract `ilium:plugin@0.1.0`. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. `ilium plugin check` fails with `component.api-version-mismatch` when the component and the manifest name different contract versions. See [Versioning](/pages/versioning/).
+The SDK version has its own number, separate from the contract `ilium:plugin@0.1.0`. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. `ilium plugin check` fails with `manifest.api-version` when the component and the manifest name different contract versions. See [Versioning](/pages/versioning/).
 
 ## Edge cases
 

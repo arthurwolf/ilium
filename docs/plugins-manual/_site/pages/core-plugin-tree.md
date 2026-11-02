@@ -15,7 +15,7 @@ The Tree plugin (`ilium.core.tree`, side both) owns the project tree as the user
 
 ### See it
 
-<figure><img src="/assets/demos/02-pane-tree.gif" alt="The pane tree: groups open and close, a pane is dragged to a new group" loading="lazy"><figcaption>The pane tree in use. Entries move between groups while their processes keep running.</figcaption></figure>
+<figure><img src="/assets/demos/02-pane-tree.gif" alt="Ilium moves the Tests fixture pane into Exhibits above Build; terminal output comes from local fixture shells" loading="lazy"><figcaption>The real Ilium tree moves Tests into Exhibits and above Build while the same process keeps running. Terminal text is from local fixture shells, not agents.</figcaption></figure>
 
 ### What the user sees
 
@@ -270,7 +270,7 @@ A move keeps placement with `inside-last`. A rename carries `expected-revision` 
 ```rust
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::intents::{MoveNodeSpec, RenameNodeSpec};
-use ilium_plugin_sdk::types::tree::Placement;
+use ilium_plugin_sdk::types::tree::{Placement, TitleSource};
 
 fn move_and_rename(node: NodeId, target: NodeId, title: &str, revision: u64) -> Vec<Submission> {
     vec![
@@ -280,6 +280,7 @@ fn move_and_rename(node: NodeId, target: NodeId, title: &str, revision: u64) -> 
         Submission::new(Intent::RenameNode(RenameNodeSpec {
             node,
             title: title.into(),
+            source: TitleSource::Plugin,
             expected_revision: Some(revision),
         })),
     ]
@@ -526,7 +527,7 @@ Other plugins change what `ilium.core.tree` does through the points below. The p
 
 Decoration slots, row actions and display modes of every plugin are drawn by the tree.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.tree"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.tree"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Refuses to close the pane that runs the build, with the reason `Build still running`
 

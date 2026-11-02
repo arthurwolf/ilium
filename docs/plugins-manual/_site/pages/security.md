@@ -40,7 +40,7 @@ This page is the overview of the security rules and the entry point to the detai
 | Tier | What it is | Where it runs | Grants |
 |---|---|---|---|
 | T0 kernel | Native code built into Ilium | In the server or client process | Everything |
-| T1 bundled | First-party WebAssembly embedded in the release | In-process Wasmtime | The manifest ceiling, granted automatically. High-risk (H) grants are asked for once, at first activation |
+| T1 bundled | First-party WebAssembly embedded in the release | In-process Wasmtime | The manifest ceiling, granted automatically. High-risk (H) grants are asked for at first activation, and the question returns at each server start until the user has answered Not now three times ([SEC-111]) |
 | T2 signed | Packages signed by a publisher key the user trusts | Sandboxed plugin helper, mandatory | A review dialog. Grants are remembered |
 | T3 local and dev | Unsigned local packages | Sandboxed plugin helper, mandatory | The same review dialog, and a persistent `dev` badge |
 
@@ -196,11 +196,11 @@ Four argument forms deserve a note: `http:setting:<key>`, `settings.read-kernel:
 
 Grants without an argument, such as `tree.read` or `agent.read`, take none. The [Capability table](/pages/reference-capabilities/) lists every grant.
 
-Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the nine grants in the next section. Grants are recorded per plugin and per side in the grant store ([SEC-112]).
+Each grant has a risk mark. `always` grants are always on. `normal` grants are checked by default in the review dialog. High-risk (H) grants start unchecked, and the user checks each one. H grants include `panes.signal`, `terminal.write`, `agent.read-prompts`, `agent.control`, `process.run`, `panes.create-command`, `inference.provide`, `clipboard.read`, `location.observer`, file writes outside `data` and `cache`, file reads that reach a sensitive path ([SEC-061]), and the ten grants in the next section (nine in its table, plus `settings.write-kernel:<tab-id>`, which is T1 only and listed after it). Grants are recorded per plugin and per side in the grant store ([SEC-112]).
 
 ## More high-risk grants
 
-These nine grants are high risk. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.
+These ten grants are high risk: the nine in the table and `settings.write-kernel:<tab-id>`, described after it. They follow the same rule as every other H grant: a T1 bundled plugin still needs an explicit grant for each of them, and the dialog shows them in the warning style, never pre-checked.
 
 | Grant | Sides | What it allows | Why it is high risk | Extra rule |
 |---|---|---|---|---|
@@ -224,9 +224,9 @@ A grant is a standing permission. Four extended features also ask the user at th
 
 | Feature | Who is asked | When | If declined |
 |---|---|---|---|
-| `open-external` | The user | The first time a plugin opens each target origin (D25) | The intent completes as `refused(not-permitted)` |
-| `http:setting:<key>` | The user | When the setting holds a host the plugin has not used before (D23) | The request fails with `not-permitted`, and the host is not contacted |
-| `location.geocode` | The user | The first time a plugin geocodes. The host service is Photon, with Nominatim as fallback (D14) | Calls return `not-permitted` |
+| `open-external` | The user | The first time a plugin opens each target origin (SEC-043) | The intent completes as `refused(not-permitted)` |
+| `http:setting:<key>` | The user | When the setting holds a host the plugin has not used before (SEC-074) | The request fails with `not-permitted`, and the host is not contacted |
+| `location.geocode` | The user | The first time a plugin geocodes. The host service is Photon, with Nominatim as fallback (decision D14 in the [Design decisions](/pages/design-decisions/)) | Calls return `not-permitted` |
 | Bundled plugin with H grants | The user | Once, at the first activation of a T1 plugin | The plugin runs without them. The question comes back at the next server start, and after three answers of Not now it stops ([SEC-111]) |
 
 <figure>
@@ -366,8 +366,9 @@ Scopes are resolved by the kernel once per grant, to canonical directories. A pl
 | `project` | The session's project folder | Grant |
 | `picked` | Each path the user chose in `fs.pick` or a `path-field` | Grant per pick |
 | `worktrees` | The setting `workspace.worktree_root` | Grant. Write is H |
-| `agent-sessions:<agent>`, `agent-config:<agent>` | Agent transcript or configuration folder, read only. includes `gemini` and, for configuration, `antigravity` | Grant, H |
-| `path:<template>` | Template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}` | Grant. Literal absolute paths are H |
+| `agent-sessions:<agent>` | Agent transcript folder, read only. Includes `gemini` | Grant, H |
+| `agent-config:<agent>` | Agent configuration folder, read and write (`fs.read` H, `fs.write` H). Includes `gemini` and `antigravity` | Grant, H for read and H for write |
+| `path:<template>` | Template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}`, `{worktrees}` | Grant. Literal absolute paths are H |
 
 Each write is atomic. The kernel writes a temporary sibling file and renames it over the target, so a reader never sees a half-written file. With the `write-atomic` call, the write also carries an expected revision and fails with `conflict` when the file changed. Writes outside `data` and `cache` need an explicit user grant, even for T1 plugins.
 
@@ -413,7 +414,7 @@ The extended contract adds limits whose purpose is safety. They are fixed by the
 |---|---|---|
 | Input lock | 2 s per lock, one per pane | The lock ends. The user's keys were queued, not lost |
 | Toasts | 3 per 10 s per plugin, 3 pending | The oldest pending toast is replaced |
-| Status segments and frame slots | 10 updates per second per segment or slot | Updates are coalesced |
+| Status segments and frame slots | 10 updates per second per slot (a status segment id is a slot) | Updates are coalesced |
 | Geocoding | 1 request per second per plugin, 10 s timeout, 24 h cache | `rate-limited` with `retry-after-ms` |
 | Open HTTP streams | `http_streams` (default 4, T1 up to 16) and `session_http_streams` (64); see [Errors and limits](/pages/reference-errors-and-limits/#requestable-limits) | `quota-exceeded` |
 | Pending HTTP requests | `http_pending` (default 256, T1 up to 1,024) | `busy` with `retry-after-ms` |

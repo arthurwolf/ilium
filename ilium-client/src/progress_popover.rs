@@ -19,7 +19,14 @@ pub(crate) fn report_lines(progress: &PaneProgress) -> Vec<String> {
         ),
         format!("├─ job_id: {}", report.job_id),
         format!("├─ status: {status}"),
-        format!("├─ percent: {}", report.percent),
+        format!(
+            "├─ percent: {}",
+            if progress.has_measurable_progress() {
+                report.percent.to_string()
+            } else {
+                "unavailable".into()
+            }
+        ),
         format!("├─ message: {}", report.message),
         "├─ details:".into(),
     ];

@@ -454,7 +454,7 @@
 <tbody>
 <tr>
 <td>[PKG-260]</td>
-<td>A URL install downloads the file into the cache folder (<code>{cache}/plugins/downloads/</code>), then treats it as a local file. A URL with the scheme <code>http</code> is refused with <code>install.insecure-url</code>. The download follows at most 3 redirects, all to HTTPS.</td>
+<td>A URL install downloads the file into the cache folder (<code>&lt;cache dir&gt;/ilium/plugins/downloads/</code>), then treats it as a local file. A URL with the scheme <code>http</code> is refused with <code>install.insecure-url</code>. The download follows at most 3 redirects, all to HTTPS.</td>
 </tr>
 <tr>
 <td>[PKG-261]</td>
@@ -494,11 +494,11 @@
 </tr>
 <tr>
 <td>[PKG-267]</td>
-<td>The user trust store is <code>$XDG_STATE_HOME/ilium/trust.json</code> (Linux <code>~/.local/state/ilium/trust.json</code> when <code>XDG_STATE_HOME</code> is unset), mode 0600, written atomically. The variable <code>ILIUM_TRUST_STORE</code> replaces it and holds an absolute file path. The format is that of <a href="/pages/reference-signing-and-trust/#the-trust-store">Signing and trust</a>. Downloads in progress live in <code>&lt;cache&gt;/plugins/downloads/</code>. Cached registry metadata lives in <code>&lt;cache&gt;/plugins/registry/&lt;hash-of-url&gt;/</code>.</td>
+<td>The user trust store is <code>$XDG_STATE_HOME/ilium/trust.json</code> (Linux <code>~/.local/state/ilium/trust.json</code> when <code>XDG_STATE_HOME</code> is unset), mode 0600, written atomically. The variable <code>ILIUM_TRUST_STORE</code> replaces it and holds an absolute file path. The format is that of <a href="/pages/reference-signing-and-trust/#the-trust-store">Signing and trust</a>. Downloads in progress live in <code>&lt;cache dir&gt;/ilium/plugins/downloads/</code>. Cached registry metadata lives in <code>&lt;cache dir&gt;/ilium/plugins/registry/&lt;hash-of-url&gt;/</code>.</td>
 </tr>
 <tr>
 <td>[PKG-268]</td>
-<td>The compiled cache <code>&lt;cache&gt;/plugins/compile/</code> is derived data, keyed by the component SHA-256 and an engine id (the Wasmtime version and settings). The host MUST be able to delete it at any time and recompile.</td>
+<td>The compiled cache <code>&lt;cache dir&gt;/ilium/plugins/compile/</code> is derived data, keyed by the component SHA-256 and an engine id (the Wasmtime version and settings). The host MUST be able to delete it at any time and recompile.</td>
 </tr>
 <tr>
 <td>[PKG-269]</td>
@@ -548,7 +548,7 @@
 </tr>
 <tr>
 <td>[PKG-275]</td>
-<td><code>--dry-run</code> runs steps 1 to 4 without writing anything. It prints the plan and exits 0 if all stages pass.</td>
+<td><code>--dry-run</code> runs stages 1 to 10 of the <a href="/pages/reference-package-format/#the-validation-order">validation order</a> without writing anything; stage 11 (the review) is printed as records and never asked, as [PKG-427] says. It prints the plan and exits with the code the real install would give (0 if all stages pass).</td>
 </tr>
 </tbody>
 </table>
@@ -599,7 +599,7 @@
 </tr>
 <tr>
 <td>[PKG-282]</td>
-<td>A new high-risk grant, a new <code>replaces</code> entry or a new high-risk extension point contribution always needs confirmation. <code>--yes</code> does not confirm it. The flag <code>--grant &lt;side&gt;:&lt;grant&gt;</code> for that exact grant does.</td>
+<td>A new high-risk grant, a new <code>replaces</code> entry or a new high-risk extension point contribution always needs confirmation. <code>--yes</code> does not confirm it. The flag <code>--grant &lt;grant&gt;</code> for that exact grant does.</td>
 </tr>
 <tr>
 <td>[PKG-283]</td>
@@ -822,7 +822,7 @@
 </tr>
 </tbody>
 </table>
-<p>Each step prints one JSONL line with <code>type</code> <code>progress</code>, <code>step</code> (<code>acquire</code>, <code>fetch</code>, <code>validate</code>, <code>review</code>, <code>stage</code>, <code>commit</code>, <code>notify</code>) and <code>status</code>. The final line has <code>type</code> <code>result</code> with <code>id</code>, <code>version</code>, <code>tier</code>, <code>action</code> (<code>installed</code>, <code>updated</code>, <code>downgraded</code>, <code>rolled-back</code>, <code>uninstalled</code>) and <code>active_from</code> (<code>now</code> or <code>restart</code>). Exit codes are in <a href="/pages/reference-plugin-cli/#exit-codes">Plugin command line</a> and <a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a>.</p>
+<p>Each step prints one JSONL line with <code>type</code> <code>progress</code>, <code>step</code> (the number of the step, from 1), <code>of</code> (the number of steps) and <code>message</code> (the step name, one of <code>acquire</code>, <code>fetch</code>, <code>validate</code>, <code>review</code>, <code>stage</code>, <code>commit</code>, <code>notify</code>). The final line has <code>type</code> <code>result</code> with <code>id</code>, <code>version</code>, <code>tier</code>, <code>action</code> (<code>installed</code>, <code>updated</code>, <code>downgraded</code>, <code>rolled-back</code>, <code>uninstalled</code>) and <code>active_from</code> (<code>now</code> or <code>restart</code>). Exit codes are in <a href="/pages/reference-plugin-cli/#exit-codes">Plugin command line</a> and <a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a>.</p>
 <h2 id="worked-example-a-crash-during-an-update">Worked example: a crash during an update</h2>
 <p>The user updates <code>example.notes</code> from 1.2.0 to 1.3.0 and the machine loses power at step 5, while the new folder is being written.</p>
 <ol>

@@ -6,7 +6,7 @@ Status widgets tell the user that something is happening, that something changed
 
 | Widget | Shows | Event |
 |---|---|---|
-| `badge` | A dot, a label or a count | `activated` when focusable |
+| `badge` | A dot, a label or a count | `activated` when it has a `key` (a keyed badge is focusable) |
 | `spinner` | A moving frame set with an optional label | none |
 | `notice` | An inline banner with a tone, text and actions | `activated`, `closed` |
 | `icon` | One glyph from a slot or a literal | none |
@@ -23,7 +23,7 @@ A tone is one of `info`, `success`, `warning`, `danger` or `muted`. It sets the 
 
 | Tone | Notice icon | Stable glyph | Theme role |
 |---|---|---|---|
-| `info` | `ℹ` | `i` | `accent` |
+| `info` | `ℹ` | `i` | `info` (token of `theme-extras`) |
 | `success` | `✓` | `+` | `success` |
 | `warning` | `!` | `!` | `warning` |
 | `danger` | `✗` | `x` | `danger` |
@@ -46,7 +46,7 @@ A tone is one of `info`, `success`, `warning`, `danger` or `muted`. It sets the 
 
 | Input | Behaviour |
 |---|---|
-| Enter | Activates a focusable badge. |
+| Enter | Activates a badge that has a `key`. |
 | Left click | Focuses and activates. |
 
 Theme roles: the `tone` role.
@@ -123,7 +123,7 @@ const custom = spinner({ frames: { tag: 'custom', val: ['-', '\\', '|', '/'] }, 
 
 #### notice
 
-**Purpose.** An inline banner inside a view. It has a tone, an optional title, rich text, up to three action buttons and an optional dismiss `✗`. The `notice` row of the Settings screen is the same widget. A dismissal is stored per `id` when the notice is a settings row.
+**Purpose.** An inline banner inside a view. It has a tone, an optional title, rich text, up to three action buttons and an optional dismiss `✗`. The `notice` row of the Settings screen is a reduced form of this widget: it has only `id` (required), `text`, `tone` and `dismissible`, so it has no title, no actions and no `muted` tone. A dismissal is stored per `id` when the notice is a settings row.
 
 | Prop | Type | Default | Meaning |
 |---|---|---|---|
@@ -282,8 +282,8 @@ render() {
 | Case | Result |
 |---|---|
 | A badge label longer than 12 cells | Truncated with `…`. |
-| A notice with more than 3 actions | `invalid-argument` on render. |
-| A spinner with fewer than 2 or more than 16 custom frames | `invalid-argument` on render. |
+| A notice with more than 3 actions | The render traps the instance with `ui.invalid-tree` (render has no result; see [UI model](/pages/ui-model/)). |
+| A spinner with fewer than 2 or more than 16 custom frames | The render traps the instance with `ui.invalid-tree`. |
 | A spinner `interval-ms` outside 80 to 1,000 | Clamped. |
 | Reduced motion | A spinner shows `⠿`. A tone keeps its colour. |
 | An icon slot that does not exist | The slot name is drawn as text. |

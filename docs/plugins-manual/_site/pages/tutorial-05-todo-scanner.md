@@ -65,7 +65,7 @@ The step adds three parts: a pure search in the core crate, a server workflow th
 
 | Call or event | Side | Kind | Meaning |
 |---|---|---|---|
-| `fs::scan(&path, glob, max_entries)` | server | async, `request-id` | Lists files that match a glob such as `**/*.rs`. `max_entries` is at most 65,536 (L3). |
+| `fs::scan(&path, glob, max_entries)` | server | async, `request-id` | Lists files that match a glob such as `**/*.rs`. `max_entries` is at most 65,536 (see [Fixed caps](/pages/reference-errors-and-limits/#requestable-limits)). |
 | `fs::take_entries(request)` | server | sync, `Option` | The matched paths and entries, once. |
 | `fs::read(&path, offset, max_bytes)` | server, job | sync, `Result` | Reads up to 1 MiB. A job uses the plugin's own grants (U29). |
 | `jobs::start(kind, input)` | server | async, `request-id` | Starts a declared job kind with bytes as input. |
@@ -84,7 +84,7 @@ Widget defaults come from the SDK builder (W1). A list sends `activated` with th
 
 ### Manifest
 
-This step adds the entries below to the step 4 manifest. Keep every other entry from step 4. `exports` lists `job-runner`, so the host creates a job instance from the server component. The job's `deadline_ms` and `memory_mib` are requested limits. A value above the tier ceiling is clamped and logged, never refused. For a T1 plugin the ceilings are 60,000 ms of CPU and 512 MiB (L2).
+This step adds the entries below to the step 4 manifest. Keep every other entry from step 4. `exports` lists `job-runner`, so the host creates a job instance from the server component. The job's `deadline_ms` (a limit on CPU time, not wall time) and `memory_mib` are requested limits. A value above the tier ceiling is clamped and logged, never refused. For a T1 plugin the ceilings are 60,000 ms of CPU and 512 MiB (L2).
 
 ```json
 {
@@ -295,8 +295,8 @@ Event::JobProgress(progress) => scan::on_job_progress(progress.request_id, progr
 Points to notice:
 
 - A failed scan takes the same branch as a successful one. `take_entries` returns `None`, and the log says `scan finished without a result`.
-- A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it (N16).
-- A job failure never counts toward the plugin's restart rule (A22).
+- A second scan replaces the first id in its slot, so the first completion is ignored. The host holds that result for 30 seconds and then drops it.
+- A job failure never counts toward the plugin's restart rule.
 
 ### Client: the results panel
 
@@ -407,7 +407,7 @@ Points to notice:
 
 ### The same workflow in TypeScript
 
-The TypeScript server uses the same commands, topics and manifest. `start` resolves with the job output and gives no job id (N5), so the scan sets a `scanning` flag and forwards each `job-progress` event while it is set. Errors are thrown as `PluginError`, and a `u64` such as the read offset is a `bigint` (S5).
+The TypeScript server uses the same commands, topics and manifest. `start` resolves with the job output and gives no job id, so the scan sets a `scanning` flag and forwards each `job-progress` event while it is set. Errors are thrown as `PluginError`, and a `u64` such as the read offset is a `bigint` (S5).
 
 **TypeScript**
 
@@ -440,7 +440,6 @@ import { isCancelled, reportProgress, start } from '@ilium/plugin-sdk/host/jobs'
 import { log } from '@ilium/plugin-sdk/host/log';
 import { publish } from '@ilium/plugin-sdk/host/topics';
 import type { Event, Submission } from '@ilium/plugin-sdk/types';
-import { lifecycle as baseLifecycle } from './lifecycle'; // the lifecycle of step 8
 import { findTodos, type TodoHit } from '../../core/src/todo';
 
 const SCAN_COMMAND = 'example.agent-tools/scan-todos';
@@ -496,7 +495,11 @@ function runJob(kind: string, input: Uint8Array): Uint8Array {
 }
 
 export const { lifecycle, handler, jobRunner } = definePlugin({
-  lifecycle: baseLifecycle,
+  lifecycle: {
+    activate(context) {
+      log('info', `todo scanner active for ${context.plugin}`);
+    },
+  },
   handler: { onEvents },
   jobRunner: { run: runJob },
 });
@@ -534,9 +537,9 @@ The gauge shows progress as a bar. The `progress-row` widget shows one job with 
 | A file cannot be read | The job fails with the read's code, such as `not-found` or `io`. The panel keeps the last results. |
 | `fs.scan` finds more than 4,096 `.rs` files | The scan completes as `failed(quota-exceeded)` and no job starts. The result is never truncated (E5). |
 | A file is over 1 MiB | Only the first MiB is read. For the rest, call `fs::read` again with a larger offset. |
-| 16 jobs already queued | `jobs::start` returns `busy` (C42). |
-| Job runs past 10 seconds of CPU | The job fails as `timed-out`, and its output is dropped (A22). |
-| Results over 64 KiB | `topics::publish` refuses the payload with `invalid-argument` (L3). A few hundred hits can reach that size. |
+| 16 jobs already queued | `jobs::start` returns `busy` (see [jobs](/pages/api-jobs/)). |
+| Job runs past 10 seconds of CPU | The job fails as `timed-out`, and its output is dropped. |
+| Results over 64 KiB | `topics::publish` refuses the payload with `invalid-argument` (a topic payload is at most 64 KiB, see [topics](/pages/capability-topics-subscribe/)). A few hundred hits can reach that size. |
 
 ### What the user sees
 

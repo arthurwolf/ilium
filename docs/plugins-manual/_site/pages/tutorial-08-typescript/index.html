@@ -542,7 +542,7 @@ import type { AgentActivity } from &quot;@ilium/plugin-sdk/types&quot;;
 export type BadgeRole = &quot;accent&quot; | &quot;muted&quot; | &quot;warning&quot;;
 
 export interface Badge {
-  text: string;
+  label: string;
   role: BadgeRole;
 }
 
@@ -550,11 +550,11 @@ export interface Badge {
 export function badgeFor(activity: AgentActivity): Badge | undefined {
   switch (activity) {
     case &quot;working&quot;:
-      return { text: &quot;working&quot;, role: &quot;accent&quot; };
+      return { label: &quot;working&quot;, role: &quot;accent&quot; };
     case &quot;idle&quot;:
-      return { text: &quot;idle&quot;, role: &quot;muted&quot; };
+      return { label: &quot;idle&quot;, role: &quot;muted&quot; };
     case &quot;awaiting-approval&quot;:
-      return { text: &quot;approve?&quot;, role: &quot;warning&quot; };
+      return { label: &quot;approve?&quot;, role: &quot;warning&quot; };
     case &quot;none&quot;:
     case &quot;done&quot;:
     case &quot;menu&quot;:
@@ -576,7 +576,7 @@ import { expect, test } from &quot;bun:test&quot;;
 import { badgeFor } from &quot;./badge&quot;;
 
 test(&quot;working agent gets accent badge&quot;, () =&gt; {
-  expect(badgeFor(&quot;working&quot;)).toEqual({ text: &quot;working&quot;, role: &quot;accent&quot; });
+  expect(badgeFor(&quot;working&quot;)).toEqual({ label: &quot;working&quot;, role: &quot;accent&quot; });
 });
 
 test(&quot;awaiting approval gets warning badge&quot;, () =&gt; {
@@ -598,13 +598,13 @@ mod tests {
     #[test]
     fn working_agent_gets_accent_badge() {
         let badge = badge_for(AgentActivity::Working).expect(&quot;working has a badge&quot;);
-        assert_eq!(badge.text, &quot;working&quot;);
-        assert_eq!(badge.role, ColorRole::Accent);
+        assert_eq!(badge.label, &quot;working&quot;);
+        assert_eq!(badge.role, BadgeRole::Accent);
     }
 
     #[test]
     fn awaiting_approval_gets_warning_badge() {
-        assert_eq!(badge_for(AgentActivity::AwaitingApproval).expect(&quot;badge&quot;).role, ColorRole::Warning);
+        assert_eq!(badge_for(AgentActivity::AwaitingApproval).expect(&quot;badge&quot;).role, BadgeRole::Warning);
     }
 
     #[test]
@@ -662,7 +662,7 @@ function setDecorationFor(node: bigint, badge: Badge): SetDecorationSpec {
   return {
     node,
     slot: BADGE_SLOT,
-    content: [span(badge.text, { fg: role(badge.role) })],
+    content: [span(badge.label, { fg: role(badge.role) })],
     icon: undefined,
     sortKey: undefined,
     persist: false,
@@ -678,10 +678,10 @@ function clearFor(node: bigint): DecorationKey {
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::AgentActivityEvent;
 use ilium_plugin_sdk::types::intents::{DecorationKey, SetDecorationSpec};
-use ilium_plugin_sdk::types::text::Style;
+use ilium_plugin_sdk::types::text::{ColorRole, Style};
 
 mod badge;
-use badge::badge_for;
+use badge::{badge_for, BadgeRole};
 
 #[ilium_plugin(side = &quot;server&quot;)]
 #[derive(Default)]
@@ -701,12 +701,20 @@ impl Handler for AgentTools {
     }
 }
 
+fn color_role(role: BadgeRole) -&gt; ColorRole {
+    match role {
+        BadgeRole::Accent =&gt; ColorRole::Accent,
+        BadgeRole::Muted =&gt; ColorRole::Muted,
+        BadgeRole::Warning =&gt; ColorRole::Warning,
+    }
+}
+
 fn decorate(change: AgentActivityEvent) -&gt; Submission {
     let intent = match badge_for(change.current) {
         Some(badge) =&gt; Intent::SetDecoration(SetDecorationSpec {
             node: change.node,
             slot: &quot;badge&quot;.into(),
-            content: vec![Span::styled(badge.text, Style::role(badge.role))],
+            content: vec![Span::styled(badge.label, Style::role(color_role(badge.role)))],
             icon: None,
             sort_key: None,
             persist: false,
@@ -727,26 +735,32 @@ fn decorate(change: AgentActivityEvent) -&gt; Submission {
 <p><strong>Rust</strong></p>
 <p>The Rust <code>badge_for</code> uses the SDK's <code>AgentActivity</code> enum and a <code>match</code>. The compiler proves that every case is handled, as the <code>assertNever</code> line does in TypeScript.</p>
 <pre><code class="language-rust">// src/badge.rs. Same logic as src/badge.ts.
-use ilium_plugin_sdk::types::text::ColorRole;
 use ilium_plugin_sdk::types::tree::AgentActivity;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BadgeRole {
+    Accent,
+    Muted,
+    Warning,
+}
+
 pub struct Badge {
-    pub text: &amp;'static str,
-    pub role: ColorRole,
+    pub label: &amp;'static str,
+    pub role: BadgeRole,
 }
 
 pub fn badge_for(activity: AgentActivity) -&gt; Option&lt;Badge&gt; {
     match activity {
-        AgentActivity::Working =&gt; Some(Badge { text: &quot;working&quot;, role: ColorRole::Accent }),
-        AgentActivity::Idle =&gt; Some(Badge { text: &quot;idle&quot;, role: ColorRole::Muted }),
+        AgentActivity::Working =&gt; Some(Badge { label: &quot;working&quot;, role: BadgeRole::Accent }),
+        AgentActivity::Idle =&gt; Some(Badge { label: &quot;idle&quot;, role: BadgeRole::Muted }),
         AgentActivity::AwaitingApproval =&gt; {
-            Some(Badge { text: &quot;approve?&quot;, role: ColorRole::Warning })
+            Some(Badge { label: &quot;approve?&quot;, role: BadgeRole::Warning })
         }
         AgentActivity::None | AgentActivity::Done | AgentActivity::Menu =&gt; None,
     }
 }
 </code></pre>
-<p>The two versions differ in three places. Rust returns <code>Option&lt;Badge&gt;</code> and TypeScript returns <code>Badge | undefined</code>. Rust uses <code>ColorRole</code> values, and TypeScript uses the role names of <code>role()</code>. TypeScript reports a new activity only in a type check, not at run time, because the bindings are generated from the same WIT as the Rust enum.</p>
+<p>The two versions differ in three places. Rust returns <code>Option&lt;Badge&gt;</code> and TypeScript returns <code>Badge | undefined</code>. Both use the same three badge roles (<code>BadgeRole</code>); the Rust version maps them to a <code>ColorRole</code> for <code>Style::role(...)</code>, and TypeScript passes the role name to <code>role()</code>. TypeScript reports a new activity only in a type check, not at run time, because the bindings are generated from the same WIT as the Rust enum.</p>
 <h3 id="the-table-rows-of-step-3">The table rows of step 3</h3>
 <p>The client panel of step 3 builds table rows. <code>tableRow</code> is pure text formatting, so it ports directly. The panel layout stays in the Rust client. To use the port, add the client side to the project and import <code>tableRow</code> from <code>src/client.ts</code>. The Rust original is listed below the TypeScript file.</p>
 <p><strong>TypeScript</strong></p>
@@ -840,7 +854,7 @@ ilium plugin build agent-tools-ts
 </tr>
 </tbody>
 </table>
-<p>The limits and their codes are listed in <a href="/pages/errors-and-limits/">errors and limits</a>.</p>
+<p>The limits and their codes are listed in <a href="/pages/reference-errors-and-limits/">errors and limits</a>.</p>
 <h3 id="what-you-see">What you see</h3>
 <p>Each badge appears on its row as soon as the activity changes. The text uses the accent, muted or warning colour of the active theme. The kernel draws the badge, and the plugin never draws anything itself. A row whose activity is <code>done</code> has no badge. The tree below is the same tree as step 1, drawn by the TypeScript build. The Rust build draws the identical tree.</p>
 <figure>

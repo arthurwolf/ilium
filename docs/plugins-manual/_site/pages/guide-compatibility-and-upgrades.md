@@ -122,9 +122,9 @@ The host runs an update in a fixed order. Your code sees three of the steps.
 | `migrate(from, to)` | New version, once per side, before `activate` | Be idempotent and finish within its deadline |
 | `activate` | New version | Check the restore format byte and the length, and fall back to defaults |
 
-A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST accept restore bytes of the format of the previous release, or MUST fall back to defaults. [AUT-206]
+A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST fall back to defaults when the first byte is not a format it knows, because the host delivers restore bytes only when the `data_version` equals that of the build that wrote them. [AUT-206]
 
-Data that must survive a layout change MUST live in storage and be converted by a `migrator`, because restore bytes are dropped when the `data_version` differs. [AUT-207]
+Data that must survive a layout change MUST live in storage and be converted by a `migrator`, because restore bytes are delivered only when the `data_version` matches, and across versions only a `migrator` carries data. [AUT-207]
 
 ## Downgrades and rollbacks
 
@@ -143,7 +143,7 @@ The host loads the contract version it ships and the one before it. A package wh
 | Your plugin lists an unstable feature that was renamed | Refused with `manifest.unstable-unknown` | Read the changelog of Ilium before upgrading, and update the name |
 | An item you use is marked `@since` a newer version than your `api` | Refused with `manifest.grant-unknown` or an import error | Raise `api` and rebuild |
 
-A plugin SHOULD rebuild and publish against each new minor contract version within the lifetime of the previous one, so that users never hold a plugin outside the window. [AUT-209]
+A plugin SHOULD rebuild and publish against each new minor contract version before the host drops the minor it was built for (the host loads the current minor and the previous one), so that users never hold a plugin outside the window. [AUT-209]
 
 A published plugin MUST NOT list an unstable feature unless the plugin is for development use, because a T2 or T3 package that lists one is installable only in development mode. [AUT-210]
 

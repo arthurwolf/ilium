@@ -70,6 +70,7 @@ pub enum ValueTarget {
     Cost {
         target: crate::value_cost::CostValueTarget,
         directory: std::path::PathBuf,
+        read: Option<NumericReadState>,
     },
     DetectionNumber {
         field: crate::value_settings::SettingsNumber,
@@ -81,6 +82,7 @@ pub enum ValueTarget {
         directory: std::path::PathBuf,
         inference_revision: Option<u64>,
         autosave: Option<InferenceNumberAutosave>,
+        read: Option<NumericReadState>,
     },
     SettingsChoice {
         field: crate::value_settings_choice::SettingsChoice,
@@ -88,6 +90,15 @@ pub enum ValueTarget {
         session_previous: Option<crate::config::SessionSettings>,
         inference_revision: Option<u64>,
     },
+}
+
+/// A read belongs to one modal, original destination and runtime field value.
+/// Failure remains a commit barrier even if editing clears a validation error.
+pub struct NumericReadState {
+    pub token: std::sync::Arc<()>,
+    pub runtime_value: String,
+    pub accepted_writes: u64,
+    pub settled: Result<(), String>,
 }
 
 #[derive(Default)]
@@ -495,6 +506,7 @@ impl ValueDialogHost {
             target: ValueTarget::SettingsNumber {
                 field,
                 directory,
+                read: None,
                 autosave: (field == crate::value_settings::SettingsNumber::InferenceTokenBudget)
                     .then(InferenceNumberAutosave::default),
                 inference_revision: (field
@@ -520,7 +532,11 @@ impl ValueDialogHost {
         let target = crate::value_cost::CostValueTarget::new(settings, row)?;
         let dialog = target.dialog(settings)?;
         Ok(Self {
-            target: ValueTarget::Cost { target, directory },
+            target: ValueTarget::Cost {
+                target,
+                directory,
+                read: None,
+            },
             dialog,
             pending_save: None,
         })
@@ -537,7 +553,40 @@ impl ValueDialogHost {
         })
     }
 
+    pub(crate) fn number_read(&self) -> Option<&NumericReadState> {
+        match &self.target {
+            ValueTarget::SettingsNumber { read, .. } | ValueTarget::Cost { read, .. } => {
+                read.as_ref()
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn number_read_mut(&mut self) -> Option<&mut NumericReadState> {
+        match &mut self.target {
+            ValueTarget::SettingsNumber { read, .. } | ValueTarget::Cost { read, .. } => {
+                read.as_mut()
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_number_read(&mut self, state: NumericReadState) {
+        match &mut self.target {
+            ValueTarget::SettingsNumber { read, .. } | ValueTarget::Cost { read, .. } => {
+                *read = Some(state)
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn number_read_ready(&self) -> Result<(), String> {
+        self.number_read()
+            .map_or(Ok(()), |read| read.settled.clone())
+    }
+
     pub(crate) fn inference_budget_draft(&self) -> Option<&str> {
+        self.number_read_ready().ok()?;
         if !matches!(
             self.target,
             ValueTarget::SettingsNumber {
@@ -841,7 +890,7 @@ mod tests {
         parent.regexp.cursor = 3;
         parent.enabled = false;
         parent.focus = crate::text_trigger_dialog::TextTriggerFocus::Target;
-        let before = parent.candidate();
+        let before = parent.candidate().unwrap();
         let host = ValueDialogHost::trigger_scope(&parent).unwrap();
         let ValueDialogState::Choice(choice) = &host.dialog else {
             panic!("catalog");
@@ -854,7 +903,7 @@ mod tests {
             .unwrap();
         let mut expected = before.clone();
         expected.target = ilium_ipc::TextTriggerTarget::Agents;
-        assert_eq!(parent.candidate(), expected);
+        assert_eq!(parent.candidate().unwrap(), expected);
         assert_eq!(parent.regexp.cursor, 3);
         assert_eq!(
             parent.focus,
@@ -865,7 +914,7 @@ mod tests {
         assert!(host
             .apply_trigger_scope_choice(&mut replacement, "Terminals")
             .is_err());
-        assert_eq!(replacement.candidate(), before);
+        assert_eq!(replacement.candidate().unwrap(), before);
     }
 
     #[test]

@@ -499,7 +499,7 @@ A plugin can raise `pending_requests` in its manifest `limits`. The ceiling is 2
 <figcaption>The review row for <code>inference</code> in the install dialog, composed by hand from the client's glyphs: rounded border, chrome title, the <code>[x]</code> checkbox and the grey <code>…</code> leader. The wording is the manual's illustration, not a capture.</figcaption>
 </figure>
 
-- **Provider choice.** Requests go to the provider that the user selected in Settings (the Inference tab). The plugin cannot choose another one.
+- **Provider choice.** Requests go to the provider that the user selected in Settings > Inference. The plugin cannot choose another one.
 - **Privacy log.** Each request that the gate admits adds one line to the privacy log, with the plugin id, the `purpose`, the provider, the model and the token counts. Settings > Privacy shows that log.
 - **Plugin log.** The lines that the plugin writes appear in `ilium plugin logs`, as in Example 1.
 
@@ -533,4 +533,4 @@ Checked against `ilium:plugin@0.1.0`.
 
 ### Security
 
-Every request is recorded in the privacy log; see [User security and privacy](/pages/user-plugin-security-and-privacy/) ([SEC-264]).
+Every request is recorded in the privacy log; see [User security and privacy](/pages/user-plugin-security-and-privacy/) ([SEC-265]).

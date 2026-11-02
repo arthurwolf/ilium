@@ -45,7 +45,7 @@ A port SHOULD put logic about panes and agents on S and drawing on C, and SHOULD
 
 ### What does not port
 
-Ilium has no editor-language protocol, no debugger protocol, no webview, no extension-to-extension object access, no Node.js and no way to load native modules. A plugin cannot run arbitrary code in the host. Work that needs a long process is started with `process.run` and the `process.long-lived` grant, and then the plugin only reads its output.
+Ilium has no editor-language protocol, no debugger protocol, no webview, no extension-to-extension object access, no Node.js and no way to load native modules. A plugin cannot run arbitrary code in the host. Work that needs a long process is started with `process.spawn` under the `process.long-lived` grant, and then the plugin only reads its output.
 
 ### Example: a "Word count" command
 
@@ -68,10 +68,10 @@ Ilium (TypeScript, client side). The editor primitive gives the lines of the act
 
 ```ts
 import { definePlugin } from '@ilium/plugin-sdk';
-import { editor } from '@ilium/plugin-sdk/host/editor';
+import { editor } from '@ilium/plugin-sdk/primitives/editor';
 import { intents } from '@ilium/plugin-sdk/host/intents';
 
-export default definePlugin({
+export const { lifecycle, handler } = definePlugin({
   side: 'client',
   handler: {
     onCommand(id: string) {
@@ -154,7 +154,7 @@ tmux plugins are shell scripts that call `tmux` commands and set options. Ilium 
 | `display-message` | A toast intent |
 | `capture-pane -p` | `terminal.read-screen` |
 | `send-keys` | `terminal.write` (high risk) |
-| `split-window`, `new-window` | `panes.create`, the `create-split` intent |
+| `split-window`, `new-window` | `panes.create`, the `create-split` intent (grant `tree.restructure`, high risk) |
 | `run-shell` hooks on events | Events, with the matching grant |
 | `pane-title-changed` hooks | Events from the tree and pane primitives |
 | `resurrect`-style save and restore | Restore bytes and storage. See [Persistence and restart](/pages/reference-persistence-and-restart/) |
@@ -178,7 +178,7 @@ Ilium: a command with a key chord and two grants, `terminal.read-screen` and `fs
 |---|---|---|
 | Rights | Everything the user can do | Only granted capabilities |
 | Time | Unbounded | Deadlines: events 20 ms, commands 50 ms, render 10 ms |
-| Failure | An error message, the editor continues | A trap, restart after 1 s, 5 s, 30 s, disabled at the third failure in 10 minutes |
+| Failure | An error message, the editor continues | A trap, restart after 1 s, then 5 s, disabled at the third failure in 10 minutes |
 | State | Variables in the process | Lost on restart. Use storage or restore bytes |
 | Language | Lua, JavaScript, shell | Rust or TypeScript, built to a component |
 | Distribution | A git clone or a marketplace |  A signed or unsigned `.iliumpkg` file |

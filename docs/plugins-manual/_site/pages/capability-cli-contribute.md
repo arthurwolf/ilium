@@ -3,10 +3,11 @@
 ## cli.contribute
 
 The `cli.contribute` grant lets a server-side plugin add one subcommand to the `ilium` command
-line. The plugin declares the subcommand in its manifest. When the user runs
+line (a plugin that owns several commands declares each one; see [Manifest](#manifest)). The plugin declares the subcommands in its manifest. When the user runs
 `ilium <name> [arguments]`, the server sends a `cli-invoked` event to the plugin, and the plugin
-answers with JSON lines on standard output and ends the call with an exit code. Every output line
-must be one JSON object with a `type` field, because agents read this output.
+answers with JSON lines on standard output and ends the call with an exit code. In `jsonl` output form every
+output line must be one JSON object with a `type` field, because agents read this output. A
+subcommand declared with output form `text` or `mixed` may also write plain text with `write-text`.
 
 The grant decides whether the subcommand exists for the user at all. If the user declines it, the
 subcommand is hidden from help and cannot be run. The grant is server-side only, and it takes no
@@ -46,12 +47,12 @@ A plugin declares its subcommands in the `cli` key. The key holds one object, or
     "exports": []
   },
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "notes",
       "summary": "List notes",
       "arguments_schema": { "type": "object", "properties": { "query": { "type": "string" } } },
       "output": "jsonl"
-    }
+    }]
   }
 }
 ```
@@ -76,12 +77,13 @@ TypeScript it is `@ilium/plugin-sdk/host/cli`.
 | Function | Rust | TypeScript | Meaning | Errors beyond the universal set |
 |---|---|---|---|---|
 | `write-line` | `cli::write_line(invocation: u64, jsonl: &str) -> Result<(), PluginError>` | `writeLine(invocation: bigint, jsonl: string): void` | Writes one JSON object and a newline to the caller's standard output. | `not-found` (finished or cancelled), `invalid-argument` (not one object with a string `type`, a raw newline, or over 64 KiB) |
+| `write-text` | `cli::write_text(invocation: u64, text: &str) -> Result<(), PluginError>` | `writeText(invocation: bigint, text: string): void` | Writes plain text to the caller's standard output. Allowed only when the subcommand's `output` is `"text"` or `"mixed"`. | `not-found`, `not-permitted` (output form is `"jsonl"`), `invalid-argument` (over 64 KiB) |
 | `write-error` | `cli::write_error(invocation: u64, text: &str) -> Result<(), PluginError>` | `writeError(invocation: bigint, text: string): void` | Writes plain text and a newline to standard error. | `not-found`, `invalid-argument` (over 64 KiB) |
 | `finish` | `cli::finish(invocation: u64, exit_code: u8)` | `finish(invocation: bigint, exitCode: number): void` | Ends the invocation. `exit_code` becomes the process exit status. | none; an unknown invocation is ignored |
 
 In TypeScript a failed `writeLine` or `writeError` throws a `PluginError`. The universal codes
 `not-permitted`, `revoked` and `internal` can also appear (see
-[errors and limits](/pages/errors-and-limits/)).
+[errors and limits](/pages/reference-errors-and-limits/)).
 
 | Event | Payload | Rust | TypeScript |
 |---|---|---|---|
@@ -150,7 +152,7 @@ a task and write from it.
 - **Risk:** normal. The capability table does not mark the grant as high risk.
 - **Tier T1 (bundled):** granted automatically up to the manifest ceiling.
 - **Tier T2 and T3:** the review dialog lists the grant as a checked row, and the user can uncheck
-  it before installing. The row text is `Add ilium commands`.
+  it before installing. The row text is `Adds commands to the ilium program`.
 - **Other grants:** the subcommand runs inside the plugin, so the plugin's other grants still
   apply to anything the subcommand reads or writes.
 - **Revoke:** in Settings > Plugins > (plugin) > Capabilities, or with
@@ -314,7 +316,7 @@ only documents the arguments for help, so the plugin validates them itself.</p>
 
 ### Used by
 
-First-party plugins from `feature-mapping.md` that hold this grant:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/) that hold this grant:
 
 - 52 `ilium voice say`, which sends a `message` to the plugin's own client side.
 - 60 `ilium progress`, which writes its status with `write-line` and `finish`.

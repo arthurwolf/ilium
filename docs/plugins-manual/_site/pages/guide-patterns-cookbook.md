@@ -12,7 +12,7 @@ Requirement ids of this page are in the range `AUT-001` to `AUT-099`. The comple
 
 - A plugin that builds and activates. Start with [Your first plugin](/pages/getting-started-first-plugin/) if you have none.
 - The grants named in each recipe. The clock, timers and storage need no grant.
-- The limits below. Every number comes from [Errors and limits](/pages/errors-and-limits/) and [Performance](/pages/performance/). This page does not define them again.
+- The limits below. Every number comes from [Errors and limits](/pages/reference-errors-and-limits/) and [Performance](/pages/performance/). This page does not define them again.
 
 | Limit | Value | Page |
 |---|---|---|
@@ -268,7 +268,7 @@ fn back_off_delays_the_next_send() {
 **Rust**
 
 ```rust
-use ilium_plugin_sdk::host::{clock, storage::{self, Bucket}};
+use ilium_plugin_sdk::host::storage::{self, Bucket};
 
 const TTL_MILLIS: u64 = 10 * 60 * 1000;
 
@@ -284,8 +284,7 @@ fn decode(bytes: &[u8]) -> Option<(u64, &[u8])> {
 }
 
 /// Returns fresh bytes, stale bytes while another session refreshes, or None.
-pub fn read_cached(key: &str) -> Option<Vec<u8>> {
-    let now = clock::now_unix_millis();
+pub fn read_cached(key: &str, now: u64) -> Option<Vec<u8>> {
     let stored = storage::get(Bucket::Shared, key);
     let fresh = stored
         .as_deref()
@@ -300,21 +299,19 @@ pub fn read_cached(key: &str) -> Option<Vec<u8>> {
     stored.as_deref().and_then(decode).map(|(_, body)| body.to_vec())
 }
 
-pub fn write_cached(key: &str, body: &[u8]) {
-    let _ = storage::put(Bucket::Shared, key, &encode(clock::now_unix_millis(), body));
+pub fn write_cached(key: &str, now: u64, body: &[u8]) {
+    let _ = storage::put(Bucket::Shared, key, &encode(now, body));
 }
 ```
 
 **TypeScript**
 
 ```ts
-import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
 import * as storage from '@ilium/plugin-sdk/host/storage';
 
 const TTL_MILLIS = 10n * 60n * 1000n;
 
-export function readCached(key: string): Uint8Array | undefined {
-  const now = nowUnixMillis();
+export function readCached(key: string, now: bigint): Uint8Array | undefined {
   const stored = storage.get('shared', key);
   const parsed = stored && stored.length >= 8 ? split(stored) : undefined;
   if (parsed && now - parsed.at < TTL_MILLIS) return parsed.body;
@@ -328,7 +325,7 @@ function split(bytes: Uint8Array): { at: bigint; body: Uint8Array } {
 }
 ```
 
-**Test.** `encode` and `decode` are pure, so test them without the host. `read_cached` takes `now` as an argument in a production plugin, so the TTL branch can be tested with fixed numbers.
+**Test.** `encode` and `decode` are pure, so test them without the host. `read_cached` and `write_cached` take `now` as an argument (the handler reads the clock once per batch, [AUT-001]), so the TTL branch can be tested with fixed numbers.
 
 **Traps.**
 
@@ -340,7 +337,7 @@ function split(bytes: Uint8Array): { at: bigint; body: Uint8Array } {
 
 **Problem.** You have thousands of rows, such as search hits, log lines or files. A tree is limited to 4,096 nodes and 1,024 KiB, and a render must finish in 10 ms.
 
-**Constraints.** The `%list` and `table` widgets keep `selected` and `offset` as host-owned state, which the plugin reads through `ui.widget-state`. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps `check-list` (256 items) and `list-editor` (64 items) are enforced at render time with `invalid-argument`.
+**Constraints.** The `%list` and `table` widgets keep `selected` and `offset` as host-owned state, which the plugin reads through `ui.widget-state`. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps `check-list` (256 items) and `list-editor` (64 items) are enforced at render time: a larger one traps with `ui.invalid-tree`.
 
 **Rule.** A view MUST render only the rows in the visible window plus a small margin, and MUST NOT put all rows into the tree. The ceiling is 4,096 nodes and 1,024 KiB for the whole tree. [AUT-011]
 

@@ -592,7 +592,7 @@
 <tr>
 <td><code>prerender</code></td>
 <td><code>{ "frames": 1 to 3600, "fps": 1 to 30, "cache_mib": 1 to 128 }</code></td>
-<td>The host calls <code>render</code> for that many frames once, caches them and loops them with no further plugin calls. A change of settings or palette discards the cache. Refused with <code>manifest.scene-prerender</code> when a value is out of range or when the scene declares <code>wants-pointer</code>.</td>
+<td>The host calls <code>render</code> for that many frames once, caches them and loops them with no further plugin calls. A change of settings or palette discards the cache. Refused with <code>manifest.scene-prerender</code> when a value is out of range. A scene that answers <code>true</code> from <code>wants_pointer</code> is played from the cache with no pointer: <code>pointer</code> returns <code>none</code> and the host logs a warning.</td>
 </tr>
 <tr>
 <td><code>glyph_plane</code></td>
@@ -692,7 +692,7 @@
 </div>
 
 <h2 id="limits">Limits</h2>
-<p>The table lists the scene-relevant keys with their defaults and the ceilings for tier T2 and T3 packages. A request above a ceiling is clamped and logged, never refused. The user can lower any value under <code>[plugins.limits]</code> in <code>config.toml</code>.</p>
+<p>The table lists the scene-relevant keys with their defaults and the ceilings for tier T2 and T3 packages. A runtime scene limit above its ceiling is clamped and logged. The two install-time limits, package assets and the <code>prerender</code> cache, are refused at install instead. The user can lower any value under <code>[plugins.limits]</code> in <code>config.toml</code>.</p>
 <table>
 <thead>
 <tr>
@@ -1042,7 +1042,7 @@ last-receipt: func() -&gt; option&lt;frame-receipt&gt;;
 <td>Refused with <code>package.old-format</code>. Logged as <code>old format, not loaded</code>.</td>
 </tr>
 <tr>
-<td>A manifest key with no counterpart, including <code>wants-pointer</code> in a manifest or a key in <code>limits</code></td>
+<td>A manifest key with no counterpart, including a <code>wants-pointer</code> key in a manifest or a key in <code>limits</code></td>
 <td>Refused at install with <code>manifest.unknown-key</code></td>
 </tr>
 <tr>
@@ -1058,8 +1058,8 @@ last-receipt: func() -&gt; option&lt;frame-receipt&gt;;
 <td>Refused with <code>manifest.grant-unknown</code></td>
 </tr>
 <tr>
-<td>A <code>frame_rate_cap</code> above 60, or a limit above its ceiling</td>
-<td>Clamped to the ceiling and logged. Not refused.</td>
+<td>A <code>frame_rate_cap</code> above 60, or a runtime scene limit above its ceiling</td>
+<td>Clamped to the ceiling and logged. Not refused. <code>package_assets_mib</code> and the <code>prerender</code> cache above their ceilings are refused at install</td>
 </tr>
 <tr>
 <td><code>settings</code> that fail <code>settings_schema</code></td>
@@ -1074,8 +1074,12 @@ last-receipt: func() -&gt; option&lt;frame-receipt&gt;;
 <td>The frame is dropped. A warn line appears at most once per second.</td>
 </tr>
 <tr>
-<td><code>prerender</code> values out of range, or <code>prerender</code> together with <code>wants-pointer</code></td>
+<td><code>prerender</code> values out of range</td>
 <td>Refused at install with <code>manifest.scene-prerender</code></td>
+</tr>
+<tr>
+<td><code>prerender</code> together with a scene that answers <code>true</code> from <code>wants_pointer</code></td>
+<td>Not refused. Played from the cache, <code>pointer</code> returns <code>none</code>, a warning is logged</td>
 </tr>
 <tr>
 <td>Package assets over 64 MiB (256 MiB for T1), or a font over 4 MiB</td>
@@ -1083,7 +1087,7 @@ last-receipt: func() -&gt; option&lt;frame-receipt&gt;;
 </tr>
 <tr>
 <td>A glyph plane write without <code>glyph_plane: true</code></td>
-<td>The spec says the call needs <code>glyph_plane: true</code>. The error code is not specified.</td>
+<td>The call returns <code>unsupported</code> (<a href="/pages/api-surface-glyph-plane/">glyph plane errors</a>)</td>
 </tr>
 </tbody>
 </table>

@@ -46,7 +46,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 {
   "api": "ilium:plugin@0.1.0",
   "id": "ilium.core.search",
-  "name": "Workspace search",
+  "name": "Search",
   "version": "0.1.0",
   "publisher": "Ilium",
   "server": {
@@ -115,9 +115,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "command:search",
-    "job:index",
-    "view:search.panel"
+    "command:ilium.core.search/open",
+    "view:search"
   ],
   "contributes": {
     "commands": [
@@ -258,7 +257,7 @@ export const { lifecycle, handler, views } = definePlugin({
 
 #### 2. Search by meaning
 
-The server embeds pane titles and screen snippets into a vector index, then answers a query by cosine similarity and returns the top 20 ids with scores. The host does the maths. See the [vector API](/pages/api-vector/) and the [inference.embed grant](/pages/capability-inference-embed/). An embed call takes at most 256 texts, so a large workspace is indexed in batches.
+The server embeds pane titles and screen snippets into a vector index, then answers a query by cosine similarity and returns the top 20 ids with scores. The host does the maths. See the [vector API](/pages/api-vector/) and the [inference.embed grant](/pages/capability-inference-embed/). An embed call takes at most 256 texts, so the samples below split the corpus into batches of 256 (`EMBED_BATCH`) and embed each batch in turn.
 
 **Rust**
 
@@ -267,6 +266,8 @@ use ilium_plugin_sdk::host::vector;
 use ilium_plugin_sdk::types::errors::PluginError;
 
 const PURPOSE: &str = "workspace search";
+/// `embed` accepts at most 256 texts per call.
+const EMBED_BATCH: usize = 256;
 
 pub struct MeaningIndex { index: u32 }
 
@@ -274,7 +275,10 @@ impl MeaningIndex {
     /// `items` holds (pane id, title and screen snippet).
     pub async fn build(items: &[(String, String)]) -> Result<MeaningIndex, PluginError> {
         let texts: Vec<String> = items.iter().map(|(_, text)| text.clone()).collect();
-        let vectors = vector::embed(&texts, PURPOSE).await?;
+        let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+        for batch in texts.chunks(EMBED_BATCH) {
+            vectors.extend(vector::embed(batch, PURPOSE).await?);
+        }
         let dimensions = vectors.first().map_or(0, |vector| vector.len());
         let index = vector::create_index("workspace", dimensions as u16)?;
         let entries: Vec<(String, Vec<f32>)> =
@@ -297,9 +301,15 @@ impl MeaningIndex {
 import { createIndex, embed, topK, upsert } from '@ilium/plugin-sdk/host/vector';
 
 const PURPOSE = 'workspace search';
+// `embed` accepts at most 256 texts per call.
+const EMBED_BATCH = 256;
 
 export async function buildIndex(items: Array<[string, string]>): Promise<number> {
-  const vectors = await embed(items.map(([, text]) => text), PURPOSE);
+  const texts = items.map(([, text]) => text);
+  const vectors: number[][] = [];
+  for (let start = 0; start < texts.length; start += EMBED_BATCH) {
+    vectors.push(...(await embed(texts.slice(start, start + EMBED_BATCH), PURPOSE)));
+  }
   const index = createIndex('workspace', vectors[0]?.length ?? 0);
   upsert(index, items.map(([id], position) => [id, vectors[position]] as [string, number[]]));
   return index;
@@ -489,7 +499,7 @@ Other plugins change what `ilium.core.search` does through the points below. The
 
 - `ilium.core.search/query`: query: search all sources
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.search"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.search"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds issues as a result kind
 

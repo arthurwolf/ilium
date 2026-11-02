@@ -24,7 +24,11 @@ use std::collections::BTreeMap;
 
 const MANIFEST: &str = include_str!("native_climate_1193.json");
 const CLIMATE_ROWS: usize = 63;
-const REGISTRY_CHARGE: u64 = 2 * 1024 * 1024;
+// Sized from the bundled manifest (28 KB of text for 63 rows), with a generous
+// factor for the parsed row strings and digests. The former flat 2 MiB charge
+// was about 70 times the data it covers and pushed saved-world route
+// qualification over the scene account.
+const REGISTRY_CHARGE: u64 = MANIFEST.len() as u64 * 4 + 64 * 1024;
 const MAP_PIXELS: usize = 256 * 256;
 const NATIVE_DATA_VERSION: i32 = 3218;
 

@@ -514,7 +514,7 @@
 </tr>
 <tr>
 <td>B19</td>
-<td>Delay of a PTY frame while the plugin queue is full (4 MiB)</td>
+<td>Delay of a PTY frame while the plugin event queue is full (<code>event_queue</code> entries, 1,024 by default)</td>
 <td>Under 1 ms at the 99th percentile</td>
 </tr>
 <tr>
@@ -525,12 +525,12 @@
 <tr>
 <td>B21</td>
 <td>Helper start: spawn to <code>Ready</code> for a 2 MiB component</td>
-<td>Record; under 80 ms median expected</td>
+<td>Record only (no pass or fail threshold)</td>
 </tr>
 <tr>
 <td>B22</td>
 <td>Session memory: 40 bundled plugins plus 8 T2 helpers, steady state</td>
-<td>Added RSS under 120 MiB for the bundled set; helpers under <code>memory_mib + 32</code> MiB each</td>
+<td>Added RSS under 120 MiB for the bundled set; each helper under the sum of its hosted instances' <code>memory_mib</code> plus 32 MiB</td>
 </tr>
 <tr>
 <td>B23</td>
@@ -547,7 +547,7 @@
 <p>The B1 to B9 rows are the phase-0 benchmarks of the platform plan, kept with their targets. B10 to B24 are added by this reference.</p>
 <ul>
 <li><strong>[HST-305]</strong> <code>ilium-plugin-bench</code> MUST contain one program for each of B1 to B24, with the id in its name.</li>
-<li><strong>[HST-306]</strong> The release gate MUST include B1 to B9 and B16 to B20 on the reference machine, and MUST fail when any budget is missed.</li>
+<li><strong>[HST-306]</strong> The release gate MUST include B1 to B9, B16 to B20 and B23 on the reference machine, and MUST fail when any budget is missed.</li>
 </ul>
 <h2 id="named-budgets">Named budgets</h2>
 <table>

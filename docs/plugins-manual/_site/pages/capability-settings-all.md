@@ -8,7 +8,7 @@ The two grants unlock three functions of the `settings` import: `list-settings` 
 
 ### settings.contribute:<tab-id>, a different grant
 
-`settings.contribute:<tab-id>` is a separate, low-risk grant. A plugin needs it to add a section of rows to one built-in tab, for example `settings.contribute:terminal`. It is the only grant that lets a plugin draw anything in a built-in tab, and it allows nothing else:
+`settings.contribute:<tab-id>` is a separate, normal-risk grant. A plugin needs it to add a section of rows to one built-in tab, for example `settings.contribute:terminal`. It is the only grant that lets a plugin draw anything in a built-in tab, and it allows nothing else:
 
 | Grant | Risk | Argument | Allows | Does not allow |
 |---|---|---|---|---|
@@ -110,7 +110,7 @@ set-plugin-json: func(plugin: plugin-id, patch: string) -> result<_, plugin-erro
 - A key that is not in the schema is `invalid-argument`, and the message names that key.
 - The patch is all or nothing. One invalid key stores nothing.
 - A key set to `null` resets that key to its schema `default`.
-- A patch that changes no stored value succeeds and sends no event (P4).
+- A patch that changes no stored value succeeds and sends no event.
 
 When a patch changes values, the target plugin receives `settings-changed` with the changed keys, on the side that owns them. The writer gets no event of its own.
 
@@ -172,7 +172,7 @@ struct SettingsScreen;
 impl Lifecycle for SettingsScreen {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
         for entry in settings::list_settings() {
-            log::log(Level::Info, &format!("settings tab {} ({})", entry.tab, entry.scope));
+            log::log(Level::Info, &format!("settings tab {} ({})", entry.tab, entry.side));
         }
         match settings::get_plugin_json(NOTES_PLUGIN) {
             Ok(values) => log::log(Level::Info, &format!("notes values: {values}")),
@@ -235,7 +235,7 @@ export const { lifecycle, handler } = definePlugin({
   side: 'client',
   activate() {
     for (const entry of listSettings()) {
-      log('info', `settings tab ${entry.tab} (${entry.scope})`);
+      log('info', `settings tab ${entry.tab} (${entry.side})`);
     }
     try {
       log('info', `notes values: ${getPluginJson(NOTES_PLUGIN)}`);
@@ -294,7 +294,7 @@ The manifest checks that run at install or build time, with their exact text:
 
 ### Who requests it
 
-First-party plugins from `feature-mapping.md`:
+First-party plugins from [feature traceability](/pages/reference-feature-traceability/):
 
 - Feature 89, guided setup: `settings.read-all`, `settings.write-all` and `plugins.manage`.
 - Feature 90, settings UI: `settings.read-all`, `settings.write-all` and `help.read`. The settings store, its validation and the recovery page stay in the kernel.
@@ -306,11 +306,11 @@ First-party plugins from `feature-mapping.md`:
 - [help.read](/pages/capability-help-read/) for the help topics that the settings screen shows.
 - [Settings screens](/pages/settings-screens/) for the row keywords and custom settings pages.
 - [Plugin settings extension](/pages/settings-extension/) for tabs, sections and the built-in tab ids.
-- [Errors and limits](/pages/errors-and-limits/) for the full error code table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error code table.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the binding rules.
 
 Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 
 ### Security
 
-Reading all settings excludes secrets ([SEC-242]); see [Secrets](/pages/reference-secrets/).
+Reading all settings returns an empty string for a plugin secret, never its value ([SEC-244]); see [Secrets](/pages/reference-secrets/).

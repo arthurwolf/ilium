@@ -102,7 +102,6 @@ pub enum ReadError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rejection {
     Absent,
-    ProtoChunk,
     IncompleteSections,
     CoordinateMismatch,
     Read(String),
@@ -400,9 +399,7 @@ fn load_with_ceiling(
             Ok(Some(decoded)) => {
                 if decoded.identity.position != position {
                     Rejection::CoordinateMismatch
-                } else if !decoded.is_full() {
-                    Rejection::ProtoChunk
-                } else if !decoded.has_full_coverage(limits.min_section, limits.max_section) {
+                } else if !decoded.has_block_coverage(limits.min_section, limits.max_section) {
                     Rejection::IncompleteSections
                 } else {
                     // Retain no partial window on exhaustion. One decoded chunk

@@ -472,6 +472,13 @@
     &quot;startup&quot;,
     &quot;view:text-triggers.rules&quot;
   ],
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [
+    &quot;services:test-rule&quot;,
+    &quot;points:rule-packs&quot;,
+    &quot;points:before-fire&quot;,
+    &quot;topics:fired&quot;
+  ],
   &quot;limits_tier&quot;: &quot;first-party&quot;
 }
 </code></pre>
@@ -672,7 +679,7 @@ export function ruleRow(index: number, enabled: boolean, error?: string) {
 <td>collect</td>
 <td>Ship a group of rules the user can enable as a set.</td>
 <td>entry: id, title, rules (list of pattern, reply, enabled)</td>
-<td>standard</td>
+<td>high</td>
 </tr>
 <tr>
 <td><code>before-fire</code></td>
@@ -691,7 +698,7 @@ export function ruleRow(index: number, enabled: boolean, error?: string) {
 <ul>
 <li><code>ilium.core.text-triggers/fired</code>: { rule, pane }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.text-triggers"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.text-triggers"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-refuses-rules-marked-office-outside-0900-to-1800">Example: Refuses rules marked <code>office</code> outside 09:00 to 18:00</h4>
 <p>A package adds a <code>veto</code> handler. Handlers run until one refuses.</p>
 <pre><code class="language-json">{

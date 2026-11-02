@@ -466,6 +466,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
     match state.tab {
+        SettingsTab::Toolbar => {
+            crate::tree_toolbar_settings::render(frame, layout.content_area, app, state)
+        }
         SettingsTab::LlmInstructions => {}
         SettingsTab::Setup => render_scrollable(
             frame,
@@ -512,6 +515,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::TextTriggers => {
             let view = text_trigger_view(app, state.selected_row, layout.content_area.width);
             render_scrollable(frame, layout.content_area, view.lines, state.scroll);
+        }
+        SettingsTab::CustomAgents => {
+            render_scrollable(
+                frame,
+                layout.content_area,
+                custom_agent_lines(app, state),
+                state.scroll,
+            );
         }
         SettingsTab::Appearance => {
             let lines = appearance_view(
@@ -755,6 +766,9 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::About => {}
+        SettingsTab::Toolbar => {
+            push_help_anchor(&mut anchors, layout, "TOOLBAR-01", 2, 0, true);
+        }
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
             for (topic_id, line, row) in
@@ -1000,6 +1014,14 @@ pub fn settings_help_anchors(
                 state.selected_row == app.text_trigger_settings.triggers.len(),
             );
         }
+        SettingsTab::CustomAgents => push_help_anchor(
+            &mut anchors,
+            layout,
+            "CUSTOMAGENT-01",
+            1,
+            state.scroll,
+            true,
+        ),
         SettingsTab::Appearance => {
             let view = appearance_view(
                 &app.ui_settings,
@@ -1037,6 +1059,8 @@ pub fn settings_help_anchors(
                     AppearanceRow::ShowToolbarLabels => "AP-17",
                     AppearanceRow::SectionFrames => "AP-33",
                     AppearanceRow::LastPrompt => "AP-18",
+                    AppearanceRow::GoalTab => "AP-37",
+                    AppearanceRow::GoalToolbarIcon => "AP-38",
                     AppearanceRow::LastPromptMaxLines => "AP-19",
                     AppearanceRow::ProgressMonitor => "AP-20",
                     AppearanceRow::ProgressMonitorMaxLines => "AP-21",
@@ -1044,6 +1068,7 @@ pub fn settings_help_anchors(
                     AppearanceRow::TerminalTextSelection => "AP-23",
                     AppearanceRow::LockClosedEnabled => "AP-24",
                     AppearanceRow::ProjectSeparators => "AP-25",
+                    AppearanceRow::ResourceGrouping => "AP-36",
                     AppearanceRow::TreeToolbarAlwaysVisible => "AP-34",
                     AppearanceRow::AutoRemoveEmptyGroups => "AP-26",
                     AppearanceRow::AutoFreeze => "AP-27",
@@ -1331,6 +1356,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Appearance => "◐",
         SettingsTab::Padding => "▢",
         SettingsTab::Icons => "▦",
+        SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
         SettingsTab::Optimization => "↗",
@@ -1351,6 +1377,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Titles => "≔",
         SettingsTab::Triggers => "⚑",
         SettingsTab::TextTriggers => "¶",
+        SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
         SettingsTab::Api => "⇄",
         SettingsTab::About => "ⓘ",
@@ -1373,6 +1400,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
         SettingsTab::Inference => "Models",
         SettingsTab::LlmInstructions => "LLM text",
         SettingsTab::TextTriggers => "Triggers",
+        SettingsTab::CustomAgents => "Custom",
         _ => tab.label(),
     }
 }
@@ -1588,6 +1616,131 @@ struct TextTriggerView {
     add_line: usize,
 }
 
+fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
+    use crate::custom_agent_editor::EditorRow;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "CUSTOM AGENTS",
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Values are plaintext in Ilium's owner-only configuration file."),
+        Line::from("Changes apply on the next launch or restart."),
+        Line::from(""),
+    ];
+    if let Some(editor) = &state.custom_agent_editor {
+        for (index, row) in editor.rows().into_iter().enumerate() {
+            let (label, value) = match row {
+                EditorRow::Name => ("Name".to_owned(), editor.draft.name.clone()),
+                EditorRow::Icon => ("Icon".to_owned(), editor.draft.icon.clone()),
+                EditorRow::Provider => (
+                    "Base".to_owned(),
+                    format!("{:?}", editor.draft.base_provider),
+                ),
+                EditorRow::EnvironmentKey(index) => (
+                    format!("Variable {} name", index + 1),
+                    editor.draft.environment[index].key.clone(),
+                ),
+                EditorRow::EnvironmentValue(index) => (
+                    format!("Variable {} value", index + 1),
+                    editor.displayed_value(index).unwrap_or_default(),
+                ),
+                EditorRow::RemoveEnvironment(index) => (
+                    format!("Remove variable {}", index + 1),
+                    "[ Remove ]".to_owned(),
+                ),
+                EditorRow::AddEnvironment => ("Add variable".to_owned(), "[ Add ]".to_owned()),
+                EditorRow::RevealValues => (
+                    "Show values".to_owned(),
+                    if editor.reveal_values { "On" } else { "Off" }.to_owned(),
+                ),
+                EditorRow::Save => (
+                    "Save profile".to_owned(),
+                    if state.custom_agent_save_pending {
+                        "Saving…"
+                    } else {
+                        "[ Save ]"
+                    }
+                    .to_owned(),
+                ),
+                EditorRow::Cancel => ("Cancel".to_owned(), "[ Cancel ]".to_owned()),
+            };
+            let value = value
+                .chars()
+                .map(|character| match character {
+                    '\n' => "\\n".to_owned(),
+                    '\r' => "\\r".to_owned(),
+                    '\t' => "\\t".to_owned(),
+                    other if other.is_control() => "�".to_owned(),
+                    other => other.to_string(),
+                })
+                .collect::<String>();
+            let selected = index == state.selected_row;
+            let padding = 30usize.saturating_sub(label.chars().count());
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} {label}", if selected { "›" } else { " " }),
+                    if selected {
+                        theme::selected_style()
+                    } else {
+                        Style::new()
+                    },
+                ),
+                leader_span(padding),
+                Span::raw(value),
+            ]));
+        }
+        lines.push(Line::from(if state.custom_agent_editing {
+            "Type to edit; Enter finishes; Esc cancels editing."
+        } else {
+            "Enter edits or activates; arrows navigate; Esc cancels."
+        }));
+    } else {
+        for (index, profile) in app.custom_agents.profiles.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} {} {}  ({:?}, {} variables)  [Delete]",
+                if index == state.selected_row {
+                    "›"
+                } else {
+                    " "
+                },
+                profile.icon,
+                profile.name,
+                profile.base_provider,
+                profile.environment.len()
+            )));
+        }
+        let missing = crate::custom_agent_settings::missing_profiles(app);
+        for (index, identity) in missing.iter().enumerate() {
+            lines.push(Line::from(format!(
+                "{} [ Restore missing profile {} ({:?}) ]",
+                if state.selected_row == app.custom_agents.profiles.len() + index {
+                    "›"
+                } else {
+                    " "
+                },
+                identity.profile_id,
+                identity.base_provider
+            )));
+        }
+        lines.push(Line::from(format!(
+            "{} [ Add custom agent ]",
+            if state.selected_row == app.custom_agents.profiles.len() + missing.len() {
+                "›"
+            } else {
+                " "
+            }
+        )));
+        lines.push(Line::from(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." }));
+    }
+    lines
+}
+
+pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Rect) -> u16 {
+    (custom_agent_lines(app, state).len().min(u16::MAX as usize) as u16).saturating_sub(area.height)
+}
+
 /// Readable, measured list surface for server-executed regexp responses.
 /// Each rule has a distinct status/target heading and wrapped match/reply rows.
 fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerView {
@@ -1733,7 +1886,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
-        SettingsTab::Padding => 0,
+        SettingsTab::Padding | SettingsTab::Toolbar => 0,
         SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,
@@ -1769,6 +1922,10 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::TextTriggers => text_trigger_view(app, selected_row, content_area.width)
             .lines
             .len() as u16,
+        SettingsTab::CustomAgents => match &app.mode {
+            crate::app::Mode::Settings(state) => custom_agent_lines(app, state).len() as u16,
+            _ => 0,
+        },
         SettingsTab::Appearance => {
             appearance_view(&app.ui_settings, selected_row, content_area.width)
                 .lines
@@ -2121,6 +2278,13 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             &app.tree,
             &mut preview_tree_state,
             crate::tree_ui::TreeRenderOptions {
+                visibility: None,
+                toolbar_layout: &app.ui_settings.tree_toolbar_layout,
+                custom_toolbar_profiles: None,
+                custom_toolbar_selected: None,
+                custom_toolbar_hovered: None,
+                custom_toolbar_pending: None,
+                custom_agent_labels: None,
                 focused: false,
                 elapsed_ms: app.started_at.elapsed().as_millis(),
                 terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
@@ -2154,6 +2318,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 hover: crate::tree_ui::TreeHoverState::default(),
                 sidebar_files: &Default::default(),
                 chatroom_projects: &Default::default(),
+                resources: Some(&app.resources),
                 panes: &app.panes,
             },
         );
@@ -4077,12 +4242,30 @@ pub(crate) fn described_settings_scroll_for_selection(
     area: Rect,
     state: &SettingsState,
 ) -> u16 {
-    let rows = match state.tab {
-        SettingsTab::Sound => sound_description_geometry(area.width).row_lines,
-        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width).row_lines,
+    let line = match state.tab {
+        SettingsTab::Sound => sound_description_geometry(area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::VoiceControl => voice_view(app, state.selected_row, area.width)
+            .row_lines
+            .get(state.selected_row)
+            .copied(),
+        SettingsTab::Appearance => {
+            let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                .get(state.selected_row)
+                .copied();
+            let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            view.row_lines
+                .iter()
+                .find(|(row, _)| Some(*row) == selected)
+                .map(|(_, line)| usize::from(*line))
+                // Wide layouts replace the first selector with sizing cards.
+                .or_else(|| (selected == Some(AppearanceRow::LeftPanelSizingMode)).then_some(0))
+        }
         _ => return state.scroll,
     };
-    let Some(line) = rows.get(state.selected_row).copied() else {
+    let Some(line) = line else {
         return state.scroll;
     };
     let line = line.min(usize::from(u16::MAX)) as u16;
@@ -4599,6 +4782,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::MinimumTerminalWidth => "Minimum terminal width",
         AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::ProjectSeparators => "Project separators",
+        AppearanceRow::ResourceGrouping => "Group agents under resources",
         AppearanceRow::TreeToolbarAlwaysVisible => "Tree toolbar always visible",
         AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
@@ -4613,6 +4797,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
         AppearanceRow::SectionFrames => "Section frames",
         AppearanceRow::LastPrompt => "Last prompt banner",
+        AppearanceRow::GoalTab => "Goal tab",
+        AppearanceRow::GoalToolbarIcon => "Goal toolbar icon",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::ProgressMonitor => "Progress monitor",
         AppearanceRow::ProgressMonitorMaxLines => "Progress footer lines",
@@ -4659,6 +4845,7 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
         }
+        AppearanceRow::ResourceGrouping => "Display owners and FIFO waiters beneath shared resource rows. Pane parents and split layouts stay unchanged.",
         AppearanceRow::ProjectSeparators => {
             "Draw a frame-style line after each project’s full tree, except the last. Saved for this project."
         }
@@ -4699,6 +4886,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::LastPrompt => {
             "Show the last prompt you typed or pasted and submitted into a detected agent pane, in a banner below its toolbar. Only an exactly-reconstructed submission updates it -- an unrecognised input leaves the previous prompt showing."
+        }
+        AppearanceRow::GoalTab => {
+            "Offer a Goal tab in the prompt banner when the agent has a current goal."
+        }
+        AppearanceRow::GoalToolbarIcon => {
+            "Show a goal flag in the agent toolbar with a readable goal popover."
         }
         AppearanceRow::LastPromptMaxLines => {
             "Maximum rows the last-prompt banner can grow to -- it only reserves as many as the prompt actually needs (wrapping long lines to fit), up to this ceiling. A prompt that still doesn't fit is truncated in the middle, keeping its first and last lines."
@@ -4752,6 +4945,7 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
         }
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
+        AppearanceRow::ResourceGrouping => on_off(ui.resource_queue_grouping),
         AppearanceRow::ProjectSeparators => on_off(ui.show_project_separators),
         AppearanceRow::TreeToolbarAlwaysVisible => on_off(ui.tree_toolbar_always_visible),
         AppearanceRow::TreeRowManagementControls => on_off(ui.show_tree_row_management_controls),
@@ -4770,6 +4964,8 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         AppearanceRow::ShowToolbarLabels => on_off(ui.show_toolbar_labels),
         AppearanceRow::SectionFrames => on_off(ui.section_frames_enabled),
         AppearanceRow::LastPrompt => on_off(ui.last_prompt_enabled),
+        AppearanceRow::GoalTab => on_off(ui.goal_tab_enabled),
+        AppearanceRow::GoalToolbarIcon => on_off(ui.goal_toolbar_icon_enabled),
         AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
         AppearanceRow::ProgressMonitor => on_off(ui.progress_monitor_enabled),
         AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
@@ -5056,11 +5252,7 @@ pub(crate) fn settings_choice_control(
         let first = models.iter().find(|model| !model.trim().is_empty());
         let can_step = fallback
             || if value.trim().is_empty() {
-                first.is_some_and(|first| {
-                    models
-                        .iter()
-                        .any(|model| !model.trim().is_empty() && model != first)
-                })
+                first.is_some()
             } else {
                 models
                     .iter()
@@ -6511,11 +6703,18 @@ pub fn simple_content_hit(
 fn about_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
+        Line::from(vec![
+            Span::styled("ilium", Style::new().add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(
+                format!("v{}", env!("CARGO_PKG_VERSION")),
+                Style::new().add_modifier(Modifier::DIM),
+            ),
+        ]),
         Line::from(Span::styled(
-            "ilium",
-            Style::new().add_modifier(Modifier::BOLD),
+            "  ───────────────────────────────────",
+            theme::border_style(false),
         )),
-        Line::from(format!("Version {}", env!("CARGO_PKG_VERSION"))),
         Line::from(""),
         Line::from("A terminal multiplexer with a tree-structured pane list and AI"),
         Line::from(
@@ -6780,7 +6979,7 @@ mod number_control_tests {
     }
 
     #[test]
-    fn empty_model_with_one_distinct_discovered_option_disables_cycle_but_keeps_catalog() {
+    fn empty_model_with_one_distinct_discovered_option_enables_initial_selection() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("synthetic-single-model".into(), directory.path().into());
         app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
@@ -6807,14 +7006,14 @@ mod number_control_tests {
                 Position::new(geometry.previous.x, geometry.previous.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::PreviousChoice)
         );
         assert_eq!(
             control.hit(
                 Position::new(geometry.next.x, geometry.next.y),
                 PointerButton::Left
             ),
-            None
+            Some(ControlAction::NextChoice)
         );
         assert_eq!(
             control.hit(
@@ -6823,6 +7022,17 @@ mod number_control_tests {
             ),
             Some(ControlAction::OpenChoices)
         );
+        // Once selected, the single distinct model has nowhere to cycle.
+        app.inference_settings.ollama.model = "synthetic-only-model".into();
+        let (_, selected_control) =
+            settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
+        let selected = selected_control.geometry();
+        for point in [selected.previous, selected.next] {
+            assert_eq!(
+                selected_control.hit(Position::new(point.x, point.y), PointerButton::Left),
+                None
+            );
+        }
         app.ollama_models.push("synthetic-second-model".into());
         let (_, control) =
             settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
@@ -7149,17 +7359,18 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙",
-            "↻", "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
+            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
             assert_eq!(tab_icon(tab), expected_icon, "semantic icon for {tab:?}");
         }
 
-        let area = Rect::new(0, 0, 30, 56);
+        let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+        let area = Rect::new(0, 0, 30, spacious_height);
         for active in SettingsTab::ALL {
-            let mut terminal = Terminal::new(TestBackend::new(30, 56)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(30, spacious_height)).unwrap();
             terminal
                 .draw(|frame| render_tab_list(frame, area, active))
                 .unwrap();
@@ -7357,7 +7568,8 @@ mod tests {
 
     #[test]
     fn compact_navigation_keeps_distinct_icon_labels_readable() {
-        let area = Rect::new(0, 0, 12, 56);
+        let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+        let area = Rect::new(0, 0, 12, spacious_height);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
             .draw(|frame| render_tab_list(frame, area, SettingsTab::Appearance))
@@ -8596,6 +8808,42 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn appearance_keyboard_selection_keeps_controls_visible_at_compact_heights() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("appearance-scroll-test".into(), directory.path().into());
+        for mode in LeftPanelSizingMode::ALL {
+            app.ui_settings.left_panel_sizing.mode = mode;
+            let rows = AppearanceRow::visible(mode);
+            for width in [38, 56, SIZING_CARDS_MINIMUM_CONTENT_WIDTH, 120] {
+                let area = Rect::new(7, 3, width, 18);
+                let mut state = SettingsState {
+                    tab: SettingsTab::Appearance,
+                    ..SettingsState::default()
+                };
+                for selected in (0..rows.len()).chain((0..rows.len()).rev()) {
+                    state.selected_row = selected;
+                    state.scroll = described_settings_scroll_for_selection(&app, area, &state);
+                    let view = appearance_view(&app.ui_settings, selected, width);
+                    let line = view
+                        .row_lines
+                        .iter()
+                        .find(|(row, _)| *row == rows[selected])
+                        .map(|(_, line)| *line)
+                        .unwrap_or(0);
+                    assert!(
+                        line >= state.scroll,
+                        "{mode:?} width {width} row {selected}"
+                    );
+                    assert!(
+                        line < state.scroll + area.height,
+                        "{mode:?} width {width} row {selected} below viewport"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

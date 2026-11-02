@@ -602,7 +602,7 @@ export function disableHistory(): void {
 </tr>
 <tr>
 <td>Validation</td>
-<td><code>enum</code> with <code>enum_titles</code>; a value that is not an option is <code>invalid-argument</code>; <code>source</code> together with <code>options</code> is <code>manifest.settings-source</code>; an unknown catalogue is <code>manifest.catalog-unknown</code></td>
+<td><code>enum</code> with <code>enum_titles</code>; a value that is not an option is <code>invalid-argument</code>; a <code>choice</code> row with both or neither of <code>options</code> and <code>source</code> is <code>manifest.settings-source</code>; an unknown catalogue is <code>manifest.catalog-unknown</code></td>
 </tr>
 <tr>
 <td>Written</td>
@@ -900,7 +900,7 @@ export function authorised(config: Config): boolean {
 </tr>
 <tr>
 <td>Written</td>
-<td>1 s after the last keystroke, and at once when the editor closes</td>
+<td>600 ms after the last keystroke, or 1 s when the text is above 10,000 bytes (<code>debounce_ms</code> overrides both), and at once when the editor closes</td>
 </tr>
 </tbody>
 </table>
@@ -974,7 +974,7 @@ export function renderEntry(config: Config, text: string): string {
 </tr>
 </tbody>
 </table>
-<p>The row stores the path as text. It grants no file access: the plugin needs its own <code>fs</code> grant to open the path, and the path must lie inside a scope it holds.</p>
+<p>The row stores the path as text. It grants no file access: the plugin needs its own <code>fs.*</code> grant to open the path, and the path must lie inside a scope it holds.</p>
 <figure>
 <pre class="term">╭  ≡ ● · Path states────────────────────────────────────╮
 │  History file …………………………………………………………… ‹ ~/clips.db ›  │
@@ -1296,11 +1296,11 @@ export function showCount(count: number): void {
 </tr>
 <tr>
 <td>Fields</td>
-<td><code>title</code>, <code>rows</code> (1 to 12, no nested <code>group</code>), <code>collapsed</code></td>
+<td><code>title</code>, <code>rows</code> (1 to 12 children, no nested <code>group</code>), <code>collapsed</code></td>
 </tr>
 <tr>
 <td>Validation</td>
-<td><code>manifest.settings-limit</code> above 12 rows; a nested group is <code>manifest.settings-row-field</code></td>
+<td><code>manifest.settings-limit</code> above 12 children in a group (a section holds up to 24 rows, a group counting as one row plus its children); a nested group is <code>manifest.settings-row-field</code></td>
 </tr>
 <tr>
 <td>Written</td>
@@ -1850,12 +1850,12 @@ export function showBudget(used: number): void {
 </code></pre>
 <p>Hidden rows make the row positions jump under the cursor. Use <code>depends_on</code> when the user should see where a setting lives, and <code>visible_when</code> when the row would only confuse.</p>
 <h4 id="scope-and-applies">scope and applies</h4>
-<p><code>scope: "project"</code> stores the value in the project's <code>.ilium/</code> settings under <code>[plugins."&lt;plugin-id&gt;"]</code> instead of the user configuration. The project value wins while that project is open. A <code>settings-changed</code> event carries the scope of the change in its <code>scope</code> field. <code>applies: "restart"</code> draws <code>↻</code> after the value and the note <code>Applies after restart.</code> The plugin reads the new value only after it restarts.</p>
+<p><code>scope: "project"</code> stores the value in the project's <code>.ilium/</code> settings under <code>[plugins."&lt;plugin-id&gt;"]</code> instead of the user configuration. The project value wins while that project is open. A <code>settings-changed</code> event carries the side that owns the changed keys in its <code>side</code> field. <code>applies: "restart"</code> draws <code>↻</code> after the value and the note <code>Applies after restart.</code> The plugin reads the new value only after it restarts.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
     for event in batch {
         let Event::SettingsChanged(change) = event else { continue };
-        // change.scope tells which side owns the keys; change.origin says who wrote them
+        // change.side tells which side owns the keys; change.origin says who wrote them
         self.reload(&amp;change.keys);
     }
     Vec::new()

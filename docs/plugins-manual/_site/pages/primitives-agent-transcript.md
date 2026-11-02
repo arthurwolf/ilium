@@ -2,7 +2,7 @@
 
 ## Agent transcript and signals
 
-The base agent primitive tells a plugin which agent runs in a pane and what it is doing. The primitive also gives the facts a cost meter, a context gauge or a handoff tool needs: the model in use, the prompt epoch, the typed transcript of the conversation, and two events, `signal-changed` and `agent-model-changed`. The host parses the agent's session file. The plugin never receives a file path to read.
+The base agent primitive tells a plugin which agent runs in a pane and what it is doing. The primitive also gives the facts a cost meter, a context gauge or a handoff tool needs: the model in use, the prompt epoch, the typed transcript of the conversation, and two events, `signal-changed` and `agent-model-changed`. The host parses the agent's session file.
 
 This page extends [Agent primitive](/pages/primitives-agent/).
 
@@ -43,7 +43,7 @@ take-transcript: func(request: request-id) -> option<list<transcript-turn>>;
 
 ### Signals
 
-A signature can declare named signals that the host extracts from the agent's status line or screen: context percentage, session cost, the rate-limit reset time. `signal-changed { pane, signal, value }` carries the signal name and its value as a string. The event is coalesced by pane and signal, so a rapidly changing percentage arrives as its latest value. Signal names come from the signature, so a plugin lists the names it cares about in its own configuration.
+A signature can declare named signals that the host extracts from the agent's status line or screen: context percentage, session cost, the rate-limit reset time. `signal-changed { pane, signal, value }` carries the signal name and its value as a string. The event is coalesced by pane and signal, so a rapidly changing percentage arrives as its latest value. Signal names come from the signature, so a plugin keeps the names it cares about in its own settings (for example a `list-editor` row) and compares them with `signal.signal` in the handler. The host delivers only signals that a signature declares; a name that no signature declares is ignored and never delivered, and it raises no error.
 
 ### The transcript
 
@@ -82,10 +82,10 @@ for event in batch {
         Event::SignalChanged(signal) if signal.signal == "context-percent" => {
             self.context.insert(signal.pane, signal.value);
         }
-        Event::AgentActivityChanged(change) if change.activity == AgentActivity::Idle => {
+        Event::AgentActivityChanged(change) if change.current == AgentActivity::Idle => {
             match agent::transcript(TranscriptQuery {
-                pane: change.pane, last_turns: 20, max_bytes: 256 * 1024 }) {
-                Ok(request) => { self.pending.insert(request, change.pane); }
+                pane: change.node, last_turns: 20, max_bytes: 256 * 1024 }) {
+                Ok(request) => { self.pending.insert(request, change.node); }
                 Err(error) => log::log(Level::Warn, &error.message),
             }
         }
@@ -137,7 +137,7 @@ const tokens = turns.reduce((sum, turn) => sum + (turn.tokens ?? 0), 0);
 | `transcript` | `unsupported` | the signature has no known session file format |
 | `transcript` | `not-found` | no session yet for the pane |
 | `transcript` | `invalid-argument` | `last-turns` over 512 or `max-bytes` over 4 MiB |
-| completion | `io`, `quota-exceeded` | the file could not be read, or the result was too large to hold |
+| completion | `io` | the file could not be read |
 | any | `not-permitted` | the grant is missing |
 
 ### What the user sees

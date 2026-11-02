@@ -675,7 +675,7 @@ const text = paragraph([], {
 <li>With <code>link-command</code> set, the host runs that command through the command registry on activation. It passes the arguments <code>{"target": "&lt;link target&gt;"}</code>. The command must be one of the plugin's own commands or covered by its <code>commands.invoke</code> grant. The plugin then receives <code>command-invoked</code>.</li>
 <li>Without <code>link-command</code>, the plugin receives a <code>ui-action</code> of kind <code>activated</code> whose value is <code>text(&lt;link target&gt;)</code>. The host never opens a browser itself.</li>
 </ul>
-<p>With <code>task-click</code>, a click on a task item sends <code>toggled</code> with <code>text("&lt;line&gt;")</code>, the line number of the item. The plugin rewrites its source, for example <code>- [ ]</code> to <code>- [x]</code>, and renders again. With <code>images</code>, an image written as <code>![alt](asset:path)</code>, or a file inside a granted <code>fs</code> scope, renders through the rules of the <code>image</code> widget. Any other image shows its alt text.</p>
+<p>With <code>task-click</code>, a click on a task item sends <code>toggled</code> with <code>text("&lt;line&gt;")</code>, the one-based line number of the item in the source text (the first line is <code>1</code>; lines are split at <code>\n</code>). The plugin rewrites its source, for example <code>- [ ]</code> to <code>- [x]</code>, and renders again. With <code>images</code>, an image written as <code>![alt](asset:path)</code>, or a file inside a granted <code>fs</code> scope, renders through the rules of the <code>image</code> widget. Any other image shows its alt text.</p>
 <figure>
 <pre class="term">╭─ Help: keys ─────────────────────────────────────────╮
 │ <span class="t-hi">Keys</span>                                                 │
@@ -996,7 +996,7 @@ export const { lifecycle, handler, views } = definePlugin({
   },
 });
 </code></pre>
-<p>The <code>toggled</code> value is the zero-based or one-based line number as the host counts it; check it against your own source on the first run, because the specification names it only as the line of the task item.</p>
+<p>The <code>toggled</code> value is the one-based line number of the task item in the source text: the first line of the source is <code>"1"</code>. Convert it with <code>lines[Number(value) - 1]</code> when you index an array.</p>
 <h2 id="width-and-language">Width and language</h2>
 <p>Every text widget lays out text by cell width, and a wide character takes two cells. A plugin MUST measure text with <code>display-width</code> and MUST NOT size a column by character count. [AUT-617] See <a href="/pages/guide-internationalisation/">Internationalisation</a>.</p>
 <h2 id="edge-cases-and-errors">Edge cases and errors</h2>
@@ -1023,7 +1023,7 @@ export const { lifecycle, handler, views } = definePlugin({
 </tr>
 <tr>
 <td>A tooltip longer than 200 characters</td>
-<td>Not allowed. The limit is 200 characters.</td>
+<td>The host cuts it at 199 Unicode scalar values and appends an ellipsis. There is no error.</td>
 </tr>
 <tr>
 <td><code>set-widget-state</code> with an unknown key</td>
@@ -1067,7 +1067,7 @@ export const { lifecycle, handler, views } = definePlugin({
 </tr>
 </tbody>
 </table>
-<p>The limits of the whole tree are in <a href="/pages/errors-and-limits/">Errors and limits</a>. Trap behaviour is in the <a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> pages.</p>
+<p>The limits of the whole tree are in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>. Trap behaviour is in the <a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> pages.</p>
 <h2 id="what-the-user-sees">What the user sees</h2>
 <p>Text takes its colours from the active theme. A clickable span or link is accent coloured and underlined, so it reads as a target; a task box toggles under the pointer; key hints look the same as the hints in the status bar; and a diff is coloured red and green on a muted gutter, like the diff views of the client.</p>
 <p>Requirement ids for this page: [WID-025]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
@@ -1079,7 +1079,7 @@ export const { lifecycle, handler, views } = definePlugin({
 <li><a href="/pages/widgets-input/">Input</a> for editable values</li>
 <li><a href="/pages/capability-commands-invoke/">Commands invoke</a></li>
 <li><a href="/pages/ui-model/">The UI model</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 </ul>
 <p>API version: <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/widgets-media-and-embedded/"><small>Previous</small>Media and embedded views</a><a class="next" href="/pages/widgets-status-and-feedback/"><small>Next</small>Status and feedback</a></nav>

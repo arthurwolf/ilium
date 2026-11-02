@@ -20,13 +20,13 @@ The command palette is a kernel surface: one filterable list of every command th
 
 | Field | Type | Meaning |
 |---|---|---|
-| `id` | string | Unique within the plugin. The host namespaces it as `<plugin-id>.<id>`. |
+| `id` | string | Unique within the plugin. The global id is `<plugin-id>/<local-id>`, for example `example.todo/scan` ([commands](/pages/api-commands/)). |
 | `title` | string | Shown in the palette and in menus. At most 80 characters. |
 | `category` | string, optional | Group heading. At most 32 characters. Commands without one fall under the plugin name. |
-| `keywords` | list of string, optional | At most 8 words matched by the filter but not shown. |
+| `keywords` | list of string, optional | At most 8 strings of 1 to 24 characters each, without spaces, matched by the filter but not shown. |
 | `palette` | boolean, optional | `false` hides the command from the palette (default `true`). |
 
-The filter is the host's, as for [catalogues](/pages/api-catalogs/): case-insensitive substring over title, category and keywords, prefix matches first. Enabled state and the check mark come from `commands.set-state` (see [commands](/pages/api-commands/)). A disabled command stays visible and dim.
+The filter is the host's, as for [catalogues](/pages/api-catalogs/): case-insensitive substring over title, id, category and keywords, prefix matches first. Enabled state and the check mark come from `commands.set-state` (see [commands](/pages/api-commands/)). A disabled command stays visible and dim.
 
 <figure>
 <pre class="term">╭  ≡ ● · Commands ──────────────────────────────╮
@@ -49,11 +49,14 @@ Choosing an entry invokes it: the plugin receives `command-invoked` with origin 
 **Rust**
 
 ```rust
-fn on_event(&mut self, event: Event) -> Vec<Submission> {
-    match event {
-        Event::CommandInvoked(invoked) if invoked.command == "scan" => self.start_scan(),
-        _ => Vec::new(),
-    }
+fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+    batch
+        .into_iter()
+        .flat_map(|event| match event {
+            Event::CommandInvoked(invoked) if invoked.command == "example.todo/scan" => self.start_scan(),
+            _ => Vec::new(),
+        })
+        .collect()
 }
 ```
 
@@ -62,7 +65,7 @@ fn on_event(&mut self, event: Event) -> Vec<Submission> {
 ```ts
 onEvents(batch) {
   return batch.flatMap((event) =>
-    event.tag === 'command-invoked' && event.val.command === 'scan' ? startScan() : []);
+    event.tag === 'command-invoked' && event.val.command === 'example.todo/scan' ? startScan() : []);
 }
 ```
 

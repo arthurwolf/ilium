@@ -8,7 +8,7 @@ The short answer is that there are five ways, from light to heavy, and every cor
 
 ### What you need
 
-- **A grant for each way.** Observing needs a topic grant. Driving needs a service or command grant. Extending needs [extensions.contribute](/pages/capability-extensions-contribute/). Offering needs [extensions.provide](/pages/capability-extensions-provide/). Replacing needs no grant, but the user confirms it.
+- **A grant for each way.** Observing needs a topic grant. Driving needs a service or command grant. Extending needs [extensions.contribute](/pages/capability-extensions-contribute/). Offering needs [extensions.provide](/pages/capability-extensions-provide/). Replacing needs no grant of its own to take the place of a core plugin, and the user confirms it. A replacement still declares the `services.provide` and `extensions.provide` grants for the services and extension points it re-offers, as the manifest example below shows.
 - **The page of the core plugin.** Every core plugin page has an **Extension points** section that lists its points, services and topics. [Reference: core extension points](/pages/reference-core-extension-points/) lists all of them in one place.
 - **An SDK.** Rust: stable 1.90 or later with the `wasm32-wasip2` target and the `ilium-plugin-sdk` crate. TypeScript: Bun 1.2 or later and `@ilium/plugin-sdk`.
 
@@ -346,16 +346,16 @@ A third-party plugin that wants a core topic lists it in `contributes.topics.sub
 
 ### Timing of hooks on core points
 
-A hook on a core plugin's point runs on the side that owns the point (see the Side column of [Core extension points](/pages/reference-core-extension-points/)), one handler after another, under the deadlines in [Extension points](/pages/api-extension-points/) (20 ms per handler on every core hook, 100 ms for the chain, measured from the first handler). For `veto`, `transform` and `first` points the core plugin holds that one action until the chain completes (at most the 100 ms cap plus one deadline) and keeps serving other events meanwhile. For `observe` points the action does not wait, and observe handlers may run after it. [EXT-029] See [Host scheduling](/pages/reference-host-scheduling/).
+A hook on a core plugin's point runs on the side that owns the point (see the Side column of [Core extension points](/pages/reference-core-extension-points/)), one handler after another, under the deadlines in [Extension points](/pages/api-extension-points/) (20 ms per handler by default, set per handler by its manifest `deadline_ms` between 5 and 50 ms, 100 ms for the chain, measured from the first handler). For `veto`, `transform` and `first` points the core plugin holds that one action until the chain completes (at most the 100 ms cap plus one deadline) and keeps serving other events meanwhile. For `observe` points the action does not wait, and observe handlers may run after it. [EXT-029] See [Host scheduling](/pages/reference-host-scheduling/).
 
 ### Ordering, priorities and the user
 
-- **Priority.** A contribution has a priority from 0 to 100, 50 by default. Lower runs first. Among contributions of equal priority, T1 comes before T2 and T3, then plugin id order, then extension id order. The declared priority is kept.
+- **Priority.** A contribution has a priority from 0 to 100, 50 by default. Lower runs first, but only within a tier band: a T1 contribution runs before a T2 or T3 contribution of any priority, then priority orders contributions inside the band, then plugin id order, then extension id order [SEC-288]. The declared priority is kept.
 - **User order.** On the owner's Extensions tab the user can move any contributor up or down and turn it off. The user's order is a stored list per point. It overrides priority and tier, a contributor installed later runs after the stored items, and an update keeps the stored position. The host stores it, not the plugin.
 - **Chains.** A `transform` chain passes each handler the output of the previous one. A `veto` chain stops at the first refusal. A `first` chain stops at the first answer. An `observe` chain calls everyone.
 - **Fail open.** A handler that times out, traps or errors counts as `pass`. A timeout never vetoes. A breach is a timeout, a trap, an error return, an oversize or schema-failing reply, a CPU overrun or a skip because the instance was busy. Three consecutive breaches stop that extension until the contributor's instance restarts or the user presses Reset. The user sees `stopped after 3 failures` and a Reset button. The whole chain has a cap of 100 ms, and handlers that have not started by then are skipped.
 - **Dormant contributions.** A contribution is dormant when its owner is not installed, is disabled, or does not satisfy its `@version`. It stays in the package and does nothing. It becomes active when the owner appears, and the Plugins screen shows `waiting for <owner-id>` until then. Install never fails because an owner is missing. See [lifecycle](/pages/lifecycle/).
-- **Point versions.** Every point has a semver `version` for its schema. A contributor can write `<point>@<minimum-version>`. The match is: same major; minor at least the requested one; for major 0 the minor must be equal; patch is ignored. A contribution without `@version` matches any owner version. A contribution that does not match stays dormant. See [versioning](/pages/versioning/).
+- **Point versions.** Every point has a semver `version` for its schema. A contributor can write `<point>@<minimum-version>`. The version is a caret range (PKG-317, PKG-318, PKG-328 in [Dependency resolution](/pages/reference-dependency-resolution/)): `@1.2.0` accepts `>=1.2.0 <2.0.0` and `@0.1.0` accepts `>=0.1.0 <0.2.0`. A contribution without `@version` matches any owner version. A contribution that does not match stays dormant. See [versioning](/pages/versioning/).
 
 A short rule for choosing a mode when you offer a point: use `observe` when you only tell others, `transform` when others may change data, `veto` when others may stop an action, and `first` when exactly one answer is needed.
 
@@ -408,7 +408,7 @@ No. A hook exists only where the owner declared a point. If you need one, ask fo
 A hook can refuse or change data only where the mode allows it. A hook that is late, traps or errors is ignored, and three consecutive breaches stop it. A hook cannot crash the owner.
 
 **Does a hook slow the feature down?**
-A little. T1 handlers share the process. T2 and T3 handlers cost one helper round trip. A handler gets 5 to 50 ms (20 by default) and a chain gets 100 ms. Owners should not put hooks on a path hotter than about 100 calls per second.
+A little. T1 handlers share the process. T2 and T3 handlers cost one helper round trip. A handler gets 20 ms by default (its manifest `deadline_ms` may set 5 to 50 ms) and a chain gets 100 ms. Owners should not put hooks on a path hotter than about 100 calls per second.
 
 **What if the owner is not installed?**
 Your contribution is dormant. It does nothing, and the Plugins screen shows `waiting for <owner-id>`. It becomes active when the owner appears.

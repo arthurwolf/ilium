@@ -400,7 +400,7 @@
 <ul>
 <li>A plugin that builds and activates. Start with <a href="/pages/getting-started-first-plugin/">Your first plugin</a> if you have none.</li>
 <li>The grants named in each recipe. The clock, timers and storage need no grant.</li>
-<li>The limits below. Every number comes from <a href="/pages/errors-and-limits/">Errors and limits</a> and <a href="/pages/performance/">Performance</a>. This page does not define them again.</li>
+<li>The limits below. Every number comes from <a href="/pages/reference-errors-and-limits/">Errors and limits</a> and <a href="/pages/performance/">Performance</a>. This page does not define them again.</li>
 </ul>
 <table>
 <thead>
@@ -675,7 +675,7 @@ fn back_off_delays_the_next_send() {
 <p><strong>Rule.</strong> A cached value MUST carry its fetch time as <code>now-unix-millis</code> inside the stored bytes, and the reader MUST compare it with the current time. The host does not expire entries by age. [AUT-009]</p>
 <p><strong>Rule.</strong> When several sessions can refresh the same entry, only the caller whose <code>lease</code> returned true MAY refresh it. [AUT-010]</p>
 <p><strong>Rust</strong></p>
-<pre><code class="language-rust">use ilium_plugin_sdk::host::{clock, storage::{self, Bucket}};
+<pre><code class="language-rust">use ilium_plugin_sdk::host::storage::{self, Bucket};
 
 const TTL_MILLIS: u64 = 10 * 60 * 1000;
 
@@ -691,8 +691,7 @@ fn decode(bytes: &amp;[u8]) -&gt; Option&lt;(u64, &amp;[u8])&gt; {
 }
 
 /// Returns fresh bytes, stale bytes while another session refreshes, or None.
-pub fn read_cached(key: &amp;str) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
-    let now = clock::now_unix_millis();
+pub fn read_cached(key: &amp;str, now: u64) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
     let stored = storage::get(Bucket::Shared, key);
     let fresh = stored
         .as_deref()
@@ -707,18 +706,16 @@ pub fn read_cached(key: &amp;str) -&gt; Option&lt;Vec&lt;u8&gt;&gt; {
     stored.as_deref().and_then(decode).map(|(_, body)| body.to_vec())
 }
 
-pub fn write_cached(key: &amp;str, body: &amp;[u8]) {
-    let _ = storage::put(Bucket::Shared, key, &amp;encode(clock::now_unix_millis(), body));
+pub fn write_cached(key: &amp;str, now: u64, body: &amp;[u8]) {
+    let _ = storage::put(Bucket::Shared, key, &amp;encode(now, body));
 }
 </code></pre>
 <p><strong>TypeScript</strong></p>
-<pre><code class="language-ts">import { nowUnixMillis } from '@ilium/plugin-sdk/host/clock';
-import * as storage from '@ilium/plugin-sdk/host/storage';
+<pre><code class="language-ts">import * as storage from '@ilium/plugin-sdk/host/storage';
 
 const TTL_MILLIS = 10n * 60n * 1000n;
 
-export function readCached(key: string): Uint8Array | undefined {
-  const now = nowUnixMillis();
+export function readCached(key: string, now: bigint): Uint8Array | undefined {
   const stored = storage.get('shared', key);
   const parsed = stored &amp;&amp; stored.length &gt;= 8 ? split(stored) : undefined;
   if (parsed &amp;&amp; now - parsed.at &lt; TTL_MILLIS) return parsed.body;
@@ -731,7 +728,7 @@ function split(bytes: Uint8Array): { at: bigint; body: Uint8Array } {
   return { at: view.getBigUint64(0, true), body: bytes.subarray(8) };
 }
 </code></pre>
-<p><strong>Test.</strong> <code>encode</code> and <code>decode</code> are pure, so test them without the host. <code>read_cached</code> takes <code>now</code> as an argument in a production plugin, so the TTL branch can be tested with fixed numbers.</p>
+<p><strong>Test.</strong> <code>encode</code> and <code>decode</code> are pure, so test them without the host. <code>read_cached</code> and <code>write_cached</code> take <code>now</code> as an argument (the handler reads the clock once per batch, [AUT-001]), so the TTL branch can be tested with fixed numbers.</p>
 <p><strong>Traps.</strong></p>
 <ul>
 <li>A <code>put</code> into <code>shared</code> of a value over 1 MiB fails with <code>invalid-argument</code>, not <code>quota-exceeded</code>.</li>
@@ -740,7 +737,7 @@ function split(bytes: Uint8Array): { at: bigint; body: Uint8Array } {
 </ul>
 <h2 id="recipe-4-lists-larger-than-the-tree">Recipe 4: lists larger than the tree</h2>
 <p><strong>Problem.</strong> You have thousands of rows, such as search hits, log lines or files. A tree is limited to 4,096 nodes and 1,024 KiB, and a render must finish in 10 ms.</p>
-<p><strong>Constraints.</strong> The <code>%list</code> and <code>table</code> widgets keep <code>selected</code> and <code>offset</code> as host-owned state, which the plugin reads through <code>ui.widget-state</code>. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps <code>check-list</code> (256 items) and <code>list-editor</code> (64 items) are enforced at render time with <code>invalid-argument</code>.</p>
+<p><strong>Constraints.</strong> The <code>%list</code> and <code>table</code> widgets keep <code>selected</code> and <code>offset</code> as host-owned state, which the plugin reads through <code>ui.widget-state</code>. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps <code>check-list</code> (256 items) and <code>list-editor</code> (64 items) are enforced at render time: a larger one traps with <code>ui.invalid-tree</code>.</p>
 <p><strong>Rule.</strong> A view MUST render only the rows in the visible window plus a small margin, and MUST NOT put all rows into the tree. The ceiling is 4,096 nodes and 1,024 KiB for the whole tree. [AUT-011]</p>
 <p><strong>Rule.</strong> A view that hides rows behind a window MUST show how many rows exist and where the window is, for example <code>41 to 60 of 3,212</code>, so that the user knows more exist. [AUT-012]</p>
 <p><strong>Rust</strong></p>

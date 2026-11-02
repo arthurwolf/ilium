@@ -426,7 +426,7 @@
 </tbody>
 </table>
 <p>Users add the key once with <code>ilium plugin trust add publisher.pub</code> and install the package with <code>ilium plugin install</code>. A newer version of an installed id is an update.</p>
-<p>The manual also specifies an optional registry, a set of signed static files that a client can read (see <a href="/pages/reference-registry/">Registry reference</a>). It adds search, channels, yank and deprecate. The command <code>ilium plugin publish</code> is described there, while the command-line reference marks it as reserved in this contract version. Until those two pages agree, an author MUST treat the package file as the only publishing route that is certain to work, and MAY add a registry as a second route when the host supports it. [AUT-301]</p>
+<p>The manual also specifies an optional registry, a set of signed static files that a client can read (see <a href="/pages/reference-registry/">Registry reference</a>). It adds search, channels, yank and deprecate. The command <code>ilium plugin publish &lt;file&gt; --registry &lt;url&gt;</code> uploads a signed package to a registry (see <a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a>). The package file stays the base route that needs no registry, and an author MAY add a registry as a second route. [AUT-301]</p>
 <h2 id="before-you-release">Before you release</h2>
 <p>Run these in the project folder, in this order. Each is offline.</p>
 <pre><code class="language-bash">ilium plugin check
@@ -466,7 +466,7 @@ ilium plugin verify dist/com.example.notes-1.4.0.iliumpkg
 </tr>
 <tr>
 <td><code>verify</code></td>
-<td>Offline replay of the install stages 1 to 8 on the finished file</td>
+<td>Offline replay of the install stages 1 to 7 on the finished file</td>
 </tr>
 </tbody>
 </table>
@@ -552,7 +552,7 @@ ilium plugin sign dist/com.example.notes-1.4.0.iliumpkg --key ~/keys/example/pub
 <td>A later <code>pack</code> writes a new archive without a signature</td>
 </tr>
 <tr>
-<td>Sign in a clean environment, or give CI the key through <code>ILIUM_PLUGIN_SIGNING_KEY</code></td>
+<td>Sign in a clean environment, or give CI the key through <code>ILIUM_PLUGIN_SIGNING_KEY</code> (path of a key file) or <code>ILIUM_PUBLISHER_KEY</code> (PEM text)</td>
 <td>The key never appears in a command line or a log</td>
 </tr>
 </tbody>
@@ -560,7 +560,7 @@ ilium plugin sign dist/com.example.notes-1.4.0.iliumpkg --key ~/keys/example/pub
 <p>The secret key MUST NOT be committed, packaged or printed. [AUT-306]</p>
 <p>A release MUST be signed after the last <code>pack</code>, and the signed file MUST be the file that users receive. Signing twice with the same key gives the same bytes. [AUT-307]</p>
 <h3 id="show-users-the-fingerprint">Show users the fingerprint</h3>
-<p>The key fingerprint is the SHA-256 of the raw public key. Users see its short form (for example <code>3f2a…9c01</code>) in the trust dialog. The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two. [AUT-308]</p>
+<p>The key fingerprint is the SHA-256 of the raw public key. Users see its short form (the first 8 digits, for example <code>3f2a 91c0</code>) in the trust dialog. The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two. [AUT-308]</p>
 <h3 id="lost-leaked-or-changed-keys">Lost, leaked or changed keys</h3>
 <table>
 <thead>
@@ -579,7 +579,7 @@ ilium plugin sign dist/com.example.notes-1.4.0.iliumpkg --key ~/keys/example/pub
 <tr>
 <td>Key leaked</td>
 <td>Anyone can sign as you</td>
-<td>Stop shipping, tell users to run <code>ilium plugin trust revoke &lt;key_id&gt;</code>, publish under a new key</td>
+<td>Stop shipping, tell users to run <code>ilium plugin trust revoke &lt;key_id&gt; --reason compromised</code>, publish under a new key</td>
 </tr>
 <tr>
 <td>A known publisher id arrives with another key</td>

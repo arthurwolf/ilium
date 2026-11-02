@@ -12,14 +12,14 @@ Ilium keeps one rule about names: a title that you typed by hand is never replac
 - **Session naming.** New sessions get a name, and you can trigger a name by hand (Triggering titles manually).
 - **Tree organisation.** The model proposes groups, and one undo step reverts them (Tree organization instructions; Tree organization in the privacy guide).
 - **AI triggers.** Toggles decide which events start titling (the Triggers tab of Settings).
-- **Custom instruction inputs.** Seven text inputs steer the titles (The seven instruction inputs).
+- **Custom instruction inputs.** Seven text inputs steer the titles. They live in the shared `[inference.instructions]` table, which Inference, Titles, Recap and Smart copy all read (see [config and data migration](/pages/reference-config-and-data-migration/) and the LLM Instructions tab in [Inference](/pages/core-plugin-inference/)).
 - **Inferred-title icons.** The title also picks the icon of the row.
 
 ### See it
 
-<figure><img src="/assets/demos/03-contextual-titles.gif" alt="Pane titles change as the user sends prompts to agents" loading="lazy"><figcaption>Pane titles follow the prompts sent to each agent.</figcaption></figure>
+<figure><img src="/assets/demos/03-contextual-titles.gif" alt="A terminal gains an inferred title while the manually named Keep pane stays unchanged" loading="lazy"><figcaption>Current Ilium applies an automatic title from a supplied local response fixture. The manually named Keep pane stays unchanged.</figcaption></figure>
 
-<figure><img src="/assets/demos/01-ai-tree.gif" alt="The tree is reorganised into groups by the model" loading="lazy"><figcaption>The tree organised into groups.</figcaption></figure>
+<figure><img src="/assets/demos/01-ai-tree.gif" alt="A scripted plan regroups current Ilium panes by topic" loading="lazy"><figcaption>A scripted plan is applied to current Ilium, then the same panes are visited after thematic grouping. Local agent fixtures; no model inference.</figcaption></figure>
 
 <figure><img src="/assets/demos/07c-settings-tour-c.gif" alt="A tour of the last Settings tabs, including the title options" loading="lazy"><figcaption>The title options in Settings.</figcaption></figure>
 
@@ -142,6 +142,7 @@ use ilium_plugin_sdk::host::inference::{self, ChatMessage, CompletionRequest};
 use ilium_plugin_sdk::host::log::{self, Level};
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::TitleSource;
 
 // manifest: "capabilities": { "server": ["inference",
 //   "agent.read-prompts", "tree.read", "tree.write"] }
@@ -184,6 +185,7 @@ impl Handler for Titler {
                     submissions.push(Submission::new(Intent::RenameNode(RenameNodeSpec {
                         node,
                         title: completion.text.trim().to_string(),
+                        source: TitleSource::Inferred,
                         expected_revision: None,
                     })));
                 }
@@ -531,7 +533,7 @@ Other plugins change what `ilium.core.titles` does through the points below. The
 
 Calls `ilium:inference/provider` through the inference plugin.
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.titles"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.titles"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
 #### Example: Adds a style that puts the ticket key first
 

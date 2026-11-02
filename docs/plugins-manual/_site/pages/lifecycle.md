@@ -157,7 +157,7 @@ The `startup` trigger applies per side: a server side with `startup` starts when
 
 ## Running
 
-The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for `handler.on-events`. A breach counts as a failure. See [Errors and limits](/pages/errors-and-limits/).
+The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for `handler.on-events`. A breach counts as a failure. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ## Stop and the final save
 
@@ -346,8 +346,7 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 | `activate` returns an error | yes | Also when a `service:` or `cli:` call triggered the activation. |
 | `activate` misses its deadline | yes | |
 | `handler.on-events`, `views.render` or another export misses its deadline | yes | |
-| `deactivate` misses its deadline, reason `disabled` or `shutdown` | no | The plugin is leaving anyway. The instance is dropped and a warn line is logged. |
-| `deactivate` misses its deadline, reason `upgrade` or `revoked` | yes | The plugin was to continue. |
+| `deactivate` misses its deadline, any reason | no | The miss is logged and dropped: the instance is dropped, its restore bytes are discarded and a warn line is logged [HST-191]. |
 | Event queue overflow (more than 1,024 events by default) | yes | |
 | Memory limit of the instance reached | yes | A trap. |
 | Instantiation refused because the session memory pool is full | no | Host capacity, see below. |
@@ -447,13 +446,13 @@ A reinstalled plugin reads its kept values again. The recovery page is the only 
 
 Revoking a grant in Settings > Plugins > Capabilities, or with `ilium plugin grants <id> --revoke <grant>`, bumps the authorization epoch. Calls in flight return `revoked`, and pending requests that need the capability complete as `failed(revoked)`. The plugin receives `deactivate(revoked)` and is activated again with the reduced grant set and its restore bytes. Decorations, toolbar state, grabs, claims, highlights, filters, watches and routes that need the capability are withdrawn.
 
-A capability added later by the user, or by an accepted upgrade, produces `deactivate(shutdown)` and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.
+A capability added later by the user, or by an accepted upgrade, produces `deactivate(granted)` and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.
 
 ## Development reload
 
 `ilium plugin dev`, run in the package directory, watches the sources and reloads the plugin in a running session. This section is normative. The walkthrough is in [Debugging](/pages/debugging/).
 
-- [LIF-220] `ilium plugin dev` MUST attach to the session of `--cwd` (the current directory by default), or to the session named by `--session <name>`. When no server runs for it, the command MUST exit with code 2 and the error code `dev.no-server`, unless `--start-server` is given. Test: run it with no server.
+- [LIF-220] `ilium plugin dev` MUST attach to the session of `--cwd` (the current directory by default), or to the session named by `--session <name>`. When no server runs for it, the command MUST fail with `session.unreachable` and exit code 6, and MUST NOT start a session itself [DEV-180]. Test: run it with no server.
 - [LIF-221] A development package MUST shadow an installed package with the same id for that session only. When `ilium plugin dev` ends, the installed version MUST become active again. Test: install version 1, run dev with version 2, end dev and read the version.
 - [LIF-222] A rebuild MUST start 300 ms after the last change in the directory. Test: touch a file twice 100 ms apart and assert one build.
 - [LIF-223] The reload steps MUST run in this order: build, validate the manifest, compare grants, deactivate the server side with `upgrade`, deactivate each attached client side with `upgrade` in attach order, swap, activate the server side, then each client side, each with `restored`. Test: record the log order with two clients.
@@ -480,7 +479,7 @@ The command prints JSON lines. Every line has a `type`.
 {"type":"reload","plugin":"<id>","version":"<version>","restored_bytes":<n>,"sides":["server","client"]}
 ```
 
-A development package carries a `dev` badge in Settings, and it uses the T3 sandbox and ceilings. Plugin logs appear in `ilium plugin logs <id>`.
+A development package carries a `dev` badge in Settings, and it uses the T2 sandbox and ceilings. Plugin logs appear in `ilium plugin logs <id>`.
 
 ## What `activate` does not tell you
 
@@ -531,14 +530,14 @@ The tree footer shows notice N14 when the host stopped a plugin. Settings > Plug
 
 ### Rules defined elsewhere on this page
 
-- [LIF-271] On a trap or stop the host MUST release every effect listed in the stop-effects paragraph of this page, for the dead instance as well. Test: trap a plugin holding an input lock, a stream and a child process.
+- [LIF-271] On a trap or stop the host MUST release every effect listed under the stop-effects sentence of [Durable timers and further triggers](#durable-timers-and-further-triggers), for the dead instance as well. Test: trap a plugin holding an input lock, a stream and a child process.
 - [USR-173] An update MUST keep the grants the user already answered and MUST ask only for new ones. A failed update MUST roll back to the previous version. The user-facing rules are USR-123 and USR-124 in [Install and manage plugins](/pages/user-install-and-manage/#update-a-plugin). Test: update with one new grant and count the rows in the dialog.
 - [LIF-275] An update MUST reset the "Not now" counter of a bundled plugin. Test: answer Not now twice, update, and count prompts.
 
 ## See also
 
 - [Plugin settings extension](/pages/settings-extension/) for settings rows in each lifecycle state
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Capabilities and grants](/pages/capabilities/)
 - [Packages and manifests](/pages/packages/)
 - [Exports](/pages/api-exports/)

@@ -22,7 +22,7 @@ Terms:
 
 - **[DEV-200]** `check` MUST run exactly the install checks of [Packages and manifests](/pages/packages/), in the same order, with the same codes, and MUST NOT run any plugin code. It reports the install codes `manifest.*`. The install path uses no `package.*` codes, so `check` has none either. The rules of DEV-201 add further codes.
 - **[DEV-201]** `check` MUST add the component rules below, which report `component.*` and `signature.*` codes and two further `manifest.*` codes. They need built components and are skipped, with one `component.missing` finding per absent side, when `dist/` has no component for a declared side.
-- **[DEV-202]** Every `check` finding is an `error`, except `signature.absent`, `component.size-warning` and `check.stale-build`, which are `warn`, and `signature.fingerprint`, which is `info`. The severity column of the rule tables is normative.
+- **[DEV-202]** Every `check` finding is an `error`, except `signature.absent`, `check.stale-build` and `component.size-warning` from 8 to 32 MiB, which are `warn` (`component.size-warning` is an `error` above 32 MiB, DEV-206), and `signature.fingerprint`, which is `info`. The severity column of the rule tables is normative.
 - **[DEV-203]** `check` MUST NOT check trust. Whether a signing key is trusted depends on the user's machine. `check` verifies that a signature is valid for the manifest bytes and states the fingerprint in an `info` finding named `signature.fingerprint`.
 
 ### Component rules
@@ -73,7 +73,7 @@ A finding record:
 | `lint.dedup-key-charset` | warn | replayed fixtures | A submission carries a dedup key with a character outside `[A-Za-z0-9._:/-]` or longer than 128 characters | Fix the key |
 | `lint.icon-name-unknown` | warn | manifest | An `icon` is not a Tabler icon name that the host ships | Choose a listed name |
 | `lint.extension-schema` | warn | manifest | An extension point has a schema outside the allowed subset, no `version`, or `max_handlers` of 0 | Fix the declaration |
-| `lint.description-missing` | warn | manifest | `description` is empty or longer than 280 characters | Write one short paragraph |
+| `lint.description-missing` | warn | manifest | `description` is empty or longer than 280 characters (the manifest limit of 500 characters is a separate hard error) | Write one short paragraph |
 | `lint.license-missing` | info | manifest | `license` is empty | Add an SPDX expression |
 | `lint.grant-unexplained` | warn | docs | A requested grant name does not appear in `README.md` | Explain the grant in the README |
 | `lint.help-title-mismatch` | warn | docs | The first heading of a help topic differs from its manifest `title` | Make them equal |
@@ -85,6 +85,8 @@ A finding record:
 | `lint.high-risk-grants` | info | manifest | A high-risk grant is requested | Confirm it is needed |
 | `lint.src-in-package` | info | files | The package holds `src/**` entries, which reviewers can read but the host never loads | Pack without `--include-src` unless wanted |
 | `lint.contribution-near-cap` | info | manifest | A contribution list is at 90 percent of its cap | Plan for the cap |
+| `lint.notice-missing` | warn | project | The package bundles third-party code (`bundled-dependencies` in the manifest) and the project has no `THIRD-PARTY-NOTICES` or `NOTICE` file | Add the notice file |
+| `lint.notice-incomplete` | warn | project | A bundled dependency named in the manifest has no entry in the notice file | Add its licence text |
 | `lint.readme-missing` | info | project | No `README.md` in the project folder | Add one |
 | `lint.changelog-missing` | info | project | No `CHANGELOG.md` in the project folder | Add one |
 | `lint.suppression-reason-missing` | error | `lint.toml` | A suppression has no reason | Add a reason |
@@ -113,7 +115,7 @@ A lint finding record:
 
 - **[DEV-225]** Plain `lint` MUST exit with 0 when only `warn` and `info` findings exist, and with 3 when an `error` finding exists.
 - **[DEV-226]** `lint --deny warnings` MUST exit with 3 when any unsuppressed `warn` or `error` finding exists. `info` findings never affect the exit code.
-- **[DEV-227]** `check` MUST exit with 3 when any `error` finding exists, and `check` has no deny flag, because its two `warn` findings (an unsigned package and a large component) are normal during development.
+- **[DEV-227]** `check` MUST exit with 3 when any `error` finding exists, and `check` has no deny flag, because its three `warn` findings (`signature.absent` for an unsigned package, `component.size-warning` for a component from 8 to 32 MiB and `check.stale-build`) are normal during development.
 
 ## Suppression
 
@@ -132,7 +134,7 @@ reason = "scans the project once at startup to fill the tree decorations"
 
 - **[DEV-230]** `lint.toml` MUST be the only place that suppresses a lint rule. The manifest MUST NOT carry a suppression key, because unknown manifest keys fail the install.
 - **[DEV-231]** A `[[suppress]]` table MUST have `rule` and `reason`. `key_path` is optional and, when given, limits the suppression to findings with the same key path. A table without `reason` MUST produce `lint.suppression-reason-missing`.
-- **[DEV-232]** `check` rules MUST NOT be suppressible. A `rule` that names a `manifest.*`, `component.*` or `signature.*` code MUST produce `lint.suppression-unknown`.
+- **[DEV-232]** `check` rules MUST NOT be suppressible. A `rule` that names a `check.*`, `manifest.*`, `component.*` or `signature.*` code MUST produce `lint.suppression-unknown`.
 - **[DEV-233]** A suppressed finding MUST still be printed, with `suppressed` true, so a reviewer sees it. Suppressed findings do not count toward the exit code.
 
 ## Worked example

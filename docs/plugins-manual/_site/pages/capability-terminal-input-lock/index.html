@@ -511,7 +511,7 @@ impl Handler for StagedInput {
         for event in batch {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != &quot;com.example.stagedinput/compact&quot; { continue; }
-            let Some(pane) = invoked.pane else { continue };
+            let Some(pane) = invoked.context.pane else { continue };
             submissions.push(Submission::new(Intent::SendInput(SendInputSpec {
                 pane,
                 stages: vec![
@@ -535,12 +535,12 @@ export const { lifecycle, handler } = definePlugin({
     const submissions: Submission[] = [];
     for (const event of batch) {
       if (event.tag !== 'command-invoked') continue;
-      if (event.val.command !== 'com.example.stagedinput/compact' || event.val.pane === undefined) continue;
+      if (event.val.command !== 'com.example.stagedinput/compact' || event.val.context.pane === undefined) continue;
       submissions.push({
         intent: {
           tag: 'send-input',
           val: {
-            pane: event.val.pane,
+            pane: event.val.context.pane,
             stages: [
               { text: '/compact', delayMs: 0 },
               { text: '\r', delayMs: 120 },
@@ -593,7 +593,7 @@ export const { lifecycle, handler } = definePlugin({
 <td>Nothing.</td>
 </tr>
 <tr>
-<td>Session limit on locks</td>
+<td>Session limit on locks (one lock per pane, so at most the number of open panes; no other cap)</td>
 <td><code>busy</code></td>
 <td>Retry later.</td>
 </tr>

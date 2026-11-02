@@ -6,6 +6,7 @@
 //! and for other attached clients to know what's open).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::{
@@ -263,6 +264,13 @@ pub enum TerminalOrigin {
     /// A stopped agent whose resume command is retained for an explicit
     /// unfreeze. Restarting Ilium restores the pane without launching it.
     Frozen { resume_command: String },
+    /// A profile identity and its non-secret provider command survive restarts.
+    /// Environment values are resolved from configuration at each launch.
+    CustomAgent {
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        command_line: String,
+        frozen: bool,
+    },
 }
 
 impl TerminalOrigin {
@@ -275,6 +283,7 @@ impl TerminalOrigin {
             TerminalOrigin::PlainShell => "shell",
             TerminalOrigin::Command(command_line) => command_line,
             TerminalOrigin::Frozen { .. } => "frozen agent",
+            TerminalOrigin::CustomAgent { identity, .. } => &identity.profile_id,
         }
     }
 
@@ -291,6 +300,7 @@ impl TerminalOrigin {
                 .unwrap_or_else(|| self.default_pane_name()),
             TerminalOrigin::PlainShell => self.default_pane_name(),
             TerminalOrigin::Frozen { .. } => self.default_pane_name(),
+            TerminalOrigin::CustomAgent { .. } => self.default_pane_name(),
         }
     }
 }
@@ -401,6 +411,12 @@ pub struct TerminalPaneRuntime {
     /// Latest manual Enter eligible for a provider transcript correction.
     pub prompt_transcript_epoch: Option<PromptTranscriptEpoch>,
     pub session_process_started_at_unix_seconds: Option<u64>,
+    pub session_process_identity_inode: Option<u64>,
+    /// Revisit Claude session evidence periodically without tying I/O to every screen refresh.
+    pub next_claude_session_recheck: Instant,
+    /// Held while the session binding is cached, so PID reuse cannot recreate
+    /// ownership even if the replacement has the same kernel start tick.
+    pub session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -479,6 +495,8 @@ impl TerminalPaneRuntime {
                 client_focused: false,
                 last_forced: None,
                 request_generation: 0,
+                wake_on_output: false,
+                last_output_wake: None,
                 identity_system_generation: None,
                 cached_identity: None,
                 cached_screen_classification: None,
@@ -502,6 +520,9 @@ impl TerminalPaneRuntime {
             legacy_prompt_fallback_blocked: false,
             prompt_transcript_epoch: None,
             session_process_started_at_unix_seconds: None,
+            session_process_identity_inode: None,
+            next_claude_session_recheck: Instant::now(),
+            session_process_identity: None,
             session_process_id: None,
             session_transcript_path: None,
             auto_answer_attempt: None,
@@ -1378,6 +1399,13 @@ pub struct DetectionSchedule {
     /// coalesced by the debounce window. A detection pass captures this value
     /// and cannot overwrite a newer request with its stale deadline/status.
     pub request_generation: u64,
+    /// Set by the detection loop while this pane holds an agent that is not
+    /// mid-turn and is not focused, i.e. while it sits in the slow idle tier.
+    /// Only then does PTY output wake the pane early (see
+    /// `crate::detection::wake_for_output`).
+    pub wake_on_output: bool,
+    /// Start of the current output-wake spacing window.
+    pub last_output_wake: Option<Instant>,
     /// Process identity result associated with one refreshed `System` table.
     pub identity_system_generation: Option<u64>,
     pub cached_identity: Option<ilium_detect::AgentIdentity>,
@@ -1499,6 +1527,24 @@ fn terminal_launch_plan(
     origin: &TerminalOrigin,
     claude_transcript_exists: impl FnOnce(&str) -> bool,
 ) -> TerminalLaunchPlan {
+    if let TerminalOrigin::CustomAgent {
+        command_line,
+        frozen,
+        ..
+    } = origin
+    {
+        return if *frozen {
+            TerminalLaunchPlan {
+                command_line: None,
+                session_id: None,
+            }
+        } else {
+            terminal_launch_plan(
+                &TerminalOrigin::Command(command_line.clone()),
+                claude_transcript_exists,
+            )
+        };
+    }
     if let TerminalOrigin::Command(command_line) = origin {
         if let Some(session_id) = generated_claude_session_id(command_line) {
             return if claude_transcript_exists(session_id) {
@@ -1540,6 +1586,7 @@ fn terminal_launch_plan(
             command_line: Some(command_line.clone()),
             session_id: None,
         },
+        TerminalOrigin::CustomAgent { .. } => unreachable!("custom origins are handled above"),
     }
 }
 
@@ -1589,11 +1636,14 @@ pub struct PaneIdentityEnv<'a> {
     pub worktree_root: Option<&'a Path>,
 }
 
-pub fn spawn_terminal_session(
+/// Spawn with validated profile variables as structured process environment.
+/// Values never enter the shell command or the durable terminal origin.
+pub(crate) fn spawn_terminal_session_with_environment(
     origin: &TerminalOrigin,
     cwd: &Path,
     identity: &PaneIdentityEnv<'_>,
     quota: &ilium_execution::QuotaGroup,
+    environment: &[ilium_core::custom_agent::EnvironmentEntry],
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin, |session_id| {
@@ -1607,6 +1657,9 @@ pub fn spawn_terminal_session(
             .arg(command_flag)
             .arg(command_line),
     };
+    let command = environment.iter().fold(command, |command, entry| {
+        command.env(&entry.key, &entry.value)
+    });
     let mut command = command
         .env(ilium_ipc::pane_env::PANE_ID, identity.pane_id.0.to_string())
         .env(ilium_ipc::pane_env::SESSION_NAME, identity.session_name)
@@ -1746,6 +1799,25 @@ mod tests {
         assert_eq!(runtime.adopt_agent_process(&identity), Ok(true));
         assert!(!runtime.is_session_identity_invalidated);
         runtime.session.kill().expect("close fixture");
+    }
+
+    #[test]
+    fn custom_claude_uses_the_same_session_id_launch_as_the_base_provider() {
+        let origin = TerminalOrigin::CustomAgent {
+            identity: ilium_core::custom_agent::CustomAgentIdentity {
+                profile_id: "work".into(),
+                base_provider: BuiltinAgentProvider::Claude,
+            },
+            command_line: "claude".into(),
+            frozen: false,
+        };
+        let plan = terminal_launch_plan(&origin, |_| false);
+        let session_id = plan.session_id.unwrap();
+        assert!(uuid::Uuid::parse_str(&session_id).is_ok());
+        assert_eq!(
+            plan.command_line,
+            Some(format!("claude --session-id {session_id}"))
+        );
     }
 
     #[test]

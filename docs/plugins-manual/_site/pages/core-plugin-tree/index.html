@@ -404,7 +404,7 @@
 <li>Closing panes and groups (Panes and layout, Closing).</li>
 </ul>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/02-pane-tree.gif" alt="The pane tree: groups open and close, a pane is dragged to a new group" loading="lazy"><figcaption>The pane tree in use. Entries move between groups while their processes keep running.</figcaption></figure>
+<figure><img src="/assets/demos/02-pane-tree.gif" alt="Ilium moves the Tests fixture pane into Exhibits above Build; terminal output comes from local fixture shells" loading="lazy"><figcaption>The real Ilium tree moves Tests into Exhibits and above Build while the same process keeps running. Terminal text is from local fixture shells, not agents.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -628,7 +628,7 @@ function create(channel: string, payload: Uint8Array): Submission | undefined {
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::intents::{MoveNodeSpec, RenameNodeSpec};
-use ilium_plugin_sdk::types::tree::Placement;
+use ilium_plugin_sdk::types::tree::{Placement, TitleSource};
 
 fn move_and_rename(node: NodeId, target: NodeId, title: &amp;str, revision: u64) -&gt; Vec&lt;Submission&gt; {
     vec![
@@ -638,6 +638,7 @@ fn move_and_rename(node: NodeId, target: NodeId, title: &amp;str, revision: u64)
         Submission::new(Intent::RenameNode(RenameNodeSpec {
             node,
             title: title.into(),
+            source: TitleSource::Plugin,
             expected_revision: Some(revision),
         })),
     ]
@@ -881,7 +882,7 @@ export const { handler } = definePlugin({
 <li><code>ilium.core.tree/changed</code>: { node, change } after any structural change</li>
 </ul>
 <p>Decoration slots, row actions and display modes of every plugin are drawn by the tree.</p>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.tree"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.tree"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-refuses-to-close-the-pane-that-runs-the-build-with-the-reason-build-still-running">Example: Refuses to close the pane that runs the build, with the reason <code>Build still running</code></h4>
 <p>A package adds a <code>veto</code> handler. Handlers run until one refuses.</p>
 <pre><code class="language-json">{

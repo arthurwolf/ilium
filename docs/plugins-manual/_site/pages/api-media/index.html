@@ -508,7 +508,7 @@ close-video: func(video: u64);
 <ul>
 <li><strong>Frame rate.</strong> The decoder does not pace the frames. The plugin decides how often it calls <code>next-frame</code>, usually from a timer (<a href="/pages/api-clock-and-timers/">timers</a>).</li>
 <li><strong>Frame size.</strong> Each dimension must be at least 1, and <code>width</code> by <code>height</code> may not exceed 3,840 by 2,160. The frame size must match the pixel size of the surface that receives it. The host derives that pixel size from the surface's <code>min-columns</code> and <code>min-rows</code> and the sub-cell factor of the shared dither mode, so the plugin sets those widget props to give the size it asks for.</li>
-<li><strong>Buffer.</strong> The host decodes frames ahead, as many as fit in <code>video_buffer_mib</code> (64 MiB by default, 256 MiB at most) for each open video, and always at least one. A call that finds a buffered frame returns at once.</li>
+<li><strong>Buffer.</strong> The host decodes frames ahead, as many as fit in <code>video_buffer_mib</code> (64 MiB by default, 256 MiB at most for tier 1, 64 MiB for tiers 2 and 3) for each open video, and always at least one. A call that finds a buffered frame returns at once.</li>
 <li><strong>Open videos.</strong> A plugin may hold 2 open videos at once, and the ceiling is 8. A third <code>open-video</code> returns <code>quota-exceeded</code> until one is closed.</li>
 <li><strong>Closing.</strong> Call <code>close-video</code> as soon as the plugin no longer needs the video. Each open video holds its decoder and its frame buffer until then.</li>
 </ul>
@@ -717,7 +717,7 @@ export default definePlugin({
 </tr>
 <tr>
 <td><code>not-found</code></td>
-<td><code>open-video</code>: the path does not exist. <code>next-frame</code> or <code>close-video</code>: the video id is unknown or already closed.</td>
+<td><code>open-video</code>: the path does not exist. <code>next-frame</code>: the video id is unknown or already closed. <code>close-video</code> has no error channel: closing an unknown or already closed id is a silent no-op.</td>
 <td>No.</td>
 </tr>
 <tr>
@@ -727,7 +727,7 @@ export default definePlugin({
 </tr>
 <tr>
 <td><code>unsupported</code></td>
-<td>No <code>ffmpeg</code> on <code>PATH</code> (the message names the program), or the file's extension or codec is not supported.</td>
+<td>No <code>ffmpeg</code> on <code>PATH</code> (the message names the program), or the file's extension, the <code>mime</code> type given to <code>open-video-bytes</code>, or the codec is not supported. Accepted mime types are <code>video/mp4</code>, <code>video/x-matroska</code>, <code>video/x-msvideo</code>, <code>video/quicktime</code>, <code>video/webm</code>, <code>video/mpeg</code>, <code>video/x-ms-wmv</code>, <code>video/x-flv</code> and <code>video/mp2t</code>.</td>
 <td>No.</td>
 </tr>
 <tr>
@@ -775,7 +775,7 @@ seek: func(video: u64, millis: u64) -&gt; result&lt;_, plugin-error&gt;;
 <td><code>open-video-bytes</code></td>
 <td><code>media::open_video_bytes(&amp;bytes, "video/mp4")</code></td>
 <td><code>openVideoBytes(bytes, 'video/mp4')</code></td>
-<td><code>invalid-argument</code> (format), <code>quota-exceeded</code> (16 MiB)</td>
+<td><code>unsupported</code> (mime type or codec), <code>invalid-argument</code> (empty bytes, or more than 16 MiB)</td>
 </tr>
 <tr>
 <td><code>open-video-range</code></td>
@@ -809,7 +809,7 @@ seek(video, 0n);
 <li><a href="/pages/api-codec/">codec</a> for decoding still images.</li>
 <li><a href="/pages/api-fs/">fs</a> and <a href="/pages/capability-fs-pick/">capability: fs.pick</a> for files the user chooses.</li>
 <li><a href="/pages/api-clock-and-timers/">timers</a> for the frame rate.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the general error model.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the general error model.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-log/"><small>Previous</small>log</a><a class="next" href="/pages/api-messages-and-topics/"><small>Next</small>Messages and topics</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

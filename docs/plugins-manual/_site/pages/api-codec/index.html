@@ -459,7 +459,7 @@ rasterize-text: func(request: raster-text) -&gt; result&lt;decoded-image, plugin
 <td><code>sha256</code></td>
 <td><code>data</code></td>
 <td>32 bytes</td>
-<td>Returns the SHA-256 digest. It never fails.</td>
+<td>Returns the SHA-256 digest. It fails with <code>invalid-argument</code> for input above 16 MiB.</td>
 </tr>
 <tr>
 <td><code>rasterize-text</code></td>
@@ -496,7 +496,7 @@ rasterize-text: func(request: raster-text) -&gt; result&lt;decoded-image, plugin
 </tr>
 </tbody>
 </table>
-<p>Each function is synchronous, so Rust and TypeScript code call it directly. Errors arrive as <code>PluginError</code>, see <a href="/pages/errors-and-limits/">errors</a>.</p>
+<p>Each function is synchronous, so Rust and TypeScript code call it directly. Errors arrive as <code>PluginError</code>, see <a href="/pages/reference-errors-and-limits/">errors</a>.</p>
 <p>The native crates behind the import are flate2, the image decoders, sha2 and cosmic-text. A plugin cannot choose another decoder.</p>
 <h3 id="limits">Limits</h3>
 <table>
@@ -772,7 +772,7 @@ export function inflateAndHash(path: FsPath): { plain: Uint8Array; digest: Uint8
 <li><a href="/pages/api-ui/">ui</a> for <code>write-surface</code>.</li>
 <li><a href="/pages/background-jobs/">background jobs</a> for work near the input limit.</li>
 <li><a href="/pages/capability-always-granted/">always-granted capabilities</a> for the grant rules.</li>
-<li><a href="/pages/errors-and-limits/">errors and limits</a> for the error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">errors and limits</a> for the error codes.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for project setup.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-clock-and-timers/"><small>Previous</small>clock and timers</a><a class="next" href="/pages/api-commands/"><small>Next</small>commands</a></nav>

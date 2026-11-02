@@ -518,7 +518,7 @@ take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
   &quot;capabilities&quot;: { &quot;server&quot;: [&quot;sessions.cross&quot;, &quot;cli.contribute&quot;] },
   &quot;contributes&quot;: {
     &quot;commands&quot;: [{ &quot;id&quot;: &quot;pane-count&quot;, &quot;title&quot;: &quot;Count panes&quot; }],
-    &quot;cli&quot;: { &quot;name&quot;: &quot;count-everywhere&quot;, &quot;summary&quot;: &quot;Count panes in every session&quot; }
+    &quot;cli&quot;: [{ &quot;name&quot;: &quot;count-everywhere&quot;, &quot;summary&quot;: &quot;Count panes in every session&quot; }]
   }
 }
 </code></pre>
@@ -786,7 +786,7 @@ export const { handler } = definePlugin({
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for <code>request-completed</code> and the <code>take-*</code> pattern.</li>
 <li><a href="/pages/api-commands/">commands</a> for declaring the command that the target runs.</li>
 <li><a href="/pages/capabilities/">Capabilities</a> for risk levels and the grant dialog.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the common error codes.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the common error codes.</li>
 </ul>
 <p>Interface version: <code>ilium:host/sessions</code>, version 0.1.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-geocode/"><small>Previous</small>Geocode and location picker</a><a class="next" href="/pages/api-fs-atomic-and-tail/"><small>Next</small>fs: atomic write, revisions, tail, agent homes</a></nav>

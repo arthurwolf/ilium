@@ -482,7 +482,7 @@ The TypeScript version builds the same panel with the camelCase builders.
 
 ```ts
 import { definePlugin } from '@ilium/plugin-sdk';
-import { createBuffer } from '@ilium/plugin-sdk/host/editor';
+import { createBuffer } from '@ilium/plugin-sdk/primitives/editor';
 import { surfaceSize, writeSurface } from '@ilium/plugin-sdk/host/ui';
 import { codeView, image, layout, paragraph, surface, terminalView, tree, video }
   from '@ilium/plugin-sdk/ui/build';
@@ -599,7 +599,7 @@ export const { lifecycle, handler, views } = definePlugin({
 | The area is larger than the surface | The surface is drawn from the top-left corner, and the extra cells keep the cell background. |
 | A surface has received no rows | It draws the cell background. |
 
-The `not-found`, `invalid-argument`, `unsupported` and `quota-exceeded` codes are described in [Errors and limits](/pages/errors-and-limits/). A missing grant or bad source never fails the render, so check the plugin log when a widget stays empty.
+The `not-found`, `invalid-argument`, `unsupported` and `quota-exceeded` codes are described in [Errors and limits](/pages/reference-errors-and-limits/). A missing grant or bad source never fails the render, so check the plugin log when a widget stays empty.
 
 ## What the user sees
 
@@ -623,4 +623,4 @@ Requirement ids for this page: [WID-028]. See the [requirements index](/pages/re
 - [Editor primitive](/pages/primitives-editor/)
 - [Terminal primitive](/pages/primitives-terminal/)
 - [Accessibility and theming](/pages/accessibility-and-theming/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)

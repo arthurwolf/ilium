@@ -120,6 +120,8 @@ struct Request {
     sequence: u64,
     generation: u64,
     ticket: DeferredWriteTicket,
+    // Preadmitted before the FIFO placeholder or original-session transfer.
+    text: Option<RetirementReservation<String>>,
     acknowledgement: Option<(bool, Result<(), String>)>,
 }
 struct Ready {
@@ -310,7 +312,7 @@ impl SelectionOwner {
         if self.closing || self.fault.is_some() || used >= MAX_REQUESTS {
             return Err("Selection queue closed or full; original retained".into());
         }
-        if session.output_retention.is_none() {
+        if session.capture_retention.is_none() && session.output_retention.is_none() {
             return Err("Capture custody missing; original retained".into());
         }
         let bytes = session
@@ -339,12 +341,30 @@ impl SelectionOwner {
             .retirement()
             .try_reserve::<SmartCopySession>(METADATA)
             .map_err(|reason| format!("Selection retirement: {reason:?}; original retained"))?;
-        let recovery = self
+        // Initial captures and restored sessions already own this exact typed
+        // envelope. Reuse it without taking the original before every other
+        // admission succeeds; reserving a replacement would consume an extra
+        // global slot and can refuse a copy that has sufficient real capacity.
+        let recovery = if session.return_retirement.is_some() {
+            None
+        } else {
+            Some(
+                self.client
+                    .retirement()
+                    .try_reserve::<SmartCopySession>(METADATA)
+                    .map_err(|reason| {
+                        format!("Selection recovery retirement: {reason:?}; original retained")
+                    })?,
+            )
+        };
+        // An accepted FIFO head must not later need another retirement slot.
+        // Failure here leaves both the session and native queue untouched.
+        let text = self
             .client
             .retirement()
-            .try_reserve::<SmartCopySession>(METADATA)
+            .try_reserve::<String>(bytes + METADATA)
             .map_err(|reason| {
-                format!("Selection recovery retirement: {reason:?}; original retained")
+                format!("Selection text retirement: {reason:?}; original retained")
             })?;
         let ticket = clipboard
             .reserve_prepared_write()
@@ -354,13 +374,15 @@ impl SelectionOwner {
             ticket.fail("Selection source disappeared before preparation");
             return Err("Selection source disappeared".into());
         };
-        // An old returned-session permit is empty: replacing it frees only metadata.
-        session.return_retirement = Some(recovery);
+        if let Some(recovery) = recovery {
+            session.return_retirement = Some(recovery);
+        }
         let sequence = self.next;
         let request = Request {
             sequence,
             generation,
             ticket,
+            text: Some(text),
             acknowledgement: None,
         };
         let input = Input {
@@ -434,25 +456,19 @@ impl SelectionOwner {
                 return;
             }
         };
-        let text = match self
-            .client
-            .retirement()
-            .try_reserve::<String>(bytes + METADATA)
-        {
-            Ok(text) => text,
-            Err(reason) => {
-                if permanent(reason) {
-                    self.fault = Some(reason);
-                }
-                return;
-            }
-        };
-        let Some(Queued::Input(input, request)) = self.queued.pop_front() else {
+        let Some(Queued::Input(input, mut request)) = self.queued.pop_front() else {
             return;
         };
+        // Invariant: admit installs this permit before moving the session.
+        let text = request
+            .text
+            .take()
+            .expect("accepted selection text custody");
         match reservation.submit(SelectionJob { input, text, bytes }) {
             Ok(receipt) => self.active = Some(Active::Cpu { request, receipt }),
             Err(rejected) => {
+                // A transient submission refusal retries the exact same permit.
+                request.text = Some(rejected.value.text);
                 self.queued
                     .push_front(Queued::Input(rejected.value.input, request));
                 if permanent(rejected.reason) {
@@ -1128,10 +1144,120 @@ mod tests {
             .unwrap();
     }
     #[test]
+    fn one_free_retirement_slot_refuses_before_session_or_fifo_transfer() {
+        let (mut execution, client, capture, clipboard, _) = bank();
+        let mut owner = SelectionOwner::new(client.clone());
+        let mut session = original(&capture, 42, &["original captured selection"]);
+        let value = session.as_mut().expect("session");
+        value.capture_retention = value.output_retention.take();
+        value.return_retirement = Some(
+            client
+                .retirement()
+                .try_reserve::<SmartCopySession>(METADATA)
+                .expect("producer session permit"),
+        );
+        let pointer = value
+            .selected_parts()
+            .next()
+            .expect("selected text")
+            .as_ptr();
+        let blockers = (0..ilium_execution::RETIREMENT_SLOTS - 2)
+            .map(|_| {
+                client
+                    .retirement()
+                    .try_reserve::<()>(METADATA)
+                    .expect("occupied global slot")
+            })
+            .collect::<Vec<_>>();
+        let error = owner.admit(&mut session, &clipboard).unwrap_err();
+        assert!(error.starts_with("Selection text retirement:"));
+        assert_eq!(owner.next, 1, "refusal must not consume a sequence");
+        assert!(!owner.pending());
+        let value = session.as_ref().expect("refused original retained");
+        assert_eq!(value.selected_parts().next().unwrap().as_ptr(), pointer);
+        assert!(value.capture_retention.is_some());
+        assert!(value.return_retirement.is_some());
+        let write = clipboard
+            .submit(Operation::Write("independent later write".into()))
+            .map_err(|(_, error)| error)
+            .unwrap();
+        let reply = clipboard
+            .fixture_process_next(|operation| match operation {
+                Operation::Write(text) => {
+                    assert_eq!(text, "independent later write");
+                    Ok(String::new())
+                }
+                _ => panic!("refusal must not publish a selected-copy FIFO ticket"),
+            })
+            .expect("no unprepared selected-copy placeholder may block the FIFO");
+        assert_eq!(reply.view().id, write);
+        drop(reply);
+        drop(blockers);
+        drop(session);
+        drop(owner);
+        drop(clipboard);
+        execution.request_shutdown(ShutdownMode::Drain);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+    #[test]
+    fn exact_two_free_retirement_slots_complete_while_other_slots_stay_owned() {
+        let (mut execution, client, capture, clipboard, _) = bank();
+        let mut owner = SelectionOwner::new(client.clone());
+        let mut session = original(&capture, 42, &["original captured selection"]);
+        let value = session.as_mut().expect("session");
+        value.capture_retention = value.output_retention.take();
+        value.return_retirement = Some(
+            client
+                .retirement()
+                .try_reserve::<SmartCopySession>(METADATA)
+                .expect("producer session permit"),
+        );
+        let blockers = (0..ilium_execution::RETIREMENT_SLOTS - 3)
+            .map(|_| {
+                client
+                    .retirement()
+                    .try_reserve::<()>(METADATA)
+                    .expect("occupied global slot")
+            })
+            .collect::<Vec<_>>();
+        owner
+            .admit(&mut session, &clipboard)
+            .expect("exact completion capacity");
+        assert!(session.is_none());
+        assert!(matches!(
+            client.retirement().try_reserve::<()>(METADATA),
+            Err(RejectReason::QueueFull)
+        ));
+        // Keep blockers alive through completion: dispatch may reserve no slot.
+        let done = collect(&mut owner, &clipboard, true);
+        assert!(done.result.is_ok());
+        assert!(done.original().unwrap().capture_retention.is_some());
+        assert!(done.original().unwrap().return_retirement.is_some());
+        drop(done);
+        drop(blockers);
+        drop(owner);
+        drop(clipboard);
+        execution.request_shutdown(ShutdownMode::Drain);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+    #[test]
     fn native_failure_restores_same_session_allocation_and_explicit_retry_uses_new_fifo_slot() {
         let (mut execution, client, capture, clipboard, _) = bank();
         let mut owner = SelectionOwner::new(client.clone());
         let mut session = original(&capture, 41, &["β original", "second\nline"]);
+        let value = session.as_mut().unwrap();
+        value.capture_retention = value.output_retention.take();
+        value.return_retirement = Some(
+            client
+                .retirement()
+                .try_reserve::<SmartCopySession>(METADATA)
+                .unwrap(),
+        );
+        let capture_before = capture.usage();
         let pointer = session
             .as_ref()
             .unwrap()
@@ -1152,6 +1278,9 @@ mod tests {
             ["β original", "second\nline"]
         );
         assert!(restored.original.return_retirement.is_some());
+        assert!(restored.original.capture_retention.is_some());
+        assert_eq!(capture.usage().input_bytes, capture_before.input_bytes);
+        assert_eq!(capture.usage().result_bytes, capture_before.result_bytes);
         let mut session = Some(restored.original);
         owner.admit(&mut session, &clipboard).unwrap();
         let done = collect(&mut owner, &clipboard, true);

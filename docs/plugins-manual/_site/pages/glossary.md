@@ -57,7 +57,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Kernel.** The part of Ilium that is native code and not a plugin (tier T0). It owns the tree, the panes, the settings store, the snapshot and the recovery page.
 
-**Key id.** The fingerprint of a publisher public key: the SHA-256 of the key bytes, written as 8 groups of 4 hexadecimal characters. See [Signing and trust](/pages/reference-signing-and-trust/).
+**Key id.** The fingerprint of a publisher public key: the SHA-256 of the key bytes, written as 64 lowercase hexadecimal characters in 16 groups of 4. See [Signing and trust](/pages/reference-signing-and-trust/).
 
 **Lock file.** The file `ilium-plugins.lock` in a project. It records the exact version and package hash of each plugin, so `install --locked` gives the same set everywhere. See [Versions and dependencies](/pages/reference-dependency-resolution/).
 
@@ -81,7 +81,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Registry.** An optional source of plugins: signed JSON files and package blobs on an HTTPS host or file share. Ilium ships with none configured (decision D27). See [Registry reference](/pages/reference-registry/).
 
-**Replacement.** A plugin that lists another plugin in `replaces` and provides its whole `surface`. The replaced core plugin is turned off while the replacement is on. See [Extending core plugins](/pages/extending-core-plugins/#replace).
+**Replacement.** A plugin that lists another plugin in `replaces` and provides its whole `surface`. The replaced core plugin is turned off while the replacement is on. See [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin).
 
 **Reproducible build.** A build in which two machines make the same package bytes from the same source. See [Publishing guide](/pages/guide-publishing/#reproducible-builds).
 
@@ -93,7 +93,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Scene.** An animated background, written as a `scene` component that implements the `renderer` export. A scene draws into a surface, and the host applies the shared look to the result. See [Scenes](/pages/api-scenes/).
 
-**Scope.** A named area of the file system that a `fs` grant refers to, such as `project`, `data` or `cache`. See [File access](/pages/file-access/).
+**Scope.** A named area of the file system that an `fs.*` grant refers to, such as `project`, `data` or `cache`. See [File access](/pages/file-access/).
 
 **Shared look.** The colour, style and dithering settings that the user sets once and the host applies to every scene and surface. A plugin does not add its own brightness or palette controls. See [Accessibility and theming](/pages/accessibility-and-theming/).
 
@@ -144,7 +144,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Frame slot.** A place in a pane frame (header icon, header text, footer row or banner) that a plugin fills with `set-frame-slot`.
 
-**High-risk grant (H).** A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Nine grants are high risk in the contract.
+**High-risk grant (H).** A grant that is off by default in every dialog and always needs an explicit user choice, even for a bundled plugin. Eleven grants are high risk in the contract; `settings.read-kernel` is high only for the `api` tab.
 
 **Host catalogue.** A catalogue owned by the kernel, such as `ilium.palettes`, `ilium.dithers`, `ilium.filters`, `ilium.style-presets` or `ilium.icons`.
 
@@ -217,7 +217,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 ### Internal decision ids
 
-Some pages cite short ids such as L2 to L6, AX5, E9, C78, A21 and X5. They come from the design notes. L2 to L6 are section labels in [Errors and limits reference](/pages/reference-errors-and-limits/), and AX5 is a decision in [Design decisions](/pages/design-decisions/). E9, C78, A21 and X5 have no page that defines them, and a reader can ignore them. The requirement ids written in square brackets with a prefix and a number are the ones that tests use.
+Some pages cite short ids such as L2 to L6, AX5, E9 and C78. They come from the design notes. L2 to L6 are section labels in [Errors and limits reference](/pages/reference-errors-and-limits/), and AX5 is a decision in [Design decisions](/pages/design-decisions/). E9 and C78 have no page that defines them, and a reader can ignore them. The requirement ids written in square brackets with a prefix and a number are the ones that tests use.
 
 ## For users
 
@@ -280,7 +280,7 @@ Windows and macOS refuse T2 and T3 packages until a sandbox exists on those syst
 | `duplicate(original)` | The dedup key was reserved. `original` is the reference of the first submission. |
 | `refused(code)` | Not applied, for a check that ran before acceptance. The key is not reserved. |
 | `failed(code)` | Accepted, but the host failed to apply it, for example with `io` or `timed-out`. |
-| `cancelled` | Stopped by the plugin, the user, a shutdown, or a refusal of its batch. |
+| `cancelled` | Stopped by the plugin, the user, or a shutdown. (A sibling of a refused submission is `refused(cancelled)`, not `cancelled`.) |
 
 ### Error codes
 
@@ -319,7 +319,7 @@ Grants are recorded per plugin, per side, and per user configuration. They are n
 
 ### Further grants
 
-Twenty-three grant rows are new. Ten are high risk (H).
+Twenty-three grant rows are new. Eleven are high risk (H).
 
 | Grant | Sides | Meaning | Risk |
 |---|---|---|---|
@@ -359,7 +359,7 @@ New argument forms: `http:setting:<key>`, `fs.read:agent-sessions:gemini`, `fs.r
 
 ### Further manifest errors
 
-`manifest.catalog-unknown`, `manifest.contribution-limit`, `manifest.contribution-target`, `manifest.row-format`, `manifest.limits-tier`, `manifest.when-key`, `manifest.client-request-unknown`, `manifest.asset-size`, `manifest.visible-when`, `manifest.menu-depth`, `manifest.settings-source`, `manifest.cli-field` and `manifest.scene-prerender`. Each refuses the install and names the key path. See [Errors and limits](/pages/errors-and-limits/).
+`manifest.catalog-unknown`, `manifest.contribution-limit`, `manifest.contribution-target`, `manifest.row-format`, `manifest.limits-tier`, `manifest.when-key`, `manifest.client-request-unknown`, `manifest.asset-size`, `manifest.visible-when`, `manifest.menu-depth`, `manifest.settings-source`, `manifest.cli-field` and `manifest.scene-prerender`. Each refuses the install and names the key path. See [Errors and limits](/pages/reference-errors-and-limits/).
 
 ### Renders
 
@@ -619,7 +619,7 @@ Illustrative, not generated. The grant prompt for a bundled plugin. `fs.read:pro
 - [Manifest reference](/pages/reference-manifest/)
 - [Capability table](/pages/reference-capabilities/)
 - [Events and intents](/pages/reference-events-and-intents/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Security model](/pages/security/)
 - [Lifecycle](/pages/lifecycle/)
 - [Debugging](/pages/debugging/)

@@ -395,7 +395,7 @@
 
 <p>The Rust SDK, <code>ilium-plugin-sdk</code>, gives a Rust plugin four things: generated bindings for the WIT contract, the <code>#[ilium_plugin]</code> attribute that binds the plugin's exports to Rust types, helpers for asynchronous host calls, and a test double for running handlers without the host. A Rust plugin depends on this crate only. It never depends on an Ilium crate, so the SDK is the whole surface a plugin can see.</p>
 <p>The host loads a plugin as a WebAssembly component. It calls the plugin's exports with batches of events and applies the submissions the plugin returns. The plugin calls host imports when it needs the host to act. The SDK maps both directions to ordinary Rust types, traits and <code>Result</code> values.</p>
-<p>The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see <a href="/pages/typescript-sdk/">TypeScript SDK reference</a>. The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and nineteen grants.</p>
+<p>The page documents the contract in full. Every listing appears in Rust and in TypeScript, and the TypeScript SDK reference page mirrors this one section by section; see <a href="/pages/typescript-sdk/">TypeScript SDK reference</a>. The widget catalogue has 51 widgets in seven families, and the host adds thirteen interfaces, four optional exports and 23 grants.</p>
 <h3 id="you-will-need">You will need</h3>
 <ul>
 <li>Rust 1.90 or newer with the <code>wasm32-wasip2</code> target.</li>
@@ -428,7 +428,7 @@ ilium-plugin-sdk = { version = &quot;0.1&quot;, features = [&quot;testing&quot;]
   &quot;scripts&quot;: { &quot;test&quot;: &quot;bun test&quot; }
 }
 </code></pre>
-<p>The generated files are <code>manifest.json</code>, <code>Cargo.toml</code> and <code>src/lib.rs</code> for Rust, and <code>manifest.json</code>, <code>package.json</code> and <code>src/main.ts</code> for TypeScript. <code>ilium plugin new</code> does not run <code>bun install</code>; run it yourself. A folder that holds both <code>Cargo.toml</code> and <code>package.json</code> stops the build with <code>toolchain.language-ambiguous</code>.</p>
+<p>The generated files are <code>manifest.json</code>, <code>Cargo.toml</code> and <code>src/lib.rs</code> for Rust, and <code>manifest.json</code>, <code>package.json</code> and <code>src/&lt;side&gt;.ts</code> for TypeScript (<code>src/server.ts</code>, <code>src/client.ts</code> or <code>src/scene.ts</code>). <code>ilium plugin new</code> does not run <code>bun install</code>; run it yourself. A folder that holds both <code>Cargo.toml</code> and <code>package.json</code> stops the build with <code>toolchain.language-ambiguous</code>.</p>
 <h2 id="how-a-plugin-is-built">How a plugin is built</h2>
 <p><code>ilium plugin build</code> compiles the plugin for WASI Preview 2, wraps the result as a component and writes one file per declared side to <code>dist/</code>, named after the manifest <code>entry</code> (for example <code>dist/server.wasm</code>). <code>ilium plugin pack</code> writes the <code>.iliumpkg</code> package to the same folder. The build runs on the author's machine. The host checks the file inventory and the signature at install time, so an SDK build never skips those checks. The extended calls need no extra build flag: a component links only the imports its manifest requests.</p>
 <figure>
@@ -1099,13 +1099,13 @@ const model = icon({ slot: 'model.claude', label: 'Claude' });
 <pre><code class="language-rust">// types::ui::{VideoSource, MediaFit}
 let clip = tree.video(VideoSource::Asset(&quot;loops/shore.webm&quot;.into()))
     .autoplay(true).looped(true).fit(MediaFit::Cover).key(&quot;clip&quot;);
-let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(&quot;term&quot;); // needs terminal.raw-input
+let term = tree.terminal_view(self.pane).interactive(true).scrollback(true).key(&quot;term&quot;); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 </code></pre>
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">import { video, terminalView } from '@ilium/plugin-sdk/ui/build';
 
 const clip = video({ tag: 'asset', val: 'loops/shore.webm' }, { key: 'clip', autoplay: true, loop: true, fit: 'cover' });
-const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.raw-input
+const term = terminalView(pane, { key: 'term', interactive: true, scrollback: true }); // needs terminal.read-screen, and terminal.raw-input because it is interactive
 </code></pre>
 <h3 id="hover-pointer-drag-feedback-popovers-and-theme-tokens">Hover, pointer, drag feedback, popovers and theme tokens</h3>
 <p><strong>Rust</strong></p>
@@ -1303,11 +1303,11 @@ let ids = vector::embed(&amp;[&quot;notes on retries&quot;.to_string()], &quot;s
 let child = process::spawn(SpawnSpec { process: spec, stdin_open: true, line_mode: true })?;
 child.write_stdin(b&quot;ping\n&quot;)?;
 // durable timers and journal.
-timers::at(&quot;nightly&quot;, 86_400_000, true)?;
-journal::log_event(&quot;moved&quot;, &amp;payload)?;
+timers::at(1_790_000_000_000, &quot;nightly&quot;)?; // epoch in ms, then the timer name
+journal::log_event(None, &quot;moved&quot;, &amp;payload)?;
 // kernel settings and keymap (read-only).
-let value = kernel_settings::read(&quot;terminal.scrollback&quot;)?;
-let chord = keymap::bindings(&quot;palette.open&quot;)?;
+let value = kernel_settings::read(&quot;terminal&quot;)?; // the tab; JSON text
+let bindings = keymap::bindings();
 // client requests: ask the attached client to do something.
 let answer = client_requests::request(&quot;pick-file&quot;, &amp;args).await?;
 // sessions (server): list and send to another session.
@@ -1335,12 +1335,12 @@ const stream = await http.stream({ request, framing: 'server-sent-events', maxCh
 const ids = await vector.embed(['notes on retries'], 'search');
 const child = proc.spawn({ process: spec, stdinOpen: true, lineMode: true });
 child.writeStdin(new TextEncoder().encode('ping\n'));
-timers.setDurable('nightly', 86_400_000n, true);
-journal.append('moved', payload);
-const value = kernel.get('terminal.scrollback');
-const chord = keymap.lookup('palette.open');
+timers.at(1_790_000_000_000n, 'nightly');
+journal.logEvent(undefined, 'moved', payloadJson);
+const value = kernel.read('terminal');
+const chord = keymap.bindings();
 const answer = await clientRequests.request('pick-file', args);
-const all = sessions.list();
+const all = sessions.listLive();
 </code></pre>
 <p>Terminal, agent, editor and basic primitives gain the following functions, each behind the grant named in the table.</p>
 <table>
@@ -1391,18 +1391,18 @@ const all = sessions.list();
 </tr>
 </tbody>
 </table>
-<p><code>gpu</code> is <code>@unstable</code>: import it only from a scene and expect it to change. Nine of the grants in this table are high risk and prompt the user with a separate consent line: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code> and <code>settings.read-kernel:api</code>. See <a href="/pages/reference-capabilities/">Capabilities</a> and <a href="/pages/security/">Security</a>.</p>
+<p><code>gpu</code> is <code>@unstable</code>: import it only from a scene and expect it to change. Eleven of the 23 grants are high risk and prompt the user with a separate consent line: <code>terminal.history</code>, <code>terminal.input-lock</code>, <code>terminal.raw-input</code>, <code>panes.lifecycle</code>, <code>tree.restructure</code>, <code>sessions.cross</code>, <code>process.long-lived</code>, <code>agent.transcript</code>, <code>settings.read-kernel:api</code>, <code>settings.write-kernel:&lt;tab-id&gt;</code> and <code>panes.create-command:&lt;program&gt;</code>. See <a href="/pages/reference-capabilities/">Capabilities</a> and <a href="/pages/security/">Security</a>.</p>
 <h2 id="settings-rows-meters-and-row-state">Settings rows, meters and row state</h2>
 <p>The manifest <code>settings</code> object declares 18 row types. The plugin updates a row's state at run time without republishing the manifest.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">// Meter row filled from the plugin, and a state banner on a row.
 ui::set_meter(&quot;usage.spend&quot;, vec![MeterSegment { label: &quot;today&quot;.into(), value: 4.2, tone: Tone::Info }])?;
-ui::set_row_state(&quot;provider.key&quot;, RowState { kind: RowStateKind::Warning, message: &quot;Key expires in 3 days&quot;.into() })?;
+ui::set_row_state(&quot;provider.key&quot;, RowState { kind: RowStateKind::Error, message: Some(&quot;Key is invalid&quot;.into()) })?;
 </code></pre>
 <p><strong>TypeScript</strong></p>
 <pre><code class="language-ts">// Meter row filled from the plugin, and a state banner on a row.
 setMeter('usage.spend', [{ label: 'today', value: 4.2, tone: 'info' }]);
-setRowState('provider.key', { kind: 'warning', message: 'Key expires in 3 days' });
+setRowState('provider.key', { kind: 'error', message: 'Key is invalid' });
 </code></pre>
 <p>The manifest side, identical for both languages:</p>
 <pre><code class="language-json">{
@@ -1468,7 +1468,7 @@ use ilium_plugin_sdk::exports::HookHandler;
 
 // Owner: needs extensions.provide:com.example.notes/after-save
 let entries = extensions::list(&quot;com.example.notes/recognisers&quot;)?;
-let request = extensions::run_hook(&quot;com.example.notes/after-save&quot;, &amp;payload_json).await;
+let outcome = extensions::run_hook(&quot;com.example.notes/after-save&quot;, &amp;payload_json).await;
 // Outcome ok: take the reply. refused(extension.vetoed): do not perform the action.
 
 // Contributor: needs extensions.contribute:com.example.notes/after-save
@@ -1662,12 +1662,12 @@ test('badge is set when agent works', async () =&gt; {
 <h2 id="package-surface">Package surface</h2>
 <p>The SDK does not build packages. The <code>ilium plugin</code> command does that, from the files of the project. A plugin author touches the package in three places: the manifest, the <code>help/</code> folder and the <code>dist/</code> output. The build stages, the package layout and the signing steps are in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a> and <a href="/pages/packages/">Packages</a>. <code>ilium plugin pack</code> builds an unsigned package. <code>ilium plugin sign</code> signs it.</p>
 <h2 id="sdk-versioning-policy">SDK versioning policy</h2>
-<p>The SDK version has its own number, separate from the contract <code>ilium:plugin@0.1.0</code>. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. <code>ilium plugin check</code> fails with <code>component.api-version-mismatch</code> when the component and the manifest name different contract versions. See <a href="/pages/versioning/">Versioning</a>.</p>
+<p>The SDK version has its own number, separate from the contract <code>ilium:plugin@0.1.0</code>. A new SDK release that keeps the contract compatible raises the minor or patch number. An SDK release that needs a new contract version raises the contract and writes the change in the changelog of the SDK. <code>ilium plugin check</code> fails with <code>manifest.api-version</code> when the component and the manifest name different contract versions. See <a href="/pages/versioning/">Versioning</a>.</p>
 <h2 id="edge-cases">Edge cases</h2>
 <ul>
 <li>A batch holds at most 256 events and a submission list at most 256 entries; a larger list traps the instance with <code>trap.submission-batch</code>.</li>
 <li>A crashed instance restarts after 1 s, then 5 s; the third failure within 10 minutes disables the plugin until the user enables it.</li>
-<li><code>on_events</code> has a 20 ms deadline, <code>render</code> 10 ms, <code>activate</code> 2000 ms and <code>deactivate</code> 500 ms. A breach traps the instance.</li>
+<li><code>on_events</code> has a 20 ms deadline, <code>render</code> 10 ms, <code>activate</code> 2000 ms and <code>deactivate</code> 500 ms. A breach of <code>on_events</code>, <code>render</code> or <code>activate</code> traps the instance. A breach of <code>deactivate</code> drops the instance, discards the restore bytes, logs <code>deactivate.deadline</code> and does not count as a failure.</li>
 <li>Instance memory is capped at 32 MiB (the <code>memory_mib</code> manifest key can raise it, up to 128 MiB for T2 and T3 plugins).</li>
 <li>A log message over 16 KiB is cut and ends with <code>…[truncated]</code>.</li>
 <li>An await that never completes is cancelled with <code>timed-out</code> when its request timeout elapses.</li>

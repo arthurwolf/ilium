@@ -397,11 +397,11 @@
 <p>An agent's own auto-compact trigger lives inside the agent command-line tool, so the plugin only reads it and never changes how the agent decides. The summary job and the optimiser are ordinary plugin code that use the contract version 0.1.</p>
 <h3 id="what-it-covers">What it covers</h3>
 <ul>
-<li><strong>Remote compaction.</strong> The summary is built through the inference model in a job, so the agent keeps working while it runs. The Remote compaction page of the user documentation describes what the user sees.</li>
-<li><strong>Compact button routing.</strong> The compact button of the agent toolbar starts the same job as the palette command. See Starting it in Remote compaction.</li>
-<li><strong>Compaction optimiser.</strong> The Optimization tab of Settings recommends a threshold, with Apply and Revert. See the Optimization part of the Settings tab reference.</li>
-<li><strong>Auto-compact trigger reader.</strong> The plugin reads the trigger each agent uses (see Techniques in Remote compaction), so the recommendation matches the agent.</li>
-<li><strong>Session conversion.</strong> Convert a session between Claude and Codex, described under Session recovery in the user documentation.</li>
+<li><strong>Remote compaction.</strong> The summary is built through the inference model in a job, so the agent keeps working while it runs. The user page <code>src/docs/remote-compaction.md</code> describes what the user sees.</li>
+<li><strong>Compact button routing.</strong> The compact button of the agent toolbar starts the same job as the palette command. See the section Starting it in <code>src/docs/remote-compaction.md</code>.</li>
+<li><strong>Compaction optimiser.</strong> The Optimization tab of Settings recommends a threshold, with Apply and Revert. See the Remote compaction section of <code>src/docs/settings.md</code>.</li>
+<li><strong>Auto-compact trigger reader.</strong> The plugin reads the trigger each agent uses (see the section Techniques in <code>src/docs/remote-compaction.md</code>), so the recommendation matches the agent.</li>
+<li><strong>Session conversion.</strong> Convert a session between Claude and Codex, described in <code>src/docs/session-recovery.md</code>.</li>
 </ul>
 <h3 id="see-it">See it</h3>
 <figure><img src="/assets/demos/26-convert-session.gif" alt="A Claude session is converted to a Codex session and the converted file is opened" loading="lazy"><figcaption>Converting a session between Claude and Codex. The plugin writes the converted session and opens it for inspection.</figcaption></figure>
@@ -498,7 +498,7 @@
     ]
   },
   &quot;activation&quot;: [
-    &quot;event:agent-context-low&quot;,
+    &quot;event:agent-activity-changed&quot;,
     &quot;service:compact&quot;,
     &quot;view:compaction.optimizer&quot;
   ],
@@ -855,7 +855,7 @@ export function openConverted(sessionFile: string): Submission {
 <ul>
 <li><code>ilium.core.compaction/finished</code>: { pane, tokens_before, tokens_after }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.compaction"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.compaction"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-refuses-a-compaction-while-a-test-run-is-active-in-the-pane">Example: Refuses a compaction while a test run is active in the pane</h4>
 <p>A package adds a <code>veto</code> handler. Handlers run until one refuses.</p>
 <pre><code class="language-json">{

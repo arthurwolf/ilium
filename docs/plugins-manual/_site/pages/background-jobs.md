@@ -42,15 +42,18 @@ Each kind is listed under `contributes.jobs`. The plugin also lists `job-runner`
 | CPU deadline (`deadline_ms`) | 2,000 ms | 60,000 ms | 10,000 ms | `failed(timed-out)` |
 | Wall-clock deadline (`job_wall_ms`) | 20,000 ms | 600,000 ms | 100,000 ms | `failed(timed-out)` |
 | Memory (`memory_mib`) | 64 MiB | 512 MiB | 256 MiB | `failed(quota-exceeded)` |
-| Input, and output, each | 16 MiB | 64 MiB | 16 MiB | Input: `invalid-argument` at the call. Output: `failed(invalid-argument)` |
+| Input, and output, each (`job_io_mib`) | 16 MiB | 64 MiB | 16 MiB | Input: `invalid-argument` at the call. Output: `failed(invalid-argument)` |
 | Concurrent jobs | 2 | 8 | 2 | Extra jobs wait in the queue |
 | Queued jobs | 16 | 64 | 16 | `busy` at the start call |
+| Hold of a finished result for `take-output` | 30 s | 30 s | 30 s | `none` after the hold (ABI-012) |
+
+The quota group is the `ilium-execution` CPU token bucket of [Resource accounting](/pages/reference-resource-accounting/): 2,000 ms of CPU time, refilled at 500 ms per second, one group for each plugin side in each process. A job start spends from it.
 
 The CPU deadline counts CPU time only. Time spent in `wait-request` or waiting for the disk counts against the wall-clock deadline instead.
 
 ## The surface
 
-The `jobs` import has five functions. Two of them are callable only inside the job, and the `job-runner` export is the code the host calls.
+The `jobs` import has six functions. Three of them are callable only inside the job, and the `job-runner` export is the code the host calls.
 
 | Function | Rust | TypeScript | Callable from | Meaning |
 |---|---|---|---|---|
@@ -356,7 +359,7 @@ A job completes once, and a `request-completed` event carries the outcome. The o
 | `wait-request` outside `run` | `unsupported` |
 | `take-output` after the 30 s hold, a second take, or an unknown id | `none` |
 
-Every failed job is reported to the plugin and never counts toward the restart rule. A trap in the plugin's own instance, by contrast, counts. See [errors and limits](/pages/errors-and-limits/) for the restart and disable rule.
+Every failed job is reported to the plugin and never counts toward the restart rule. A trap in the plugin's own instance, by contrast, counts. See [errors and limits](/pages/reference-errors-and-limits/) for the restart and disable rule.
 
 <div class="warn">
 <p>A job cannot start another job. <code>jobs.start</code> returns <code>unsupported</code> inside <code>run</code>. Start the second job from the plugin's own instance, after the first one completes.</p>
@@ -371,7 +374,7 @@ A job itself is invisible. The user sees what the plugin draws: a progress gauge
 - [Requests and outcomes](/pages/requests-and-outcomes/)
 - [API: jobs](/pages/api-jobs/)
 - [Capability: jobs.run](/pages/capability-jobs-run/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Services](/pages/services/)
 - [Lifecycle](/pages/lifecycle/)
 

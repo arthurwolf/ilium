@@ -18,7 +18,7 @@ The pane itself, its place in the tree and its focus are kernel-native. The plug
 
 ### See it
 
-<figure><img src="/assets/demos/08-kanban.gif" alt="A Kanban board with three columns while a card moves from To do to Doing" loading="lazy"><figcaption>A board pane with three columns. The selected card moves one column to the right.</figcaption></figure>
+<figure><img src="/assets/demos/08-kanban.gif" alt="The current Ilium Kanban board moves a card to Doing, marks it complete, edits its note, then verifies the saved Markdown file" loading="lazy"><figcaption>The current board completes a card, edits its note, and reopens the Markdown file to verify the saved title and note. The visible agent panes are idle local CLI-shaped fixtures; no provider request is made, and the capture does not demonstrate live agent classification.</figcaption></figure>
 
 ### What the user sees
 
@@ -115,7 +115,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "pane-kind:kanban"
+    "pane-kind:board"
   ],
   "contributes": {
     "pane_kinds": [
@@ -166,6 +166,8 @@ This plugin is the single owner of the following built-in Settings tabs. It hold
 | Tab id | Label | Config table | Readers |
 |---|---|---|---|
 | `kanban-board` | Kanban Board | `[kanban_board]` | none |
+
+The user sees one tab titled Kanban Board in the rail. The kernel tab id `kanban-board` is the tab the user sees and the `[kanban_board]` table is where its values live. The manifest tab `id: "kanban"` is this plugin's contributed row group and is shown inside that same tab, never as a second tab with the same title.
 
 If the plugin is disabled, the tab stays in the rail with its stored values shown read-only and the notice "Kanban is disabled. Values are kept." The kernel keeps reading the keys it consumes itself (listed in the Consumer column of the key table in [config and data migration](/pages/reference-config-and-data-migration/)). Behaviour that only this plugin provides is off. The exact result for this plugin is its row in [kernel and boot](/pages/reference-kernel-and-boot/). [COR-022]
 
@@ -560,9 +562,9 @@ Other plugins change what `ilium.core.kanban` does through the points below. The
 
 - `ilium.core.kanban/card-moved`: { board, card, to_column }
 
-**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.kanban"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replace)).
+**Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.kanban"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
-#### Example: Posts a toast when a card reaches the `Done` column
+#### Example: Observes every card move
 
 A package adds a `observe` handler. Every handler runs; replies are ignored.
 

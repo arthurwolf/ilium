@@ -70,6 +70,8 @@ pub enum Error {
         state: String,
         java_position: [i32; 3],
     },
+    #[error("selected native model textures are missing from the pinned packs: {}", .0.join(", "))]
+    MissingTextures(Vec<String>),
     #[error("native binding source/model limit: {0}")]
     Limit(&'static str),
 }
@@ -452,8 +454,15 @@ impl NativeSourceSession {
             self.budget.clone(),
         )?
         .import_with_progress(requests.as_slice(), cancel, progress)?;
+        let missing = ids
+            .iter()
+            .filter(|id| imports.bank.resolve(id).is_none())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(Error::MissingTextures(missing));
+        }
         if imports.bank.coverage().required_satisfied != ids.len()
-            || ids.iter().any(|id| imports.bank.resolve(id).is_none())
             || imports.records.iter().any(|record| record.source.is_none())
         {
             return Err(Error::Limit("required native model textures missing"));
@@ -616,8 +625,13 @@ pub fn prepare_native_shared(
         }
     }
     let ids = textures.into_iter().collect::<Vec<_>>();
-    if ids.iter().any(|id| imports.bank.resolve(id).is_none()) {
-        return Err(Error::Limit("required native model textures missing"));
+    let missing = ids
+        .iter()
+        .filter(|id| imports.bank.resolve(id).is_none())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(Error::MissingTextures(missing));
     }
     let mut tint = None::<NativeTint>;
     // One memo per tile: blend windows of neighbouring blocks overlap heavily.

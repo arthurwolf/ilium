@@ -542,7 +542,7 @@ Bundled plugins keep working.
 
 <p>Illustrative, not generated. A host log that shows which plugins load, which one is refused on a platform without a sandbox, and when the host stops. The names are placeholders.</p>
 <h3 id="the-sandbox-helper">The sandbox helper</h3>
-<p>T2 and T3 components run in a separate helper process. The helper confines itself with a seccomp filter and a bubblewrap mount namespace. The namespace holds only the scopes that the plugin was granted, mounted read-only for read grants, plus read-only <code>/usr</code>, <code>/bin</code>, <code>/lib*</code> and <code>/etc</code>. A component that imports <code>wasi:sockets</code> or <code>wasi:http</code> is refused at load, so network access goes through the <code>http</code> import, which the kernel performs for the plugin.</p>
+<p>T2 and T3 components run in a separate helper process. The helper confines itself with a seccomp filter and a bubblewrap mount namespace. The namespace holds only the scopes that the plugin was granted, mounted read-only for read grants, plus read-only <code>/usr</code>, <code>/bin</code>, <code>/lib*</code> and <code>/etc</code>. A component that imports <code>wasi:sockets</code> or <code>wasi:http</code> is refused at install, so network access goes through the <code>http</code> import, which the kernel performs for the plugin.</p>
 <p>Child processes that a plugin starts with <code>process.run</code> inherit the same confinement. T1 children run without confinement, at low priority.</p>
 <figure>
 <svg viewBox="0 0 400 180" role="img" aria-label="Request path from plugin code through the kernel" width="600" height="270">
@@ -603,7 +603,7 @@ Bundled plugins keep working.
 <li>Plugins never print raw terminal escape sequences. They describe widgets as data, and the kernel applies the theme, icon widths and the stable-glyph preference. The host removes escape sequences from text fields and logs one warning per view.</li>
 </ul>
 <h3 id="limits">Limits</h3>
-<p>The manifest may request a limit. The host clamps the request to the ceiling for the tier and logs the clamp; it never refuses the package. The user sets the same keys under <code>[plugins.limits]</code> in <code>config.toml</code>, for every plugin or for the whole session. The main keys are below. The full list is in <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p>The manifest may request a limit. The host clamps the request to the ceiling for the tier and logs the clamp; it never refuses the package. The user sets the same keys under <code>[plugins.limits]</code> in <code>config.toml</code>, for every plugin or for the whole session. The main keys are below. The full list is in <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <table>
 <thead>
 <tr>
@@ -675,13 +675,13 @@ Bundled plugins keep working.
 </table>
 <p>The session keys cap the sum over all plugins in one process. For example, <code>session_memory_mib</code> is 1,024 MiB. A new instance that would exceed it is refused and logged. It does not count as a failure. The session keys and the exact failure list are in <a href="/pages/reference-errors-and-limits/#host-rules-for-limits-and-restarts">Errors and limits</a>.</p>
 <h2 id="hook-chains">Hook chains</h2>
-<p>An owner can run a hook chain through the <code>extensions</code> host interface. The host looks up the extensions of that point, sorts them by priority (lower first, ties by plugin id) and calls each handler through the contributor's <code>hook-handler</code> export, one after the other. The reply of each handler is checked against the point's mode and <code>reply_schema</code> before the next handler runs. Hooks fail open. A handler that times out, traps or errors counts as a pass, three breaches in a row stop that extension until its plugin restarts, and the whole chain is capped at 100 ms. Handlers after the cap are skipped and logged. <code>run-hook</code> is asynchronous: it returns a request id at once and the chain runs without blocking the owner's call. Handlers run strictly one after another, the 100 ms cap is measured from the start of the first handler, and a hook never crosses a process: a client-owned point runs only the handlers in that client. T1 handlers run in the process that hosts the owner's side. T2 and T3 handlers cost one helper round trip, which counts inside the handler deadline. See <a href="/pages/api-extension-points/">extension points</a> and <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
+<p>An owner can run a hook chain through the <code>extensions</code> host interface. The host looks up the extensions of that point, sorts them by priority (lower first, ties by plugin id) and calls each handler through the contributor's <code>hook-handler</code> export, one after the other. The reply of each handler is checked against the point's mode and <code>reply_schema</code> before the next handler runs. Hooks fail open. A handler that times out, traps or errors counts as a pass, three breaches in a row stop that extension until its plugin restarts or the user presses Reset (the stop is not saved across a server restart; the full rule is under Fail open on the <a href="/pages/extending-core-plugins/">extending core plugins</a> page), and the whole chain is capped at 100 ms. Handlers after the cap are skipped and logged. <code>run-hook</code> is asynchronous: it returns a request id at once and the chain runs without blocking the owner's call. Handlers run strictly one after another, the 100 ms cap is measured from the start of the first handler, and a hook never crosses a process: a client-owned point runs only the handlers in that client. T1 handlers run in the process that hosts the owner's side. T2 and T3 handlers cost one helper round trip, which counts inside the handler deadline. See <a href="/pages/api-extension-points/">extension points</a> and <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
 <h2 id="failures-and-restarts">Failures and restarts</h2>
 <p>A trap or a deadline breach drops the instance, cancels its pending requests and keeps its decorations, marked stale. The host then restarts the plugin on a back-off:</p>
 <ul>
 <li>The first failure restarts after 1 second.</li>
 <li>The second failure restarts after 5 seconds.</li>
-<li>The third failure within the 10-minute window stops that side; there is no 30-second step.</li>
+<li>The third failure within the 10-minute window stops that side. The schedule is 1 s, 5 s, stop.</li>
 <li>A third failure inside a sliding 10-minute window disables the plugin on that side. On the client, each client counts separately.</li>
 </ul>
 <p>A revocation, a disable, an upgrade or a shutdown never counts as a failure. When the host disables a plugin, the tree footer shows a notice in this form:</p>
@@ -727,6 +727,7 @@ impl Handler for Hello {
                 icon: None,
                 sort_key: None,
                 persist: false,
+                ..SetDecorationSpec::default()
             })));
         }
         submissions
@@ -738,7 +739,7 @@ impl Handler for Hello {
 <li>The dispatcher delivers <code>agent-activity-changed</code> into the plugin's queue. Delivery requires <code>agent.read</code>.</li>
 <li><code>log::log</code> is an always-granted import. Its line goes to the plugin log.</li>
 <li>The returned <code>Submission</code> is checked when the batch is accepted. The kernel verifies <code>tree.decorate</code>, the node and the slot <code>hello</code>, which the manifest declares.</li>
-<li>If the user declined <code>tree.decorate</code>, the kernel answers <code>refused(not-permitted)</code> for that submission. The batch is refused as a whole only for a malformed submission or a missing grant.</li>
+<li>If the user declined <code>tree.decorate</code>, the kernel answers <code>refused(not-permitted)</code> for that submission and refuses the whole batch: every other submission completes as <code>refused(cancelled)</code> with <code>batch refused: submission &lt;index&gt;</code>. A malformed submission refuses the batch the same way. Optional fields such as <code>spans</code>, <code>tooltip</code>, <code>frames</code>, <code>tone</code> take their defaults from <code>SetDecorationSpec::default()</code>.</li>
 </ol>
 <h2 id="worked-example-2-a-typescript-client-plugin">Worked example 2: a TypeScript client plugin</h2>
 <p>This plugin runs in the client. It answers its own command with a desktop notice. It needs the <code>notify.desktop</code> grant, and the command <code>com.example.hello/greet</code> must be declared under <code>contributes.commands</code>.</p>
@@ -845,7 +846,7 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/primitives/">Primitives</a></li>
 <li><a href="/pages/services/">Services</a></li>
 <li><a href="/pages/security/">Security</a></li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a></li>
 <li><a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
 </ul>

@@ -463,7 +463,7 @@
 <h3 id="execution-quota">Execution quota</h3>
 <p>The <code>ilium-execution</code> quota group is a token bucket. It holds 2,000 ms of CPU time and refills at 500 ms per second. There is one group for each plugin side in each process. A call spends its thread time. A submission also spends 1 ms for every 64 KiB of payload.</p>
 <ul>
-<li>When the bucket is empty, a new submission returns <code>quota-exceeded</code> with The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. <code>retry-after-ms</code> = max(100, ceil_10(-balance_ms * 2)), where <code>ceil_10</code> rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200.</li>
+<li>When the bucket is empty, a new submission returns <code>quota-exceeded</code> with a <code>retry-after-ms</code> value. The bucket balance can go below zero, because a call is charged after it ends. The bucket is empty when the balance is 0 or less. <code>retry-after-ms</code> = max(100, ceil_10(-balance_ms * 2)), where <code>ceil_10</code> rounds up to the next 10 ms: the wall time until the balance refills to 0 at 500 ms per second, never below 100. A balance of -100 ms gives 200.</li>
 <li>A call already running is not stopped by an empty bucket. Its deadline stops it.</li>
 <li>
 <p>A refused call is not a failure and is not counted toward the restart rule. It counts as a quota hit in the metrics of <a href="/pages/reference-health-and-watchdog/">Health and watchdog</a>.</p>
@@ -497,7 +497,7 @@ memory_mib = 64
 </code></pre>
 <p>Example. A T3 plugin asks <code>memory_mib: 200</code> in its manifest. The user sets nothing. The ceiling for T2 and T3 is 128, so the plugin gets 128 and the log says <code>limit memory_mib clamped 200 to 128</code>. If the user sets 64 for this plugin, it gets 64. If the user sets 256, it gets 128.</p>
 <ul>
-<li>[LIF-143] The effective limit MUST be <code>min(ceiling, first set of [plugins."&lt;id&gt;".limits] value, [plugins.limits] value, manifest value, default)</code>; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them. Test: the three cases of the example.</li>
+<li>[LIF-143] The effective limit MUST be <code>min(ceiling, v)</code>, where <code>v</code> is the first set of the <code>[plugins."&lt;id&gt;".limits]</code> value, the <code>[plugins.limits]</code> value, the manifest value and the default, in that order; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them; a value above the current session value is clamped to it and the host logs a warning. Test: the three cases of the example.</li>
 <li>[LIF-144] A per-plugin user value MUST win over a user value for all plugins. Test: set both and read the effective value.</li>
 </ul>
 <h3 id="helpers-and-cgroups">Helpers and cgroups</h3>
@@ -510,7 +510,7 @@ memory_mib = 64
 <pre><code class="language-text">{&quot;type&quot;:&quot;plugin-stat&quot;,&quot;id&quot;:&quot;com.example.notes&quot;,&quot;side&quot;:&quot;server&quot;,&quot;resource&quot;:&quot;memory&quot;,&quot;used&quot;:9437184,&quot;limit&quot;:33554432,&quot;source&quot;:&quot;default&quot;}
 {&quot;type&quot;:&quot;plugin-stat&quot;,&quot;id&quot;:&quot;com.example.notes&quot;,&quot;side&quot;:&quot;server&quot;,&quot;resource&quot;:&quot;execution-ms&quot;,&quot;used&quot;:1240,&quot;limit&quot;:2000,&quot;source&quot;:&quot;fixed&quot;}
 </code></pre>
-<p><code>source</code> is <code>default</code>, <code>manifest</code>, <code>user</code> or <code>ceiling</code>. The Plugins screen detail tab Resources shows the same rows (<a href="/pages/user-managing-plugins/">Managing plugins</a>).</p>
+<p><code>source</code> is <code>default</code>, <code>manifest</code>, <code>user</code>, <code>ceiling</code> or <code>fixed</code>. <code>fixed</code> marks a limit that no manifest or user setting changes, such as the <code>ilium-execution</code> bucket. The Plugins screen detail tab Resources shows the same rows (<a href="/pages/user-managing-plugins/">Managing plugins</a>).</p>
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin stats com.example.notes
 <span class="t-dim">RESOURCE     USED     LIMIT    SOURCE</span>
@@ -554,7 +554,7 @@ disk         12 MiB   256 MiB  default
 </table>
 <h3 id="see-also">See also</h3>
 <ul>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/reference-errors-and-limits/">Reference, errors and limits</a></li>
 <li><a href="/pages/performance/">Performance</a></li>
 <li><a href="/pages/reference-health-and-watchdog/">Health and watchdog</a></li>

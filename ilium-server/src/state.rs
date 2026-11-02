@@ -121,6 +121,10 @@ impl ServerEvents {
         self.sender.subscribe()
     }
 
+    pub(crate) fn has_subscribers(&self) -> bool {
+        self.sender.receiver_count() > 0
+    }
+
     #[cfg(test)]
     pub(crate) fn subscribe_owned(&self) -> OwnedServerEventReceiver {
         OwnedServerEventReceiver {
@@ -265,6 +269,7 @@ pub struct ServerState {
     blocking_error_generations:
         std::sync::Mutex<std::collections::HashMap<(Option<NodeId>, String), u64>>,
     blocking_error_next_generation: std::sync::atomic::AtomicU64,
+    pub(crate) resources: std::sync::OnceLock<crate::resources::ResourceService>,
     pub session_name: String,
     /// Canonical project boundary shared by every pane in this server.
     pub session_cwd: PathBuf,
@@ -291,6 +296,8 @@ pub struct ServerState {
     pub sound_requests: PlaybackSender,
     pub tree: std::sync::Arc<RwLock<Tree>>,
     pub panes: std::sync::Arc<RwLock<PaneRegistry>>,
+    /// Monotonic activity observations, including unsubscribed terminal output.
+    pub(crate) recent_activity: std::sync::Mutex<crate::recent_activity::RecentActivity>,
     /// Server-owned, pane-keyed semantic debug history. It is separate from
     /// the hot tree snapshot transported after structural changes.
     pub agent_debug: std::sync::Arc<AgentDebugRecorder>,
@@ -336,7 +343,7 @@ pub struct ServerState {
     /// server. Cooperating processes additionally take the repository lease.
     /// This mutex does not exclude arbitrary external file access or tree edits.
     /// Acquire after a workspace repository lock, before tree/pane locks.
-    pub(crate) workspace_spawn_lock: Mutex<()>,
+    pub(crate) workspace_spawn_lock: Arc<Mutex<()>>,
     /// Pane IDs currently undergoing replacement. The standard mutex is held
     /// only for set membership changes, never across an await.
     pub(crate) replacing_panes: std::sync::Mutex<HashSet<NodeId>>,
@@ -539,6 +546,7 @@ impl ServerState {
         tree.ensure_launch_project(options.session_cwd.clone())
             .expect("a new tree always accepts its launch project");
         Self {
+            resources: std::sync::OnceLock::new(),
             blocking_errors: std::sync::Mutex::new(Vec::new()),
             blocking_error_generations: std::sync::Mutex::new(std::collections::HashMap::new()),
             blocking_error_next_generation: std::sync::atomic::AtomicU64::new(1),
@@ -562,6 +570,7 @@ impl ServerState {
             sound_requests: options.sound_requests,
             tree: std::sync::Arc::new(RwLock::new(tree)),
             panes: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            recent_activity: std::sync::Mutex::default(),
             agent_debug: std::sync::Arc::new(AgentDebugRecorder::new(
                 options.agent_debug_menu_enabled,
             )),
@@ -581,7 +590,7 @@ impl ServerState {
             repo_discovery_cache: Default::default(),
             repo_facts_cache: Default::default(),
             workspace_repository_locks: Mutex::new(HashMap::new()),
-            workspace_spawn_lock: Mutex::new(()),
+            workspace_spawn_lock: Arc::new(Mutex::new(())),
             replacing_panes: std::sync::Mutex::new(HashSet::new()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),

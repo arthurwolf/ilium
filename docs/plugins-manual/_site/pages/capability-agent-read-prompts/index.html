@@ -632,10 +632,10 @@ export const { lifecycle, handler, views } = definePlugin({
 </code></pre>
 <p>The <code>activate</code> hook reads the activation context, which lists only the grants that were accepted. When the
 grant is declined, the banner says so rather than showing an empty box. The <code>render</code> function runs under
-the 10 ms <code>render_deadline_ms</code> default (see <a href="/pages/errors-and-limits/">Limits</a>), and <code>lastPrompt</code> is a
+the 10 ms <code>render_deadline_ms</code> default (see <a href="/pages/reference-errors-and-limits/">Limits</a>), and <code>lastPrompt</code> is a
 synchronous call, so the read fits.</p>
 <h2 id="what-the-user-sees">What the user sees</h2>
-<p>When a T2 or T3 plugin is installed, the review dialog lists the grant with the <code>HIGH</code> mark. The row is
+<p>When a T2 or T3 plugin is installed, the review dialog lists the grant with the <code>!</code> mark (high risk). The row is
 unchecked until the user checks it.</p>
 <figure>
 <pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
@@ -712,7 +712,7 @@ is not delivered, or a value of none.</p>
 of the server process. A server restart clears it. The snapshot stores the epoch counter but not the text.</p>
 <h2 id="limits">Limits</h2>
 <ul>
-<li><code>event_queue</code> is 1,024 events by default and 4,096 at the T1 ceiling (see <a href="/pages/errors-and-limits/">Errors and limits</a>). Prompt events are never dropped, so a slow handler fills the queue quickly.</li>
+<li><code>event_queue</code> is 1,024 events by default and 4,096 at the T1 ceiling (see <a href="/pages/reference-errors-and-limits/">Errors and limits</a>). Prompt events are never dropped, so a slow handler fills the queue quickly.</li>
 <li>Prompt text that the plugin keeps counts against its <code>memory_mib</code> budget (32 MiB by default). The banner example keeps none.</li>
 <li>Prompt text stored with <code>storage.put</code> counts against the storage bucket (16 MiB by default). Store only what the feature needs.</li>
 </ul>

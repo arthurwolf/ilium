@@ -69,7 +69,7 @@ Payloads use the WIT types of the API. Names in the Rust and TypeScript SDKs fol
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch: u64` | `agent.read-prompts` | never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, drag, wheel), `button: option` | `terminal.pointer`, while claimed | coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button: option` | `terminal.pointer`, while claimed | coalesced (drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | never dropped |
@@ -129,7 +129,7 @@ Eighteen further event cases are appended after `events-dropped`. All are minor.
 
 Two existing payloads gain optional fields:
 
-- `pointer` gains `sub-x`, `sub-y`, `modifiers` and the kind `move`. `move` is reported only while the pointer is claimed and over the pane.
+- `pointer` gains `sub-x`, `sub-y` and `modifiers`. The kind `move` is in the base kind list and is reported only while the pointer is claimed and over the pane.
 - `command-invoked` gains the origins `toast`, `row-action`, `status-segment`, `tree-toolbar`, `frame-slot`, `virtual-row-drop` and `text`. Its context gains `virtual-row` and `menu-item`.
 
 Two prompt events exist. `input-submitted` fires only for a pane with an identified agent, once per recorded prompt, and carries the source and the epoch. `user-line-submitted` fires for any terminal pane, agent or plain, when the user presses Enter on a line, and carries no source. For one prompt typed by the user into an agent pane, both fire, `input-submitted` first, then `user-line-submitted` in the same batch if the queue allows. A prompt sent by a plugin, a schedule or voice fires `input-submitted` only [EVT-040].
@@ -142,10 +142,11 @@ A coalesced event takes the position of its newest occurrence, which can place a
 
 Six kinds extend the base set, which makes 17: `hover-enter` and `hover-leave` (nodes with `hover-events`), `pointer` (nodes with `pointer-events`), `drag-over` (drop targets), `resized` (`split`) and `filter-changed` (`%list`, `choice`, debounced 150 ms). `scrolled`, `pointer` and `drag-over` are coalesced. The others are never dropped.
 
-Five `action-value` cases extend the base set, which makes 12.
+Six `action-value` cases extend the base set of six (`none`, `text`, `index`, `number`, `flag`, `drop`), which makes 12.
 
 | Case | Payload | Sent by |
 |---|---|---|
+| `cell` | `cell-position` (`column`, `row`) | `surface`, `terminal-view` and `code-view` activations |
 | `pointer` | `view-pointer` | `pointer` actions |
 | `drag-over` | `source-key`, `target-key`, `index`, `accept` (`none`, `before`, `after`, `inside`) | `drag-over` actions |
 | `item-state` | item id (empty for a tri-state toggle), `tri-state` | `check-list`, tri-state toggles |
@@ -254,7 +255,7 @@ A batch is refused as a whole in two cases: a malformed submission (wrong shape,
 | `play-sound` | sound id | `sound.play` | `refused(not-found)`; `refused(rate-limited)` above 4 per second |
 | `notify` | `title`, `body`, `urgency` (low, normal, high), `sound` | `notify.desktop` | `refused(rate-limited)` above 6 per minute |
 | `open-view`, `close-view` | `view-target`, `focus` | `ui.panels` | `refused(not-found)` for an undeclared view |
-| `invoke-command` | `command`, `arguments-json` | `commands.invoke` | `failed(timed-out)` after 30 s |
+| `invoke-command` | `command`, `arguments-json` | `commands.invoke` | `refused(conflict)` for a disabled command; `failed(timed-out)` after 30 s |
 | `message` | `to`, `channel`, `payload` | `messages.peer` | `refused(not-found)`; `refused(invalid-argument)` above 1 MiB |
 | `editor-apply-edits` | `buffer`, `base-revision`, `edits` | `editor.edit` | `refused(conflict)` on a stale revision |
 | `editor-open` | `path`, `line`, `placement` (new pane, split, replace) | `editor.edit` | `ok-node`; `failed(io)` |
@@ -277,9 +278,9 @@ Twenty-three further intent cases exist, and `outcome` includes `ok-epoch(u64)`.
 | `restructure` | `operations` (at most 256), `label` | `tree.restructure` | `ok-node` with an undo token; all or nothing, `refused(conflict)` names the failing index |
 | `revert-restructure` | `token` | `tree.restructure` | `ok`; `refused(conflict)` after a later change |
 | `set-inferred-icon` | `node`, `icon`, `source` | `tree.decorate` | `ok`; a manual icon wins with `refused(conflict)` |
-| `mark-attention`, `ack-attention` | `node`, `reason` (at most 80) | `tree.attention` | `ok` |
+| `mark-attention`, `ack-attention` | `node`, `reason` (at most 80) | `tree.attention` | `ok`; `refused(rate-limited)` above 10 per second per node per plugin, the two intents together |
 | `open-external` | `target`: url, file or settings | `open-external` | `ok`; `refused(not-permitted)` when the user declines; `http`, `https`, `mailto` only |
-| `set-status-segment`, `clear-status-segment` | `segment`, `content`, `tooltip`, `tone` | `ui.chrome` | `ok`; 10 per second per segment |
+| `set-status-segment`, `clear-status-segment` | `segment`, `content`, `tooltip`, `tone` | `ui.chrome` | `ok`; 10 per second per slot (the segment id is the slot) |
 | `set-frame-slot`, `clear-frame-slot` | `pane`, `slot`, `content`, `icon`, `tooltip` | `ui.chrome` | `ok`; `refused(invalid-argument)` when the pane does not match `applies_to` |
 | `toast` | `id`, `tone`, `title` (60), `body` (200), `actions` (2), `duration-ms` | `notify.toast` | `ok`; 3 per 10 s (`rate-limited`); a shown `id` is replaced |
 | `dismiss-toast` | `id` | `notify.toast` | `ok` |
@@ -342,6 +343,7 @@ use ilium_plugin_sdk::dedup;
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::types::events::PaneTitleChangedEvent;
 use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::TitleSource;
 
 #[ilium_plugin(side = "server")]
 #[derive(Default)]
@@ -355,7 +357,12 @@ impl Handler for Titler {
             else {
                 continue;
             };
-            let spec = RenameNodeSpec { node, title: title.trim().to_string() };
+            let spec = RenameNodeSpec {
+                node,
+                title: title.trim().to_string(),
+                source: TitleSource::Inferred,
+                expected_revision: None,
+            };
             let key = dedup::key_for(&["titler", &node.to_string(), spec.title.as_str()]);
             submissions.push(Submission::keyed(Intent::RenameNode(spec), key));
         }

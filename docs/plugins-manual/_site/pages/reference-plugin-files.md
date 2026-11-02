@@ -23,21 +23,22 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 
 ### How paths are chosen
 
-Ilium never writes a hard-coded `~`. It asks the operating system for three roots through the `directories` crate, with the project name `ilium` and no organisation. The roots are the configuration folder, the data folder and the cache folder.
+Ilium never writes a hard-coded `~`. It asks the operating system for three roots through the `directories` crate, with the project name `ilium` and no organisation: the configuration folder, the data folder and the cache folder. A fourth root, the state folder (`<state>`), holds the grant, consent, trust and audit files.
 
 | Root | Linux | macOS | Windows |
 |---|---|---|---|
 | Configuration (`<config>`) | `~/.config/ilium` | `~/Library/Application Support/ilium` | `%APPDATA%\ilium\config` |
 | Data (`<data>`) | `~/.local/share/ilium` | `~/Library/Application Support/ilium` | `%APPDATA%\ilium\data` |
 | Cache (`<cache>`) | `~/.cache/ilium` | `~/Library/Caches/ilium` | `%LOCALAPPDATA%\ilium\cache` |
+| State (`<state>`) | `$XDG_STATE_HOME/ilium` (default `~/.local/state/ilium`) | `~/Library/Application Support/Ilium/state` | `%LOCALAPPDATA%\Ilium\state` |
 
-On Linux the roots follow `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` when they are set. The rest of this page writes `<config>`, `<data>` and `<cache>` and never repeats the system paths. A project folder (`<project>`) is the canonical launch folder of a session. Project-scope files live in `<project>/.ilium/`.
+On Linux the roots follow `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME` when they are set. The rest of this page writes `<config>`, `<data>`, `<cache>` and `<state>` and never repeats the system paths. A project folder (`<project>`) is the canonical launch folder of a session. Project-scope files live in `<project>/.ilium/`.
 
-- [USR-200] The host MUST resolve `<config>`, `<data>` and `<cache>` with the `directories` crate for the project name `ilium`, and MUST NOT write plugin files anywhere else. Test: start Ilium with `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` pointing at three empty folders, install a plugin, and assert that no plugin file appears outside those folders and the project's `.ilium` folder.
+- [USR-200] The host MUST resolve `<config>`, `<data>`, `<cache>` and `<state>` (the per-OS paths of [SEC-112]) with the `directories` crate for the project name `ilium`, and MUST NOT write plugin files anywhere else. Test: start Ilium with `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME` pointing at four empty folders, install a plugin, and assert that no plugin file appears outside those folders and the project's `.ilium` folder.
 
 ### The table of items
 
-Paths start at `<config>`, `<data>`, `<cache>` or `<project>`. The plugin root is `<data>/plugins/`. The layout of the plugin root is owned by [Install, update and uninstall](/pages/reference-install-update-uninstall/); this table repeats it for users and adds the user-facing files.
+Paths start at `<config>`, `<data>`, `<cache>`, `<state>` or `<project>`. The plugin root is `<data>/plugins/`. The layout of the plugin root is owned by [Install, update and uninstall](/pages/reference-install-update-uninstall/); this table repeats it for users and adds the user-facing files.
 
 | Item | Location | Format | Written by | Removed by |
 |---|---|---|---|---|
@@ -47,20 +48,21 @@ Paths start at `<config>`, `<data>`, `<cache>` or `<project>`. The plugin root i
 | Unpacking area | `<data>/plugins/staging/<uuid>/` | Same as a package | Install, update | The rename into the store, a failed operation, or the next start (older than 1 hour or its process is gone) |
 | Pre-migration copies | `<data>/plugins/backups/<id>/<version>-<utc timestamp>/` | Copy of data and buckets | Update with a data migration | The next committed update keeps only the newest; `uninstall --purge` deletes them |
 | Plugin data | `<data>/plugins/data/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:data` | `uninstall --purge`, or Delete data in the uninstall dialog |
+| Purge note | `<data>/plugins/purged.json` | JSON list of plugin id and purge time | `uninstall --purge` | Ilium, once every known project has been opened and cleaned of that plugin's data; a project never reopened keeps its data |
 | Global storage bucket | `<data>/plugins/storage/<id>/global.db` | Key-value database | The plugin, through `storage` | Same as plugin data |
 | Project and session buckets | Inside `<project>/.ilium/` and the session snapshot `<project>/.ilium/sessions/<session>.json` | Database and JSON | The plugin and the host | Same as plugin data, for the open project and session. Other projects get a tombstone |
-| Grants and consent answers | `$XDG_STATE_HOME/ilium/grants.json` and `consents.json` (one file each for all plugins) | JSON | Review dialog, Capabilities tab, `ilium plugin grants`, first-use prompts | Every uninstall |
-| Trusted publisher keys | `$XDG_STATE_HOME/ilium/trust.json`, or the path in `ILIUM_TRUST_STORE` | JSON list of `{publisher, fingerprint, public_key, added_at}` | `ilium plugin trust add` and the trust prompt | `ilium plugin trust remove` |
+| Grants and consent answers | `<state>/grants.json` and `consents.json` (one file each for all plugins) | JSON | Review dialog, Capabilities tab, `ilium plugin grants`, first-use prompts | Every uninstall |
+| Trusted publisher keys | `<state>/trust.json`, or the path in `ILIUM_TRUST_STORE` | JSON object `ilium-trust/1` with a `keys` list; see [Signing and trust](/pages/reference-signing-and-trust/) | `ilium plugin trust add` and the trust prompt | `ilium plugin trust remove` |
 | Plugin settings, user scope | `<config>/config.toml`, table `[plugins."<id>"]` | TOML | The Settings screen | `uninstall --purge`, Forget settings |
 | Plugin settings, project scope | `<project>/.ilium/config.yaml`, key `plugins.<id>` | YAML | The Settings screen | Same two actions, for the open project |
 | Plugin limits | `<config>/config.toml`, table `[plugins.limits]` | TOML | The user | The user |
-| Plugin cache | `<cache>/plugins/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:cache` | The host may evict it at any time. Every uninstall removes it |
-| Compile cache | `<cache>/plugins/compile/` | Compiled components | Install of a T2 or T3 plugin | The host, when space is low |
+| Plugin cache | `<cache dir>/ilium/plugins/<id>/` | Whatever the plugin writes | The plugin, through `fs.write:cache` | The host may evict it at any time. Every uninstall removes it |
+| Compile cache | `<cache dir>/ilium/plugins/compile/` | Compiled components | Install of a T2 or T3 plugin | The host, when space is low |
 | Plugin log | `<data>/plugins/logs/<id>.log` and rotated files | Text, four columns | The plugin and the host | Rotation. See below |
 | User extension order and toggles | `<config>/config.toml`, table `[plugins.extensions]` | TOML | The Extensions tab | Every uninstall of the owner |
 | Replacement record | `<config>/config.toml`, table `[plugins.replaces]` | TOML | The replace confirmation | Undoing the replacement |
 | Administrator policy | See [Plugin policy](/pages/reference-plugin-policy/) | TOML | The administrator | The administrator |
-| Audit log | `$XDG_STATE_HOME/ilium/audit/audit.jsonl` (see [Audit log](/pages/reference-audit-log/)) | JSON lines | The host | Rotation by `audit.max_mib` and `audit.keep_days` |
+| Audit log | `<state>/audit/audit.jsonl` (see [Audit log](/pages/reference-audit-log/)) | JSON lines | The host | Rotation by `audit.max_mib` and `audit.keep_days` |
 
 The two last settings-adjacent tables, `[plugins.extensions]` and `[plugins.replaces]`, are proposed names that the owner of [Extension points](/pages/api-extension-points/) confirms.
 
@@ -87,7 +89,7 @@ The grant file has one entry per side. A grant value is `granted`, `declined` or
 
 `first_start_not_now` counts how often the user chose Not now at the first-start prompt of a bundled plugin. See [Install and manage plugins](/pages/user-install-and-manage/#first-start-of-a-bundled-plugin).
 
-The fingerprint of a key is shown as 32 uppercase hexadecimal characters in 8 groups of 4 separated by `-` (see the CLI reference). The short form in dialogs shows the first 4 and the last 4 characters joined by an ellipsis, for example `3F2A…9C01`.
+The fingerprint of a key is shown as 64 lowercase hexadecimal characters in 16 groups of 4 (see the CLI reference, [DEV-112]). The short form is the first 8 characters, for example `3f2a91c0`. It is shown only beside the full form or in `trust list` ([SEC-177]).
 
 ### The plugin log
 
@@ -120,7 +122,7 @@ The default uninstall, `--purge` and `--keep-data` are specified in the table of
 | Action | Package | Grants | Settings | Data, storage | Cache | Extensions order | Log | Trusted keys |
 |---|---|---|---|---|---|---|---|---|
 | Disable | kept | kept | kept | kept | kept | kept | kept | kept |
-| Uninstall, default | removed | removed | kept | kept when there is no terminal, otherwise asked | removed | removed | kept 7 days | kept |
+| Uninstall, default | removed | removed | kept | kept, no question asked | removed | removed | kept 7 days | kept |
 | Uninstall `--purge` | removed | removed | removed | removed | removed | removed | removed | kept |
 | Uninstall `--keep-data` | removed | removed | kept | kept | removed | removed | kept 7 days | kept |
 | Forget settings (recovery page) | kept | kept | removed | kept | kept | kept | kept | kept |
@@ -137,7 +139,7 @@ Copy these items, in this order, with Ilium stopped:
 
 1. `<data>/plugins/store/` and `<data>/plugins/installed.json`, so the same versions install again.
 2. The trust store `trust.json`, so signed packages are still trusted.
-3. `$XDG_STATE_HOME/ilium/grants.json` and `consents.json`, if you want the same answers. Skip it to be asked again on the new machine.
+3. `<state>/grants.json` and `consents.json`, if you want the same answers. Skip it to be asked again on the new machine.
 4. `<config>/config.toml` and the `.ilium` folders of your projects, for settings.
 5. `<data>/plugins/data/` and `<data>/plugins/storage/`, for the plugin's own data.
 
@@ -152,7 +154,7 @@ Skip the cache, the logs, the staging folder and the backups. A machine that run
 | A grant file does not parse | The file is renamed to `grants.json.corrupt-<YYYYMMDD-HHmmss>` and the server logs `grants.unreadable`. T2 and T3 plugins start as not installed with no grants; T1 plugins start with only normal grants ([HST-044]) |
 | A package folder is missing but the registry lists it | The plugin is refused at load with the code `package.corrupt` |
 | The disk is full during a write | The action stops, the old file stays, and the error is `install.io` or `io` |
-| Two Ilium servers share one profile | Each write takes `installed.lock`. The second writer waits up to 5 s, then fails the action with `conflict` |
+| Two Ilium servers share one profile | Each write takes `installed.lock`. The second writer polls every 100 ms for up to 30 s, then fails the action with `install.locked` (exit code 4, [LIF-066]) |
 
 ### See also
 

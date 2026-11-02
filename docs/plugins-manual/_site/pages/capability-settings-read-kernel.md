@@ -185,4 +185,4 @@ The user can change the grant at any time in Settings > Plugins > com.example.sc
 
 ### Security
 
-Kernel settings tabs are read only through this grant; secrets are excluded ([SEC-242]).
+Kernel settings tabs are read only through this grant; a kernel secret is returned as `<redacted>` ([SEC-244]).

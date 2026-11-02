@@ -666,7 +666,7 @@ Tests run on the developer's machine only. `cargo test` reports each test with `
 ## See also
 
 - [Debugging](/pages/debugging/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Capabilities](/pages/capabilities/)
 - [Rust SDK](/pages/rust-sdk/)
 - [TypeScript SDK](/pages/typescript-sdk/)

@@ -412,7 +412,7 @@
 <li><code>before:&lt;section&gt;</code> puts it directly before a named section.</li>
 <li><code>after:&lt;section&gt;</code> puts it directly after a named section.</li>
 </ul>
-<p>Most built-in tabs have one unnamed section called <code>main</code>, so <code>before:main</code> is refused. Tabs with headings, such as Remote compaction, expose named anchors: <code>behaviour</code>, <code>technique-per-agent</code>, <code>custom-prompt</code>, <code>input-shaping</code> and <code>model</code>. Kernel anchors are never renamed or removed.</p>
+<p>Most built-in tabs have one unnamed section called <code>main</code>, so <code>before:main</code> is refused with <code>manifest.settings-anchor</code>. Tabs with headings, such as Remote compaction, expose named anchors: <code>behaviour</code>, <code>technique-per-agent</code>, <code>custom-prompt</code>, <code>input-shaping</code> and <code>model</code>. Kernel anchors are never renamed or removed.</p>
 <p>A new tab is placed in the rail with <code>after</code>, which names the tab it follows. The default is <code>text-triggers</code>. The tail of the rail (<code>debug</code>, <code>api</code>, <code>about</code>, <code>setup</code>) is pinned, so a plugin tab never appears after <code>debug</code>.</p>
 <h3 id="ordering">Ordering</h3>
 <p>The order of plugin content inside one tab is fixed by three keys, applied in turn:</p>
@@ -459,7 +459,7 @@
 
 <h3 id="grants">Grants</h3>
 <p>A plugin needs no grant for its own tab or for sections in its own tab. The always-granted <code>settings</code> access covers the plugin's own values.</p>
-<p>To add sections to a built-in tab, the plugin needs one grant per tab: <code>settings.contribute:&lt;tab-id&gt;</code>, for example <code>settings.contribute:terminal</code>. The grant takes one tab id with no wildcard. It gives permission to draw sections in that tab and nothing else. The review dialog shows it as "Adds settings to the Terminal tab". The grant is low risk and gives no read or write access to built-in values.</p>
+<p>To add sections to a built-in tab, the plugin needs one grant per tab: <code>settings.contribute:&lt;tab-id&gt;</code>, for example <code>settings.contribute:terminal</code>. The grant takes one tab id with no wildcard. It gives permission to draw sections in that tab and nothing else. The review dialog shows it as "Adds settings to the Terminal tab". The grant is normal risk and gives no read or write access to built-in values.</p>
 <p><code>settings.read-all</code> and <code>settings.write-all</code> are a different grant and stay high risk. Neither grant implies <code>settings.contribute</code>, and the reverse is also true. See <a href="/pages/capability-settings-all/">capability: settings.read-all and settings.write-all</a>.</p>
 <h3 id="row-types">Row types</h3>
 <p>A row is one setting line group: a label, a control and a description. Rows are declared inline in the manifest. The table lists the 18 types. Every type, in every state, is on the <a href="/pages/reference-settings-rows/">row gallery</a>.</p>
@@ -641,6 +641,43 @@
 </tr>
 </tbody>
 </table>
+<p>The caps above are the standard tier. A bundled T1 plugin whose id starts with <code>ilium.</code> and that sets <code>limits_tier: "first-party"</code> gets these higher caps instead (any other package is refused with <code>manifest.limits-tier</code>; see <a href="/pages/design-decisions/">design decisions</a>):</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Standard</th>
+<th>First-party</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tabs per plugin</td>
+<td>2</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Value keys per plugin</td>
+<td>128</td>
+<td>2,048</td>
+</tr>
+<tr>
+<td>Rows per section</td>
+<td>24</td>
+<td>64</td>
+</tr>
+<tr>
+<td>List items</td>
+<td>64</td>
+<td>1,024</td>
+</tr>
+<tr>
+<td>Choice options</td>
+<td>64</td>
+<td>512</td>
+</tr>
+</tbody>
+</table>
 <p>When the limit for plugin sections in one built-in tab is reached, the extra sections are not drawn. They are listed on the recovery page with the warning <code>settings.section-dropped</code>. Install-time errors name the item, its path in the manifest and the limit.</p>
 <h3 id="values-and-saving">Values and saving</h3>
 <p>Values for a plugin's settings are stored in its own table in <code>config.toml</code>:</p>
@@ -650,7 +687,7 @@ max_entries = 500
 ignore_patterns = [&quot;^sk-[A-Za-z0-9]{20,}$&quot;, &quot;^ghp_&quot;]
 record_panes = true
 </code></pre>
-<p>A row's key follows its section's <code>scope</code>. A row with <code>scope: "project"</code> is written to the project's <code>.ilium/</code> settings instead of <code>config.toml</code>; the project value wins while that project is open. The <code>scope</code> of a <code>settings-changed</code> event names the receiving side. Client-scope keys are read on the client. Server-scope keys are checked by the client against the same schema, written to the same table and passed to the server through the normal configuration refresh. A section has a single scope, so a plugin that needs both sides declares two sections.</p>
+<p>A row's key follows its section's <code>scope</code>. A row with <code>scope: "project"</code> is written to the project's <code>.ilium/</code> settings instead of <code>config.toml</code>; the project value wins while that project is open. The <code>side</code> field of a <code>settings-changed</code> event names the receiving side. Client-scope keys are read on the client. Server-scope keys are checked by the client against the same schema, written to the same table and passed to the server through the normal configuration refresh. A section has a single scope, so a plugin that needs both sides declares two sections.</p>
 <p>Changes are saved as the user makes them. There is no Save button.</p>
 <table>
 <thead>

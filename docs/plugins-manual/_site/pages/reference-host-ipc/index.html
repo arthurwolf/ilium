@@ -707,7 +707,7 @@ pub struct InstalledPlugin { pub id: PluginId, pub version: String, pub content_
 </tr>
 </tbody>
 </table>
-<p>An oversized item is refused at the sender. The sender's call completes with <code>failed(too-large)</code>.</p>
+<p>An oversized item is refused at the sender. The sender's call returns <code>ipc.payload-too-large</code>.</p>
 <ul>
 <li><strong>[HST-124]</strong> The sender MUST check the caps above and refuse an oversized item with <code>ipc.payload-too-large</code> before it is encoded.</li>
 <li><strong>[HST-125]</strong> A receiver MUST drop an envelope above 17 MiB and close the connection with <code>ipc.payload-too-large</code>.</li>
@@ -735,7 +735,7 @@ pub struct InstalledPlugin { pub id: PluginId, pub version: String, pub content_
 <tr>
 <td><code>ipc.payload-too-large</code></td>
 <td>A cap above is exceeded</td>
-<td>Item refused</td>
+<td>Item refused; the sender's call returns this code</td>
 </tr>
 <tr>
 <td><code>ipc.client-too-slow</code></td>

@@ -28,7 +28,7 @@ enum level { trace, debug, info, warn, error }
 log: func(level: level, message: string);
 ```
 
-The WIT names are kebab-case. The Rust and TypeScript names follow the rules in the SDK shape section of the decisions file: snake_case functions and UpperCamelCase variants in Rust, camelCase functions and kebab-case string tags in TypeScript.
+The WIT names are kebab-case. The Rust and TypeScript names follow these rules (see the [Rust SDK](/pages/rust-sdk/) and the [TypeScript SDK](/pages/typescript-sdk/)): snake_case functions and UpperCamelCase variants in Rust, camelCase functions and kebab-case string tags in TypeScript.
 
 | Function | Rust | TypeScript | Grant | Sides | Sync or async | Returns |
 |---|---|---|---|---|---|---|
@@ -273,7 +273,7 @@ export function recordSend(pane: bigint, key: string): void {
 - [Plugin exports](/pages/api-exports/) for the lifecycle calls that usually log.
 - [Events](/pages/api-events/) for the events that a handler logs when it receives them.
 - [Debugging](/pages/debugging/) for trap backtraces, which show source positions in builds made with `ilium plugin build --debug`.
-- [Errors and limits](/pages/errors-and-limits/) for the full table of limits.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full table of limits.
 - [Testing](/pages/testing/) for reading log lines in a test with the fake host.
 
 ### Security

@@ -2,13 +2,13 @@
 
 ## Sessions
 
-A session is one project's tree of groups and panes together with the processes that run in it. Sessions outlive the terminal window: the user can detach and reattach, and after a restart the tree comes back from a snapshot. The plugin id is `ilium.core.sessions` and it runs on the server side only.
+A session is one project's tree of groups and panes together with the processes that run in it. Sessions outlive the terminal window: the user can detach and reattach, and after a restart the tree comes back from a snapshot. The plugin id is `ilium.core.sessions` and it runs on both sides: the server side owns the session logic and the client side only writes the `session` kernel setting.
 
 The snapshot files, the rolling backups, the ordered event journal and the `ilium`, `new-session`, `ls` and `kill-session` commands are kernel-native: the kernel writes and reads them in its own process before any plugin runs. The plugin drives the parts a plugin can reach through the contract: it relaunches verified agent sessions, freezes panes during a restore, stops processes gracefully, follows client attach and detach events, and creates a project entry.
 
 ### What it covers
 
-- JSON snapshots and rolling snapshot backups, described in the session recovery guide.
+- JSON snapshots and rolling snapshot backups, described in the user documentation page `session-recovery.md` ("Session recovery" in the Ilium user docs, `src/docs/session-recovery.md`).
 - Restore after a restart and the recovery policy.
 - Resuming verified agent sessions, so an agent pane continues its own conversation.
 - Detach and reattach, and sessions per project.
@@ -49,7 +49,7 @@ The snapshot files, the rolling backups, the ordered event journal and the `iliu
 
 This block is a fragment. It lists the contributions. The whole manifest is in [Complete manifest](#complete-manifest).
 
-The contract version is 0.1. The plugin has a server side only.
+The contract version is 0.1. The plugin has a server side and a client side. The server side owns the session logic; the client side only writes the `session` kernel setting.
 
 ```json
 {
@@ -96,6 +96,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "startup",
     "view:sessions.list"
   ],
+  "replaceable": false,
   "limits_tier": "first-party"
 }
 ```
@@ -215,7 +216,7 @@ export function onEvent(event: { tag: string }): void {
 
 #### Freeze panes during a restore
 
-A restored pane is paused until the layout is rebuilt, so no program prints into a half-built screen. The plugin submits `freeze-pane` for each restored pane and `unfreeze-pane` once every pane reports `running` through `pane-lifecycle-changed`. See [pane lifecycle](/pages/api-pane-lifecycle/), [pane lifecycle intents](/pages/api-intent-pane-lifecycle/) and [events](/pages/api-events/).
+A restored pane is paused until the layout is rebuilt, so no program prints into a half-built screen. The plugin submits `freeze-pane` for each restored pane and `unfreeze-pane` once every pane reports `running` through `pane-lifecycle-changed`. A pane that has not reported `running` 30 seconds after its `freeze-pane` is unfrozen anyway, and the plugin logs a warning naming the pane, so one stuck pane never keeps the others frozen. See [pane lifecycle](/pages/api-pane-lifecycle/), [pane lifecycle intents](/pages/api-intent-pane-lifecycle/) and [events](/pages/api-events/).
 
 **Rust**
 
@@ -328,7 +329,7 @@ Other plugins change what `ilium.core.sessions` does through the points below. T
 
 | Point | Kind | What it does | Payload | Risk |
 |---|---|---|---|---|
-| `snapshot-sections` | collect | Store extra JSON in the session snapshot and receive it back on restore. | entry: id, max_bytes (the plugin answers `snapshot` and `restore` messages) | standard |
+| `snapshot-sections` | collect | Store extra JSON in the session snapshot and receive it back on restore. | entry: id, max_bytes (the plugin answers the `snapshot-section` and `restore-section` requests in its handler) | standard |
 | `before-restore` | hook (observe) | Learn that a restore starts, to prepare state. | session, pane_count | standard |
 
 **Services** (grant `services.use:<name>`):
@@ -343,7 +344,7 @@ Other plugins change what `ilium.core.sessions` does through the points below. T
 
 #### Example: Keeps a small JSON document with the session
 
-A package adds this entry in its manifest. It needs no code.
+A package adds this entry in its manifest. The manifest only declares the section; the plugin's handler must still answer `snapshot-section` and `restore-section` (see [Config and data migration](/pages/reference-config-and-data-migration/#snapshot-sections)).
 
 ```json
 {

@@ -445,7 +445,7 @@
 </tr>
 </tbody>
 </table>
-<p>A version can appear in the <code>point</code> field of a <code>contributes.extensions</code> entry, for example <code>ilium.core.smart-copy/after-copy@0.1.0</code>. It means "same major, minor at least this". See <a href="/pages/versioning/">versioning</a>.</p>
+<p>A version can appear in the <code>point</code> field of a <code>contributes.extensions</code> entry, for example <code>ilium.core.smart-copy/after-copy@0.1.0</code>. A bare version is a caret range (<code>@0.1.0</code> accepts <code>&gt;=0.1.0 &lt;0.2.0</code>); see <a href="/pages/reference-dependency-resolution/">dependency resolution</a> (PKG-317, PKG-318, PKG-328). See <a href="/pages/versioning/">versioning</a>.</p>
 <h3 id="side">Side</h3>
 <p>A handler runs on the side that owns the call. A server-owned point calls the server half of the contributor. A client-owned point calls the client half. A contributor declares its handler and its grant on that side. A handler declared on the wrong side is refused at install with <code>manifest.extension-side</code>.</p>
 <h3 id="what-it-allows">What it allows</h3>
@@ -477,8 +477,8 @@
 </table>
 <p>A handler gets only the payload of the owner's <code>payload_schema</code>. It may call other host functions its own grants allow, synchronously, within its deadline.</p>
 <h3 id="risk">Risk</h3>
-<p>The grant is normal risk (S) for a point with <code>risk: "standard"</code>. It is high risk (H) for a point with <code>risk: "high"</code>. The owner sets the risk, because the owner knows what its payload holds. A high-risk grant starts unchecked in the review dialog, and the line carries a warning. Examples are the <code>before-send-input</code> point of the terminal, <code>before-fire</code> of text triggers, and <code>before-broadcast</code> of fleet.</p>
-<p>A handler on a <code>veto</code> point can stop an action. A handler on a <code>transform</code> point can change data in flight. Both are limited. A handler that is slow, traps or errors counts as <code>pass</code>, so a broken contributor never blocks the owner. Three breaches in a row stop that extension until the plugin restarts.</p>
+<p>The grant is normal risk (not high risk) for a point with <code>risk: "standard"</code>. It is high risk (H) for a point with <code>risk: "high"</code>. The owner sets the risk, because the owner knows what its payload holds. A high-risk grant starts unchecked in the review dialog, and the line carries a warning. Examples are the <code>before-send-input</code> point of the terminal, <code>before-fire</code> of text triggers, and <code>before-broadcast</code> of fleet.</p>
+<p>A handler on a <code>veto</code> point can stop an action. A handler on a <code>transform</code> point can change data in flight. Both are limited. A handler that is slow, traps or errors counts as <code>pass</code>, so a broken contributor never blocks the owner. Three consecutive breaches (a timeout, trap, error or disallowed reply, with no successful handler call between them) stop that extension until the plugin restarts.</p>
 <h3 id="manifest">Manifest</h3>
 <pre><code class="language-json">{
   &quot;id&quot;: &quot;com.example.quiet-hours&quot;,
@@ -610,7 +610,7 @@ export const { lifecycle, handler, hookHandler } = definePlugin({
 </tr>
 <tr>
 <td><code>extension.disabled</code></td>
-<td>Stopped after three breaches, or turned off by the user.</td>
+<td>Stopped after three consecutive breaches, or turned off by the user.</td>
 <td>log, Plugins screen</td>
 </tr>
 </tbody>

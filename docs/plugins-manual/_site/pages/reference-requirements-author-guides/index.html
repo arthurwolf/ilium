@@ -590,19 +590,19 @@
 <td>AUT-105</td>
 <td>Timings for comparison with the targets MUST come from a release build.</td>
 <td><a href="/pages/performance/">performance</a></td>
-<td>Run <code>ilium plugin check</code> or <code>lint</code> and read the finding</td>
+<td>Unit test that every timing a plugin reports carries a release-build marker</td>
 </tr>
 <tr>
 <td>AUT-110</td>
 <td>When two pages differ, the defining page decides, and a page that cites an install code MUST use the cause that the defining page gives.</td>
 <td><a href="/pages/reference-errors-and-limits/">reference-errors-and-limits</a></td>
-<td>Review of the project files and release notes</td>
+<td>Doc-lint check: extract every <code>manifest.*</code> and <code>package.*</code> install code cited with a cause in the pages and compare it with the code table of reference-errors-and-limits; any code whose cause differs fails the check.</td>
 </tr>
 <tr>
 <td>AUT-111</td>
 <td>An author MUST treat a limit as a trap and not as a warning.</td>
-<td><a href="/pages/errors-and-limits/">errors-and-limits</a></td>
-<td>Review against the page, plus a test where the rule has an observable result</td>
+<td><a href="/pages/reference-errors-and-limits/">error codes and limits</a></td>
+<td>Fake host: call with a value above a stated maximum; assert the call returns the documented error or traps, and is never accepted with only a warning</td>
 </tr>
 <tr>
 <td>AUT-201</td>
@@ -636,13 +636,13 @@
 </tr>
 <tr>
 <td>AUT-206</td>
-<td>A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST accept restore bytes of the format of the previous release, or MUST fall back to defaults.</td>
+<td>A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST fall back to defaults when the first byte is not a format it knows, because the host delivers restore bytes only when the <code>data_version</code> equals that of the build that wrote them.</td>
 <td><a href="/pages/guide-compatibility-and-upgrades/">guide-compatibility-and-upgrades</a></td>
 <td>Unit test on the fake host</td>
 </tr>
 <tr>
 <td>AUT-207</td>
-<td>Data that must survive a layout change MUST live in storage and be converted by a <code>migrator</code>, because restore bytes are dropped when the <code>data_version</code> differs.</td>
+<td>Data that must survive a layout change MUST live in storage and be converted by a <code>migrator</code>, because restore bytes are delivered only when the <code>data_version</code> matches, and across versions only a <code>migrator</code> carries data.</td>
 <td><a href="/pages/guide-compatibility-and-upgrades/">guide-compatibility-and-upgrades</a></td>
 <td>Unit test on the fake host</td>
 </tr>
@@ -696,7 +696,7 @@
 </tr>
 <tr>
 <td>AUT-301</td>
-<td>Until those two pages agree, an author MUST treat the package file as the only publishing route that is certain to work, and MAY add a registry as a second route when the host supports it.</td>
+<td>An author MUST offer the package file as the base route that needs no registry, and MAY add a registry as a second route through <code>ilium plugin publish</code>.</td>
 <td><a href="/pages/guide-publishing-and-support/">guide-publishing-and-support</a></td>
 <td>Review of the project files and release notes</td>
 </tr>
@@ -804,7 +804,7 @@
 </tr>
 <tr>
 <td>AUT-319</td>
-<td>A version number, once published, MUST NOT be reused for different content. The host refuses it with <code>package.version-reused</code>.</td>
+<td>A version number, once published, MUST NOT be reused for different content. The registry refuses a duplicate on publish with <code>registry.version-exists</code>, and the host refuses it on install with <code>package.version-reused</code>.</td>
 <td><a href="/pages/guide-publishing-and-support/">guide-publishing-and-support</a></td>
 <td>Review against the page, plus a test where the rule has an observable result</td>
 </tr>
@@ -812,7 +812,7 @@
 <td>AUT-320</td>
 <td>Before every release you MUST run <code>ilium plugin check</code>, <code>lint</code> and <code>test</code>.</td>
 <td><a href="/pages/tutorial-09-package-and-share/">tutorial-09-package-and-share</a></td>
-<td>Unit test on the fake host</td>
+<td>Review only; the release step is tested through the release script of the tutorial</td>
 </tr>
 <tr>
 <td>AUT-321</td>
@@ -840,7 +840,7 @@
 </tr>
 <tr>
 <td>AUT-403</td>
-<td>A plugin SHOULD NOT list an <code>unstable</code> feature in a release, because the shape of that feature can change without a major version.</td>
+<td>A plugin MUST NOT list an <code>unstable</code> feature in a release unless the plugin is for development use, because the shape of that feature can change without a major version.</td>
 <td><a href="/pages/guide-quality-checklist/">guide-quality-checklist</a></td>
 <td>Run <code>ilium plugin check</code> or <code>lint</code> and read the finding</td>
 </tr>
@@ -900,15 +900,15 @@
 </tr>
 <tr>
 <td>AUT-503</td>
-<td>A plugin SHOULD work in <code>compact</code> density at 40 columns and in both icon modes, and SHOULD end every icon-only control with a text label that stays when icons are not drawn.</td>
+<td>A plugin MUST work in <code>compact</code> density at 40 columns and in both icon modes, and MUST end every icon-only control with a text label that stays when icons are not drawn.</td>
 <td><a href="/pages/accessibility-and-theming/">accessibility-and-theming</a></td>
-<td>Review of the rendered views at each theme and density setting</td>
+<td>Render test: count the rendered rows at 40 columns in <code>compact</code> density with each icon mode and assert that no row is cut and every icon-only control has its label; scan the tree for <code>rgb</code> and <code>indexed</code> colours and assert none</td>
 </tr>
 <tr>
 <td>AUT-504</td>
-<td>A plugin SHOULD use the nine colour roles and avoid <code>rgb</code> and <code>indexed</code> colours, because only a role follows the theme and the user's contrast choice.</td>
+<td>A plugin MUST use the nine colour roles and avoid <code>rgb</code> and <code>indexed</code> colours, because only a role follows the theme.</td>
 <td><a href="/pages/accessibility-and-theming/">accessibility-and-theming</a></td>
-<td>Review of the rendered views at each theme and density setting</td>
+<td>Render test: count the rendered rows at 40 columns in <code>compact</code> density with each icon mode and assert that no row is cut and every icon-only control has its label; scan the tree for <code>rgb</code> and <code>indexed</code> colours and assert none</td>
 </tr>
 <tr>
 <td>AUT-505</td>
@@ -938,7 +938,7 @@
 <td>AUT-602</td>
 <td>A plugin MUST measure width with <code>display-width</code> and MUST NOT use <code>len()</code>, <code>chars().count()</code> or <code>String.length</code> for layout.</td>
 <td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
-<td>Render a view on the fake host and check row widths</td>
+<td>Render a view with wide characters and combining marks on the fake host; assert each row's cell width equals the <code>display-width</code> of its text</td>
 </tr>
 <tr>
 <td>AUT-603</td>
@@ -948,7 +948,7 @@
 </tr>
 <tr>
 <td>AUT-604</td>
-<td>A plugin SHOULD NOT call it once per character for a long text. Measure once, and cut only when the text is too wide.</td>
+<td>A plugin SHOULD NOT call <code>display-width</code> once per character for a long text. Measure once, and cut only when the text is too wide.</td>
 <td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
 <td>Review against the page, plus a test where the rule has an observable result</td>
 </tr>
@@ -968,7 +968,7 @@
 <td>AUT-607</td>
 <td>A plugin SHOULD NOT promise correct display of right-to-left scripts, and SHOULD state this in its README if its users need them.</td>
 <td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
-<td>Render a view on the fake host and check row widths</td>
+<td>Review of the plugin README for the statement, when the plugin targets users who need right-to-left scripts</td>
 </tr>
 <tr>
 <td>AUT-608</td>
@@ -984,7 +984,7 @@
 </tr>
 <tr>
 <td>AUT-610</td>
-<td>A plugin MUST NOT translate them.</td>
+<td>A plugin MUST NOT translate command ids, setting keys, error codes and event names.</td>
 <td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
 <td>Review against the page, plus a test where the rule has an observable result</td>
 </tr>
@@ -992,11 +992,11 @@
 <td>AUT-611</td>
 <td>A plugin that shows a time MUST write the zone or say that it is relative, and MUST store times as UTC milliseconds, never as local text.</td>
 <td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
-<td>Review against the page, plus a test where the rule has an observable result</td>
+<td>Render a view on the fake host with the test clock at a known UTC time; assert the displayed text contains either the zone name (for example <code>UTC</code>) or a relative phrase (for example <code>5 min ago</code>), and never a bare local-looking time; assert stored times are UTC milliseconds</td>
 </tr>
 <tr>
 <td>AUT-612</td>
-<td>A plugin SHOULD use it for absolute times unless the user chooses another form.</td>
+<td>A plugin SHOULD use <code>YYYY-MM-DD HH:mm:ss</code> for absolute times unless the user chooses another form.</td>
 <td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
 <td>Review against the page, plus a test where the rule has an observable result</td>
 </tr>
@@ -1031,6 +1031,36 @@
 <td>Render a view on the fake host and check row widths</td>
 </tr>
 <tr>
+<td>AUT-618</td>
+<td>A plugin MUST pass a toast or notice body already in the language it chose, and the host MUST show it unchanged apart from escape removal and the width cut.</td>
+<td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
+<td>A test where the rule has an observable result</td>
+</tr>
+<tr>
+<td>AUT-619</td>
+<td>The host's fixed words around a plugin's text are not in the plugin's language and a plugin MUST NOT rely on them matching its own.</td>
+<td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
+<td>A test where the rule has an observable result</td>
+</tr>
+<tr>
+<td>AUT-620</td>
+<td>The grant reason has one value; the review dialog shows it verbatim as data, cut at the dialog width with <code>…</code>, never mixed into a host sentence.</td>
+<td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
+<td>A test where the rule has an observable result</td>
+</tr>
+<tr>
+<td>AUT-621</td>
+<td>A plugin SHOULD write the grant reason in a language its users read and SHOULD keep it short enough to fit 60 cells after a translation.</td>
+<td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
+<td>A test where the rule has an observable result</td>
+</tr>
+<tr>
+<td>AUT-622</td>
+<td>Grant ids, the plugin id and capability names in the dialog are identifiers and are never translated.</td>
+<td><a href="/pages/guide-internationalisation/">guide-internationalisation</a></td>
+<td>A test where the rule has an observable result</td>
+</tr>
+<tr>
 <td>AUT-701</td>
 <td>A port SHOULD put logic about panes and agents on S and drawing on C, and SHOULD send messages between them rather than share state.</td>
 <td><a href="/pages/guide-porting-from-other-plugin-systems/">guide-porting-from-other-plugin-systems</a></td>
@@ -1052,19 +1082,19 @@
 <td>AUT-704</td>
 <td>A port SHOULD prefer the typed primitive (<code>terminal.read-screen</code>) over a program, because the primitive needs a weaker grant.</td>
 <td><a href="/pages/guide-porting-from-other-plugin-systems/">guide-porting-from-other-plugin-systems</a></td>
-<td>Run the plugin with the grant refused and check the result</td>
+<td>Read the manifest; assert it requests <code>terminal.read-screen</code> and no <code>process.run</code> grant for the same data</td>
 </tr>
 <tr>
 <td>AUT-705</td>
 <td>A port MUST NOT ask for a write grant wider than the folder it writes to.</td>
 <td><a href="/pages/guide-porting-from-other-plugin-systems/">guide-porting-from-other-plugin-systems</a></td>
-<td>Run the plugin with the grant refused and check the result</td>
+<td>Read the manifest; assert each <code>fs.write</code> scope is the folder the plugin writes to; a scope is wider when its name is an ancestor of that folder or a wildcard over it</td>
 </tr>
 <tr>
 <td>AUT-706</td>
 <td>A port SHOULD be written as a new plugin with a new id, and SHOULD NOT reuse the name of the original in a way that suggests it is the same product.</td>
 <td><a href="/pages/guide-porting-from-other-plugin-systems/">guide-porting-from-other-plugin-systems</a></td>
-<td>Review against the page, plus a test where the rule has an observable result</td>
+<td>Compare the manifest id with the original plugin's id; assert they differ (the name rule is review only)</td>
 </tr>
 <tr>
 <td>AUT-801</td>
@@ -1092,7 +1122,7 @@
 </tr>
 </tbody>
 </table>
-<p>113 requirements.</p>
+<p>118 requirements.</p>
 <p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-requirements-api-host/"><small>Previous</small>Requirements for the host API</a><a class="next" href="/pages/reference-requirements-capabilities/"><small>Next</small>Requirements for capabilities</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

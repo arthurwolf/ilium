@@ -414,7 +414,7 @@
 enum level { trace, debug, info, warn, error }
 log: func(level: level, message: string);
 </code></pre>
-<p>The WIT names are kebab-case. The Rust and TypeScript names follow the rules in the SDK shape section of the decisions file: snake_case functions and UpperCamelCase variants in Rust, camelCase functions and kebab-case string tags in TypeScript.</p>
+<p>The WIT names are kebab-case. The Rust and TypeScript names follow these rules (see the <a href="/pages/rust-sdk/">Rust SDK</a> and the <a href="/pages/typescript-sdk/">TypeScript SDK</a>): snake_case functions and UpperCamelCase variants in Rust, camelCase functions and kebab-case string tags in TypeScript.</p>
 <table>
 <thead>
 <tr>
@@ -716,7 +716,7 @@ export function recordSend(pane: bigint, key: string): void {
 <li><a href="/pages/api-exports/">Plugin exports</a> for the lifecycle calls that usually log.</li>
 <li><a href="/pages/api-events/">Events</a> for the events that a handler logs when it receives them.</li>
 <li><a href="/pages/debugging/">Debugging</a> for trap backtraces, which show source positions in builds made with <code>ilium plugin build --debug</code>.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full table of limits.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full table of limits.</li>
 <li><a href="/pages/testing/">Testing</a> for reading log lines in a test with the fake host.</li>
 </ul>
 <h3 id="security">Security</h3>

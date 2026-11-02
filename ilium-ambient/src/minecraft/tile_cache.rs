@@ -78,7 +78,7 @@ pub fn capture(tiles: &[NativeTile], bank_epoch: Digest256) -> CachedRoute {
                 });
                 (models.len() - 1) as u32
             });
-            mesh_faces.push((face.position, index, face.quad_index));
+            mesh_faces.push((face.position(), index, face.quad_index));
         }
         // An empty fluid mesh is equivalent to none for every consumer.
         let fluid = tile

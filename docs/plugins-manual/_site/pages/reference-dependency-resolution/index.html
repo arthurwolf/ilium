@@ -455,7 +455,7 @@
 </tr>
 <tr>
 <td>[PKG-317]</td>
-<td>A bare version with no operator (<code>1.2.3</code>, <code>1.2</code>, <code>1</code>) means a caret range. This is the Cargo rule. It makes <code>@0.1.0</code> and <code>@^0.1.0</code> the same.</td>
+<td>A bare version with no operator (<code>1.2.3</code>, <code>1.2</code>, <code>1</code>) means a caret range. This is the Cargo rule. It makes <code>0.1.0</code> and <code>^0.1.0</code> the same in <code>requires.plugins</code> ranges and point references. It does not apply to <code>requires.services</code>, which takes only a full version (PKG-327).</td>
 </tr>
 <tr>
 <td>[PKG-318]</td>
@@ -531,7 +531,7 @@
 <h2 id="the-requires-object">The <code>requires</code> object</h2>
 <pre><code class="language-json">&quot;requires&quot;: {
   &quot;host&quot;: &quot;&gt;=0.1.0&quot;,
-  &quot;services&quot;: [&quot;ilium:inference/provider@0.1.0&quot;, &quot;com.example.git/status@^1.2&quot;],
+  &quot;services&quot;: [&quot;ilium:inference/provider@0.1.0&quot;, &quot;com.example.git/status@1.2.0&quot;],
   &quot;plugins&quot;: [
     { &quot;id&quot;: &quot;com.example.git&quot;, &quot;version&quot;: &quot;^1.2&quot;, &quot;optional&quot;: false },
     { &quot;id&quot;: &quot;com.example.theme-pack&quot;, &quot;version&quot;: &quot;*&quot;, &quot;optional&quot;: true }
@@ -561,8 +561,8 @@
 <td><code>services</code></td>
 <td>list of string</td>
 <td><code>[]</code></td>
-<td>At most 32. Each is <code>&lt;interface&gt;@&lt;range&gt;</code>. The interface name follows the grant argument rule for <code>services.use</code>. The <code>@&lt;range&gt;</code> part is optional and defaults to <code>*</code></td>
-<td><code>manifest.requires-invalid</code></td>
+<td>At most 32. Each is <code>&lt;interface&gt;@&lt;major&gt;.&lt;minor&gt;.&lt;patch&gt;</code>. The interface name follows the grant argument rule for <code>services.use</code>. The full version is required and means the minimum compatible version; a range or short form is refused (PKG-327)</td>
+<td><code>manifest.requires-invalid</code>, <code>manifest.service-version</code></td>
 </tr>
 <tr>
 <td><code>plugins</code></td>
@@ -602,11 +602,11 @@
 </tr>
 <tr>
 <td>[PKG-326]</td>
-<td><code>wait_ms</code> replaces the fixed 2 s activation wait of the lifecycle page. It is the time a plugin's activation waits for each required service provider. A value above 5000 is refused. The older fixed values 2 s default and 5 s maximum remain the default and the ceiling.</td>
+<td><code>wait_ms</code> replaces the fixed 2 s activation wait of the lifecycle page. It is the time a plugin's activation waits for each required service provider. The default is 2000, the range is 0 to 5000, and a value outside the range is refused with <code>manifest.requires-invalid</code>.</td>
 </tr>
 <tr>
 <td>[PKG-327]</td>
-<td>The service form in <code>requires.services</code> is <code>interface@range</code> with the range grammar of this page. The form <code>ilium:inference/provider@0.1.0</code> stays valid and means <code>^0.1.0</code>. The older forms <code>@0.1</code> and <code>@0.1.0</code> are therefore the same.</td>
+<td>The service form in <code>requires.services</code> is <code>interface@&lt;major&gt;.&lt;minor&gt;.&lt;patch&gt;</code>, a full version that means the minimum compatible version (the caret range <code>^&lt;major&gt;.&lt;minor&gt;.&lt;patch&gt;</code>, so <code>ilium:inference/provider@0.1.0</code> means <code>^0.1.0</code>). The range grammar of this page does not apply to services: a short form such as <code>@0.1</code>, a caret, a tilde or any range is refused with <code>manifest.service-version</code> (PKG-579).</td>
 </tr>
 <tr>
 <td>[PKG-328]</td>
@@ -890,7 +890,7 @@
 </tr>
 <tr>
 <td>[PKG-359]</td>
-<td>The lock file <code>plugins.lock</code> is JSON: <code>{ "format": "ilium-lock/1", "plugins": [ { "id", "version", "sha256", "source" } ] }</code>, sorted by id. <code>ilium plugin lock</code> writes it from the installed set. <code>ilium plugin install --locked &lt;file&gt;</code> installs exactly those versions. A locked version that no source offers fails with <code>dependency.unresolved</code>. A resolution that differs from the lock fails with <code>dependency.lock-mismatch</code>.</td>
+<td>The lock file <code>ilium-plugins.lock</code> is JSON: <code>{ "format": "ilium-lock/1", "plugins": [ { "id", "version", "sha256", "source" } ] }</code>, sorted by id. <code>ilium plugin lock</code> writes it from the installed set. <code>ilium plugin install --locked &lt;file&gt;</code> installs exactly those versions. A locked version that no source offers fails with <code>dependency.unresolved</code>. A resolution that differs from the lock fails with <code>dependency.lock-mismatch</code>.</td>
 </tr>
 <tr>
 <td>[PKG-360]</td>

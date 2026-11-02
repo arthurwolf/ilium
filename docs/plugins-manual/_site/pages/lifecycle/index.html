@@ -661,7 +661,7 @@ timers.at(clock.nowUnixMillis() + 86_400_000n, 'nightly-scan');
 <h2 id="core-plugins-at-boot">Core plugins at boot</h2>
 <p>The <code>startup</code> trigger applies per side: a server side with <code>startup</code> starts when the server host starts, and a client side with <code>startup</code> starts when the client host starts. The core plugins that start at boot and those that start on first use are listed in <a href="/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins">startup and lazy activation</a>. Safe start (<code>--safe-plugins</code>) loads only the essential set, and <code>--no-plugins</code> loads none. [COR-020] [COR-021]</p>
 <h2 id="running">Running</h2>
-<p>The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for <code>handler.on-events</code>. A breach counts as a failure. See <a href="/pages/errors-and-limits/">Errors and limits</a>.</p>
+<p>The host calls the exports in response to events, views, commands and scene frames. Each call has its own deadline, for example 20 ms for <code>handler.on-events</code>. A breach counts as a failure. See <a href="/pages/reference-errors-and-limits/">Errors and limits</a>.</p>
 <h2 id="stop-and-the-final-save">Stop and the final save</h2>
 <p>On server shutdown, the services stop first. Then the plugin host refuses new plugin submissions, which complete as <code>cancelled</code>. Each active plugin receives <code>deactivate(shutdown)</code> in reverse start order (consumers before the providers they require), and its returned bytes become its restore state. Pending requests are cancelled and instances are dropped. The final snapshot is written last, so no plugin intent can reach it after the writer stops.</p>
 <figure>
@@ -858,14 +858,9 @@ export const { lifecycle, handler } = definePlugin({
 <td></td>
 </tr>
 <tr>
-<td><code>deactivate</code> misses its deadline, reason <code>disabled</code> or <code>shutdown</code></td>
+<td><code>deactivate</code> misses its deadline, any reason</td>
 <td>no</td>
-<td>The plugin is leaving anyway. The instance is dropped and a warn line is logged.</td>
-</tr>
-<tr>
-<td><code>deactivate</code> misses its deadline, reason <code>upgrade</code> or <code>revoked</code></td>
-<td>yes</td>
-<td>The plugin was to continue.</td>
+<td>The miss is logged and dropped: the instance is dropped, its restore bytes are discarded and a warn line is logged [HST-191].</td>
 </tr>
 <tr>
 <td>Event queue overflow (more than 1,024 events by default)</td>
@@ -1060,11 +1055,11 @@ export const { lifecycle, handler } = definePlugin({
 <p>A reinstalled plugin reads its kept values again. The recovery page is the only settings screen that stays reachable when the plugin is disabled.</p>
 <h2 id="revocation-and-grant-changes">Revocation and grant changes</h2>
 <p>Revoking a grant in Settings &gt; Plugins &gt; Capabilities, or with <code>ilium plugin grants &lt;id&gt; --revoke &lt;grant&gt;</code>, bumps the authorization epoch. Calls in flight return <code>revoked</code>, and pending requests that need the capability complete as <code>failed(revoked)</code>. The plugin receives <code>deactivate(revoked)</code> and is activated again with the reduced grant set and its restore bytes. Decorations, toolbar state, grabs, claims, highlights, filters, watches and routes that need the capability are withdrawn.</p>
-<p>A capability added later by the user, or by an accepted upgrade, produces <code>deactivate(shutdown)</code> and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.</p>
+<p>A capability added later by the user, or by an accepted upgrade, produces <code>deactivate(granted)</code> and a re-activation with the new set. Neither revocation nor a grant change counts as a failure.</p>
 <h2 id="development-reload">Development reload</h2>
 <p><code>ilium plugin dev</code>, run in the package directory, watches the sources and reloads the plugin in a running session. This section is normative. The walkthrough is in <a href="/pages/debugging/">Debugging</a>.</p>
 <ul>
-<li>[LIF-220] <code>ilium plugin dev</code> MUST attach to the session of <code>--cwd</code> (the current directory by default), or to the session named by <code>--session &lt;name&gt;</code>. When no server runs for it, the command MUST exit with code 2 and the error code <code>dev.no-server</code>, unless <code>--start-server</code> is given. Test: run it with no server.</li>
+<li>[LIF-220] <code>ilium plugin dev</code> MUST attach to the session of <code>--cwd</code> (the current directory by default), or to the session named by <code>--session &lt;name&gt;</code>. When no server runs for it, the command MUST fail with <code>session.unreachable</code> and exit code 6, and MUST NOT start a session itself [DEV-180]. Test: run it with no server.</li>
 <li>[LIF-221] A development package MUST shadow an installed package with the same id for that session only. When <code>ilium plugin dev</code> ends, the installed version MUST become active again. Test: install version 1, run dev with version 2, end dev and read the version.</li>
 <li>[LIF-222] A rebuild MUST start 300 ms after the last change in the directory. Test: touch a file twice 100 ms apart and assert one build.</li>
 <li>[LIF-223] The reload steps MUST run in this order: build, validate the manifest, compare grants, deactivate the server side with <code>upgrade</code>, deactivate each attached client side with <code>upgrade</code> in attach order, swap, activate the server side, then each client side, each with <code>restored</code>. Test: record the log order with two clients.</li>
@@ -1124,7 +1119,7 @@ export const { lifecycle, handler } = definePlugin({
 </table>
 <pre><code class="language-text">{&quot;type&quot;:&quot;reload&quot;,&quot;plugin&quot;:&quot;&lt;id&gt;&quot;,&quot;version&quot;:&quot;&lt;version&gt;&quot;,&quot;restored_bytes&quot;:&lt;n&gt;,&quot;sides&quot;:[&quot;server&quot;,&quot;client&quot;]}
 </code></pre>
-<p>A development package carries a <code>dev</code> badge in Settings, and it uses the T3 sandbox and ceilings. Plugin logs appear in <code>ilium plugin logs &lt;id&gt;</code>.</p>
+<p>A development package carries a <code>dev</code> badge in Settings, and it uses the T2 sandbox and ceilings. Plugin logs appear in <code>ilium plugin logs &lt;id&gt;</code>.</p>
 <h2 id="what-activate-does-not-tell-you">What <code>activate</code> does not tell you</h2>
 <p>The <code>activate</code> call receives the activation context and the restore bytes, and nothing else about the past. There is no <code>previous-version</code> value and no flag that says "this is the first run after an update" in <code>ilium:plugin@0.1.0</code>. A plugin that must act once after an update uses one of these two ways, in this order of preference:</p>
 <ol>
@@ -1233,14 +1228,14 @@ export const { lifecycle, handler } = definePlugin({
 
 <h3 id="rules-defined-elsewhere-on-this-page">Rules defined elsewhere on this page</h3>
 <ul>
-<li>[LIF-271] On a trap or stop the host MUST release every effect listed in the stop-effects paragraph of this page, for the dead instance as well. Test: trap a plugin holding an input lock, a stream and a child process.</li>
+<li>[LIF-271] On a trap or stop the host MUST release every effect listed under the stop-effects sentence of <a href="#durable-timers-and-further-triggers">Durable timers and further triggers</a>, for the dead instance as well. Test: trap a plugin holding an input lock, a stream and a child process.</li>
 <li>[USR-173] An update MUST keep the grants the user already answered and MUST ask only for new ones. A failed update MUST roll back to the previous version. The user-facing rules are USR-123 and USR-124 in <a href="/pages/user-install-and-manage/#update-a-plugin">Install and manage plugins</a>. Test: update with one new grant and count the rows in the dialog.</li>
 <li>[LIF-275] An update MUST reset the "Not now" counter of a bundled plugin. Test: answer Not now twice, update, and count prompts.</li>
 </ul>
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="/pages/settings-extension/">Plugin settings extension</a> for settings rows in each lifecycle state</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
 <li><a href="/pages/capabilities/">Capabilities and grants</a></li>
 <li><a href="/pages/packages/">Packages and manifests</a></li>
 <li><a href="/pages/api-exports/">Exports</a></li>

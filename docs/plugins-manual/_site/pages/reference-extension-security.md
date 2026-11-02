@@ -23,7 +23,7 @@ A third-party owner cannot choose `standard` for a point that meets these criter
 
 **[SEC-281]** Data classes. Each field of `payload_schema` and `entry_schema` MAY carry an annotation `x-ilium-data` with one of: `terminal-text`, `agent-prompt`, `file-content`, `path`, `secret`, `user-text`. A point with any field of class `terminal-text`, `agent-prompt`, `file-content` or `secret` is `high`. The review dialog lists the classes in the contributor's **Adds to other plugins** row.
 
-**[SEC-282]** A contributor to a point with a sensitive data class MUST also hold the grant that would let it read the same data directly: `terminal.read-screen` or `terminal.history` for `terminal-text`, `agent.read-prompts` for `agent-prompt`, a matching `fs.read` for `file-content`. A contributor that lacks the grant is refused at install with `manifest.grant-dependency`. This closes data laundering through an owner (class A5).
+**[SEC-282]** A contributor to a point with a sensitive data class MUST also hold the grant that would let it read the same data directly: `terminal.read-screen` or `terminal.history` for `terminal-text`, `agent.read-prompts` for `agent-prompt`, a matching `fs.read` for `file-content`. A contributor that lacks the grant is refused at install with `manifest.grant-dependency`. Class `secret` has no read grant, so it needs no grant dependency: it raises the point to `high` and the review dialog lists it, nothing more. This closes data laundering through an owner (class A5).
 
 **[SEC-283]** An entry that drives a privileged action of a T1 owner (a post-create step, an instruction block, a target file, a rule pack that sends text, a provider profile that redirects inference) MUST be validated by the owner with an explicit allowlist of what an entry can make it do. The review dialog shows a line `Can make <owner> <action>` per such entry type. The owner rejects any entry outside the allowlist with `extension.entry-rejected`.
 
@@ -39,7 +39,7 @@ For `high` veto and transform points the owner declares `on_failure`: `"pass"` o
 
 **[SEC-286]** On `veto` points the handler sees the final payload (veto points have no transforms). On a point with `final_check` the guard sees the output of the transform chain, not the original.
 
-**[SEC-285]** Withdrawn, see [HST-472]. The chain cap is a hard 100 ms: a handler that starts before 100 ms runs until its own `deadline_ms`, and handlers not started at 100 ms are skipped as `pass`.
+**[SEC-285]** Withdrawn, see [HST-472].
 
 **[SEC-289]** Nesting. A handler can start another hook chain with `run-hook`. The outermost chain is depth 1. A `run-hook` from a handler at depth 3 fails at once with `extension-error` `reentrant`, base code `conflict` and a message that starts with `extension.depth-exceeded`. It counts as a pass for the handler that caused it and not as a breach. A `run-hook` on any point already on the current chain stack, directly or indirectly, fails with `extension.reentrant`. The inner chain runs after the handler returns and its time does not count toward the outer deadline.
 
@@ -61,17 +61,17 @@ The review of every core point against [SEC-280] gives 19 high-risk points. The 
 | `ilium.core.editor/before-save` | high | Rewrites any saved file | Class `file-content` |
 | `ilium.core.voice/transcript` | high | Changes which command runs | Class `user-text`; entries validated by the owner |
 | `ilium.core.agent-detect/classify` | high | Can make a working agent look idle, so actions fire | Output limited to the activity enum |
-| `ilium.core.fleet/before-broadcast` | high | Text to many agents | Existing |
+| `ilium.core.fleet/before-broadcast` | high | Text to many agents | Class `agent-prompt` |
 | `ilium.core.inference/before-request` | high | Sees and rewrites every prompt | Class `agent-prompt` |
 | `ilium.core.inference/provider-profiles` | high | Redirects inference to another endpoint | Endpoint checked by [Network egress](/pages/reference-network-egress/); owner confirms with the user |
 | `ilium.core.notifications/channels` | high | Sends notification bodies to webhooks | Webhook host checked as egress |
-| `ilium.core.scheduler/before-send-scheduled` | high | Existing | Existing |
-| `ilium.core.text-triggers/before-fire` | high | Existing | Existing |
+| `ilium.core.scheduler/before-send-scheduled` | high | Rewrites or refuses input that is sent later, without the user watching | Class `agent-prompt`; the veto only refuses, so it cannot add text |
+| `ilium.core.text-triggers/before-fire` | high | Can stop a rule that is about to send text to a terminal | Veto only: it refuses or ends the rule and cannot change the text |
 | `ilium.core.text-triggers/rule-packs` | high | Rules send text to terminals | Rules validated by the owner; see [Project values](#project-values) |
 | `ilium.core.chatroom/before-post` | high | Rewrites messages that agents read | Class `agent-prompt` |
 | `ilium.core.agent-setup/instruction-blocks` | high | Injects instructions into agent configuration files | Class `agent-prompt` |
 | `ilium.core.agent-setup/targets` | high | Adds files that setup edits | Path must lie in `agent-config` scopes |
-| `ilium.core.agent-setup/before-install` | high | Existing | Existing |
+| `ilium.core.agent-setup/before-install` | high | Can refuse writing an instruction block to an agent file | Veto only: it refuses the write and cannot change the block or the path |
 | `ilium.core.worktrees/post-create-steps` | high | Steps run programs | Each step's program needs a `process.run` grant of the contributor |
 | `ilium.core.diagnostics/log-sinks` | high | Receives every log record | Records pass through redaction ([SEC-249]) |
 | `ilium.core.tree/before-close`, `ilium.core.worktrees/before-remove` | standard | User-overridable ([SEC-291]) | |
@@ -104,7 +104,7 @@ A **project value** is a setting stored in a repository's `.ilium/` folder. A cl
 
 **[SEC-311]** In an untrusted project, project-scope plugin values are ignored: plugins read their defaults or user values. The `get` call reports `source: "default"` or `"user"`. A notice on the Plugins screen shows how many values were ignored.
 
-**[SEC-312]** Even in a trusted project, rows whose type is `path`, `url`, `host` or command-like text, and any row marked `trust_sensitive: true`, take project values only with the extra step that the first use of each value is shown to the user (the same consent as `http:setting`, D23).
+**[SEC-312]** Even in a trusted project, rows whose type is `path`, `url`, `host` or command-like text, and any row marked `trust_sensitive: true`, take project values only with the extra step that the first use of each value is shown to the user (the same consent as `http:setting`, SEC-074).
 
 **[SEC-313]** Secrets never come from project files ([SEC-242]).
 
@@ -128,7 +128,7 @@ A plugin that can draw text on screen can try to look like the kernel. The rules
 
 ## Worked example: a guard that times out
 
-A T2 plugin contributes a veto handler to `ilium.core.terminal/before-send-input`, sleeping for its whole deadline on each call. With `on_failure: refuse` (the default for the point), every plugin-initiated send is refused with `guard-failed` after 20 ms; the user's own paste shows `A guard did not answer. Continue anyway?` once, and the user can say yes. After three consecutive breaches the extension is stopped, the kernel draws the notice, and the audit log records it. With the previous fail-open rule, the handler would have been a free way to disable a guard. The test cases are in [Security testing](/pages/reference-security-testing/).
+A T2 plugin contributes a veto handler to `ilium.core.terminal/before-send-input`, sleeping for its whole deadline on each call. With `on_failure: refuse` (the default for the point), every plugin-initiated send is refused with `extension.vetoed` (reason `guard-failed`) after 20 ms; the user's own paste shows `A guard did not answer. Continue anyway?` once, and the user can say yes. After three consecutive breaches the extension is stopped, the kernel draws the notice, and the audit log records it. With the previous fail-open rule, the handler would have been a free way to disable a guard. The test cases are in [Security testing](/pages/reference-security-testing/).
 
 ## Edge cases
 

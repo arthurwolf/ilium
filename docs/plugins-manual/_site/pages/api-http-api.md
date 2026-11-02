@@ -350,7 +350,7 @@ Each open call takes exactly one `respond`. A second `respond` for the same call
 
 ### Used by
 
-The kernel's own loopback routes (feature 58) do not use this grant. They are served under `/api/` with the same token.
+The kernel's own loopback routes (see [Kernel and boot](/pages/reference-kernel-and-boot/)) do not use this grant. They are served under `/api/` with the same token.
 
 ### See also
 
@@ -359,6 +359,6 @@ The kernel's own loopback routes (feature 58) do not use this grant. They are se
 - [cli](/pages/api-cli/) for the other server-side entry point that answers over a stream.
 - [Plugin exports](/pages/api-exports/) for the `handler` export that receives `http-called`.
 - [Events and intents](/pages/events-and-intents/) for the event batch that carries `http-called`.
-- [Errors and limits](/pages/errors-and-limits/) for the shared error model.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the shared error model.
 
 Checked against `ilium:plugin@0.1.0`.

@@ -150,9 +150,10 @@ pub fn decode_bounded_frame_with_storage<T: crate::BoundedMessage>(
     crate::bounded_decode::decode_bounded_with_storage(&frame.payload)
 }
 
-// Persisted presentation revisions and captured title observations require
-// a matching peer. The tag must occupy only bits in FRAME_SCHEMA_MASK.
-const FRAME_SCHEMA_TAG: u32 = 0xC000_0000;
+// Resource commands, lifecycle history and wait snapshots require a matching
+// peer. Reject the previous enum layout before decoding any payload.
+// The tag must occupy only bits in FRAME_SCHEMA_MASK.
+const FRAME_SCHEMA_TAG: u32 = 0xC800_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {
     FRAME_SCHEMA_TAG | length
@@ -861,6 +862,7 @@ mod prompt_attempt_wire_tests {
     use super::*;
     #[test]
     fn previous_schema_is_rejected_before_decoding_changed_prompt_queue_shape() {
+        assert!(frame_payload_length(0xC000_0000 | 16).is_err());
         assert!(frame_payload_length(0xA800_0000 | 16).is_err());
         assert!(frame_payload_length(0xB800_0000 | 16).is_err());
         assert!(frame_payload_length(0xB000_0000 | 16).is_err());

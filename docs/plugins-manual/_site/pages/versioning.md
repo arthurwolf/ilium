@@ -139,7 +139,7 @@ The contract is one unit, `ilium:plugin@0.1.0`, and its items fall into three ki
 | Kind | What it contains | Examples |
 |---|---|---|
 | New | Interfaces, functions, export fragments, and cases appended at the end of variants and enums | the host interfaces `catalogs`, `geocode`, `sessions`, `kernel-settings`, `keymap`, `client-requests` and `extensions`, the exports `catalog-provider`, `menu-provider`, `virtual-rows-provider` and `token-provider`, 18 events, 23 intents, 23 grants |
-| Manifest | Keys and fields on manifest entries | nine `contributes` keys, `limits_tier`, six settings row types, 13 `manifest.*` codes |
+| Manifest | Keys and fields on manifest entries | nine `contributes` keys, `limits_tier`, 18 settings row types, 13 `manifest.*` codes |
 | Shape | Fields of records, fixed by the first freeze | See [ABI evolution](/pages/reference-abi-evolution/#2-what-may-change). After the freeze a record never gains a field |
 
 The widget catalogue has 51 widgets in seven families, there are 18 settings row types, 17 ui-action kinds and 12 action-value cases, and the outcome case `ok-epoch(u64)` is part of the outcome variant. A plugin that matches only `ok` still works, because `is_ok()` in Rust and `isOk()` in TypeScript cover both.

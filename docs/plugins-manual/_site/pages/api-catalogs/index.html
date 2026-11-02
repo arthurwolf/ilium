@@ -694,9 +694,19 @@ export const { catalogProvider } = definePlugin({
 <td>The provider missed its 20 ms deadline.</td>
 </tr>
 <tr>
+<td><code>query</code></td>
+<td><code>not-permitted</code></td>
+<td>The catalogue belongs to a plugin. The synchronous <code>query</code> serves host catalogues only and has no deadline; use <code>query-async</code> for a plugin catalogue.</td>
+</tr>
+<tr>
 <td><code>query</code>, <code>query-async</code></td>
 <td><code>not-permitted</code></td>
-<td><code>ilium.models</code> without <code>inference</code>, or another plugin's catalogue without <code>services.use</code>.</td>
+<td><code>ilium.models</code> without <code>inference</code>.</td>
+</tr>
+<tr>
+<td><code>query-async</code></td>
+<td><code>not-permitted</code></td>
+<td>Another plugin's catalogue without <code>services.use</code>.</td>
 </tr>
 <tr>
 <td>any</td>
@@ -705,6 +715,7 @@ export const { catalogProvider } = definePlugin({
 </tr>
 </tbody>
 </table>
+<p>Failure path of <code>query-async</code>: the failure never comes back from <code>take-page</code>, which returns only a page or nothing. When the provider misses its deadline, the host completes the request with the outcome <code>failed(timed-out)</code> (see <a href="/pages/requests-and-outcomes/">requests and outcomes</a>) and <code>take-page</code> for that request id returns <code>none</code> from then on. A plugin calls <code>take-page</code> only after it saw the completion, and treats <code>none</code> after a <code>failed</code> completion as the end of the request.</p>
 <p>Caps: 8 catalogues per plugin, 256 items per page, <code>description</code> 120 characters, <code>group</code> 32, <code>disabled-reason</code> 40, 8 keywords per item. Install errors: <code>manifest.catalog-unknown</code>, <code>manifest.contribution-limit</code>.</p>
 <h3 id="see-also">See also</h3>
 <ul>

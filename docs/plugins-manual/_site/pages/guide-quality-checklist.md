@@ -6,7 +6,7 @@ This guide is the review list an author runs before each release. Every item say
 
 ### How to use the list
 
-Work top to bottom. The first five sections can be run by a machine. The last three need a person. A release is ready when every item is checked or has a written reason in `lint.toml` or in the release notes.
+Work top to bottom. Sections 1 to 6 are run by a machine wherever a row names a command or test; a row marked `Review` in those sections is a manual check. Section 6 (Behaviour tests) is run with `test`. The last two sections need a person. A release is ready when every item is checked or has a written reason in `lint.toml` or in the release notes.
 
 A release MUST have no `check` error and no unsuppressed `lint` error. [AUT-401]
 
@@ -20,13 +20,13 @@ A release SHOULD pass `ilium plugin lint --deny warnings`, and every suppression
 | Components exist for every declared side | `check` | `component.missing`, `component.invalid` |
 | Exports match the manifest | `check` | `manifest.exports-mismatch` |
 | SDK version matches `api` | `check` | `manifest.api-version` |
-| `description` is one paragraph of 280 characters or less | `lint` | `lint.description-missing` |
+| `description` is one paragraph of 280 characters or less (hard limit 500) | `lint` | `lint.description-missing` |
 | `license` is an SPDX expression and `LICENSE` exists | `lint` | `lint.license-missing`, `lint.license-file-missing` |
 | `unstable` is empty | `lint` | `lint.unstable-feature` |
 | Package is below 100 MiB | `lint` | `lint.package-size-near-cap` |
 | Release build, no debug information | `lint` | `lint.debug-info-in-release` |
 
-A plugin SHOULD NOT list an `unstable` feature in a release, because the shape of that feature can change without a major version. [AUT-403]
+A plugin MUST NOT list an `unstable` feature in a release unless the plugin is for development use, because the shape of that feature can change without a major version. [AUT-403]
 
 ## 2. Grants and privacy
 
@@ -38,7 +38,7 @@ A plugin SHOULD NOT list an `unstable` feature in a release, because the shape o
 | The plugin works when each optional grant is refused | Test | none |
 | No secret or whole payload in a log line | Review | none |
 
-A plugin MUST request the smallest grant set that works, and every grant MUST be explained in the README with the feature that needs it. [AUT-404]
+Every capability a plugin requests MUST be exercised by a tested call path, no unused grant may remain in the manifest, and every grant MUST be explained in the README with the feature that needs it. [AUT-404]
 
 A plugin MUST handle `not-permitted` for every call of an optional grant and MUST keep working with a reduced feature set. [AUT-405]
 
@@ -53,7 +53,7 @@ A plugin MUST handle `not-permitted` for every call of an optional grant and MUS
 | Render stays below 10 ms for the largest realistic view | `profile` | none |
 | Memory stays below 80 percent of `memory_mib` | `stats` | none |
 
-A plugin SHOULD keep every measured use below 80 percent of its limit on the largest realistic data set, because the limit is a trap, not a warning. See [Performance](/pages/performance/). [AUT-406]
+A plugin SHOULD keep every measured use below 80 percent of its limit on the fixture data set named in the README (one stated size per limit, such as the largest list length or buffer size the plugin documents), because the limit is a trap, not a warning. See [Performance](/pages/performance/). [AUT-406]
 
 ## 4. Views and keys
 

@@ -18,7 +18,7 @@ Submissions follow the same pattern. Every submission that a handler returns com
 | Identifier | Type | Chosen by | Names | Appears in |
 |---|---|---|---|---|
 | `correlation` | `u64` | The plugin | One submission | `submission.correlation`, and `request-ref` `submission(n)` |
-| `request-id` | `u64` | The host | One slow host call | The raw call's return value, `request-ref` `call(id)`, and every `take-*` function. Unique per plugin side for the whole server run, starts at 1 at server start and is never reused, also across instance restarts [ABI-040] |
+| `request-id` | `u64` | The host | One slow host call | The raw call's return value, `request-ref` `call(id)`, and every `take-*` function. Unique per plugin side for the whole server run, starts at 1 at each server start and is never reused across plugin-instance restarts [ABI-040] |
 
 The plugin picks correlation numbers below 2^63. The SDK allocates its own numbers from 2^63 upward.
 
@@ -40,7 +40,7 @@ The WIT shapes are `submission { intent, correlation, dedup-key }`, `request-ref
 | `outcome` `failed(e)` | `Outcome::Failed(e)` | `{ tag: 'failed', val: e }` |
 | `outcome` `cancelled` | `Outcome::Cancelled` | `{ tag: 'cancelled' }` |
 
-`plugin-error` has a `code`, a `message` and an optional `retry-after-ms`. Its codes are listed in [Errors and limits](/pages/errors-and-limits/).
+`plugin-error` has a `code`, a `message` and an optional `retry-after-ms`. Its codes are listed in [Errors and limits](/pages/reference-errors-and-limits/).
 
 ### Slow calls
 
@@ -183,7 +183,7 @@ if (event.tag === 'input-uncertain') {
 
 ## Duplicate submissions and dedup keys
 
-A submission carries an optional `dedup-key`. It has 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. The key is scoped to the plugin id, and it stays reserved for 10 minutes from the moment the kernel accepts the submission. A refused submission does not reserve its key, so a retry with the same key after fixing the cause is valid. An accepted submission keeps its key even if it later fails or is cancelled. A key is reserved while `now_wall_ms - accepted_wall_ms < 600,000`. The accepted time is persisted in the journal on the wall clock, so it survives a server restart, and at exactly 600,000 ms the key is free [ABI-034].
+A submission carries an optional `dedup-key`. It has 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. The key is scoped to the plugin id for submissions the kernel handles itself, and it stays reserved for 10 minutes from the moment the kernel accepts the submission. A refused submission does not reserve its key, so a retry with the same key after fixing the cause is valid. An accepted submission keeps its key even if it later fails or is cancelled. A key is reserved while `now_wall_ms - accepted_wall_ms < 600,000`. The accepted time is persisted in the journal on the wall clock, so it survives a server restart, and at exactly 600,000 ms the key is free [ABI-034].
 
 A submission that a client plugin half forwards to the server has a wider scope: the pair (plugin id, client id), held by the server for the same 10 minutes. Two clients that send the same key for the same plugin are two submissions. See [Plugin traffic over IPC](/pages/reference-host-ipc/).
 
@@ -388,7 +388,7 @@ Requirement ids for this page: [EVT-021], [EVT-022], [RQO-001], [RQO-002], [RQO-
 - [Events and intents](/pages/events-and-intents/) for the event batch and the submission record.
 - [Intents](/pages/api-intents/) for the intent catalogue and per-intent outcomes.
 - [Background jobs](/pages/background-jobs/) and [Jobs](/pages/api-jobs/) for `jobs.wait-request`.
-- [Errors and limits](/pages/errors-and-limits/) for the full error code table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error code table.
 - [Extension points](/pages/api-extension-points/) for `run-hook`.
 - [Rust SDK](/pages/rust-sdk/), [TypeScript SDK](/pages/typescript-sdk/) and [Testing](/pages/testing/).
 

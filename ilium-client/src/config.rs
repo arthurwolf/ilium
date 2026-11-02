@@ -41,11 +41,9 @@ use crate::reset_planning::ResetPlanningSettings;
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
 
-/// The four client-side config tables, already validated. What [`load`]
-/// returns; a config file that fails to load falls back to
-/// [`ClientConfig::default`] at the call site (`crate::run`) rather than
-/// this module hardcoding that fallback here -- mirrors
-/// `ilium_server::config::ServerConfig`'s own doc comment.
+pub use ilium_core::custom_agent::CustomAgentSettings;
+
+/// Validated client configuration loaded from the user configuration file.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     /// The effective leader-key binding table -- `LEADER_BINDINGS` with any
@@ -77,6 +75,8 @@ pub struct ClientConfig {
     pub text_triggers: TextTriggerSettings,
     /// Managed agent-instruction targets and durable startup-prompt choices.
     pub agent_setup: AgentSetupSettings,
+    /// Custom-agent environment values are stored as plaintext in the private config file.
+    pub custom_agents: CustomAgentSettings,
     /// Terminal presentation and creation defaults.
     pub terminal: TerminalSettings,
     /// Defaults applied when a local editor buffer is opened.
@@ -118,6 +118,7 @@ impl Default for ClientConfig {
             triggers: TriggerSettings::default(),
             text_triggers: TextTriggerSettings::default(),
             agent_setup: AgentSetupSettings::default(),
+            custom_agents: CustomAgentSettings::default(),
             terminal: TerminalSettings::default(),
             editor: EditorSettings::default(),
             session: SessionSettings::default(),
@@ -1042,9 +1043,13 @@ pub struct UiSettings {
     /// placement in the right panel.
     pub tree_order: TreeOrder,
     pub tree_row_layout: crate::tree_row_layout::TreeRowLayout,
+    pub tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout,
+    pub tree_inactivity_minutes: u16,
     /// Per-project Appearance setting mirrored from `.ilium/config.yaml`.
     /// This value is intentionally excluded from the global `config.toml`.
     pub show_project_separators: bool,
+    /// Display resource participants beneath their shared resource, without reparenting panes.
+    pub resource_queue_grouping: bool,
     pub motion_level: MotionLevel,
     pub sidebar_density: SidebarDensity,
     /// Uses single-cell text symbols in the row-action hover overlay. This
@@ -1086,6 +1091,10 @@ pub struct UiSettings {
     /// detected agent pane in a persistent banner below its toolbar (see
     /// `ilium_core::Tree::set_last_prompt`).
     pub last_prompt_enabled: bool,
+    /// Offer a Goal tab when a current agent goal is known.
+    pub goal_tab_enabled: bool,
+    /// Offer the goal flag and its detailed popover in the agent toolbar.
+    pub goal_toolbar_icon_enabled: bool,
     /// Maximum rows the last-prompt banner reserves. A prompt with more
     /// lines than this is middle-truncated (see `crate::last_prompt_banner`)
     /// rather than growing the banner, so the reservation stays a fixed
@@ -1149,7 +1158,10 @@ impl Default for UiSettings {
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::default(),
+            tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
+            tree_inactivity_minutes: 15,
             show_project_separators: false,
+            resource_queue_grouping: true,
             motion_level: MotionLevel::default(),
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
@@ -1163,6 +1175,8 @@ impl Default for UiSettings {
             section_frames_enabled: true,
             show_toolbar_labels: true,
             last_prompt_enabled: true,
+            goal_tab_enabled: true,
+            goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             attention_running_indicator:
@@ -1222,6 +1236,8 @@ struct RawClientConfig {
     #[serde(default)]
     agent_setup: AgentSetupSettings,
     #[serde(default)]
+    custom_agents: CustomAgentSettings,
+    #[serde(default)]
     terminal: RawTerminalConfig,
     #[serde(default)]
     editor: RawEditorConfig,
@@ -1279,11 +1295,14 @@ struct RawUiConfig {
     antigravity_agent_icon: Option<String>,
     tree_order: Option<String>,
     tree_row_layout: Option<crate::tree_row_layout::TreeRowLayout>,
+    tree_toolbar_layout: Option<crate::tree_toolbar_layout::TreeToolbarLayout>,
+    tree_inactivity_minutes: Option<u16>,
     motion_level: Option<String>,
     sidebar_density: Option<String>,
     use_stable_glyphs: Option<bool>,
     show_inferred_title_icons: Option<bool>,
     show_tree_row_management_controls: Option<bool>,
+    resource_queue_grouping: Option<bool>,
     tree_toolbar_always_visible: Option<bool>,
     agent_debug_menu_enabled: Option<bool>,
     show_context_menu_icons: Option<bool>,
@@ -1291,6 +1310,8 @@ struct RawUiConfig {
     section_frames_enabled: Option<bool>,
     show_toolbar_labels: Option<bool>,
     last_prompt_enabled: Option<bool>,
+    goal_tab_enabled: Option<bool>,
+    goal_toolbar_icon_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     agent_monitoring_mode: Option<String>,
     agent_tree_model_icons: Option<bool>,
@@ -1354,6 +1375,10 @@ struct RawThemeConfig {
 /// testable, mirroring `ilium_server::error::ConfigLoadError`.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoadError {
+    #[error("invalid custom agent settings: {0}")]
+    InvalidCustomAgents(ilium_core::custom_agent::ProfileValidationError),
+    #[error("configuration is not valid TOML; values are omitted from this error")]
+    PrivateConfigParse,
     #[error("invalid [git] settings: {0}")]
     InvalidGitSettings(String),
     #[error("failed to read config file: {0}")]
@@ -1492,6 +1517,14 @@ impl From<toml::de::Error> for ConfigLoadError {
 /// [`save_ui_settings`].
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigSaveError {
+    #[error("invalid custom agent settings: {0}")]
+    InvalidCustomAgents(ilium_core::custom_agent::ProfileValidationError),
+    #[error("configuration is not valid TOML; values are omitted from this error")]
+    PrivateConfigParse,
+    #[error("custom agent profile changed in another client; reload before saving")]
+    CustomAgentConflict,
+    #[error("configuration document exceeds the 256 KiB limit")]
+    TooLarge,
     #[error("failed to read existing config file: {0}")]
     Read(std::io::Error),
     #[error("failed to parse existing config file as TOML: {0}")]
@@ -1515,18 +1548,36 @@ pub enum ConfigSaveError {
 /// to start the client over a typo in an optional config file.
 pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
     let path = config_dir.join("config.toml");
-    if !path.exists() {
-        return Ok(ClientConfig::default());
+    // Only true absence selects defaults. Path::exists hides permission and
+    // dangling-link errors, which exact editors must never present as saved data.
+    match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ClientConfig::default());
+        }
+        Err(source) => {
+            return Err(ClientError::ConfigLoad {
+                path,
+                source: ConfigLoadError::Read(source),
+            })
+        }
+        Ok(_) => {}
     }
     let contents = read_config_text(&path).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source: ConfigLoadError::Read(source),
     })?;
     let raw: RawClientConfig =
-        toml::from_str(&contents).map_err(|source| ClientError::ConfigLoad {
+        toml::from_str(&contents).map_err(|_source| ClientError::ConfigLoad {
             path: path.clone(),
-            source: ConfigLoadError::Parse(Box::new(source)),
+            source: ConfigLoadError::PrivateConfigParse,
         })?;
+
+    ilium_core::custom_agent::validate_profiles(&raw.custom_agents.profiles).map_err(|source| {
+        ClientError::ConfigLoad {
+            path: path.clone(),
+            source: ConfigLoadError::InvalidCustomAgents(source),
+        }
+    })?;
 
     let keybindings =
         merge_keybindings(&raw.keybindings).map_err(|source| ClientError::ConfigLoad {
@@ -1595,6 +1646,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         triggers: raw.triggers.normalized(),
         text_triggers: raw.text_triggers,
         agent_setup: raw.agent_setup,
+        custom_agents: raw.custom_agents,
         terminal,
         editor,
         session,
@@ -1780,7 +1832,12 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         },
         tree_order,
         tree_row_layout: raw.tree_row_layout.unwrap_or_default().normalized(),
+        tree_toolbar_layout: raw.tree_toolbar_layout.unwrap_or_default().normalized(),
+        tree_inactivity_minutes: raw.tree_inactivity_minutes.unwrap_or(15).max(1),
         show_project_separators: false,
+        resource_queue_grouping: raw
+            .resource_queue_grouping
+            .unwrap_or(defaults.resource_queue_grouping),
         motion_level,
         sidebar_density,
         use_stable_glyphs: raw.use_stable_glyphs.unwrap_or(defaults.use_stable_glyphs),
@@ -1814,6 +1871,10 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         last_prompt_enabled: raw
             .last_prompt_enabled
             .unwrap_or(defaults.last_prompt_enabled),
+        goal_tab_enabled: raw.goal_tab_enabled.unwrap_or(defaults.goal_tab_enabled),
+        goal_toolbar_icon_enabled: raw
+            .goal_toolbar_icon_enabled
+            .unwrap_or(defaults.goal_toolbar_icon_enabled),
         last_prompt_max_lines: match raw.last_prompt_max_lines {
             Some(lines)
                 if (MIN_LAST_PROMPT_MAX_LINES..=MAX_LAST_PROMPT_MAX_LINES).contains(&lines) =>
@@ -2192,6 +2253,31 @@ fn merge_keybindings(
         // every binding), so this always finds a match.
         if let Some(binding) = bindings.iter_mut().find(|binding| binding.action == action) {
             binding.key = key;
+        }
+    }
+
+    // New goal actions must not invalidate an existing user's explicit
+    // bindings merely because one of their old choices became a default.
+    // Explicit collisions still fail below; only an unconfigured new action
+    // moves to the first free printable key.
+    for action in [
+        keymap::Action::ToggleGoalTab,
+        keymap::Action::ToggleGoalPopover,
+    ] {
+        if overrides.contains_key(keymap::action_name(action)) {
+            continue;
+        }
+        let Some(index) = bindings.iter().position(|binding| binding.action == action) else {
+            continue;
+        };
+        if bindings
+            .iter()
+            .enumerate()
+            .any(|(other, binding)| other != index && binding.key == bindings[index].key)
+        {
+            if let Some(key) = keymap::available_keys(&bindings).first().copied() {
+                bindings[index].key = BindingKey::Character(key);
+            }
         }
     }
 
@@ -2738,6 +2824,105 @@ fn publish_text_trigger_settings(
     write_toml_document(path, document)
 }
 
+/// Saves custom profiles while retaining unrelated configuration tables.
+pub fn save_custom_agent_settings(
+    config_dir: &Path,
+    settings: &CustomAgentSettings,
+) -> Result<(), ClientError> {
+    ilium_core::custom_agent::validate_profiles(&settings.profiles).map_err(|source| {
+        ClientError::ConfigSave {
+            path: config_dir.join("config.toml"),
+            source: Box::new(ConfigSaveError::InvalidCustomAgents(source)),
+        }
+    })?;
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "custom_agents", value)
+}
+
+/// Merges profile edits against the current file while holding its writer lock.
+/// Concurrent edits to different profile IDs survive; conflicting edits fail.
+pub fn update_custom_agent_settings(
+    config_dir: &Path,
+    previous: &CustomAgentSettings,
+    desired: &CustomAgentSettings,
+) -> Result<CustomAgentSettings, ClientError> {
+    let path = config_dir.join("config.toml");
+    ilium_core::custom_agent::validate_profiles(&desired.profiles).map_err(|source| {
+        ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::InvalidCustomAgents(source)),
+        }
+    })?;
+    let mut document = read_toml_document(&path)?;
+    let mut current = document
+        .get("custom_agents")
+        .cloned()
+        .map(CustomAgentSettings::deserialize)
+        .transpose()
+        .map_err(|_source| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::PrivateConfigParse),
+        })?
+        .unwrap_or_default();
+    ilium_core::custom_agent::validate_profiles(&current.profiles).map_err(|source| {
+        ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::InvalidCustomAgents(source)),
+        }
+    })?;
+    let mut seen = HashSet::new();
+    for id in previous
+        .profiles
+        .iter()
+        .chain(&desired.profiles)
+        .map(|profile| profile.id.as_str())
+    {
+        if !seen.insert(id) {
+            continue;
+        }
+        let before = previous.profiles.iter().find(|profile| profile.id == id);
+        let after = desired.profiles.iter().find(|profile| profile.id == id);
+        if before == after {
+            continue;
+        }
+        let existing = current.profiles.iter().position(|profile| profile.id == id);
+        if existing.map(|index| &current.profiles[index]) != before {
+            return Err(ClientError::ConfigSave {
+                path,
+                source: Box::new(ConfigSaveError::CustomAgentConflict),
+            });
+        }
+        match (existing, after) {
+            (Some(index), Some(profile)) => current.profiles[index] = profile.clone(),
+            (Some(index), None) => {
+                current.profiles.remove(index);
+            }
+            (None, Some(profile)) => current.profiles.push(profile.clone()),
+            (None, None) => {}
+        }
+    }
+    ilium_core::custom_agent::validate_profiles(&current.profiles).map_err(|source| {
+        ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::InvalidCustomAgents(source)),
+        }
+    })?;
+    let value = toml::Value::try_from(&current).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    // A parsed TOML document and the empty fallback both have a table root.
+    document
+        .as_table_mut()
+        .expect("TOML document root")
+        .insert("custom_agents".into(), value);
+    write_toml_document(&path, &document)?;
+    Ok(current)
+}
+
 /// Persists managed-instruction targets and prompt suppression while
 /// preserving all unrelated client and detached-server configuration.
 pub fn save_agent_setup_settings(
@@ -2877,9 +3062,9 @@ fn read_toml_document(path: &Path) -> Result<ConfigDocument, ClientError> {
         },
     )?;
     let value = match read_config_text(path) {
-        Ok(contents) => toml::from_str(&contents).map_err(|source| ClientError::ConfigSave {
+        Ok(contents) => toml::from_str(&contents).map_err(|_source| ClientError::ConfigSave {
             path: path.to_path_buf(),
-            source: Box::new(ConfigSaveError::Parse(source)),
+            source: Box::new(ConfigSaveError::PrivateConfigParse),
         })?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             toml::Value::Table(toml::value::Table::new())
@@ -2909,6 +3094,12 @@ fn write_toml_document(path: &Path, document: &ConfigDocument) -> Result<(), Cli
             path: path.to_path_buf(),
             source: Box::new(ConfigSaveError::Serialize(source)),
         })?;
+    if serialized.len() > 256 * 1024 {
+        return Err(ClientError::ConfigSave {
+            path: path.to_path_buf(),
+            source: Box::new(ConfigSaveError::TooLarge),
+        });
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|source| ClientError::ConfigSave {
             path: path.to_path_buf(),
@@ -2956,6 +3147,23 @@ fn write_toml_document(path: &Path, document: &ConfigDocument) -> Result<(), Cli
 /// writes `App`'s live, fully-resolved settings.
 fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     let mut table = toml::value::Table::new();
+    table.insert(
+        "tree_toolbar_layout".to_string(),
+        toml::Value::Table(toml::value::Table::from_iter([(
+            "entries".to_string(),
+            toml::Value::Array(
+                ui.tree_toolbar_layout
+                    .entries
+                    .iter()
+                    .map(|entry| toml::Value::String(entry.key().to_string()))
+                    .collect(),
+            ),
+        )])),
+    );
+    table.insert(
+        "tree_inactivity_minutes".to_string(),
+        toml::Value::Integer(i64::from(ui.tree_inactivity_minutes)),
+    );
     table.insert(
         "tree_row_layout".to_string(),
         toml::Value::Table(toml::value::Table::from_iter([
@@ -3086,6 +3294,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         toml::Value::Boolean(ui.agent_tree_model_icons),
     );
     table.insert(
+        "resource_queue_grouping".to_string(),
+        toml::Value::Boolean(ui.resource_queue_grouping),
+    );
+    table.insert(
         "show_tree_row_management_controls".to_string(),
         toml::Value::Boolean(ui.show_tree_row_management_controls),
     );
@@ -3116,6 +3328,14 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "last_prompt_enabled".to_string(),
         toml::Value::Boolean(ui.last_prompt_enabled),
+    );
+    table.insert(
+        "goal_tab_enabled".to_string(),
+        toml::Value::Boolean(ui.goal_tab_enabled),
+    );
+    table.insert(
+        "goal_toolbar_icon_enabled".to_string(),
+        toml::Value::Boolean(ui.goal_toolbar_icon_enabled),
     );
     table.insert(
         "last_prompt_max_lines".to_string(),
@@ -3320,6 +3540,120 @@ fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn oversized_custom_agent_configuration_is_rejected_without_overwriting_the_file() {
+        use super::*;
+        use ilium_core::custom_agent::{CustomAgentProfile, EnvironmentEntry};
+        let directory = scratch_dir();
+        let path = directory.join("config.toml");
+        std::fs::write(&path, "[ui]\ntree_width = 25\n").unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let settings = CustomAgentSettings {
+            profiles: vec![CustomAgentProfile {
+                id: "one".into(),
+                name: "Work".into(),
+                icon: "★".into(),
+                base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                environment: vec![EnvironmentEntry {
+                    key: "TOKEN".into(),
+                    value: "s".repeat(256 * 1024),
+                }],
+            }],
+        };
+        let error = save_custom_agent_settings(&directory, &settings).unwrap_err();
+        assert!(format!("{error}").contains("256 KiB"));
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn custom_agent_settings_round_trip_without_replacing_other_tables() {
+        use super::*;
+        use ilium_core::custom_agent::{CustomAgentProfile, EnvironmentEntry};
+
+        let directory = scratch_dir();
+        std::fs::write(
+            directory.join("config.toml"),
+            "[notifications]\nenabled = false\n",
+        )
+        .unwrap();
+        let settings = CustomAgentSettings {
+            profiles: vec![CustomAgentProfile {
+                id: "profile-1".into(),
+                name: "Example".into(),
+                icon: "★".into(),
+                base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                environment: vec![EnvironmentEntry {
+                    key: "EXAMPLE_VALUE".into(),
+                    value: "literal = 'text'\n☃".into(),
+                }],
+            }],
+        };
+        save_custom_agent_settings(&directory, &settings).unwrap();
+        assert_eq!(load(&directory).unwrap().custom_agents, settings);
+        assert!(!load(&directory).unwrap().notifications.enabled);
+        save_custom_agent_settings(&directory, &CustomAgentSettings::default()).unwrap();
+        assert!(load(&directory).unwrap().custom_agents.profiles.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_agent_settings_are_saved_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = scratch_dir();
+        let path = directory.join("config.toml");
+        std::fs::write(&path, "[notifications]\nenabled = false\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        save_custom_agent_settings(&directory, &CustomAgentSettings::default()).unwrap();
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn custom_agent_updates_preserve_unrelated_concurrent_profiles() {
+        use super::*;
+        use ilium_core::custom_agent::CustomAgentProfile;
+
+        let directory = scratch_dir();
+        let profile = |id: &str| CustomAgentProfile {
+            id: id.into(),
+            name: id.into(),
+            icon: "★".into(),
+            base_provider: ilium_core::BuiltinAgentProvider::Claude,
+            environment: Vec::new(),
+        };
+        let original = CustomAgentSettings {
+            profiles: vec![profile("first")],
+        };
+        save_custom_agent_settings(&directory, &original).unwrap();
+        let mut concurrent = original.clone();
+        concurrent.profiles.push(profile("second"));
+        save_custom_agent_settings(&directory, &concurrent).unwrap();
+        let mut edited = original.clone();
+        edited.profiles[0].name = "renamed".into();
+        let merged = update_custom_agent_settings(&directory, &original, &edited).unwrap();
+        assert_eq!(merged.profiles.len(), 2);
+        assert_eq!(merged.profiles[0].name, "renamed");
+        assert_eq!(merged.profiles[1].id, "second");
+        assert!(update_custom_agent_settings(&directory, &original, &edited).is_err());
+    }
+
+    #[test]
+    fn malformed_custom_agent_config_does_not_disclose_values_in_errors() {
+        use super::*;
+        let directory = scratch_dir();
+        std::fs::write(
+            directory.join("config.toml"),
+            "[[custom_agents.profiles]]\nvalue = 'sensitive-sentinel\n",
+        )
+        .unwrap();
+        let load_error = load(&directory).unwrap_err();
+        assert!(!format!("{load_error:?} {load_error}").contains("sensitive-sentinel"));
+        let save_error =
+            save_custom_agent_settings(&directory, &CustomAgentSettings::default()).unwrap_err();
+        assert!(!format!("{save_error:?} {save_error}").contains("sensitive-sentinel"));
+    }
     #[test]
     fn terminal_parser_pool_defaults_off_and_preserves_explicit_finite_limits() {
         assert_eq!(TerminalSettings::default().engine_memory_budget_mib, 0);
@@ -4059,6 +4393,30 @@ mod tests {
     }
 
     #[test]
+    fn existing_remaps_take_precedence_over_new_goal_defaults() {
+        let overrides = HashMap::from([
+            ("quit".to_string(), "G".to_string()),
+            ("new_terminal".to_string(), "U".to_string()),
+        ]);
+        let bindings = merge_keybindings(&overrides).unwrap();
+        assert_eq!(
+            keymap::action_for_table(&bindings, BindingKey::Character('G')),
+            Some(keymap::Action::Quit)
+        );
+        assert_eq!(
+            keymap::action_for_table(&bindings, BindingKey::Character('U')),
+            Some(keymap::Action::NewTerminal)
+        );
+        assert!(bindings
+            .iter()
+            .any(|binding| binding.action == keymap::Action::ToggleGoalTab));
+        assert!(bindings
+            .iter()
+            .any(|binding| binding.action == keymap::Action::ToggleGoalPopover));
+        assert!(reject_duplicate_keys(&bindings).is_ok());
+    }
+
+    #[test]
     fn a_theme_override_replaces_only_the_specified_color() {
         let dir = scratch_dir();
         std::fs::write(
@@ -4111,10 +4469,26 @@ mod tests {
         assert!(matches!(
             result,
             Err(ClientError::ConfigLoad {
-                source: ConfigLoadError::Parse(_),
+                source: ConfigLoadError::PrivateConfigParse,
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn tree_toolbar_settings_round_trip_and_preserve_an_empty_layout() {
+        let dir = scratch_dir();
+        let ui = UiSettings {
+            tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout {
+                entries: Vec::new(),
+            },
+            tree_inactivity_minutes: 27,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+        let restored = load(&dir).unwrap().ui;
+        assert_eq!(restored.tree_toolbar_layout, ui.tree_toolbar_layout);
+        assert_eq!(restored.tree_inactivity_minutes, 27);
     }
 
     #[test]
@@ -4727,6 +5101,16 @@ mod tests {
     }
 
     #[test]
+    fn resource_grouping_defaults_on_and_disabled_preference_survives_reload() {
+        let directory = scratch_dir();
+        let mut ui = UiSettings::default();
+        assert!(ui.resource_queue_grouping);
+        ui.resource_queue_grouping = false;
+        save_ui_settings(&directory, &ui).unwrap();
+        assert!(!load(&directory).unwrap().ui.resource_queue_grouping);
+    }
+
+    #[test]
     fn save_ui_settings_round_trips_through_load() {
         let dir = scratch_dir();
         let mut icons = IconSettings::default();
@@ -4748,7 +5132,10 @@ mod tests {
             },
             tree_order: TreeOrder::NameDescending,
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::mixed(),
+            tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
+            tree_inactivity_minutes: 15,
             show_project_separators: false,
+            resource_queue_grouping: true,
             tree_toolbar_always_visible: false,
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
@@ -4760,6 +5147,8 @@ mod tests {
             section_frames_enabled: false,
             show_toolbar_labels: false,
             last_prompt_enabled: false,
+            goal_tab_enabled: false,
+            goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
             attention_progress_reports: false,
@@ -4912,6 +5301,26 @@ mod tests {
         let loaded = load(&dir).unwrap();
         assert!(!loaded.ui.last_prompt_enabled);
         assert_eq!(loaded.ui.last_prompt_max_lines, 8);
+    }
+
+    #[test]
+    fn goal_visibility_settings_default_on_and_persist_independently() {
+        let dir = scratch_dir();
+        let defaults = load(&dir).unwrap().ui;
+        assert!(defaults.goal_tab_enabled && defaults.goal_toolbar_icon_enabled);
+        for (tab, icon) in [(true, false), (false, true), (false, false), (true, true)] {
+            let settings = UiSettings {
+                goal_tab_enabled: tab,
+                goal_toolbar_icon_enabled: icon,
+                ..UiSettings::default()
+            };
+            save_ui_settings(&dir, &settings).unwrap();
+            let loaded = load(&dir).unwrap().ui;
+            assert_eq!(
+                (loaded.goal_tab_enabled, loaded.goal_toolbar_icon_enabled),
+                (tab, icon)
+            );
+        }
     }
 
     #[test]

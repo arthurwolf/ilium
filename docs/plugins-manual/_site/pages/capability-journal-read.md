@@ -90,7 +90,7 @@ impl Handler for Audit {
             let Event::CommandInvoked(invoked) = event else { continue };
             if invoked.command != "com.example.audit/count" { continue; }
             let since = clock::now_unix_millis() - 3_600_000;
-            let entries = journal::read(invoked.pane, since, 50);
+            let entries = journal::read(invoked.context.pane, since, 50);
             let sent = entries.iter().filter(|entry| entry.kind == "input-sent").count();
             log::log(Level::Info, &format!("{sent} inputs sent in the last hour"));
         }
@@ -113,7 +113,7 @@ export const { lifecycle, handler } = definePlugin({
   onEvents(batch: Event[]): Submission[] {
     for (const event of batch) {
       if (event.tag !== 'command-invoked' || event.val.command !== 'com.example.audit/count') continue;
-      const entries = read(event.val.pane, nowUnixMillis() - 3_600_000n, 50);
+      const entries = read(event.val.context.pane, nowUnixMillis() - 3_600_000n, 50);
       const sent = entries.filter((entry) => entry.kind === 'input-sent').length;
       log('info', `${sent} inputs sent in the last hour`);
     }
@@ -129,11 +129,12 @@ Entries from other sources can be absent when the grant is missing; the call doe
 | Situation | Outcome | What the plugin does |
 |---|---|---|
 | Grant missing | only own entries are returned | Do not treat an empty result as proof that nothing happened. |
-| `limit` above the cap | clamped | Page with `since`. |
+| `limit` above 1,000 (the per-call read cap) | clamped to 1,000 | Page with `since`. |
 | Payload above 4 KiB when logging | `invalid-argument` | Store a reference instead. |
 | Pane closed | entries remain until trimmed | Nothing. |
 | Journal full | oldest entries trimmed | Nothing. |
-| Grant revoked later | `revoked` | Stop reading foreign entries. |
+| Grant revoked while a call is in flight | `revoked` | Stop reading foreign entries. |
+| Call made after the grant was revoked | `not-permitted` | Stop reading foreign entries. |
 
 Journal entries are part of the session snapshot, so they survive a restart of the server.
 

@@ -895,7 +895,7 @@ export function starAndFold(panes: bigint[], group: bigint): Submission[] {
 <h3 id="what-the-user-sees">What the user sees</h3>
 <p>Reading the tree shows nothing on its own. The user sees what the plugin does with the data: a decoration, a sorted list, a notice or a log line. Metadata is never shown unless the plugin shows it. A bookmark flag from Example 1 appears only if the plugin draws it, for example as a badge with <code>tree.decorate</code>. Log lines from a refused read appear in <code>ilium plugin logs &lt;plugin-id&gt;</code>.</p>
 <h3 id="errors-and-limits">Errors and limits</h3>
-<p>Reads never fail. A missing node gives none or an empty list. The error cases are these:</p>
+<p>A read of a missing node never fails: it gives none or an empty list. Reads can still fail for a missing grant or a revoked authorization, as the rows below show:</p>
 <table>
 <thead>
 <tr>

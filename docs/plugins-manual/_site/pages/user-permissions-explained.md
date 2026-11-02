@@ -177,16 +177,17 @@ A started program runs in the same sandbox as the plugin, with no network. Stopp
 |---|---|---|
 | `sessions.cross` | Reach other Ilium sessions on this machine | HIGH |
 | `workspace.manage` | Create and remove worktrees and workspaces | HIGH |
-| `cli.contribute` | Add its own `ilium` command | normal |
+| `cli.contribute` | Add `ilium` commands of its own | normal |
 | `http-api.route:<path>` | Answer requests at one path of the local HTTP API | normal |
 | `settings.contribute:<tab>` | Add rows to one named built-in Settings tab | normal |
 | `settings.read-kernel:<tab>` | Read the values of one built-in Settings tab | normal; HIGH for the api tab |
 | `settings.read-all`, `settings.write-all` | Read or change every setting. Bundled plugins only | HIGH |
+| `settings.write-kernel:<tab>` | Change the values of one built-in Settings tab. Bundled plugins only, one holder per tab | HIGH |
 | `plugins.manage` | Install, remove and turn plugins on and off. Bundled plugins only | HIGH |
 | `help.read` | Read the Ilium help topics | normal |
 | `gpu.kernels` | Run graphics code. Development builds only | normal |
 
-Rows marked bundled-only or development-only are never shown to you for third-party plugins. A third-party package that asks for them fails to install with `manifest.grant-tier`.
+Rows marked bundled-only or development-only are never shown to you for third-party plugins. A third-party package that asks for them fails to install with `manifest.grant-tier` for a bundled-only row, or with `manifest.grant-unknown` for `gpu.kernels`, which does not exist in a release build.
 
 - [USR-080] The Capabilities tab MUST show the plain wording, the grant string, the risk and the state (granted, declined, revoked) of every permission the plugin requests. Test: open the tab for a plugin with ten requested grants and compare.
 - [USR-081] A package that requests a bundled-only grant MUST fail to install with `manifest.grant-tier`. Test: request `plugins.manage` in a T2 package.
@@ -256,7 +257,7 @@ Even with permissions, Ilium limits what a plugin can do to your screen and sess
 | The plugin lists a permission that does not exist | Install fails with `manifest.grant-unknown` |
 | The plugin asks for a permission its side cannot hold | Install fails with `manifest.grant-side` |
 | An update asks for a new permission | Only the new row is shown |
-| Your administrator forbids a permission | The row shows "Blocked by your administrator", off and locked. See [Plugin policy](/pages/reference-plugin-policy/) |
+| Your administrator forbids a permission | The grant row in the review dialog and in the Capabilities tab shows "Blocked by your administrator", off and locked. A whole plugin that the policy blocks shows "Blocked by policy" in the plugin list. See [Plugin policy](/pages/reference-plugin-policy/) |
 | You uninstall, then reinstall | Permissions are asked again |
 
 ### See also

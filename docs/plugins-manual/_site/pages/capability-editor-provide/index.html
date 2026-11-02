@@ -556,7 +556,7 @@ High risk. The grant is high risk (H) and for T1 bundled plugins only. By defaul
 </table>
 <p>The record <code>adopted-buffer</code> has the fields <code>buffer: buffer-id</code>, <code>path: option&lt;fs-path&gt;</code>, <code>text: string</code>, <code>language: option&lt;string&gt;</code>, <code>cursor: text-position</code> and <code>dirty: bool</code>. The <code>buffer</code> id is the one the native editor issued, so a plugin that stored it keeps working after the handover. A buffer that the provider creates gets a new id from the provider's own counter, and that counter never reuses an adopted id.</p>
 <p>The record <code>text-edit</code> has the fields <code>range: text-range</code> and <code>replacement: string</code>.</p>
-<p>In Rust, the trait is <code>ilium_plugin_sdk::exports::EditorProvider</code>, with the same twelve methods in snake_case (<code>read_lines</code>, <code>apply_edits</code> and so on). In TypeScript, the methods sit flat in the <code>definePlugin</code> object beside <code>lifecycle</code> and <code>handler</code>, in camelCase.</p>
+<p>In Rust, the trait is <code>ilium_plugin_sdk::exports::EditorProvider</code>, with the same fourteen methods as the table above in snake_case (<code>read_lines</code>, <code>apply_edits</code> and so on). In TypeScript, the methods sit flat in the <code>definePlugin</code> object beside <code>lifecycle</code> and <code>handler</code>, in camelCase.</p>
 <h2 id="lifecycle-of-a-provider">Lifecycle of a provider</h2>
 <ol>
 <li><strong>Grant.</strong> A T1 plugin activates first without its H capabilities, and then the prompt appears (see below). If the user declines, the provider role does not start and the native editor keeps serving the interface.</li>
@@ -568,7 +568,7 @@ High risk. The grant is high risk (H) and for T1 bundled plugins only. By defaul
 <li><strong>Revocation.</strong> Revoking <code>editor.provide</code> makes calls in flight fail with <code>revoked</code>. The plugin receives <code>deactivate(revoked)</code>, and its buffers return to the native editor (see <a href="/pages/primitives-editor/">Editor primitives</a>).</li>
 </ol>
 <h2 id="worked-example-rust">Worked example: Rust</h2>
-<p>This provider keeps the adopted buffers in memory. It implements <code>adopt</code>, <code>release</code> and <code>read_lines</code>. The other methods listed above follow the same pattern. The trait does not compile until all twelve exist.</p>
+<p>This provider keeps the adopted buffers in memory. It implements <code>adopt</code>, <code>release</code> and <code>read_lines</code>. The other methods listed above follow the same pattern. The trait does not compile until all fourteen exist.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::exports::EditorProvider;
@@ -622,7 +622,7 @@ impl EditorProvider for BufferKeeper {
         }
         let entry = self.find(buffer)?;
         let line_total = entry.text.lines().count();
-        if first_line as usize &gt; line_total {
+        if first_line as usize &gt;= line_total {
             return Err(error(ErrorCode::InvalidArgument, &quot;line past the end of the buffer&quot;));
         }
         let lines = entry.text.lines().skip(first_line as usize).take(count as usize);
@@ -669,7 +669,9 @@ export const { lifecycle, handler, editorProvider } = definePlugin({
       throw new PluginError('invalid-argument', 'at most 10,000 lines per call');
     }
     const lines = requireBuffer(buffer).text.split('\n');
-    if (firstLine &gt; lines.length) {
+    // Match Rust `str::lines`: a trailing newline does not start another line.
+    if (lines.length &gt; 0 &amp;&amp; lines[lines.length - 1] === '') lines.pop();
+    if (firstLine &gt;= lines.length) {
       throw new PluginError('invalid-argument', 'line past the end of the buffer');
     }
     return lines.slice(firstLine, firstLine + count);
@@ -738,7 +740,7 @@ export const { lifecycle, handler, editorProvider } = definePlugin({
 </tr>
 <tr>
 <td><code>manifest.grant-unknown</code></td>
-<td>The <code>api</code> key names an unknown API version.</td>
+<td>The grant name is not a capability of this API version (for <code>editor.provide</code>, it is reserved in <code>ilium:plugin@0.1.0</code>). An unknown <code>api</code> version is a different error.</td>
 </tr>
 <tr>
 <td><code>manifest.export-grant</code></td>
@@ -771,7 +773,7 @@ export const { lifecycle, handler, editorProvider } = definePlugin({
       bundled plugins only
 </pre>
 
-<p>The user can check the grants of an installed plugin with <code>ilium plugin grants &lt;id&gt;</code>. Grants are per side and per session (see <a href="/pages/reference-capabilities/">Capabilities reference</a>).</p>
+<p>The user can check the grants of an installed plugin with <code>ilium plugin grants &lt;id&gt;</code>. Grants are recorded per plugin, per side and per user configuration (see <a href="/pages/reference-capabilities/">Capabilities reference</a>).</p>
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="/pages/capability-editor-read/">editor.read</a> for the read calls the provider implements.</li>

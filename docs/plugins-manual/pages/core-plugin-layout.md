@@ -16,7 +16,7 @@ The Layout plugin (`ilium.core.layout`, side both) owns split views and the arra
 
 ### See it
 
-<figure><img src="/assets/demos/03-mixed-splits.gif" alt="A terminal, an editor and a board share one screen in a mixed split" loading="lazy"><figcaption>A mixed split. Terminal, editor and board panes sit side by side, and focus moves between them.</figcaption></figure>
+<figure><img src="/assets/demos/03-mixed-splits.gif" alt="Two local fixture terminals, a text editor and a live clock share a four-pane split" loading="lazy"><figcaption>A four-pane split combines two labelled local terminal fixtures, a text editor and a live clock. Focus moves between panes.</figcaption></figure>
 
 ### What the user sees
 

@@ -481,7 +481,7 @@
 <tr>
 <td><code>notify-spec.body</code></td>
 <td>field</td>
-<td><code>string</code>, 0 to 2,048 characters. The text below the title.</td>
+<td><code>option&lt;string&gt;</code>, 0 to 2,048 characters when present. The text below the title; none shows a title-only notice. Rust: <code>Option&lt;String&gt;</code>. TypeScript: <code>string \| undefined</code>.</td>
 </tr>
 <tr>
 <td><code>notify-spec.urgency</code></td>
@@ -505,7 +505,7 @@
 </tr>
 </tbody>
 </table>
-<p>The payload is a record with these four fields and no others. The WIT form is <code>record notify-spec { title: string, body: string, urgency: urgency, sound: option&lt;string&gt; }</code>.</p>
+<p>The core payload is a record with these four fields. The WIT form is <code>record notify-spec { title: string, body: option&lt;string&gt;, urgency: urgency, sound: option&lt;string&gt; }</code> (the full record also carries the optional coalescing fields described in <a href="/pages/api-notifications/">notifications</a>).</p>
 <h3 id="urgency">Urgency</h3>
 <p>The urgency sets the form that the desktop uses for the notice. The host does not change the text.</p>
 <table>
@@ -588,7 +588,7 @@ impl Handler for NotesNotifier {
             submissions.push(Submission::keyed(
                 Intent::Notify(NotifySpec {
                     title: &quot;Export finished&quot;.into(),
-                    body: &quot;12 notes written to the archive folder.&quot;.into(),
+                    body: Some(&quot;12 notes written to the archive folder.&quot;.into()),
                     urgency: Urgency::Normal,
                     sound: Some(&quot;done&quot;.into()),
                 }),
@@ -719,6 +719,26 @@ notify.desktop     normal   <span class="t-ok">granted</span>
 </figure>
 
 <p>A revocation re-activates the plugin with the reduced grant set. The plugin receives <code>deactivate(revoked)</code> and its activation does not count as a failure.</p>
+<h3 id="desktop-notices-are-never-the-only-signal">Desktop notices are never the only signal</h3>
+<p>The desktop may hide a notice (focus or do-not-disturb rules) and <code>ok</code> only means it was queued.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Rule</th>
+<th>Exact value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CAP-882</td>
+<td>In-app twin of a desktop notice</td>
+<td>Every <code>notify</code> intent MUST be accompanied by an in-app text signal of the same event that stays until the user dismisses it or the event ends. Dismissal is the user closing or clearing the row, and the event ends when the condition the notice reports stops being true (for example the agent leaves the waiting state), after which the row is removed within 1 second. The desktop notice alone is not a valid signal</td>
+<td><code>src/docs/notifications.md</code></td>
+</tr>
+</tbody>
+</table>
 <h3 id="risk-and-tier-rules">Risk and tier rules</h3>
 <ul>
 <li>The grant has the normal risk. The review dialog lists it, and it is checked by default.</li>
@@ -726,7 +746,7 @@ notify.desktop     normal   <span class="t-ok">granted</span>
 <li>T1 bundled plugins receive the grant automatically up to their manifest ceiling. T2 and T3 packages show it in the review dialog, and the user keeps or removes it there.</li>
 </ul>
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code> use the grant for:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a> use the grant for:</p>
 <ul>
 <li>48: desktop notifications.</li>
 <li>56: text triggers, which often finish with a notice. See <a href="/pages/capability-terminal-output-filter/">the terminal output filter</a>.</li>
@@ -737,7 +757,7 @@ notify.desktop     normal   <span class="t-ok">granted</span>
 <li><a href="/pages/capability-sound-play/">sound.play</a> for the sound catalogue and the <code>play-sound</code> intent.</li>
 <li><a href="/pages/capability-agent-read/">agent.read</a> for the agent activity that usually triggers an alert.</li>
 <li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for the <code>ok</code>, <code>refused</code> and <code>duplicate</code> outcomes.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the error codes and the rate rules.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the error codes and the rate rules.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the import paths.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>
@@ -747,7 +767,7 @@ notify.desktop     normal   <span class="t-ok">granted</span>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>
 
-<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#notifydesktop">notify.desktop</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#surface">Surface</a></li><li class="l3"><a href="#urgency">Urgency</a></li><li class="l3"><a href="#focus-and-visibility">Focus and visibility</a></li><li class="l3"><a href="#sound">Sound</a></li><li class="l3"><a href="#duplicates-and-dedup-keys">Duplicates and dedup keys</a></li><li class="l3"><a href="#worked-example-manifest">Worked example: manifest</a></li><li class="l3"><a href="#worked-example-rust">Worked example: Rust</a></li><li class="l3"><a href="#worked-example-typescript">Worked example: TypeScript</a></li><li class="l3"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#risk-and-tier-rules">Risk and tier rules</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#notifydesktop">notify.desktop</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#surface">Surface</a></li><li class="l3"><a href="#urgency">Urgency</a></li><li class="l3"><a href="#focus-and-visibility">Focus and visibility</a></li><li class="l3"><a href="#sound">Sound</a></li><li class="l3"><a href="#duplicates-and-dedup-keys">Duplicates and dedup keys</a></li><li class="l3"><a href="#worked-example-manifest">Worked example: manifest</a></li><li class="l3"><a href="#worked-example-rust">Worked example: Rust</a></li><li class="l3"><a href="#worked-example-typescript">Worked example: TypeScript</a></li><li class="l3"><a href="#errors-and-edge-cases">Errors and edge cases</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#desktop-notices-are-never-the-only-signal">Desktop notices are never the only signal</a></li><li class="l3"><a href="#risk-and-tier-rules">Risk and tier rules</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
 </div>
 </div>
 <script src="/assets/js/manual.js" defer></script>

@@ -464,7 +464,7 @@
 </tr>
 <tr>
 <td>[SEC-023]</td>
-<td>The mount namespace holds only: read-only <code>/usr</code>, <code>/bin</code>, <code>/lib</code>, <code>/lib64</code> and <code>/etc</code> (a minimal subset, no <code>/etc/passwd</code> home lists beyond uid maps); a fresh <code>/proc</code> for the PID namespace; a minimal <code>/dev</code> with <code>null</code>, <code>zero</code>, <code>urandom</code>, <code>full</code>; a tmpfs <code>/tmp</code> capped at 64 MiB; and the granted scopes, read-only for read grants. The <code>data</code> and <code>cache</code> mounts are <code>noexec,nosuid,nodev</code>.</td>
+<td>The mount namespace holds only: read-only <code>/usr</code>, <code>/bin</code>, <code>/lib</code>, <code>/lib64</code> and <code>/etc</code> (a minimal subset, no <code>/etc/passwd</code> home lists beyond uid maps); a fresh <code>/proc</code> for the PID namespace; a minimal <code>/dev</code> with <code>null</code>, <code>zero</code>, <code>urandom</code>, <code>full</code>; a tmpfs <code>/tmp</code> capped at 64 MiB; and the granted scopes, read-only for read grants. Every writable mount (<code>data</code>, <code>cache</code>, <code>picked</code>, any writable scope, and the <code>/tmp</code> tmpfs) is <code>noexec,nosuid,nodev</code>.</td>
 <td>Fixture lists <code>/</code>; only these paths exist. Executing a binary from <code>/data</code> fails with <code>EACCES</code>.</td>
 </tr>
 <tr>
@@ -494,13 +494,13 @@
 </tr>
 <tr>
 <td>[SEC-029]</td>
-<td>A cgroup v2 leaf is created per helper with: <code>memory.max</code> = plugin <code>memory_mib</code> plus 32 MiB overhead; <code>pids.max</code> = 64 plus 8 per allowed child; <code>cpu.weight</code> = 10 (low priority); <code>cpu.max</code> = the manifest <code>cpu_ms_per_s</code> quota expressed as a period. A memory kill is reported as a trap <code>limit-exceeded(memory)</code> and counts as a failure.</td>
+<td>A cgroup v2 leaf is created per helper with: <code>memory.max</code> = the sum of the hosted instances' <code>memory_mib</code> plus 32 MiB overhead; <code>pids.max</code> = 64 plus 8 per allowed child; <code>cpu.weight</code> = 10 (low priority); <code>cpu.max</code> = the manifest <code>cpu_ms_per_s</code> quota expressed as a period. A memory kill is reported as a <code>trap.memory</code> and counts as a failure.</td>
 <td>Fixture allocates past the limit; helper is killed; the log has the code.</td>
 </tr>
 </tbody>
 </table>
 <h3 id="the-seccomp-allowlist">The seccomp allowlist</h3>
-<p><strong>[SEC-067]</strong> The filter is an allowlist of the system calls that Wasmtime, the allocator and the dispatcher channel need. Everything else returns <code>EPERM</code>, or kills the helper for the entries marked kill. The implementation MUST publish the list as a generated file with the release so tests can compare. These calls are always denied, and the fixture suite calls each of them:</p>
+<p><strong>[SEC-067]</strong> The filter is an allowlist of the system calls that Wasmtime, the allocator and the dispatcher channel need. Everything else returns <code>EPERM</code>; no call kills the helper. The implementation MUST publish the list as a generated file with the release so tests can compare. These calls are always denied, and the fixture suite calls each of them:</p>
 <table>
 <thead>
 <tr>
@@ -543,7 +543,7 @@
 <p><strong>[SEC-065]</strong> If cgroup v2 is available but the user has no delegated controller (<code>memory</code>, <code>pids</code>, <code>cpu</code>), the host MUST enforce the same limits inside the helper with <code>setrlimit</code> (<code>RLIMIT_AS</code>, <code>RLIMIT_NPROC</code>, <code>RLIMIT_CPU</code>) and a watchdog in the server that samples the helper's RSS once a second. The audit log records <code>sandbox-degraded</code> with the controller list once per start. If the controllers needed for <code>memory.max</code> and <code>pids.max</code> are both missing and <code>setrlimit</code> cannot bound them, the helper is not started ([SEC-055]).</p>
 <h2 id="dispatcher-protocol-trust">Dispatcher protocol trust</h2>
 <p><strong>[SEC-050]</strong> The server MUST treat every message from a helper as hostile. The identity of the plugin comes from the channel the message arrived on, never from a field in the message. A message that names another plugin id is dropped and counts as a failure.</p>
-<p><strong>[SEC-051]</strong> The server MUST enforce a maximum message size of 4 MiB (8 MiB for <code>terminal-view</code> frames) and a rate of 5,000 messages per second per helper. A larger or faster message ends the helper.</p>
+<p><strong>[SEC-051]</strong> The server MUST enforce a maximum message size of 4 MiB (8 MiB for <code>terminal-view</code> frames) and a rate of 5,000 messages per second per helper. A larger or faster message ends the helper, and that ending counts as a failure toward the restart-and-disable rule, as in [SEC-052].</p>
 <p><strong>[SEC-052]</strong> A malformed message (bad framing, bad UTF-8, a schema violation, an unknown message kind, an out-of-range resource handle) kills the helper and counts as a failure toward the restart-and-disable rule. The server never tries to repair the message.</p>
 <p><strong>[SEC-053]</strong> Wasmtime configuration, for T1 and for the helper:</p>
 <table>
@@ -568,7 +568,7 @@
 </tr>
 <tr>
 <td><code>wasi:sockets</code>, <code>wasi:http</code> imports</td>
-<td>Refused at load. A component that imports them is not instantiated</td>
+<td>Refused at install, and checked again at load; a component that imports them is never instantiated</td>
 </tr>
 <tr>
 <td><code>wasi:clocks</code>, <code>wasi:random</code></td>
@@ -960,7 +960,7 @@
 </table>
 <p><strong>[SEC-030]</strong> Every row in this table MUST have the mitigation implemented. A feature added to the contract later MUST add a row before release.</p>
 <h3 id="process-execution-rules">Process execution rules</h3>
-<p><strong>[SEC-031]</strong> <code>process.run</code> and <code>process.spawn</code> need a grant for the exact program. A bare name such as <code>git</code> is resolved against a fixed system <code>PATH</code> that the server captured at start and filtered to system directories (<code>/usr/bin</code>, <code>/bin</code>, <code>/usr/local/bin</code>). It is never resolved against the plugin's own environment or against any writable scope.</p>
+<p><strong>[SEC-031]</strong> <code>process.run</code> and <code>process.spawn</code> need a grant for the exact program. A bare name such as <code>git</code> is resolved against the fixed system <code>PATH</code> <code>/usr/bin:/bin</code> (directories <code>/usr/bin</code> and <code>/bin</code>). It is never resolved against the plugin's own environment or against any writable scope.</p>
 <p><strong>[SEC-032]</strong> Children of T2 and T3 plugins run in the same confinement as the helper and have no network. A program that needs the network, such as <code>git fetch</code>, therefore fails by design. A plugin that needs a remote operation uses <code>http</code>.</p>
 <p><strong>[SEC-033]</strong> Environment keys are validated. These are refused with <code>invalid-argument</code>: <code>LD_*</code>, <code>DYLD_*</code>, <code>PATH</code>, <code>IFS</code>, <code>BASH_ENV</code>, <code>ENV</code>, <code>PYTHON*</code>, <code>NODE_OPTIONS</code>, <code>PERL5*</code>, <code>RUBY*</code>, <code>GIT_CONFIG*</code>, <code>GIT_SSH*</code>, <code>GIT_EXEC_PATH</code>, <code>GIT_ASKPASS</code>, plus any key that the admin policy adds under <code>[processes] deny_env</code>.</p>
 <p><strong>[SEC-034]</strong> A program may not resolve into <code>package</code>, <code>data</code>, <code>cache</code>, <code>picked</code> or any writable scope. Writable mounts of T2 and T3 are <code>noexec</code>, so a plugin cannot write a binary and run it. Absolute-path grants (<code>process.run:/usr/bin/git</code>) are compared to the resolved real path.</p>
@@ -974,7 +974,7 @@
 <p><strong>[SEC-043]</strong> <code>open-external</code> file targets: only paths in scopes the plugin can read; refused when the file has any executable mode bit; refused for the extensions <code>.desktop</code>, <code>.exe</code>, <code>.bat</code>, <code>.cmd</code>, <code>.com</code>, <code>.sh</code>, <code>.jar</code>, <code>.app</code>, <code>.appimage</code>, <code>.scr</code>, <code>.lnk</code>, <code>.command</code>, <code>.html</code>, <code>.htm</code>, <code>.svg</code>, <code>.js</code>, <code>.py</code>, <code>.pl</code>, <code>.rb</code>; and refused for MIME types the host treats as active content. Outcome code <code>refused(not-permitted)</code> with reason <code>file-type</code>. The origin prompt shows the punycode form for hosts that contain non-ASCII characters and highlights the registrable domain. A plugin may have at most one pending consent prompt and 6 per hour ([SEC-105]).</p>
 <p><strong>[SEC-044]</strong> <code>clipboard.write</code>: text larger than 64 KiB, or containing any control character other than tab, newline and carriage return, is refused with <code>invalid-argument</code>. Text with a newline is allowed. A write is accepted only from a user-initiated command or a keybinding while the user has focus in a terminal pane; a write caused by a timer or an event while the terminal has focus is refused with <code>not-permitted</code> reason <code>not-user-initiated</code>.</p>
 <p><strong>[SEC-045]</strong> <code>notify.desktop</code>: the host prefixes the title with the plugin display name and a colon. The plugin cannot supply the prefix.</p>
-<p><strong>[SEC-046]</strong> Regular expressions supplied by plugins (output filters, settings <code>pattern</code>, schema <code>pattern</code>, <code>when</code> expressions) MUST be compiled with a linear-time engine that has Rust <code>regex</code> semantics: no backreferences and no lookaround. A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB. A pattern that fails any limit is refused with <code>invalid-argument</code> at registration (code <code>regex.too-large</code> or <code>regex.unsupported</code>). Matching against a 1 MiB input finishes in time proportional to the input.</p>
+<p><strong>[SEC-046]</strong> Regular expressions supplied by plugins (output filters, settings <code>pattern</code>, schema <code>pattern</code>, <code>when</code> expressions) MUST be compiled with a linear-time engine that has Rust <code>regex</code> semantics: no backreferences and no lookaround. A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB. A pattern that fails any limit is refused with <code>invalid-argument</code> at registration. Matching against a 1 MiB input finishes in time proportional to the input.</p>
 <h2 id="edge-cases">Edge cases</h2>
 <table>
 <thead>

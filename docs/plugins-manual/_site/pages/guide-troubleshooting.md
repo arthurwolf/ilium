@@ -53,7 +53,7 @@ The install stages are listed in [Package format](/pages/reference-package-forma
 | Install asks to trust a key | The key is not in the trust store | `ilium plugin trust add publisher.pub` after checking the fingerprint |
 | Install refused without a message | The user declined the review dialog | Run again and read the dialog |
 
-An author MUST read the code in an install error before changing anything, because each code names one cause. [AUT-802]
+An author looks the code in an install error up in the error table above and changes only the field or file that row names, because each code names one cause. [AUT-802]
 
 ## Activation
 
@@ -73,8 +73,8 @@ An author MUST read the code in an install error before changing anything, becau
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Plugin disabled after three failures in 10 minutes | Repeated traps | Fix the first trap in the log. Then `ilium plugin reset-failures <id>` |
-| Event handler trap on time | A handler ran over 20 ms (50 ms for T1) | Move slow work to jobs or requests |
+| Plugin disabled after three failures in 10 minutes | Repeated traps | Fix the first trap in the log. Then `ilium plugin reset-failures <id>`, which clears the count without starting the plugin; turn it on again in Settings > Plugins or with `ilium plugin enable <id>` |
+| Event handler trap on time | A handler ran over the 20 ms default (50 ms is only the T1 ceiling of `event_deadline_ms`; T2 and T3 stop at 20 ms. A hook handler may use 5 to 50 ms at any tier) | Move slow work to jobs or requests |
 | Command trap on time | Over 50 ms | Return a pending state and finish later |
 | Render trap | `render` over 10 ms, or a tree over its limit | Cut the tree. See [Performance](/pages/performance/) |
 | Tree over 4,096 nodes or 1,024 KiB | Too many rows | Window the list. See [Patterns cookbook](/pages/guide-patterns-cookbook/) |
@@ -118,7 +118,7 @@ An author MUST read the code in an install error before changing anything, becau
 ## See also
 
 - [Debugging](/pages/debugging/) and [Debugging tools](/pages/reference-debugging-tools/)
-- [Errors and limits](/pages/errors-and-limits/)
+- [Errors and limits](/pages/reference-errors-and-limits/)
 - [Quality checklist](/pages/guide-quality-checklist/)
 - [FAQ](/pages/guide-faq/)
 

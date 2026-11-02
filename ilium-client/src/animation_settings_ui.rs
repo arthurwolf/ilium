@@ -3895,6 +3895,113 @@ mod tests {
     }
 
     #[test]
+    fn palette_catalog_retains_refused_choice_until_retry_is_durable() {
+        use crate::filesystem::configuration::ConfigurationChange;
+        use crate::filesystem::configurations::ConfigurationIntent;
+        use crate::value_dialog::ValueDialogState;
+
+        // Dropping a refused choice, closing it as saved, or losing it on retry must fail.
+        let (mut app, _probe, project) = settings_app(100, 40);
+        let animation_home = project.path().join("global-animation");
+        std::fs::create_dir(&animation_home).unwrap();
+        app.animation_home = animation_home.clone();
+        app.prepare_animation_edit();
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
+        assert_eq!(app.animation_write_path().unwrap(), animation_home);
+        let before = app.animation_settings.clone();
+        let row = row_index(&app, &AnimationRow::Common("look_palette"));
+        app.begin_animation_value_dialog(row);
+        for character in "Slate".chars() {
+            key(&mut app, KeyCode::Char(character));
+        }
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("palette catalog did not open");
+        };
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("palette must offer choices");
+        };
+        let chosen = choice.highlighted_id.clone().unwrap();
+        let original = choice.selected_id.clone();
+        assert_ne!(Some(&chosen), original.as_ref());
+        assert!(choice
+            .options()
+            .iter()
+            .any(|option| option.id == chosen && option.label == "Slate"));
+
+        // Six real 10 MiB writes occupy 60 MiB of the unchanged 64 MiB writer limit.
+        // Do not use key(): its implicit drain would remove this admission pressure.
+        for _ in 0..6 {
+            app.enqueue_configuration(
+                animation_home.clone(),
+                ConfigurationChange::Separators(false),
+                ConfigurationIntent::Separators,
+            )
+            .unwrap();
+        }
+        let accepted = app.configuration_admission.accepted;
+        let enter = |app: &mut App| {
+            crate::keys::handle_event(
+                app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            );
+        };
+        enter(&mut app);
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("refused choice must remain open");
+        };
+        assert!(!host.is_saving());
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("refusal lost the palette catalog");
+        };
+        assert_eq!(choice.highlighted_id.as_deref(), Some(chosen.as_str()));
+        assert_eq!(choice.selected_id, original);
+        assert_eq!(choice.search.buf, "Slate");
+        let notice = choice.notice.as_deref().unwrap();
+        assert!(notice.contains("RetainedBytes") && notice.contains("unsaved"));
+        assert_eq!(app.configuration_admission.accepted, accepted);
+        assert_eq!(app.animation_settings, before);
+        assert_eq!(
+            crate::project_config::load(&animation_home)
+                .unwrap()
+                .animation,
+            before
+        );
+
+        // Release actual queued work and retry the retained choice in the same dialog.
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
+        enter(&mut app);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        assert_eq!(app.configuration_admission.accepted, accepted + 1);
+        assert_eq!(
+            crate::project_config::load(&animation_home)
+                .unwrap()
+                .animation,
+            before,
+            "admission alone is not a durable save"
+        );
+        app.settle_filesystem_for_test();
+        assert!(matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Animations));
+        let saved = crate::project_config::load(&animation_home)
+            .unwrap()
+            .animation;
+        assert_eq!(saved.appearance.palette.to_string(), chosen);
+        assert_eq!(
+            ilium_ambient::style::palette_labels()[saved.appearance.palette],
+            "Slate"
+        );
+        assert_eq!(saved, app.animation_settings);
+        assert_eq!(
+            crate::project_config::load(project.path())
+                .unwrap()
+                .animation,
+            before,
+            "the global preference must not be written to the launch project"
+        );
+    }
+
+    #[test]
     fn palette_and_named_controls_survive_scene_switches_and_failed_saves() {
         let (mut app, _probe, project) = settings_app(140, 40);
         app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;

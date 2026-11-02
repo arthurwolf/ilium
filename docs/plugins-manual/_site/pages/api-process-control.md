@@ -65,9 +65,9 @@ The signal goes to the child process that the pane started. Use `kill` only when
 
 ### How the helper runs
 
-1. **Grant check.** A `run` call that names no program of the plugin's grants is refused at once with `invalid-argument`. A `cwd` outside a readable scope is `not-permitted`.
+1. **Grant check.** A `run` call that names no program of the plugin's grants is refused at once with `not-permitted` (a missing grant is always `not-permitted`). A `cwd` outside a readable scope is `not-permitted`.
 2. **Program lookup.** A bare name is resolved through `PATH`. An absolute path runs exactly that file.
-3. **Environment.** The helper starts with only `PATH`, `HOME` and `LANG`. Each entry in `environment` replaces the value of the same name.
+3. **Environment.** The helper starts with only `PATH`, `HOME` and `LANG`. Each entry in `environment` replaces the value of the same name, except that a key refused by [SEC-033] (`LD_*`, `DYLD_*`, `PATH`, `IFS`, `BASH_ENV` and the others listed there) makes the whole call fail with `invalid-argument` before the program starts.
 4. **Priority and quota.** The helper runs at low priority, and its CPU time is charged to the plugin's quota.
 5. **Confinement.** On T2 and T3 packages, the helper runs in a bubblewrap mount namespace. It sees only the plugin's granted scopes (read-only for read grants), plus read-only `/usr`, `/bin`, `/lib*` and `/etc`. It has no network and a seccomp filter. On T1 bundled plugins, the helper runs unconfined at low priority.
 6. **Timeout.** The helper is killed when `timeout_millis` passes. The completion is `failed(timed-out)`.
@@ -246,7 +246,7 @@ Output and the end arrive as events, delivered to `on-events`:
 | `child-output` | `child`, `stream` (`stdout` or `stderr`), `bytes` | Never dropped. The host stops reading the pipe while the plugin's queue is full, so the child slows down instead of losing output. |
 | `child-exited` | `child`, `status`, `signal` | Never dropped. |
 
-With `line-mode: true`, each `child-output` is one whole line. `timeout-millis` of the `process-spec` is ignored for a spawned child. The child runs at low priority under the plugin's CPU quota, with the same environment rules as `run`. When the plugin drops the `child` handle or stops, the host sends SIGTERM and, after 2 seconds, SIGKILL.
+With `line-mode: true`, each `child-output` is one whole line. `timeout-millis` of the `process-spec` must still be 1 to 600,000 (else `invalid-argument`) but is ignored for a spawned child. The child runs at low priority under the plugin's CPU quota, with the same environment rules as `run`. When the plugin drops the `child` handle or stops, the host sends SIGTERM and, after 2 seconds, SIGKILL.
 
 **Rust**
 
@@ -267,7 +267,7 @@ impl LogFollower {
                 cwd: None,
                 stdin: None,
                 environment: Vec::new(),
-                timeout_millis: 0, // ignored for spawned children
+                timeout_millis: 1, // must still be valid (1..600,000); ignored for spawned children
             },
             stdin_open: false,
             line_mode: true,
@@ -308,7 +308,7 @@ let child: Child | undefined;
 
 export function start(file: string): void {
   child = process.spawn({
-    process: { program: 'tail', arguments: ['-F', file], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 0 },
+    process: { program: 'tail', arguments: ['-F', file], cwd: undefined, stdin: undefined, environment: [], timeoutMillis: 1_000 },
     stdinOpen: false,
     lineMode: true,
   });
@@ -391,7 +391,7 @@ At run time, every helper run and every refusal appears in the plugin log:
 <span class="t-ok">exit</span> request 5, status 0, stdout 0 bytes
 <span class="t-ok">exit</span> request 6, status 0, stdout 12 bytes
 <span class="t-dim">       " M notes.md"</span>
-<span class="t-err">refused</span> process.run sh: invalid-argument, no grant
+<span class="t-err">refused</span> process.run sh: not-permitted, no grant
 </pre>
 
 Illustrative, not generated. A plugin log for two git runs and one refused run. The refusal names `sh`, because no grant of this plugin names it.
@@ -400,7 +400,8 @@ Illustrative, not generated. A plugin log for two git runs and one refused run. 
 
 | Where | Code | When it happens |
 |---|---|---|
-| Sync, `run` | `invalid-argument` | Program matches no grant, timeout is 0 or over 600,000 ms, stdin over 4 MiB, too many arguments or variables. |
+| Sync, `run` | `not-permitted` | Program matches no `process.run:<program>` grant. |
+| Sync, `run` | `invalid-argument` | Timeout is 0 or over 600,000 ms, stdin over 4 MiB, too many arguments or variables. |
 | Sync, `run` | `not-permitted` | `cwd` lies outside a scope the plugin can read. |
 | Sync, `run` | `busy` | The session already runs 16 children, or the plugin has too many pending requests. |
 | Completion | `failed(not-found)` | The program is missing from `PATH`, or `cwd` does not exist. |
@@ -433,7 +434,7 @@ Edge cases to handle in code:
 - [Capability: process run](/pages/capability-process-run/) for grant rules, confinement and the review dialog.
 - [Capability: signal panes](/pages/capability-panes-signal/) for the `panes.signal` grant.
 - [Workspace](/pages/api-workspace/) for worktree custody records, which go with `git` work.
-- [Errors and limits](/pages/errors-and-limits/) for the full error table.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full error table.
 - [Security](/pages/security/) for the risk tiers behind high-risk grants.
 
 Targets `ilium:plugin@0.1.0`.

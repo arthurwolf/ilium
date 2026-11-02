@@ -86,7 +86,7 @@ The kernel checks a submission in this order. The first failing check decides th
 4. The pane exists. Otherwise `refused(not-found)`.
 5. The pane is restored and its process has started. Otherwise `refused(pane-not-ready)`.
 6. The signature declares the action id. Otherwise `refused(unsupported)`.
-7. The activity is in the action's `allowed_when` list. Otherwise `refused(conflict)` with the message `agent is working`.
+7. The activity is in the action's `allowed_when` list. Otherwise `refused(conflict)`. The message names the current activity: `agent is working`, `agent is idle`, `agent is done`, `agent is awaiting approval` or `agent is in a menu`, named after the current activity.
 8. The plugin has not exceeded the rate of 20 `send-input` or `agent-action` submissions per second for that pane. Otherwise `refused(rate-limited)`.
 9. The key is reserved and the keys are written to the pane.
 
@@ -96,7 +96,7 @@ A submission refused at steps 1 to 8 does not reserve its key. A retry with the 
 
 The key identifies one user request. It is reserved for 10 minutes per plugin, so a retry after a lost reply reuses the key and does nothing a second time. The SDK helper `dedup::key_for` joins its parts with `:` and replaces disallowed characters with `-`, and `Submission::keyed` sets the key. `dedup::key_for(&["compact", "42", "7"])` gives `compact:42:7`. TypeScript has no helper, so the plugin builds the string itself.
 
-From build phase 5 on, the kernel journals `send-input` and `agent-action` keys in the snapshot before the write. A server restart then does not repeat the keys. Keys reserved before that phase do not survive a restart.
+From Phase 5 of the [roadmap](/pages/roadmap/) on, the kernel journals `send-input` and `agent-action` keys in the snapshot before the write. A server restart then does not repeat the keys. Keys reserved before Phase 5 ships do not survive a restart.
 
 ## Toolbar state
 
@@ -319,7 +319,7 @@ When the grant is declined, `agent-action` completes with `refused(not-permitted
 | `agent-action` | `refused(not-found)` | The pane does not exist. |
 | `agent-action` | `refused(pane-not-ready)` | The pane was restored and its process has not started. Retry after `pane-created` or `tree-changed` for that pane. |
 | `agent-action` | `refused(unsupported)` | The signature declares no action with that id. |
-| `agent-action` | `refused(conflict)` | The activity is not in `allowed_when`. The message is `agent is working`. The key is not reserved, so the same key can be used later. |
+| `agent-action` | `refused(conflict)` | The activity is not in `allowed_when`. The message names the current activity: `agent is working`, `agent is idle`, `agent is done`, `agent is awaiting approval` or `agent is in a menu`, named after the current activity. The key is not reserved, so the same key can be used later. |
 | `agent-action` | `refused(rate-limited)` | The pane received more than 20 submissions per second. `retry-after-ms` is set. |
 | `agent-action` | `duplicate(original)` | The key was reserved within the last 10 minutes. Nothing happens. |
 | `agent-action` | `failed(code)` | The key was accepted and the write failed. The key stays reserved, so a retry needs a new key. |

@@ -116,7 +116,7 @@ All defaults are the same for every tier. The T1 column is the ceiling that a bu
 | `virtual-rows-provider.list-virtual-children` | server | 20 ms | 20 ms | 20 ms | soft, streak 3 | Spinner row stays | trap only |
 | `token-provider.tokens` | client | 10 ms | 10 ms | 10 ms | soft, streak 3 | Lines stay plain; the host retries | trap only |
 | `settings-validate` | client | 100 ms | 100 ms | 100 ms | soft, streak 3 | The save is refused, the previous value kept; the breach counts as a failure | yes |
-| `service-provider` call | provider side | `command_deadline_ms` 50 ms | 100 ms | 50 ms | hard | Trap the provider; the caller's request completes `failed(timed-out)`; other deferred calls of the provider complete `failed(cancelled)` | yes |
+| `service-provider` call | provider side | `command_deadline_ms` 50 ms | 100 ms | 50 ms | hard | Trap the provider; the caller's request completes `failed(internal)`; other deferred calls of the provider complete `failed(cancelled)` | yes |
 | `inference-provider` `complete` and `models` | server | `command_deadline_ms` 50 ms | 100 ms | 50 ms | hard | Trap; the request is `failed(internal)` | yes |
 | `job-runner.run`, CPU time | job instance | 2,000 ms | 60,000 ms | 10,000 ms | hard, own thread | `failed(timed-out)` | no |
 | `job-runner.run`, wall time | job instance | 20,000 ms | 600,000 ms | 100,000 ms | hard, own thread | `failed(timed-out)` | no |
@@ -249,7 +249,7 @@ A request is cancelled by one of seven causes. The outcome tells the plugin whic
 | The plugin asked for it (`cancel(request)`, `jobs.cancel`) | `cancelled` | A cancelled job completes with the outcome `cancelled`. `jobs.cancel` returns nothing: cancelling a completed, unknown or already cancelled id is a silent no-op and produces no further completion |
 | Server or client shutdown | `cancelled` | Submissions accepted but not yet applied at shutdown complete as `cancelled`. `refused(cancelled)` is used only for siblings of a refused batch |
 | The request deadline passed | `failed(timed-out)` | For example the 30 s command reply deadline, or a provider that does not reply to a deferred service call within 30 s. The earlier of the two events wins |
-| A service provider traps or restarts while callers wait | `failed(cancelled)` for every deferred call, at once | A breach of the 50 ms provider deadline completes the breaching call as `failed(timed-out)` and the other deferred calls as `failed(cancelled)` |
+| A service provider traps or restarts while callers wait | `failed(cancelled)` for every deferred call, at once | A breach of the 50 ms provider deadline completes the breaching call as `failed(internal)` and the other deferred calls as `failed(cancelled)` |
 
 Cancelled host work is torn down within a bound.
 
@@ -259,7 +259,7 @@ Cancelled host work is torn down within a bound.
 | File read, watch, scan | Stopped at the next chunk, within 100 ms |
 | Child process | SIGTERM, then SIGKILL after 2 s (POSIX); see [Platform support](/pages/reference-platform-support/) for Windows |
 | Running job | The cancel flag is set; `is-cancelled` returns true. If the job has not returned within 1,000 ms (`job_cancel_grace_ms`), the host traps the job instance at the next tick |
-| Helper call | A `Cancel` message is sent; if the helper does not answer within the call's deadline plus 5 ms, it is killed |
+| Helper call | A `Cancel` message is sent; if the helper has not answered 500 ms after the call's deadline, the host kills it and counts one failure (HST-162) |
 
 - **[HST-209]** Each cancellation cause MUST produce the outcome in the table, and a completed request MUST NOT be changed by a later cancel. `jobs.cancel` of a completed, unknown or already cancelled id MUST be a silent no-op.
 - **[HST-210]** Cancelled HTTP and file work MUST stop within 100 ms, child processes MUST receive SIGTERM then SIGKILL after 2 s, and a job that ignores the cancel flag MUST be trapped 1,000 ms after the flag is set.
@@ -303,12 +303,12 @@ The benchmarks B16 and B17 of [Performance budgets and benchmarks](/pages/refere
 | Two calls to one instance arrive together | They run one after the other by priority | none |
 | Caller deadline passes while the call waits in the queue | The call is abandoned, a breach is counted | `host.queue-timeout` |
 | A call yields during `activate` and another plugin runs | Allowed; the activating plugin gets no other call | none |
-| Deadline expires inside a synchronous import | Trap when the import returns | `host.deadline` |
+| Deadline expires inside a synchronous import | Trap when the import returns | `trap.deadline` |
 | System suspend during a call | The tick after the gap is ignored | none |
 | Trap with a surviving event in the batch | Redelivered once to the new instance | `events.poison` on a second trap |
 | Empty CPU bucket | Plugin submissions return `quota-exceeded` with `retry-after-ms`; `on-events` and other calls into the plugin still run | `quota-exceeded` |
 | Job ignores the cancel flag | Trapped 1,000 ms later; the job completes `cancelled` | `cancelled` |
-| Soft call passes the soft deadline plus 100 ms | Trap | `host.deadline` |
+| Soft call passes the soft deadline plus 100 ms | Trap | `trap.deadline` |
 | Stream credit window full | The host stops reading the socket or pipe | none |
 | Hook chain exceeds 100 ms | Remaining handlers are skipped | `extension.chain-cap` |
 

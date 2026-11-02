@@ -396,7 +396,7 @@
 <p>The <code>settings.read-all</code> and <code>settings.write-all</code> capabilities let a plugin read and change the settings of other plugins. They exist for one purpose: the settings screen itself. Only a bundled first-party (T1) plugin can hold either grant. A T2 or T3 package that asks for one fails the manifest check, so a third-party plugin never reaches the user with these grants.</p>
 <p>The two grants unlock three functions of the <code>settings</code> import: <code>list-settings</code> lists the tabs and sections that every installed plugin declares, <code>get-plugin-json</code> reads all values of one plugin, and <code>set-plugin-json</code> changes some of them. A plugin's own values stay under <code>get-json</code> and <code>set-json</code>, which need no grant.</p>
 <h3 id="settingscontribute-a-different-grant">settings.contribute:<tab-id>, a different grant</h3>
-<p><code>settings.contribute:&lt;tab-id&gt;</code> is a separate, low-risk grant. A plugin needs it to add a section of rows to one built-in tab, for example <code>settings.contribute:terminal</code>. It is the only grant that lets a plugin draw anything in a built-in tab, and it allows nothing else:</p>
+<p><code>settings.contribute:&lt;tab-id&gt;</code> is a separate, normal-risk grant. A plugin needs it to add a section of rows to one built-in tab, for example <code>settings.contribute:terminal</code>. It is the only grant that lets a plugin draw anything in a built-in tab, and it allows nothing else:</p>
 <table>
 <thead>
 <tr>
@@ -609,7 +609,7 @@ set-plugin-json: func(plugin: plugin-id, patch: string) -&gt; result&lt;_, plugi
 <li>A key that is not in the schema is <code>invalid-argument</code>, and the message names that key.</li>
 <li>The patch is all or nothing. One invalid key stores nothing.</li>
 <li>A key set to <code>null</code> resets that key to its schema <code>default</code>.</li>
-<li>A patch that changes no stored value succeeds and sends no event (P4).</li>
+<li>A patch that changes no stored value succeeds and sends no event.</li>
 </ul>
 <p>When a patch changes values, the target plugin receives <code>settings-changed</code> with the changed keys, on the side that owns them. The writer gets no event of its own.</p>
 <p><code>get-plugin-json</code> returns the keys of every scope, so a settings screen needs one call per plugin. A plugin without settings returns <code>{}</code>. A <code>secret</code> field comes back as the empty string to every plugin except its owner, so the screen can show a masked field without seeing the value.</p>
@@ -662,7 +662,7 @@ struct SettingsScreen;
 impl Lifecycle for SettingsScreen {
     fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
         for entry in settings::list_settings() {
-            log::log(Level::Info, &amp;format!(&quot;settings tab {} ({})&quot;, entry.tab, entry.scope));
+            log::log(Level::Info, &amp;format!(&quot;settings tab {} ({})&quot;, entry.tab, entry.side));
         }
         match settings::get_plugin_json(NOTES_PLUGIN) {
             Ok(values) =&gt; log::log(Level::Info, &amp;format!(&quot;notes values: {values}&quot;)),
@@ -720,7 +720,7 @@ export const { lifecycle, handler } = definePlugin({
   side: 'client',
   activate() {
     for (const entry of listSettings()) {
-      log('info', `settings tab ${entry.tab} (${entry.scope})`);
+      log('info', `settings tab ${entry.tab} (${entry.side})`);
     }
     try {
       log('info', `notes values: ${getPluginJson(NOTES_PLUGIN)}`);
@@ -827,7 +827,7 @@ export const { lifecycle, handler } = definePlugin({
 </figure>
 
 <h3 id="who-requests-it">Who requests it</h3>
-<p>First-party plugins from <code>feature-mapping.md</code>:</p>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a>:</p>
 <ul>
 <li>Feature 89, guided setup: <code>settings.read-all</code>, <code>settings.write-all</code> and <code>plugins.manage</code>.</li>
 <li>Feature 90, settings UI: <code>settings.read-all</code>, <code>settings.write-all</code> and <code>help.read</code>. The settings store, its validation and the recovery page stay in the kernel.</li>
@@ -839,12 +839,12 @@ export const { lifecycle, handler } = definePlugin({
 <li><a href="/pages/capability-help-read/">help.read</a> for the help topics that the settings screen shows.</li>
 <li><a href="/pages/settings-screens/">Settings screens</a> for the row keywords and custom settings pages.</li>
 <li><a href="/pages/settings-extension/">Plugin settings extension</a> for tabs, sections and the built-in tab ids.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the full error code table.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error code table.</li>
 <li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the binding rules.</li>
 </ul>
 <p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>
 <h3 id="security">Security</h3>
-<p>Reading all settings excludes secrets ([SEC-242]); see <a href="/pages/reference-secrets/">Secrets</a>.</p>
+<p>Reading all settings returns an empty string for a plugin secret, never its value ([SEC-244]); see <a href="/pages/reference-secrets/">Secrets</a>.</p>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-services/"><small>Previous</small>Capability: services</a><a class="next" href="/pages/capability-sound-play/"><small>Next</small>Capability: sound.play</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>
 </article>

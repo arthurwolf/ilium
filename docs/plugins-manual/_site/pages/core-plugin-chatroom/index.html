@@ -401,9 +401,9 @@
 <li>The message view and the composer.</li>
 <li>The context-injection output of <code>ilium chat context</code>, which the hooks that <a href="/pages/core-plugin-agent-setup/">Agent setup</a> installs print into an agent prompt.</li>
 </ul>
-<p>Agent setup owns the Setup tab, both instruction blocks and the hook entries. Chatroom asks Agent setup through the service <code>ilium.core.agent-setup/install</code> to install the chatroom block and hooks. At start, Agent setup repairs a missing or outdated chatroom hook when <code>CHATROOM.md</code> exists.</p>
+<p>Agent setup owns the Setup tab, both instruction blocks and the hook entries. Chatroom asks Agent setup through the service <code>ilium.core.agent-setup/install</code> to install the chatroom block and hooks. At start, Agent setup repairs a missing or outdated chatroom hook when <code>CHATROOM.md</code> exists. <code>ilium chat init</code> installs the same hooks on request through the same service, so both paths write the same entries and neither one duplicates a hook.</p>
 <h3 id="see-it">See it</h3>
-<figure><img src="/assets/demos/14-chatroom.gif" alt="Two agents and the user exchange messages in the Chatroom view" loading="lazy"><figcaption>Agents append messages to the shared file and the Chatroom view shows them as timestamped rows.</figcaption></figure>
+<figure><img src="/assets/demos/14-chatroom.gif" alt="The current Ilium Chatroom displays locally scripted Codex and Claude messages; provider agents are not running" loading="lazy"><figcaption>The current-build Chatroom view shows two local simulation messages. Provider agents are not running.</figcaption></figure>
 
 <h3 id="what-the-user-sees">What the user sees</h3>
 <figure>
@@ -575,11 +575,17 @@
   &quot;license&quot;: &quot;MIT&quot;,
   &quot;server&quot;: {
     &quot;entry&quot;: &quot;server.wasm&quot;,
-    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;virtual-rows-provider&quot;
+    ]
   },
   &quot;client&quot;: {
     &quot;entry&quot;: &quot;client.wasm&quot;,
-    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;
+    &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;,
+    &quot;exports&quot;: [
+      &quot;views&quot;
+    ]
   },
   &quot;capabilities&quot;: {
     &quot;server&quot;: [
@@ -603,13 +609,13 @@
   ],
   &quot;limits_tier&quot;: &quot;first-party&quot;,
   &quot;contributes&quot;: {
-    &quot;cli&quot;: {
+    &quot;cli&quot;: [{
       &quot;name&quot;: &quot;chat&quot;,
       &quot;summary&quot;: &quot;Project chatroom: init, send, context, tail&quot;,
       &quot;output&quot;: &quot;text&quot;,
       &quot;stdin&quot;: &quot;none&quot;,
       &quot;requires_server&quot;: false
-    }
+    }]
   }
 }
 </code></pre>
@@ -675,7 +681,7 @@ export const openRow = (): Submission =&gt; ({
 });
 </code></pre>
 <h4 id="tail-chatroommd-and-publish">Tail CHATROOM.md and publish</h4>
-<p>On <code>fs-changed</code> the server reads what was added since its cursor and publishes each message on the topic <code>chatroom</code>. The client updates when it receives <code>topic-published</code>. See <a href="/pages/api-messages-and-topics/">messages and topics</a>, <a href="/pages/capability-topics-subscribe/">topics.subscribe</a>, <a href="/pages/api-fs-atomic-and-tail/">atomic writes and tail</a>, <a href="/pages/capability-fs-watch/">fs.watch</a> and <a href="/pages/api-events/">events</a>.</p>
+<p>On <code>fs-changed</code> the server reads what was added since its cursor and publishes each message on the topic <code>chatroom</code>. For each message it then publishes the contributed topic <code>ilium.core.chatroom/posted</code> with <code>{ author, kind, length }</code>, where <code>length</code> is the number of characters of the message text; <code>message_header</code> in the example reads <code>author</code> and <code>kind</code> from the message header. The client updates when it receives <code>topic-published</code>. See <a href="/pages/api-messages-and-topics/">messages and topics</a>, <a href="/pages/capability-topics-subscribe/">topics.subscribe</a>, <a href="/pages/api-fs-atomic-and-tail/">atomic writes and tail</a>, <a href="/pages/capability-fs-watch/">fs.watch</a> and <a href="/pages/api-events/">events</a>.</p>
 <p><strong>Rust</strong></p>
 <pre><code class="language-rust">use ilium_plugin_sdk::host::{fs, topics};
 use ilium_plugin_sdk::types::events::FsChangedEvent;
@@ -691,6 +697,9 @@ fn on_fs_changed(&amp;mut self, changed: FsChangedEvent) {
     for block in split_messages(&amp;chunk.bytes) {
         let payload = serde_json::json!({ &quot;text&quot;: block }).to_string();
         let _ = topics::publish(&quot;chatroom&quot;, &amp;payload);
+        let (author, kind) = message_header(&amp;block);
+        let posted = serde_json::json!({ &quot;author&quot;: author, &quot;kind&quot;: kind, &quot;length&quot;: block.chars().count() }).to_string();
+        let _ = topics::publish(&quot;ilium.core.chatroom/posted&quot;, &amp;posted);
     }
 }
 </code></pre>
@@ -706,6 +715,8 @@ export function onFsChanged(watch: bigint, ownWatch: bigint): void {
   cursor = chunk.cursor;
   for (const block of splitMessages(chunk.bytes)) {
     publish('chatroom', JSON.stringify({ text: block }));
+    const [author, kind] = messageHeader(block);
+    publish('ilium.core.chatroom/posted', JSON.stringify({ author, kind, length: [...block].length }));
   }
 }
 
@@ -856,7 +867,7 @@ impl Handler for FollowTail {
 <tr>
 <td><code>before-post</code></td>
 <td>hook (transform)</td>
-<td>Change or refuse a message before it is written to the room.</td>
+<td>Change a message before it is written to the room.</td>
 <td>author, text, kind; reply: text</td>
 <td>standard</td>
 </tr>
@@ -878,7 +889,7 @@ impl Handler for FollowTail {
 <ul>
 <li><code>ilium.core.chatroom/posted</code>: { author, kind, length }</li>
 </ul>
-<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.chatroom"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replace">Extending core plugins</a>).</p>
+<p><strong>Replaceable:</strong> yes. A replacement lists <code>"replaces": ["ilium.core.chatroom"]</code> and provides the whole surface (see <a href="/pages/extending-core-plugins/#replacing-a-core-plugin">Extending core plugins</a>).</p>
 <h4 id="example-removes-lines-that-look-like-keys-from-a-message">Example: Removes lines that look like keys from a message</h4>
 <p>A package adds a <code>transform</code> handler. Each handler gets the previous output and may replace it.</p>
 <pre><code class="language-json">{
@@ -907,10 +918,12 @@ impl HookHandler for Plugin {
         match call.extension.as_str() {
             &quot;strip_secrets&quot; =&gt; {
                 // call.payload_json holds: author, text, kind
-                let _payload: serde_json::Value = match serde_json::from_str(&amp;call.payload_json) {
+                let mut payload: serde_json::Value = match serde_json::from_str(&amp;call.payload_json) {
                     Ok(value) =&gt; value,
                     Err(_) =&gt; return HookReply::Pass,
                 };
+                // Change the fields the hook owns, for example payload[&quot;text&quot;].
+                let new_payload_json = payload.to_string();
                 HookReply::Replace(new_payload_json)
             }
             _ =&gt; HookReply::Pass,
@@ -924,7 +937,8 @@ impl HookHandler for Plugin {
     if (call.extension !== 'strip_secrets') return { tag: 'pass' };
     // call.payloadJson holds: author, text, kind
     const payload = JSON.parse(call.payloadJson);
-    void payload;
+    // Change the fields the hook owns, for example payload.text.
+    const newPayloadJson = JSON.stringify(payload);
     return { tag: 'replace', val: newPayloadJson };
   },
 });

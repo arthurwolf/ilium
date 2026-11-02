@@ -693,6 +693,11 @@ fn answer_later(call_number: u64) {
 <td>synchronous</td>
 </tr>
 <tr>
+<td><code>revoked</code></td>
+<td>the grant changed during the call</td>
+<td>completion</td>
+</tr>
+<tr>
 <td><code>not-found</code></td>
 <td>no installed and enabled provider; <code>reply</code> for an unknown or expired call</td>
 <td>synchronous</td>
@@ -773,7 +778,7 @@ fn answer_later(call_number: u64) {
 <li><strong>Consumer declined.</strong> Every <code>call</code> returns <code>not-permitted</code>. Each refusal is written to the plugin log with the grant name.</li>
 <li><strong>Provider declined.</strong> The provider is installed, but its service is never registered and its <code>handle</code> export is never called. Callers get <code>not-found</code>.</li>
 <li><strong>Provider not installed or disabled.</strong> <code>call</code> returns <code>not-found</code> at once.</li>
-<li><strong>Provider cycle.</strong> Two plugins that require each other's services are refused at install (section 16.3 of the API).</li>
+<li><strong>Provider cycle.</strong> Two plugins that require each other's services are refused at install with <code>manifest.service-cycle</code> (<a href="/pages/reference-errors-and-limits/">errors and limits</a>).</li>
 <li><strong>Failing provider.</strong> A provider that stops or restarts before it answers fails its pending callers with <code>cancelled</code>. Three failures within 10 minutes disable it.</li>
 </ul>
 <h3 id="review-dialog-and-what-the-user-sees">Review dialog and what the user sees</h3>

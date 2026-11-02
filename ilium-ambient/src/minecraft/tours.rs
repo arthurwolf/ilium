@@ -169,7 +169,7 @@ impl PreparedMap {
                 || !(region::MIN_DATA_VERSION..=region::MAX_DATA_VERSION)
                     .contains(&chunk.identity.data_version)
                 || !chunk.sections_present
-                || !chunk.has_full_coverage(-4, 19)
+                || !chunk.has_block_coverage(-4, 19)
             {
                 return Err(Error::Invalid("unqualified coverage"));
             }

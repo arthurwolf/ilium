@@ -446,7 +446,7 @@
 <tr>
 <td><code>device.gpu</code></td>
 <td>no</td>
-<td>a name that never existed; see the animation migration notes</td>
+<td>a name that never existed; see <a href="/pages/porting-iliumanim/">porting iliumanim</a></td>
 </tr>
 </tbody>
 </table>
@@ -544,7 +544,7 @@ export function blurFrame(pixels: Uint8Array, width: number, height: number): Ui
 <tr>
 <td>Pixel buffer size mismatch</td>
 <td><code>invalid-argument</code></td>
-<td>Match width, height and format.</td>
+<td>Match width, height and format (4 bytes per pixel, RGBA, 8 bits per channel, so the buffer is exactly <code>width * height * 4</code> bytes).</td>
 </tr>
 <tr>
 <td>Buffer too large</td>

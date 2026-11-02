@@ -10,7 +10,7 @@ The always-granted set covers the plugin's own state and its basic tools:
 - timers that fire back into the plugin,
 - a key-value store in three buckets, and the plugin's own settings values,
 - compression, image decoding, hashing and text rasterizing,
-- read and write access to four folders that belong to the plugin,
+- read and write access to three folders (package, data, cache) that belong to the plugin,
 - messages between the plugin's server side and client side,
 - asking the host to render again a view the plugin declares.
 
@@ -22,7 +22,7 @@ A plugin that keeps its state in storage and writes its own logs needs nothing i
 - A manifest with no `capabilities` key behaves exactly like `"capabilities": {}`, and like a side
   with an empty list. The plugin then has the always-granted set and nothing else.
 - The SDK for your language: the Rust crate `ilium-plugin-sdk` or the npm package
-  `@ilium/plugin-sdk`. Plugins depend only on that package (S1).
+  `@ilium/plugin-sdk`. Plugins depend only on that package.
 
 The table uses these side letters: `S` is the server side, `C` the client side and `A` the scene
 (animation) side.
@@ -33,12 +33,12 @@ The table uses these side letters: `S` is the server side, `C` the client side a
 |---|---|---|---|
 | `log` | S C A | `log(level, message)`, `level` is `trace`, `debug`, `info`, `warn` or `error` | One log line per call. |
 | `clock` | S C A | `now-unix-millis() -> u64`, `monotonic-millis() -> u64` | Wall-clock and monotonic time in milliseconds. |
-| `timers` | S C | `set(after-millis, repeat-millis?) -> timer-id`, `cancel(timer)` | Timers that fire as the `timer-fired` event. |
-| `storage` | S C A | `get`, `put`, `remove`, `keys` on `bucket`: `global`, `project`, `session` | Key-value entries that only this plugin can see. |
+| `timers` | S C | `set(after-millis, repeat-millis?) -> result<timer-id, plugin-error>`, `cancel(timer)` | Timers that fire as the `timer-fired` event. |
+| `storage` | S C A | `get`, `put`, `remove`, `keys`, `write-batch` and `lease` on `bucket`: `global`, `project`, `session`, `shared` | Key-value entries that only this plugin can see. |
 | `settings` | S C | `get-json() -> string`, `set-json(patch)` | Read and write the plugin's own setting values. |
 | `codec` | S C A | `inflate`, `deflate`, `image-info`, `decode-image`, `sha256`, `rasterize-text` | Compression, images, hashes and text as pixels. |
 | `fs.read:package` | S C A | The read functions of `fs` (`read`, `read-all`, `list-dir`, `metadata`) | Read only, on the package's `assets/` directory. |
-| `fs.read:data`, `fs.write:data` | S C A | The read functions and the write functions (`write`, `remove`, `rename`) | The plugin's private data directory. |
+| `fs.read:data`, `fs.write:data` | S C A | The read functions and the write functions (`write`, `remove`, `rename`, `create_dir`) | The plugin's private data directory. |
 | `fs.read:cache`, `fs.write:cache` | S C A | The same functions as `data` | The plugin's evictable cache directory. |
 | `messages` (own side) | S C | Intent `message`, event `message` | Messages to and from the other side of the same plugin. |
 | `ui.invalidate` (own views) | C | `invalidate(view-target)` | Asks the host to render again a view the plugin declares. |
@@ -69,11 +69,13 @@ The `TimerId` type is `ilium_plugin_sdk::types::ids::TimerId`.
 Storage, settings and codec signatures, in WIT form:
 
 ```wit
-enum bucket { global, project, session }
+enum bucket { global, project, session, shared }
 get: func(bucket: bucket, key: string) -> option<list<u8>>;
 put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
 remove: func(bucket: bucket, key: string);
 keys: func(bucket: bucket, prefix: string) -> list<string>;
+write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-error>;
+lease: func(key: string, ttl-millis: u32) -> bool;
 
 get-json: func() -> string;
 set-json: func(patch: string) -> result<_, plugin-error>;
@@ -234,8 +236,8 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
-In TypeScript `put` and `get` throw a `PluginError` on failure, and `get` returns `undefined` for a
-missing key. `nowUnixMillis()` returns a `bigint`, so the example converts it with `toString()`.
+In TypeScript `put` throws a `PluginError` on failure. `get` has no failure channel (the WIT
+return is `option`): it returns `undefined` for a missing key and never throws. `nowUnixMillis()` returns a `bigint`, so the example converts it with `toString()`.
 
 ## Limits, errors and edge cases
 
@@ -252,6 +254,8 @@ the universal codes (`not-permitted` for a path escape, `revoked`, `internal`) a
 | `storage.get` | missing key | `none` |
 | `storage.put` | key empty or over 256 bytes, value over 1 MiB | `invalid-argument` |
 | `storage.put` | bucket over 16 MiB (256 MiB at T1) | `quota-exceeded` |
+| `storage.write-batch` | more than 256 entries or 4 MiB of key and value bytes | `invalid-argument` |
+| `storage.put` in `shared` | bucket over `shared_cache_mib` | oldest entries evicted, no error |
 | `settings.set-json` | patch over 256 KiB, or a value that breaks the schema | `invalid-argument` |
 | `settings.set-json` | key of the other side | `invalid-argument` |
 | `codec` | input over 16 MiB, or corrupt data | `invalid-argument` |
@@ -263,8 +267,8 @@ the universal codes (`not-permitted` for a path escape, `revoked`, `internal`) a
 | `messages` | payload over 1 MiB | `refused(invalid-argument)` |
 | `ui.invalidate` | view not declared by the plugin | ignored, one warn line |
 
-Timers are not persisted. A restart, a disable or an upgrade clears them, so a plugin re-arms its
-timers in `activate`. Storage survives restarts: the `session` bucket is deleted with its named
+Ordinary timers are not persisted. A restart, a disable or an upgrade clears them, so a plugin re-arms its
+timers in `activate`. Durable timers (`timers.at`) are the exception: they survive a restart and a deactivation (see [lifecycle](/pages/lifecycle/#durable-timers-and-further-triggers)). Storage survives restarts: the `session` bucket is deleted with its named
 session, and the `global` and `project` buckets are kept or deleted on uninstall, as the user
 chooses.
 
@@ -307,10 +311,10 @@ placeholders.
   [capability messages.peer](/pages/capability-messages-peer/) for messages between plugins.
 - [Panels](/pages/capability-ui-panels/), the capability that declares the views `ui.invalidate`
   redraws.
-- [Errors and limits](/pages/errors-and-limits/) for the full table of error codes.
+- [Errors and limits](/pages/reference-errors-and-limits/) for the full table of error codes.
 
 Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-Always-granted calls are still audited where the audit log lists them; inference use is in the privacy log ([SEC-264]).
+Always-granted calls are not individually audited. The audit log records security decisions only (installs, grants, consents, trust, policy and sandbox events; see [audit log](/pages/reference-audit-log/)), so storage, settings and `fs` writes, reads, timers, codec calls and log lines do not appear in it. Inference use is in the inference privacy log, which is kernel-owned ([SEC-305]).

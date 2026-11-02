@@ -449,7 +449,7 @@ impl MenuProvider for Actions {
             MenuEntry::new(&quot;freeze&quot;, if frozen { &quot;Unfreeze&quot; } else { &quot;Freeze&quot; }).icon(&quot;❄&quot;),
             MenuEntry::new(&quot;copy&quot;, &quot;Copy&quot;).submenu(),
             MenuEntry::new(&quot;copy-last&quot;, &quot;Last answer&quot;).parent(&quot;copy&quot;),
-            MenuEntry::new(&quot;close&quot;, &quot;Close pane&quot;).danger().separator_before()
+            MenuEntry::new(&quot;close&quot;, &quot;Close pane&quot;).danger().separator_before(true)
                 .disabled_reason_if(context.pane.is_none(), &quot;No pane here&quot;),
         ]
     }
@@ -496,8 +496,8 @@ export const { menuProvider } = definePlugin({
 <td><code>manifest.menu-depth</code> (static) or truncated (dynamic)</td>
 </tr>
 <tr>
-<td>Entry command unknown</td>
-<td>install refused or entry disabled</td>
+<td>Entry command unknown (not declared in <code>contributes.commands</code>)</td>
+<td>The entry is left out of the menu, the rest opens normally, and the host writes one <code>warn</code> line naming the entry id to the plugin log. The install is not refused</td>
 </tr>
 </tbody>
 </table>

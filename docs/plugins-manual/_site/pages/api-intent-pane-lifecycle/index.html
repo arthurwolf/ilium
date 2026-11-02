@@ -422,7 +422,7 @@ enum pane-lifecycle-state { running, frozen, restarting, exited }
 <tr>
 <td><code>freeze-pane</code></td>
 <td>The process is stopped with SIGSTOP on Unix. Output stops and the pane shows the frozen mark.</td>
-<td><code>ok</code>; <code>refused(unsupported)</code> on Windows</td>
+<td><code>ok</code>; <code>refused(unsupported)</code> on Windows; <code>refused(conflict)</code> when the pane is already frozen or its process has exited</td>
 </tr>
 <tr>
 <td><code>unfreeze-pane</code></td>
@@ -432,12 +432,12 @@ enum pane-lifecycle-state { running, frozen, restarting, exited }
 <tr>
 <td><code>replace-pane-command</code></td>
 <td>The current process ends and the new <code>command</code> runs in the same pane, with <code>cwd</code> if given. <code>keep-scrollback</code> keeps the history above the new output.</td>
-<td><code>ok</code> once the new process runs. The durable resume binding stays with the kernel.</td>
+<td><code>ok</code> once the new process runs; <code>refused(invalid-argument)</code> when the <code>cwd</code> does not exist or the program cannot be found, checked before the old process is ended, so the old process keeps running. The durable resume binding stays with the kernel.</td>
 </tr>
 <tr>
 <td><code>terminate-pane-process</code></td>
 <td>Sends a terminate request, waits <code>grace-ms</code>, then kills. At most 10,000 ms.</td>
-<td><code>ok</code> when the process has exited. The pane stays open and shows its exit status.</td>
+<td><code>ok</code> when the process has exited. The pane stays open and shows its exit status. <code>refused(internal)</code> when the kill fails; the pane stays open and its status is unchanged.</td>
 </tr>
 <tr>
 <td><code>resize-pane</code></td>
@@ -446,6 +446,7 @@ enum pane-lifecycle-state { running, frozen, restarting, exited }
 </tr>
 </tbody>
 </table>
+<p>An exited pane has no process to stop or continue, so <code>freeze-pane</code> and <code>unfreeze-pane</code> refuse it with <code>refused(conflict)</code>. <code>terminate-pane-process</code> on an exited pane is a no-op that returns <code>ok</code>, <code>resize-pane</code> and <code>replace-pane-command</code> still work on it (the latter starts a new process). Freezing a frozen pane is refused with <code>refused(conflict)</code>. <code>terminate-pane-process</code> on a frozen pane first sends SIGCONT so that the process can act on the terminate request, then proceeds as usual and returns <code>ok</code>. <code>replace-pane-command</code> on a frozen pane continues the old process, ends it, and starts the new one; the new process is not frozen and the frozen mark is cleared.</p>
 <p>Common refusals: <code>refused(not-permitted)</code> without the grant, <code>refused(not-found)</code> for a missing pane, <code>refused(pane-not-ready)</code> on a restored pane that has not started, <code>refused(invalid-argument)</code> for an empty command or a <code>grace-ms</code> over 10,000.</p>
 <figure>
 <svg viewBox="0 0 420 130" role="img" aria-label="Pane lifecycle states and the intents that move between them" width="630" height="195">
@@ -548,8 +549,16 @@ const resize = { tag: 'resize-pane', val: { pane, columns: 100, rows: undefined 
 <td><code>refused(unsupported)</code></td>
 </tr>
 <tr>
+<td><code>freeze-pane</code> on a frozen pane</td>
+<td><code>refused(conflict)</code></td>
+</tr>
+<tr>
 <td><code>unfreeze-pane</code> on a running pane</td>
 <td><code>refused(conflict)</code></td>
+</tr>
+<tr>
+<td><code>terminate-pane-process</code> or <code>replace-pane-command</code> on a frozen pane</td>
+<td>The process is continued first, then the intent proceeds; the frozen mark is cleared and the outcome is <code>ok</code></td>
 </tr>
 <tr>
 <td><code>grace-ms</code> over 10,000</td>

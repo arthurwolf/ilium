@@ -461,7 +461,7 @@
 <tr>
 <td><code>editor-apply-edits</code></td>
 <td><code>buffer: buffer-id</code>, <code>base-revision: u64</code>, <code>edits: list&lt;text-edit&gt;</code></td>
-<td><code>ok</code>; <code>refused(not-found)</code>, <code>refused(conflict)</code>, <code>refused(invalid-argument)</code></td>
+<td><code>ok</code>; <code>refused(not-found)</code>, <code>refused(conflict)</code>, <code>refused(invalid-argument)</code>; <code>failed(not-found)</code> (the buffer closed after the edit was accepted)</td>
 </tr>
 <tr>
 <td><code>editor-open</code></td>
@@ -822,7 +822,7 @@ function stampHeading(): Submission | undefined {
 <li><a href="/pages/file-access/">File access</a> and <a href="/pages/capability-fs-read/">fs.read</a>: the file scopes that load and open calls need.</li>
 <li><a href="/pages/capability-fs-write/">fs.write</a>: the write grant that <code>save-buffer</code> needs.</li>
 <li><a href="/pages/widgets-media-and-embedded/">Code view</a>: showing a buffer in a pane.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a>: the error codes and caps used on this page.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a>: the error codes and caps used on this page.</li>
 <li><a href="/pages/tutorial-05-todo-scanner/">Tutorial 05: TODO scanner</a>: opening files with <code>editor-open</code>.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-commands-invoke/"><small>Previous</small>commands.invoke</a><a class="next" href="/pages/capability-editor-provide/"><small>Next</small>editor.provide</a></nav>

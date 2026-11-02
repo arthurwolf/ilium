@@ -422,7 +422,7 @@
 </tr>
 </tbody>
 </table>
-<p>The primitive is available to the server side only, through the <code>ilium:server/base</code> world. Import it from <code>ilium_plugin_sdk::primitives::terminal</code> in Rust, or from <code>@ilium/plugin-sdk/primitives/terminal</code> in TypeScript. Agent identification is a separate contract, described in <a href="/pages/primitives-agent/">primitives-agent</a>.</p>
+<p>The primitive is available to both the server and the client sides, through the <code>ilium:server/base</code> and <code>ilium:client/base</code> worlds. Import it from <code>ilium_plugin_sdk::primitives::terminal</code> in Rust, or from <code>@ilium/plugin-sdk/primitives/terminal</code> in TypeScript. Agent identification is a separate contract, described in <a href="/pages/primitives-agent/">primitives-agent</a>.</p>
 <pre><code class="language-json">{
   &quot;capabilities&quot;: {
     &quot;server&quot;: [&quot;terminal.read-screen&quot;, &quot;terminal.output-filter&quot;, &quot;terminal.pointer&quot;,
@@ -548,7 +548,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>kind</code> is <code>down</code>, <code>up</code>, <code>drag</code> or <code>wheel</code>. <code>button</code> is <code>left</code>, <code>middle</code>, <code>right</code>, or <code>none</code> for a wheel event. <code>row</code> and <code>column</code> count from the top visible row and the left column of the pane. The scrollback offset is not applied.</p>
+<p><code>kind</code> is <code>down</code>, <code>up</code>, <code>move</code>, <code>drag</code>, <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> or <code>wheel-right</code> (the <code>pointer-kind</code> enum of the WIT). <code>button</code> is <code>left</code>, <code>middle</code>, <code>right</code>, or <code>none</code> for a wheel or move event. <code>row</code> and <code>column</code> count from the top visible row and the left column of the pane. The scrollback offset is not applied.</p>
 <h3 id="reading-the-screen">Reading the screen</h3>
 <p><code>read_screen</code> with <code>Visible</code> returns the bottom <code>max_rows</code> rows of the visible area, top to bottom. <code>cursor_row</code> counts from the first returned row. A cursor above the returned rows gives the number of returned rows and column 0. With <code>Scrollback</code>, it returns the rows directly above the visible area, oldest first. Each row holds the characters of its cells, with escape sequences and trailing blanks removed. A wide character appears once.</p>
 <p><code>max_rows</code> of 0 returns an empty list. A value above 10,000 is clamped to 10,000 without an error. <code>revision</code> is per pane. It starts at 0 when the host starts the pane, rises when either part changes, and is not saved in the snapshot. Compare it with the last revision you saw to skip unchanged work.</p>
@@ -560,7 +560,7 @@
 <h3 id="highlights-and-the-pointer-claim">Highlights and the pointer claim</h3>
 <p>A highlight layer has a name of 1 to 32 characters from <code>[a-z0-9-]</code>. Layer names are scoped to the calling plugin, so two plugins can both use <code>search</code>. Regions of one layer are painted in list order. Where two regions overlap, the later region sets the foreground and background, and the modifiers of all overlapping regions are combined. A region outside the screen is clipped without an error. A region whose first position is after its last is <code>invalid-argument</code>.</p>
 <p>A <code>label</code> is not drawn in the pane. It appears as a tooltip after the pointer rests on the region for 500 ms. A label over 128 characters is <code>invalid-argument</code>. Highlights survive <code>release_pointer</code>. They are withdrawn when the plugin is disabled, its grant is revoked, or the pane is removed.</p>
-<p>A claim gives the plugin the pointer of one pane. While it holds the claim, the host stops forwarding mouse events to the program in the pane, and its own selection and wheel scrollback are off there. Wheel events reach the plugin as <code>pointer</code> events with kind <code>wheel</code>. Typing is not affected, because typing needs <code>terminal.write</code>, not a claim. The plugin that already holds a claim can call <code>claim_pointer</code> again and gets <code>ok</code>. <code>release_pointer</code> without a claim does nothing.</p>
+<p>A claim gives the plugin the pointer of one pane. While it holds the claim, the host stops forwarding mouse events to the program in the pane, and its own selection and wheel scrollback are off there. Wheel events reach the plugin as <code>pointer</code> events with kind <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> or <code>wheel-right</code>. Typing is not affected, because typing needs <code>terminal.write</code>, not a claim. The plugin that already holds a claim can call <code>claim_pointer</code> again and gets <code>ok</code>. <code>release_pointer</code> without a claim does nothing.</p>
 <h3 id="input-the-send-input-intent">Input: the send-input intent</h3>
 <p>Input is an intent, not a function. The plugin submits <code>send-input</code> with these fields:</p>
 <table>
@@ -623,7 +623,7 @@
 </tr>
 </tbody>
 </table>
-<p>The grants <code>terminal.read-cells</code>, <code>terminal.history</code>, <code>terminal.raw-input</code> and <code>terminal.input-lock</code> are listed in <a href="/pages/reference-capabilities/">Capabilities</a>. The <code>pointer</code> event gains <code>sub-x</code>, <code>sub-y</code>, <code>modifiers</code> and the kind <code>move</code>; the <code>wheel</code> kind is split into <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> and <code>wheel-right</code> in <code>view-pointer</code>. The new fields are optional.</p>
+<p>The grants <code>terminal.read-cells</code>, <code>terminal.history</code>, <code>terminal.raw-input</code> and <code>terminal.input-lock</code> are listed in <a href="/pages/reference-capabilities/">Capabilities</a>. The <code>pointer</code> event gains <code>sub-x</code>, <code>sub-y</code>, <code>modifiers</code> and the kind <code>move</code>; the single <code>wheel</code> kind of the earlier surface is replaced by <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> and <code>wheel-right</code> in <code>view-pointer</code>. The new fields are optional.</p>
 <h3 id="manifest-contributions">Manifest contributions</h3>
 <table>
 <thead>
@@ -799,9 +799,9 @@ fn continue_if_unchanged(pane: NodeId, epoch_at_idle: u64) -&gt; Option&lt;Submi
 </thead>
 <tbody>
 <tr>
-<td>any function with a pane</td>
+<td>any function with a pane, except <code>read_screen</code>, <code>selection</code> and <code>prompt_epoch</code></td>
 <td><code>not-permitted</code></td>
-<td>The grant is missing or was declined.</td>
+<td>The grant was declined or revoked.</td>
 </tr>
 <tr>
 <td>any function with a pane</td>
@@ -898,7 +898,7 @@ take-history: func(request: request-id) -&gt; option&lt;string&gt;;
 <li><a href="/pages/primitives-agent/">Agent primitive</a> for the pane's agent identity and prompt epoch.</li>
 <li><a href="/pages/capability-terminal-read-screen/">Read-screen</a>, <a href="/pages/capability-terminal-write/">write</a>, <a href="/pages/capability-terminal-output-filter/">output-filter</a> and <a href="/pages/capability-terminal-pointer/">pointer</a> capabilities.</li>
 <li><a href="/pages/widgets-media-and-embedded/">Terminal view widget</a> for showing a pane's screen inside a plugin's own UI.</li>
-<li><a href="/pages/errors-and-limits/">Errors and limits</a> for the codes used above.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the codes used above.</li>
 </ul>
 <nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/primitives-editor/"><small>Previous</small>Editor primitive</a><a class="next" href="/pages/primitives-terminal-reads/"><small>Next</small>Terminal reads</a></nav>
 <p class="site-footer">Ilium Plugin Developer Manual</p>

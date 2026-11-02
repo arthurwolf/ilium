@@ -19,7 +19,7 @@ Agent setup owns the Setup tab, both instruction blocks and the hook entries. Ch
 
 ### See it
 
-<figure><img src="/assets/demos/14-chatroom.gif" alt="Two agents and the user exchange messages in the Chatroom view" loading="lazy"><figcaption>Agents append messages to the shared file and the Chatroom view shows them as timestamped rows.</figcaption></figure>
+<figure><img src="/assets/demos/14-chatroom.gif" alt="The current Ilium Chatroom displays locally scripted Codex and Claude messages; provider agents are not running" loading="lazy"><figcaption>The current-build Chatroom view shows two local simulation messages. Provider agents are not running.</figcaption></figure>
 
 ### What the user sees
 
