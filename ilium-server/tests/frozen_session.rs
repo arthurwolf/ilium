@@ -9,7 +9,6 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::process::Command;
 
-#[cfg(unix)]
 use ilium_core::BuiltinAgentProvider;
 use ilium_core::{NodeId, ROOT_ID};
 #[cfg(unix)]

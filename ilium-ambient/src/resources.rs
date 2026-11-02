@@ -39,7 +39,7 @@ impl AmbientResources {
         if cost.threads == 0 || cost.resident_bytes == 0 {
             return Err(RejectReason::InvalidCost);
         }
-        retry_while_busy(|| {
+        retry_admission_while_busy(|| {
             self.quota
                 .reserve_external_worker(cost.threads, cost.resident_bytes)
         })
@@ -48,7 +48,7 @@ impl AmbientResources {
     /// Reserve before allocating independently retained immutable storage.
     /// A cloned guard covers only the same allocation, never a heap copy.
     pub fn reserve_storage(&self, bytes: usize) -> Result<Arc<StorageAdmission>, RejectReason> {
-        retry_while_busy(|| self.quota.reserve_external_storage(bytes)).map(Arc::new)
+        retry_admission_while_busy(|| self.quota.reserve_external_storage(bytes)).map(Arc::new)
     }
 }
 
@@ -61,7 +61,7 @@ const BUSY_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_millis(
 /// counter updates). It is contention, not exhaustion, so a short bounded
 /// retry absorbs it; every real capacity refusal is returned unchanged and no
 /// limit is relaxed.
-fn retry_while_busy<T>(
+fn retry_admission_while_busy<T>(
     mut attempt: impl FnMut() -> Result<T, RejectReason>,
 ) -> Result<T, RejectReason> {
     let deadline = std::time::Instant::now() + BUSY_RETRY_BUDGET;
