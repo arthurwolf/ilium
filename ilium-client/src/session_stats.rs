@@ -103,7 +103,7 @@ impl TokenTotals {
 }
 
 /// Usage attributed to one model over the whole session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModelUsage {
     pub model: String,
     pub calls: u32,
@@ -111,7 +111,7 @@ pub struct ModelUsage {
 }
 
 /// One user prompt as recorded in the transcript.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PromptRecord {
     pub at_ms: Option<i64>,
     pub text: String,
@@ -124,7 +124,7 @@ pub struct PromptRecord {
 
 /// One model call's token delta, for charts. `context` is the size of the
 /// prompt sent on that call: how full the model's window was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenSample {
     pub at_ms: i64,
     pub tokens: TokenTotals,
@@ -132,7 +132,9 @@ pub struct TokenSample {
 }
 
 /// What the agent was doing between one transcript event and the next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum WorkKind {
     /// No turn running: waiting for the user.
     Idle,
@@ -180,14 +182,14 @@ impl WorkKind {
 }
 
 /// The agent switched to `kind` at `at_ms` and stayed there until the next mark.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorkMark {
     pub at_ms: i64,
     pub kind: WorkKind,
 }
 
 /// How an Ilium progress-bar (progress monitor) run ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProgressOutcome {
     /// Still being watched.
     Running,
@@ -200,7 +202,7 @@ pub enum ProgressOutcome {
 }
 
 /// One progress-bar run: from the `ilium progress set` call to its outcome.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProgressSpan {
     pub start_ms: i64,
     pub end_ms: Option<i64>,
@@ -229,7 +231,7 @@ pub(crate) fn parse_progress_outcome(text: &str) -> Option<(u64, ProgressOutcome
 }
 
 /// A rate-limit window as reported by the provider (Codex).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RateLimitWindow {
     pub used_percent: f64,
     pub window_minutes: Option<u64>,
@@ -239,7 +241,7 @@ pub struct RateLimitWindow {
 /// Cost figures Claude Code recorded itself. The CLI writes these snapshots
 /// periodically rather than per call, so for a live pane the figure can trail
 /// the token counters; the popover labels it accordingly.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReportedCost {
     pub total_usd: f64,
     pub lines_added: u64,
@@ -255,7 +257,7 @@ pub struct ReportedCost {
 /// Tokens one model consumed during one minute. The dollar cost is derived
 /// later from a price table, so a changed price override reprices history
 /// without re-reading the transcript.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpendBucket {
     /// Start of the minute, in Unix milliseconds.
     pub minute_ms: i64,
@@ -267,7 +269,7 @@ pub struct SpendBucket {
 /// minute while this session ran. Codex reports the account-wide `used_percent`
 /// of each window; the rise between two readings is what this session saw
 /// being consumed, so concurrent agents on the same account count together.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QuotaBucket {
     /// Start of the minute, in Unix milliseconds.
     pub minute_ms: i64,
@@ -296,7 +298,7 @@ impl PartialEq for StatsRetention {
 }
 
 /// Everything the popover shows about one session.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SessionStats {
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -351,6 +353,7 @@ pub struct SessionStats {
 
     pub bytes_read: u64,
     pub records_parsed: u64,
+    #[serde(skip)]
     pub(crate) retention: StatsRetention,
 }
 
@@ -491,7 +494,7 @@ impl SessionStats {
 
 /// A Claude model call, merged across the several transcript records the CLI
 /// writes for one response (one per content block, all carrying full usage).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ClaudeCall {
     at_ms: Option<i64>,
     model: String,
@@ -499,9 +502,36 @@ struct ClaudeCall {
     sidechain: bool,
 }
 
+// JSON object keys cannot represent the timestamp/model pairs used here.
+mod ordered_pairs {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S, V>(
+        values: &BTreeMap<(i64, String), V>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        V: Serialize,
+    {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D, V>(deserializer: D) -> Result<BTreeMap<(i64, String), V>, D::Error>
+    where
+        D: Deserializer<'de>,
+        V: Deserialize<'de>,
+    {
+        Ok(Vec::<((i64, String), V)>::deserialize(deserializer)?
+            .into_iter()
+            .collect())
+    }
+}
+
 /// Incremental parser. Feed it a transcript file with [`Self::ingest_file`];
 /// call [`Self::snapshot`] whenever a value for display is needed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatsAccumulator {
     class: AgentClass,
     offset: u64,
@@ -536,12 +566,15 @@ pub struct StatsAccumulator {
     codex_current_model: Option<String>,
     codex_rate_limits: Vec<(String, RateLimitWindow)>,
     codex_samples: Vec<TokenSample>,
+    #[serde(with = "ordered_pairs")]
     codex_spend: BTreeMap<(i64, String), TokenTotals>,
     /// Last reading per quota window: used percent and the reset instant that
     /// identifies which window period it belongs to.
     codex_quota_last: HashMap<String, (f64, Option<i64>)>,
+    #[serde(with = "ordered_pairs")]
     codex_quota_spend: BTreeMap<(i64, String), f64>,
     // Last field: the state debit outlives destruction of every owned map/vector.
+    #[serde(skip)]
     retention: StatsRetention,
 }
 
@@ -654,7 +687,7 @@ impl StatsAccumulator {
                 + self.codex_quota_last.capacity())
                 * 128
     }
-    fn check_bounds(&self) -> std::io::Result<()> {
+    pub(crate) fn check_bounds(&self) -> std::io::Result<()> {
         let records = self.seen_tool_ids.len()
             + self.claude_calls.len()
             + self.codex_spend.len()
@@ -707,6 +740,14 @@ impl StatsAccumulator {
     /// Bytes consumed so far (always at a line boundary).
     pub fn offset(&self) -> u64 {
         self.offset
+    }
+
+    pub(crate) fn class(&self) -> &AgentClass {
+        &self.class
+    }
+
+    pub(crate) fn extra_offsets(&self) -> &HashMap<PathBuf, u64> {
+        &self.extra_offsets
     }
 
     /// Reads any bytes appended since the last call. Progress is reported at
