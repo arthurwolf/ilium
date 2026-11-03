@@ -298,3 +298,12 @@ fn dev_611_advancing_fake_time_by_a_thousand_days_takes_no_real_time() {
         "fake time must not be waited out in real time"
     );
 }
+
+/// REQ: DEV-611
+#[test]
+fn dev_611_restart_case_records_the_fake_clock_time_of_the_trap() {
+    let mut host = host();
+    trap_at(&mut host, 7 * MINUTE_MS);
+    assert_eq!(host.clock().now(), 7 * MINUTE_MS, "the clock is the fake value");
+    assert_eq!(host.restarts()[0].at_ms, 7 * MINUTE_MS);
+}

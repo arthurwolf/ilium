@@ -269,6 +269,18 @@ fn pkg_497_traced_in_the_requirement_table_as_should() {
     assert_traced("PKG-497", SLUG, "SHOULD");
 }
 
+/// REQ: PKG-497 WARN
+#[test]
+fn pkg_497_guide_states_the_do_not_embed_prohibition() {
+    assert_row(PAGE, "PKG-497", &["Do not embed"]);
+}
+
+/// REQ: PKG-496 WARN
+#[test]
+fn pkg_496_guide_asks_for_the_lock_file_to_be_frozen() {
+    assert_row(PAGE, "PKG-496", &["lock file frozen"]);
+}
+
 /// REQ: PKG-498 WARN
 #[test]
 fn doc_pkg_498_build_info_names_toolchain_and_commit_and_pack_includes_it() {

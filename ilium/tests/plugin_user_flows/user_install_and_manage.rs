@@ -299,6 +299,25 @@ fn usr_128_update_after_key_removal_asks_for_trust_again() {
     assert_eq!(list_row(&mut rig, "com.example.signed").version, "1.0.0");
 }
 
+/// REQ: USR-128
+#[test]
+fn usr_128_trusting_the_key_again_reactivates_the_plugin() {
+    let mut rig = UserRig::new();
+    let key = KeyPair::generate("Example Publisher");
+    rig.trust(&key);
+    let _ = rig.install_file(
+        &spec("com.example.signed", "1.0.0", &["tree.read"]).signed_with(&key),
+        &["--yes"],
+    );
+    let _ = rig.cli(&["trust", "remove", &key.fingerprint()]);
+    assert!(list_row(&mut rig, "com.example.signed").untrusted);
+    rig.trust(&key);
+    let row = list_row(&mut rig, "com.example.signed");
+    assert!(!row.untrusted, "trusting the key again clears the mark");
+    assert_eq!(row.state, "On", "the plugin loads again");
+    assert_eq!(row.version, "1.0.0", "its data and version are kept");
+}
+
 // ---- USR-122 / USR-126 ----
 
 /// REQ: USR-122, USR-126
@@ -360,6 +379,19 @@ fn usr_126_update_with_an_equal_or_lower_version_is_refused() {
     );
     assert_eq!(result_exit_code(&output), 0);
     assert_eq!(list_row(&mut rig, "com.example.up").id, "com.example.up");
+}
+
+/// REQ: USR-126
+#[test]
+fn usr_126_higher_version_under_another_plugin_id_does_not_replace_the_installed_plugin() {
+    let mut rig = UserRig::new();
+    install_ok(&mut rig, &spec("com.example.up", "1.2.0", &[]));
+    let output = rig.install_file(
+        &spec("com.example.other", "2.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
+    assert_eq!(result_exit_code(&output), 0);
+    assert_eq!(list_row(&mut rig, "com.example.up").version, "1.2.0");
 }
 
 // ---- USR-123 / USR-173 ----

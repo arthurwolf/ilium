@@ -390,6 +390,15 @@ fn dev_837_slow_work_started_from_a_handler_returns_at_once_and_its_result_comes
 
 /// REQ: DEV-838
 #[test]
+fn dev_838_job_output_is_the_bytes_of_its_own_run() {
+    let mut fixture = job_fixture(Box::new(|_kind, input| Ok(input.to_vec())));
+    let job = expect_ok(fixture.jobs().start(KIND.to_owned(), b"second".to_vec()));
+    assert!(is_ok(&complete(&mut fixture, job)));
+    assert_eq!(fixture.jobs().take_output(job), Some(b"second".to_vec()));
+}
+
+/// REQ: DEV-838
+#[test]
 fn dev_838_second_job_run_does_not_see_state_of_the_first() {
     let mut remembered: Option<Vec<u8>> = None;
     let mut fixture = job_fixture(Box::new(move |_kind, input| {

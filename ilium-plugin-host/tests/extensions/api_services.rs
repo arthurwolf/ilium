@@ -240,6 +240,29 @@ fn svc_014_provider_accepts_64_in_flight_calls_and_the_65th_returns_busy() {
     assert_eq!(code_of(&error), ErrorCode::Busy);
 }
 
+/// REQ: SVC-014
+#[test]
+fn svc_014_the_busy_call_is_refused_at_the_call_and_never_reaches_the_provider() {
+    let mut world = service_world("0.1.0", deferred());
+    let manifest = consumer_manifest("com.example.c2", SERVICE, None);
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, Vec::new())),
+        "ok"
+    );
+    for _ in 0..32 {
+        assert!(call_echo(&mut world, OK_PAYLOAD).is_ok());
+    }
+    for _ in 0..32 {
+        assert!(world
+            .call_service("com.example.c2", SERVICE, "echo", OK_PAYLOAD)
+            .is_ok());
+    }
+    assert_eq!(world.service_calls_seen("com.example.prov").len(), 64);
+    let error = err_of(world.call_service("com.example.c2", SERVICE, "echo", OK_PAYLOAD));
+    assert_eq!(code_of(&error), ErrorCode::Busy);
+    assert_eq!(world.service_calls_seen("com.example.prov").len(), 64);
+}
+
 // ---------------------------------------------------------------------------------------------
 // SVC-006 versions
 // ---------------------------------------------------------------------------------------------

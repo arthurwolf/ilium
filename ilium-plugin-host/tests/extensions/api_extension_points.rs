@@ -1345,3 +1345,24 @@ fn sec_288_equal_tier_and_priority_orders_by_plugin_id() {
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
     assert_eq!(run_order(&world), vec!["com.example.a", "com.example.b"]);
 }
+
+/// REQ: SEC-288
+#[test]
+fn sec_288_user_order_places_a_t2_contributor_before_a_t1_contributor() {
+    let mut world = hook_world(
+        "observe",
+        vec![
+            contrib_tier("t1", 0, Tier::T1, pass(1)),
+            contrib_tier("t2", 0, Tier::T2, pass(1)),
+        ],
+    );
+    world.set_user_order(
+        POINT,
+        vec![
+            ("com.example.t2".to_owned(), "e-t2".to_owned()),
+            ("com.example.t1".to_owned(), "e-t1".to_owned()),
+        ],
+    );
+    let _ = run_chain(&mut world, r#"{"text":"a"}"#);
+    assert_eq!(run_order(&world), vec!["com.example.t2", "com.example.t1"]);
+}

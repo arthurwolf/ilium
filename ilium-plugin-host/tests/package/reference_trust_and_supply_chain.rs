@@ -917,6 +917,16 @@ fn sec_156_verify_of_an_unknown_id_is_not_found() {
     assert_eq!(out.exit_code, 5, "{}", all_text(&out));
 }
 
+/// REQ: SEC-156
+#[test]
+fn sec_156_verify_of_an_existing_file_is_checked_not_looked_up_as_an_id() {
+    let fixture = trusted_fixture();
+    let path = put_package(&fixture, "in.ilpl", b"not a package");
+    let out = run_cli(&fixture, &["verify", path.as_str()]);
+    assert_ne!(out.exit_code, 0, "{}", all_text(&out));
+    assert!(!has(&out, "plugin.not-found"), "{}", all_text(&out));
+}
+
 // ---- SEC-154/155: inspect ----
 
 fn inspect(bytes: &[u8]) -> ilium_plugin_host::cli::CliOutput {

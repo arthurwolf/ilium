@@ -211,6 +211,33 @@ mod spec_tests {
         }
     }
 
+    /// REQ: DEV-464
+    #[test]
+    fn exact_expectation_matches_only_identical_arguments() {
+        let mut host = FakeHost::new().grant("process.run:git");
+        host.process()
+            .expect("git", &["push"])
+            .returns(exit_with_stdout(b"pushed"));
+        let spec = |arguments: &[&str]| ProcessSpec {
+            program: "git".to_string(),
+            arguments: arguments.iter().map(|argument| argument.to_string()).collect(),
+            cwd: None,
+            stdin: None,
+            environment: Vec::new(),
+            timeout_millis: 1000,
+        };
+        assert!(
+            host.process().run(&spec(&["push", "--force"])).is_err(),
+            "an extra argument must not match the expectation"
+        );
+        let matched = host
+            .process()
+            .run(&spec(&["push"]))
+            .expect("identical arguments match");
+        assert_eq!(matched.stdout, b"pushed".to_vec());
+        assert_eq!(host.process().calls().len(), 2);
+    }
+
     #[test]
     fn expect_returns_registers_without_recording_a_call() {
         let mut host = FakeHost::new().grant("process.run:git");

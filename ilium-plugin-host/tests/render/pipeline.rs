@@ -627,6 +627,21 @@ fn wid_030_theme_switch_one_theme_changed_and_one_render() {
     assert_eq!(rig.render_calls(view), base + 1);
 }
 
+/// REQ: WID-030
+#[test]
+fn wid_030_theme_switch_renders_every_open_view_exactly_once() {
+    let mut rig = rig_t2();
+    let first = rig.open_view("a");
+    let second = rig.open_view("b");
+    rig.advance_ms(50);
+    let base_first = rig.render_calls(first);
+    let base_second = rig.render_calls(second);
+    rig.change_theme();
+    rig.advance_ms(50);
+    assert_eq!(rig.render_calls(first), base_first + 1);
+    assert_eq!(rig.render_calls(second), base_second + 1);
+}
+
 /// REQ: HST-269
 #[test]
 fn hst_269_matched_keys_keep_view_state() {

@@ -274,6 +274,29 @@ fn doc_abi_005_labelled_excerpt_names_an_interface_the_reference_declares() {
 
 /// REQ: ABI-016
 #[test]
+fn doc_abi_016_json_fields_and_parameters_are_typed_string() {
+    let mut found = 0;
+    let mut wrong = Vec::new();
+    for (relative, text) in wit_files() {
+        let text = strip_comments(&text);
+        for (index, _) in text.match_indices("-json:") {
+            let after = text[index + "-json:".len()..].trim_start();
+            // `get-json: func()` names a function, not a field or a parameter.
+            if after.starts_with("func") {
+                continue;
+            }
+            found += 1;
+            if !after.starts_with("string") {
+                wrong.push(format!("{relative}: {}", after.lines().next().unwrap_or_default()));
+            }
+        }
+    }
+    assert!(found > 0, "no -json field or parameter found in the wit tree");
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// REQ: ABI-016
+#[test]
 fn doc_abi_016_wit_names_are_kebab_case() {
     let is_kebab = |word: &str| {
         let mut previous_dash = true;

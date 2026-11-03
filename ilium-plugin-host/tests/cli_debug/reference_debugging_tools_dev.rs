@@ -219,6 +219,18 @@ fn dev_740_conformance_flag_is_accepted_by_test() {
     assert_eq!(result[0]["exit_code"], output.exit_code);
 }
 
+/// REQ: DEV-740
+#[test]
+fn dev_740_unknown_flag_next_to_conformance_is_a_usage_error() {
+    let scratch = scratch();
+    let output = run(&env(scratch.path()), &["test", "--conformance", "--no-such-flag"]);
+    assert!(
+        error_code(&output).unwrap_or_default().starts_with("usage."),
+        "{:?}",
+        output.stdout_jsonl
+    );
+}
+
 /// REQ: DEV-741
 #[test]
 fn dev_741_tag_must_equal_v_plus_version() {

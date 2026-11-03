@@ -222,6 +222,19 @@ fn pkg_464_beta_channel_install_is_refused_by_the_stable_only_policy_and_allowed
     assert_ok(&install_notes(&sandbox, &["--channel", "stable"]));
 }
 
+/// REQ: PKG-472 WARN
+#[test]
+fn pkg_472_refused_beta_channel_reports_policy_blocked() {
+    let sandbox = Sandbox::with_registry(&registry_with_beta());
+    write_policy(
+        &sandbox,
+        "version = 1\n[packages]\nallowed_channels = [\"stable\"]\n",
+    );
+    let refused = install_notes(&sandbox, &["--channel", "beta"]);
+    assert_policy_block(&refused, "policy.blocked");
+    assert_eq!(sandbox.installed_version(NOTES), None);
+}
+
 // ---- Pre-trust your key (PKG-465, 466) -----------------------------------------------------
 
 /// REQ: PKG-465 MAY

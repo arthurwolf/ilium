@@ -1,5 +1,6 @@
 //! Rule statements of the guide-internationalisation page as the manual states them (doc-lint tests, part 2).
 use crate::support::{assert_page_line, assert_rule};
+use ilium_plugin_sdk::testing::FakeHost;
 
 /// REQ: AUT-601
 #[test]
@@ -166,6 +167,14 @@ fn doc_aut_613_time_formatting_tested_with_fake_clock_from_2030() {
     );
 }
 
+/// REQ: AUT-613
+#[test]
+fn doc_aut_613_fake_host_clock_starts_at_2030_utc() {
+    let host = FakeHost::new();
+    // 2030-01-01 00:00:00 UTC in milliseconds since the Unix epoch.
+    assert_eq!(host.clock().now(), 1_893_456_000_000);
+}
+
 /// REQ: AUT-614 WARN
 #[test]
 fn doc_aut_614_machine_output_dot_no_group_separator_metric_units() {
@@ -203,6 +212,15 @@ fn doc_aut_616_time_stored_as_utc_millis_zone_or_relative_displayed() {
             "MUST state the zone or show relative time",
             "`now-unix-millis` is UTC",
         ],
+    );
+}
+
+/// REQ: AUT-616
+#[test]
+fn doc_aut_616_plugin_built_time_strings_state_zone_or_relative() {
+    assert_page_line(
+        "AUT-616",
+        &["builds its own time string states the zone or shows relative time"],
     );
 }
 

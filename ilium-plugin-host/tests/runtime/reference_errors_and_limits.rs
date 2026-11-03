@@ -226,6 +226,17 @@ fn api_041_a_disabled_side_stays_disabled_without_a_manual_enable() {
     assert_eq!(host.state(), InstanceState::StoppedByFailure);
 }
 
+/// REQ: API-041
+#[test]
+fn api_041_manual_enable_resets_the_failure_count_to_zero() {
+    let (mut host, _) = trapped_host_at(&[0, 2_000, 4_000]);
+    host.enable();
+    assert_eq!(host.failure_count(), 0);
+    fail_once(&mut host);
+    assert_eq!(host.failure_count(), 1);
+    assert_eq!(host.restart_delay_ms(), Some(1_000));
+}
+
 /// REQ: HST-401, API-042
 #[test]
 fn hst_401_trap_deadline_and_activate_error_count_as_failures() {
@@ -298,6 +309,18 @@ fn api_045_a_scene_frame_trap_restarts_the_client_side_after_1_s() {
     host.fail_scene_frame();
     assert_eq!(host.state_of(Side::Client), InstanceState::RestartScheduled);
     assert_eq!(host.state_of(Side::Server), InstanceState::Active);
+}
+
+/// REQ: API-046
+#[test]
+fn api_046_refused_second_instance_leaves_the_running_plugin_active() {
+    let host = HostHarness::new()
+        .session_memory_mib(32)
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    host.activate_second_plugin_with_memory(33);
+    assert_eq!(host.state(), InstanceState::Active);
 }
 
 /// REQ: API-046, HST-407
@@ -558,6 +581,18 @@ fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fie
     assert_eq!(reply.error_code(), Some("not-permitted"));
     assert_eq!(log_count(&host, "not-permitted"), 1);
     assert!(log_text(&host).contains("ilium:host/tree"));
+}
+
+/// REQ: API-010
+#[test]
+fn api_010_import_whose_capability_was_requested_does_not_trap() {
+    let host = HostHarness::new()
+        .grants(&["clipboard.read"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    let reply = host.call_import_json("ilium:host/clipboard", "read", "{}");
+    assert_eq!(reply.trap_code(), None);
 }
 
 /// REQ: API-010

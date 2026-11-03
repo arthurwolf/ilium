@@ -329,6 +329,26 @@ fn dev_787_link_to_a_shipped_topic_does_not_warn() {
     ));
 }
 
+/// REQ: DEV-788
+#[test]
+fn dev_788_fresh_topic_names_each_setting_the_plugin_adds() {
+    let (_root, _env, dir) = fresh("server");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read_text(&dir, "manifest.json")).unwrap();
+    let topic = read_text(&dir, "help/overview.md");
+    let settings = manifest["contributes"]["settings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(!settings.is_empty(), "the server template adds no setting");
+    for setting in settings {
+        assert!(
+            topic.contains(setting["title"].as_str().unwrap()),
+            "{setting}"
+        );
+    }
+}
+
 /// REQ: DEV-788 WARN
 #[test]
 fn dev_788_fresh_topic_names_each_command_the_plugin_adds() {

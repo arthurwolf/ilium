@@ -241,6 +241,24 @@ mod session_routing {
 
     /// REQ: DEV-482
     #[test]
+    fn dev_482_each_contributor_is_activated_once_per_hook_point_run() {
+        with_clean_env(|| {
+            spy_reset();
+            let first = package("s482c", "example.first", r#""x-priority": 10"#);
+            let second = package("s482d", "example.second", r#""x-priority": 20"#);
+            let mut session = FakeSession::new();
+            session
+                .install_core("ilium.core.tree")
+                .install_native::<Spy>(&first)
+                .install_native::<Spy>(&second)
+                .start();
+            session.pump().expect("settles");
+            assert_eq!(spy().activations.len(), 2, "one activation per contributor");
+        });
+    }
+
+    /// REQ: DEV-482
+    #[test]
     fn dev_482_a_hook_point_calls_its_contributors_in_priority_order() {
         with_clean_env(|| {
             spy_reset();

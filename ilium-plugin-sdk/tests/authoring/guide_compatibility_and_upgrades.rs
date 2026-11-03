@@ -56,6 +56,15 @@ fn doc_aut_205_new_grant_checked_with_not_permitted_fallback() {
     assert_rule("AUT-205", "MUST", &["`not-permitted`", "fall back"]);
 }
 
+/// REQ: AUT-205
+#[test]
+fn doc_aut_205_new_grant_is_treated_as_optional_at_run_time() {
+    assert_page_line(
+        "AUT-205",
+        &["treated as optional at run time", "keeps the old version"],
+    );
+}
+
 /// REQ: AUT-206
 #[test]
 fn doc_aut_206_restore_layout_first_byte_identifies_format() {

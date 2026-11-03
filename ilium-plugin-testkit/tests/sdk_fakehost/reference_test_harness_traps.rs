@@ -2,9 +2,9 @@
 //! the single-host restart rule; the session variant is in `reference_test_harness_session.rs`).
 
 use ilium_plugin_sdk_core::host::InstanceState;
-use ilium_plugin_sdk_core::types::{ErrorCode, Event, PluginError};
+use ilium_plugin_sdk_core::types::{ErrorCode, Event, NodeClass, PluginError};
 use ilium_plugin_testkit::errors::codes;
-use ilium_plugin_testkit::FakeHost;
+use ilium_plugin_testkit::{FakeHost, TreeNode};
 
 use crate::common::{
     assert_fails_with, client_batch, spy, spy_reset, temp_dir, with_clean_env, write_file, Spy,
@@ -149,6 +149,43 @@ fn dev_491_a_restarted_instance_gets_a_new_plugin_object_and_tree_changed() {
             .flatten()
             .any(|event| matches!(event, Event::TreeChanged(_)));
         assert!(tree_changed, "restart replays tree-changed for every node");
+    });
+}
+
+/// REQ: DEV-491
+#[test]
+fn dev_491_restart_replays_tree_changed_listing_every_node_id() {
+    with_clean_env(|| {
+        spy_reset();
+        let mut host = FakeHost::new().grants(&["tree.read"]);
+        host.activate::<Spy>();
+        let mut node_ids = Vec::new();
+        for name in ["shell", "editor", "logs"] {
+            node_ids.push(host.tree().add(TreeNode {
+                id: 0,
+                parent: None,
+                name: name.to_string(),
+                class: NodeClass::Pane,
+                content_kind: Some("ilium.terminal".to_string()),
+                agent: None,
+            }));
+        }
+        fail_at(&mut host, 0);
+        host.advance_clock(1_000);
+        host.settle();
+        let replayed: Vec<Vec<u64>> = spy()
+            .batches
+            .iter()
+            .flatten()
+            .filter_map(|event| match event {
+                Event::TreeChanged(ids) => Some(ids.iter().map(|id| id.0).collect()),
+                _ => None,
+            })
+            .collect();
+        let last = replayed.last().expect("restart replays tree-changed");
+        for node_id in node_ids {
+            assert!(last.contains(&node_id), "node {node_id} missing from replay");
+        }
     });
 }
 
@@ -427,6 +464,24 @@ fn dev_485_restart_runs_at_one_second_of_fake_time_not_before() {
             1,
             "no restart before one second of fake time"
         );
+        host.advance_clock(1);
+        host.settle();
+        assert_eq!(spy().activations.len(), 2, "the restart runs at one second");
+    });
+}
+
+/// REQ: DEV-485
+#[test]
+fn dev_485_restart_rule_uses_fake_time_for_a_trap_after_thirty_minutes() {
+    with_clean_env(|| {
+        let mut host = active();
+        fail_at(&mut host, 30);
+        let restarts = host.restarts();
+        assert_eq!(restarts.len(), 1);
+        assert_eq!(restarts[0].delay_ms, 1_000, "the delay is fake time, not wall time");
+        host.advance_clock(999);
+        host.settle();
+        assert_eq!(spy().activations.len(), 1, "no restart before one second");
         host.advance_clock(1);
         host.settle();
         assert_eq!(spy().activations.len(), 2, "the restart runs at one second");

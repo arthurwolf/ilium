@@ -73,6 +73,16 @@ fn abi_026_epoch_tick_is_10_ms() {
     assert_eq!(EPOCH_TICK_MS, 10);
 }
 
+/// REQ: ABI-026
+#[test]
+fn abi_026_manual_states_the_ticker_interval_the_constant_uses() {
+    let statement = format!("advances that counter every **{EPOCH_TICK_MS} ms**");
+    assert!(
+        crate::support::manual_page("reference-runtime-model.md").contains(&statement),
+        "reference-runtime-model.md does not state the {EPOCH_TICK_MS} ms ticker"
+    );
+}
+
 /// REQ: ABI-027
 #[test]
 fn abi_027_memory_limit_default_and_ceilings() {

@@ -43,6 +43,19 @@ fn doc_aut_304_package_contains_no_secret() {
 
 /// REQ: AUT-305
 #[test]
+fn doc_aut_305_error_catalogue_describes_the_publisher_id_refusal() {
+    let catalogue = page("reference-errors-and-limits");
+    assert!(
+        catalogue.lines().any(|line| {
+            line.starts_with("| `manifest.id-publisher` |")
+                && line.contains("does not start with the publisher id")
+        }),
+        "the error catalogue lacks the manifest.id-publisher row"
+    );
+}
+
+/// REQ: AUT-305
+#[test]
 fn doc_aut_305_signed_id_starts_with_publisher_id() {
     assert_rule(
         "AUT-305",
@@ -157,6 +170,15 @@ fn doc_aut_313_release_page_states_linux_requirement() {
     assert_rule("AUT-313", "MUST", &["need Linux"]);
 }
 
+/// REQ: AUT-313
+#[test]
+fn doc_aut_313_release_page_names_the_platform_refusal_code() {
+    assert_page_line(
+        "AUT-313",
+        &["on Windows and macOS", "`package.platform-unsupported`"],
+    );
+}
+
 /// REQ: AUT-314
 #[test]
 fn doc_aut_314_unredacted_not_asked_from_normal_install() {
@@ -211,6 +233,15 @@ fn doc_aut_319_published_version_never_reused() {
     assert_rule("AUT-319", "MUST NOT", &["`package.version-reused`"]);
 }
 
+/// REQ: AUT-319
+#[test]
+fn doc_aut_319_registry_refuses_a_duplicate_version_on_publish() {
+    assert!(
+        table_row("AUT-319").contains("`registry.version-exists`"),
+        "the AUT-319 row lacks the registry refusal code"
+    );
+}
+
 /// REQ: AUT-320
 #[test]
 fn doc_aut_320_check_lint_and_test_run_before_release() {
@@ -219,6 +250,12 @@ fn doc_aut_320_check_lint_and_test_run_before_release() {
         "MUST",
         &["`ilium plugin check`, `lint` and `test`"],
     );
+}
+
+/// REQ: AUT-321
+#[test]
+fn doc_aut_321_changelog_goes_in_readme_and_description() {
+    assert_page_line("AUT-321", &["in `README.md` and in the `description`"]);
 }
 
 /// REQ: AUT-321

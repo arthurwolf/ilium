@@ -55,6 +55,17 @@ fn pkg_158_absolute_path_entry_refused_path_invalid() {
     );
 }
 
+/// REQ: PKG-158
+#[test]
+fn pkg_158_absolute_path_refusal_adds_no_other_error_codes() {
+    let mut entries = vector_entries_z();
+    entries.insert(0, Z::new("/etc/passwd", b"x"));
+    assert_eq!(
+        check_codes(&build(&entries, &Tail::default())),
+        only("package.path-invalid")
+    );
+}
+
 /// REQ: PKG-159
 #[test]
 fn pkg_159_backslash_entry_refused_path_invalid() {
@@ -69,6 +80,18 @@ fn pkg_159_backslash_entry_refused_path_invalid() {
     );
 }
 
+/// REQ: PKG-159
+#[test]
+fn pkg_159_forward_slash_twin_of_the_backslash_name_is_not_a_path_error() {
+    let entries = sorted({
+        let mut v = vector_entries_z();
+        v.push(Z::new("assets/x.png", b"x"));
+        v
+    });
+    let codes = check_package_codes(&build(&entries, &Tail::default()));
+    assert!(!codes.contains(&"package.path-invalid".to_string()));
+}
+
 /// REQ: PKG-160
 #[test]
 fn pkg_160_nul_byte_entry_refused_path_invalid() {
@@ -81,6 +104,18 @@ fn pkg_160_nul_byte_entry_refused_path_invalid() {
         check_package_codes(&build(&entries, &Tail::default())),
         only("package.path-invalid")
     );
+}
+
+/// REQ: PKG-160
+#[test]
+fn pkg_160_same_name_without_the_nul_byte_is_not_a_path_error() {
+    let entries = sorted({
+        let mut v = vector_entries_z();
+        v.push(Z::new("assets/ab.png", b"x"));
+        v
+    });
+    let codes = check_package_codes(&build(&entries, &Tail::default()));
+    assert!(!codes.contains(&"package.path-invalid".to_string()));
 }
 
 /// REQ: PKG-161
@@ -242,6 +277,13 @@ fn pkg_174_unlisted_top_level_file_refused_entry_unexpected() {
     );
 }
 
+/// REQ: PKG-174
+#[test]
+fn pkg_174_the_same_vector_without_the_extra_file_has_no_entry_unexpected() {
+    let codes = stage1_codes(&build(&vector_entries_z(), &Tail::default()));
+    assert!(!codes.contains(&"package.entry-unexpected".to_string()));
+}
+
 /// REQ: PKG-175
 #[test]
 fn pkg_175_manifest_and_server_swapped_refused_entry_order() {
@@ -253,6 +295,13 @@ fn pkg_175_manifest_and_server_swapped_refused_entry_order() {
         stage1_codes(&build(&entries, &Tail::default())),
         only("package.entry-order")
     );
+}
+
+/// REQ: PKG-175
+#[test]
+fn pkg_175_correct_order_of_the_same_two_entries_has_no_entry_order_error() {
+    let codes = stage1_codes(&build(&vector_entries_z(), &Tail::default()));
+    assert!(!codes.contains(&"package.entry-order".to_string()));
 }
 
 /// REQ: PKG-176
@@ -270,11 +319,32 @@ fn pkg_176_4097_entries_refused_entry_limit() {
     );
 }
 
+/// REQ: PKG-176
+#[test]
+fn pkg_176_4096_entries_are_not_refused_for_the_entry_limit() {
+    let mut entries = vector_entries_z();
+    for index in 0..4094 {
+        entries.push(Z::new(&format!("assets/f{index:04}.bin"), b""));
+    }
+    let entries = sorted(entries);
+    assert_eq!(entries.len(), 4096);
+    let codes = stage1_codes(&build(&entries, &Tail::default()));
+    assert!(!codes.contains(&"package.entry-limit".to_string()));
+}
+
 /// REQ: PKG-177
 #[test]
 fn pkg_177_core_module_instead_of_component_refused_component_invalid() {
     let bytes = package_with_component(&core_module_with(&[api_section(&[0, 0, 0, 1, 0, 0])]));
     assert_eq!(check_codes(&bytes), only("package.component-invalid"));
+}
+
+/// REQ: PKG-177
+#[test]
+fn pkg_177_one_api_section_component_is_not_refused_as_component_invalid() {
+    let bytes = package_with_component(&component_with(&[api_section(&[0, 0, 0, 1, 0, 0])]));
+    let codes = check_codes(&bytes);
+    assert!(!codes.contains(&"package.component-invalid".to_string()));
 }
 
 /// REQ: PKG-178
@@ -283,6 +353,14 @@ fn pkg_178_duplicated_api_section_refused_api_section_repeated() {
     let section = api_section(&[0, 0, 0, 1, 0, 0]);
     let bytes = package_with_component(&component_with(&[section.clone(), section]));
     assert_eq!(check_codes(&bytes), only("package.api-section-repeated"));
+}
+
+/// REQ: PKG-178
+#[test]
+fn pkg_178_single_api_section_is_not_refused_as_repeated() {
+    let bytes = package_with_component(&component_with(&[api_section(&[0, 0, 0, 1, 0, 0])]));
+    let codes = check_codes(&bytes);
+    assert!(!codes.contains(&"package.api-section-repeated".to_string()));
 }
 
 /// REQ: PKG-179
@@ -297,6 +375,14 @@ fn pkg_179_five_byte_payload_refused_api_section_invalid() {
 fn pkg_180_payload_0_0_2_0_refused_api_version() {
     let bytes = package_with_component(&component_with(&[api_section(&[0, 0, 0, 2, 0, 0])]));
     assert_eq!(check_codes(&bytes), only("manifest.api-version"));
+}
+
+/// REQ: PKG-180
+#[test]
+fn pkg_180_payload_0_0_0_1_is_not_refused_as_api_version() {
+    let bytes = package_with_component(&component_with(&[api_section(&[0, 0, 0, 1, 0, 0])]));
+    let codes = check_codes(&bytes);
+    assert!(!codes.contains(&"manifest.api-version".to_string()));
 }
 
 /// REQ: PKG-181

@@ -91,6 +91,16 @@ fn doc_aut_409_layout_change_tested_with_previous_storage_snapshot() {
 
 /// REQ: AUT-410
 #[test]
+fn doc_aut_410_colour_rule_is_reviewed_at_each_theme_and_density() {
+    assert!(
+        table_row("AUT-410")
+            .contains("Review of the rendered views at each theme and density setting"),
+        "the AUT-410 row lacks the theme and density review method"
+    );
+}
+
+/// REQ: AUT-410
+#[test]
 fn doc_aut_410_colour_not_the_only_carrier_of_meaning_quality() {
     assert_rule(
         "AUT-410",
