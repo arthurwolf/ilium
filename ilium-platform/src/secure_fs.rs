@@ -43,6 +43,33 @@ pub fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
     Ok(file)
 }
 
+/// Open a provider file without updating its access time, or fail closed if
+/// the platform or file permissions cannot guarantee that property.
+#[cfg(target_os = "linux")]
+pub fn open_regular_file_without_atime(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOATIME)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "read source is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn open_regular_file_without_atime(_path: &Path) -> io::Result<std::fs::File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "access-time-preserving reads are unavailable",
+    ))
+}
+
 /// Identifies the generation of an already-open file handle. Callers must
 /// open the path first and derive this identity from that same handle so a
 /// replacement between path lookup and identity capture cannot be mistaken

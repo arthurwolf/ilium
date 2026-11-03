@@ -273,6 +273,10 @@ pub enum ResourceCommand {
         resource_id: ResourceId,
         reason: String,
     },
+    RecoverStaleOwner {
+        resource_id: ResourceId,
+        reason: String,
+    },
     ReconcileInvocation {
         agent: AgentIdentity,
         evidence: InvocationEligibility,

@@ -83,6 +83,12 @@ pub enum FixtureBehavior {
     /// test.
     WorkingUntilMarker { marker_path: PathBuf },
 
+    /// Sits at an idle prompt until `marker_path` exists, then starts a turn on
+    /// its own -- prints the working marker with no keystroke ever sent to it.
+    /// This is how a real agent begins a goal continuation or a background-task
+    /// notification turn.
+    IdleThenWorkingOnMarker { marker_path: PathBuf },
+
     /// Working fixture that records fresh kernel terminal dimensions for split tests.
     WorkingUntilMarkerWithSize {
         marker_path: PathBuf,
@@ -470,6 +476,7 @@ mod tests {
             | FixtureBehavior::StaticScreen { .. }
             | FixtureBehavior::WorkingThenIdle { .. }
             | FixtureBehavior::WorkingUntilMarker { .. }
+            | FixtureBehavior::IdleThenWorkingOnMarker { .. }
             | FixtureBehavior::WorkingUntilMarkerWithSize { .. }
             | FixtureBehavior::HoldArgument { .. }
             | FixtureBehavior::ResumePrompt
@@ -503,6 +510,9 @@ mod tests {
             FixtureBehavior::WorkingThenIdle { working_seconds: 5 },
             FixtureBehavior::WorkingUntilMarker {
                 marker_path: PathBuf::from("/tmp/marker"),
+            },
+            FixtureBehavior::IdleThenWorkingOnMarker {
+                marker_path: PathBuf::from("/tmp/start-marker"),
             },
             FixtureBehavior::WorkingUntilMarkerWithSize {
                 marker_path: PathBuf::from("/synthetic/marker"),

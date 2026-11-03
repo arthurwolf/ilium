@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::BuiltinAgentProvider;
+use crate::{AgentProvider, BuiltinAgentProvider};
 
 /// An ordered row is retained until validation so duplicate keys are visible.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +30,14 @@ pub struct CustomAgentProfile {
     pub name: String,
     pub icon: String,
     pub base_provider: BuiltinAgentProvider,
+    /// Replaces the provider's program word (`claude`, `codex`) when launching;
+    /// blank keeps the default. Shell text, so `my_claude` or `~/bin/claude` work.
+    #[serde(default)]
+    pub command: String,
+    /// Extra command-line arguments inserted right after the program word, as
+    /// shell text (`--yolo`, `--model 'name with space'`).
+    #[serde(default)]
+    pub arguments: String,
     #[serde(default)]
     pub environment: Vec<EnvironmentEntry>,
 }
@@ -51,7 +59,24 @@ pub struct CustomAgentIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCustomAgentLaunch {
     pub identity: CustomAgentIdentity,
+    pub command: String,
+    pub arguments: String,
     pub environment: Vec<EnvironmentEntry>,
+}
+
+impl ResolvedCustomAgentLaunch {
+    /// Rewrites a canonical provider command line (`claude`, `claude --resume ID`,
+    /// `codex resume ID`) with this profile's program override and arguments.
+    /// Command lines that do not start with the provider's program word are
+    /// returned unchanged, so user-owned commands are never mangled.
+    pub fn customize_command_line(&self, command_line: &str) -> String {
+        customize_command_line(
+            self.identity.base_provider,
+            &self.command,
+            &self.arguments,
+            command_line,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -72,10 +97,37 @@ pub enum ProfileValidationError {
     DuplicateKey { row: usize },
     #[error("Environment row {row}: value contains a NUL character")]
     InvalidValue { row: usize },
+    #[error("Command must not contain control characters")]
+    InvalidCommand,
+    #[error("Arguments must not contain control characters")]
+    InvalidArguments,
     #[error("Profile IDs must be unique")]
     DuplicateId,
     #[error("Profile names must be unique, ignoring case and surrounding whitespace")]
     DuplicateName,
+}
+
+fn customize_command_line(
+    provider: BuiltinAgentProvider,
+    command: &str,
+    arguments: &str,
+    command_line: &str,
+) -> String {
+    let program = provider.command_line();
+    let rest = match command_line.strip_prefix(program) {
+        Some("") => "",
+        Some(rest) if rest.starts_with(' ') => rest,
+        _ => return command_line.to_owned(),
+    };
+    let command = command.trim();
+    let arguments = arguments.trim();
+    let mut line = if command.is_empty() { program } else { command }.to_owned();
+    if !arguments.is_empty() {
+        line.push(' ');
+        line.push_str(arguments);
+    }
+    line.push_str(rest);
+    line
 }
 
 /// The terminal adapter filters these variables even when inherited.
@@ -103,6 +155,16 @@ pub fn is_reserved_environment_key(key: &str) -> bool {
 }
 
 impl CustomAgentProfile {
+    /// The command a fresh launch of this profile runs, for display in settings.
+    pub fn command_preview(&self) -> String {
+        customize_command_line(
+            self.base_provider,
+            &self.command,
+            &self.arguments,
+            self.base_provider.command_line(),
+        )
+    }
+
     pub fn launch_input(&self) -> Result<ResolvedCustomAgentLaunch, ProfileValidationError> {
         self.validate()?;
         Ok(ResolvedCustomAgentLaunch {
@@ -110,6 +172,8 @@ impl CustomAgentProfile {
                 profile_id: self.id.clone(),
                 base_provider: self.base_provider,
             },
+            command: self.command.clone(),
+            arguments: self.arguments.clone(),
             environment: self.environment.clone(),
         })
     }
@@ -129,6 +193,12 @@ impl CustomAgentProfile {
             BuiltinAgentProvider::Claude | BuiltinAgentProvider::Codex
         ) {
             return Err(ProfileValidationError::InvalidProvider);
+        }
+        if self.command.chars().any(char::is_control) {
+            return Err(ProfileValidationError::InvalidCommand);
+        }
+        if self.arguments.chars().any(char::is_control) {
+            return Err(ProfileValidationError::InvalidArguments);
         }
         let mut keys = HashSet::new();
         for (index, entry) in self.environment.iter().enumerate() {
@@ -180,8 +250,37 @@ mod tests {
             name: "Work".into(),
             icon: "★".into(),
             base_provider: BuiltinAgentProvider::Claude,
+            command: String::new(),
+            arguments: String::new(),
             environment: vec![],
         }
+    }
+
+    #[test]
+    fn command_override_and_arguments_rewrite_only_the_program_word() {
+        let mut item = profile();
+        item.command = "my_claude".into();
+        item.arguments = "--yolo".into();
+        let launch = item.launch_input().unwrap();
+        assert_eq!(launch.customize_command_line("claude"), "my_claude --yolo");
+        assert_eq!(
+            launch.customize_command_line("claude --resume abc"),
+            "my_claude --yolo --resume abc"
+        );
+        assert_eq!(launch.customize_command_line("claudette"), "claudette");
+        assert_eq!(launch.customize_command_line("echo claude"), "echo claude");
+        item.command = String::new();
+        item.arguments = String::new();
+        let plain = item.launch_input().unwrap();
+        assert_eq!(plain.customize_command_line("claude"), "claude");
+        item.arguments = "--a\n--b".into();
+        assert_eq!(
+            item.validate(),
+            Err(ProfileValidationError::InvalidArguments)
+        );
+        item.arguments.clear();
+        item.command = "bad\u{7}".into();
+        assert_eq!(item.validate(), Err(ProfileValidationError::InvalidCommand));
     }
 
     #[test]

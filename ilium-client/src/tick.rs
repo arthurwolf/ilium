@@ -25,6 +25,9 @@ pub fn on_tick(
     was_animating: bool,
     search_workers: &mut SearchWorkers,
 ) -> bool {
+    if app.custom_status_screen_observations.retry_due(now) {
+        app.refresh_custom_status_screen_watches();
+    }
     // Read *before* advancing the animation so the tick that finishes an
     // in-progress transition still reports "was animating" and forces its
     // own final redraw -- `tick_layout_animation` and the animation
@@ -32,13 +35,15 @@ pub fn on_tick(
     // of this tick" contract.
     app.tick_layout_animation(now);
     let before = app.pane_viewports();
-    app.sync_last_prompt_histories();
-    let metadata_geometry_changed = before != app.pane_viewports();
+    let prompt_history_changed = app.sync_last_prompt_histories();
+    let after_prompt_sync = app.pane_viewports();
+    let metadata_geometry_changed = before != after_prompt_sync;
     if metadata_geometry_changed {
         app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
     }
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
+    let tree_activity_changed = app.tick_tree_activity_projection(now);
     let autosave_wrote = app.tick_autosave();
     let resource_saved = app.tick_resource_dialog(now);
     let budget_saved = app.tick_restructure_budget_autosave(now)
@@ -49,6 +54,14 @@ pub fn on_tick(
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
+    let session_goals_changed = app.tick_session_goals(now);
+    let claude_goals_changed = app.tick_claude_goals(now);
+    let goal_selection_changed = app.prune_goal_tab_selection();
+    let goal_geometry_changed = (session_goals_changed || claude_goals_changed)
+        && after_prompt_sync != app.pane_viewports();
+    if goal_geometry_changed {
+        app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+    }
     let remote_compaction_started = app.tick_remote_compaction_monitor(now);
     let cost_changed = app.tick_cost(now);
     let compaction_changed = app.tick_compaction(now);
@@ -69,8 +82,10 @@ pub fn on_tick(
         !setup_prompt_was_open && matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     was_animating
         || metadata_geometry_changed
+        || prompt_history_changed
         || tree_transition_changed
         || terminal_activity_changed
+        || tree_activity_changed
         || (app.ui_settings.progress_monitor_enabled && !app.resources.waits.is_empty())
         || resource_saved
         || autosave_wrote
@@ -80,6 +95,10 @@ pub fn on_tick(
         || attention_changed
         || session_stats_changed
         || session_models_changed
+        || session_goals_changed
+        || claude_goals_changed
+        || goal_selection_changed
+        || goal_geometry_changed
         || remote_compaction_started
         || cost_changed
         || compaction_changed

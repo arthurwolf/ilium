@@ -142,6 +142,35 @@ const TEXT_INSET_RIGHT: u16 = 2;
 /// Left-aligned quarter block drawn as the blockquote gutter.
 const QUOTE_GUTTER: &str = "\u{258e}";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerTab {
+    Prompt,
+    Goal,
+}
+
+/// Tab geometry is shared by rendering and mouse hit testing. Compact labels
+/// keep both tabs available when the banner is narrow.
+pub fn tab_rects(area: Rect, toolbar: bool) -> Option<(Rect, Rect)> {
+    if area.height == 0 {
+        return None;
+    }
+    let reserved =
+        if area.height == 1 && toolbar && crate::last_prompt_toolbar::has_toolbar(area.width) {
+            crate::last_prompt_toolbar::TOOLBAR_WIDTH
+        } else {
+            0
+        };
+    let available = area.width.saturating_sub(reserved);
+    if available < 3 {
+        return None;
+    }
+    let (prompt_width, goal_width) = if available >= 12 { (6, 4) } else { (1, 1) };
+    Some((
+        Rect::new(area.x, area.y, prompt_width, 1),
+        Rect::new(area.x + prompt_width + 1, area.y, goal_width, 1),
+    ))
+}
+
 /// Columns the text wraps to inside `area_width`. Areas too narrow for the
 /// insets use the whole width so tiny panes still show their prompt.
 fn text_width(area_width: u16) -> u16 {
@@ -151,6 +180,13 @@ fn text_width(area_width: u16) -> u16 {
     } else {
         area_width
     }
+}
+
+/// Interaction state for the banner's toolbar and optional tabs.
+pub struct BannerControls {
+    pub toolbar: Option<ToolbarVisibility>,
+    pub hovered: Option<PromptToolbarButton>,
+    pub selected_tab: Option<BannerTab>,
 }
 
 /// Renders the last-prompt banner into `area`: a background fill spanning
@@ -165,9 +201,13 @@ pub fn render(
     prompt: Option<&str>,
     max_lines: u16,
     scheme: ColorScheme,
-    toolbar: Option<ToolbarVisibility>,
-    hovered: Option<PromptToolbarButton>,
+    controls: BannerControls,
 ) {
+    let BannerControls {
+        toolbar,
+        hovered,
+        selected_tab,
+    } = controls;
     if area.height == 0 {
         return;
     }
@@ -195,12 +235,38 @@ pub fn render(
             .width
             .saturating_sub(crate::last_prompt_toolbar::TOOLBAR_WIDTH.saturating_sub(inset_right));
     }
-    let rows = layout(prompt, text_area.width, max_lines.min(area.height));
+    if let Some(selected) = selected_tab {
+        if let Some((prompt_tab, goal_tab)) = tab_rects(area, toolbar.is_some()) {
+            for (tab, rect, full, short) in [
+                (BannerTab::Prompt, prompt_tab, "Prompt", "P"),
+                (BannerTab::Goal, goal_tab, "Goal", "G"),
+            ] {
+                let mut style = theme::last_prompt_style(scheme);
+                if tab == selected {
+                    style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+                }
+                frame.render_widget(
+                    Paragraph::new(if rect.width == 1 { short } else { full }).style(style),
+                    rect,
+                );
+            }
+            if area.height > 1 {
+                text_area.y += 1;
+                text_area.height = text_area.height.saturating_sub(1);
+            } else {
+                let start = goal_tab.x.saturating_add(goal_tab.width).saturating_add(1);
+                let end = text_area.x.saturating_add(text_area.width);
+                text_area.x = start.min(end);
+                text_area.width = end.saturating_sub(text_area.x);
+            }
+        }
+    }
+    let rows = layout(prompt, text_area.width, max_lines.min(text_area.height));
     let gutter_style = Style::new()
         .fg(theme::accent_bg())
         .bg(theme::muted_accent_bg(scheme));
     for (index, (_, is_seam)) in rows.iter().enumerate() {
-        if framed {
+        if framed && (selected_tab.is_none() || area.height > 1) {
             let gutter = if *is_seam {
                 gutter_style.add_modifier(Modifier::DIM)
             } else {
@@ -208,7 +274,7 @@ pub fn render(
             };
             frame.render_widget(
                 Paragraph::new(Span::styled(QUOTE_GUTTER, gutter)),
-                Rect::new(area.x + 1, area.y + index as u16, 1, 1),
+                Rect::new(area.x + 1, text_area.y + index as u16, 1, 1),
             );
         }
     }
@@ -253,6 +319,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn goal_tabs_fit_narrow_rows_and_never_overlap_the_toolbar() {
+        let area = Rect::new(2, 3, 30, 1);
+        let (prompt, goal) = tab_rects(area, true).unwrap();
+        assert!(prompt.x + prompt.width < goal.x);
+        assert!(
+            goal.x + goal.width <= area.x + area.width - crate::last_prompt_toolbar::TOOLBAR_WIDTH
+        );
+        let compact = Rect::new(0, 0, 5, 1);
+        let (prompt, goal) = tab_rects(compact, false).unwrap();
+        assert_eq!((prompt.width, goal.width), (1, 1));
+        assert!(tab_rects(Rect::new(0, 0, 2, 1), false).is_none());
+    }
+
+    #[test]
+    fn goal_tab_renders_with_the_prompt_controls_in_one_and_two_rows() {
+        for height in [1, 2] {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(50, height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    let area = frame.area();
+                    render(
+                        frame,
+                        area,
+                        Some("Paused: objective"),
+                        height,
+                        ColorScheme::Dark,
+                        BannerControls {
+                            toolbar: Some(ToolbarVisibility {
+                                older: false,
+                                newer: false,
+                            }),
+                            hovered: None,
+                            selected_tab: Some(BannerTab::Goal),
+                        },
+                    );
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let top: String = (0..50).map(|x| buffer[(x, 0)].symbol()).collect();
+            assert!(top.contains("Prompt") && top.contains("Goal"));
+            let bottom: String = (0..50).map(|x| buffer[(x, height - 1)].symbol()).collect();
+            assert!(bottom.contains(PromptToolbarButton::Close.glyph()));
+            assert!(bottom.contains("Paused"));
+        }
+    }
+
+    #[test]
     fn wide_banner_draws_a_quote_gutter_and_indents_the_text() {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 3)).unwrap();
@@ -265,8 +379,11 @@ mod tests {
                     Some("hello world"),
                     3,
                     ColorScheme::Dark,
-                    None,
-                    None,
+                    BannerControls {
+                        toolbar: None,
+                        hovered: None,
+                        selected_tab: None,
+                    },
                 );
             })
             .unwrap();
@@ -296,8 +413,11 @@ mod tests {
                     Some("hello"),
                     3,
                     ColorScheme::Dark,
-                    Some(visibility),
-                    None,
+                    BannerControls {
+                        toolbar: Some(visibility),
+                        hovered: None,
+                        selected_tab: None,
+                    },
                 );
             })
             .unwrap();
@@ -323,8 +443,11 @@ mod tests {
                     Some("FIRST\nSECOND\nTHIRD\nLAST"),
                     4,
                     ColorScheme::Dark,
-                    None,
-                    None,
+                    BannerControls {
+                        toolbar: None,
+                        hovered: None,
+                        selected_tab: None,
+                    },
                 );
             })
             .unwrap();

@@ -18,6 +18,7 @@ pub mod animation_recommendation;
 pub mod custom_agent;
 pub mod option_compatible_list;
 pub mod progress_timing;
+pub mod status_rule_expression;
 pub use progress_timing::{
     EtaEstimate, ProgressCheck, ProgressCheckOutcome, ProgressRate, ProgressSample, ProgressTiming,
 };

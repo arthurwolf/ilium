@@ -62,6 +62,19 @@ pub(crate) fn detection_freshness_warning(
     None
 }
 
+/// Return unknown for absent, mismatched, or future-dated evidence. Those
+/// cases should not make a negated stale condition fire as if it were fresh.
+pub(crate) fn detection_activity_stale(
+    status: &PaneStatus,
+    evidence: Option<&ilium_ipc::PaneDetectionEvidence>,
+    current_unix_millis: u64,
+) -> Option<bool> {
+    status.agent_state()?;
+    let evidence = evidence.filter(|evidence| &evidence.applied_status == status)?;
+    let age = current_unix_millis.checked_sub(evidence.observed_at_unix_millis)?;
+    Some(evidence.stale_after_millis == 0 || age >= evidence.stale_after_millis)
+}
+
 /// Redraw only when an observation crosses its expiry, including on a silent
 /// maintenance tick. Receipt time never participates in the decision.
 pub(crate) fn detection_freshness_expired_since(
@@ -1379,6 +1392,10 @@ mod detection_freshness_tests {
             goal: None,
         };
         assert!(detection_freshness_warning(&status, Some(&evidence), 1_029_999).is_none());
+        assert_eq!(detection_activity_stale(&status, Some(&evidence), 1_029_999), Some(false));
+        assert_eq!(detection_activity_stale(&status, Some(&evidence), 1_030_000), Some(true));
+        assert_eq!(detection_activity_stale(&status, None, 1_000_000), None);
+        assert_eq!(detection_activity_stale(&status, Some(&evidence), 999_999), None);
         let stale = detection_freshness_warning(&status, Some(&evidence), 1_030_000).unwrap();
         assert!(stale.contains("30 seconds ago") && stale.contains("limit 30 seconds"));
         assert!(detection_freshness_warning(&status, None, 1_000_000)
@@ -1390,6 +1407,7 @@ mod detection_freshness_tests {
                 .contains("future timestamp")
         );
         evidence.applied_status = PaneStatus::PlainShell;
+        assert_eq!(detection_activity_stale(&status, Some(&evidence), 1_000_000), None);
         assert!(
             detection_freshness_warning(&status, Some(&evidence), 1_000_000)
                 .unwrap()

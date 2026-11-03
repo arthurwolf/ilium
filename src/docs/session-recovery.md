@@ -133,7 +133,7 @@ You can continue a Claude Code conversation under Codex, or a Codex conversation
 
 1. Right-click the agent's terminal pane in the tree and choose **Convert to Codex** (for a Claude pane) or **Convert to Claude Code** (for a Codex pane). The entry appears only when the pane has a verified session, no other conversion is running, and the pane is not a worktree pane.
 2. Ilium checks that the source transcript exists, freezes the pane, opens the **Convert ... session to ...** dialog and stops the agent process.
-3. The dialog shows each step with progress and a log. Press `Esc` to cancel while it is converting.
+3. The dialog shows each step with progress and a log. If the shared worker budget is busy, it waits briefly for capacity; press `Esc` to cancel the wait or conversion.
    - Claude to Codex: locate the Claude Code transcript, inspect it, start a private `codex app-server`, import the session using Codex's own importer, verify the Codex rollout, stop the app-server.
    - Codex to Claude: locate the Codex rollout, parse it, convert it to Claude Code lines, write the Claude Code transcript, verify it, register it with Claude Code. User prompts, assistant text and shell or tool calls with results are carried over. Reasoning and token events are dropped.
 4. On success the frozen pane is replaced by a new pane that resumes the converted session in the other agent.
@@ -181,3 +181,4 @@ Notes:
 | New server binary not in use | Run `ilium --restart-server` (this restarts the project's server and relaunches panes) |
 | Session data appears in `git status` | Add `.ilium/` to `.gitignore` |
 | Conversion entry missing | Not a Claude or Codex agent, no verified transcript yet, a worktree pane, or another conversion is running |
+| Conversion reports `InputBytes` | An older Ilium client could not reserve its conversion memory budget. Other work may be using the shared budget, or the conversion may need more than the configured limit. If the source agent was stopped, press `Enter` in the failure dialog to resume its original session. Wait for other work to finish before trying again; the original transcript is not modified |

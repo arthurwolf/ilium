@@ -43,6 +43,9 @@ fn main() {
         FixtureBehavior::WorkingUntilMarker { marker_path } => {
             run_working_until_marker(&marker_path, None)
         }
+        FixtureBehavior::IdleThenWorkingOnMarker { marker_path } => {
+            run_idle_then_working_on_marker(&marker_path)
+        }
         FixtureBehavior::WorkingUntilMarkerWithSize {
             marker_path,
             size_path,
@@ -492,6 +495,16 @@ fn run_working_then_idle(working_seconds: u32) {
     if let Some(queued_prompt) = read_submitted_line() {
         emit(&format!("queued:<{queued_prompt}>\r\n"));
     }
+    linger();
+}
+
+fn run_idle_then_working_on_marker(marker_path: &std::path::Path) {
+    emit("Done. Ready for the next instruction.\r\n");
+    while !marker_path.exists() {
+        std::thread::sleep(MARKER_POLL_INTERVAL);
+    }
+    clear_screen();
+    emit("Cogitating (esc to interrupt)\r\n");
     linger();
 }
 

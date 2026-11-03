@@ -1,6 +1,6 @@
 # Agent monitoring
 
-Ilium watches every terminal pane for an AI coding agent, works out which agent it is and what that agent is doing, and shows the answer in the project tree. This page explains how identity and activity are detected, what each status indicator means, how Normal and Attention display modes differ, how the `/goal` badge, progress footers and reserved terminal space behave, how to recover work when an agent stops, and which agent CLIs are supported. Detection is read-only: Ilium observes processes and the visible screen and never controls the agent.
+Ilium watches every terminal pane for an AI coding agent, works out which agent it is and what that agent is doing, and shows the answer in the project tree. This page explains detection, status indicators, the Normal, Attention and Custom display modes, goals and progress monitors, and recovery when an agent stops. Detection is read-only: Ilium observes processes and the visible screen and never controls the agent.
 
 Contents:
 
@@ -9,6 +9,7 @@ Contents:
 - [The three icon slots in the tree](#the-three-icon-slots-in-the-tree)
 - [Status indicators and their defaults](#status-indicators-and-their-defaults)
 - [Normal mode and Attention mode](#normal-mode-and-attention-mode)
+- [Custom status rules](#custom-status-rules)
 - [The `/goal` badge](#the-goal-badge)
 - [Progress monitors and progress displays](#progress-monitors-and-progress-displays)
 - [Reserved terminal space](#reserved-terminal-space)
@@ -43,7 +44,10 @@ Detection is adaptive rather than fixed.
 | Pane state | Default check interval | Setting |
 | --- | --- | --- |
 | Working or waiting for approval | 10 seconds | `working_poll_seconds` |
-| Idle, finished, or plain shell | 45 seconds | `idle_poll_seconds` |
+| Idle or finished agent | 15 seconds (or `idle_poll_seconds` if lower) | `idle_poll_seconds` |
+| Plain shell | 45 seconds | `idle_poll_seconds` |
+
+A pane you are not viewing that holds an idle or finished agent is also rechecked about one second after it prints new output, at most once every five seconds. An agent that starts a turn by itself (a goal continuation, a queued or scheduled prompt, a background-task notification) therefore shows its activity spinner within a couple of seconds instead of waiting for the idle check. Plain shells keep the idle interval.
 
 Both values are whole seconds, are applied to a running server within moments of saving, and are clamped to a minimum of 500 ms (a value of `0` means 500 ms). They are detection checks only. They do not change how fast an agent works and are unrelated to progress-monitor polling.
 
@@ -157,7 +161,7 @@ A monitored task's progress icon is drawn from a family of frames. **Settings ->
 
 ## Normal mode and Attention mode
 
-**Settings -> Agent Monitoring -> Display mode** (`[ui].agent_monitoring_mode`, `"normal"` or `"attention"`; default `normal`).
+**Settings -> Agent Monitoring -> Display mode** (`[ui].agent_monitoring_mode`, `"normal"`, `"attention"` or `"custom"`; default `normal`).
 
 - **Normal** shows the objective and now slots side by side.
 - **Attention** shows one status icon: the highest-priority signal. Agent identity stays separate. The underlying evidence is unchanged, so a paused goal that is also waiting for approval is still paused; Attention just shows the approval.
@@ -186,6 +190,18 @@ When nothing in that list applies and the agent is simply working, Attention wou
 
 Normal mode ignores this setting and always shows the working animation.
 
+## Custom status rules
+
+Select **Custom** in Agent Monitoring and open **Configure custom icons** to choose the status shown beside each agent. Custom displays one status icon, separate from the agent identity. Rules are global and are saved as you edit them; they apply to all projects.
+
+Rules are evaluated from top to bottom. The first enabled rule whose conditions match supplies the icon, so move a more specific rule above a broader one. Within a rule, NOT applies to one condition and AND binds more tightly than OR: `A OR B AND C` means `A OR (B AND C)`. A condition whose evidence is unavailable is unknown, not false; negating it does not make it match. The supplied defaults start with an independently designed set of rules. Reset restores those defaults after confirmation.
+
+Conditions can use detected agent and goal states, progress monitor and attention information, and other available pane facts. A screen regular expression can match text currently visible in the pane; it does not search scrollback. The server evaluates patterns against the visible screen and sends match results, not the screen text, for these observations. Rules accept up to 16 distinct screen patterns of at most 256 characters each. Invalid patterns cannot be saved. If the screen cannot be observed or exceeds the observation limit, the result is unknown until it can be observed again.
+
+For panes with multiple monitors, the selected monitored task and progress conditions refer to Ilium's representative monitor. Separate **any monitored task** and **any monitor has failed** conditions inspect all registered monitors; they are false when there are none. Conditions joined with AND are independent: two separate **any** conditions can be satisfied by different monitors.
+
+Each rule can select a static symbol, a Braille animation, an animation made from symbol frames, or frames driven by monitored progress. Colour and bold or dim styling are configurable. The application's motion setting also controls animated rule visuals. The editor offers Live tree and Demo tree previews; the latter uses example states rather than your agents. If no rule matches, the default rules configuration leaves the custom status slot empty.
+
 ## The `/goal` badge
 
 Claude Code and Codex support a long-term `/goal`. Ilium reads the provider's own status row and maps it to the objective slot: active, paused, blocked, usage-limited or reached. Key points:
@@ -195,6 +211,14 @@ Claude Code and Codex support a long-term `/goal`. Ilium reads the provider's ow
 - A blocked goal is not inferred from error-looking terminal text, and is separate from approval requests and task failures.
 - A progress monitor's result message never pauses, resumes or otherwise changes the agent's goal.
 - Each of the five goal states has its own icon row in Settings -> Agent Monitoring.
+
+When a current goal is known, the last-prompt banner offers **Prompt** and **Goal** tabs. Click a tab or use the configured leader followed by `G` to switch the focused pane. The toolbar's flag opens goal details: hover for a preview, click to pin or unpin it, or use the leader followed by `U`. A pinned view accepts arrow keys, Page Up/Down, Home, End and Escape while focused; click outside it to return keyboard focus to the terminal. Scroll the view to read long objectives. These shortcuts can be remapped in Keyboard settings.
+
+The goal tab and toolbar flag have separate switches in User Interface settings. They are enabled by default. If Ilium cannot recover text for the current session, it says so; a temporarily unavailable provider may leave the last known text marked stale. Goal text is read locally and is not sent to a model by this feature. Claude lifecycle state comes from the visible agent status; accepted main-session goal commands can provide its text. Codex goal details come from its verified thread's local goal state when safe access is available; the screen-derived goal indicator remains available otherwise.
+
+To bound local memory use, an individual Claude transcript record larger than 8 MiB is treated as unavailable; Ilium does not display a truncated objective as if it were complete. After an oversized Claude record, later verified goal commands can restore the text. A Codex objective larger than 1 MiB is likewise treated as unavailable rather than truncated.
+
+On 64-bit Linux with comparable process handles, Ilium checks the running agent's process identity, home and provider configuration directory before reading goal details. For Claude Code 2.1.312, a verified session record bound to a socket owned by that process can establish the current session even when its transcript is not open. Otherwise, Ilium requires an unambiguous verified main transcript held open by the agent. A custom provider directory can be read when the agent's session has also been verified. Where the process identity, environment, transcript ownership or session binding cannot be verified, goal text is unavailable and the existing screen-derived indicator remains available.
 
 ## Progress monitors and progress displays
 
@@ -246,7 +270,7 @@ All under **Settings -> Agent Monitoring**.
 | Hide completed progress after | `[ui].completed_progress_hide_after_seconds` | 60 | Steps of 30 seconds; `0` = Never |
 | Progress fill style | `[ui].task_progress_frames` | Braille | Braille, Blocks, Moons, Quarters or custom |
 
-Hide-after behaviour: the delay starts from the server's final observation and does not restart when a client reconnects. Hiding changes presentation only. Text disappears but the reserved rows remain; error details, unread indicators, retained results and queued notifications are untouched, and the child terminal is not resized.
+Hide-after behaviour: the delay starts from the server's final observation and does not restart when a client reconnects. Hiding releases the footer rows and resizes the child terminal; error details, unread indicators, retained results and queued notifications are untouched.
 
 ## Reserved terminal space
 
@@ -258,7 +282,7 @@ To reclaim or change the space, turn a display off or lower its row limit in Set
 
 | Row | What it does |
 | --- | --- |
-| Display mode | Normal or Attention |
+| Display mode | Normal, Attention or Custom status rules |
 | Attention running indicator | What a quietly working agent shows in Attention mode |
 | Working poll interval | Seconds between checks while working or awaiting approval |
 | Idle poll interval | Seconds between checks while idle |
@@ -318,6 +342,8 @@ For a detected Claude Code or Codex pane, the second icon in the pane header ope
 
 The popover has four tabs: **Overview**, **Tokens**, **Activity** and **Prompts**. All data is parsed locally from the agent's own JSONL transcript on a low-priority worker thread; nothing is sent to the server or any network. Large transcripts are read incrementally. Dollar figures here appear only when the agent itself recorded them (Claude Code's own cost snapshot); the cost indicators described in [Agent cost](agent-cost.md) price tokens separately.
 
+Previously read statistics remain visible while the same session refreshes. Ilium also keeps a bounded private local cache of statistics and read positions, so it can resume reading after a restart or when an in-memory entry is discarded. The cache can include recent prompts. If the cache is unavailable or its transcript checks fail, Ilium reads the transcript again; figures may take longer to appear.
+
 ## Configuration reference
 
 ```toml
@@ -331,7 +357,7 @@ process_name = "myagent"
 agent_class  = "other"
 
 [ui]
-agent_monitoring_mode = "normal"          # or "attention"
+agent_monitoring_mode = "normal"          # or "attention" or "custom"
 attention_running_indicator = "icon"
 progress_max_lines = 4                    # 1 to 20
 completed_progress_hide_after_seconds = 60  # 0 = never hide

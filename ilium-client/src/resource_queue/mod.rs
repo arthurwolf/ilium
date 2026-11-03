@@ -6,12 +6,15 @@ mod dialog;
 mod help;
 #[cfg(test)]
 mod near_limit_tests;
+mod panel;
+mod panel_actions;
 mod presentation;
 pub mod segments;
 pub(crate) mod tree;
 use crate::app::{App, FocusTarget, RightPanelTarget};
 pub use dialog::ResourceDialog;
 use ilium_core::{resource_queue::*, NodeId};
+pub use panel_actions::ResourceAction;
 use std::collections::HashMap;
 pub use tree::{ResourceRowTarget, ResourceRows};
 // Terminal presentation must never interpret catalog text as control sequences.
@@ -58,6 +61,7 @@ pub struct ResourceUi {
     pub wait_revision: Option<u64>,
     pub next_request: u64,
     pub pending: Option<u64>,
+    pub snapshot_retry_at: Option<std::time::Instant>,
     pub retry_request: Option<ilium_ipc::resource::ResourceRequest>,
     pub error: Option<String>,
     pub observation_error: Option<String>,
@@ -65,6 +69,12 @@ pub struct ResourceUi {
     pub previous_target: Option<RightPanelTarget>,
     pub recovery_intent: Option<(NodeId, ResourceCommand)>,
     pub selected_reservation: Option<ReservationId>,
+    /// Resource whose right-click menu is open (the menu target stays the project).
+    pub context_resource: Option<ResourceId>,
+    /// Project, resource and request under a right-clicked participant row.
+    pub context_participant: Option<(NodeId, ResourceId, ReservationId)>,
+    /// Panel button under the pointer, with the pointer position, for tooltips.
+    pub hovered_action: Option<(panel_actions::ResourceAction, ratatui::layout::Position)>,
 }
 impl ResourceUi {
     pub fn record(&self, id: &ResourceId) -> Option<&ResourceRecord> {
@@ -141,6 +151,7 @@ impl App {
             .rebuild(&self.tree, &catalog, &self.session_name, &local_invocations);
         self.resources.local_invocations = local_invocations;
         self.resources.catalog = Some(catalog);
+        self.open_new_resource_rows();
         if let Some(ResourceRowTarget::Participant {
             pane_id,
             project_id,
@@ -163,6 +174,21 @@ impl App {
                 .find(|id| self.tree.get(*id).is_some_and(|node| node.is_project()));
             if let Some(project) = project {
                 self.select_node(project);
+            }
+        }
+        // A deleted or unlinked resource loses its tree row; its control panel must not linger.
+        if let crate::app::RightPanelTarget::Resource {
+            project_id,
+            resource_id,
+        } = &self.right_panel_target
+        {
+            let still_listed = self.resources.rows.targets.values().any(|target| {
+                matches!(target, ResourceRowTarget::Resource { project_id: project, resource_id: resource }
+                    if project == project_id && resource == resource_id)
+            });
+            if !still_listed {
+                self.right_panel_target = crate::app::RightPanelTarget::Empty;
+                self.status_message = Some("The resource was removed from this project".into());
             }
         }
         self.bump_tree_version();
@@ -350,6 +376,20 @@ impl App {
         self.resources.error = None;
         self.resource_request(project_id, ilium_ipc::resource::ResourceOperation::Snapshot);
     }
+    /// Resource folders start expanded so an agent that takes a resource stays
+    /// visible; each folder is opened once, so a later user collapse sticks.
+    pub(crate) fn open_new_resource_rows(&mut self) {
+        let mut opened = false;
+        for (project, resource_row) in self.resources.rows.take_unopened_resource_rows() {
+            let mut path = self.path_to(project);
+            path.push(resource_row);
+            opened |= self.tree_state.open(path);
+        }
+        if opened {
+            self.bump_tree_version();
+        }
+    }
+
     pub fn settings_toggle_resource_grouping(&mut self) {
         let mut ui = self.ui_settings.clone();
         ui.resource_queue_grouping = !ui.resource_queue_grouping;
@@ -415,7 +455,100 @@ impl App {
         }
         match result {
             Ok(reply) => {
-                // A stale success is not confirmation: keep the exact retry envelope and form.
+                // A newer broadcast can precede the reply to a committed create.
+                // Only the exact submitted identity, confirmed by that newer catalog,
+                // may complete the form without applying the older projection.
+                let confirmed_create = correlated
+                    && self.resources.dialog.as_ref().is_some_and(|dialog| {
+                        matches!(dialog.kind, dialog::DialogKind::Create)
+                            && dialog.submitted
+                            && !dialog.submit_when_ready
+                            && self
+                                .resources
+                                .retry_request
+                                .as_ref()
+                                .is_some_and(|request| {
+                                    request.request_key.as_deref()
+                                        == Some(dialog.request_key.as_str())
+                                        && matches!(
+                                            &request.operation,
+                                            ilium_ipc::resource::ResourceOperation::Mutate(
+                                                ResourceCommand::Create { definition, .. }
+                                            ) if definition.id == dialog.create_id
+                                        )
+                                })
+                            && reply.result.as_ref().is_some_and(|result| {
+                                result.resource_id.as_ref() == Some(&dialog.create_id)
+                                    && self.resources.catalog.as_ref().is_some_and(|catalog| {
+                                        catalog.revision >= result.revision
+                                            && catalog.resources.contains_key(&dialog.create_id)
+                                    })
+                            })
+                    });
+                // A link reply can likewise follow its own newer broadcast.
+                // Confirm both the submitted binding and the server-assigned
+                // project identity remain present before closing the form.
+                let confirmed_link = correlated
+                    && self.resources.dialog.as_ref().is_some_and(|dialog| {
+                        matches!(dialog.kind, dialog::DialogKind::Link { .. })
+                            && dialog.submitted
+                            && !dialog.submit_when_ready
+                            && self.resources.retry_request.as_ref().is_some_and(|request| {
+                                if request.project_id != Some(dialog.project)
+                                    || request.request_key.as_deref()
+                                        != Some(dialog.request_key.as_str())
+                                {
+                                    return false;
+                                }
+                                let ilium_ipc::resource::ResourceOperation::Mutate(
+                                    ResourceCommand::Link { link },
+                                ) = &request.operation else {
+                                    return false;
+                                };
+                                reply.result.as_ref().is_some_and(|result| {
+                                    result.resource_id.as_ref() == Some(&link.resource_id)
+                                        && self.resources.catalog.as_ref().is_some_and(|catalog| {
+                                            catalog.revision >= result.revision
+                                                && reply.catalog.links.iter().any(|committed| {
+                                                    committed.resource_id == link.resource_id
+                                                        && committed.project_path == link.project_path
+                                                        && committed.slug == link.slug
+                                                        && catalog.links.iter().any(|current| {
+                                                            current.project_id == committed.project_id
+                                                                && current.resource_id == committed.resource_id
+                                                                && current.project_path == committed.project_path
+                                                                && current.slug == committed.slug
+                                                        })
+                                                })
+                                        })
+                                })
+                            })
+                    });
+                // A successful edit may also arrive behind a newer broadcast.
+                // Only acknowledge its baseline when the current definition is
+                // exactly the one returned for this correlated submitted edit.
+                // A later metadata edit must still require explicit conflict repair.
+                let confirmed_edit = correlated
+                    && self.resources.dialog.as_ref().is_some_and(|dialog| {
+                        let dialog::DialogKind::Edit(id) = &dialog.kind else {
+                            return false;
+                        };
+                        dialog.submitted
+                            && !dialog.submit_when_ready
+                            && self.resources.retry_request.as_ref().is_some_and(|request| {
+                                request.request_key.as_deref() == Some(dialog.request_key.as_str())
+                                    && matches!(&request.operation, ilium_ipc::resource::ResourceOperation::Mutate(ResourceCommand::Edit { definition }) if &definition.id == id)
+                            })
+                            && reply.result.as_ref().is_some_and(|result| {
+                                result.resource_id.as_ref() == Some(id)
+                                    && self.resources.catalog.as_ref().is_some_and(|catalog| {
+                                        catalog.revision >= result.revision
+                                            && catalog.resources.get(id).is_some_and(|current| {
+                                                reply.catalog.resources.get(id).is_some_and(|committed| current.definition == committed.definition)
+                                            })
+                                    })
+                            })
+                    });
                 let accepted = self.receive_resource_catalog(
                     reply.catalog,
                     reply.clock,
@@ -423,13 +556,23 @@ impl App {
                     reply.active_waits,
                     reply.wait_revision,
                 );
-                if !accepted {
+                if !accepted && !confirmed_edit {
+                    if confirmed_create || confirmed_link {
+                        self.resources.dialog = None;
+                        self.resources.retry_request = None;
+                        self.resources.observation_error = None;
+                        return;
+                    }
                     if correlated {
                         if let Some(dialog) = &mut self.resources.dialog {
                             dialog.submitted = false;
+                            dialog.submit_when_ready = false;
                         }
                     }
                     return;
+                }
+                if confirmed_edit {
+                    self.resources.observation_error = None;
                 }
                 if let Some(token) = reply.recovery_token {
                     if correlated {
@@ -444,11 +587,35 @@ impl App {
                         .resources
                         .dialog
                         .as_mut()
-                        .filter(|dialog| dialog.submitted)
+                        .filter(|dialog| dialog.submitted && !dialog.submit_when_ready)
                     {
-                        if matches!(dialog.kind, dialog::DialogKind::Edit(_)) {
+                        if let Some(resource_id) = dialog.then_archive.take() {
+                            let project = dialog.project;
+                            self.resources.dialog = None;
+                            let revision = self
+                                .resources
+                                .catalog
+                                .as_ref()
+                                .map(|catalog| catalog.revision);
+                            self.resource_request_with_token(
+                                project,
+                                ilium_ipc::resource::ResourceOperation::Mutate(
+                                    ResourceCommand::Archive { resource_id },
+                                ),
+                                None,
+                                revision,
+                            );
+                        } else if matches!(dialog.kind, dialog::DialogKind::Edit(_)) {
                             dialog.submitted = false;
                             dialog.dirty_at = None;
+                            if let dialog::DialogKind::Edit(id) = &dialog.kind {
+                                dialog.edit_baseline = self
+                                    .resources
+                                    .catalog
+                                    .as_ref()
+                                    .and_then(|catalog| catalog.resources.get(id))
+                                    .map(|record| record.definition.clone());
+                            }
                             dialog.expected_revision = self
                                 .resources
                                 .catalog
@@ -469,7 +636,9 @@ impl App {
                             .map(|catalog| catalog.revision);
                     }
                 }
-                self.resources.error = None;
+                if correlated {
+                    self.resources.error = None;
+                }
                 let debt=self.resources.catalog.as_ref().and_then(|catalog|catalog.links.iter().find_map(|link|link.sync_debt.as_ref().map(|debt|format!("Resource committed; instruction/settings repair required: {debt}. Open the resource and press i to repair."))));
                 if debt.is_some() {
                     self.status_message = debt;
@@ -492,14 +661,49 @@ impl App {
                         },
                     );
                 }
+                let submit_when_ready = correlated
+                    && self
+                        .resources
+                        .dialog
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.submit_when_ready);
+                if submit_when_ready {
+                    if let Some(dialog) = &mut self.resources.dialog {
+                        dialog.submit_when_ready = false;
+                        dialog.submitted = false;
+                    }
+                    let event = crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Enter,
+                        crossterm::event::KeyModifiers::NONE,
+                    ));
+                    dialog::handle_event(self, &event);
+                }
             }
             Err(error) => {
+                // A queued Submit has not sent any mutation yet. Transient
+                // catalog contention must not silently discard that intent.
+                // Retry only the read, paced by the existing UI tick.
+                if correlated
+                    && error.code == "busy"
+                    && self
+                        .resources
+                        .dialog
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.submit_when_ready)
+                {
+                    self.resources.snapshot_retry_at =
+                        Some(std::time::Instant::now() + std::time::Duration::from_millis(500));
+                    self.resources.error =
+                        Some("Resource catalog busy; retrying the read before submitting…".into());
+                    return;
+                }
                 if correlated {
                     self.resources.recovery_intent = None;
                 }
                 self.resources.error = Some(format!("{}: {}", error.code, error.message));
                 if let Some(dialog) = &mut self.resources.dialog {
                     dialog.submitted = false;
+                    dialog.submit_when_ready = false;
                 }
             }
         }
@@ -589,6 +793,28 @@ impl App {
         }
     }
     pub fn tick_resource_dialog(&mut self, now: std::time::Instant) -> bool {
+        if self
+            .resources
+            .snapshot_retry_at
+            .is_some_and(|retry_at| now >= retry_at)
+        {
+            self.resources.snapshot_retry_at = None;
+            if self.resources.pending.is_none() {
+                if let Some(project) = self
+                    .resources
+                    .dialog
+                    .as_ref()
+                    .filter(|dialog| dialog.submit_when_ready)
+                    .map(|dialog| dialog.project)
+                {
+                    self.resource_request(
+                        project,
+                        ilium_ipc::resource::ResourceOperation::Snapshot,
+                    );
+                    return true;
+                }
+            }
+        }
         dialog::autosave(self, now)
     }
     pub fn resource_detail(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
@@ -597,6 +823,36 @@ impl App {
     pub fn resource_overlay(&self, frame: &mut ratatui::Frame) {
         dialog::render(self, frame);
         help::render(self, frame);
+        self.render_panel_tooltip(frame);
+    }
+    fn render_panel_tooltip(&self, frame: &mut ratatui::Frame) {
+        let Some((action, anchor)) = self.resources.hovered_action else {
+            return;
+        };
+        if self.resources.dialog.is_some() || self.resources.help_open {
+            return;
+        }
+        let RightPanelTarget::Resource {
+            ref resource_id, ..
+        } = self.right_panel_target
+        else {
+            return;
+        };
+        let Some(record) = self.resources.record(resource_id) else {
+            return;
+        };
+        let (title, body) = action.tooltip(record);
+        let reason = action.availability(self, record).err();
+        crate::status_icons::render_tooltip(
+            frame,
+            frame.area(),
+            anchor,
+            &crate::status_icons::TooltipContent {
+                title: title.to_owned(),
+                body: body.to_owned(),
+                reason: reason.map(|reason| format!("Unavailable now: {reason}")),
+            },
+        );
     }
     pub fn resource_wait_footer(
         &self,
@@ -607,6 +863,67 @@ impl App {
         detail::render_wait(self, frame, area, pane);
     }
 }
+impl App {
+    /// Runs a resource action chosen from the tree context menu.
+    pub fn run_resource_context_action(
+        &mut self,
+        project_id: NodeId,
+        action: crate::app::ContextMenuAction,
+    ) {
+        use crate::app::ContextMenuAction as Action;
+        if matches!(
+            action,
+            Action::ResourceRequestShow
+                | Action::ResourceRequestCancel
+                | Action::ResourceRequestRelease
+        ) {
+            let Some((project, resource_id, reservation_id)) =
+                self.resources.context_participant.clone()
+            else {
+                return;
+            };
+            self.show_resource(project, resource_id.clone());
+            self.resources.selected_reservation = Some(reservation_id);
+            let code = match action {
+                Action::ResourceRequestCancel => Some('x'),
+                Action::ResourceRequestRelease => Some('o'),
+                _ => None,
+            };
+            if let Some(code) = code {
+                detail::perform_key(
+                    self,
+                    project,
+                    resource_id,
+                    crossterm::event::KeyCode::Char(code),
+                );
+            }
+            return;
+        }
+        let Some(resource_id) = self.resources.context_resource.clone() else {
+            return;
+        };
+        if matches!(action, Action::ResourceOpenPanel) {
+            self.show_resource(project_id, resource_id);
+            return;
+        }
+        let code = match action {
+            Action::ResourceEdit => 'e',
+            Action::ResourcePause | Action::ResourceResume => 'p',
+            Action::ResourceMarkOffline => 'u',
+            Action::ResourceUnlink => 'l',
+            Action::ResourceDelete => 'a',
+            _ => return,
+        };
+        self.show_resource(project_id, resource_id.clone());
+        detail::perform_key(
+            self,
+            project_id,
+            resource_id,
+            crossterm::event::KeyCode::Char(code),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,6 +935,33 @@ mod tests {
         );
         assert!(app.ui_settings.resource_queue_grouping);
         assert!(app.resources.catalog.is_none());
+    }
+    #[test]
+    fn new_resource_folders_open_once_and_a_manual_collapse_sticks() {
+        let mut app = App::new(
+            "test".into(),
+            std::path::PathBuf::from("/synthetic-resource-project"),
+        );
+        let project = NodeId(7);
+        let row = NodeId((1_u64 << 61) | 1);
+        app.resources.rows.targets.insert(
+            row,
+            ResourceRowTarget::Resource {
+                project_id: project,
+                resource_id: ResourceId::from("gpu"),
+            },
+        );
+        app.resources.rows.projects.insert(project, vec![row]);
+        let path = {
+            let mut path = app.path_to(project);
+            path.push(row);
+            path
+        };
+        app.open_new_resource_rows();
+        assert!(app.tree_state.opened().contains(&path));
+        app.tree_state.close(&path);
+        app.open_new_resource_rows();
+        assert!(!app.tree_state.opened().contains(&path));
     }
     #[test]
     fn recovery_confirmation_keeps_original_project_and_revision() {
@@ -772,6 +1116,86 @@ mod review_regressions {
         }
     }
     #[test]
+    fn reordered_edit_reply_preserves_further_saves_and_concurrent_conflicts() {
+        for concurrent_edit in [false, true] {
+            let (mut app, project, _) = setup();
+            let definition = app.resources.catalog.as_ref().unwrap().resources
+                [&ResourceId::from("gpu")]
+                .definition
+                .clone();
+            let mut form = ResourceDialog::edit(project, &definition);
+            form.expected_revision = Some(7);
+            form.fields[0] = "First authored title".into();
+            let now = std::time::Instant::now();
+            form.dirty_at = Some(now);
+            app.resources.dialog = Some(form);
+            assert!(dialog::autosave(
+                &mut app,
+                now + std::time::Duration::from_millis(600)
+            ));
+            let (request_id, _) = capture(&mut app);
+            let mut committed = reply(&app, 8);
+            committed
+                .catalog
+                .resources
+                .get_mut(&ResourceId::from("gpu"))
+                .unwrap()
+                .definition
+                .title = "First authored title".into();
+            committed
+                .catalog
+                .resources
+                .get_mut(&ResourceId::from("gpu"))
+                .unwrap()
+                .definition
+                .definition_revision += 1;
+            let mut newer = committed.catalog.clone();
+            newer.revision = 9;
+            if concurrent_edit {
+                newer
+                    .resources
+                    .get_mut(&ResourceId::from("gpu"))
+                    .unwrap()
+                    .definition
+                    .title = "Another user's title".into();
+                newer
+                    .resources
+                    .get_mut(&ResourceId::from("gpu"))
+                    .unwrap()
+                    .definition
+                    .definition_revision += 1;
+            }
+            app.receive_resource_catalog(newer, committed.clock.clone(), Vec::new(), Vec::new(), 6);
+            app.receive_resource_reply(request_id, Ok(committed));
+            let form = app.resources.dialog.as_mut().unwrap();
+            form.fields[0] = "Second authored title".into();
+            form.dirty_at = Some(now);
+            assert!(dialog::autosave(
+                &mut app,
+                now + std::time::Duration::from_millis(1200)
+            ));
+            if concurrent_edit {
+                assert!(
+                    app.take_outbound_requests().is_empty(),
+                    "a concurrent edit must remain fenced"
+                );
+                assert!(app
+                    .resources
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains("metadata changed"));
+            } else {
+                let (_, request) = capture(&mut app);
+                assert_eq!(request.expected_revision, Some(9));
+                assert!(
+                    matches!(request.operation, ResourceOperation::Mutate(ResourceCommand::Edit { definition }) if definition.title == "Second authored title")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn final_create_envelope_has_timestamped_key_and_stable_nonempty_identity() {
         let (mut app, project, _) = setup();
         let mut form = ResourceDialog::create(project);
@@ -828,6 +1252,113 @@ mod review_regressions {
         assert!(app.resources.clock_now().is_some());
     }
     #[test]
+    fn committed_create_closes_when_newer_catalog_arrives_before_reply() {
+        let (mut app, project, _) = setup();
+        let mut form = ResourceDialog::create(project);
+        form.fields[0] = "Synthetic GPU".into();
+        form.create_id = ResourceId::from("gpu");
+        app.resources.dialog = Some(form);
+        dialog::handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        let (request_id, _) = capture(&mut app);
+        let committed_reply = reply(&app, 6);
+        app.receive_resource_reply(request_id, Ok(committed_reply));
+        assert!(app.resources.dialog.is_none());
+        assert!(app.resources.retry_request.is_none());
+        assert_eq!(app.resources.catalog.as_ref().unwrap().revision, 7);
+    }
+    #[test]
+    fn reordered_link_reply_closes_only_when_the_submitted_link_still_exists() {
+        for link_still_exists in [true, false] {
+            let (mut app, project, _) = setup();
+            let link = app.resources.catalog.as_ref().unwrap().links[0].clone();
+            let mut form = ResourceDialog::link(project);
+            form.submitted = true;
+            let mut request = ResourceRequest::new(
+                Some(project),
+                ResourceOperation::Mutate(ResourceCommand::Link { link: link.clone() }),
+            );
+            request.request_key = Some(form.request_key.clone());
+            app.resources.dialog = Some(form);
+            app.resources.retry_request = Some(request);
+            app.resources.pending = Some(42);
+            let committed = reply(&app, 6);
+            if !link_still_exists {
+                app.resources.catalog.as_mut().unwrap().links.clear();
+            }
+            app.receive_resource_reply(42, Ok(committed));
+            assert_eq!(app.resources.dialog.is_none(), link_still_exists);
+            assert_eq!(app.resources.retry_request.is_none(), link_still_exists);
+            assert_eq!(app.resources.catalog.as_ref().unwrap().revision, 7);
+        }
+    }
+    #[test]
+    fn edit_rebases_unrelated_catalog_update_without_losing_metadata() {
+        let (mut app, project, _) = setup();
+        let definition = app
+            .resources
+            .catalog
+            .as_ref()
+            .unwrap()
+            .resources
+            .values()
+            .next()
+            .unwrap()
+            .definition
+            .clone();
+        let mut form = ResourceDialog::edit(project, &definition);
+        form.expected_revision = Some(7);
+        form.fields[0] = "Edited title".into();
+        app.resources.dialog = Some(form);
+        let mut newer = app.resources.catalog.clone().unwrap();
+        newer.revision = 8;
+        let clock = app.resources.clock.clone().unwrap();
+        app.receive_resource_catalog(newer, clock, Vec::new(), Vec::new(), 5);
+        dialog::handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        let (_, request) = capture(&mut app);
+        assert_eq!(request.expected_revision, Some(8));
+    }
+    #[test]
+    fn edit_refuses_rebase_when_the_definition_changed() {
+        let (mut app, project, _) = setup();
+        let definition = app
+            .resources
+            .catalog
+            .as_ref()
+            .unwrap()
+            .resources
+            .values()
+            .next()
+            .unwrap()
+            .definition
+            .clone();
+        let mut form = ResourceDialog::edit(project, &definition);
+        form.expected_revision = Some(7);
+        form.fields[0] = "Edited title".into();
+        app.resources.dialog = Some(form);
+        let mut newer = app.resources.catalog.clone().unwrap();
+        newer.revision = 8;
+        newer
+            .resources
+            .get_mut(&definition.id)
+            .unwrap()
+            .definition
+            .title = "Concurrent edit".into();
+        let clock = app.resources.clock.clone().unwrap();
+        app.receive_resource_catalog(newer, clock, Vec::new(), Vec::new(), 5);
+        dialog::handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(app.resources.error.is_some());
+    }
+    #[test]
     fn late_attach_reconciles_waits_and_old_registry_snapshot_cannot_revert_them() {
         let (mut app, _, pane) = setup();
         assert_eq!(
@@ -880,7 +1411,6 @@ mod review_regressions {
                 ownership_generation: 13,
             },
         );
-        form.fields[0] = "CONFIRM".into();
         form.expected_revision = Some(7);
         app.resources.dialog = Some(form);
         dialog::handle_event(
@@ -925,14 +1455,13 @@ mod review_regressions {
                 ..
             })
         ));
-        let mut cancel = ResourceDialog::own_action(
+        let cancel = ResourceDialog::own_action(
             project,
             &reservation,
             ResourceCommand::Cancel {
                 reservation_id: reservation.id.clone(),
             },
         );
-        cancel.fields[0] = "CONFIRM".into();
         assert!(matches!(
             dialog::command(&app, &cancel),
             Ok(ResourceCommand::Cancel { .. })

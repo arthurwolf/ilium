@@ -466,6 +466,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
     match state.tab {
+        SettingsTab::Toolbar => {
+            crate::tree_toolbar_settings::render(frame, layout.content_area, app, state)
+        }
         SettingsTab::LlmInstructions => {}
         SettingsTab::Setup => render_scrollable(
             frame,
@@ -517,7 +520,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             render_scrollable(
                 frame,
                 layout.content_area,
-                custom_agent_lines(app, state),
+                custom_agent_view(app, state).lines,
                 state.scroll,
             );
         }
@@ -597,12 +600,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             reset_planning_lines(app, state.selected_row),
             state.scroll,
         ),
-        SettingsTab::AgentMonitoring => render_scrollable(
-            frame,
-            layout.content_area,
-            agent_monitoring_view(app, state.selected_row, layout.content_area.width).lines,
-            state.scroll,
-        ),
+        SettingsTab::AgentMonitoring => {
+            if let Some(editor) = &app.custom_status_rules_editor {
+                crate::status_rules_editor::render(frame, layout.content_area, app, editor);
+            } else {
+                render_scrollable(frame, layout.content_area,
+                    agent_monitoring_view(app, state.selected_row, layout.content_area.width).lines,
+                    state.scroll);
+            }
+        }
         SettingsTab::Cost => crate::cost_settings_ui::render(
             frame,
             layout.content_area,
@@ -763,6 +769,9 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::About => {}
+        SettingsTab::Toolbar => {
+            push_help_anchor(&mut anchors, layout, "TOOLBAR-01", 2, 0, true);
+        }
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
             for (topic_id, line, row) in
@@ -1053,6 +1062,8 @@ pub fn settings_help_anchors(
                     AppearanceRow::ShowToolbarLabels => "AP-17",
                     AppearanceRow::SectionFrames => "AP-33",
                     AppearanceRow::LastPrompt => "AP-18",
+                    AppearanceRow::GoalTab => "AP-37",
+                    AppearanceRow::GoalToolbarIcon => "AP-38",
                     AppearanceRow::LastPromptMaxLines => "AP-19",
                     AppearanceRow::ProgressMonitor => "AP-20",
                     AppearanceRow::ProgressMonitorMaxLines => "AP-21",
@@ -1348,6 +1359,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Appearance => "◐",
         SettingsTab::Padding => "▢",
         SettingsTab::Icons => "▦",
+        SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
         SettingsTab::Optimization => "↗",
@@ -1391,6 +1403,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
         SettingsTab::Inference => "Models",
         SettingsTab::LlmInstructions => "LLM text",
         SettingsTab::TextTriggers => "Triggers",
+        SettingsTab::CustomAgents => "Custom",
         _ => tab.label(),
     }
 }
@@ -1606,103 +1619,265 @@ struct TextTriggerView {
     add_line: usize,
 }
 
-fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
+/// Rendered custom-agent settings plus the line each selectable row sits on,
+/// so keyboard scrolling and mouse hits agree with the spacing of the layout.
+pub(crate) struct CustomAgentView {
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) row_lines: Vec<usize>,
+}
+
+const CUSTOM_AGENT_LABEL_WIDTH: usize = 26;
+
+fn dim(text: impl Into<String>) -> Span<'static> {
+    Span::styled(text.into(), Style::new().add_modifier(Modifier::DIM))
+}
+
+fn section_heading(title: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        title.to_owned(),
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// Control characters would corrupt the terminal grid, so show them escaped.
+fn printable(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\n' => "\\n".to_owned(),
+            '\r' => "\\r".to_owned(),
+            '\t' => "\\t".to_owned(),
+            other if other.is_control() => "�".to_owned(),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+/// One aligned `label ……… value` row; an empty value shows its dim placeholder.
+fn custom_agent_form_row(
+    label: &str,
+    value: &str,
+    placeholder: &str,
+    selected: bool,
+    editing: bool,
+) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let label_style = if selected {
+        theme::selected_style()
+    } else {
+        Style::new()
+    };
+    let padding = CUSTOM_AGENT_LABEL_WIDTH.saturating_sub(label.chars().count());
+    let value_span = if value.is_empty() && !editing {
+        dim(placeholder.to_owned())
+    } else {
+        Span::raw(printable(value))
+    };
+    let mut spans = vec![
+        Span::raw("  "),
+        Span::styled(format!("{marker} {label}"), label_style),
+        leader_span(padding),
+        value_span,
+    ];
+    if editing {
+        spans.push(Span::styled("▏", Style::new().fg(theme::accent_bg())));
+    }
+    Line::from(spans)
+}
+
+/// A button-like row (`[ Save ]`) without a leader, indented like form rows.
+fn custom_agent_action_row(label: &str, selected: bool) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let style = if selected {
+        theme::selected_style()
+    } else {
+        Style::new()
+    };
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(format!("{marker} [ {label} ]"), style),
+    ])
+}
+
+/// The profile line shown in the list; the mouse hit-test uses its prefix width.
+pub(crate) fn custom_agent_list_prefix(
+    profile: &ilium_core::custom_agent::CustomAgentProfile,
+    selected: bool,
+) -> String {
+    format!(
+        "{} {} {}  {}",
+        if selected { "›" } else { " " },
+        profile.icon,
+        profile.name,
+        dim_summary(profile)
+    )
+}
+
+fn dim_summary(profile: &ilium_core::custom_agent::CustomAgentProfile) -> String {
+    format!(
+        "({:?} · {} · {} variables)  ",
+        profile.base_provider,
+        profile.command_preview(),
+        profile.environment.len()
+    )
+}
+
+pub(crate) fn custom_agent_view(app: &App, state: &SettingsState) -> CustomAgentView {
     use crate::custom_agent_editor::EditorRow;
     let mut lines = vec![
         Line::from(Span::styled(
-            "CUSTOM AGENTS",
+            if state.custom_agent_editor.is_some() {
+                "CUSTOM AGENTS › PROFILE"
+            } else {
+                "CUSTOM AGENTS"
+            },
             Style::new()
                 .fg(theme::accent_bg())
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("Values are plaintext in Ilium's owner-only configuration file."),
-        Line::from("Changes apply on the next launch or restart."),
+        Line::from(dim(
+            "Values are plaintext in Ilium's owner-only configuration file.",
+        )),
+        Line::from(dim("Changes apply on the next launch or restart.")),
         Line::from(""),
     ];
+    let mut row_lines = Vec::new();
     if let Some(editor) = &state.custom_agent_editor {
-        for (index, row) in editor.rows().into_iter().enumerate() {
-            let (label, value) = match row {
-                EditorRow::Name => ("Name".to_owned(), editor.draft.name.clone()),
-                EditorRow::Icon => ("Icon".to_owned(), editor.draft.icon.clone()),
-                EditorRow::Provider => (
-                    "Base".to_owned(),
-                    format!("{:?}", editor.draft.base_provider),
+        let rows = editor.rows();
+        for (index, row) in rows.iter().copied().enumerate() {
+            // Each group starts with a heading and a blank line above it.
+            let heading = match row {
+                EditorRow::Name => Some(("Identity", None)),
+                EditorRow::Command => Some((
+                    "Launch",
+                    Some("Replace the program and add flags; both are shell text."),
+                )),
+                EditorRow::EnvironmentKey(0) => Some((
+                    "Environment",
+                    Some("Variables set only for this agent's process."),
+                )),
+                EditorRow::AddEnvironment if editor.draft.environment.is_empty() => Some((
+                    "Environment",
+                    Some("Variables set only for this agent's process."),
+                )),
+                EditorRow::Save => Some(("Actions", None)),
+                _ => None,
+            };
+            if let Some((title, hint)) = heading {
+                if !row_lines.is_empty() {
+                    lines.push(Line::from(""));
+                }
+                lines.push(section_heading(title));
+                if let Some(hint) = hint {
+                    lines.push(Line::from(dim(hint)));
+                }
+            } else if matches!(row, EditorRow::EnvironmentKey(position) if position > 0)
+                || (row == EditorRow::AddEnvironment && !editor.draft.environment.is_empty())
+            {
+                // A blank line separates one variable's name/value/remove trio from the next.
+                lines.push(Line::from(""));
+            }
+            let selected = index == state.selected_row;
+            let editing = selected && state.custom_agent_editing;
+            row_lines.push(lines.len());
+            lines.push(match row {
+                EditorRow::Name => {
+                    custom_agent_form_row("Name", &editor.draft.name, "required", selected, editing)
+                }
+                EditorRow::Icon => {
+                    custom_agent_form_row("Icon", &editor.draft.icon, "none", selected, false)
+                }
+                EditorRow::Provider => custom_agent_form_row(
+                    "Base agent",
+                    &format!("{:?}", editor.draft.base_provider),
+                    "",
+                    selected,
+                    false,
                 ),
-                EditorRow::EnvironmentKey(index) => (
-                    format!("Variable {} name", index + 1),
-                    editor.draft.environment[index].key.clone(),
+                EditorRow::Command => custom_agent_form_row(
+                    "Command",
+                    &editor.draft.command,
+                    &format!(
+                        "{} (default)",
+                        ilium_core::AgentProvider::command_line(editor.draft.base_provider)
+                    ),
+                    selected,
+                    editing,
                 ),
-                EditorRow::EnvironmentValue(index) => (
-                    format!("Variable {} value", index + 1),
-                    editor.displayed_value(index).unwrap_or_default(),
+                EditorRow::Arguments => custom_agent_form_row(
+                    "Arguments",
+                    &editor.draft.arguments,
+                    "none",
+                    selected,
+                    editing,
                 ),
-                EditorRow::RemoveEnvironment(index) => (
-                    format!("Remove variable {}", index + 1),
-                    "[ Remove ]".to_owned(),
+                EditorRow::EnvironmentKey(position) => custom_agent_form_row(
+                    &format!("Variable {} name", position + 1),
+                    &editor.draft.environment[position].key,
+                    "NAME",
+                    selected,
+                    editing,
                 ),
-                EditorRow::AddEnvironment => ("Add variable".to_owned(), "[ Add ]".to_owned()),
-                EditorRow::RevealValues => (
-                    "Show values".to_owned(),
-                    if editor.reveal_values { "On" } else { "Off" }.to_owned(),
+                EditorRow::EnvironmentValue(position) => custom_agent_form_row(
+                    &format!("Variable {} value", position + 1),
+                    &editor.displayed_value(position).unwrap_or_default(),
+                    "empty",
+                    selected,
+                    editing,
                 ),
-                EditorRow::Save => (
-                    "Save profile".to_owned(),
+                EditorRow::RemoveEnvironment(position) => {
+                    custom_agent_action_row(&format!("Remove variable {}", position + 1), selected)
+                }
+                EditorRow::AddEnvironment => custom_agent_action_row("Add variable", selected),
+                EditorRow::RevealValues => custom_agent_form_row(
+                    "Show values",
+                    if editor.reveal_values { "On" } else { "Off" },
+                    "",
+                    selected,
+                    false,
+                ),
+                EditorRow::Save => custom_agent_action_row(
                     if state.custom_agent_save_pending {
                         "Saving…"
                     } else {
-                        "[ Save ]"
-                    }
-                    .to_owned(),
-                ),
-                EditorRow::Cancel => ("Cancel".to_owned(), "[ Cancel ]".to_owned()),
-            };
-            let value = value
-                .chars()
-                .map(|character| match character {
-                    '\n' => "\\n".to_owned(),
-                    '\r' => "\\r".to_owned(),
-                    '\t' => "\\t".to_owned(),
-                    other if other.is_control() => "�".to_owned(),
-                    other => other.to_string(),
-                })
-                .collect::<String>();
-            let selected = index == state.selected_row;
-            let padding = 30usize.saturating_sub(label.chars().count());
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{} {label}", if selected { "›" } else { " " }),
-                    if selected {
-                        theme::selected_style()
-                    } else {
-                        Style::new()
+                        "Save profile"
                     },
+                    selected,
                 ),
-                leader_span(padding),
-                Span::raw(value),
-            ]));
+                EditorRow::Cancel => custom_agent_action_row("Cancel", selected),
+            });
+            if row == EditorRow::Arguments {
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    dim(format!(
+                        "Runs: {}",
+                        printable(&editor.draft.command_preview())
+                    )),
+                ]));
+            }
         }
-        lines.push(Line::from(if state.custom_agent_editing {
+        lines.push(Line::from(""));
+        lines.push(Line::from(dim(if state.custom_agent_editing {
             "Type to edit; Enter finishes; Esc cancels editing."
         } else {
             "Enter edits or activates; arrows navigate; Esc cancels."
-        }));
+        })));
     } else {
         for (index, profile) in app.custom_agents.profiles.iter().enumerate() {
-            lines.push(Line::from(format!(
-                "{} {} {}  ({:?}, {} variables)  [Delete]",
-                if index == state.selected_row {
-                    "›"
-                } else {
-                    " "
-                },
-                profile.icon,
-                profile.name,
-                profile.base_provider,
-                profile.environment.len()
-            )));
+            row_lines.push(lines.len());
+            lines.push(Line::from(vec![
+                Span::raw(custom_agent_list_prefix(
+                    profile,
+                    index == state.selected_row,
+                )),
+                Span::raw("[Delete]"),
+            ]));
         }
         let missing = crate::custom_agent_settings::missing_profiles(app);
         for (index, identity) in missing.iter().enumerate() {
+            row_lines.push(lines.len());
             lines.push(Line::from(format!(
                 "{} [ Restore missing profile {} ({:?}) ]",
                 if state.selected_row == app.custom_agents.profiles.len() + index {
@@ -1714,6 +1889,8 @@ fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
                 identity.base_provider
             )));
         }
+        lines.push(Line::from(""));
+        row_lines.push(lines.len());
         lines.push(Line::from(format!(
             "{} [ Add custom agent ]",
             if state.selected_row == app.custom_agents.profiles.len() + missing.len() {
@@ -1722,13 +1899,18 @@ fn custom_agent_lines(app: &App, state: &SettingsState) -> Vec<Line<'static>> {
                 " "
             }
         )));
-        lines.push(Line::from(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." }));
+        lines.push(Line::from(""));
+        lines.push(Line::from(dim(if state.custom_agent_delete_confirm { "Delete this profile? Press y to confirm, n to cancel. Running panes continue; restart needs the profile." } else { "Enter edits or adds; Delete removes a profile." })));
     }
-    lines
+    CustomAgentView { lines, row_lines }
 }
 
 pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Rect) -> u16 {
-    (custom_agent_lines(app, state).len().min(u16::MAX as usize) as u16).saturating_sub(area.height)
+    (custom_agent_view(app, state)
+        .lines
+        .len()
+        .min(u16::MAX as usize) as u16)
+        .saturating_sub(area.height)
 }
 
 /// Readable, measured list surface for server-executed regexp responses.
@@ -1876,7 +2058,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
-        SettingsTab::Padding => 0,
+        SettingsTab::Padding | SettingsTab::Toolbar => 0,
         SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,
@@ -1913,7 +2095,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             .lines
             .len() as u16,
         SettingsTab::CustomAgents => match &app.mode {
-            crate::app::Mode::Settings(state) => custom_agent_lines(app, state).len() as u16,
+            crate::app::Mode::Settings(state) => custom_agent_view(app, state).lines.len() as u16,
             _ => 0,
         },
         SettingsTab::Appearance => {
@@ -2158,10 +2340,69 @@ pub fn setup_content_hit(area: Rect, scroll: u16, position: Position, app: &App)
     None
 }
 
-/// Two-sided icon editor: a compact three-column selector table on the left,
-/// and an always-live miniature sidebar on the right. The preview stays
-/// intentionally independent from `tree_ui` so it can show every icon role
-/// even when the live session happens not to contain that node/status.
+/// Render the current session tree in a settings preview using the production tree renderer.
+pub(crate) fn render_live_tree_preview(frame: &mut Frame, area: Rect, app: &App, mode: crate::agent_monitoring::AgentMonitoringMode) {
+        if area.width == 0 || area.height == 0 { return; }
+        let mut preview_tree_state = TreeState::default();
+        for path in app.tree_state.opened() { preview_tree_state.open(path.clone()); }
+        let agent_models = app.current_tree_models();
+        crate::tree_ui::render(
+            frame,
+            area,
+            &app.tree,
+            &mut preview_tree_state,
+            crate::tree_ui::TreeRenderOptions {
+                visibility: None,
+                toolbar_layout: &app.ui_settings.tree_toolbar_layout,
+                custom_toolbar_profiles: None,
+                custom_toolbar_selected: None,
+                custom_toolbar_hovered: None,
+                custom_toolbar_pending: None,
+                custom_agent_labels: None,
+                focused: false,
+                elapsed_ms: if app.ui_settings.motion_level == crate::config::MotionLevel::Off { 0 } else { app.started_at.elapsed().as_millis() },
+                terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
+                current_unix_millis: crate::scheduled_input::unix_millis_now(),
+                project_name: app.project_name.as_deref(),
+                project_icon: app.project_icon.as_deref(),
+                is_project_name_loading: app.is_project_name_loading,
+                titles_loading: &app.titles_loading,
+                recently_created: &app.recently_created,
+                terminal_activity: &app.terminal_activity,
+                detection_evidence: Some(&app.pane_detection_evidence),
+                focused_pane_id: app.focused_pane_id(),
+                transitions: &app.tree_transitions,
+                agent_identifiers: &app.ui_settings.agent_identifiers,
+                agent_models: &agent_models,
+                icons: &app.ui_settings.icons,
+                workspace_git_statuses: &app.workspace_git_statuses,
+                show_worktree_branch_line: app.git_settings.branch_line
+                    == crate::config::GitBranchLine::WorktreeOnly,
+                tree_order: app.ui_settings.tree_order,
+                row_layout: &app.ui_settings.tree_row_layout,
+                show_project_separators: app.ui_settings.show_project_separators,
+                sidebar_density: app.ui_settings.sidebar_density,
+                use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+                agent_monitoring_mode: mode,
+                attention_progress_reports: app.ui_settings.attention_progress_reports,
+                custom_status_rules: Some(&app.custom_status_rules),
+                screen_observations: Some(&app.custom_status_screen_observations),
+                screen_pane_id: None,
+                icon_motion: app.ui_settings.motion_level,
+                attention_running_indicator: app.ui_settings.attention_running_indicator,
+                show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
+                frozen_panes: &app.frozen_panes,
+                cost: None,
+                hover: crate::tree_ui::TreeHoverState::default(),
+                sidebar_files: &Default::default(),
+                chatroom_projects: &Default::default(),
+                resources: Some(&app.resources),
+                panes: &app.panes,
+            },
+        );
+}
+
+/// Two-sided icon editor with a live or illustrative sidebar preview.
 fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let (left, right) = icon_tab_columns(area);
     let table_height = left.height.saturating_sub(2) as usize;
@@ -2260,56 +2501,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
         right.height.saturating_sub(2),
     );
     if state.icons_preview_real {
-        let mut preview_tree_state = TreeState::default();
-        let agent_models = app.current_tree_models();
-        crate::tree_ui::render(
-            frame,
-            preview_area,
-            &app.tree,
-            &mut preview_tree_state,
-            crate::tree_ui::TreeRenderOptions {
-                custom_toolbar_profiles: None,
-                custom_toolbar_selected: None,
-                custom_toolbar_hovered: None,
-                custom_toolbar_pending: None,
-                custom_agent_labels: None,
-                focused: false,
-                elapsed_ms: app.started_at.elapsed().as_millis(),
-                terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
-                current_unix_millis: crate::scheduled_input::unix_millis_now(),
-                project_name: app.project_name.as_deref(),
-                project_icon: app.project_icon.as_deref(),
-                is_project_name_loading: app.is_project_name_loading,
-                titles_loading: &app.titles_loading,
-                recently_created: &app.recently_created,
-                terminal_activity: &app.terminal_activity,
-                detection_evidence: Some(&app.pane_detection_evidence),
-                focused_pane_id: app.focused_pane_id(),
-                transitions: &app.tree_transitions,
-                agent_identifiers: &app.ui_settings.agent_identifiers,
-                agent_models: &agent_models,
-                icons: &app.ui_settings.icons,
-                workspace_git_statuses: &app.workspace_git_statuses,
-                show_worktree_branch_line: app.git_settings.branch_line
-                    == crate::config::GitBranchLine::WorktreeOnly,
-                tree_order: app.ui_settings.tree_order,
-                row_layout: &app.ui_settings.tree_row_layout,
-                show_project_separators: app.ui_settings.show_project_separators,
-                sidebar_density: app.ui_settings.sidebar_density,
-                use_stable_glyphs: app.ui_settings.use_stable_glyphs,
-                agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
-                attention_progress_reports: app.ui_settings.attention_progress_reports,
-                attention_running_indicator: app.ui_settings.attention_running_indicator,
-                show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
-                frozen_panes: &app.frozen_panes,
-                cost: None,
-                hover: crate::tree_ui::TreeHoverState::default(),
-                sidebar_files: &Default::default(),
-                chatroom_projects: &Default::default(),
-                resources: Some(&app.resources),
-                panes: &app.panes,
-            },
-        );
+        render_live_tree_preview(frame, preview_area, app, app.ui_settings.agent_monitoring_mode);
     } else {
         let mut preview = vec![Line::from("")];
         let icons = &app.ui_settings.icons;
@@ -4799,6 +4991,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
         AppearanceRow::SectionFrames => "Section frames",
         AppearanceRow::LastPrompt => "Last prompt banner",
+        AppearanceRow::GoalTab => "Goal tab",
+        AppearanceRow::GoalToolbarIcon => "Goal toolbar icon",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::ProgressMonitor => "Progress monitor",
         AppearanceRow::ProgressMonitorMaxLines => "Progress footer lines",
@@ -4887,6 +5081,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::LastPrompt => {
             "Show the last prompt you typed or pasted and submitted into a detected agent pane, in a banner below its toolbar. Only an exactly-reconstructed submission updates it -- an unrecognised input leaves the previous prompt showing."
         }
+        AppearanceRow::GoalTab => {
+            "Offer a Goal tab in the prompt banner when the agent has a current goal."
+        }
+        AppearanceRow::GoalToolbarIcon => {
+            "Show a goal flag in the agent toolbar with a readable goal popover."
+        }
         AppearanceRow::LastPromptMaxLines => {
             "Maximum rows the last-prompt banner can grow to -- it only reserves as many as the prompt actually needs (wrapping long lines to fit), up to this ceiling. A prompt that still doesn't fit is truncated in the middle, keeping its first and last lines."
         }
@@ -4958,6 +5158,8 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         AppearanceRow::ShowToolbarLabels => on_off(ui.show_toolbar_labels),
         AppearanceRow::SectionFrames => on_off(ui.section_frames_enabled),
         AppearanceRow::LastPrompt => on_off(ui.last_prompt_enabled),
+        AppearanceRow::GoalTab => on_off(ui.goal_tab_enabled),
+        AppearanceRow::GoalToolbarIcon => on_off(ui.goal_toolbar_icon_enabled),
         AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
         AppearanceRow::ProgressMonitor => on_off(ui.progress_monitor_enabled),
         AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
@@ -6345,6 +6547,59 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
 struct AgentMonitoringView {
     lines: Vec<Line<'static>>,
     row_lines: Vec<(crate::app::AgentMonitoringRow, u16)>,
+    cards: Vec<(crate::agent_monitoring::AgentMonitoringMode, Rect)>,
+    configure_line: Option<u16>,
+}
+
+pub(crate) fn monitoring_preview_span(app: &App, mode: crate::agent_monitoring::AgentMonitoringMode, index: usize) -> Span<'static> {
+    use ilium_core::{AgentClass, AgentState, AgentTurn, GoalState, PaneProgress, PaneStatus, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus};
+    let (turn, goal) = match index {
+        0 => (AgentTurn::Working, Some(GoalState::Active)),
+        1 => (AgentTurn::WaitingApproval, None),
+        2 => (AgentTurn::Idle, Some(GoalState::Paused)),
+        3 => (AgentTurn::WaitingSubagents, None),
+        5..=9 => (AgentTurn::Idle, None),
+        _ => (AgentTurn::Idle, None),
+    };
+    let status = PaneStatus::Agent(AgentState { class: AgentClass::Claude, turn, goal, completion_unread: index == 9 });
+    let progress: Vec<PaneProgress> = match index {
+        5..=8 => {
+            let task_status = match index { 6 => ProgressTaskStatus::Error, 8 => ProgressTaskStatus::Done, _ => ProgressTaskStatus::Running };
+            vec![PaneProgress {
+                monitor_id: 1,
+                report: ProgressTaskReport {
+                    job_id: "demo".into(), status: task_status, percent: if index == 5 { 50.0 } else { 100.0 },
+                    message: "Example task".into(), details: String::new(), error: None, eta_seconds: None, indeterminate: false,
+                },
+                monitor_health: if index == 7 { ProgressMonitorHealth::Failed { consecutive_failures: 1, last_error: "Example failure".into() } } else { ProgressMonitorHealth::Healthy },
+                last_observed_unix_millis: 0, timing: Default::default(), attention: ProgressAttention::Unread,
+            }]
+        }
+        _ => Vec::new(),
+    };
+    let icons = &app.ui_settings.icons;
+    let elapsed_ms = app.started_at.elapsed().as_millis();
+    if mode == crate::agent_monitoring::AgentMonitoringMode::Custom {
+        return crate::status_rule_visual::status_span(crate::status_rule_visual::StatusSpanContext {
+            rules: &app.custom_status_rules, status: &status, progress: &progress, scheduled_input: false,
+            shell_output: None, activity_stale: None,
+            screen_matches: &|_| ilium_core::status_rule_expression::Observation::Unknown,
+            icons, use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+            elapsed_millis: u64::try_from(elapsed_ms).unwrap_or(u64::MAX), motion: app.ui_settings.motion_level,
+        });
+    }
+    let signals = crate::agent_monitoring::displayed_pane_signals(mode, app.ui_settings.attention_progress_reports,
+        app.ui_settings.attention_running_indicator, &status, &progress, false, None);
+    let objective = crate::status_icons::objective_span(signals.objective, icons, app.ui_settings.use_stable_glyphs);
+    let now_elapsed = if app.ui_settings.motion_level == crate::config::MotionLevel::Off { 0 } else { elapsed_ms };
+    let now = crate::status_icons::now_span(signals.now, icons, now_elapsed, app.ui_settings.use_stable_glyphs);
+    if mode == crate::agent_monitoring::AgentMonitoringMode::Normal {
+        Span::raw(format!("{} {}", objective.content, now.content))
+    } else if objective.content.is_empty() { now } else { objective }
+}
+
+pub(crate) fn monitoring_card_preview(app: &App, mode: crate::agent_monitoring::AgentMonitoringMode, index: usize) -> String {
+    monitoring_preview_span(app, mode, index).content.into_owned()
 }
 
 pub(crate) fn agent_monitoring_rows(app: &App) -> Vec<crate::app::AgentMonitoringRow> {
@@ -6490,35 +6745,61 @@ fn agent_monitoring_view(
             Line::from(""),
         ],
         row_lines: Vec::new(),
+        cards: Vec::new(),
+        configure_line: None,
     };
-    view.lines.extend([
-        Line::from(""),
-        Line::from(Span::styled("Normal mode: two status positions", Style::new().add_modifier(Modifier::BOLD))),
-        Line::from(" Agent identity │ objective / long-term │ current activity / right now │ pane title"),
-        Line::from("                  committed goal or task     what the agent is doing"),
-        Line::from(""),
-        Line::from("Objective position: blank; goal active, paused, blocked, usage-limited, reached;"),
-        Line::from("  task pending, running progress, degraded observation, done, failed, monitor failed; scheduled input."),
-        Line::from("Current activity position: blank; needs approval, working, waiting on subagents, settling,"),
-        Line::from("  parked on a monitored task, finished unread, idle; plain-shell fast/slow recent output."),
-        Line::from("Unread task success/error and acknowledged outcomes share their state glyph; bold marks unread."),
-        Line::from(""),
-        Line::from(Span::styled("Attention mode priority", Style::new().add_modifier(Modifier::BOLD))),
-        Line::from(if app.ui_settings.attention_progress_reports {
-            "Approval → monitor failed → task error → blocked → usage limited → paused → reached"
-        } else {
-            "Approval → blocked → usage limited → paused → reached → unread agent turn → running"
-        }),
-        Line::from(if app.ui_settings.attention_progress_reports {
-            "→ unread task success → unread agent turn → running. Only one status glyph is shown."
-        } else {
-            "Progress reports are excluded by default; task failures remain available in the progress footer."
-        }),
-        Line::from("Attention uses one shared status position, left blank when there is no icon."),
-        Line::from("A goal remains until its provider changes or clears it; opening the pane acknowledges results, not goals."),
-        Line::from(""),
-        Line::from(Span::styled("Monitoring settings", Style::new().add_modifier(Modifier::BOLD))),
-    ]);
+    view.lines[2] = Line::from(Span::styled("Choose the status icons shown beside agents in the left tree.", Style::new().add_modifier(Modifier::DIM)));
+    view.lines[3] = Line::from(Span::styled("Select Display mode below and use ←/→ or Enter; click a card to choose it.", Style::new().add_modifier(Modifier::DIM)));
+    if content_width >= 48 {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        let first_line = view.lines.len() as u16;
+        let cards = crate::selectable_cards::layout(Rect::new(0, first_line, content_width, 11), 3, 1);
+        let modes = AgentMonitoringMode::ALL;
+        for line in 0..11 {
+            let mut spans = Vec::new();
+            for (index, area) in cards.iter().enumerate() {
+                if index > 0 { spans.push(Span::raw(" ")); }
+                let mode = modes[index];
+                let selected = app.ui_settings.agent_monitoring_mode == mode;
+                let inner = usize::from(area.width.saturating_sub(2));
+                let border = crate::selectable_cards::border_style(selected, false);
+                if line == 0 || line == 10 {
+                    let (left, right) = if line == 0 { ('┌', '┐') } else { ('└', '┘') };
+                    spans.push(Span::styled(format!("{left}{}{right}", "─".repeat(inner)), border));
+                    continue;
+                }
+                let content = match line {
+                    1 => format!(" {} {}", crate::selectable_cards::radio(selected), mode.label()),
+                    2 => match mode {
+                        AgentMonitoringMode::Normal => " Two status icons".to_owned(),
+                        AgentMonitoringMode::Attention => " Needs attention".to_owned(),
+                        AgentMonitoringMode::Custom => " Your ordered rules".to_owned(),
+                    },
+                    4 => " Demo project".to_owned(),
+                    5..=9 => {
+                        let names = ["Working", "Approval", "Paused", "Waiting", "Idle"];
+                        let i = line - 5;
+                        format!(" ├ {} {}", monitoring_card_preview(app, mode, i), names[i])
+                    }
+                    _ => String::new(),
+                };
+                let content = truncate_icon_text(&content, inner);
+                let padding = inner.saturating_sub(UnicodeWidthStr::width(content.as_str()));
+                spans.push(Span::styled("│", border));
+                spans.push(Span::styled(content, if line == 1 && selected { theme::selected_style().add_modifier(Modifier::BOLD) } else { Style::new() }));
+                spans.push(Span::raw(" ".repeat(padding)));
+                spans.push(Span::styled("│", border));
+            }
+            view.lines.push(Line::from(spans));
+        }
+        view.cards.extend(modes.into_iter().zip(cards));
+    }
+    if app.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom {
+        view.configure_line = Some(view.lines.len() as u16);
+        view.lines.push(Line::from(Span::styled("  [ Configure custom icons ]  ·  press C", theme::selected_style().add_modifier(Modifier::BOLD))));
+    }
+    view.lines.push(Line::from(""));
+    view.lines.push(Line::from(Span::styled("Monitoring settings", Style::new().add_modifier(Modifier::BOLD))));
 
     if let Some(input) = &app.agent_detection_signature_input {
         view.lines.push(Line::from(Span::styled(
@@ -6565,6 +6846,8 @@ fn agent_monitoring_view(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentMonitoringContentHit {
+    Mode(crate::agent_monitoring::AgentMonitoringMode),
+    Configure,
     Row {
         row: crate::app::AgentMonitoringRow,
         direction: i32,
@@ -6585,6 +6868,13 @@ pub fn agent_monitoring_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
+    let virtual_position = Position::new(position.x.saturating_sub(content_area.x), virtual_line);
+    if let Some((mode, _)) = view.cards.iter().find(|(_, area)| area.contains(virtual_position)) {
+        return Some(AgentMonitoringContentHit::Mode(*mode));
+    }
+    if view.configure_line == Some(virtual_line) && virtual_position.x < 28 {
+        return Some(AgentMonitoringContentHit::Configure);
+    }
     let row = view
         .row_lines
         .into_iter()
@@ -6695,11 +6985,18 @@ pub fn simple_content_hit(
 fn about_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
+        Line::from(vec![
+            Span::styled("ilium", Style::new().add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(
+                format!("v{}", env!("CARGO_PKG_VERSION")),
+                Style::new().add_modifier(Modifier::DIM),
+            ),
+        ]),
         Line::from(Span::styled(
-            "ilium",
-            Style::new().add_modifier(Modifier::BOLD),
+            "  ───────────────────────────────────",
+            theme::border_style(false),
         )),
-        Line::from(format!("Version {}", env!("CARGO_PKG_VERSION"))),
         Line::from(""),
         Line::from("A terminal multiplexer with a tree-structured pane list and AI"),
         Line::from(
@@ -7344,17 +7641,18 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙",
-            "↻", "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
+            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
             assert_eq!(tab_icon(tab), expected_icon, "semantic icon for {tab:?}");
         }
 
-        let area = Rect::new(0, 0, 30, 56);
+        let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+        let area = Rect::new(0, 0, 30, spacious_height);
         for active in SettingsTab::ALL {
-            let mut terminal = Terminal::new(TestBackend::new(30, 56)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(30, spacious_height)).unwrap();
             terminal
                 .draw(|frame| render_tab_list(frame, area, active))
                 .unwrap();
@@ -7552,7 +7850,8 @@ mod tests {
 
     #[test]
     fn compact_navigation_keeps_distinct_icon_labels_readable() {
-        let area = Rect::new(0, 0, 12, 56);
+        let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+        let area = Rect::new(0, 0, 12, spacious_height);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
             .draw(|frame| render_tab_list(frame, area, SettingsTab::Appearance))
@@ -8687,14 +8986,11 @@ mod tests {
         for width in [60, 160] {
             let area = Rect::new(0, 0, width, 90);
             let view = agent_monitoring_view(&app, 0, area.width);
-            assert!(view.lines.iter().any(|line| {
-                line.to_string()
-                    .contains("Normal mode: two status positions")
-            }));
-            assert!(view
-                .lines
-                .iter()
-                .any(|line| line.to_string().contains("Attention mode priority")));
+            assert_eq!(view.cards.len(), 3);
+            for (mode, card) in &view.cards {
+                let point = Position::new(area.x + card.x, area.y + card.y + 1);
+                assert_eq!(agent_monitoring_content_hit(area, 0, point, &app), Some(AgentMonitoringContentHit::Mode(*mode)));
+            }
             assert_eq!(
                 crate::value_settings_choice::SettingsChoice::at(
                     &app,
@@ -8710,10 +9006,46 @@ mod tests {
                     .iter()
                     .map(|option| option.label.as_str())
                     .collect::<Vec<_>>(),
-                ["Normal", "Attention"]
+                ["Normal", "Attention", "Custom"]
             );
             assert_eq!(selected, "Normal");
         }
+    }
+
+    #[test]
+    fn custom_monitoring_card_reflects_rules_and_scroll_hit_geometry() {
+        use ilium_core::status_rule_expression::VisualKind;
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        let area = Rect::new(4, 3, 90, 40);
+        let before = monitoring_card_preview(&app, crate::agent_monitoring::AgentMonitoringMode::Custom, 0);
+        let working = app.custom_status_rules.rules.iter_mut().find(|rule| rule.id == "working-goal").unwrap();
+        working.then.kind = VisualKind::Glyph("X".to_owned());
+        let after = monitoring_card_preview(&app, crate::agent_monitoring::AgentMonitoringMode::Custom, 0);
+        assert_ne!(before, after);
+        assert_eq!(after, "X");
+        let view = agent_monitoring_view(&app, 0, area.width);
+        let card = view.cards[2].1;
+        let position = Position::new(area.x + card.x + 1, area.y + card.y + 2 - 1);
+        assert_eq!(agent_monitoring_content_hit(area, 1, position, &app), Some(AgentMonitoringContentHit::Mode(crate::agent_monitoring::AgentMonitoringMode::Custom)));
+    }
+
+    #[test]
+    fn custom_demo_preserves_rule_style_and_monitor_facts() {
+        use ilium_core::status_rule_expression::VisualKind;
+        use ratatui::style::{Color, Modifier};
+
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        let failed = app.custom_status_rules.rules.iter_mut().find(|rule| rule.id == "task-failed").unwrap();
+        failed.then.kind = VisualKind::Glyph("X".into());
+        failed.then.style.color = Some("danger".into());
+        failed.then.style.bold = true;
+        let mode = crate::agent_monitoring::AgentMonitoringMode::Custom;
+        let failure = monitoring_preview_span(&app, mode, 6);
+        assert_eq!(failure.content, "X");
+        assert_eq!(failure.style.fg, Some(Color::Red));
+        assert!(failure.style.add_modifier.contains(Modifier::BOLD));
+        let progress = monitoring_preview_span(&app, mode, 5);
+        assert_eq!(progress.content, "🌓");
     }
 
     #[test]
@@ -8727,35 +9059,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        for expected in [
-            "Normal mode",
-            "Attention mode",
-            "Normal mode: two status positions",
-            "objective / long-term",
-            "current activity / right now",
-            "Objective position:",
-            "goal active, paused, blocked, usage-limited, reached;",
-            "task pending, running progress, degraded observation, done, failed, monitor failed; scheduled input.",
-            "Current activity position:",
-            "needs approval, working, waiting on subagents, settling,",
-            "parked on a monitored task, finished unread, idle; plain-shell fast/slow recent output.",
-            "Unread task success/error and acknowledged outcomes share their state glyph; bold marks unread.",
-            "Attention mode priority",
-            "Approval → blocked → usage limited → paused → reached → unread agent turn → running",
-            "Progress reports are excluded by default; task failures remain available in the progress footer.",
-            "A goal remains until its provider changes or clears it; opening the pane acknowledges results, not goals.",
-        ] {
+        for expected in ["Normal", "Attention", "Custom", "Two status icons", "Your ordered rules", "Demo project"] {
             assert!(rendered.contains(expected), "missing {expected:?}");
         }
 
-        // The shared selector replaced the old two preview cards. Keep the
-        // documented slot diagram and both mode explanations covered instead.
-        for explanation in [
-            "Agent identity │ objective / long-term │ current activity / right now │ pane title",
-            "Attention uses one shared status position, left blank when there is no icon.",
-        ] {
-            assert_eq!(rendered.matches(explanation).count(), 1);
-        }
+        assert_eq!(rendered.matches("Demo project").count(), 3);
 
         for target in crate::agent_monitoring::STATUS_ICON_TARGETS {
             let expected = monitoring_row_label(crate::app::AgentMonitoringRow::StatusIcon(target));
@@ -8769,11 +9077,6 @@ mod tests {
         assert_eq!(monitoring_row_value(progress_row, &app), "[○ OFF]");
         app.ui_settings.attention_progress_reports = true;
         assert_eq!(monitoring_row_value(progress_row, &app), "[ON  ●]");
-        let enabled_view = agent_monitoring_view(&app, 0, 160);
-        assert!(enabled_view
-            .lines
-            .iter()
-            .any(|line| line.to_string().contains("monitor failed → task error")));
         let model_icon_row = crate::app::AgentMonitoringRow::ModelIcons;
         assert!(view.row_lines.iter().any(|(row, _)| *row == model_icon_row));
         assert_eq!(

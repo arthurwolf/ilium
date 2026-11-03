@@ -80,24 +80,69 @@ pub fn visible_tiles(
     scale: f32,
     size: [usize; 2],
 ) -> Result<Vec<(Region, Region)>> {
-    if !scale.is_finite() || scale <= 0.0 || size.contains(&0) {
+    Ok(plan_tiles(region, &[relative_camera(region)], scale, size)?.tiles)
+}
+
+/// A tile set generated once over a stable grid and reusable for every camera
+/// whose own visible tiles it contains.
+#[derive(Clone, Debug)]
+pub struct TilePlan {
+    pub grid: Region,
+    pub core_side: i32,
+    pub tiles: Vec<(Region, Region)>,
+}
+
+/// The camera offset a region encodes (see `visible_tiles`).
+pub fn relative_camera(region: Region) -> [f64; 2] {
+    let middle_z = (SOURCE_Z_MIN + SOURCE_Z_MAX) * 0.5;
+    [
+        (f64::from(region.minimum[0]) + f64::from(region.maximum[0])) * 0.5 - middle_z,
+        (f64::from(region.minimum[1]) + f64::from(region.maximum[1])) * 0.5 - middle_z,
+    ]
+}
+
+/// The smallest region containing both inputs; both are 16-cell aligned, so
+/// the result is too.
+pub fn union_region(first: Region, second: Region) -> Region {
+    Region {
+        minimum: [0, 1].map(|axis| first.minimum[axis].min(second.minimum[axis])),
+        maximum: [0, 1].map(|axis| first.maximum[axis].max(second.maximum[axis])),
+    }
+}
+
+/// Tiles of `grid` visible from any of `cameras`, with the coarsest core side
+/// rule of `visible_tiles` applied to the whole set.
+pub fn plan_tiles(
+    grid: Region,
+    cameras: &[[f64; 2]],
+    scale: f32,
+    size: [usize; 2],
+) -> Result<TilePlan> {
+    if !scale.is_finite() || scale <= 0.0 || size.contains(&0) || cameras.is_empty() {
         return Err(AssetError::InvalidMetadata(
             "invalid generated viewport tile projection".into(),
         ));
     }
     let scale = f64::from(scale);
-    let middle_z = (SOURCE_Z_MIN + SOURCE_Z_MAX) * 0.5;
-    let relative_camera = [
-        (f64::from(region.minimum[0]) + f64::from(region.maximum[0])) * 0.5 - middle_z,
-        (f64::from(region.minimum[1]) + f64::from(region.maximum[1])) * 0.5 - middle_z,
-    ];
     let preferred_tile_count = preferred_tile_count(scale);
     let mut last_budget_error = None;
     let mut coarsest_within_hard_budget = None;
     for core_side in FINE_CORE_SIDES.into_iter().chain([CORE_SIDE]) {
-        match visible_tiles_with_core_side(region, scale, size, relative_camera, core_side) {
-            Ok(selected) if selected.len() <= preferred_tile_count => return Ok(selected),
-            Ok(selected) => coarsest_within_hard_budget = Some(selected),
+        match visible_tiles_with_core_side(grid, scale, size, cameras, core_side) {
+            Ok(tiles) if tiles.len() <= preferred_tile_count => {
+                return Ok(TilePlan {
+                    grid,
+                    core_side,
+                    tiles,
+                });
+            }
+            Ok(tiles) => {
+                coarsest_within_hard_budget = Some(TilePlan {
+                    grid,
+                    core_side,
+                    tiles,
+                })
+            }
             Err(error @ AssetError::Limit { .. }) => {
                 if core_side == CORE_SIDE {
                     return coarsest_within_hard_budget.ok_or(error);
@@ -107,12 +152,32 @@ pub fn visible_tiles(
             Err(error) => return Err(error),
         }
     }
-    if let Some(selected) = coarsest_within_hard_budget {
-        return Ok(selected);
+    if let Some(plan) = coarsest_within_hard_budget {
+        return Ok(plan);
     }
     Err(last_budget_error.unwrap_or_else(|| {
         AssetError::InvalidMetadata("no generated viewport core sizes configured".into())
     }))
+}
+
+/// True when every tile `region` needs is already part of `plan`, so a frame
+/// rendered from the plan is identical to one from a session opened for
+/// `region` itself.
+pub fn plan_covers(plan: &TilePlan, region: Region, scale: f32, size: [usize; 2]) -> bool {
+    if (0..2).any(|axis| {
+        region.minimum[axis] < plan.grid.minimum[axis]
+            || region.maximum[axis] > plan.grid.maximum[axis]
+    }) {
+        return false;
+    }
+    let needed = visible_tiles_with_core_side(
+        plan.grid,
+        f64::from(scale),
+        size,
+        &[relative_camera(region)],
+        plan.core_side,
+    );
+    needed.is_ok_and(|needed| needed.iter().all(|tile| plan.tiles.contains(tile)))
 }
 
 fn preferred_tile_count(scale: f64) -> usize {
@@ -126,23 +191,14 @@ fn visible_tiles_with_core_side(
     region: Region,
     scale: f64,
     size: [usize; 2],
-    relative_camera: [f64; 2],
+    cameras: &[[f64; 2]],
     core_side: i32,
 ) -> Result<Vec<(Region, Region)>> {
     let mut selected = Vec::new();
     for (core, expanded) in tiles_with_core_side(region, core_side)? {
-        let x0 = f64::from(core.minimum[0]) - relative_camera[0] - PROJECTION_MARGIN;
-        let x1 = f64::from(core.maximum[0]) - relative_camera[0] + PROJECTION_MARGIN;
-        let y0 = f64::from(core.minimum[1]) - relative_camera[1] - PROJECTION_MARGIN;
-        let y1 = f64::from(core.maximum[1]) - relative_camera[1] + PROJECTION_MARGIN;
-        let screen_left = ISOMETRIC_X * scale * (x0 - y1);
-        let screen_right = ISOMETRIC_X * scale * (x1 - y0);
-        let screen_top = scale * ((x0 + y0) * 0.5 - SOURCE_Z_MAX);
-        let screen_bottom = scale * ((x1 + y1) * 0.5 - SOURCE_Z_MIN);
-        if screen_right < -(size[0] as f64) * 0.5
-            || screen_left > size[0] as f64 * 0.5
-            || screen_bottom < -(size[1] as f64) * 0.5
-            || screen_top > size[1] as f64 * 0.5
+        if !cameras
+            .iter()
+            .any(|&relative_camera| tile_is_visible(core, relative_camera, scale, size))
         {
             continue;
         }
@@ -156,6 +212,21 @@ fn visible_tiles_with_core_side(
         }
     }
     Ok(selected)
+}
+
+fn tile_is_visible(core: Region, relative_camera: [f64; 2], scale: f64, size: [usize; 2]) -> bool {
+    let x0 = f64::from(core.minimum[0]) - relative_camera[0] - PROJECTION_MARGIN;
+    let x1 = f64::from(core.maximum[0]) - relative_camera[0] + PROJECTION_MARGIN;
+    let y0 = f64::from(core.minimum[1]) - relative_camera[1] - PROJECTION_MARGIN;
+    let y1 = f64::from(core.maximum[1]) - relative_camera[1] + PROJECTION_MARGIN;
+    let screen_left = ISOMETRIC_X * scale * (x0 - y1);
+    let screen_right = ISOMETRIC_X * scale * (x1 - y0);
+    let screen_top = scale * ((x0 + y0) * 0.5 - SOURCE_Z_MAX);
+    let screen_bottom = scale * ((x1 + y1) * 0.5 - SOURCE_Z_MIN);
+    !(screen_right < -(size[0] as f64) * 0.5
+        || screen_left > size[0] as f64 * 0.5
+        || screen_bottom < -(size[1] as f64) * 0.5
+        || screen_top > size[1] as f64 * 0.5)
 }
 
 /// Each owned core is prepared with a 16-cell context on each side. The
@@ -219,6 +290,42 @@ mod tests {
     use crate::scenes::voxel_landscape::surface_entities::{
         model, AtlasLayout, ClimateSkin, ALL_SPECIES,
     };
+
+    #[test]
+    fn horizon_plan_serves_a_slow_pan_over_terrain_following_regions() {
+        let scale = 4.2;
+        let size = [300, 192];
+        // The camera height follows hills, so the region shifts independently
+        // of the (slow) horizontal pan.
+        let camera_at = |seconds: f64| {
+            [
+                64.0 + seconds * 0.0625,
+                64.0,
+                40.0 + 24.0 * (seconds / 90.0).sin(),
+            ]
+        };
+        let regions: Vec<_> = (0..=20)
+            .map(|step| region(camera_at(f64::from(step) * 30.0), scale, size).unwrap())
+            .collect();
+        let mut grid = regions[0];
+        for &other in &regions {
+            grid = union_region(grid, other);
+        }
+        let cameras: Vec<_> = regions.iter().map(|&r| relative_camera(r)).collect();
+        let plan = plan_tiles(grid, &cameras, scale, size).unwrap();
+        assert!(plan.tiles.len() <= MAX_VIEWPORT_TILES);
+        // Every region along the pan, and the ones in between, reuse the plan.
+        for step in 0..=600 {
+            let between = region(camera_at(f64::from(step)), scale, size).unwrap();
+            assert!(plan_covers(&plan, between, scale, size), "second {step}");
+        }
+        // Far beyond the horizon the plan no longer applies.
+        let far = region([400.0, 64.0, 40.0], scale, size).unwrap();
+        assert!(!plan_covers(&plan, far, scale, size));
+        // A single-camera plan equals the classic visible_tiles selection.
+        let own = plan_tiles(regions[0], &[relative_camera(regions[0])], scale, size).unwrap();
+        assert_eq!(own.tiles, visible_tiles(regions[0], scale, size).unwrap());
+    }
 
     #[test]
     fn twenty_five_percent_large_frame_is_admitted_as_bounded_tiles() {

@@ -24,6 +24,7 @@ impl NumberReadTarget {
 pub enum ConfigurationChange {
     NumberRead(NumberReadTarget),
     Ui(Box<crate::config::UiSettings>),
+    StatusRules(Box<ilium_core::status_rule_expression::StatusRules>),
     Terminal(crate::config::TerminalSettings),
     Git(crate::config::GitSettings),
     ResetPlanning(crate::reset_planning::ResetPlanningSettings),
@@ -119,6 +120,8 @@ impl Job for ConfigurationWrite {
             }
 
             Ui(value) => crate::config::save_ui_settings(directory, &value)
+                .map(|()| ConfigurationSaved::Plain),
+            StatusRules(value) => crate::config::save_status_rules(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Terminal(value) => crate::config::save_terminal_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -342,6 +345,7 @@ impl ConfigurationChange {
                     + value.icon.as_ref().map_or(0, String::capacity)
             }
             Git(value) => serialized_bound(value)?,
+            StatusRules(value) => serialized_bound(value)?,
             ResetPlanning(value) => serialized_bound(value)?,
             Attention(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
@@ -403,6 +407,7 @@ impl ConfigurationChange {
         use ConfigurationChange::*;
         Ok(match self {
             Git(value) => Git(normalize(&value)?),
+            StatusRules(value) => StatusRules(Box::new(normalize(&*value)?)),
             ResetPlanning(value) => ResetPlanning(normalize(&value)?),
             Attention(value) => Attention(normalize(&value)?.normalized()),
             Cost(mut value) => {

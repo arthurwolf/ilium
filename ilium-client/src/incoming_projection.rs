@@ -192,6 +192,8 @@ impl ProjectionRetention {
             | ProjectRestructureApplied { .. }
             | InitialStateSyncComplete
             | NodeActivityChanged { .. }
+            | PaneRecentActivity { .. }
+            | StatusScreenObserved(_)
             | NodeFocusCheckpointChanged { .. }
             | SessionRecoveryAvailable { .. }
             | PanePromptSubmitted { .. }

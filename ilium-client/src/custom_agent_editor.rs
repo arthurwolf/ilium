@@ -18,6 +18,8 @@ pub enum EditorRow {
     Name,
     Icon,
     Provider,
+    Command,
+    Arguments,
     EnvironmentKey(usize),
     EnvironmentValue(usize),
     RemoveEnvironment(usize),
@@ -29,7 +31,13 @@ pub enum EditorRow {
 
 impl CustomAgentEditor {
     pub fn rows(&self) -> Vec<EditorRow> {
-        let mut rows = vec![EditorRow::Name, EditorRow::Icon, EditorRow::Provider];
+        let mut rows = vec![
+            EditorRow::Name,
+            EditorRow::Icon,
+            EditorRow::Provider,
+            EditorRow::Command,
+            EditorRow::Arguments,
+        ];
         for index in 0..self.draft.environment.len() {
             rows.extend([
                 EditorRow::EnvironmentKey(index),
@@ -62,6 +70,8 @@ impl CustomAgentEditor {
                 name: String::new(),
                 icon: "✦".into(),
                 base_provider: BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: Vec::new(),
             },
             reveal_values: false,

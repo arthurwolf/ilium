@@ -24,6 +24,28 @@ pub fn verified_jsonl_history_path(
     verified_jsonl_history_path_with_hint(home_dir, pane_cwd, agent_class, session_id, None)
 }
 
+/// Like [`verified_jsonl_history_path_with_hint`], for lookups that run off
+/// the UI thread and nobody waits on interactively: it uses the larger
+/// background budget, so a transcript whose first records are big pasted
+/// prompts is still found.
+pub fn verified_background_jsonl_history_path_with_hint(
+    home_dir: &Path,
+    pane_cwd: &Path,
+    agent_class: &AgentClass,
+    session_id: &str,
+    transcript_hint: Option<&Path>,
+) -> Option<PathBuf> {
+    if !matches!(agent_class, AgentClass::Claude | AgentClass::Codex) {
+        return None;
+    }
+    let locator = TranscriptLocator::new_bounded(
+        home_dir,
+        pane_cwd,
+        ilium_agent_session::BACKGROUND_TRANSCRIPT_LOOKUP_LIMITS,
+    );
+    resolve_history_path(&locator, agent_class, session_id, transcript_hint)
+}
+
 /// Like [`verified_jsonl_history_path`], but first tries the server-verified
 /// `transcript_hint` for this exact session.
 ///

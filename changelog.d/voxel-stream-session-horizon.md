@@ -1,0 +1,2 @@
+### Fixed
+- The Voxel animation no longer stays blank (a faint dot field with a permanently busy worker) on terrains where preparing the first view takes longer than the camera's region stays constant. The streamed surface session now covers a ten-minute pan horizon, is no longer cancelled when the terrain-following camera height shifts the view region, and the last frame stays on screen while a newer one is prepared.

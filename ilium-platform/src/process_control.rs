@@ -174,6 +174,58 @@ pub struct PtyProcessIdentity {
     pidfd: std::os::fd::OwnedFd,
 }
 
+impl PtyProcessIdentity {
+    /// Whether this proof was captured for the requested numeric process ID.
+    #[cfg(target_os = "linux")]
+    pub fn is_for_process(&self, process_id: u32) -> bool {
+        self.process_id == process_id
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn is_for_process(&self, _process_id: u32) -> bool {
+        false
+    }
+
+    /// Kernel process birth token, meaningful only on the current boot.
+    #[cfg(target_os = "linux")]
+    pub fn birth_start_ticks(&self) -> Option<u64> {
+        Some(self.start_ticks)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn birth_start_ticks(&self) -> Option<u64> {
+        None
+    }
+
+    /// Comparable pidfs identity while at least one process handle is held.
+    /// Older Linux kernels use a shared anonymous inode, and 32-bit pidfs also
+    /// needs an inode generation; neither can safely supply this token.
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    pub fn pidfs_inode(&self) -> Option<u64> {
+        use std::os::fd::AsRawFd;
+
+        const PID_FS_MAGIC: libc::c_long = 0x5049_4446;
+        // SAFETY: both structs are plain C output buffers, initialized before
+        // the kernel writes them; the owned descriptor remains live throughout.
+        let mut filesystem: libc::statfs = unsafe { std::mem::zeroed() };
+        let mut metadata: libc::stat = unsafe { std::mem::zeroed() };
+        let descriptor = self.pidfd.as_raw_fd();
+        if unsafe { libc::fstatfs(descriptor, &mut filesystem) } != 0
+            || filesystem.f_type != PID_FS_MAGIC
+            || unsafe { libc::fstat(descriptor, &mut metadata) } != 0
+            || metadata.st_ino == 0
+        {
+            return None;
+        }
+        Some(metadata.st_ino)
+    }
+
+    #[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+    pub fn pidfs_inode(&self) -> Option<u64> {
+        None
+    }
+}
+
 /// Successful, bounded observation after terminating a PTY lineage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PtyTerminationProof {
@@ -208,6 +260,85 @@ pub fn capture_pty_process(_process_id: u32) -> io::Result<PtyProcessIdentity> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "PTY process proof requires Linux procfs",
+    ))
+}
+
+/// Check that a captured process still owns its numeric identity. This also
+/// detects exit and reuse while an asynchronous provider read is in flight.
+#[cfg(target_os = "linux")]
+pub fn captured_process_is_current(identity: &PtyProcessIdentity) -> io::Result<bool> {
+    if !linux_pidfd_is_live(&identity.pidfd)? {
+        return Ok(false);
+    }
+    match read_linux_process(identity.process_id) {
+        Ok(current) => Ok(current.start_ticks == identity.start_ticks
+            && !matches!(current.state, 'Z' | 'X')
+            && linux_pidfd_is_live(&identity.pidfd)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn captured_process_is_current(_identity: &PtyProcessIdentity) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "process identity proof unavailable",
+    ))
+}
+
+/// Prove that two captured, live processes are connected by a live parent
+/// chain. Holding every intermediate pidfd prevents a recycled intermediate
+/// PID from silently changing the chain while it is inspected.
+#[cfg(target_os = "linux")]
+pub fn captured_process_descends_from(
+    process: &PtyProcessIdentity,
+    root: &PtyProcessIdentity,
+) -> io::Result<bool> {
+    const MAX_ANCESTORS: usize = 128;
+    if !captured_process_is_current(process)? || !captured_process_is_current(root)? {
+        return Ok(false);
+    }
+    let mut ancestors: Vec<PtyProcessIdentity> = Vec::new();
+    let mut current = process.process_id;
+    for _ in 0..MAX_ANCESTORS {
+        if current == root.process_id {
+            if current == process.process_id && process.start_ticks != root.start_ticks {
+                return Ok(false);
+            }
+            let mut child = process;
+            for parent in &ancestors {
+                let observed = read_linux_process(child.process_id)?;
+                if !captured_process_is_current(child)? || observed.parent_id != parent.process_id {
+                    return Ok(false);
+                }
+                child = parent;
+            }
+            return Ok(captured_process_is_current(child)?
+                && child.process_id == root.process_id
+                && child.start_ticks == root.start_ticks
+                && captured_process_is_current(root)?);
+        }
+        let child = ancestors.last().unwrap_or(process);
+        let observed = read_linux_process(current)?;
+        if !captured_process_is_current(child)? || observed.parent_id == 0 {
+            return Ok(false);
+        }
+        let parent = capture_pty_process(observed.parent_id)?;
+        current = parent.process_id;
+        ancestors.push(parent);
+    }
+    Ok(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn captured_process_descends_from(
+    _process: &PtyProcessIdentity,
+    _root: &PtyProcessIdentity,
+) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "process ancestry proof unavailable",
     ))
 }
 
@@ -1275,6 +1406,71 @@ pub fn is_running(process_id: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_process_proof_rejects_an_exited_child() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned child");
+        let identity = capture_pty_process(child.id()).expect("capture child");
+        assert!(captured_process_is_current(&identity).expect("inspect live child"));
+        child.kill().expect("stop owned child");
+        child.wait().expect("reap owned child");
+        assert!(!captured_process_is_current(&identity).expect("inspect exited child"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_process_proof_rejects_a_changed_birth_identity() {
+        let mut identity =
+            capture_pty_process(std::process::id()).expect("capture current process");
+        assert!(captured_process_is_current(&identity).expect("inspect current process"));
+        identity.start_ticks ^= 1;
+        assert!(!captured_process_is_current(&identity).expect("inspect different birth identity"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pidfs_inode_identifies_the_same_captured_process() {
+        let first = capture_pty_process(std::process::id()).expect("capture test process");
+        let second = capture_pty_process(std::process::id()).expect("capture same process");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned child");
+        let child_identity = capture_pty_process(child.id()).expect("capture child");
+        if let Some(first_inode) = first.pidfs_inode() {
+            assert_eq!(second.pidfs_inode(), Some(first_inode));
+            assert_ne!(child_identity.pidfs_inode(), Some(first_inode));
+        } else {
+            assert_eq!(second.pidfs_inode(), None);
+            assert_eq!(child_identity.pidfs_inode(), None);
+        }
+        child.kill().expect("stop owned child");
+        child.wait().expect("reap owned child");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_ancestry_requires_live_matching_processes() {
+        let mut root = capture_pty_process(std::process::id()).expect("capture test process");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned child");
+        let child_identity = capture_pty_process(child.id()).expect("capture child");
+        assert!(captured_process_descends_from(&root, &root).expect("same process"));
+        assert!(captured_process_descends_from(&child_identity, &root).expect("child lineage"));
+        assert!(!captured_process_descends_from(&root, &child_identity).unwrap_or(false));
+        root.start_ticks ^= 1;
+        assert!(!captured_process_descends_from(&child_identity, &root).unwrap_or(false));
+        root.start_ticks ^= 1;
+        child.kill().expect("stop owned child");
+        child.wait().expect("reap owned child");
+        assert!(!captured_process_descends_from(&child_identity, &root).unwrap_or(false));
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
