@@ -341,11 +341,28 @@ download() {
     curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o "$2" "$1" 2> "$work/download-error" || fail "HTTPS download failed (network, rate limit, or missing release asset); no latest fallback"
 }
 if [ -z "$version" ]; then
-    resolved=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o /dev/null -w '%{url_effective}' "$origin/latest" 2> "$work/download-error") || fail "Cannot resolve latest stable release"
-    case "$resolved" in "$origin/tag/v"*) version=${resolved#"$origin/tag/v"} ;; *) fail "Latest release redirect is not the expected tagged origin" ;; esac
+    resolution=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o /dev/null -w '%{http_code} %{url_effective}' "$origin/latest" 2> "$work/download-error") || {
+        # Only a definite missing stable release selects the published preview.
+        # Network errors, authorization failures and rate limits never downgrade.
+        case "$resolution" in '404 '*) version=0.1.1-linux.1 ;; *) fail "Cannot resolve latest stable release" ;; esac
+    }
+    if [ -z "$version" ]; then
+        case "$resolution" in
+            "200 $origin"|"200 $origin/") version=0.1.1-linux.1 ;;
+            "200 $origin/tag/v"*) version=${resolution#"200 $origin/tag/v"} ;;
+            *) fail "Latest release redirect is not the expected tagged origin" ;;
+        esac
+    fi
     valid_version "$version" || fail "Latest release tag is not a safe version"
     requested_version=$version
 fi
+if [ "$version" = 0.1.1-linux.1 ]; then
+    # This historical preview predates AVAILABILITY and has six package-format
+    # checksums rather than the native archive inventory. Pin its sole native
+    # archive directly; future releases use the normal manifest contract.
+    [ "$archive_name" = ilium-linux-x86_64.tar.gz ] || fail "This platform is not ready yet for the requested release"
+    expected=c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26
+else
 download "$origin/download/v$version/SHA256SUMS" "$work/SHA256SUMS"
 stage=checksum
 expected=$(awk -v selected="$archive_name" -v inventory="$checksum_archives" '
@@ -380,6 +397,7 @@ expected=$(awk -v selected="$archive_name" -v inventory="$checksum_archives" '
         }' "$work/AVAILABILITY" "$work/SHA256SUMS") || fail "Malformed or inconsistent availability inventory"
     [ "$expected" != OMITTED ] || fail "This platform is not ready yet for the requested release"
 }
+fi
 stage=download
 download "$origin/download/v$version/$archive_name" "$work/$archive_name"
 stage=checksum

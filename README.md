@@ -10,19 +10,17 @@
 
 Linux x86_64 preview: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1) provides six packages and SHA256SUMS. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-**Not yet available for this preview:** hosted installers, Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
+**Not yet available for this preview:** Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
 
 Plugin code is present for future integration and is not yet available for use.
 
-**Hosted installers are not yet available for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.1.
-
-Linux and macOS:
+Install the Linux x86_64 preview (no root required):
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
 ```
 
-Windows PowerShell:
+Windows PowerShell **(coming soon: the Windows package is not yet available)**:
 
 ```powershell
 irm https://ilium-setup.pages.dev/install.ps1 | iex
@@ -44,7 +42,7 @@ Verify packages using the preview checksum file [`SHA256SUMS`](https://github.co
 
 The GitHub Packages release bundle is **not yet available**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
 
-Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package; the hosted installer is not available.
+Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package.
 
 No Rust toolchain is needed for releases. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately. Linux is the primary platform; macOS and Windows are implemented with different test coverage.
 

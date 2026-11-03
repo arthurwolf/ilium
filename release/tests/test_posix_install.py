@@ -152,6 +152,22 @@ class PosixInstallTests(unittest.TestCase):
             self.assertIn("--proto", row["arguments"])
             self.assertIn("--tlsv1.2", row["arguments"])
 
+    def test_missing_stable_selects_only_the_known_linux_preview(self):
+        for mode in ("no-stable", "no-stable-redirect"):
+            with self.subTest(mode=mode):
+                log = self.downloads / "requests.jsonl"
+                log.unlink(missing_ok=True)
+                result = self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": mode})
+                self.failure(result, "download")  # No preview archive in the fixture.
+                requests = [json.loads(line)["url"] for line in log.read_text().splitlines()]
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(requests[-1].endswith("/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz"))
+
+    def test_missing_stable_does_not_offer_preview_on_other_platforms(self):
+        self.failure(self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_ARCH": "aarch64"}), "download")
+        requests = (self.downloads / "requests.jsonl").read_text().splitlines()
+        self.assertEqual(len(requests), 1)
+
     def test_unsupported_targets_do_not_download_or_install(self):
         for kernel, arch in (("FreeBSD", "x86_64"), ("Linux", "i686"), ("Darwin", "ppc"), ("Windows", "ARM64")):
             self.failure(self.invoke(env={"FIXTURE_KERNEL": kernel, "FIXTURE_ARCH": arch}), "target")
