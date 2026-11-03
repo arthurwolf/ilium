@@ -14,19 +14,7 @@ Linux x86_64 preview: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/relea
 
 Plugin code is present for future integration and is not yet available for use.
 
-**Hosted installers are not yet available for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.1.
-
-Linux and macOS:
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
-```
-
-Windows PowerShell:
-
-```powershell
-irm https://ilium-setup.pages.dev/install.ps1 | iex
-```
+**Hosted installers: coming soon.** Download a package below to install this preview.
 
 Windows downloads are **not yet available**: per-user setup `.exe`, `.msi`, and ZIP.
 
