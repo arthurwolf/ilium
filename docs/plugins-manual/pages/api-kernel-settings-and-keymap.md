@@ -18,7 +18,7 @@ A plugin uses them to adapt. A plugin that draws a hint bar can show the user's 
 
 ### Interface
 
-```wit
+```text
 // kernel-settings (S C, grant settings.read-kernel:<tab-id>)
 read: func(tab: string) -> result<string, plugin-error>;          // JSON object of that tab's values; secrets as "<redacted>"
 

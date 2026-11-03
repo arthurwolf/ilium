@@ -17,7 +17,7 @@ These intents change the kernel's own chrome without letting a plugin draw it. A
 
 ### Records
 
-```wit
+```text
 enum tone { info, success, warning, danger, muted }
 record toast-action { label: string, command: string }
 record toast-spec {

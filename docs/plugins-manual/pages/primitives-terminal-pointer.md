@@ -18,7 +18,7 @@ See [terminal.pointer](/pages/capability-terminal-pointer/). The calls are synch
 
 ### Signatures
 
-```wit
+```text
 claim-pointer: func(pane: node-id) -> result<_, plugin-error>;
 claim-pointer-gesture: func(pane: node-id, modifiers: pointer-modifiers) -> result<_, plugin-error>;
 release-pointer: func(pane: node-id);

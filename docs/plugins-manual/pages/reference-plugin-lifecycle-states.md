@@ -184,7 +184,7 @@ The `reason` is one of `user`, `failure`, `policy`, `update`, `uninstall`, `trig
 
 The record of [help and plugins](/pages/api-help-and-plugins/) has 19 fields, numbered in the table below. `enabled` and `failed` stay as derived fields, so a plugin that reads only them keeps working.
 
-```wit
+```text
 enum package-state { not-installed, installed-enabled, installed-disabled-by-user,
                      disabled-untrusted, disabled-blocked, disabled-by-policy,
                      refused-at-load, update-staged, uninstall-pending }

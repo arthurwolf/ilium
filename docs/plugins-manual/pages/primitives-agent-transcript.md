@@ -22,7 +22,7 @@ See [agent.read](/pages/capability-agent-read/), [agent.read-prompts](/pages/cap
 
 ### Signatures
 
-```wit
+```text
 record agent-model { model: string, provider: option<string>, context-window: option<u32>, source: string }
 model: func(pane: node-id) -> option<agent-model>;       // source: statusline, transcript or signature
 prompt-epoch: func(pane: node-id) -> option<u64>;

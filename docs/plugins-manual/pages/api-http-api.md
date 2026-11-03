@@ -37,7 +37,7 @@ The listener matches on the method and the path together. A `POST` route does no
 
 The import has one function and one event. Each call to `respond` answers exactly one `http-called` event.
 
-```wit
+```text
 respond: func(
     call: u64, status: u16, headers: list<tuple<string, string>>, body: list<u8>,
 ) -> result<_, plugin-error>;

@@ -1,3 +1,9 @@
+---
+layout: page
+title: Minimum system requirements
+permalink: /pages/reference-minimum-system-requirements/
+---
+
 # Minimum system requirements
 
 This page lists what an Ilium host needs to run, and what the repository establishes about it. Where the repository does not establish a value, the value is an open decision and is listed at the end. A requirement carries an ID only when its value is decided, or when it is marked "(proposed, owner to confirm)" until the owner accepts it.

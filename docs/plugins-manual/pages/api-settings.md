@@ -137,7 +137,7 @@ A key that belongs to the other side (see the scope rule below) is `invalid-argu
 
 A plugin may export `settings-validate` on the side that owns the keys. The kernel calls it after the schema check and before a save, for changes made by the user and for resets. It is never called for `set-json` or `set-plugin-json`.
 
-```wit
+```text
 record field-error { key: string, message: string }   // message <= 120 characters
 settings-validate: func(patch: string, merged: string) -> result<_, list<field-error>>;
 ```

@@ -469,7 +469,7 @@ Coalesced writes send one event with the last origin and the union of keys.
 
 **`settings-validate`** is an optional export on the side that owns the scope.
 
-```wit
+```text
 record field-error { key: string, message: string }
 settings-validate: func(patch: string, merged: string) -> result<_, list<field-error>>;
 ```

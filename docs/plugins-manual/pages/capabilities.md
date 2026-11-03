@@ -216,7 +216,7 @@ at 72 columns for a signed notes package.
 │ Notes 0.1.0 by Example Labs (T2, signed)                                   │
 │                                                                            │
 │ <span class="t-hi">Server side</span>                                                                │
-│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
+│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read  │
 │ [x] Reads files in this project <span class="t-dim">……………………………………………………………………</span> fs.read:project │
 │ <span class="t-warn">! [ ] Runs the program git</span> <span class="t-dim">…………………………………………………………………………………</span> <span class="t-warn">process.run:git</span> │
 │ [x] Connects to api.example.com <span class="t-dim">………………………………………………………</span> http:api.example.com │

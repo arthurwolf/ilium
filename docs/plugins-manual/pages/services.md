@@ -438,7 +438,7 @@ export function answerSize(call: bigint, columns: number, rows: number): void {
 
 The inference provider is the typed service that most consumers use. A plugin that exports `inference-provider` must hold `inference.provide`. Its WIT shape is:
 
-```wit
+```text
 // Provider exports
 record provider-call { call: u64, request: completion-request }
 complete: func(call: provider-call) -> result<_, plugin-error>;

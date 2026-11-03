@@ -62,7 +62,7 @@ The signal is a field of the intent, chosen on every call. The grant itself neve
 
 The intent is declared in `ilium:types/intents`, which imports the `signal` enum from `ilium:types/tree`:
 
-```wit
+```text
 record signal-pane-spec { pane: node-id, signal: signal }
 // enum signal { interrupt, terminate, kill, hangup } is declared in ilium:types/tree
 // in variant intent: signal-pane(signal-pane-spec)

@@ -54,7 +54,7 @@ The schema file maps each method to a `params` schema and a `result` schema. The
 
 ### Interface
 
-```wit
+```text
 // ilium:host/services, imported by the caller and by the provider
 call: func(service: string, method: string, payload-json: string)
   -> result<request-id, plugin-error>;

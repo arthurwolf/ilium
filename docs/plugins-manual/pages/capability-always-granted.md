@@ -73,7 +73,7 @@ The `TimerId` type is `ilium_plugin_sdk::types::ids::TimerId`.
 
 Storage, settings and codec signatures, in WIT form:
 
-```wit
+```text
 enum bucket { global, project, session, shared }
 get: func(bucket: bucket, key: string) -> option<list<u8>>;
 put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;

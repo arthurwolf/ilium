@@ -64,7 +64,7 @@ Events that concern the tree, delivered in batches to `on-events`:
 
 The WIT declaration of the interface, for reference:
 
-```wit
+```text
 enum node-class { container, pane, folder }
 record node-view {
   id: node-id, parent: option<node-id>, class: node-class,

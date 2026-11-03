@@ -18,7 +18,7 @@ A call returns a request id at once, and the completion arrives later as a `requ
 
 ### Interface
 
-```wit
+```text
 // inference (S C, grant inference)
 record chat-message { role: string, content: string }
 record completion-request { messages: list<chat-message>, max-output-tokens: option<u32>,

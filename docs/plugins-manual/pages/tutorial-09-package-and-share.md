@@ -246,21 +246,21 @@ The dialog is the canonical review dialog of [Security](/pages/security/#verifyi
 
 <figure>
 <pre class="term"><span class="t-hi">╭─ Install com.example.agent-tools 0.1.0 ──╮</span>
-│ Name (self-declared): Example Developer      │
-│ Unsigned T3 · dev badge after install        │
-│                                              │
-│ <span class="t-dim">Server</span>                                       │
-│ [x] Read agent events ………………… agent.read     │
-│ [ ] <span class="t-warn">HIGH</span> Control agents … agent.control      │
-│ [x] Read the workspace tree …… tree.read     │
-│ [x] Read project files …… fs.read:project    │
-│ <span class="t-dim">Client</span>                                       │
-│ [x] Show panels …………………………… ui.panels        │
-│ [ ] <span class="t-warn">HIGH</span> Read the agent transcript           │
-│     agent.transcript                         │
-│                                              │
-│ <span class="t-hi"> Esc </span> Cancel   <span class="t-hi"> Enter </span> Install               │
-╰──────────────────────────────────────────────╯
+│ Name (self-declared): Example Developer  │
+│ Unsigned T3 · dev badge after install    │
+│                                          │
+│ <span class="t-dim">Server</span>                                   │
+│ [x] Read agent events ………………… agent.read │
+│ [ ] <span class="t-warn">HIGH</span> Control agents … agent.control  │
+│ [x] Read the workspace tree …… tree.read │
+│ [x] Read project files …… fs.read:project│
+│ <span class="t-dim">Client</span>                                   │
+│ [x] Show panels …………………………… ui.panels    │
+│ [ ] <span class="t-warn">HIGH</span> Read the agent transcript       │
+│     agent.transcript                     │
+│                                          │
+│ <span class="t-hi"> Esc </span> Cancel   <span class="t-hi"> Enter </span> Install           │
+╰──────────────────────────────────────────╯
 </pre>
 <figcaption>Rendered at 48 columns. Illustrative. The review dialog for an unsigned package. HIGH rows start unchecked. The rows are shortened for the page, and the real dialog lists every grant.</figcaption>
 </figure>

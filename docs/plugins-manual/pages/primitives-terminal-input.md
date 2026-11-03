@@ -20,7 +20,7 @@ See [terminal.write](/pages/capability-terminal-write/) and [Capabilities](/page
 
 ### Signatures
 
-```wit
+```text
 lock-input: func(pane: node-id, millis: u16) -> result<_, plugin-error>;   // at most 2,000 ms
 unlock-input: func(pane: node-id);
 

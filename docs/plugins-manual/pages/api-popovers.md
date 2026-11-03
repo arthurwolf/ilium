@@ -15,7 +15,7 @@ A tooltip is a short note that appears after the pointer rests on something. A p
 
 ### Interface
 
-```wit
+```text
 record tooltip { lines: styled-lines, delay-ms: option<u16> }   // <= 200 characters; default 500 ms, 0..2000
 
 record ui-node { /* ... */ tooltip: option<tooltip>, tab-index: option<s16>, disabled-reason: option<string> }

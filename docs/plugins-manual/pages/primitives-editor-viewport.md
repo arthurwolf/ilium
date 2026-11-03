@@ -20,7 +20,7 @@ See [editor.read](/pages/capability-editor-read/). A manifest that exports `toke
 
 ### Signatures
 
-```wit
+```text
 record editor-viewport { buffer: buffer-id, pane: node-id, first-line: u32, last-line: u32, columns: u16, rows: u16 }
 viewport: func(pane: node-id) -> option<editor-viewport>;
 record minimap-mark { line: u32, color: color, lane: u8 }      // lane 0..2

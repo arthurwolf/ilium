@@ -25,7 +25,7 @@ The SDK for your language exposes the functions under `primitives/editor`. Rust 
 
 ### Interface
 
-```wit
+```text
 record buffer-ref {
     buffer: buffer-id, pane: option<node-id>, path: option<fs-path>,
     language: option<string>, revision: u64, line-count: u32, dirty: bool,

@@ -126,7 +126,7 @@ is fixed: "Read the workspace tree".
 │ com.example.tree 0.1.0 by Example Ltd                                      │
 │                                                                            │
 │ <span class="t-hi">Server side</span>                                                                │
-│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read │
+│ [x] Read the workspace tree <span class="t-dim">……………………………………………………………………………………………</span> tree.read  │
 │                                                                            │
 │ <span class="t-dim">Space toggle · Enter allow · Esc decline</span>                                   │
 ╰────────────────────────────────────────────────────────────────────────────╯

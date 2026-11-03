@@ -14,7 +14,7 @@ Use a job for work that takes longer than the event deadline of 20 ms: parsing a
 
 ### Interface
 
-```wit
+```text
 // jobs (S C A, grant jobs.run)
 start: func(kind: string, input: list<u8>) -> result<request-id, plugin-error>;
 cancel: func(job: request-id);

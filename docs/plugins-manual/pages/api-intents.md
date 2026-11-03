@@ -14,7 +14,7 @@ An intent is a request that asks the kernel to change something: rename a node, 
 
 The records, the outcome and the submit function, as declared in WIT:
 
-```wit
+```text
 record submission { intent: intent, correlation: u64, dedup-key: option<string> }
 variant request-ref { submission(u64), call(request-id) }
 variant outcome {

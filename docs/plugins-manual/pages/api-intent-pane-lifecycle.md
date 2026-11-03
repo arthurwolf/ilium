@@ -16,7 +16,7 @@ Five intents let a server-side plugin control the process of a terminal pane: st
 
 ### Records
 
-```wit
+```text
 record freeze-pane-spec { pane: node-id }
 record unfreeze-pane-spec { pane: node-id }
 record replace-pane-command-spec {

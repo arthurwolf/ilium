@@ -33,7 +33,7 @@ Use a message when one receiver must act on the data. Use a topic when any numbe
 
 The WIT definitions behind the table:
 
-```wit
+```text
 // ilium:host/topics
 publish: func(topic: string, payload-json: string) -> result<_, plugin-error>;
 

@@ -42,7 +42,7 @@ The edit intents are submitted, not called. They are listed in the next table wi
 
 The payload records are defined in `ilium:types/editing` and in the `editor-placement` enum:
 
-```wit
+```text
 record text-position { line: u32, column: u32 }
 record text-range { start: text-position, end: text-position }
 record text-edit { range: text-range, replacement: string }

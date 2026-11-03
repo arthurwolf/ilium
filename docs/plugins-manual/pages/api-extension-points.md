@@ -89,7 +89,7 @@ Contributor manifest:
 
 ### Interface
 
-```wit
+```text
 // ilium:host/extensions, imported by owners and contributors
 interface extensions {
   record extension-entry {

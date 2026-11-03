@@ -34,7 +34,7 @@ Rust and TypeScript names follow the binding rules in the Rust SDK and TypeScrip
 
 ### WIT
 
-```wit
+```text
 // ilium:host/clock  (S C A, always)
 now-unix-millis: func() -> u64;
 monotonic-millis: func() -> u64;

@@ -137,7 +137,7 @@ A custom page is a plugin tab with `"render": "view"`, drawn by the `views` expo
 
 The host calls `render` with the view target `settings-page("demo")`, which carries the local tab id:
 
-```wit
+```text
 record area { columns: u16, rows: u16 }
 render: func(view: view-target, area: area) -> ui-tree;
 ```

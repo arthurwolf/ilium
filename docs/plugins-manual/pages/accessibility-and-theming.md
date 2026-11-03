@@ -20,7 +20,7 @@ Plugins never choose the exact colour of their text. A view names a colour role,
 
 The host gives every view one `theme-tokens` record. A role names a token, so a plugin never needs the palette itself.
 
-```wit
+```text
 enum color-role { foreground, muted, accent, success, warning, danger, info, selection, border }
 
 record theme-tokens {
@@ -48,7 +48,7 @@ Colour tokens are packed `0x00RRGGBB` numbers. `background` is not a role. The h
 
 `theme-tokens` holds the seven base colours. The contract also defines `theme-extras`, a second record read with `theme-extras()`. It carries the three colours that the roles `info`, `selection` and `border` use, and three settings that change how a view should behave.
 
-```wit
+```text
 record theme-extras { reduced-motion: bool, density: density, info: u32, selection: u32, border: u32, icon-mode: icon-mode }
 enum density { compact, normal, comfortable }
 enum icon-mode { normal, stable }   // stable only when the user opted in
@@ -389,7 +389,7 @@ The host reads only its own `[ui]` settings. It does not read the operating syst
 
 USR-302 and AUT-504 let a plugin follow `[ui] contrast = "high"`. `theme-extras` therefore carries the setting. The contract adds one field and one enum:
 
-```wit
+```text
 enum contrast-level { normal, high }
 record theme-extras { reduced-motion: bool, density: density, info: u32, selection: u32, border: u32, icon-mode: icon-mode, contrast: contrast-level }
 ```
@@ -432,7 +432,7 @@ The host decides at start whether the terminal can show UTF-8 and box drawing. I
 | Plugin text | A non-ASCII character is transliterated when the host has a mapping (`é` to `e`), otherwise replaced by `?`. Text is never sent as bytes the terminal would garble. |
 | Setup | The guided setup shows one warning on the first run in this mode: the locale is not UTF-8, and the fix is `export LANG=C.UTF-8`. It is not repeated in later runs. |
 
-Reduced capability is not an error. A plugin trap is not caused by the mode. Test: run the fixture view under `LANG=C` and `TERM=linux` and assert that no byte above 0x7F reaches the terminal, that borders use `+-|`, that `icon-mode` reads `ascii` and that the setup warning appears once. USR-300 still holds in this mode, because every state also has a word. The environment allowlist for helpers is in [SEC-027](/pages/reference-security-policy/) and does not change here.
+Reduced capability is not an error. A plugin trap is not caused by the mode. Test: run the fixture view under `LANG=C` and `TERM=linux` and assert that no byte above 0x7F reaches the terminal, that borders use `+-|`, that `icon-mode` reads `ascii` and that the setup warning appears once. USR-300 still holds in this mode, because every state also has a word. The environment allowlist for helpers is in [SEC-027](/pages/reference-requirements-security-policy/) and does not change here.
 
 ### Theme contract: what a theme is, where it loads from, and why plugins ship none
 

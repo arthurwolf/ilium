@@ -204,7 +204,7 @@ switch (event.tag) {
 
 ## Submissions and outcomes
 
-```wit
+```text
 record submission { intent: intent, correlation: u64, dedup-key: option<string> }
 variant request-ref { submission(u64), call(request-id) }
 variant outcome {

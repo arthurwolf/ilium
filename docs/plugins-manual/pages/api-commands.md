@@ -20,7 +20,7 @@ Commands connect the parts of a plugin that the user touches with the parts that
 
 ### Interface
 
-```wit
+```text
 // commands (C, plus S for invoke)
 set-state: func(command: string, enabled: bool, checked: option<bool>) -> result<_, plugin-error>;   // own commands
 invoke: func(command: string, arguments-json: string) -> result<request-id, plugin-error>;          // commands.invoke:<pattern>

@@ -50,7 +50,7 @@ This page covers the durable timer, the journal and the input journal. The setti
 
 ### Surface
 
-```wit
+```text
 // ilium:host/timers  (S C, always)
 at:             func(epoch: epoch-ms, name: string) -> result<timer-id, plugin-error>;   // durable
 cancel-durable: func(name: string);

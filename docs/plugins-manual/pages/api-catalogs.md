@@ -20,7 +20,7 @@ A catalogue is a named list of options that a `choice` row or widget can read in
 
 ### Interface
 
-```wit
+```text
 record catalog-item {
   id: string, title: string,
   description: option<string>,          // at most 120 characters

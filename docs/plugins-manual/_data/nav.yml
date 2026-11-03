@@ -741,3 +741,71 @@
   url: /pages/authoring-onboarding/
 - title: "Requirements for production operation"
   url: /pages/reference-requirements-production/
+- title: "Capability: agent-config.propose"
+  url: /pages/capability-agent-config-propose/
+- title: "Concurrency for plugin authors"
+  url: /pages/concurrency-for-plugin-authors/
+- title: "Contributing"
+  url: /pages/contributing/
+- title: "Governance"
+  url: /pages/governance/
+- title: "Administrator failure runbook"
+  url: /pages/guide-admin-failure-runbook/
+- title: "Backwards-compatibility test matrix"
+  url: /pages/guide-backwards-compatibility-test-matrix/
+- title: "Deprecating plugin features"
+  url: /pages/guide-deprecating-plugin-features/
+- title: "Example plugin catalogue"
+  url: /pages/guide-example-plugins/
+- title: "Upgrading Ilium and rolling back the host"
+  url: /pages/guide-operator-upgrades/
+- title: "Plugins without the SDK"
+  url: /pages/guide-plugins-without-the-sdk/
+- title: "Reproducible builds"
+  url: /pages/guide-reproducible-builds/
+- title: "SDK migration"
+  url: /pages/guide-sdk-migration/
+- title: "Writing user-visible text"
+  url: /pages/guide-writing-user-text/
+- title: "Host upgrade and restart while plugins run"
+  url: /pages/host-upgrade-while-plugins-run/
+- title: "ABI major versions"
+  url: /pages/reference-abi-major-versions/
+- title: "Shell completion and man pages"
+  url: /pages/reference-cli-completion/
+- title: "CLI network use and privacy"
+  url: /pages/reference-cli-network-and-privacy/
+- title: "CLI output stability"
+  url: /pages/reference-cli-output-stability/
+- title: "Core replacement matrix"
+  url: /pages/reference-core-replacement-matrix/
+- title: "Reference, documentation site"
+  url: /pages/reference-documentation-site/
+- title: "Reference, host aggregate limits"
+  url: /pages/reference-host-aggregate-limits/
+- title: "Host release verification"
+  url: /pages/reference-host-release-verification/
+- title: "Soak and endurance testing"
+  url: /pages/reference-host-soak-and-load-testing/
+- title: "Minimum system requirements"
+  url: /pages/reference-minimum-system-requirements/
+- title: "Failure modes of the dev command"
+  url: /pages/reference-plugin-cli-dev-failure-modes/
+- title: "Debugging a running plugin"
+  url: /pages/reference-plugin-debugging/
+- title: "Test harness contract for CI"
+  url: /pages/reference-plugin-test-harness/
+- title: "Registry key compromise"
+  url: /pages/reference-registry-key-compromise/
+- title: "Release key compromise"
+  url: /pages/reference-release-key-compromise/
+- title: "Release rollout"
+  url: /pages/reference-release-rollout/
+- title: "SDK deprecation"
+  url: /pages/reference-sdk-deprecation/
+- title: "Toolchain support matrix"
+  url: /pages/reference-toolchain-support-matrix/
+- title: "Release process"
+  url: /pages/release-process/
+- title: "Support policy"
+  url: /pages/support/

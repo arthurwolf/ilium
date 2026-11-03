@@ -96,7 +96,7 @@ All items of this package are shared data. A plugin never imports `ilium:types` 
 
 ### 4.1 ids
 
-```wit
+```text
 package ilium:types@0.1.0;
 
 interface ids {
@@ -132,7 +132,7 @@ interface ids {
 
 ### 4.2 errors
 
-```wit
+```text
 interface errors {
   /// The order is part of the ABI. Meaning of each code: see Errors and limits.
   enum error-code {
@@ -151,7 +151,7 @@ interface errors {
 
 ### 4.3 text
 
-```wit
+```text
 interface text {
   enum color-role { foreground, muted, accent, success, warning, danger, info, selection, border }
   variant color { role(color-role), rgb(u32), indexed(u8) }
@@ -198,7 +198,7 @@ interface text {
 
 ### 4.4 paths
 
-```wit
+```text
 interface paths {
   /// `scope` is a granted scope name such as project, data or agent-sessions:codex.
   /// `path` is relative to the scope root and uses '/' separators.
@@ -208,7 +208,7 @@ interface paths {
 
 ### 4.5 editing
 
-```wit
+```text
 interface editing {
   use ilium:types/ids@0.1.0.{buffer-id, node-id};
   use ilium:types/paths@0.1.0.{fs-path};
@@ -226,7 +226,7 @@ interface editing {
 
 ### 4.6 layout
 
-```wit
+```text
 interface layout {
   enum direction { horizontal, vertical }
   variant constraint { length(u16), min(u16), max(u16), percentage(u16), ratio(tuple<u32, u32>), fill(u16) }
@@ -241,7 +241,7 @@ interface layout {
 
 ### 4.7 geo
 
-```wit
+```text
 interface geo {
   /// WGS 84 degrees. Latitude -90 to 90 and longitude -180 to 180, else invalid-argument.
   record geo-point { lat: f64, lon: f64 }
@@ -251,7 +251,7 @@ interface geo {
 
 ### 4.7a net
 
-```wit
+```text
 interface net {
   record header { name: string, value: string }
 }
@@ -259,7 +259,7 @@ interface net {
 
 ### 4.8 tree
 
-```wit
+```text
 interface tree {
   use ilium:types/ids@0.1.0.{node-id, plugin-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -298,7 +298,7 @@ The enum `split-direction` has the same two cases as `direction` in `layout`. Th
 
 The `widget` variant has 51 cases. The order is the order of the families in [Widgets index](/pages/widgets-index/): layout (10), text (5), collections (6), data (10), input (11), status (4), media (5). A container holds child indexes in `ui-node.children`, never nested widgets, so no type is recursive.
 
-```wit
+```text
 interface ui {
   use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id};
   use ilium:types/text@0.1.0.{color, style, styled-text, styled-lines, rich-text, rich-lines, tooltip, tri-state, tone, preview};
@@ -661,7 +661,7 @@ The enum `orientation` here belongs to `meter`. It has the cases of `direction`,
 
 ### 4.10 requests
 
-```wit
+```text
 interface requests {
   use ilium:types/ids@0.1.0.{node-id, request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -687,7 +687,7 @@ interface requests {
 
 The `intent` variant has 42 cases. The first 19 are the base set. The last 23 were appended in the order shown. A submission carries one intent.
 
-```wit
+```text
 interface intents {
   use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id, client-id};
   use ilium:types/text@0.1.0.{rich-text, tooltip, styled-text, tone};
@@ -882,7 +882,7 @@ The `event` variant has 56 cases: 38 base cases and 18 appended cases. A reader 
 
 Payload naming rule: a payload with several fields is a record named `<case>-event`. A payload with one value of an existing type uses that type. Delivery policy, grant and coalescing key of every case are in the [Host conformance matrix](/pages/reference-host-conformance/#4-event-matrix) and the [Event and intent tables](/pages/reference-events-and-intents/).
 
-```wit
+```text
 interface events {
   use ilium:types/ids@0.1.0.{node-id, plugin-id, client-id, buffer-id, request-id, timer-id, watch-id, stream-id, child-id, grab-id, epoch-ms};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1037,7 +1037,7 @@ The record `header` is declared once in `ilium:types/net`. The events and the `h
 
 ### 4.13 lifecycle
 
-```wit
+```text
 interface lifecycle {
   use ilium:types/ids@0.1.0.{plugin-id};
   /// The order is the ABI. crash-restart is reserved: the host never delivers it, because a
@@ -1071,7 +1071,7 @@ Every interface of this package is imported by a plugin. The line under each hea
 
 Common errors: every function that returns `plugin-error` can return `not-permitted` for a missing grant, `invalid-argument` for a bad value, `quota-exceeded` and `rate-limited` for a limit, and `internal` for a host fault. The lists below add only the codes that are specific to the function.
 
-```wit
+```text
 package ilium:host@0.1.0;
 ```
 
@@ -1079,12 +1079,18 @@ package ilium:host@0.1.0;
 
 S C A. Grant: none. API page: [Log](/pages/api-log/).
 
-```wit
+```text
 interface log {
   enum level { trace, debug, info, warn, error }
   /// One entry per line. The budget is 200 lines per second per side instance (limits.log_lines_per_second,
   /// 1,000 for bundled plugins). Lines over the budget are dropped and counted.
   log: func(level: level, message: string);
+}
+
+interface telemetry {
+  /// Adds `delta` to a plugin-defined counter. At most 16 distinct names per plugin side (HST-638);
+  /// names match `^[a-z][a-z0-9_]{0,31}$`. Counters stay in the process and the local log; nothing is sent over the network.
+  count: func(name: string, delta: s64) -> result<_, plugin-error>;
 }
 ```
 
@@ -1092,7 +1098,7 @@ interface log {
 
 S C A. Grant: none. API page: [Clock and timers](/pages/api-clock-and-timers/).
 
-```wit
+```text
 interface clock {
   /// UTC wall clock in milliseconds. May jump when the user changes the clock.
   now-unix-millis: func() -> u64;
@@ -1105,7 +1111,7 @@ interface clock {
 
 S C. Grant: none. API pages: [Clock and timers](/pages/api-clock-and-timers/) and [Durable timers](/pages/api-durable-timers/).
 
-```wit
+```text
 interface timers {
   use ilium:types/ids@0.1.0.{timer-id, epoch-ms};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1124,7 +1130,7 @@ interface timers {
 
 S C. Grant: none for own entries, `journal.read` for others. API page: [Durable timers](/pages/api-durable-timers/).
 
-```wit
+```text
 interface journal {
   use ilium:types/ids@0.1.0.{node-id, epoch-ms};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1140,7 +1146,7 @@ interface journal {
 
 S C. Grant: `tree.read`; `tree.metadata` for the metadata calls. API page: [Tree](/pages/api-tree/).
 
-```wit
+```text
 interface tree {
   use ilium:types/ids@0.1.0.{node-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1160,7 +1166,7 @@ interface tree {
 
 S C. Grant: `panes.read`. API page: [Panes](/pages/api-panes/).
 
-```wit
+```text
 interface panes {
   use ilium:types/ids@0.1.0.{node-id};
   use ilium:types/tree@0.1.0.{pane-info};
@@ -1173,7 +1179,7 @@ interface panes {
 
 S C. Grant: depends on the intent. API page: [Intents](/pages/api-intents/).
 
-```wit
+```text
 interface intents-host {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1193,7 +1199,7 @@ The interface name `intents-host` avoids a clash with `ilium:types/intents` in g
 
 S C A (A: `get` only). Grant: none. API page: [Storage](/pages/api-storage/).
 
-```wit
+```text
 interface storage {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// shared is this plugin's own cache: its server side, its client sides and every session of the same user see it, and the host may clear it at any time.
@@ -1217,7 +1223,7 @@ interface storage {
 
 S C. Grant: none for own values, `settings.read-all` and `settings.write-all` for other plugins. API pages: [Settings](/pages/api-settings/) and [Settings schema](/pages/reference-settings-schema/).
 
-```wit
+```text
 interface settings {
   use ilium:types/ids@0.1.0.{plugin-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1268,7 +1274,7 @@ interface settings {
 
 S C A. Grant: none. API page: [Codec](/pages/api-codec/).
 
-```wit
+```text
 interface codec {
   use ilium:types/errors@0.1.0.{plugin-error};
   enum compression { zlib, gzip, deflate-raw }
@@ -1290,9 +1296,9 @@ interface codec {
 
 ### 5.11 fs
 
-S C. Grant: `fs.read:<scope>`, `fs.write:<scope>`, `fs.watch:<scope>`, `fs.pick`, `agent-config.propose:<agent>` (for `propose-agent-config`). API pages: [Files](/pages/api-fs/), [Atomic writes and tail](/pages/api-fs-atomic-and-tail/) and [Agent configuration proposals](/pages/capability-agent-config-propose/).
+S C. Grant: `fs.read:<scope>`, `fs.write:<scope>`, `fs.watch:<scope>`, `fs.pick`, `agent-config.propose:<agent>` (the function propose-agent-config). API pages: [Files](/pages/api-fs/), [Atomic writes and tail](/pages/api-fs-atomic-and-tail/) and [Agent configuration proposals](/pages/capability-agent-config-propose/).
 
-```wit
+```text
 interface fs {
   use ilium:types/ids@0.1.0.{request-id, watch-id, lock-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1366,7 +1372,7 @@ interface fs {
 
 S C. Grant: `http:<host-pattern>`. API pages: [HTTP](/pages/api-http/) and [HTTP streams](/pages/api-http-streams/).
 
-```wit
+```text
 interface http {
   use ilium:types/ids@0.1.0.{request-id, stream-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1393,7 +1399,7 @@ interface http {
 
 S C A. Grant: `jobs.run`. API page: [Jobs](/pages/api-jobs/).
 
-```wit
+```text
 interface jobs {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1414,7 +1420,7 @@ interface jobs {
 
 S C. Grant: `process.run:<program>`, `process.long-lived`. API pages: [Process control](/pages/api-process-control/).
 
-```wit
+```text
 interface process {
   use ilium:types/ids@0.1.0.{request-id, child-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1449,7 +1455,7 @@ interface process {
 
 S C. Grant: `inference`; `inference.provide` for provider replies. API pages: [Inference](/pages/api-inference/) and [Services](/pages/services/).
 
-```wit
+```text
 interface inference {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1474,7 +1480,7 @@ interface inference {
 
 S C. Grant: `inference.embed`. API page: [Vector](/pages/api-vector/).
 
-```wit
+```text
 interface vector {
   use ilium:types/ids@0.1.0.{request-id, index-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1495,7 +1501,7 @@ interface vector {
 
 S C. Grant: none for the catalogue, `sound.play` for the intent. API page: [Capability: sound play](/pages/capability-sound-play/).
 
-```wit
+```text
 interface sounds {
   /// Bundled and contributed sound ids.
   catalog: func() -> list<string>;
@@ -1506,7 +1512,7 @@ interface sounds {
 
 S C. Grant: `topics.subscribe:<topic-pattern>` to subscribe. Publishing needs no grant, only the plugin's own topic prefix and a publishes entry in the manifest. API page: [Messages and topics](/pages/api-messages-and-topics/).
 
-```wit
+```text
 interface topics {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Only topics declared under the plugin's own id. payload-json is at most 64 KiB.
@@ -1518,7 +1524,7 @@ interface topics {
 
 S C. Grant: none for own commands, `commands.invoke:<pattern>`. API pages: [Commands](/pages/api-commands/), [Command palette](/pages/api-command-palette/) and [Menus](/pages/api-menus/).
 
-```wit
+```text
 interface commands {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1533,7 +1539,7 @@ interface commands {
 
 S C. Grant: `services.use:<name>` for callers, `services.provide:<name>` for providers. Unstable feature `plugin-services` for calls between plugins. API page: [Services](/pages/services/).
 
-```wit
+```text
 interface services {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1552,7 +1558,7 @@ interface services {
 
 C. Grant: none for own views. API pages: [UI model](/pages/ui-model/) and [UI](/pages/api-ui/). This is the one table of `ui` functions; the Widgets index links here.
 
-```wit
+```text
 interface ui-host {
   use ilium:types/errors@0.1.0.{plugin-error};
   use ilium:types/ui@0.1.0.{view-target, widget-state, popup-anchor, popup-options, theme-tokens, theme-extras, pixel-format};
@@ -1587,7 +1593,7 @@ The interface is named `ui-host` in the package so that it does not clash with `
 
 C. Grant: `keys.intercept`. API page: [Keys](/pages/api-keys/).
 
-```wit
+```text
 interface keys {
   use ilium:types/ids@0.1.0.{node-id, grab-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1603,7 +1609,7 @@ interface keys {
 
 S. Grant: `cli.contribute`. API page: [CLI](/pages/api-cli/).
 
-```wit
+```text
 interface cli {
   use ilium:types/ids@0.1.0.{node-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1632,7 +1638,7 @@ interface cli {
 
 S. Grant: `http-api.route:<path>`. API page: [HTTP API](/pages/api-http-api/).
 
-```wit
+```text
 interface http-api {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Answers http-called. Errors: not-found for an unknown or answered call.
@@ -1644,7 +1650,7 @@ interface http-api {
 
 S. Grant: `workspace.manage`. API page: [Workspace](/pages/api-workspace/).
 
-```wit
+```text
 interface workspace {
   use ilium:types/ids@0.1.0.{node-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1661,7 +1667,7 @@ interface workspace {
 
 C. Grant: `clipboard.read`, `clipboard.write`. API page: [Clipboard](/pages/api-clipboard/).
 
-```wit
+```text
 interface clipboard {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// At most 1 MiB in UTF-8 bytes. Longer text is cut at a scalar boundary.
@@ -1675,7 +1681,7 @@ interface clipboard {
 
 C A. Grant: `audio.capture`, `audio.loopback`, `audio.playback`. API page: [Audio](/pages/api-audio/).
 
-```wit
+```text
 interface audio {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1695,7 +1701,7 @@ interface audio {
 
 C A. Grant: `media.video`. API page: [Media](/pages/api-media/).
 
-```wit
+```text
 interface media {
   use ilium:types/errors@0.1.0.{plugin-error};
   use ilium:types/paths@0.1.0.{fs-path};
@@ -1715,7 +1721,7 @@ interface media {
 
 C A. Grant: `location.observer`. API page: [Location](/pages/api-location/).
 
-```wit
+```text
 interface location {
   /// Latitude and longitude, or none when unknown.
   current: func() -> option<tuple<f64, f64>>;
@@ -1726,7 +1732,7 @@ interface location {
 
 C. Grant: `help.read`. API page: [Help and plugins](/pages/api-help-and-plugins/).
 
-```wit
+```text
 interface help {
   /// Markdown. none for an unknown topic.
   topic: func(id: string) -> option<string>;
@@ -1737,7 +1743,7 @@ interface help {
 
 C. Grant: `plugins.manage`. API page: [Help and plugins](/pages/api-help-and-plugins/).
 
-```wit
+```text
 interface plugins {
   use ilium:types/ids@0.1.0.{plugin-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1781,7 +1787,7 @@ interface plugins {
 
 S C. Grant: none. API page: [Catalogs](/pages/api-catalogs/).
 
-```wit
+```text
 interface catalogs {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1802,7 +1808,7 @@ interface catalogs {
 
 S C A. Grant: `location.geocode`. API page: [Geocode](/pages/api-geocode/).
 
-```wit
+```text
 interface geocode {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1821,7 +1827,7 @@ interface geocode {
 
 S. Grant: `sessions.cross`. API page: [Sessions](/pages/api-sessions/).
 
-```wit
+```text
 interface sessions {
   use ilium:types/ids@0.1.0.{request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1836,9 +1842,9 @@ interface sessions {
 
 ### 5.35 kernel-settings
 
-S C. Grants: `settings.read-kernel:<tab-id>` for `read`, and `settings.write-kernel:<tab-id>` for `write` (T1 only). API page: [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/).
+S C. Grants: `settings.read-kernel:<tab-id>` (the function read) and `settings.write-kernel:<tab-id>` (the function write) (T1 only). API page: [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/).
 
-```wit
+```text
 interface kernel-settings {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// A JSON object of that tab's values. Secrets are "<redacted>".
@@ -1852,7 +1858,7 @@ interface kernel-settings {
 
 C. Grant: `keymap.read`. API page: [Kernel settings and keymap](/pages/api-kernel-settings-and-keymap/).
 
-```wit
+```text
 interface keymap {
   record binding { command: string, chords: list<string>, context: string, is-default: bool }
   bindings: func() -> list<binding>;
@@ -1865,7 +1871,7 @@ interface keymap {
 
 A. Grant: `gpu.kernels`. Unstable feature `gpu-kernels`. API page: [GPU](/pages/api-gpu/).
 
-```wit
+```text
 interface gpu {
   use ilium:types/errors@0.1.0.{plugin-error};
   enum gpu-kernel { blur, threshold, palette-map, dither-ordered, scale }
@@ -1880,7 +1886,7 @@ interface gpu {
 
 S and C. Grant: none for declared kinds. API page: [Client requests](/pages/api-client-requests/).
 
-```wit
+```text
 interface client-requests {
   use ilium:types/ids@0.1.0.{client-id, request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -1896,7 +1902,7 @@ interface client-requests {
 
 S C. Grant: `extensions.provide:<point>`, `extensions.contribute:<point>`. API page: [Extension points](/pages/api-extension-points/).
 
-```wit
+```text
 interface extensions {
   use ilium:types/ids@0.1.0.{plugin-id, request-id};
   record extension-entry {
@@ -1942,7 +1948,7 @@ The full table of slow calls is in [Requests and outcomes](/pages/requests-and-o
 
 Primitives are the typed access to the built-in pane kinds. A primitive is imported by client and server plugins as the table in section 3 says. Each function names its grant in the comment.
 
-```wit
+```text
 package ilium:primitives@0.1.0;
 ```
 
@@ -1950,7 +1956,7 @@ package ilium:primitives@0.1.0;
 
 S C. Grants: `terminal.read-screen`, `terminal.read-cells`, `terminal.history`, `terminal.output-filter`, `terminal.pointer`, `terminal.input-lock`. API pages: [Terminal](/pages/primitives-terminal/), [Terminal reads](/pages/primitives-terminal-reads/), [Terminal pointer](/pages/primitives-terminal-pointer/) and [Terminal input](/pages/primitives-terminal-input/).
 
-```wit
+```text
 interface terminal {
   use ilium:types/ids@0.1.0.{node-id, request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -2006,7 +2012,7 @@ interface terminal {
 
 S C. Grants: `agent.read`, `agent.read-prompts`, `agent.transcript`, `agent.signatures`, `agent.control`. API pages: [Agent](/pages/primitives-agent/) and [Agent transcript](/pages/primitives-agent-transcript/).
 
-```wit
+```text
 interface agent {
   use ilium:types/ids@0.1.0.{node-id, request-id, epoch-ms};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -2048,7 +2054,7 @@ interface agent {
 
 C. Grants: `editor.read`, `editor.edit`. API pages: [Editor](/pages/primitives-editor/) and [Editor viewport](/pages/primitives-editor-viewport/).
 
-```wit
+```text
 interface editor {
   use ilium:types/ids@0.1.0.{node-id, buffer-id, request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -2090,7 +2096,7 @@ The editor-provider status is decided: the editor is a built-in pane kind, a plu
 
 C. Grant: `panes.provide-kind` for the pane kinds the plugin contributes. API page: [Basic pane primitive](/pages/primitives-basic/).
 
-```wit
+```text
 interface basic {
   use ilium:types/ids@0.1.0.{node-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -2115,7 +2121,7 @@ interface basic {
 
 Imported by scene plugins only. A scene also imports `log`, `clock`, `storage`, `fs`, `codec`, `jobs`, `http`, `audio`, `media`, `location`, `geocode` and `gpu` from `ilium:host`, as the import matrix says.
 
-```wit
+```text
 package ilium:anim@0.1.0;
 ```
 
@@ -2123,7 +2129,7 @@ package ilium:anim@0.1.0;
 
 Grant: none. Manifest keys: `glyph_plane: true` for the glyph methods. API pages: [Scenes](/pages/api-scenes/) and [Glyph plane and receipts](/pages/api-surface-glyph-plane/).
 
-```wit
+```text
 interface surface {
   use ilium:types/ids@0.1.0.{epoch-ms};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -2166,7 +2172,7 @@ interface surface {
 
 Grant: none. Scene only.
 
-```wit
+```text
 interface fonts {
   use ilium:types/errors@0.1.0.{plugin-error};
   resource font {
@@ -2180,7 +2186,7 @@ interface fonts {
 
 ### 7.3 renderer types
 
-```wit
+```text
 interface renderer-types {
   /// The order is the ABI.
   enum readiness { ready, preparing, failed }
@@ -2194,13 +2200,13 @@ interface renderer-types {
 
 This package holds everything a plugin implements. The host calls these interfaces. A plugin exports `lifecycle` and, on server and client, `handler`. Optional exports are named in the manifest `exports` list, and required exports are never listed there [ABI-018].
 
-```wit
+```text
 package ilium:exports@0.1.0;
 ```
 
 ### 8.1 lifecycle
 
-```wit
+```text
 interface lifecycle {
   use ilium:types/errors@0.1.0.{plugin-error};
   use ilium:types/lifecycle@0.1.0.{activation, deactivation-reason};
@@ -2213,7 +2219,7 @@ interface lifecycle {
 
 ### 8.2 handler
 
-```wit
+```text
 interface handler {
   use ilium:types/events@0.1.0.{event};
   use ilium:types/intents@0.1.0.{submission};
@@ -2224,7 +2230,7 @@ interface handler {
 
 ### 8.3 views
 
-```wit
+```text
 interface views {
   use ilium:types/ui@0.1.0.{view-target, ui-tree};
   use ilium:types/layout@0.1.0.{area};
@@ -2235,7 +2241,7 @@ interface views {
 
 ### 8.4 detector
 
-```wit
+```text
 interface detector {
   use ilium:types/tree@0.1.0.{agent-activity};
   record detector-screen { columns: u16, rows: list<string>, cursor-row: u16, title: option<string>, revision: u64 }
@@ -2248,7 +2254,7 @@ interface detector {
 
 ### 8.5 job-runner
 
-```wit
+```text
 interface job-runner {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// Runs in a job instance, see Runtime model. The output is at most job_io_mib (default 16 MiB, ceiling 64 MiB).
@@ -2258,7 +2264,7 @@ interface job-runner {
 
 ### 8.6 service-provider
 
-```wit
+```text
 interface service-provider {
   use ilium:types/ids@0.1.0.{plugin-id};
   variant service-reply { done(string), deferred }
@@ -2270,7 +2276,7 @@ interface service-provider {
 
 ### 8.7 inference-provider
 
-```wit
+```text
 interface inference-provider {
   use ilium:types/errors@0.1.0.{plugin-error};
   use ilium:host/inference@0.1.0.{completion-request};
@@ -2283,7 +2289,7 @@ interface inference-provider {
 
 ### 8.8 annotator
 
-```wit
+```text
 interface annotator {
   use ilium:types/ids@0.1.0.{buffer-id};
   use ilium:types/text@0.1.0.{style};
@@ -2294,7 +2300,7 @@ interface annotator {
 
 ### 8.9 settings-validate
 
-```wit
+```text
 interface settings-validate {
   use ilium:host/settings@0.1.0.{field-error};
   /// 100 ms deadline. A message is at most 120 characters of plain text.
@@ -2304,7 +2310,7 @@ interface settings-validate {
 
 ### 8.10 catalog-provider
 
-```wit
+```text
 interface catalog-provider {
   use ilium:types/errors@0.1.0.{plugin-error};
   use ilium:host/catalogs@0.1.0.{catalog-query, catalog-page};
@@ -2314,7 +2320,7 @@ interface catalog-provider {
 
 ### 8.11 menu-provider
 
-```wit
+```text
 interface menu-provider {
   use ilium:types/ids@0.1.0.{node-id, buffer-id};
   use ilium:types/errors@0.1.0.{plugin-error};
@@ -2341,7 +2347,7 @@ interface menu-provider {
 
 ### 8.12 virtual-rows-provider
 
-```wit
+```text
 interface virtual-rows-provider {
   use ilium:types/errors@0.1.0.{plugin-error};
   use ilium:types/text@0.1.0.{rich-text, tooltip};
@@ -2357,7 +2363,7 @@ interface virtual-rows-provider {
 
 ### 8.13 token-provider
 
-```wit
+```text
 interface token-provider {
   use ilium:types/ids@0.1.0.{buffer-id};
   enum token-kind { keyword, string, number, comment, type-name, function, variable, operator, punctuation, constant, tag, attribute, plain }
@@ -2369,7 +2375,7 @@ interface token-provider {
 
 ### 8.14 hook-handler
 
-```wit
+```text
 interface hook-handler {
   use ilium:types/errors@0.1.0.{plugin-error};
   record hook-call { call: u64, point: string, extension: string, payload-json: string }
@@ -2381,7 +2387,7 @@ interface hook-handler {
 
 ### 8.15 renderer
 
-```wit
+```text
 interface renderer {
   use ilium:anim/surface@0.1.0.{frame-surface};
   use ilium:anim/renderer-types@0.1.0.{readiness, frame-input};
@@ -2404,7 +2410,7 @@ interface renderer {
 
 ### 8.16 migrator
 
-```wit
+```text
 interface migrator {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// The host calls it once per side before activate when the manifest data_version rose.
@@ -2417,11 +2423,13 @@ interface migrator {
 
 A world is one base plus fragments. A fragment is a world that `include`s nothing and only adds exports; the SDK composes them. Each fragment name is the one used in the manifest-independent tables of [Worlds and sides](/pages/worlds-and-sides/).
 
-```wit
+```text
 package ilium:server@0.1.0;
 
 world base {
   import ilium:host/log@0.1.0;
+  import ilium:host/telemetry@0.1.0;
+  import ilium:host/geocode@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/timers@0.1.0;
   import ilium:host/journal@0.1.0;
@@ -2466,11 +2474,13 @@ world with-hook-handler { export ilium:exports/hook-handler@0.1.0; }
 world with-migrator { export ilium:exports/migrator@0.1.0; }
 ```
 
-```wit
+```text
 package ilium:client@0.1.0;
 
 world base {
   import ilium:host/log@0.1.0;
+  import ilium:host/telemetry@0.1.0;
+  import ilium:host/gpu@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/timers@0.1.0;
   import ilium:host/journal@0.1.0;
@@ -2526,11 +2536,12 @@ world with-hook-handler { export ilium:exports/hook-handler@0.1.0; }
 world with-migrator { export ilium:exports/migrator@0.1.0; }
 ```
 
-```wit
+```text
 package ilium:anim@0.1.0;
 
 world base {
   import ilium:host/log@0.1.0;
+  import ilium:host/telemetry@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/storage@0.1.0;
   import ilium:host/codec@0.1.0;

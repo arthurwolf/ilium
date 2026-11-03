@@ -79,7 +79,7 @@ The WIT functions `take-bytes` and `take-entries` are used only through the wrap
 
 Records, from `ilium:host/fs`:
 
-```wit
+```text
 record fs-path { scope: string, path: string }
 enum entry-kind { file, directory, symlink, other }
 record fs-metadata {

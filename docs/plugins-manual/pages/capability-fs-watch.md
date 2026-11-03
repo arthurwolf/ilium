@@ -42,7 +42,7 @@ A grant that breaks these rules stops the install. Each error is one JSONL `erro
 
 The WIT declarations, from which the SDK bindings are generated, are:
 
-```wit
+```text
 type watch-id = u64;
 watch: func(path: fs-path, recursive: bool) -> result<watch-id, plugin-error>;  // fs.watch
 unwatch: func(watch: watch-id);

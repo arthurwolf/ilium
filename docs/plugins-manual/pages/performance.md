@@ -341,7 +341,7 @@ The job kind is declared in the manifest:
 
 The WIT calls behind the SDK wrappers are exact:
 
-```wit
+```text
 read-all: func(path: fs-path) -> result<request-id, plugin-error>;
 start: func(kind: string, input: list<u8>) -> result<request-id, plugin-error>;
 take-bytes: func(request: request-id) -> option<list<u8>>;

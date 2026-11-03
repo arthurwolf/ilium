@@ -16,7 +16,7 @@ The session tree is made of groups, folders, projects, splits and panes. A plugi
 
 ### Records
 
-```wit
+```text
 enum placement { before, after, inside-first, inside-last }           // as for move-node
 
 record create-group-spec   { parent: option<node-id>, title: string, placement: placement, children: list<node-id> }

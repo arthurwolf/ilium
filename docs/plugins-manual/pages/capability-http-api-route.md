@@ -56,7 +56,7 @@ The method is an upper-case HTTP method name. Each route is served at `/plugins/
 
 The capability adds one import and one event. Each `respond` call answers exactly one `http-called` event.
 
-```wit
+```text
 respond: func(call: u64, status: u16, headers: list<tuple<string, string>>,
               body: list<u8>) -> result<_, plugin-error>;
 

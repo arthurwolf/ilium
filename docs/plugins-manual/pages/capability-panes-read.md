@@ -66,7 +66,7 @@ Rust names come from `ilium_plugin_sdk::host::panes`. TypeScript names come from
 
 The WIT declarations, with the grant on each line:
 
-```wit
+```text
 // ilium:types/tree
 record pane-info {
     node: node-id, content-kind: string, primitive: primitive-kind,

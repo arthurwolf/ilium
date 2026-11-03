@@ -33,7 +33,7 @@ The grant keeps two user decisions intact. A title the user typed is never overw
 
 The grant has no functions. It opens four intents, each returned as a submission. The WIT records below are the payloads.
 
-```wit
+```text
 record submission { intent: intent, correlation: u64, dedup-key: option<string> }
 enum placement { before, after, inside-first, inside-last }
 record rename-node-spec { node: node-id, title: string, source: title-source, expected-revision: option<u64> }

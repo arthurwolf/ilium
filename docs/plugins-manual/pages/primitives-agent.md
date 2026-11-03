@@ -33,7 +33,7 @@ target) or TypeScript (Bun 1.2 or later). See [toolchain setup](/pages/getting-s
 
 ### Interface
 
-```wit
+```text
 // ilium:types/tree
 enum agent-activity { none, working, idle, awaiting-approval, done, menu }
 record agent-view {

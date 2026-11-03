@@ -43,7 +43,7 @@ Every function below is in the client world. A grant listed in the second column
 
 The records and the event as WIT declares them:
 
-```wit
+```text
 record audio-device { id: string, name: string, is-input: bool, is-default: bool }
 record audio-frames-event { capture: u64, samples: list<s16> }
 devices: func() -> list<audio-device>;
