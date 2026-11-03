@@ -290,13 +290,28 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     let before = app.pane_viewports();
     let tree = serde_json::to_vec(&app.tree).unwrap();
     assert_eq!(before.len(), 2);
+    // A waiting pane deliberately gains a wait footer while the progress monitor
+    // is on; this test pins that the grouping setting itself never moves geometry.
+    app.ui_settings.progress_monitor_enabled = false;
+    let before = app.pane_viewports();
     app.resources
         .waits
         .insert(first, ReservationId::from("reservation"));
     app.ui_settings.resource_queue_grouping = false;
-    assert_eq!(before, app.pane_viewports());
-    app.resources.waits.clear();
+    let waiting = app.pane_viewports();
+    assert_eq!(waiting.len(), before.len());
+    for (original, current) in before.iter().zip(&waiting) {
+        assert_eq!(original.pane_id, current.pane_id);
+        assert_eq!(original.outer_area, current.outer_area);
+        assert_eq!(original.slot_index, current.slot_index);
+    }
+    // The native wait footer uses space inside its pane, never a sibling's split.
+    assert!(waiting[0].progress_area.is_some());
+    assert!(waiting[0].content_area.height < before[0].content_area.height);
+    assert_eq!(waiting[1], before[1]);
     app.ui_settings.resource_queue_grouping = true;
+    assert_eq!(waiting, app.pane_viewports());
+    app.resources.waits.clear();
     assert_eq!(before, app.pane_viewports());
     assert_eq!(app.tree.parent_of(first), Some(split));
     assert_eq!(app.tree.parent_of(second), Some(split));
@@ -457,12 +472,80 @@ fn clicking_a_queue_row_selects_that_request() {
 }
 
 #[test]
-fn dump_rendered_panel_for_review() {
-    for (width, height) in [(120, 40), (80, 24)] {
-        let (app, _, _) = fixture();
-        println!(
-            "=== {width}x{height} ===\n{}",
-            text(&capture(&app, width, height, None))
-        );
+fn removing_the_resource_closes_its_control_panel() {
+    let (mut app, _, _) = fixture();
+    assert!(matches!(
+        app.right_panel_target,
+        crate::app::RightPanelTarget::Resource { .. }
+    ));
+    let mut catalog = app.resources.catalog.clone().unwrap();
+    catalog.revision += 1;
+    catalog.resources.remove(&ResourceId::from("gpu"));
+    catalog.links.clear();
+    let clock = app.resources.clock.clone().unwrap();
+    assert!(app.receive_resource_catalog(catalog, clock, Vec::new(), Vec::new(), 1));
+    assert!(matches!(
+        app.right_panel_target,
+        crate::app::RightPanelTarget::Empty
+    ));
+}
+
+#[test]
+fn panel_breathing_grows_with_space_and_stays_dense_when_small() {
+    use super::super::panel::{layout, Breathing};
+    use ratatui::{layout::Position, widgets::Block};
+    let (app, _, _) = fixture();
+    let record = app
+        .resources
+        .record(&ResourceId::from("gpu"))
+        .unwrap()
+        .clone();
+    let small = Rect::new(0, 0, 60, 30);
+    let medium = Rect::new(0, 0, 100, 40);
+    let large = Rect::new(0, 0, 140, 56);
+    let inner = |area: Rect| Block::bordered().inner(area);
+    assert_eq!(
+        Breathing::for_inner(inner(small)),
+        Breathing {
+            side: 0,
+            top: 0,
+            gap: 0
+        }
+    );
+    let medium_air = Breathing::for_inner(inner(medium));
+    let large_air = Breathing::for_inner(inner(large));
+    assert!(medium_air.side > 0 && medium_air.side < large_air.side);
+    assert_eq!(large_air.side, 4);
+    assert_eq!((large_air.top, large_air.gap), (1, 1));
+    for area in [small, medium, large] {
+        let panel = layout(&app, &record, area);
+        assert_eq!(panel.breathing, Breathing::for_inner(inner(area)));
+        let sections = [
+            Some(panel.header),
+            panel.warning,
+            Some(panel.cards),
+            Some(panel.queue),
+            panel.trend,
+            Some(panel.detail),
+            panel.message,
+        ]
+        .into_iter()
+        .flatten();
+        for section in sections {
+            assert!(
+                inner(area).contains(Position::new(section.x, section.y)),
+                "{area:?}"
+            );
+            assert!(section.right() <= inner(area).right());
+        }
+        for button in &panel.buttons {
+            assert!(button.rect.x >= inner(area).x + panel.breathing.side);
+            assert!(button.rect.right() <= inner(area).right() - panel.breathing.side);
+        }
     }
+    let large_panel = layout(&app, &record, large);
+    let small_panel = layout(&app, &record, small);
+    assert!(large_panel.header.x > inner(large).x);
+    assert_eq!(small_panel.header.x, inner(small).x);
+    assert!(large_panel.cards.height > 0 && large_panel.detail.height > 0);
 }

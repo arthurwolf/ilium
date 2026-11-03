@@ -5,3 +5,5 @@
 
 ### Changed
 - Resource wording is now plain language ("Take back ownership", "Confirm safe", "Pause queue", "Mark offline", "Delete") in the panel, dialogs and help.
+- Right-clicking a request under a resource in the tree now offers to show it in the control panel, cancel it while waiting, or release it while owned.
+- The resource control panel adapts its spacing to the space it has: small panels stay dense, larger ones get side margins, a top margin and gaps between sections and status cards.

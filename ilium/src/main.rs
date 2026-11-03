@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{parser::ValueSource, CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use ilium::error::CliError;
 use ilium_core::BuiltinAgentProvider;
@@ -72,12 +72,6 @@ struct Cli {
     /// canonical project directory.
     #[arg(long, global = true, default_value = ".")]
     cwd: PathBuf,
-
-    /// True when `--cwd` was typed on the command line (not the `.` default).
-    /// An explicit project must never be overridden by the pane identity this
-    /// process inherited from the Ilium pane it happens to run in.
-    #[arg(skip)]
-    cwd_explicit: bool,
 
     /// Replace this project's running server before attaching while retaining
     /// its snapshot. Useful after installing a new server binary.
@@ -389,8 +383,8 @@ fn main() -> ExitCode {
         }
     }
     let matches = Cli::command().get_matches();
-    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    cli.cwd_explicit = matches.value_source("cwd") == Some(ValueSource::CommandLine);
+    let explicit_cwd = matches.value_source("cwd") == Some(clap::parser::ValueSource::CommandLine);
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     if matches!(&cli.command, Some(Command::ClipboardHelper)) {
         return match ilium_client::terminal_clipboard::run_helper() {
             Ok(()) => ExitCode::SUCCESS,
@@ -455,11 +449,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(run_main(cli))
+    runtime.block_on(run_main(cli, explicit_cwd))
 }
 
-async fn run_main(cli: Cli) -> ExitCode {
-    let outcome = dispatch(cli).await;
+async fn run_main(cli: Cli, explicit_cwd: bool) -> ExitCode {
+    let outcome = dispatch(cli, explicit_cwd).await;
     if let Some(error) = outcome
         .as_ref()
         .err()
@@ -508,7 +502,7 @@ async fn process_logging_barrier(shutdown: bool) -> Result<(), ilium_logging::Lo
     .map_err(|_| ilium_logging::LoggingError::Deadline)?
 }
 
-async fn dispatch(cli: Cli) -> Result<(), CliError> {
+async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
     match cli.command {
         Some(Command::ClipboardHelper) => Err(CliError::ServerReportedError(
             "Clipboard helper must run before runtime startup".into(),
@@ -569,7 +563,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             }
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
-        Some(Command::Resource(args)) => resource::run(args, &cli.cwd, cli.cwd_explicit).await,
+        Some(Command::Resource(args)) => resource::run(args, &cli.cwd, explicit_cwd).await,
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait {
@@ -2259,11 +2253,29 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, default_workspace_path, join_for_shell,
-        json_string, pane_identity_from_values, pane_progress_json, progress_report_json, session,
-        shell_join, workspace_provider, Cli, Command, ProgressCommand,
+        chat_with_pane_worktree, chatroom_project_root, client_restart_args,
+        default_workspace_path, join_for_shell, json_string, pane_identity_from_values,
+        pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
+        ChatCommand, Cli, Command, ProgressCommand,
     };
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn resource_project_selection_distinguishes_explicit_cwd_from_default() {
+        use clap::parser::ValueSource;
+
+        for arguments in [
+            vec!["ilium", "--cwd", ".", "resource", "list"],
+            vec!["ilium", "resource", "list", "--cwd=."],
+        ] {
+            let matches = Cli::command().try_get_matches_from(arguments).unwrap();
+            assert_eq!(matches.value_source("cwd"), Some(ValueSource::CommandLine));
+        }
+        let matches = Cli::command()
+            .try_get_matches_from(["ilium", "resource", "list"])
+            .unwrap();
+        assert_eq!(matches.value_source("cwd"), Some(ValueSource::DefaultValue));
+    }
 
     #[test]
     fn onboarding_flag_is_available_for_bare_and_named_interactive_attach() {
@@ -2514,9 +2526,8 @@ mod tests {
     fn tail_and_send_report_a_missing_room_but_context_stays_silent() {
         let project = tempfile::tempdir().unwrap();
 
-        let tail =
-            chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
-                .unwrap_err();
+        let tail = chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
+            .unwrap_err();
         assert!(tail
             .to_string()
             .ends_with(ilium_client::chatroom_root::NO_CHATROOM_MESSAGE));

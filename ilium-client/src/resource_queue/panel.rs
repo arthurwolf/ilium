@@ -40,8 +40,36 @@ pub(super) struct Button {
     pub enabled: Result<(), String>,
 }
 
+/// Breathing room the panel adds around and between its sections. It is
+/// derived from the space the panel actually has (CSS-flex style): a small
+/// panel gets none and keeps the dense layout, and a larger one grows its
+/// side margins, top margin and section gaps as room allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Breathing {
+    /// Columns kept clear on the left and right of the panel content.
+    pub side: u16,
+    /// Rows kept clear above the header.
+    pub top: u16,
+    /// Rows between sections, and columns between the status cards.
+    pub gap: u16,
+}
+
+impl Breathing {
+    /// Picks the breathing room for a panel whose inside is `inner`. Side
+    /// margin grows by one column per 16 columns above the narrow threshold,
+    /// capped at four; vertical room is only spent once the panel is tall.
+    pub fn for_inner(inner: Rect) -> Self {
+        Self {
+            side: (inner.width.saturating_sub(NARROW) / 16).min(4),
+            top: u16::from(inner.height >= 44),
+            gap: u16::from(inner.height >= 34),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct PanelLayout {
+    pub breathing: Breathing,
     pub header: Rect,
     pub warning: Option<Rect>,
     pub cards: Rect,
@@ -134,10 +162,17 @@ fn flow(
 
 pub(super) fn layout(app: &App, record: &ResourceRecord, area: Rect) -> PanelLayout {
     let inner = Block::bordered().inner(area);
+    let breathing = Breathing::for_inner(inner);
+    let body = Rect {
+        x: inner.x.saturating_add(breathing.side),
+        y: inner.y.saturating_add(breathing.top),
+        width: inner.width.saturating_sub(breathing.side * 2),
+        height: inner.height.saturating_sub(breathing.top),
+    };
     let (_, _, rows) = flow(
         app,
         record,
-        Rect::new(inner.x, inner.y, inner.width, u16::MAX / 2),
+        Rect::new(body.x, body.y, body.width, u16::MAX / 2),
     );
     let has_warning = warning_text(app, record).is_some();
     let queue_len = ordered(record).len();
@@ -148,19 +183,29 @@ pub(super) fn layout(app: &App, record: &ResourceRecord, area: Rect) -> PanelLay
     };
     let show_trend = inner.height >= 30 && inner.width >= NARROW;
     let has_message = app.resources.error.is_some() || app.resources.pending.is_some();
-    let [header, warning, cards, queue, trend, detail, message, buttons] = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Length(u16::from(has_warning)),
-        Constraint::Length(if inner.width >= NARROW { 3 } else { 1 }),
-        Constraint::Length(queue_height),
-        Constraint::Length(if show_trend { 4 } else { 0 }),
-        Constraint::Fill(1),
-        Constraint::Length(u16::from(has_message)),
-        Constraint::Length(rows),
-    ])
-    .areas(inner);
+    let gap = breathing.gap;
+    // Spacer rows are zero-length when the gap is off or the section below is
+    // hidden, so a compact panel keeps exactly the dense layout.
+    let [header, warning, _, cards, _, queue, _, trend, detail, _, message, _, buttons] =
+        Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(u16::from(has_warning)),
+            Constraint::Length(gap),
+            Constraint::Length(if inner.width >= NARROW { 3 } else { 1 }),
+            Constraint::Length(gap),
+            Constraint::Length(queue_height),
+            Constraint::Length(if show_trend { gap } else { 0 }),
+            Constraint::Length(if show_trend { 4 } else { 0 }),
+            Constraint::Fill(1),
+            Constraint::Length(if has_message { gap } else { 0 }),
+            Constraint::Length(u16::from(has_message)),
+            Constraint::Length(gap),
+            Constraint::Length(rows),
+        ])
+        .areas(body);
     let (captions, flowed, _) = flow(app, record, buttons);
     PanelLayout {
+        breathing,
         header,
         warning: has_warning.then_some(warning),
         cards,
@@ -712,7 +757,9 @@ fn render_cards(app: &App, frame: &mut Frame, record: &ResourceRecord, panel: &P
         );
         return;
     }
-    let cells = Layout::horizontal([Constraint::Fill(1); 4]).split(panel.cards);
+    let cells = Layout::horizontal([Constraint::Fill(1); 4])
+        .spacing(panel.breathing.gap)
+        .split(panel.cards);
     let card = |title: &'static str| Block::bordered().title(title);
     frame.render_widget(
         Paragraph::new(state.clone()).block(card("Status")),

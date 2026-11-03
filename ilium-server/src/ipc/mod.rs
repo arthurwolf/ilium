@@ -395,11 +395,13 @@ mod tests {
         for task in listener.state.connection_tasks.lock().unwrap().iter() {
             task.abort();
         }
-        let admitted_end =
-            tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
-                .await
-                .expect("aborted admitted peer remained open");
-        assert!(admitted_end.is_err());
+        // Attach now sends a resource snapshot before the abort closes the
+        // stream, so skip any events already queued and require the close.
+        tokio::time::timeout(TEST_DEADLINE, async {
+            while read_frame::<ServerEvent, _>(&mut admitted).await.is_ok() {}
+        })
+        .await
+        .expect("aborted admitted peer remained open");
         assert!(
             !listener.state.has_terminal_subscribers(NodeId(999)),
             "aborting the joined connection must drop its terminal subscription"

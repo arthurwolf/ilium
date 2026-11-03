@@ -147,9 +147,7 @@ impl Job for NativeSpawnJob {
             &self.request.cwd,
             &identity,
             &self.quota,
-            resolved
-                .as_ref()
-                .map_or(&[], |launch| launch.environment.as_slice()),
+            resolved.as_ref(),
         )?;
         ilium_platform::startup_timing::record(
             "pty_ready",

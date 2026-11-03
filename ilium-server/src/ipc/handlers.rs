@@ -233,6 +233,8 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Connection-owned subscriptions are intercepted by the reader.
+        ClientRequest::SetStatusScreenWatches { .. } => false,
         ClientRequest::Resource {
             request_id,
             request,
@@ -1722,7 +1724,6 @@ async fn handle_attach(
         .await;
         return false;
     }
-    crate::resources::send_snapshot(state, direct_tx).await;
     loop {
         match state.recovery.attach_status().await {
             crate::recovery::AttachStatus::Pending { pane_count } => {
@@ -1835,7 +1836,7 @@ const TERMINAL_HISTORY_MAX_BYTES: usize = 1024 * 1024;
 enum TerminalOutputSynchronization<'a> {
     All,
     None,
-    RecoverAfter(&'a HashMap<NodeId, u64>),
+    RecoverAfter(&'a HashMap<NodeId, u64>, Option<&'a HashSet<NodeId>>),
 }
 
 #[derive(Clone)]
@@ -1874,7 +1875,10 @@ impl TerminalOutputSynchronization<'_> {
                 Err(error) => return Err(error),
             },
             Self::None => return Ok(None),
-            Self::RecoverAfter(delivered_sequences) => {
+            Self::RecoverAfter(delivered_sequences, visible_panes) => {
+                if visible_panes.is_some_and(|visible| !visible.contains(&pane_id)) {
+                    return Ok(None);
+                }
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
                     .copied()
@@ -1911,7 +1915,7 @@ impl TerminalOutputSynchronization<'_> {
                 _ => None,
             },
             Self::None => None,
-            Self::RecoverAfter(_) => session
+            Self::RecoverAfter(_, _) => session
                 .try_output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
                 .map(|recovery| match recovery {
                     PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
@@ -1936,7 +1940,10 @@ impl TerminalOutputSynchronization<'_> {
                 None => Some(terminal_replay_event(pane_id, session.output_replay())),
             },
             Self::None => None,
-            Self::RecoverAfter(delivered_sequences) => {
+            Self::RecoverAfter(delivered_sequences, visible_panes) => {
+                if visible_panes.is_some_and(|visible| !visible.contains(&pane_id)) {
+                    return None;
+                }
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
                     .copied()
@@ -1978,7 +1985,7 @@ pub(crate) async fn resynchronization_events(
 ) -> Vec<ServerEvent> {
     state_synchronization_events(
         state,
-        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
+        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences, None),
         false,
     )
     .await
@@ -1987,6 +1994,7 @@ pub(crate) async fn resynchronization_events(
 pub(crate) async fn admitted_resynchronization_events(
     state: &ServerState,
     delivered_terminal_sequences: &HashMap<NodeId, u64>,
+    visible_panes: Option<&HashSet<NodeId>>,
 ) -> Result<
     (
         Vec<ServerEvent>,
@@ -1996,7 +2004,7 @@ pub(crate) async fn admitted_resynchronization_events(
 > {
     admitted_state_synchronization_events(
         state,
-        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
+        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences, visible_panes),
         false,
         None,
     )
@@ -14109,6 +14117,28 @@ mod tests {
             None,
             "a replaced pane owner must not broadcast its predecessor's output"
         );
+
+        // Lag repair for a viewport must not materialize hidden journals:
+        // doing so can exhaust the shared admission budget before filtering.
+        let visible = HashSet::from([missing_pane_id]);
+        let (visible_events, _admission) =
+            admitted_resynchronization_events(&state, &HashMap::new(), Some(&visible))
+                .await
+                .expect("visible-only lag recovery is admitted");
+        assert!(visible_events.iter().any(|event| matches!(event,
+            ServerEvent::ScreenUpdate { pane_id, .. }
+                | ServerEvent::TerminalReplay { pane_id, .. }
+                | ServerEvent::TerminalSnapshot { pane_id, .. }
+                if *pane_id == missing_pane_id)));
+        assert!(!visible_events.iter().any(|event| matches!(event,
+            ServerEvent::ScreenUpdate { pane_id, .. }
+                | ServerEvent::TerminalReplay { pane_id, .. }
+                | ServerEvent::TerminalSnapshot { pane_id, .. }
+                if *pane_id == current_pane_id)));
+        assert!(visible_events.iter().any(|event| matches!(event,
+            ServerEvent::PaneStateSnapshot { tree, .. }
+                if tree.get(missing_pane_id).is_some() && tree.get(current_pane_id).is_some())));
+        drop(_admission);
 
         let events = resynchronization_events(&state, &delivered_sequences).await;
         let terminal_events: Vec<&ServerEvent> = events

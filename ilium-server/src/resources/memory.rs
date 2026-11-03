@@ -3,6 +3,7 @@ use super::*;
 use ilium_core::AllocationSize;
 use ilium_execution::StorageAdmission;
 use std::{
+    future::Future,
     mem::{size_of, size_of_val},
     ops::{Deref, DerefMut},
 };
@@ -55,6 +56,32 @@ impl<T> ResourceMemory<T> {
 }
 pub(super) type Eligibility = Arc<ResourceMemory<BTreeMap<InvocationId, InvocationEligibility>>>;
 pub(super) type Catalog = Arc<ResourceMemory<ResourceCatalog>>;
+
+// Keep tracing arguments outside generic async futures and worker captures.
+fn trace_worker<T>(operation_id: u64, stage: &str, elapsed_ms: u128) {
+    tracing::debug!(
+        operation_id,
+        output_type = std::any::type_name::<T>(),
+        stage,
+        elapsed_ms,
+        "resource worker diagnostic"
+    );
+}
+
+/// Preserve the original future and its custody while identifying slow stages.
+async fn observe_io_stage<T>(stage: &'static str, future: impl Future<Output = T>) -> T {
+    tokio::pin!(future);
+    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut future).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!(
+                stage,
+                "resource I/O stage is still waiting; operation remains active"
+            );
+            future.await
+        }
+    }
+}
 pub(super) trait ResourceBytes {
     fn resource_bytes(&self) -> usize;
 }
@@ -118,6 +145,8 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
     state: &ServerState,
     action: impl FnOnce() -> Result<T, ResourceError> + Send + 'static,
 ) -> Result<ResourceMemory<T>, ResourceError> {
+    static OPERATION_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let operation_id = OPERATION_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let client = &state
         .execution
         .get()
@@ -127,17 +156,24 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
     // constructs it. Reserving the whole 128 MiB as a job result instead would
     // wait forever while logging or an attaching request retains even 64 KiB
     // of the general client's result allowance.
-    let payload_storage =
-        reserve_after_contention(state, RESULT_BYTES, "Resource worker allocation refused").await?;
-    let workspace_storage = reserve_after_contention(
-        state,
-        WORKSPACE_BYTES,
-        "Resource worker workspace allocation refused",
+    let payload_storage = observe_io_stage(
+        "payload allocation",
+        reserve_after_contention(state, RESULT_BYTES, "Resource worker allocation refused"),
+    )
+    .await?;
+    let workspace_storage = observe_io_stage(
+        "workspace allocation",
+        reserve_after_contention(
+            state,
+            WORKSPACE_BYTES,
+            "Resource worker workspace allocation refused",
+        ),
     )
     .await?;
     let capture_bytes = size_of_val(&action).saturating_add(ENVELOPE_BYTES);
-    let admission = client
-        .reserve(
+    let admission = observe_io_stage(
+        "job admission",
+        client.reserve(
             ilium_execution::Lane::Io,
             ilium_execution::JobCost {
                 // Captured heap and peak workspace retain workspace_storage;
@@ -148,12 +184,21 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
                 result_bytes: size_of::<ResourceMemory<Result<T, ResourceError>>>()
                     .saturating_add(ENVELOPE_BYTES),
             },
-        )
-        .await
-        .map_err(|e| err("admission", format!("{e:?}")))?;
-    let loaded = client
-        .run_reserved(admission, move |_| {
+        ),
+    )
+    .await
+    .map_err(|e| err("admission", format!("{e:?}")))?;
+    let loaded = observe_io_stage(
+        "worker completion",
+        client.run_reserved(admission, move |_| {
+            trace_worker::<T>(operation_id, "entered", 0);
+            let started = std::time::Instant::now();
             let mut value = action();
+            trace_worker::<T>(
+                operation_id,
+                "action completed",
+                started.elapsed().as_millis(),
+            );
             let retained_bytes = match &value {
                 Ok(value) => value.resource_bytes(),
                 Err(error) => size_of::<ResourceError>()
@@ -175,10 +220,17 @@ pub(super) async fn io<T: ResourceBytes + Send + 'static>(
             // The callback owns this lease through physical completion, even
             // when its requester has disconnected or cancelled the receipt.
             drop(workspace_storage);
+            trace_worker::<T>(
+                operation_id,
+                "callback completed",
+                started.elapsed().as_millis(),
+            );
             Ok::<_, std::convert::Infallible>(retained)
-        })
-        .await
-        .map_err(|error| err("worker", error))?;
+        }),
+    )
+    .await
+    .map_err(|error| err("worker", error))?;
+    trace_worker::<T>(operation_id, "receipt consumed", 0);
     let bytes = loaded
         .view()
         .value
@@ -316,10 +368,19 @@ pub(super) fn reserve_storage(
         .ok_or_else(|| err("unavailable", "Execution unavailable"))?
         .client
         .try_reserve_storage(bytes)
-        .map_err(|e| {
+        .map_err(|error| {
+            // This synchronous path can run while the wait registry is locked.
+            // Return transient contention to the existing request retry contract;
+            // waiting here would retain the registry and capacity exhaustion must
+            // remain an immediate refusal.
+            let code = if error == ilium_execution::RejectReason::Busy {
+                "busy"
+            } else {
+                "admission"
+            };
             err(
-                "admission",
-                format!("Resource metadata custody refused: {e:?}"),
+                code,
+                format!("Resource metadata custody refused: {error:?}"),
             )
         })
 }

@@ -47,6 +47,7 @@ pub enum ResourceStoreError {
 #[derive(Debug, Clone)]
 pub struct ResourceStore {
     catalog_path: PathBuf,
+    read_cache: std::sync::Arc<ilium_platform::resource_fs::ResourceLedgerReadCache>,
 }
 #[derive(Debug, Clone)]
 pub struct CommittedResourceChange {
@@ -73,7 +74,17 @@ impl ResourceStore {
             )
             .into());
         }
-        Ok(Self { catalog_path })
+        Ok(Self {
+            catalog_path,
+            read_cache: Default::default(),
+        })
+    }
+    pub(super) fn with_read_cache(
+        mut self,
+        cache: std::sync::Arc<ilium_platform::resource_fs::ResourceLedgerReadCache>,
+    ) -> Self {
+        self.read_cache = cache;
+        self
     }
     pub fn catalog_path(&self) -> &Path {
         &self.catalog_path
@@ -81,8 +92,8 @@ impl ResourceStore {
     fn locked(&self) -> Result<ResourceLedgerFile, ResourceStoreError> {
         ResourceLedgerFile::try_lock(&self.catalog_path)?.ok_or(ResourceStoreError::Busy)
     }
-    fn read(file: &ResourceLedgerFile) -> Result<ResourceCatalog, ResourceStoreError> {
-        let catalog = match file.read_reconciled(MAX_CATALOG_BYTES)? {
+    fn read(&self, file: &ResourceLedgerFile) -> Result<ResourceCatalog, ResourceStoreError> {
+        let catalog = match file.read_reconciled_cached(MAX_CATALOG_BYTES, &self.read_cache)? {
             Some(bytes) => serde_json::from_slice(&bytes)?,
             None => ResourceCatalog::default(),
         };
@@ -92,7 +103,7 @@ impl ResourceStore {
     }
     pub fn snapshot(&self) -> Result<ResourceCatalog, ResourceStoreError> {
         let file = self.locked()?;
-        Self::read(&file)
+        self.read(&file)
     }
     pub fn transact(
         &self,
@@ -100,7 +111,7 @@ impl ResourceStore {
         context: MutationContext,
     ) -> Result<CommittedResourceChange, ResourceStoreError> {
         let file = self.locked()?;
-        let catalog = Self::read(&file)?;
+        let catalog = self.read(&file)?;
         let transition = apply_resource_command(&catalog, command, &context)?;
         check_catalog_capacity(&transition.catalog)?;
         if std::mem::size_of::<CommittedResourceChange>()

@@ -8,37 +8,41 @@
 
 ## Quick start
 
-The commands and download links below require a published release. If release downloads are unavailable, [build from source](src/docs/building-from-source.md).
+Linux x86_64 preview: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1) provides six packages and SHA256SUMS. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-Linux and macOS:
+**Not yet available for this preview:** Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
+
+Plugin code is present for future integration and is not yet available for use.
+
+Install the Linux x86_64 preview (no root required):
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
 ```
 
-Windows PowerShell:
+Windows PowerShell **(coming soon: the Windows package is not yet available)**:
 
 ```powershell
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-For a Windows installer instead, choose the per-user [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) or [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi); the [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) is available for manual setup.
+Windows downloads are **not yet available**: per-user setup `.exe`, `.msi`, and ZIP.
 
-Direct release downloads (one package per system):
+Direct downloads (Linux x86_64 preview; other systems not yet available):
 
-| System | Downloads |
+| System | Downloads / availability |
 | --- | --- |
-| Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.flatpak) |
-| Linux ARM64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak) |
-| macOS Apple Silicon | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.dmg) |
-| macOS Intel | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.dmg) |
-| Windows x86_64 | [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) |
+| Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) |
+| Linux ARM64 | tar.gz, deb, rpm, AppImage, Snap, Flatpak **(coming soon; not yet available)** |
+| macOS Apple Silicon | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| macOS Intel | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| Windows x86_64 | setup `.exe`, MSI, ZIP **(coming soon; not yet available)** |
 
-Verify downloads against [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS). Details: [Installation](src/docs/installation.md).
+Verify packages using the preview checksum file [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS). Details: [Installation](src/docs/installation.md).
 
-After a qualified tag release completes, its [GitHub Packages release bundle](https://github.com/users/arthurwolf/packages/container/package/ilium-release) contains the same published assets in an OCI artifact. With [ORAS](https://oras.land/docs/installation/), run `oras pull ghcr.io/arthurwolf/ilium-release:VERSION --output ilium-release`, replacing `VERSION` with the release tag (for example, `v0.1.1`). The bundle includes the installers and five native archives; use the system installer above to install Ilium. The release's `SHA256SUMS` covers the native archives, while the published release asset digests cover every bundled file.
+The GitHub Packages release bundle is **not yet available**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
 
-Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. Re-run the installer to upgrade.
+Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package.
 
 No Rust toolchain is needed for releases. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately. Linux is the primary platform; macOS and Windows are implemented with different test coverage.
 
@@ -53,7 +57,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Find the next agent that needs you</strong></p>
-<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Real Claude and Codex sessions show questions, blocked goals, background-agent waits and unread completed turns in one attention queue; setup and idle gaps are cut, with reading holds" width="100%"></a></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
@@ -203,7 +207,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Queue access to a shared resource</strong></p>
-<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two agents reserve a demonstration resource: one waits, takes ownership when it is released, then releases it. The recording is cropped and pauses are shortened." width="100%"></a></p>
+<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two projects share a demonstration resource: one reserves it, the other queues, takes ownership when it is released and then releases it. The agents are local fixtures (no model or provider calls). The recording shows the full interface, with long pauses shortened." width="100%"></a></p>
 </td>
 <td width="50%" valign="top"></td>
 </tr>
@@ -234,7 +238,7 @@ All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md
 ## What Ilium does
 
 - **Arrange**: group panes and split the screen four ways. The project tree stays visible. [Panes and layout](src/docs/panes-and-layout.md)
-- **Track**: identify agent CLIs from process trees and read activity from terminal screens, optionally showing each session's model icon in the tree. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md)
+- **Track**: identify agent CLIs from process trees and read activity from terminal screens, with optional model icons in the tree. Choose Normal or Attention status icons, or configure ordered Custom icon rules. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md)
 - **Separate**: start agents in linked Git worktrees. Unclear file, process, or ownership state blocks cleanup. [Worktrees](src/docs/worktrees.md)
 - **Resume**: detach without stopping panes. Recovery rebuilds the layout and relaunches pane programs. [Session recovery](src/docs/session-recovery.md)
 
