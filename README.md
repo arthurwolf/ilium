@@ -120,8 +120,8 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <p><a href="assets/demos/22-goal-indicators.gif?raw=true"><img src="assets/demos/22-goal-indicators.gif" alt="A real Codex goal changes from active to paused and back in the project tree. Setup is cut; captions, a closing hold and labelled account and path redactions are added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p><strong>Resume agent sessions after a reboot</strong></p>
-<p><a href="assets/demos/24-agents-survive-reboots.gif?raw=true"><img src="assets/demos/24-agents-survive-reboots.gif" alt="A staged reboot montage leads to retained footage of Ilium restoring the pane layout and resuming Claude and Codex." width="100%"></a></p>
+<p><strong>Recover a session after a simulated reboot</strong></p>
+<p><a href="assets/demos/24-agents-survive-reboots.gif?raw=true"><img src="assets/demos/24-agents-survive-reboots.gif" alt="A simulated reboot card precedes an isolated Ilium server shutdown and relaunch; a local fixture recovers a saved note. No machine reboot or provider is used." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -190,14 +190,14 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <p><a href="assets/demos/21-text-triggers.gif?raw=true"><img src="assets/demos/21-text-triggers.gif" alt="A real Claude agent receives an automatic text-trigger reply. Setup and an idle wait are cut, with reading holds added; automatic naming and restructuring are disabled in the isolated demo." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p><strong>Restore panes and resume agent sessions</strong></p>
-<p><a href="assets/demos/23-snapshot-resume.gif?raw=true"><img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and Claude and Codex continue from resumed context" width="100%"></a></p>
+<p><strong>Restore a saved session</strong></p>
+<p><a href="assets/demos/23-snapshot-resume.gif?raw=true"><img src="assets/demos/23-snapshot-resume.gif" alt="An isolated Ilium server shuts down and relaunches; a local session fixture recovers a saved note. The reboot card is simulated; no provider or machine reboot is used." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Create an isolated agent worktree</strong></p>
-<p><a href="assets/demos/25-worktree-agent.gif?raw=true"><img src="assets/demos/25-worktree-agent.gif" alt="Ilium creates a Git worktree; a local Codex-shaped fixture shows the branch and diff. Typing is shortened and three editorial captions were added." width="100%"></a></p>
+<p><a href="assets/demos/25-worktree-agent.gif?raw=true"><img src="assets/demos/25-worktree-agent.gif" alt="Ilium creates a real worktree through its native workflow and starts a local fixture in an isolated demo project; terminal states are held, captions added and a path redacted." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Convert a session between Claude and Codex</strong></p>
@@ -207,7 +207,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Queue access to a shared resource</strong></p>
-<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two projects share a demonstration resource: one reserves it, the other queues, takes ownership when it is released and then releases it. The agents are local fixtures (no model or provider calls). The recording shows the full interface, with long pauses shortened." width="100%"></a></p>
+<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two staged local fixture participants reserve, queue for, take and release a shared resource in the full interface; no provider calls are made. Captions are added and an account quota notice is masked." width="100%"></a></p>
 </td>
 <td width="50%" valign="top"></td>
 </tr>

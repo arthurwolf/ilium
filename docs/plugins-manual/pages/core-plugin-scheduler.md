@@ -19,7 +19,7 @@ Writing into a pane is a kernel service. The plugin only submits the `send-input
 
 <figure><img src="/assets/demos/04-scheduled-input.gif" alt="A five-second countdown sends ping once to an echo-only local fixture" loading="lazy"><figcaption>Current Ilium sends ping once after a five-second countdown. The receiving terminal is a labelled local echo-only fixture.</figcaption></figure>
 
-<figure><img src="/assets/demos/06-prompt-queue.gif" alt="Two prompts are queued for a local Codex-shaped fixture and sent in order after each turn; no model is used and the output is synthetic" loading="lazy"><figcaption>Current Ilium sends two queued prompts in order. A local Codex-shaped fixture supplies synthetic output; no model is used.</figcaption></figure>
+<figure><img src="/assets/demos/06-prompt-queue.gif" alt="Two prompts are queued for a real Claude agent and sent in order after each turn; tree names are staged and waits are cut." loading="lazy"><figcaption>A real Claude agent receives two queued prompts in order. The tree names are staged; the idle wait before the first prompt and part of the first turn's idle time are cut, and short reading holds are added.</figcaption></figure>
 
 ### What the user sees
 
