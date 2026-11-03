@@ -35,10 +35,10 @@ Direct downloads (Linux x86_64 preview; other systems not yet available):
 | System | Downloads / availability |
 | --- | --- |
 | Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) |
-| Linux ARM64 | **Not yet available** |
-| macOS Apple Silicon | **Not yet available** |
-| macOS Intel | **Not yet available** |
-| Windows x86_64 | **Not yet available** |
+| Linux ARM64 | tar.gz, deb, rpm, AppImage, Snap, Flatpak **(coming soon; not yet available)** |
+| macOS Apple Silicon | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| macOS Intel | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| Windows x86_64 | setup `.exe`, MSI, ZIP **(coming soon; not yet available)** |
 
 Verify packages using the preview checksum file [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS). Details: [Installation](src/docs/installation.md).
 
