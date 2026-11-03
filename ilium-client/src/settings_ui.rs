@@ -648,7 +648,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
         SettingsTab::Icons => unreachable!("Icons returns before the standard settings match"),
     }
-    render_number_controls(frame, layout.content_area, app, state);
+    if state.tab != SettingsTab::AgentMonitoring || app.custom_status_rules_editor.is_none() {
+        render_number_controls(frame, layout.content_area, app, state);
+    }
     if state.tab == SettingsTab::Keyboard {
         for field in crate::value_keyboard::KeyboardPrefix::ALL {
             if let Some(control) =
@@ -671,7 +673,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             }
         }
     }
-    render_settings_help_anchors(frame, &layout, app, state);
+    if state.tab != SettingsTab::AgentMonitoring || app.custom_status_rules_editor.is_none() {
+        render_settings_help_anchors(frame, &layout, app, state);
+    }
     if state.tab == SettingsTab::Optimization {
         // The Apply confirmation covers the whole screen, help rail included.
         crate::compaction_ui::render_modal(frame, area, app);
@@ -6541,10 +6545,11 @@ pub(crate) fn monitoring_preview_span(app: &App, mode: crate::agent_monitoring::
     use ilium_core::{AgentClass, AgentState, AgentTurn, GoalState, PaneProgress, PaneStatus, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus};
     let (turn, goal) = match index {
         0 => (AgentTurn::Working, Some(GoalState::Active)),
-        1 => (AgentTurn::WaitingApproval, None),
+        1 => (AgentTurn::WaitingApproval, Some(GoalState::Active)),
         2 => (AgentTurn::Idle, Some(GoalState::Paused)),
-        3 => (AgentTurn::WaitingSubagents, None),
-        5..=9 => (AgentTurn::Idle, None),
+        3 => (AgentTurn::WaitingSubagents, Some(GoalState::Active)),
+        5 => (AgentTurn::Working, None),
+        6..=9 => (AgentTurn::Idle, None),
         _ => (AgentTurn::Idle, None),
     };
     let status = PaneStatus::Agent(AgentState { class: AgentClass::Claude, turn, goal, completion_unread: index == 9 });
@@ -6578,7 +6583,12 @@ pub(crate) fn monitoring_preview_span(app: &App, mode: crate::agent_monitoring::
         app.ui_settings.attention_running_indicator, &status, &progress, false, None);
     let objective = crate::status_icons::objective_span(signals.objective, icons, app.ui_settings.use_stable_glyphs);
     let now_elapsed = if app.ui_settings.motion_level == crate::config::MotionLevel::Off { 0 } else { elapsed_ms };
-    let now = crate::status_icons::now_span(signals.now, icons, now_elapsed, app.ui_settings.use_stable_glyphs);
+    let now = if mode == crate::agent_monitoring::AgentMonitoringMode::Attention
+        && signals.now == ilium_core::NowSignal::Working {
+        crate::tree_ui::attention_running_span(app.ui_settings.attention_running_indicator, icons, now_elapsed, app.ui_settings.use_stable_glyphs)
+    } else {
+        crate::status_icons::now_span(signals.now, icons, now_elapsed, app.ui_settings.use_stable_glyphs)
+    };
     if mode == crate::agent_monitoring::AgentMonitoringMode::Normal {
         Span::raw(format!("{} {}", objective.content, now.content))
     } else if objective.content.is_empty() { now } else { objective }
@@ -6739,9 +6749,9 @@ fn agent_monitoring_view(
     if content_width >= 48 {
         use crate::agent_monitoring::AgentMonitoringMode;
         let first_line = view.lines.len() as u16;
-        let cards = crate::selectable_cards::layout(Rect::new(0, first_line, content_width, 11), 3, 1);
+        let cards = crate::selectable_cards::layout(Rect::new(0, first_line, content_width, 16), 3, 1);
         let modes = AgentMonitoringMode::ALL;
-        for line in 0..11 {
+        for line in 0..16 {
             let mut spans = Vec::new();
             for (index, area) in cards.iter().enumerate() {
                 if index > 0 { spans.push(Span::raw(" ")); }
@@ -6749,7 +6759,7 @@ fn agent_monitoring_view(
                 let selected = app.ui_settings.agent_monitoring_mode == mode;
                 let inner = usize::from(area.width.saturating_sub(2));
                 let border = crate::selectable_cards::border_style(selected, false);
-                if line == 0 || line == 10 {
+                if line == 0 || line == 15 {
                     let (left, right) = if line == 0 { ('┌', '┐') } else { ('└', '┘') };
                     spans.push(Span::styled(format!("{left}{}{right}", "─".repeat(inner)), border));
                     continue;
@@ -6762,8 +6772,8 @@ fn agent_monitoring_view(
                         AgentMonitoringMode::Custom => " Your ordered rules".to_owned(),
                     },
                     4 => " Demo project".to_owned(),
-                    5..=9 => {
-                        let names = ["Working", "Approval", "Paused", "Waiting", "Idle"];
+                    5..=14 => {
+                        let names = ["Working", "Approval", "Paused", "Waiting", "Idle", "Progress", "Task error", "Monitor lost", "Task done", "Unread"];
                         let i = line - 5;
                         format!(" ├ {} {}", monitoring_card_preview(app, mode, i), names[i])
                     }

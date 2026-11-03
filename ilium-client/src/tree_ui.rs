@@ -2235,7 +2235,7 @@ fn pane_label_with_icons(
 
 /// One-cell-wide activity glyphs are padded by `status_row_label`, so every
 /// variant here stays within `NOW_COLUMN_WIDTH`.
-fn attention_running_span(
+pub(crate) fn attention_running_span(
     indicator: crate::agent_monitoring::AttentionRunningIndicator,
     icons: &IconSettings,
     elapsed_ms: u128,

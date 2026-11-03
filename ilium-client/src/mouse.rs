@@ -2657,7 +2657,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 }
             } else if regions.rules.contains(position) && position.y > regions.rules.y {
                 let first = app.custom_status_rules_editor.as_ref().map_or(0, |editor| crate::status_rules_editor::first_visible_rule(editor, regions.rules.height));
-                let index = first + usize::from((position.y - regions.rules.y - 1) / 2);
+                let index = first + usize::from((position.y - regions.rules.y - 1) / 3);
                 if index < app.custom_status_rules.rules.len() {
                     if let Some(mut editor) = app.custom_status_rules_editor.take() {
                         editor.selected_rule = Some(index);
@@ -2665,7 +2665,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         editor.column = crate::status_rules_editor::EditorColumn::Rules;
                         let previous = editor.clone();
                         let mut rules = app.custom_status_rules.clone();
-                        let row = regions.rules.y.saturating_add(1).saturating_add(((index - first) as u16).saturating_mul(2));
+                        let row = regions.rules.y.saturating_add(1).saturating_add(((index - first) as u16).saturating_mul(3));
                         let action = crate::status_rules_editor::rule_action_at(regions.rules, row, position);
                         use crate::status_rules_editor::RuleAction;
                         let changed = match action {
