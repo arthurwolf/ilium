@@ -1,5 +1,5 @@
 //! publish-registry-operator-guide.md "Tokens, limits, takedowns, appeals and backups"
-//! (PUBL-033..PUBL-041).
+//! (PUB-033..PUB-041).
 //!
 //! Operator actions are driven through the `registry` command of the sandbox. Times are set with
 //! `run_at`, so 90-day, 14-day and 24-hour rules are checked without waiting.
@@ -18,9 +18,9 @@ fn publish_with_token(sandbox: &Sandbox, token: &str, plugin_id: &str) -> CliOut
     )
 }
 
-// ---- PUBL-033 publish tokens: one publisher id, 90 days -----------------------------------
+// ---- PUB-033 publish tokens: one publisher id, 90 days -----------------------------------
 
-/// REQ: PUBL-033
+/// REQ: PUB-033
 #[test]
 fn publ_033_token_expires_ninety_days_after_issue_a() {
     let sandbox = Sandbox::standard();
@@ -30,7 +30,7 @@ fn publ_033_token_expires_ninety_days_after_issue_a() {
     assert_eq!(record["expires_at"].as_str(), Some(at(90 * DAY).as_str()), "{issued:?}");
 }
 
-/// REQ: PUBL-033
+/// REQ: PUB-033
 #[test]
 fn publ_033_monthly_report_lists_tokens_older_than_ninety_days_b() {
     let sandbox = Sandbox::standard();
@@ -39,9 +39,9 @@ fn publ_033_monthly_report_lists_tokens_older_than_ninety_days_b() {
     assert!(!records(&report, "token-report").is_empty(), "the report must list the old token: {report:?}");
 }
 
-// ---- PUBL-034 revocation takes effect within one hour -------------------------------------
+// ---- PUB-034 revocation takes effect within one hour -------------------------------------
 
-/// REQ: PUBL-034
+/// REQ: PUB-034
 #[test]
 fn publ_034_publish_with_revoked_token_is_refused_within_hour_a() {
     let sandbox = Sandbox::standard();
@@ -55,7 +55,7 @@ fn publ_034_publish_with_revoked_token_is_refused_within_hour_a() {
     );
 }
 
-/// REQ: PUBL-034
+/// REQ: PUB-034
 #[test]
 fn publ_034_revocation_reports_effective_time_one_hour_out_b() {
     let sandbox = Sandbox::standard();
@@ -63,9 +63,9 @@ fn publ_034_revocation_reports_effective_time_one_hour_out_b() {
     assert!(output_contains(&revoke, &at(3600)), "the effective time must be one hour after the revoke: {revoke:?}");
 }
 
-// ---- PUBL-035 size limit answered before storing excess bytes -----------------------------
+// ---- PUB-035 size limit answered before storing excess bytes -----------------------------
 
-/// REQ: PUBL-035
+/// REQ: PUB-035
 #[test]
 fn publ_035_oversized_upload_is_refused_without_storing_excess_a() {
     let sandbox = Sandbox::standard();
@@ -78,7 +78,7 @@ fn publ_035_oversized_upload_is_refused_without_storing_excess_a() {
     assert_eq!(grown, 0, "no bytes beyond the limit may be stored");
 }
 
-/// REQ: PUBL-035
+/// REQ: PUB-035
 #[test]
 fn publ_035_upload_at_the_limit_is_not_refused_b() {
     let sandbox = Sandbox::standard();
@@ -90,9 +90,9 @@ fn publ_035_upload_at_the_limit_is_not_refused_b() {
     assert!(!error_codes(&output).contains(&"registry.size".to_owned()), "{output:?}");
 }
 
-// ---- PUBL-036 over-limit publisher gets Retry-After in whole seconds ----------------------
+// ---- PUB-036 over-limit publisher gets Retry-After in whole seconds ----------------------
 
-/// REQ: PUBL-036
+/// REQ: PUB-036
 #[test]
 fn publ_036_over_limit_publisher_gets_rate_limited_with_retry_after_a() {
     let sandbox = Sandbox::standard();
@@ -105,7 +105,7 @@ fn publ_036_over_limit_publisher_gets_rate_limited_with_retry_after_a() {
     assert!(record["retry_after"].is_string() || record["retry_after"].is_number(), "{output:?}");
 }
 
-/// REQ: PUBL-036
+/// REQ: PUB-036
 #[test]
 fn publ_036_retry_after_is_a_whole_number_of_seconds_b() {
     let sandbox = Sandbox::standard();
@@ -118,9 +118,9 @@ fn publ_036_retry_after_is_a_whole_number_of_seconds_b() {
     assert!(retry.parse::<u64>().is_ok(), "Retry-After must be whole seconds, got {retry}");
 }
 
-// ---- PUBL-037 takedowns need a second operator when there are two or more -----------------
+// ---- PUB-037 takedowns need a second operator when there are two or more -----------------
 
-/// REQ: PUBL-037
+/// REQ: PUB-037
 #[test]
 fn publ_037_takedown_by_single_operator_is_refused_a() {
     let sandbox = Sandbox::standard();
@@ -132,7 +132,7 @@ fn publ_037_takedown_by_single_operator_is_refused_a() {
     assert_ne!(output.exit_code, 0, "a second approval is required: {output:?}");
 }
 
-/// REQ: PUBL-037
+/// REQ: PUB-037
 #[test]
 fn publ_037_second_approval_is_recorded_with_the_first_b() {
     let sandbox = Sandbox::standard();
@@ -147,9 +147,9 @@ fn publ_037_second_approval_is_recorded_with_the_first_b() {
     assert!(output_contains(&output, "op-one") && output_contains(&output, "op-two"), "{output:?}");
 }
 
-// ---- PUBL-038 appeals answered within 14 days; reinstatement gets a new number ------------
+// ---- PUB-038 appeals answered within 14 days; reinstatement gets a new number ------------
 
-/// REQ: PUBL-038
+/// REQ: PUB-038
 #[test]
 fn publ_038_appeal_open_for_fifteen_days_is_marked_overdue_a() {
     let sandbox = Sandbox::standard();
@@ -158,7 +158,7 @@ fn publ_038_appeal_open_for_fifteen_days_is_marked_overdue_a() {
     assert!(output_contains(&output, "overdue"), "an appeal older than 14 days must be overdue: {output:?}");
 }
 
-/// REQ: PUBL-038
+/// REQ: PUB-038
 #[test]
 fn publ_038_reinstated_version_gets_a_new_version_number_b() {
     let sandbox = Sandbox::standard();
@@ -168,9 +168,9 @@ fn publ_038_reinstated_version_gets_a_new_version_number_b() {
     assert_ne!(record["version"], "0.3.0", "a reinstated version needs a new number: {output:?}");
 }
 
-// ---- PUBL-039 leaked keys are revoked first, never waited on ------------------------------
+// ---- PUB-039 leaked keys are revoked first, never waited on ------------------------------
 
-/// REQ: PUBL-039
+/// REQ: PUB-039
 #[test]
 fn publ_039_compromise_response_starts_with_revocation_a() {
     let sandbox = Sandbox::standard();
@@ -179,7 +179,7 @@ fn publ_039_compromise_response_starts_with_revocation_a() {
     assert_eq!(steps.first().map(|step| step["action"].clone()), Some(Value::from("revoke")), "{output:?}");
 }
 
-/// REQ: PUBL-039
+/// REQ: PUB-039
 #[test]
 fn publ_039_revocation_happens_within_the_publ_034_window_b() {
     let sandbox = Sandbox::standard();
@@ -189,9 +189,9 @@ fn publ_039_revocation_happens_within_the_publ_034_window_b() {
     assert!(seconds <= 3600, "revocation must take effect within one hour: {seconds}");
 }
 
-// ---- PUBL-040 confirmed malware is taken down within 24 hours -----------------------------
+// ---- PUB-040 confirmed malware is taken down within 24 hours -----------------------------
 
-/// REQ: PUBL-040
+/// REQ: PUB-040
 #[test]
 fn publ_040_malware_report_is_taken_down_within_24_hours_a() {
     let sandbox = Sandbox::standard();
@@ -204,7 +204,7 @@ fn publ_040_malware_report_is_taken_down_within_24_hours_a() {
     assert_eq!(result_record(&info).map(|record| record["state"].clone()), Some(Value::from("blocked")));
 }
 
-/// REQ: PUBL-040
+/// REQ: PUB-040
 #[test]
 fn publ_040_late_malware_takedown_raises_an_alert_b() {
     let sandbox = Sandbox::standard();
@@ -215,9 +215,9 @@ fn publ_040_late_malware_takedown_raises_an_alert_b() {
     assert!(!records(&output, "alert").is_empty(), "a takedown after 24 hours must alert: {output:?}");
 }
 
-// ---- PUBL-041 backups keep blobs and metadata together ------------------------------------
+// ---- PUB-041 backups keep blobs and metadata together ------------------------------------
 
-/// REQ: PUBL-041
+/// REQ: PUB-041
 #[test]
 fn publ_041_backup_holds_blobs_and_metadata_together_a() {
     let sandbox = Sandbox::standard();
@@ -230,7 +230,7 @@ fn publ_041_backup_holds_blobs_and_metadata_together_a() {
     );
 }
 
-/// REQ: PUBL-041
+/// REQ: PUB-041
 #[test]
 fn publ_041_restored_host_passes_client_hash_checks_b() {
     let sandbox = Sandbox::standard();

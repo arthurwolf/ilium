@@ -1,4 +1,4 @@
-//! Requirements A11Y-012 .. A11Y-022 (screen reader and localized text) of the plugin manual page
+//! Requirements ACC-012 .. ACC-022 (screen reader and localized text) of the plugin manual page
 //! `a11y-screen-reader-and-localized-text`. Checks run against the accessible plugin-view harness
 //! in `ilium_plugin_host::a11y` in screen reader mode, plus source checks of the shipped docs and
 //! sound notice path. Each requirement has two tests; several are red until the behaviour lands.
@@ -62,7 +62,7 @@ const THREE_BUTTONS: &str = r#"{"widgets":[
   {"id":"open","kind":"button","label":"Open","row":0,"col":1},
   {"id":"close","kind":"button","label":"Close","row":1,"col":0}]}"#;
 
-/// REQ: A11Y-012
+/// REQ: ACC-012
 #[test]
 fn a11y_012_screen_reader_prints_the_role_word_once_per_line_a() {
     let rows = reader_rows(SAVE_BUTTON);
@@ -74,7 +74,7 @@ fn a11y_012_screen_reader_prints_the_role_word_once_per_line_a() {
     );
 }
 
-/// REQ: A11Y-012
+/// REQ: ACC-012
 #[test]
 fn a11y_012_label_is_not_repeated_on_its_line_b() {
     let rows = reader_rows(SAVE_BUTTON);
@@ -86,7 +86,7 @@ fn a11y_012_label_is_not_repeated_on_its_line_b() {
     );
 }
 
-/// REQ: A11Y-013
+/// REQ: ACC-013
 #[test]
 fn a11y_013_screen_reader_rows_carry_no_decorative_glyph_a() {
     let rows = reader_rows(PLAIN_LABELS);
@@ -96,7 +96,7 @@ fn a11y_013_screen_reader_rows_carry_no_decorative_glyph_a() {
     );
 }
 
-/// REQ: A11Y-013
+/// REQ: ACC-013
 #[test]
 fn a11y_013_label_line_has_only_words_digits_and_punctuation_b() {
     let rows = reader_rows(SAVE_BUTTON);
@@ -107,7 +107,7 @@ fn a11y_013_label_line_has_only_words_digits_and_punctuation_b() {
     );
 }
 
-/// REQ: A11Y-014
+/// REQ: ACC-014
 #[test]
 fn a11y_014_failed_status_is_written_in_the_row_text_a() {
     let screen = A11yScreen::open(STATUS_FAILED, &A11ySettings::default());
@@ -118,7 +118,7 @@ fn a11y_014_failed_status_is_written_in_the_row_text_a() {
     assert!(row.contains("Failed"), "the row does not say Failed: {row:?}");
 }
 
-/// REQ: A11Y-014
+/// REQ: ACC-014
 #[test]
 fn a11y_014_changed_status_word_appears_in_the_row_b() {
     let rows = reader_rows(STATUS_DONE);
@@ -126,7 +126,7 @@ fn a11y_014_changed_status_word_appears_in_the_row_b() {
     assert!(row.contains("Done"), "the row does not say Done: {row:?}");
 }
 
-/// REQ: A11Y-015
+/// REQ: ACC-015
 #[test]
 fn a11y_015_attention_change_has_a_persistent_text_twin_a() {
     let source = repo_file("ilium-plugin-host/tests/imports_ui/sound_notify_a11y.rs");
@@ -136,7 +136,7 @@ fn a11y_015_attention_change_has_a_persistent_text_twin_a() {
     );
 }
 
-/// REQ: A11Y-015
+/// REQ: ACC-015
 #[test]
 fn a11y_015_manual_requires_a_persistent_text_twin_b() {
     let manual = repo_file("docs/plugins-manual/pages/a11y-screen-reader-and-localized-text.md");
@@ -146,7 +146,7 @@ fn a11y_015_manual_requires_a_persistent_text_twin_b() {
     );
 }
 
-/// REQ: A11Y-016
+/// REQ: ACC-016
 #[test]
 fn a11y_016_accessible_label_is_rendered_whole_a() {
     let rows = reader_rows(PLAIN_LABELS);
@@ -157,7 +157,7 @@ fn a11y_016_accessible_label_is_rendered_whole_a() {
     );
 }
 
-/// REQ: A11Y-016
+/// REQ: ACC-016
 #[test]
 fn a11y_016_manual_forbids_joining_translated_pieces_b() {
     let manual = repo_file("docs/plugins-manual/pages/a11y-screen-reader-and-localized-text.md");
@@ -167,7 +167,7 @@ fn a11y_016_manual_forbids_joining_translated_pieces_b() {
     );
 }
 
-/// REQ: A11Y-017
+/// REQ: ACC-017
 #[test]
 fn a11y_017_host_prints_the_button_role_word_exactly_once_a() {
     let rows = reader_rows(SAVE_BUTTON);
@@ -175,7 +175,7 @@ fn a11y_017_host_prints_the_button_role_word_exactly_once_a() {
     assert_eq!(count, 1, "the button role word is not printed once: {rows:?}");
 }
 
-/// REQ: A11Y-017
+/// REQ: ACC-017
 #[test]
 fn a11y_017_toggle_line_holds_the_toggle_role_word_once_b() {
     let rows = reader_rows(MUTE_TOGGLE);
@@ -187,7 +187,7 @@ fn a11y_017_toggle_line_holds_the_toggle_role_word_once_b() {
     );
 }
 
-/// REQ: A11Y-018
+/// REQ: ACC-018
 #[test]
 fn a11y_018_long_label_is_whole_at_48_columns_in_screen_reader_mode_a() {
     let rows = reader_rows(LONG_LABEL);
@@ -198,7 +198,7 @@ fn a11y_018_long_label_is_whole_at_48_columns_in_screen_reader_mode_a() {
     );
 }
 
-/// REQ: A11Y-018
+/// REQ: ACC-018
 #[test]
 fn a11y_018_no_row_is_cut_with_an_ellipsis_b() {
     let rows = reader_rows(LONG_LABEL);
@@ -208,7 +208,7 @@ fn a11y_018_no_row_is_cut_with_an_ellipsis_b() {
     );
 }
 
-/// REQ: A11Y-019
+/// REQ: ACC-019
 #[test]
 fn a11y_019_disabled_reason_is_complete_in_one_line_a() {
     let rows = reader_rows(DISABLED_WITH_REASON);
@@ -219,7 +219,7 @@ fn a11y_019_disabled_reason_is_complete_in_one_line_a() {
     );
 }
 
-/// REQ: A11Y-019
+/// REQ: ACC-019
 #[test]
 fn a11y_019_disabled_reason_is_given_in_words_not_a_symbol_b() {
     let rows = reader_rows(DISABLED_WITH_REASON);
@@ -230,7 +230,7 @@ fn a11y_019_disabled_reason_is_given_in_words_not_a_symbol_b() {
     );
 }
 
-/// REQ: A11Y-020
+/// REQ: ACC-020
 #[test]
 fn a11y_020_no_dotted_identifier_is_shown_in_a_label_a() {
     let rows = reader_rows(PLAIN_LABELS);
@@ -245,7 +245,7 @@ fn a11y_020_no_dotted_identifier_is_shown_in_a_label_a() {
     }
 }
 
-/// REQ: A11Y-020
+/// REQ: ACC-020
 #[test]
 fn a11y_020_no_snake_case_identifier_is_shown_in_a_label_b() {
     let rows = reader_rows(PLAIN_LABELS);
@@ -257,7 +257,7 @@ fn a11y_020_no_snake_case_identifier_is_shown_in_a_label_b() {
     }
 }
 
-/// REQ: A11Y-021
+/// REQ: ACC-021
 #[test]
 fn a11y_021_same_focusable_widgets_in_both_modes_a() {
     let normal = A11yScreen::open(THREE_BUTTONS, &A11ySettings::default());
@@ -265,7 +265,7 @@ fn a11y_021_same_focusable_widgets_in_both_modes_a() {
     assert_eq!(normal.focus_order(), reader.focus_order());
 }
 
-/// REQ: A11Y-021
+/// REQ: ACC-021
 #[test]
 fn a11y_021_every_label_is_shown_in_both_modes_b() {
     let normal = render_view(THREE_BUTTONS, &A11ySettings::default()).rows();
@@ -276,7 +276,7 @@ fn a11y_021_every_label_is_shown_in_both_modes_b() {
     }
 }
 
-/// REQ: A11Y-022
+/// REQ: ACC-022
 #[test]
 fn a11y_022_linear_line_order_matches_focus_order_a() {
     let screen = A11yScreen::open(THREE_BUTTONS, &screen_reader());
@@ -301,7 +301,7 @@ fn a11y_022_linear_line_order_matches_focus_order_a() {
     );
 }
 
-/// REQ: A11Y-022
+/// REQ: ACC-022
 #[test]
 fn a11y_022_each_focusable_label_has_exactly_one_linear_line_b() {
     let rows = reader_rows(THREE_BUTTONS);

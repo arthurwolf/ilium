@@ -1,4 +1,4 @@
-//! Requirements INST-105, INST-106, INST-107 and INST-110: rollback, fleet update and uninstall
+//! Requirements INS-105, INS-106, INS-107 and INS-110: rollback, fleet update and uninstall
 //! (manual pages reference-plugin-distribution-cli and reference-install-and-update).
 
 use ilium_plugin_host::cli::CliOutput;
@@ -9,7 +9,7 @@ fn mentions(out: &CliOutput, text: &str) -> bool {
     out.stderr.contains(text) || out.stdout_jsonl.iter().any(|r| r.to_string().contains(text))
 }
 
-/// REQ: INST-105
+/// REQ: INS-105
 #[test]
 fn inst_105_rollback_without_previous_fails_exit_five_a() {
     let fx = Fx::new();
@@ -19,7 +19,7 @@ fn inst_105_rollback_without_previous_fails_exit_five_a() {
     assert!(mentions(&out, "install.no-previous"));
 }
 
-/// REQ: INST-105
+/// REQ: INS-105
 #[test]
 fn inst_105_rollback_without_previous_keeps_installed_json_b() {
     let fx = Fx::new();
@@ -29,7 +29,7 @@ fn inst_105_rollback_without_previous_keeps_installed_json_b() {
     assert_eq!(fx.installed_bytes(), before);
 }
 
-/// REQ: INST-106
+/// REQ: INS-106
 #[test]
 fn inst_106_rollback_keeps_newer_version_in_store_a() {
     let fx = Fx::new();
@@ -39,7 +39,7 @@ fn inst_106_rollback_keeps_newer_version_in_store_a() {
     assert!(fx.store_dir("com.example.notes", "1.3.0").exists());
 }
 
-/// REQ: INST-106
+/// REQ: INS-106
 #[test]
 fn inst_106_rollback_store_listing_still_has_1_3_0_b() {
     let fx = Fx::new();
@@ -50,7 +50,7 @@ fn inst_106_rollback_store_listing_still_has_1_3_0_b() {
     assert!(mentions(&listing, "1.3.0"));
 }
 
-/// REQ: INST-107
+/// REQ: INS-107
 #[test]
 fn inst_107_update_all_keeps_successful_plugin_new_version_a() {
     let fx = Fx::new();
@@ -61,7 +61,7 @@ fn inst_107_update_all_keeps_successful_plugin_new_version_a() {
     assert_eq!(fx.active_version("com.example.alpha").as_deref(), Some("1.1.0"));
 }
 
-/// REQ: INST-107
+/// REQ: INS-107
 #[test]
 fn inst_107_update_all_reports_failed_signature_check_b() {
     let fx = Fx::new();
@@ -71,7 +71,7 @@ fn inst_107_update_all_reports_failed_signature_check_b() {
     assert!(mentions(&out, "signature"));
 }
 
-/// REQ: INST-110
+/// REQ: INS-110
 #[test]
 fn inst_110_uninstall_keeps_data_folder_a() {
     let fx = Fx::new();
@@ -84,7 +84,7 @@ fn inst_110_uninstall_keeps_data_folder_a() {
     assert_eq!(fx.snapshot_tree(&fx.data_dir()), before);
 }
 
-/// REQ: INST-110
+/// REQ: INS-110
 #[test]
 fn inst_110_reinstall_after_uninstall_finds_data_file_b() {
     let fx = Fx::new();

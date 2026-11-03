@@ -34,7 +34,7 @@ export ILIUM_REGISTRY_TOKEN="$(cat ~/.config/ilium/publish.token)"
 ilium plugin publish dist/notes.iliumpkg --registry https://registry.example.org --channel stable
 ```
 
-5. Read the result record. A success prints the id, the version, the SHA-256 hash and the public URL of the version. Keep the hash. You need it for the convergence check in [PUBL-006](#failed-uploads).
+5. Read the result record. A success prints the id, the version, the SHA-256 hash and the public URL of the version. Keep the hash. You need it for the convergence check in [PUB-006](#failed-uploads).
 
 Step 4 runs `verify` again before it uploads ([PKG-441](/pages/reference-plugin-distribution-cli/#publish-yank-deprecate)), so a package that fails step 3 never reaches the network.
 
@@ -51,9 +51,9 @@ A version moves through the states in the table. The registry keeps the state in
 | `yanked` | `ilium plugin yank` ([PKG-396](/pages/reference-registry/#publishing)). | Yes, but not chosen for new installs or updates. | `live` again through `unyank`. |
 | `takedown` | The operator adds the version to `revocations.json` and removes its blob ([PKG-403](/pages/reference-registry/#policy)). | Installed copies move to `disabled-blocked`. | Reinstated only as a new version after an appeal ([PKG-404](/pages/reference-registry/#policy)). |
 
-**[PUBL-001]** The registry MUST keep a version in `verifying` until stages 1 to 8 and the policy check finish, and MUST NOT show the version in `index.json` before it reaches `live` or `queued-review`. Test: upload a package whose signature check is slow, and read `index.json` during the wait; the version is absent.
-**[PUBL-002]** A version that reaches `rejected` MUST NOT be stored as a published version, and its version number MUST remain free for a new upload. Proposed, owner to confirm: the rejection record names the stage and the code, and the publisher can read it with `ilium plugin info <id>@<version>`, which exits 5 for a version that never became live.
-**[PUBL-003]** A `live` version MUST move to `yanked` only through a signed change to the metadata, and the transition MUST keep the blob, the version entry and its hash ([PKG-443](/pages/reference-plugin-distribution-cli/#publish-yank-deprecate)). Test: yank a version, then compare the blob hash in `snapshot.json` before and after; the hash is unchanged.
+**[PUB-001]** The registry MUST keep a version in `verifying` until stages 1 to 8 and the policy check finish, and MUST NOT show the version in `index.json` before it reaches `live` or `queued-review`. Test: upload a package whose signature check is slow, and read `index.json` during the wait; the version is absent.
+**[PUB-002]** A version that reaches `rejected` MUST NOT be stored as a published version, and its version number MUST remain free for a new upload. Proposed, owner to confirm: the rejection record names the stage and the code, and the publisher can read it with `ilium plugin info <id>@<version>`, which exits 5 for a version that never became live.
+**[PUB-003]** A `live` version MUST move to `yanked` only through a signed change to the metadata, and the transition MUST keep the blob, the version entry and its hash ([PKG-443](/pages/reference-plugin-distribution-cli/#publish-yank-deprecate)). Test: yank a version, then compare the blob hash in `snapshot.json` before and after; the hash is unchanged.
 
 ### Errors a publish can return
 
@@ -62,23 +62,23 @@ The publish command uses the exit codes of [Distribution commands](/pages/refere
 | Code | Exit | Cause | What the publisher does |
 |---|---|---|---|
 | `publish.unsigned` | 1 | The package has no signature from a key the registry accepts. | Sign the package with the publisher key and pack again. |
-| `registry.version-exists` | 1 | The version is already on the registry. | Check the hash with `ilium plugin info`. See [PUBL-006](#failed-uploads). Otherwise choose a new version. |
+| `registry.version-exists` | 1 | The version is already on the registry. | Check the hash with `ilium plugin info`. See [PUB-006](#failed-uploads). Otherwise choose a new version. |
 | `registry.namespace-unowned` | 1 | The id is outside the namespace of the publisher token. | Use an id under your publisher id, or ask the operator to correct the namespace. |
 | `registry.auth` | 1 | The token is missing, expired or revoked ([PKG-968](/pages/reference-registry/#publish-tokens), [PKG-970](/pages/reference-registry/#publish-tokens)). | Issue a new token and set `ILIUM_REGISTRY_TOKEN` again. |
 | `registry.policy` | 7 | The package fails the registry policy ([PKG-681](/pages/reference-registry/#policy)). The detail names `sbom-missing`, `license-invalid` or `license-notice-missing`. | Add the missing file or fix the licence, then pack again. Proposed, owner to confirm: exit 7 for `registry.policy`, because it is a policy refusal, as [PKG-424](/pages/reference-plugin-distribution-cli/#exit-codes) gives for `policy.*`. |
 | `registry.size` | 1 | The package is over 300 MiB ([PKG-400](/pages/reference-registry/#publishing)). | Remove files that the package does not need. |
 | `registry.rate-limited` | 1 | The publisher is over 20 publishes in one hour ([PKG-400](/pages/reference-registry/#publishing)). | Wait for the `Retry-After` time and publish again. |
-| `registry.unreachable` | 8 | The network failed and no response came back. | Go to [PUBL-006](#failed-uploads) before you publish again. |
+| `registry.unreachable` | 8 | The network failed and no response came back. | Go to [PUB-006](#failed-uploads) before you publish again. |
 
-**[PUBL-004]** `publish` MUST NOT print the token, and MUST NOT print the `Authorization` header in any error message. Test: publish with a wrong token and grep the output and the log for the token value; no match is found.
-**[PUBL-005]** `publish` MUST exit with the code in the table above for each listed code, and the `exit_code` of its `result` record MUST equal the process exit code ([PKG-423](/pages/reference-plugin-distribution-cli/#exit-codes)). Test: trigger each listed code against a test registry and compare the two values.
+**[PUB-004]** `publish` MUST NOT print the token, and MUST NOT print the `Authorization` header in any error message. Test: publish with a wrong token and grep the output and the log for the token value; no match is found.
+**[PUB-005]** `publish` MUST exit with the code in the table above for each listed code, and the `exit_code` of its `result` record MUST equal the process exit code ([PKG-423](/pages/reference-plugin-distribution-cli/#exit-codes)). Test: trigger each listed code against a test registry and compare the two values.
 
 ### Failed uploads
 
 A publish can fail after the server has stored the version but before the client receives the `201` answer. A network drop, a closed laptop or a timeout causes this. The next publish of the same file then returns `registry.version-exists`, even though the upload worked. A publisher must not treat that as an error without checking.
 
-**[PUBL-006]** After a `registry.unreachable` or a timeout on `publish`, the publisher MUST run `ilium plugin info <id>@<version>` before publishing again. If the registry returns the version with the same SHA-256 hash as the local package, the publish is complete and the publisher records the hash. If the version is absent, the publisher MAY publish again with the same file. Proposed, owner to confirm: the CLI does this check itself and reports the outcome as `publish.already-complete` with exit 0 when the hashes match, and `registry.version-exists` with exit 1 when they differ.
-**[PUBL-007]** A publish with the same file whose hash differs from the hash of the live version of that `id@version` MUST exit 1 with `registry.version-exists`, and MUST NOT overwrite the live version ([PKG-394](/pages/reference-registry/#publishing)). The fix is a new version number.
+**[PUB-006]** After a `registry.unreachable` or a timeout on `publish`, the publisher MUST run `ilium plugin info <id>@<version>` before publishing again. If the registry returns the version with the same SHA-256 hash as the local package, the publish is complete and the publisher records the hash. If the version is absent, the publisher MAY publish again with the same file. Proposed, owner to confirm: the CLI does this check itself and reports the outcome as `publish.already-complete` with exit 0 when the hashes match, and `registry.version-exists` with exit 1 when they differ.
+**[PUB-007]** A publish with the same file whose hash differs from the hash of the live version of that `id@version` MUST exit 1 with `registry.version-exists`, and MUST NOT overwrite the live version ([PKG-394](/pages/reference-registry/#publishing)). The fix is a new version number.
 
 ### Worked example
 
@@ -91,10 +91,10 @@ A publisher, Ana, releases version 0.3.1 of `com.example.notes`. The first uploa
 <span class="t-dim">sha256</span>  9c1e...4f20
 <span class="t-prompt">$</span> sha256sum dist/notes.iliumpkg
 9c1e...4f20  dist/notes.iliumpkg
-<span class="t-ok">ok</span>      publish complete, hashes match (proposed check of PUBL-006)
+<span class="t-ok">ok</span>      publish complete, hashes match (proposed check of PUB-006)
 </pre>
 
-Ana records the hash in her release notes and moves on. Had the hashes differed, she would bump the version to 0.3.2, because the live 0.3.1 cannot be replaced ([PUBL-007](#failed-uploads)).
+Ana records the hash in her release notes and moves on. Had the hashes differed, she would bump the version to 0.3.2, because the live 0.3.1 cannot be replaced ([PUB-007](#failed-uploads)).
 
 ### Edge cases
 

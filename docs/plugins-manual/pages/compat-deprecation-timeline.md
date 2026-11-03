@@ -23,7 +23,7 @@ A deprecated item keeps working until its removal minor. This page shows how the
 
 From these rules follows one fact that matters for planning: a removal at `R = M + 2` breaks only the packages built for `M + 1` that still use the item. A package built for `M` is already refused on host `M + 2`, because its minor has left the window. A package built for `M + 2` cannot use the item, because the removal already happened in its SDK.
 
-- **[COMP-010]** The removal minor MUST be stated in the marking release notes, together with the successor, so that an author can compute the window of every affected package from the notes alone.
+- **[CMP-010]** The removal minor MUST be stated in the marking release notes, together with the successor, so that an author can compute the window of every affected package from the notes alone.
 
 ## Worked timeline
 
@@ -37,7 +37,7 @@ The example uses an item called `services.legacy-call`. It is marked deprecated 
 
 Read the table column by column. The `0.1.0` package is refused at `0.3.0`, which is before the removal, so the removal itself never reaches it. The `0.2.0` package is refused at the removal minor and would have been refused at `0.4.0` even without the removal. The `0.3.0` package is the only one that the removal can break, and it is the one that an author has to move in the `0.3.0` release.
 
-- **[COMP-011]** A package built for `M + 1` that still uses an item removed at `M + 2` MUST be refused at install with a code of the ABI refusal table, and the removal MUST NOT change the code of any other package.
+- **[CMP-011]** A package built for `M + 1` that still uses an item removed at `M + 2` MUST be refused at install with a code of the ABI refusal table, and the removal MUST NOT change the code of any other package.
 
 The code for that refusal is one of the codes of section 4 of [ABI evolution](/pages/reference-abi-evolution/#4-the-window-and-the-refusal-codes), chosen by the check that fails. Which code applies to a removed SDK item that a package still imports is not fixed on the owner page yet (proposed, owner to confirm: `manifest.import-not-requested`, because the removed item no longer appears in the component's requested imports).
 
@@ -61,7 +61,7 @@ An unstable feature has no notice period of its own in the contract, because it 
 
 Graduation moves a feature from `unstable` to stable. A plugin that still lists the old name keeps loading after a graduation, because the manifest entry remains valid for one minor. Proposed, owner to confirm: after graduation the `unstable` entry is ignored with a `deprecated` record, and it becomes `manifest.unstable-unknown` only on the minor that removes the name.
 
-- **[COMP-012]** A graduation or removal of an unstable feature MUST be named in the release notes one minor before it takes effect, and the host MUST write a `deprecated` record for each plugin that still lists the feature in that minor.
+- **[CMP-012]** A graduation or removal of an unstable feature MUST be named in the release notes one minor before it takes effect, and the host MUST write a `deprecated` record for each plugin that still lists the feature in that minor.
 
 ## Edge cases
 
@@ -71,7 +71,7 @@ Graduation moves a feature from `unstable` to stable. A plugin that still lists 
 - Two items marked in the same minor with different removal minors each keep their own calendar. The window does not change by item.
 - A plugin that lists `requires` on another plugin's deprecated service is not covered by the SDK rules. The other plugin's contract and its major version decide that case ([AUT-213]).
 
-- **[COMP-013]** A removal MUST NOT happen on a patch release and MUST NOT change the behaviour of any item other than the removed one ([API-086]).
+- **[CMP-013]** A removal MUST NOT happen on a patch release and MUST NOT change the behaviour of any item other than the removed one ([API-086]).
 
 ## Example release note
 
@@ -83,7 +83,7 @@ A release note for the marking minor is short. It names the item, the successor,
   Removal minor: 0.4.0. Packages built for 0.3 that still use it are refused on host 0.4.
 ```
 
-- **[COMP-014]** A marking release note MUST contain the item name, the successor name, the removal minor and the packages it breaks, in that order, so that a reader can check the timeline without the source.
+- **[CMP-014]** A marking release note MUST contain the item name, the successor name, the removal minor and the packages it breaks, in that order, so that a reader can check the timeline without the source.
 
 ## Test
 

@@ -1,4 +1,4 @@
-//! publish-mirror-runbook.md "Mirror operation" (PUBL-017..PUBL-025).
+//! publish-mirror-runbook.md "Mirror operation" (PUB-017..PUB-025).
 //!
 //! Mirror sync is driven through `mirror` on a sandbox whose source registry is the standard
 //! fixture; the mirror tree is read from the sandbox folder `mirror`.
@@ -22,9 +22,9 @@ fn temp_files_under(dir: &std::path::Path, found: &mut Vec<String>) {
     }
 }
 
-// ---- PUBL-017 sync interval is at most half the shortest expiry ---------------------------
+// ---- PUB-017 sync interval is at most half the shortest expiry ---------------------------
 
-/// REQ: PUBL-017
+/// REQ: PUB-017
 #[test]
 fn publ_017_sync_interval_longer_than_half_expiry_is_refused_a() {
     let sandbox = Sandbox::standard();
@@ -34,7 +34,7 @@ fn publ_017_sync_interval_longer_than_half_expiry_is_refused_a() {
     assert_ne!(output.exit_code, 0, "a sync interval over half the expiry must be refused: {output:?}");
 }
 
-/// REQ: PUBL-017
+/// REQ: PUB-017
 #[test]
 fn publ_017_twelve_hour_interval_is_accepted_b() {
     let sandbox = Sandbox::standard();
@@ -43,9 +43,9 @@ fn publ_017_twelve_hour_interval_is_accepted_b() {
     assert_ok(&output);
 }
 
-// ---- PUBL-018 alert before the timestamp expires -----------------------------------------
+// ---- PUB-018 alert before the timestamp expires -----------------------------------------
 
-/// REQ: PUBL-018
+/// REQ: PUB-018
 #[test]
 fn publ_018_alert_fires_six_hours_before_timestamp_expiry_a() {
     let sandbox = Sandbox::standard();
@@ -58,7 +58,7 @@ fn publ_018_alert_fires_six_hours_before_timestamp_expiry_a() {
     );
 }
 
-/// REQ: PUBL-018
+/// REQ: PUB-018
 #[test]
 fn publ_018_no_alert_while_expiry_is_far_b() {
     let sandbox = Sandbox::standard();
@@ -67,9 +67,9 @@ fn publ_018_no_alert_while_expiry_is_far_b() {
     assert!(records(&output, "alert").is_empty(), "no alert while far from expiry: {output:?}");
 }
 
-// ---- PUBL-019 failed syncs keep old files and replace atomically --------------------------
+// ---- PUB-019 failed syncs keep old files and replace atomically --------------------------
 
-/// REQ: PUBL-019
+/// REQ: PUB-019
 #[test]
 fn publ_019_failed_sync_leaves_previous_files_in_place_a() {
     let sandbox = Sandbox::standard();
@@ -82,7 +82,7 @@ fn publ_019_failed_sync_leaves_previous_files_in_place_a() {
     assert_eq!(before, mirror_tree(&sandbox), "a failed sync must keep the previous files");
 }
 
-/// REQ: PUBL-019
+/// REQ: PUB-019
 #[test]
 fn publ_019_no_partial_files_remain_after_a_killed_sync_b() {
     let sandbox = Sandbox::standard();
@@ -95,9 +95,9 @@ fn publ_019_no_partial_files_remain_after_a_killed_sync_b() {
     assert!(found.is_empty(), "partial files left behind: {found:?}");
 }
 
-// ---- PUBL-020 full mirrors are byte-identical to the source --------------------------------
+// ---- PUB-020 full mirrors are byte-identical to the source --------------------------------
 
-/// REQ: PUBL-020
+/// REQ: PUB-020
 #[test]
 fn publ_020_full_mirror_files_match_source_hashes_a() {
     let sandbox = Sandbox::standard();
@@ -110,7 +110,7 @@ fn publ_020_full_mirror_files_match_source_hashes_a() {
     }
 }
 
-/// REQ: PUBL-020
+/// REQ: PUB-020
 #[test]
 fn publ_020_full_mirror_has_no_extra_or_missing_files_b() {
     let sandbox = Sandbox::standard();
@@ -120,9 +120,9 @@ fn publ_020_full_mirror_has_no_extra_or_missing_files_b() {
     assert_eq!(source_names, mirror_names);
 }
 
-// ---- PUBL-021 partial mirrors use their own keys ------------------------------------------
+// ---- PUB-021 partial mirrors use their own keys ------------------------------------------
 
-/// REQ: PUBL-021
+/// REQ: PUB-021
 #[test]
 fn publ_021_partial_mirror_publishes_its_own_root_a() {
     let sandbox = Sandbox::standard();
@@ -133,7 +133,7 @@ fn publ_021_partial_mirror_publishes_its_own_root_a() {
     assert_ne!(source_root, mirror_root, "the partial mirror must not reuse the source root");
 }
 
-/// REQ: PUBL-021
+/// REQ: PUB-021
 #[test]
 fn publ_021_partial_mirror_resigns_index_and_snapshot_b() {
     let sandbox = Sandbox::standard();
@@ -144,9 +144,9 @@ fn publ_021_partial_mirror_resigns_index_and_snapshot_b() {
     assert_ne!(source["snapshot.json"], mirrored["snapshot.json"], "snapshot.json must be re-signed");
 }
 
-// ---- PUBL-022 takedowns reach mirrors within 6 hours --------------------------------------
+// ---- PUB-022 takedowns reach mirrors within 6 hours --------------------------------------
 
-/// REQ: PUBL-022
+/// REQ: PUB-022
 #[test]
 fn publ_022_takedown_is_applied_to_mirror_within_six_hours_a() {
     let sandbox = Sandbox::standard();
@@ -158,7 +158,7 @@ fn publ_022_takedown_is_applied_to_mirror_within_six_hours_a() {
     assert!(revocations.contains("com.acme.notes"), "the mirror must carry the takedown");
 }
 
-/// REQ: PUBL-022
+/// REQ: PUB-022
 #[test]
 fn publ_022_late_takedown_is_reported_as_breach_b() {
     let sandbox = Sandbox::standard();
@@ -171,9 +171,9 @@ fn publ_022_late_takedown_is_reported_as_breach_b() {
     );
 }
 
-// ---- PUBL-023 mirrors never remove blobs on their own ------------------------------------
+// ---- PUB-023 mirrors never remove blobs on their own ------------------------------------
 
-/// REQ: PUBL-023
+/// REQ: PUB-023
 #[test]
 fn publ_023_mirror_keeps_blob_removed_at_source_without_signed_change_a() {
     let sandbox = Sandbox::standard();
@@ -187,7 +187,7 @@ fn publ_023_mirror_keeps_blob_removed_at_source_without_signed_change_a() {
     );
 }
 
-/// REQ: PUBL-023
+/// REQ: PUB-023
 #[test]
 fn publ_023_removal_follows_signed_takedown_b() {
     let sandbox = Sandbox::standard();
@@ -201,9 +201,9 @@ fn publ_023_removal_follows_signed_takedown_b() {
     );
 }
 
-// ---- PUBL-024 free space of twice the source blobs ----------------------------------------
+// ---- PUB-024 free space of twice the source blobs ----------------------------------------
 
-/// REQ: PUBL-024
+/// REQ: PUB-024
 #[test]
 fn publ_024_sync_refused_when_free_space_is_below_twice_blobs_a() {
     let sandbox = Sandbox::standard();
@@ -214,7 +214,7 @@ fn publ_024_sync_refused_when_free_space_is_below_twice_blobs_a() {
     assert_ne!(output.exit_code, 0, "a sync must refuse with too little free space: {output:?}");
 }
 
-/// REQ: PUBL-024
+/// REQ: PUB-024
 #[test]
 fn publ_024_sync_runs_with_twice_blob_size_free_b() {
     let sandbox = Sandbox::standard();
@@ -225,9 +225,9 @@ fn publ_024_sync_runs_with_twice_blob_size_free_b() {
     assert_ok(&output);
 }
 
-// ---- PUBL-025 mirror on its own filesystem ------------------------------------------------
+// ---- PUB-025 mirror on its own filesystem ------------------------------------------------
 
-/// REQ: PUBL-025
+/// REQ: PUB-025
 #[test]
 fn publ_025_mirror_inside_build_cache_root_is_refused_a() {
     let sandbox = Sandbox::standard();
@@ -237,7 +237,7 @@ fn publ_025_mirror_inside_build_cache_root_is_refused_a() {
     assert_ne!(output.exit_code, 0, "a mirror on the build cache disk must be refused: {output:?}");
 }
 
-/// REQ: PUBL-025
+/// REQ: PUB-025
 #[test]
 fn publ_025_mirror_on_own_filesystem_is_accepted_b() {
     let sandbox = Sandbox::standard();

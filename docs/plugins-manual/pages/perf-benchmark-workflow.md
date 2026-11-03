@@ -50,15 +50,15 @@ Illustrative, not generated. Both exports are well under their deadlines. The `s
 <p>Bench uses the embedded test host, not a live session. A live session also runs other plugins, the detection loop and the terminal, so its timings can differ from bench. Use <code>profile</code> to see the real session.</p>
 </div>
 
-- **[PERF-020]** `ilium plugin bench` MUST label every `timing` record `synthetic: true`, and an author MUST NOT present a bench result as a session timing. Test: run bench on a fixture and assert that every `timing` record has `synthetic` set to true.
-- **[PERF-021]** `ilium plugin bench` MUST exit 3 when any export's p99 is above its manifest `deadline_ms`, and MUST exit 0 when every export's p99 is within it. Test: a fixture whose handler sleeps 25 ms exits 3 for `on-events`, and a fixture that sleeps 5 ms exits 0.
-- **[PERF-022]** A plugin author MUST NOT raise a `deadline_ms` in the manifest, or a `limits` value above the default of its tier, to make a bench or a CI gate pass unless the new value follows from a measured need. The commit that makes the change MUST name the measured numbers. Test: a review checklist item requires the measured numbers in the commit message.
+- **[PRF-020]** `ilium plugin bench` MUST label every `timing` record `synthetic: true`, and an author MUST NOT present a bench result as a session timing. Test: run bench on a fixture and assert that every `timing` record has `synthetic` set to true.
+- **[PRF-021]** `ilium plugin bench` MUST exit 3 when any export's p99 is above its manifest `deadline_ms`, and MUST exit 0 when every export's p99 is within it. Test: a fixture whose handler sleeps 25 ms exits 3 for `on-events`, and a fixture that sleeps 5 ms exits 0.
+- **[PRF-022]** A plugin author MUST NOT raise a `deadline_ms` in the manifest, or a `limits` value above the default of its tier, to make a bench or a CI gate pass unless the new value follows from a measured need. The commit that makes the change MUST name the measured numbers. Test: a review checklist item requires the measured numbers in the commit message.
 
 ### Reading the numbers
 
 The p99 is the value that the deadline applies to. A deadline breach happens on the calls that take longest, so the tail matters more than the median. The p50 shows the typical cost. The max is a single outlier and is noisy on a shared machine, so use it only to find a call that is much slower than the rest.
 
-- **[PERF-023]** A handler SHOULD have a bench p99 of at most half its deadline, which is 10 ms for `on-events` and 5 ms for `views.render` at the defaults. (proposed, owner to confirm: the half-of-deadline target matches the warning colour in the handler budget meter in [Performance](/pages/performance/#measuring-a-handler), but no specification line requires it.) Test: a bench run of the reference fixture reports a p99 under 10 ms for `on-events`.
+- **[PRF-023]** A handler SHOULD have a bench p99 of at most half its deadline, which is 10 ms for `on-events` and 5 ms for `views.render` at the defaults. (proposed, owner to confirm: the half-of-deadline target matches the warning colour in the handler budget meter in [Performance](/pages/performance/#measuring-a-handler), but no specification line requires it.) Test: a bench run of the reference fixture reports a p99 under 10 ms for `on-events`.
 
 ### Measuring the spread
 
@@ -71,7 +71,7 @@ A benchmark on a laptop can vary by 10 percent or more between runs. A change th
 
 The CI gate uses a tolerance of 20 percent as a start, and recommends a tolerance above the spread ([CI recipes](/pages/guide-ci-recipes/#performance-regression-gate)).
 
-- **[PERF-024]** A timing claim in a commit message, a changelog entry or a review SHOULD give the p99 of at least ten runs and the spread of those runs, so that a reader can tell a change from noise. Test: a review checklist item checks the message for both numbers.
+- **[PRF-024]** A timing claim in a commit message, a changelog entry or a review SHOULD give the p99 of at least ten runs and the spread of those runs, so that a reader can tell a change from noise. Test: a review checklist item checks the message for both numbers.
 
 ### Comparing with a baseline
 
@@ -83,7 +83,7 @@ The CI gate reads a committed file, `bench/baseline.json`, and fails when a metr
 
 Illustrative, not generated. The p99 of `on-events` is 25.4 percent above the baseline, so the command exits 3.
 
-- **[PERF-025]** A baseline MUST be refreshed only in a commit of its own, after a release whose slower numbers were reviewed and accepted, or after a change of runner. Test: a commit that changes `bench/baseline.json` and any other file is refused by the review checklist.
+- **[PRF-025]** A baseline MUST be refreshed only in a commit of its own, after a release whose slower numbers were reviewed and accepted, or after a change of runner. Test: a commit that changes `bench/baseline.json` and any other file is refused by the review checklist.
 
 Run bench on a dedicated runner, or on a runner with the same size for every run. Shared runners add scheduling noise, so a baseline from a quiet machine fails on a busy one for no reason of the plugin's.
 
@@ -93,7 +93,7 @@ Run bench on a dedicated runner, or on a runner with the same size for every run
 
 Run the profile while you use the plugin in the way a user would. A profile of an idle plugin shows almost nothing, and a profile of a busy plugin shows where the time goes. For the timings while you edit, `ilium plugin dev --timings` prints the time per export call during a development session.
 
-- **[PERF-026]** `ilium plugin profile` MUST print one timing record for each export call that ran during the profile, and MUST NOT change the call time of the plugin by more than 5 percent. This is the rule in [Performance targets](/pages/performance/#performance-targets) (DEV-850). Test: profile a fixture plugin with and without profiling and compare the call times.
+- **[PRF-026]** `ilium plugin profile` MUST print one timing record for each export call that ran during the profile, and MUST NOT change the call time of the plugin by more than 5 percent. This is the rule in [Performance targets](/pages/performance/#performance-targets) (DEV-850). Test: profile a fixture plugin with and without profiling and compare the call times.
 
 ### Memory alongside time
 
@@ -103,12 +103,12 @@ A handler can be fast and still use too much memory. Read `ilium plugin stats <i
 
 A plugin's `on-events` handler filters a list of notes on every batch. The team added a feature that makes the list 40 percent longer, and the bench p99 rises from 6 ms to 14 ms.
 
-1. The author runs `ilium plugin build --release`, then `ilium plugin bench --iterations 200`. The p99 is 14 ms, above the 10 ms half-of-deadline target in PERF-023, but still under the 20 ms deadline. Bench exits 0.
+1. The author runs `ilium plugin build --release`, then `ilium plugin bench --iterations 200`. The p99 is 14 ms, above the 10 ms half-of-deadline target in PRF-023, but still under the 20 ms deadline. Bench exits 0.
 2. The author runs the spread measurement from the section above. The spread is 4 percent, so a change of 8 ms is a real change.
-3. The author checks the live profile. The handler runs 30 times a second while the user types, so the work adds up to about 420 ms per second. That is above the 250 ms per second average in PERF-004, so the bucket is at risk.
+3. The author checks the live profile. The handler runs 30 times a second while the user types, so the work adds up to about 420 ms per second. That is above the 250 ms per second average in PRF-004, so the bucket is at risk.
 4. The fix moves the filter into a job that runs when the user stops typing for 300 ms. The handler now only records the query.
-5. The author runs bench again. The p99 of `on-events` is 1.2 ms. A new profile shows the handler's spend falls well below the 250 ms per second average of PERF-004.
-6. The change goes in a commit that names the numbers from steps 1, 2, 3 and 5. The baseline is not refreshed in the same commit, as PERF-025 requires.
+5. The author runs bench again. The p99 of `on-events` is 1.2 ms. A new profile shows the handler's spend falls well below the 250 ms per second average of PRF-004.
+6. The change goes in a commit that names the numbers from steps 1, 2, 3 and 5. The baseline is not refreshed in the same commit, as PRF-025 requires.
 
 ### Limits of this page
 

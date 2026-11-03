@@ -1,4 +1,4 @@
-//! Requirements INST-001, INST-002, INST-005 and INST-006: consent, grant and dry-run flags of
+//! Requirements INS-001, INS-002, INS-005 and INS-006: consent, grant and dry-run flags of
 //! `ilium plugin install` (manual page reference-plugin-distribution-cli, install section).
 
 use ilium_plugin_host::cli::CliOutput;
@@ -13,7 +13,7 @@ fn package_path(fx: &Fx, spec: &Spec) -> String {
     fx.write_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &spec.build())
 }
 
-/// REQ: INST-001
+/// REQ: INS-001
 #[test]
 fn inst_001_yes_refuses_high_risk_grant_a() {
     let fx = Fx::new();
@@ -25,7 +25,7 @@ fn inst_001_yes_refuses_high_risk_grant_a() {
     assert!(fx.record("com.example.notes").is_none());
 }
 
-/// REQ: INST-001
+/// REQ: INS-001
 #[test]
 fn inst_001_yes_refuses_unknown_signing_key_b() {
     let fx = Fx::new();
@@ -38,7 +38,7 @@ fn inst_001_yes_refuses_unknown_signing_key_b() {
     assert_eq!(fx.installed(), before);
 }
 
-/// REQ: INST-002
+/// REQ: INS-002
 #[test]
 fn inst_002_grant_accepts_only_named_grant_a() {
     let fx = Fx::new();
@@ -49,7 +49,7 @@ fn inst_002_grant_accepts_only_named_grant_a() {
     assert!(fx.record("com.example.notes").is_none());
 }
 
-/// REQ: INST-002
+/// REQ: INS-002
 #[test]
 fn inst_002_grant_other_high_risk_grant_still_blocks_b() {
     let fx = Fx::new();
@@ -62,7 +62,7 @@ fn inst_002_grant_other_high_risk_grant_still_blocks_b() {
     assert_eq!(fx.installed_bytes(), grant_before);
 }
 
-/// REQ: INST-005
+/// REQ: INS-005
 #[test]
 fn inst_005_allow_unsigned_reports_no_trusted_signer_a() {
     let fx = Fx::new();
@@ -74,7 +74,7 @@ fn inst_005_allow_unsigned_reports_no_trusted_signer_a() {
     assert!(!info.stdout_jsonl.iter().any(|r| r.to_string().contains("\"signer\":\"trusted")));
 }
 
-/// REQ: INST-005
+/// REQ: INS-005
 #[test]
 fn inst_005_allow_unsigned_update_still_needs_signature_b() {
     let fx = Fx::new();
@@ -87,7 +87,7 @@ fn inst_005_allow_unsigned_update_still_needs_signature_b() {
     assert_eq!(fx.active_version("com.example.notes").as_deref(), Some("1.0.0"));
 }
 
-/// REQ: INST-006
+/// REQ: INS-006
 #[test]
 fn inst_006_dry_run_success_writes_nothing_a() {
     let fx = Fx::new();
@@ -110,7 +110,7 @@ fn inst_006_dry_run_success_writes_nothing_a() {
     assert_eq!(before, after);
 }
 
-/// REQ: INST-006
+/// REQ: INS-006
 #[test]
 fn inst_006_dry_run_failure_exit_code_matches_real_install_b() {
     let fx = Fx::new();

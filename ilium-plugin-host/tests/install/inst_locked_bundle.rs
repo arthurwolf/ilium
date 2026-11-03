@@ -1,4 +1,4 @@
-//! Requirements INST-007, INST-011, INST-013, INST-104, INST-108 and INST-109: `--locked`,
+//! Requirements INS-007, INS-011, INS-013, INS-104, INS-108 and INS-109: `--locked`,
 //! `--from-bundle`, `--reinstall` and install locking (manual pages reference-plugin-distribution-cli
 //! and reference-install-and-update).
 
@@ -10,7 +10,7 @@ fn mentions(out: &CliOutput, text: &str) -> bool {
     out.stderr.contains(text) || out.stdout_jsonl.iter().any(|r| r.to_string().contains(text))
 }
 
-/// REQ: INST-007
+/// REQ: INS-007
 #[test]
 fn inst_007_locked_hash_mismatch_fails_a() {
     let fx = Fx::new();
@@ -21,7 +21,7 @@ fn inst_007_locked_hash_mismatch_fails_a() {
     assert!(mentions(&out, "dependency.lock-mismatch"));
 }
 
-/// REQ: INST-007
+/// REQ: INS-007
 #[test]
 fn inst_007_locked_hash_mismatch_no_network_b() {
     let fx = Fx::new();
@@ -29,7 +29,7 @@ fn inst_007_locked_hash_mismatch_no_network_b() {
     assert!(fx.fetcher.calls().is_empty());
 }
 
-/// REQ: INST-011
+/// REQ: INS-011
 #[test]
 fn inst_011_bundle_install_exit_zero_a() {
     let fx = Fx::new();
@@ -37,7 +37,7 @@ fn inst_011_bundle_install_exit_zero_a() {
     assert_eq!(out.exit_code, 0);
 }
 
-/// REQ: INST-011
+/// REQ: INS-011
 #[test]
 fn inst_011_bundle_install_opens_no_connection_b() {
     let fx = Fx::new();
@@ -45,7 +45,7 @@ fn inst_011_bundle_install_opens_no_connection_b() {
     assert!(fx.fetcher.calls().is_empty());
 }
 
-/// REQ: INST-013
+/// REQ: INS-013
 #[test]
 fn inst_013_reinstall_locked_same_bytes_succeeds_a() {
     let fx = Fx::new();
@@ -56,7 +56,7 @@ fn inst_013_reinstall_locked_same_bytes_succeeds_a() {
     assert_eq!(fx.active_version("com.example.notes").as_deref(), Some("1.0.0"));
 }
 
-/// REQ: INST-013
+/// REQ: INS-013
 #[test]
 fn inst_013_reinstall_locked_different_hash_fails_b() {
     let fx = Fx::new();
@@ -67,7 +67,7 @@ fn inst_013_reinstall_locked_different_hash_fails_b() {
     assert!(mentions(&out, "dependency.lock-mismatch"));
 }
 
-/// REQ: INST-104
+/// REQ: INS-104
 #[test]
 fn inst_104_lock_mismatch_leaves_installed_json_a() {
     let fx = Fx::new();
@@ -79,7 +79,7 @@ fn inst_104_lock_mismatch_leaves_installed_json_a() {
     assert_eq!(fx.installed_bytes(), before);
 }
 
-/// REQ: INST-104
+/// REQ: INS-104
 #[test]
 fn inst_104_lock_mismatch_error_names_code_b() {
     let fx = Fx::new();
@@ -89,7 +89,7 @@ fn inst_104_lock_mismatch_error_names_code_b() {
     assert!(mentions(&out, "dependency.lock-mismatch"));
 }
 
-/// REQ: INST-108
+/// REQ: INS-108
 #[test]
 fn inst_108_incomplete_bundle_fails_download_failed_a() {
     let fx = Fx::new();
@@ -98,7 +98,7 @@ fn inst_108_incomplete_bundle_fails_download_failed_a() {
     assert!(mentions(&out, "install.download-failed"));
 }
 
-/// REQ: INST-108
+/// REQ: INS-108
 #[test]
 fn inst_108_incomplete_bundle_never_fetches_missing_file_b() {
     let fx = Fx::new();
@@ -106,7 +106,7 @@ fn inst_108_incomplete_bundle_never_fetches_missing_file_b() {
     assert!(fx.fetcher.calls().is_empty());
 }
 
-/// REQ: INST-109
+/// REQ: INS-109
 #[test]
 fn inst_109_locked_second_install_keeps_files_a() {
     let fx = Fx::new();
@@ -120,7 +120,7 @@ fn inst_109_locked_second_install_keeps_files_a() {
     let _ = spec;
 }
 
-/// REQ: INST-109
+/// REQ: INS-109
 #[test]
 fn inst_109_install_locked_refusal_reports_install_locked_b() {
     let fx = Fx::new();

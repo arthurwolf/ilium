@@ -23,7 +23,7 @@ An inventory before the upgrade shows which plugins the new window will refuse. 
 2. Save the health and metrics of each plugin: `ilium plugin status --json > status-before.json`.
 3. Compare the `api` value of each installed package with the window of the new host from its release notes.
 
-- **[COMP-015]** Before a host upgrade, the operator MUST save the list and the status of every installed plugin, so that a refusal after the upgrade can be compared with the state before it.
+- **[CMP-015]** Before a host upgrade, the operator MUST save the list and the status of every installed plugin, so that a refusal after the upgrade can be compared with the state before it.
 - Proposed, owner to confirm: `ilium plugin list --json` carries the `api` value of each installed package, so that step 3 needs no unpacking of the store.
 
 ## Step 1: triage
@@ -41,7 +41,7 @@ Triage answers two questions for each refused plugin: why it is refused, and whe
 | `manifest.api-version` | The section differs from the `api` value | No; the author must rebuild |
 | `manifest.unstable-unknown` | A feature name was removed or renamed | No; the author must update the manifest |
 
-- **[COMP-016]** Triage MUST classify every refused plugin by its code before any other step, and it MUST leave each plugin's files, grants and data unchanged.
+- **[CMP-016]** Triage MUST classify every refused plugin by its code before any other step, and it MUST leave each plugin's files, grants and data unchanged.
 
 ## Step 2: pin
 
@@ -57,7 +57,7 @@ A pin does not make a refused plugin load. It keeps the plugin at the version it
 
 Illustrative, not generated.
 
-- **[COMP-017]** A pin set during triage MUST be listed in the bulk report of step 4, and it MUST be removed with `ilium plugin unpin <id>` once a version that the host accepts is installed.
+- **[CMP-017]** A pin set during triage MUST be listed in the bulk report of step 4, and it MUST be removed with `ilium plugin unpin <id>` once a version that the host accepts is installed.
 
 ## Step 3: roll back
 
@@ -75,9 +75,9 @@ There are two different rollbacks. Use the one the refusal calls for.
 
 A host rollback is the way to load a plugin again after an upgrade that refused it. The ABI rules make that safe: the host does not change plugin files, grants or stored settings on a rollback, and a plugin refused after the upgrade loads again unchanged.
 
-- **[COMP-018]** A host rollback MUST NOT change installed plugin files, grants or stored settings, and a plugin refused after the upgrade MUST load again unchanged once the earlier host that accepts its `api` runs again ([ABI-078] of [ABI major versions](/pages/reference-abi-major-versions/)).
+- **[CMP-018]** A host rollback MUST NOT change installed plugin files, grants or stored settings, and a plugin refused after the upgrade MUST load again unchanged once the earlier host that accepts its `api` runs again ([ABI-078] of [ABI major versions](/pages/reference-abi-major-versions/)).
 - Proposed, owner to confirm: `--restore-backup` is used only after the audit export of step 1 has been saved, so that the data it discards can be traced.
-- **[COMP-019]** A plugin rollback whose stored data version is higher than the target supports MUST be refused with `migration.data-newer`, and the operator MUST NOT force it through a restore without the audit export of step 1.
+- **[CMP-019]** A plugin rollback whose stored data version is higher than the target supports MUST be refused with `migration.data-newer`, and the operator MUST NOT force it through a restore without the audit export of step 1.
 
 Check the state after each rollback with `ilium plugin list --json` and compare it with `before.json` from the inventory. A plugin that moved back to a state it had before the upgrade is done. A plugin in a different state needs another step.
 
@@ -96,7 +96,7 @@ Each row of the report carries:
 - whether the plugin is pinned, and
 - the action taken: pinned, rolled back, or left for the author.
 
-- **[COMP-020]** The bulk report MUST contain one row per refused plugin, in one output, with the refusal code and the declared `api` value of each.
+- **[CMP-020]** The bulk report MUST contain one row per refused plugin, in one output, with the refusal code and the declared `api` value of each.
 
 ## Worked example: a host moves from 0.2.0 to 0.3.0
 
@@ -117,7 +117,7 @@ If the operator decides that `notes-caller` matters more than the new host, the 
 - A plugin that was pinned before the upgrade and is refused after it: the pin does not change the refusal. Keep the pin so that updates stay on the pinned version.
 - An upgrade of the host while a plugin is in the middle of a data migration: the migration rules of [Data migration](/pages/guide-data-migration/) apply, and the host rollback does not reverse a migrator that already ran.
 
-- **[COMP-021]** A runbook run MUST leave the audit export of step 1 and the two `ilium plugin list --json` files in the operator's own folder, not in the plugin store.
+- **[CMP-021]** A runbook run MUST leave the audit export of step 1 and the two `ilium plugin list --json` files in the operator's own folder, not in the plugin store.
 
 ## What the operator tells the author
 

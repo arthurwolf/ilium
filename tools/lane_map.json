@@ -12,7 +12,7 @@
       "ranges": [
         "ABI-001..051",
         "ABI-950..951",
-        "COMP-001..021"
+        "CMP-001..021"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -272,7 +272,7 @@
         "PKG-260..305",
         "PKG-310..360",
         "PKG-654",
-        "INST-001..110"
+        "INS-001..110"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -291,7 +291,7 @@
         "PKG-653",
         "PKG-655..657",
         "PKG-680..685",
-        "PUBL-001..041"
+        "PUB-001..041"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -348,7 +348,7 @@
         "SEC-125..139",
         "SEC-179..279",
         "SEC-316..999",
-        "SECU-001..011"
+        "SCU-001..011"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -412,7 +412,7 @@
       "ranges": [
         "HST-300..313",
         "B1..24",
-        "PERF-001..026"
+        "PRF-001..026"
       ],
       "patterns": [
         "HOST-START",
@@ -426,7 +426,7 @@
     "user-admin": {
       "ranges": [
         "USR-001..999",
-        "A11Y-001..022"
+        "ACC-001..022"
       ],
       "patterns": [],
       "port_plugins": [],

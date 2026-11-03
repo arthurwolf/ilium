@@ -1,5 +1,5 @@
-//! Host upgrade and rollback, operator triage and data version: COMP-004, COMP-005, COMP-015,
-//! COMP-016, COMP-018, COMP-019 (compat-load-decision-table.md, compat-host-upgrade-runbook.md).
+//! Host upgrade and rollback, operator triage and data version: CMP-004, CMP-005, CMP-015,
+//! CMP-016, CMP-018, CMP-019 (compat-load-decision-table.md, compat-host-upgrade-runbook.md).
 
 use ilium_plugin_api::abi::{refusal_listing, Installation, InstalledPlugin, LoadOutcome};
 use ilium_plugin_api::codes;
@@ -16,7 +16,7 @@ fn older_host() -> ApiVersion {
     }
 }
 
-/// REQ: COMP-004
+/// REQ: CMP-004
 #[test]
 fn comp_004_refusing_upgrade_leaves_files_grants_settings_and_data_a() {
     let mut installation = Installation::sample_mixed();
@@ -29,7 +29,7 @@ fn comp_004_refusing_upgrade_leaves_files_grants_settings_and_data_a() {
     assert_eq!(installation.snapshot(), before);
 }
 
-/// REQ: COMP-004
+/// REQ: CMP-004
 #[test]
 fn comp_004_refused_plugin_is_not_uninstalled_b() {
     let mut installation = Installation::sample_mixed();
@@ -41,7 +41,7 @@ fn comp_004_refused_plugin_is_not_uninstalled_b() {
     );
 }
 
-/// REQ: COMP-005
+/// REQ: CMP-005
 #[test]
 fn comp_005_refused_plugin_loads_again_after_host_rollback_a() {
     let mut installation = Installation::sample_mixed();
@@ -52,7 +52,7 @@ fn comp_005_refused_plugin_loads_again_after_host_rollback_a() {
     assert_eq!(installation.load(REFUSED), LoadOutcome::Loaded);
 }
 
-/// REQ: COMP-005
+/// REQ: CMP-005
 #[test]
 fn comp_005_reload_after_rollback_needs_no_file_change_b() {
     let mut installation = Installation::sample_mixed();
@@ -62,7 +62,7 @@ fn comp_005_reload_after_rollback_needs_no_file_change_b() {
     assert_eq!(installation.snapshot(), before);
 }
 
-/// REQ: COMP-015
+/// REQ: CMP-015
 #[test]
 fn comp_015_pre_upgrade_list_and_status_are_saved_a() {
     let installation = Installation::sample_mixed();
@@ -76,7 +76,7 @@ fn comp_015_pre_upgrade_list_and_status_are_saved_a() {
     );
 }
 
-/// REQ: COMP-015
+/// REQ: CMP-015
 #[test]
 fn comp_015_post_upgrade_status_can_be_compared_with_saved_b() {
     let saved = Installation::sample_mixed().load(REFUSED);
@@ -85,7 +85,7 @@ fn comp_015_post_upgrade_status_can_be_compared_with_saved_b() {
     assert_ne!(upgraded.load(REFUSED), saved);
 }
 
-/// REQ: COMP-016
+/// REQ: CMP-016
 #[test]
 fn comp_016_triage_classifies_refused_plugin_by_its_code_a() {
     let installed = vec![
@@ -106,7 +106,7 @@ fn comp_016_triage_classifies_refused_plugin_by_its_code_a() {
     assert_eq!(rows[0].code, "abi.minor-unsupported");
 }
 
-/// REQ: COMP-016
+/// REQ: CMP-016
 #[test]
 fn comp_016_triage_keeps_declared_api_of_refused_plugin_b() {
     let installed = vec![InstalledPlugin {
@@ -118,7 +118,7 @@ fn comp_016_triage_keeps_declared_api_of_refused_plugin_b() {
     assert_eq!(rows[0].declared_api, older_host());
 }
 
-/// REQ: COMP-018
+/// REQ: CMP-018
 #[test]
 fn comp_018_host_rollback_keeps_files_grants_and_settings_a() {
     let mut installation = Installation::sample_mixed();
@@ -128,7 +128,7 @@ fn comp_018_host_rollback_keeps_files_grants_and_settings_a() {
     assert_eq!(installation.snapshot(), before);
 }
 
-/// REQ: COMP-018
+/// REQ: CMP-018
 #[test]
 fn comp_018_accepted_plugin_still_loads_after_rollback_b() {
     let mut installation = Installation::sample_mixed();
@@ -138,13 +138,13 @@ fn comp_018_accepted_plugin_still_loads_after_rollback_b() {
     assert_eq!(installation.load(REFUSED), LoadOutcome::Loaded);
 }
 
-/// REQ: COMP-019
+/// REQ: CMP-019
 #[test]
 fn comp_019_newer_data_refusal_code_is_migration_data_newer_a() {
     assert_eq!(codes::migration::DATA_NEWER, "migration.data-newer");
 }
 
-/// REQ: COMP-019
+/// REQ: CMP-019
 #[test]
 fn comp_019_newer_data_refusal_code_is_in_the_code_table_b() {
     assert!(codes::ALL.contains(&codes::migration::DATA_NEWER));

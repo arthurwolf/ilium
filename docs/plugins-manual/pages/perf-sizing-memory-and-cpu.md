@@ -33,8 +33,8 @@ The host reserves the configured `memory_mib` of an instance when the instance a
 
 The reservation is released when the instance deactivates. Memory that the plugin frees during a run does not return to the pool until then.
 
-- **[PERF-001]** An instance MUST reserve its effective `memory_mib` from the session memory pool when it activates, and MUST release that reservation when it deactivates. Test: with a pool of 1,024 MiB and eight instances of 128 MiB each, the ninth activation stays `inactive` with the reason `host-capacity` and no failure is counted; deactivating one of the eight lets the ninth start.
-- **[PERF-002]** When an instance grows its memory past its effective `memory_mib`, the host MUST trap the instance and count the trap as a failure. Test: a fixture that allocates 33 MiB with `memory_mib` 32 traps; the same fixture with `memory_mib` 64 passes.
+- **[PRF-001]** An instance MUST reserve its effective `memory_mib` from the session memory pool when it activates, and MUST release that reservation when it deactivates. Test: with a pool of 1,024 MiB and eight instances of 128 MiB each, the ninth activation stays `inactive` with the reason `host-capacity` and no failure is counted; deactivating one of the eight lets the ninth start.
+- **[PRF-002]** When an instance grows its memory past its effective `memory_mib`, the host MUST trap the instance and count the trap as a failure. Test: a fixture that allocates 33 MiB with `memory_mib` 32 traps; the same fixture with `memory_mib` 64 passes.
 
 ### Measuring memory
 
@@ -63,7 +63,7 @@ Choose the value from the measured peak, not from the ceiling. Use this procedur
 3. If the target is above the default of your tier's ceiling, reduce the working set first, for example by streaming a file in chunks instead of reading it whole. A value above the ceiling is clamped, and the clamp is logged once per start ([Resource accounting](/pages/reference-resource-accounting/#which-limit-wins)).
 4. Write the value in the manifest `limits` block. Do not write a value above the target for safety. A bigger value only makes the pool smaller for everyone.
 
-- **[PERF-003]** A plugin SHOULD set `memory_mib` to no more than 1.5 times its measured peak on a release build, after the heaviest realistic input. Test: a fixture reports a peak of 20 MiB; the manifest value is at most 30 MiB.
+- **[PRF-003]** A plugin SHOULD set `memory_mib` to no more than 1.5 times its measured peak on a release build, after the heaviest realistic input. Test: a fixture reports a peak of 20 MiB; the manifest value is at most 30 MiB.
 
 Rule AUT-102 in [Performance](/pages/performance/#one-table-of-budgets) asks for a plugin to stay under half of each default budget in normal use. The two rules fit together. When the default is too small for the measured peak, raise the value to the target from step 2. When the peak is under half the default, leave the default alone.
 
@@ -73,8 +73,8 @@ Every call spends thread CPU time from one bucket for the plugin side. The bucke
 
 A handler that spends 20 ms on every event batch uses 20 ms of the bucket each time. At 10 batches per second, it spends 200 ms per second, which is 40 percent of the refill rate. That is a comfortable steady state. At 40 batches per second it spends 800 ms per second and empties the bucket within a few seconds, after which submissions are refused.
 
-- **[PERF-004]** A plugin SHOULD keep its average spend on the execution bucket below 250 ms per second, measured over 60 seconds in normal use, which is half of the refill rate. (proposed, owner to confirm: the 250 ms figure is a proposal; the specification fixes only the bucket size and refill rate.) Test: a fixture that runs its normal event load for 60 seconds reports a spend under 15,000 ms in total.
-- **[PERF-005]** A call that is refused with `quota-exceeded` MUST NOT be retried in a loop. The plugin MUST wait at least `retry-after-ms` before it submits again. Test: a submission loop against an empty bucket makes no more submissions in the refusal window than the `retry-after-ms` allows.
+- **[PRF-004]** A plugin SHOULD keep its average spend on the execution bucket below 250 ms per second, measured over 60 seconds in normal use, which is half of the refill rate. (proposed, owner to confirm: the 250 ms figure is a proposal; the specification fixes only the bucket size and refill rate.) Test: a fixture that runs its normal event load for 60 seconds reports a spend under 15,000 ms in total.
+- **[PRF-005]** A call that is refused with `quota-exceeded` MUST NOT be retried in a loop. The plugin MUST wait at least `retry-after-ms` before it submits again. Test: a submission loop against an empty bucket makes no more submissions in the refusal window than the `retry-after-ms` allows.
 
 The retry pattern is in [Backpressure and retries](/pages/perf-backpressure-and-retries/).
 
@@ -84,7 +84,7 @@ A handler has a 20 ms deadline per event batch. A plugin that does more than tha
 
 Choose the job budgets with the same procedure as the memory value. Measure the job CPU time and its peak memory on a release build, then set `job_deadline_ms`, `job_wall_ms` and `job_memory_mib` in the manifest to the measured value with headroom. Keep `job_wall_ms` above `job_deadline_ms`, because a job that waits for I/O uses wall time and not CPU time.
 
-- **[PERF-006]** A plugin MUST NOT run a loop over its whole data set inside `on-events` or `views.render`. Work over a data set MUST run in a job. Test: a fixture with 100,000 items makes `on-events` return within 20 ms, and the same work appears as a running job in `ilium plugin stats`.
+- **[PRF-006]** A plugin MUST NOT run a loop over its whole data set inside `on-events` or `views.render`. Work over a data set MUST run in a job. Test: a fixture with 100,000 items makes `on-events` return within 20 ms, and the same work appears as a running job in `ilium plugin stats`.
 
 ### Check the limits with lint
 

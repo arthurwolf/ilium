@@ -29,8 +29,8 @@ Omit `--allow` for a full mirror. Use one `--allow <id>` for each plugin of a pa
 
 A client refuses a metadata document after its `expires` time ([PKG-416](/pages/reference-registry/#client-behaviour-on-each-failure)). A mirror that stops syncing therefore stops working for its users at a known time. The schedule must keep the mirror ahead of that time.
 
-**[PUBL-017]** A mirror MUST be synced at an interval of no more than half of the shortest `expires` lifetime of the metadata it serves. Proposed, owner to confirm: the timestamp document expires 24 hours after it is signed, so a mirror syncs at least every 12 hours.
-**[PUBL-018]** A mirror operator MUST alert when the `expires` time of `timestamp.json` on the mirror is less than 6 hours away. Proposed, owner to confirm: the alert threshold is 6 hours. Test: stop the sync, wait until the threshold, and check that the alert fires before the expiry.
+**[PUB-017]** A mirror MUST be synced at an interval of no more than half of the shortest `expires` lifetime of the metadata it serves. Proposed, owner to confirm: the timestamp document expires 24 hours after it is signed, so a mirror syncs at least every 12 hours.
+**[PUB-018]** A mirror operator MUST alert when the `expires` time of `timestamp.json` on the mirror is less than 6 hours away. Proposed, owner to confirm: the alert threshold is 6 hours. Test: stop the sync, wait until the threshold, and check that the alert fires before the expiry.
 
 Example systemd timer for a mirror that syncs every 6 hours:
 
@@ -64,29 +64,29 @@ ilium plugin info com.example.notes
 
 `file://` is accepted for mirrors and bundles ([PKG-438](/pages/reference-plugin-distribution-cli/#registry-and-mirror)). The `info` line shows the same version and state as the source registry.
 
-**[PUBL-019]** A sync MUST leave the previous files in place when it fails, and MUST replace each file atomically ([PKG-439](/pages/reference-plugin-distribution-cli/#registry-and-mirror)). A reader who reads the mirror during a sync MUST see either the old file or the new file, never a partial file. Test: kill a sync during a blob download, then check that every file in the folder still verifies.
-**[PUBL-020]** A mirror MUST NOT change any signed byte. Its files MUST be byte-identical to the source for a full mirror ([PKG-408](/pages/reference-registry/#mirrors)). Test: compare the SHA-256 of each file on the mirror with the source; they match.
-**[PUBL-021]** A partial mirror MUST re-sign `index.json` and `snapshot.json` with its own keys and MUST publish its own `root.json` ([PKG-409](/pages/reference-registry/#mirrors)). Its operator MUST NOT reuse the source registry's root key.
+**[PUB-019]** A sync MUST leave the previous files in place when it fails, and MUST replace each file atomically ([PKG-439](/pages/reference-plugin-distribution-cli/#registry-and-mirror)). A reader who reads the mirror during a sync MUST see either the old file or the new file, never a partial file. Test: kill a sync during a blob download, then check that every file in the folder still verifies.
+**[PUB-020]** A mirror MUST NOT change any signed byte. Its files MUST be byte-identical to the source for a full mirror ([PKG-408](/pages/reference-registry/#mirrors)). Test: compare the SHA-256 of each file on the mirror with the source; they match.
+**[PUB-021]** A partial mirror MUST re-sign `index.json` and `snapshot.json` with its own keys and MUST publish its own `root.json` ([PKG-409](/pages/reference-registry/#mirrors)). Its operator MUST NOT reuse the source registry's root key.
 
 ### Propagating yanks and takedowns
 
 A yank or a takedown reaches a mirror only at the next sync. Until then the mirror serves the old state. This is a delay the operator must plan for.
 
-**[PUBL-022]** A takedown ([PKG-403](/pages/reference-registry/#policy)) MUST be applied to a mirror within 6 hours of the source registry publishing it. Proposed, owner to confirm: a mirror operator who cannot meet this MUST remove the affected plugin from the mirror with `--allow` and sync again.
-**[PUBL-023]** A mirror operator MUST NOT remove a blob from a full mirror on its own decision. Removal follows a takedown or a signed change from the source registry, so that the mirror keeps the source's signed state.
+**[PUB-022]** A takedown ([PKG-403](/pages/reference-registry/#policy)) MUST be applied to a mirror within 6 hours of the source registry publishing it. Proposed, owner to confirm: a mirror operator who cannot meet this MUST remove the affected plugin from the mirror with `--allow` and sync again.
+**[PUB-023]** A mirror operator MUST NOT remove a blob from a full mirror on its own decision. Removal follows a takedown or a signed change from the source registry, so that the mirror keeps the source's signed state.
 
 ### Disk planning
 
 The size of a full mirror is the sum of the blob sizes and the metadata. A blob is at most 300 MiB ([PKG-400](/pages/reference-registry/#publishing)). An average package is much smaller. The planning rule below uses the real sizes of the source, and not the cap.
 
-**[PUBL-024]** A full mirror's folder MUST have free space of at least twice the size of the source's current blobs, so that a sync can write a new file before it removes the old one. Proposed, owner to confirm: the factor of 2 is a safety margin, not a measured need. Test: fill the disk to the threshold, run a sync, and check that the sync fails cleanly and leaves the previous files valid ([PUBL-019](#propagating-yanks-and-takedowns)).
-**[PUBL-025]** A mirror operator MUST NOT store a mirror on a disk that is also the root of the operator's own build cache. Proposed, owner to confirm: keep the mirror on its own filesystem, so that a full build cache cannot stop the sync.
+**[PUB-024]** A full mirror's folder MUST have free space of at least twice the size of the source's current blobs, so that a sync can write a new file before it removes the old one. Proposed, owner to confirm: the factor of 2 is a safety margin, not a measured need. Test: fill the disk to the threshold, run a sync, and check that the sync fails cleanly and leaves the previous files valid ([PUB-019](#propagating-yanks-and-takedowns)).
+**[PUB-025]** A mirror operator MUST NOT store a mirror on a disk that is also the root of the operator's own build cache. Proposed, owner to confirm: keep the mirror on its own filesystem, so that a full build cache cannot stop the sync.
 
 ### Failure modes
 
 | Symptom | Cause | Action |
 |---|---|---|
-| The sync exits 8 `registry.unreachable`. | The source is down or the network failed. | Nothing is damaged. Retry at the next timer run. Check the alert of [PUBL-018](#sync-schedule). |
+| The sync exits 8 `registry.unreachable`. | The source is down or the network failed. | Nothing is damaged. Retry at the next timer run. Check the alert of [PUB-018](#sync-schedule). |
 | The sync exits 1 `registry.hash-mismatch`. | A file on the source does not match its metadata. | Do not copy the file by hand. Report the file name and the time to the source registry operator. The mirror keeps the previous file. |
 | The sync exits 1 `registry.signature-invalid`. | The source metadata fails the root key or the threshold. | Check that the root key id matches the source registry. If it does, treat the source as compromised and follow [Registry key compromise](/pages/reference-registry-key-compromise/). |
 | Clients report `registry.metadata-expired`. | The mirror passed the `expires` time of a document. | Run a sync at once. Clients use the cache until its own expiry, then refuse. |
@@ -103,7 +103,7 @@ A registry takes down version 0.2.0 of `com.example.old-tools` at 09:40. The mir
 <span class="t-ok">ok</span>   sync complete, 4 files changed, 0 files failed
 </pre>
 
-The mirror is within the 6-hour window of [PUBL-022](#propagating-yanks-and-takedowns). Clients that refresh metadata after 12:15 move the matching installed copies to `disabled-blocked` ([PKG-403](/pages/reference-registry/#policy)).
+The mirror is within the 6-hour window of [PUB-022](#propagating-yanks-and-takedowns). Clients that refresh metadata after 12:15 move the matching installed copies to `disabled-blocked` ([PKG-403](/pages/reference-registry/#policy)).
 
 ### Edge cases
 

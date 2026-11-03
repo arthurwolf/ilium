@@ -1,5 +1,5 @@
-//! Load decision and refusal of a package: COMP-001, COMP-002, COMP-003, COMP-007, COMP-008,
-//! COMP-009 (compat-load-decision-table.md).
+//! Load decision and refusal of a package: CMP-001, CMP-002, CMP-003, CMP-007, CMP-008,
+//! CMP-009 (compat-load-decision-table.md).
 
 use std::collections::HashSet;
 
@@ -7,7 +7,7 @@ use ilium_plugin_api::abi::{trigger_abi_failure, Installation, LoadOutcome};
 use ilium_plugin_api::codes;
 use ilium_plugin_api::version::{host_window, ApiVersion, API_VERSION_BYTES, CURRENT, REFUSAL_ORDER};
 
-/// REQ: COMP-001
+/// REQ: CMP-001
 #[test]
 fn comp_001_decision_order_follows_refusal_table_a() {
     assert_eq!(
@@ -22,14 +22,14 @@ fn comp_001_decision_order_follows_refusal_table_a() {
     );
 }
 
-/// REQ: COMP-001
+/// REQ: CMP-001
 #[test]
 fn comp_001_each_check_has_its_own_code_so_one_code_is_reported_b() {
     let distinct: HashSet<&str> = REFUSAL_ORDER.iter().copied().collect();
     assert_eq!(distinct.len(), REFUSAL_ORDER.len());
 }
 
-/// REQ: COMP-002
+/// REQ: CMP-002
 #[test]
 fn comp_002_refused_package_leaves_installed_version_active_a() {
     let mut installation = Installation::sample_mixed();
@@ -41,7 +41,7 @@ fn comp_002_refused_package_leaves_installed_version_active_a() {
     assert_eq!(installation.load("stable-plugin"), LoadOutcome::Loaded);
 }
 
-/// REQ: COMP-002
+/// REQ: CMP-002
 #[test]
 fn comp_002_unknown_package_refusal_changes_no_installed_state_b() {
     let mut installation = Installation::sample_mixed();
@@ -53,7 +53,7 @@ fn comp_002_unknown_package_refusal_changes_no_installed_state_b() {
     assert_eq!(installation.snapshot(), before);
 }
 
-/// REQ: COMP-003
+/// REQ: CMP-003
 #[test]
 fn comp_003_section_version_equal_to_api_value_is_accepted_a() {
     let section = ApiVersion::from_custom_section(&API_VERSION_BYTES).expect("six bytes");
@@ -62,7 +62,7 @@ fn comp_003_section_version_equal_to_api_value_is_accepted_a() {
     assert_eq!(section, api);
 }
 
-/// REQ: COMP-003
+/// REQ: CMP-003
 #[test]
 fn comp_003_patch_difference_is_a_mismatch_with_manifest_api_version_b() {
     let section = ApiVersion::from_custom_section(&API_VERSION_BYTES).expect("six bytes");
@@ -71,7 +71,7 @@ fn comp_003_patch_difference_is_a_mismatch_with_manifest_api_version_b() {
     assert_eq!(codes::manifest::API_VERSION, "manifest.api-version");
 }
 
-/// REQ: COMP-007
+/// REQ: CMP-007
 #[test]
 fn comp_007_api_unsupported_names_lowest_and_highest_of_window_a() {
     let window = host_window();
@@ -79,7 +79,7 @@ fn comp_007_api_unsupported_names_lowest_and_highest_of_window_a() {
     assert_eq!(window.end().minor, CURRENT.minor);
 }
 
-/// REQ: COMP-007
+/// REQ: CMP-007
 #[test]
 fn comp_007_highest_bound_of_window_is_the_current_minor_b() {
     let end = host_window().end().to_string();
@@ -89,7 +89,7 @@ fn comp_007_highest_bound_of_window_is_the_current_minor_b() {
     );
 }
 
-/// REQ: COMP-008
+/// REQ: CMP-008
 #[test]
 fn comp_008_refused_package_adds_no_file_to_installation_a() {
     let mut installation = Installation::sample_mixed();
@@ -99,7 +99,7 @@ fn comp_008_refused_package_adds_no_file_to_installation_a() {
     assert_eq!(installation.snapshot(), before);
 }
 
-/// REQ: COMP-008
+/// REQ: CMP-008
 #[test]
 fn comp_008_failed_load_keeps_other_plugins_unchanged_b() {
     let mut installation = Installation::sample_mixed();
@@ -110,7 +110,7 @@ fn comp_008_failed_load_keeps_other_plugins_unchanged_b() {
     assert_eq!(installation.snapshot(), before);
 }
 
-/// REQ: COMP-009
+/// REQ: CMP-009
 #[test]
 fn comp_009_refusal_log_line_carries_code_and_plugin_a() {
     let record = trigger_abi_failure(codes::package::API_UNSUPPORTED, "example.plugin");
@@ -118,7 +118,7 @@ fn comp_009_refusal_log_line_carries_code_and_plugin_a() {
     assert_eq!(record.plugin, "example.plugin");
 }
 
-/// REQ: COMP-009
+/// REQ: CMP-009
 #[test]
 fn comp_009_every_table_code_gets_its_own_log_line_b() {
     for code in REFUSAL_ORDER {

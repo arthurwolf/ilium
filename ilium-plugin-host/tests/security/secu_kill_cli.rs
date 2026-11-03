@@ -1,11 +1,11 @@
-//! SECU-002, SECU-003, SECU-004, SECU-007 and SECU-010: exit codes, the required reason, policy
+//! SCU-002, SCU-003, SCU-004, SCU-007 and SCU-010: exit codes, the required reason, policy
 //! kills and repeated kills for `ilium plugin kill` and `ilium plugin unkill`.
 
 use ilium_plugin_host::kill_switch::{KillSwitch, PluginState};
 
 use crate::secu_support::{audit_text, env, plugin, snapshot, PLUGIN};
 
-/// REQ: SECU-002
+/// REQ: SCU-002
 #[test]
 fn secu_002_kill_of_an_unknown_id_exits_5_with_not_found_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -19,7 +19,7 @@ fn secu_002_kill_of_an_unknown_id_exits_5_with_not_found_a() {
     assert!(unkill.stderr.contains("not found"), "stderr: {}", unkill.stderr);
 }
 
-/// REQ: SECU-002
+/// REQ: SCU-002
 #[test]
 fn secu_002_unknown_id_writes_no_state_and_no_audit_line_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -34,7 +34,7 @@ fn secu_002_unknown_id_writes_no_state_and_no_audit_line_b() {
     assert_eq!(snapshot(&root.path().join("state")), state_before, "no state may change");
 }
 
-/// REQ: SECU-003
+/// REQ: SCU-003
 #[test]
 fn secu_003_kill_and_unkill_without_a_session_exit_6_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -44,7 +44,7 @@ fn secu_003_kill_and_unkill_without_a_session_exit_6_a() {
     assert_eq!(plugin(&env, &["unkill", PLUGIN]).exit_code, 6);
 }
 
-/// REQ: SECU-003
+/// REQ: SCU-003
 #[test]
 fn secu_003_no_session_leaves_installed_state_and_kill_flag_unchanged_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -57,7 +57,7 @@ fn secu_003_no_session_leaves_installed_state_and_kill_flag_unchanged_b() {
     assert_eq!(snapshot(&root.path().join("state")), before);
 }
 
-/// REQ: SECU-004
+/// REQ: SCU-004
 #[test]
 fn secu_004_kill_without_reason_is_refused_and_records_nothing_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -73,7 +73,7 @@ fn secu_004_kill_without_reason_is_refused_and_records_nothing_a() {
     );
 }
 
-/// REQ: SECU-004
+/// REQ: SCU-004
 #[test]
 fn secu_004_kill_stores_its_reason_in_the_plugin_killed_record_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -88,7 +88,7 @@ fn secu_004_kill_stores_its_reason_in_the_plugin_killed_record_b() {
     assert!(killed.contains("exfiltrates tokens"), "record: {killed}");
 }
 
-/// REQ: SECU-007
+/// REQ: SCU-007
 #[test]
 fn secu_007_unkill_is_refused_while_a_policy_kill_lists_the_plugin_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -105,7 +105,7 @@ fn secu_007_unkill_is_refused_while_a_policy_kill_lists_the_plugin_a() {
     assert_eq!(snapshot(&root.path().join("state")), state_before, "state must not change");
 }
 
-/// REQ: SECU-007
+/// REQ: SCU-007
 #[test]
 fn secu_007_removing_the_policy_entry_keeps_the_plugin_refused_until_unkill_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -124,7 +124,7 @@ fn secu_007_removing_the_policy_entry_keeps_the_plugin_refused_until_unkill_b() 
     );
 }
 
-/// REQ: SECU-010
+/// REQ: SCU-010
 #[test]
 fn secu_010_second_kill_writes_one_more_plugin_killed_record_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -136,7 +136,7 @@ fn secu_010_second_kill_writes_one_more_plugin_killed_record_a() {
     assert_eq!(records, 2, "two kills must leave two records");
 }
 
-/// REQ: SECU-010
+/// REQ: SCU-010
 #[test]
 fn secu_010_second_kill_keeps_one_disabled_by_admin_state_b() {
     let root = tempfile::tempdir().expect("temp dir");

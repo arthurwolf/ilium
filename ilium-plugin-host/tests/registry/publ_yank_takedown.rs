@@ -1,4 +1,4 @@
-//! publish-yank-deprecate-takedown.md "Yank, deprecate, unlist and takedown" (PUBL-008..PUBL-016).
+//! publish-yank-deprecate-takedown.md "Yank, deprecate, unlist and takedown" (PUB-008..PUB-016).
 //!
 //! Yank, unyank, deprecate, unlist and takedown are driven through the CLI of a sandbox whose
 //! registry is the standard fixture. Metadata assertions read the served `snapshot.json`,
@@ -21,9 +21,9 @@ fn snapshot_entry(tree: &Tree, key: &str) -> Value {
     signed_of(&tree["snapshot.json"])["meta"][key].clone()
 }
 
-// ---- PUBL-008 yank needs a reason that is stored and shown ---------------------------------
+// ---- PUB-008 yank needs a reason that is stored and shown ---------------------------------
 
-/// REQ: PUBL-008
+/// REQ: PUB-008
 #[test]
 fn publ_008_yank_without_reason_is_refused_a() {
     let sandbox = Sandbox::standard();
@@ -35,7 +35,7 @@ fn publ_008_yank_without_reason_is_refused_a() {
     );
 }
 
-/// REQ: PUBL-008
+/// REQ: PUB-008
 #[test]
 fn publ_008_reason_is_stored_and_shown_by_info_b() {
     let sandbox = Sandbox::standard();
@@ -47,9 +47,9 @@ fn publ_008_reason_is_stored_and_shown_by_info_b() {
     assert!(stored.contains("writes the auth token"), "reason must be in the signed metadata");
 }
 
-// ---- PUBL-009 security yanks reach auto-update clients at the next safe point -------------
+// ---- PUB-009 security yanks reach auto-update clients at the next safe point -------------
 
-/// REQ: PUBL-009
+/// REQ: PUB-009
 #[test]
 fn publ_009_security_yank_forces_auto_install_a() {
     let sandbox = two_plugin_sandbox();
@@ -64,7 +64,7 @@ fn publ_009_security_yank_forces_auto_install_a() {
     );
 }
 
-/// REQ: PUBL-009
+/// REQ: PUB-009
 #[test]
 fn publ_009_ordinary_yank_does_not_force_an_update_b() {
     let sandbox = two_plugin_sandbox();
@@ -77,9 +77,9 @@ fn publ_009_ordinary_yank_does_not_force_an_update_b() {
     );
 }
 
-// ---- PUBL-010 yank and unyank never change hash, signature or length ----------------------
+// ---- PUB-010 yank and unyank never change hash, signature or length ----------------------
 
-/// REQ: PUBL-010
+/// REQ: PUB-010
 #[test]
 fn publ_010_yank_keeps_hash_signature_and_length_a() {
     let sandbox = Sandbox::standard();
@@ -90,7 +90,7 @@ fn publ_010_yank_keeps_hash_signature_and_length_a() {
     assert_eq!(before["length"], after["length"]);
 }
 
-/// REQ: PUBL-010
+/// REQ: PUB-010
 #[test]
 fn publ_010_unyank_restores_identical_entry_b() {
     let sandbox = Sandbox::standard();
@@ -101,9 +101,9 @@ fn publ_010_unyank_restores_identical_entry_b() {
     assert_eq!(before, after, "yank then unyank must leave hash, signature and length equal");
 }
 
-// ---- PUBL-011 a security yank stays yanked until its reason is withdrawn ------------------
+// ---- PUB-011 a security yank stays yanked until its reason is withdrawn ------------------
 
-/// REQ: PUBL-011
+/// REQ: PUB-011
 #[test]
 fn publ_011_unyank_of_security_yank_is_refused_a() {
     let sandbox = Sandbox::standard();
@@ -112,7 +112,7 @@ fn publ_011_unyank_of_security_yank_is_refused_a() {
     assert_ne!(output.exit_code, 0, "unyank of a security yank must be refused: {output:?}");
 }
 
-/// REQ: PUBL-011
+/// REQ: PUB-011
 #[test]
 fn publ_011_security_unyank_is_recorded_in_transparency_log_b() {
     let sandbox = Sandbox::standard();
@@ -122,9 +122,9 @@ fn publ_011_security_unyank_is_recorded_in_transparency_log_b() {
     assert_eq!(record["state"], "yanked", "the version must stay yanked: {info:?}");
 }
 
-// ---- PUBL-012 deprecate never blocks installs ----------------------------------------------
+// ---- PUB-012 deprecate never blocks installs ----------------------------------------------
 
-/// REQ: PUBL-012
+/// REQ: PUB-012
 #[test]
 fn publ_012_deprecated_plugin_still_installs_a() {
     let sandbox = two_plugin_sandbox();
@@ -141,7 +141,7 @@ fn publ_012_deprecated_plugin_still_installs_a() {
     assert_eq!(sandbox.installed_version("com.acme.old").as_deref(), Some("1.0.0"));
 }
 
-/// REQ: PUBL-012
+/// REQ: PUB-012
 #[test]
 fn publ_012_install_prints_message_and_successor_once_b() {
     let sandbox = two_plugin_sandbox();
@@ -159,9 +159,9 @@ fn publ_012_install_prints_message_and_successor_once_b() {
     assert!(rendered.contains("com.acme.new"), "successor id must be shown");
 }
 
-// ---- PUBL-013 unlist keeps every blob and the lock resolution -----------------------------
+// ---- PUB-013 unlist keeps every blob and the lock resolution -----------------------------
 
-/// REQ: PUBL-013
+/// REQ: PUB-013
 #[test]
 fn publ_013_unlist_removes_from_search_and_index_a() {
     let sandbox = two_plugin_sandbox();
@@ -176,7 +176,7 @@ fn publ_013_unlist_removes_from_search_and_index_a() {
     assert!(!listed.contains(&"com.acme.old".to_owned()), "index.json must drop the unlisted plugin");
 }
 
-/// REQ: PUBL-013
+/// REQ: PUB-013
 #[test]
 fn publ_013_update_still_works_after_unlist_b() {
     let sandbox = two_plugin_sandbox();
@@ -186,9 +186,9 @@ fn publ_013_update_still_works_after_unlist_b() {
     assert_eq!(update.exit_code, 0, "update of an unlisted installed copy must succeed: {update:?}");
 }
 
-// ---- PUBL-014 takedown records reason, time and rule; users see the policy text -----------
+// ---- PUB-014 takedown records reason, time and rule; users see the policy text -----------
 
-/// REQ: PUBL-014
+/// REQ: PUB-014
 #[test]
 fn publ_014_takedown_records_reason_time_and_rule_a() {
     let sandbox = Sandbox::standard();
@@ -203,7 +203,7 @@ fn publ_014_takedown_records_reason_time_and_rule_a() {
     );
 }
 
-/// REQ: PUBL-014
+/// REQ: PUB-014
 #[test]
 fn publ_014_users_see_policy_json_text_not_private_note_b() {
     let sandbox = Sandbox::standard();
@@ -213,9 +213,9 @@ fn publ_014_users_see_policy_json_text_not_private_note_b() {
     assert!(!output_contains(&output, "private internal note"), "private notes must not be shown");
 }
 
-// ---- PUBL-015 takedown keeps the signed entry and marks it blocked ------------------------
+// ---- PUB-015 takedown keeps the signed entry and marks it blocked ------------------------
 
-/// REQ: PUBL-015
+/// REQ: PUB-015
 #[test]
 fn publ_015_takedown_keeps_signed_version_entry_a() {
     let sandbox = Sandbox::standard();
@@ -226,7 +226,7 @@ fn publ_015_takedown_keeps_signed_version_entry_a() {
     assert_eq!(before["hashes"], after["hashes"], "the hash must stay known");
 }
 
-/// REQ: PUBL-015
+/// REQ: PUB-015
 #[test]
 fn publ_015_info_reports_blocked_state_b() {
     let sandbox = Sandbox::standard();
@@ -236,9 +236,9 @@ fn publ_015_info_reports_blocked_state_b() {
     assert_eq!(record["state"], "blocked", "{info:?}");
 }
 
-// ---- PUBL-016 every maintainer gets a takedown notice with the appeal address -------------
+// ---- PUB-016 every maintainer gets a takedown notice with the appeal address -------------
 
-/// REQ: PUBL-016
+/// REQ: PUB-016
 #[test]
 fn publ_016_every_maintainer_receives_notice_a() {
     let sandbox = Sandbox::standard();
@@ -250,7 +250,7 @@ fn publ_016_every_maintainer_receives_notice_a() {
     );
 }
 
-/// REQ: PUBL-016
+/// REQ: PUB-016
 #[test]
 fn publ_016_notice_contains_appeal_address_from_policy_b() {
     let sandbox = Sandbox::standard();

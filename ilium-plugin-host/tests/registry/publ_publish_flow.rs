@@ -1,4 +1,4 @@
-//! publish-publisher-workflow.md "Publisher workflow and version states" (PUBL-001..PUBL-007).
+//! publish-publisher-workflow.md "Publisher workflow and version states" (PUB-001..PUB-007).
 //!
 //! Tests follow the manual: publish, info and yank are driven through the CLI of a sandbox whose
 //! registry is served by the recording fake network.
@@ -20,9 +20,9 @@ fn info_json(sandbox: &Sandbox, target: &str) -> CliOutput {
     sandbox.run(&["info", target, "--json"])
 }
 
-// ---- PUBL-001 verifying versions stay out of the index ------------------------------------
+// ---- PUB-001 verifying versions stay out of the index ------------------------------------
 
-/// REQ: PUBL-001
+/// REQ: PUB-001
 #[test]
 fn publ_001_verifying_version_is_absent_from_index_a() {
     let sandbox = Sandbox::standard();
@@ -38,7 +38,7 @@ fn publ_001_verifying_version_is_absent_from_index_a() {
     );
 }
 
-/// REQ: PUBL-001
+/// REQ: PUB-001
 #[test]
 fn publ_001_only_live_or_queued_review_reaches_index_b() {
     let sandbox = Sandbox::standard();
@@ -53,9 +53,9 @@ fn publ_001_only_live_or_queued_review_reaches_index_b() {
     );
 }
 
-// ---- PUBL-002 rejected versions are not stored and free their number ----------------------
+// ---- PUB-002 rejected versions are not stored and free their number ----------------------
 
-/// REQ: PUBL-002
+/// REQ: PUB-002
 #[test]
 fn publ_002_rejected_version_is_not_stored_a() {
     let sandbox = Sandbox::standard();
@@ -65,7 +65,7 @@ fn publ_002_rejected_version_is_not_stored_a() {
     assert_eq!(info.exit_code, 5, "a never-live version must make info exit 5: {info:?}");
 }
 
-/// REQ: PUBL-002
+/// REQ: PUB-002
 #[test]
 fn publ_002_rejection_record_names_stage_and_code_b() {
     let sandbox = Sandbox::standard();
@@ -77,9 +77,9 @@ fn publ_002_rejection_record_names_stage_and_code_b() {
     assert!(record["rejection"]["code"].is_string(), "{info:?}");
 }
 
-// ---- PUBL-003 live -> yanked keeps the blob, the entry and the hash -----------------------
+// ---- PUB-003 live -> yanked keeps the blob, the entry and the hash -----------------------
 
-/// REQ: PUBL-003
+/// REQ: PUB-003
 #[test]
 fn publ_003_yank_keeps_blob_hash_in_snapshot_a() {
     let sandbox = Sandbox::standard();
@@ -96,7 +96,7 @@ fn publ_003_yank_keeps_blob_hash_in_snapshot_a() {
     );
 }
 
-/// REQ: PUBL-003
+/// REQ: PUB-003
 #[test]
 fn publ_003_yank_is_a_signed_metadata_change_b() {
     let sandbox = Sandbox::standard();
@@ -107,9 +107,9 @@ fn publ_003_yank_is_a_signed_metadata_change_b() {
     assert_eq!(record["state"], "yanked", "{info:?}");
 }
 
-// ---- PUBL-004 the token and the Authorization header never reach output -------------------
+// ---- PUB-004 the token and the Authorization header never reach output -------------------
 
-/// REQ: PUBL-004
+/// REQ: PUB-004
 #[test]
 fn publ_004_wrong_token_is_not_echoed_in_output_a() {
     let sandbox = Sandbox::standard();
@@ -124,7 +124,7 @@ fn publ_004_wrong_token_is_not_echoed_in_output_a() {
     assert!(!rendered.contains("Authorization"), "Authorization header leaked");
 }
 
-/// REQ: PUBL-004
+/// REQ: PUB-004
 #[test]
 fn publ_004_token_is_absent_from_the_log_file_b() {
     let sandbox = Sandbox::standard();
@@ -145,9 +145,9 @@ fn publ_004_token_is_absent_from_the_log_file_b() {
     assert!(!found, "publish token found in a log file under {}", logs.display());
 }
 
-// ---- PUBL-005 publish exit codes match the result record ----------------------------------
+// ---- PUB-005 publish exit codes match the result record ----------------------------------
 
-/// REQ: PUBL-005
+/// REQ: PUB-005
 #[test]
 fn publ_005_exit_code_matches_result_record_a() {
     let sandbox = Sandbox::standard();
@@ -161,7 +161,7 @@ fn publ_005_exit_code_matches_result_record_a() {
     );
 }
 
-/// REQ: PUBL-005
+/// REQ: PUB-005
 #[test]
 fn publ_005_version_exists_exits_one_b() {
     let sandbox = Sandbox::standard();
@@ -172,9 +172,9 @@ fn publ_005_version_exists_exits_one_b() {
     assert_failed(&output, "registry.version-exists", 1);
 }
 
-// ---- PUBL-006 recovery after an unreachable registry --------------------------------------
+// ---- PUB-006 recovery after an unreachable registry --------------------------------------
 
-/// REQ: PUBL-006
+/// REQ: PUB-006
 #[test]
 fn publ_006_unreachable_publish_is_checked_with_info_first_a() {
     let sandbox = Sandbox::standard();
@@ -190,7 +190,7 @@ fn publ_006_unreachable_publish_is_checked_with_info_first_a() {
     );
 }
 
-/// REQ: PUBL-006
+/// REQ: PUB-006
 #[test]
 fn publ_006_same_hash_reports_publish_already_complete_b() {
     let sandbox = Sandbox::standard();
@@ -201,9 +201,9 @@ fn publ_006_same_hash_reports_publish_already_complete_b() {
     assert_eq!(output.exit_code, 0);
 }
 
-// ---- PUBL-007 changed content under an existing version never overwrites it ---------------
+// ---- PUB-007 changed content under an existing version never overwrites it ---------------
 
-/// REQ: PUBL-007
+/// REQ: PUB-007
 #[test]
 fn publ_007_different_hash_exits_one_without_overwrite_a() {
     let sandbox = Sandbox::standard();
@@ -218,7 +218,7 @@ fn publ_007_different_hash_exits_one_without_overwrite_a() {
     );
 }
 
-/// REQ: PUBL-007
+/// REQ: PUB-007
 #[test]
 fn publ_007_message_points_to_a_new_version_number_b() {
     let sandbox = Sandbox::standard();
@@ -227,6 +227,6 @@ fn publ_007_message_points_to_a_new_version_number_b() {
     let message = error_message(&output, "registry.version-exists");
     assert!(
         message.to_lowercase().contains("new version"),
-        "the fix named by PUBL-007 is a new version number: {message:?}"
+        "the fix named by PUB-007 is a new version number: {message:?}"
     );
 }

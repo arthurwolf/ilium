@@ -1,4 +1,4 @@
-//! publish-registry-operator-guide.md "Metadata documents, expiry and accounts" (PUBL-026..PUBL-032).
+//! publish-registry-operator-guide.md "Metadata documents, expiry and accounts" (PUB-026..PUB-032).
 //!
 //! Metadata documents are read from the standard fixture registry, which follows the manual's
 //! signed-metadata layout (`index.json`, `snapshot.json`, `timestamp.json`, `root.json`, ...).
@@ -21,9 +21,9 @@ fn scan_for(dir: &std::path::Path, needle: &str, hits: &mut Vec<String>) {
     }
 }
 
-// ---- PUBL-026 every table file served at its path with the right type ----------------------
+// ---- PUB-026 every table file served at its path with the right type ----------------------
 
-/// REQ: PUBL-026
+/// REQ: PUB-026
 #[test]
 fn publ_026_each_table_file_is_served_at_its_path_a() {
     let sandbox = Sandbox::standard();
@@ -34,7 +34,7 @@ fn publ_026_each_table_file_is_served_at_its_path_a() {
     assert!(BASE.starts_with("https://"), "the registry must be served over HTTPS");
 }
 
-/// REQ: PUBL-026
+/// REQ: PUB-026
 #[test]
 fn publ_026_signed_type_matches_the_file_role_b() {
     let tree = RegistryBuilder::standard().build();
@@ -50,9 +50,9 @@ fn publ_026_signed_type_matches_the_file_role_b() {
     }
 }
 
-// ---- PUBL-027 timestamp lifetime 24 hours and re-signed every 12 hours --------------------
+// ---- PUB-027 timestamp lifetime 24 hours and re-signed every 12 hours --------------------
 
-/// REQ: PUBL-027
+/// REQ: PUB-027
 #[test]
 fn publ_027_timestamp_expires_24_hours_after_signing_a() {
     let tree = RegistryBuilder::standard().build();
@@ -60,7 +60,7 @@ fn publ_027_timestamp_expires_24_hours_after_signing_a() {
     assert_eq!(signed["expires"].as_str(), Some(at(86_400).as_str()));
 }
 
-/// REQ: PUBL-027
+/// REQ: PUB-027
 #[test]
 fn publ_027_registry_resigns_timestamp_every_twelve_hours_b() {
     let sandbox = Sandbox::standard();
@@ -71,9 +71,9 @@ fn publ_027_registry_resigns_timestamp_every_twelve_hours_b() {
     );
 }
 
-// ---- PUBL-028 snapshot expires no sooner than the timestamp, 7 days ----------------------
+// ---- PUB-028 snapshot expires no sooner than the timestamp, 7 days ----------------------
 
-/// REQ: PUBL-028
+/// REQ: PUB-028
 #[test]
 fn publ_028_snapshot_expiry_is_not_before_timestamp_expiry_a() {
     let tree = RegistryBuilder::standard().build();
@@ -82,7 +82,7 @@ fn publ_028_snapshot_expiry_is_not_before_timestamp_expiry_a() {
     assert!(snapshot_expires >= timestamp_expires, "{snapshot_expires} < {timestamp_expires}");
 }
 
-/// REQ: PUBL-028
+/// REQ: PUB-028
 #[test]
 fn publ_028_snapshot_expires_seven_days_after_signing_b() {
     let tree = RegistryBuilder::standard().build();
@@ -90,9 +90,9 @@ fn publ_028_snapshot_expires_seven_days_after_signing_b() {
     assert_eq!(signed["expires"].as_str(), Some(at(7 * 86_400).as_str()));
 }
 
-// ---- PUBL-029 root lifetime and rotation 30 days before expiry ----------------------------
+// ---- PUB-029 root lifetime and rotation 30 days before expiry ----------------------------
 
-/// REQ: PUBL-029
+/// REQ: PUB-029
 #[test]
 fn publ_029_root_expires_at_least_365_days_after_signing_a() {
     let tree = RegistryBuilder::standard().build();
@@ -100,7 +100,7 @@ fn publ_029_root_expires_at_least_365_days_after_signing_a() {
     assert!(expires >= at(365 * 86_400), "root.json expires too early: {expires}");
 }
 
-/// REQ: PUBL-029
+/// REQ: PUB-029
 #[test]
 fn publ_029_check_fails_when_root_has_under_30_days_left_b() {
     let sandbox = Sandbox::standard();
@@ -109,9 +109,9 @@ fn publ_029_check_fails_when_root_has_under_30_days_left_b() {
     assert_ne!(output.exit_code, 0, "under 30 days of root left must fail the check: {output:?}");
 }
 
-// ---- PUBL-030 machine-readable expiry status and operator alerts --------------------------
+// ---- PUB-030 machine-readable expiry status and operator alerts --------------------------
 
-/// REQ: PUBL-030
+/// REQ: PUB-030
 #[test]
 fn publ_030_status_exposes_timestamp_and_root_expiry_a() {
     let sandbox = Sandbox::standard();
@@ -121,7 +121,7 @@ fn publ_030_status_exposes_timestamp_and_root_expiry_a() {
     assert!(record["root_expires"].is_string(), "{output:?}");
 }
 
-/// REQ: PUBL-030
+/// REQ: PUB-030
 #[test]
 fn publ_030_operator_alerted_under_six_hours_to_timestamp_expiry_b() {
     let sandbox = Sandbox::standard();
@@ -129,9 +129,9 @@ fn publ_030_operator_alerted_under_six_hours_to_timestamp_expiry_b() {
     assert!(!records(&output, "alert").is_empty(), "an alert must fire under 6 hours: {output:?}");
 }
 
-// ---- PUBL-031 no token, Authorization header or second factor in logs --------------------
+// ---- PUB-031 no token, Authorization header or second factor in logs --------------------
 
-/// REQ: PUBL-031
+/// REQ: PUB-031
 #[test]
 fn publ_031_publish_token_absent_from_registry_logs_a() {
     let sandbox = Sandbox::standard();
@@ -146,7 +146,7 @@ fn publ_031_publish_token_absent_from_registry_logs_a() {
     assert!(hits.is_empty(), "the token appears in logs: {hits:?}");
 }
 
-/// REQ: PUBL-031
+/// REQ: PUB-031
 #[test]
 fn publ_031_authorization_header_and_second_factor_absent_from_logs_b() {
     let sandbox = Sandbox::standard();
@@ -157,9 +157,9 @@ fn publ_031_authorization_header_and_second_factor_absent_from_logs_b() {
     assert!(hits.is_empty(), "authorization or second factor logged: {hits:?}");
 }
 
-// ---- PUBL-032 two maintainers with second factors ----------------------------------------
+// ---- PUB-032 two maintainers with second factors ----------------------------------------
 
-/// REQ: PUBL-032
+/// REQ: PUB-032
 #[test]
 fn publ_032_publisher_with_two_maintainers_has_no_warning_a() {
     let sandbox = Sandbox::standard();
@@ -168,7 +168,7 @@ fn publ_032_publisher_with_two_maintainers_has_no_warning_a() {
     assert!(!output_contains(&output, "No second maintainer"), "{output:?}");
 }
 
-/// REQ: PUBL-032
+/// REQ: PUB-032
 #[test]
 fn publ_032_single_maintainer_publisher_shows_warning_b() {
     let sandbox = Sandbox::standard();

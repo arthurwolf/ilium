@@ -73,7 +73,7 @@ export function retryDelayMs(error: PluginErrorLike): number | undefined {
 
 The `quota-exceeded` case with no `retry-after-ms` returns nothing, because a retry cannot succeed until the plugin frees storage. The `busy` and `rate-limited` cases always return a delay, because waiting is the only safe answer.
 
-- **[PERF-010]** A plugin MUST NOT retry a refused call sooner than its `retry-after-ms` value, and MUST NOT retry a `quota-exceeded` error that has no `retry-after-ms` without first freeing the resource it names. Test: a fixture with a rate rule of 1 call per 2 seconds makes 10 attempts in 5 seconds; the attempts after the first are spaced by at least `retry-after-ms`; a fixture that fills a storage bucket and retries `put` without freeing space makes no progress.
+- **[PRF-010]** A plugin MUST NOT retry a refused call sooner than its `retry-after-ms` value, and MUST NOT retry a `quota-exceeded` error that has no `retry-after-ms` without first freeing the resource it names. Test: a fixture with a rate rule of 1 call per 2 seconds makes 10 attempts in 5 seconds; the attempts after the first are spaced by at least `retry-after-ms`; a fixture that fills a storage bucket and retries `put` without freeing space makes no progress.
 
 ### Retry with a timer, not with a loop
 
@@ -86,8 +86,8 @@ The pattern is:
 3. The timer event fires in a later batch. The handler makes the call again.
 4. After a fixed number of attempts, the handler gives up, logs one line at `warn` and drops the work.
 
-- **[PERF-011]** A plugin that retries a refused call MUST schedule the retry with a timer and MUST return from the handler before the delay ends. A plugin MUST NOT wait for a retry with a sleep or a loop inside a handler. Test: a handler that receives `busy` returns within 20 ms; the retry happens in a later batch after the timer fires.
-- **[PERF-012]** A retry loop MUST stop after a bounded number of attempts. (proposed, owner to confirm: the default bound is 5 attempts, with the delay doubling from `retry-after-ms` and capped at 60 seconds.) Test: a call that is always refused makes exactly 5 attempts and then logs one `warn` line.
+- **[PRF-011]** A plugin that retries a refused call MUST schedule the retry with a timer and MUST return from the handler before the delay ends. A plugin MUST NOT wait for a retry with a sleep or a loop inside a handler. Test: a handler that receives `busy` returns within 20 ms; the retry happens in a later batch after the timer fires.
+- **[PRF-012]** A retry loop MUST stop after a bounded number of attempts. (proposed, owner to confirm: the default bound is 5 attempts, with the delay doubling from `retry-after-ms` and capped at 60 seconds.) Test: a call that is always refused makes exactly 5 attempts and then logs one `warn` line.
 
 ### Waiting for a busy host
 
@@ -95,7 +95,7 @@ The `busy` error for pending requests means the plugin has 64 requests in flight
 
 A plugin counts its own requests in flight. It keeps the count below the host limit with room for other work. The plugin decreases the count when a `request-completed` arrives for the request.
 
-- **[PERF-013]** A plugin SHOULD keep its own count of requests in flight below half of the `pending_requests` limit of its tier, so that a short burst does not reach `busy`. (proposed, owner to confirm: a half-of-limit rule is an author recommendation; the specification fixes the limit and the `busy` error only.) Test: a fixture that starts requests as fast as it can never has more than 32 in flight on T3.
+- **[PRF-013]** A plugin SHOULD keep its own count of requests in flight below half of the `pending_requests` limit of its tier, so that a short burst does not reach `busy`. (proposed, owner to confirm: a half-of-limit rule is an author recommendation; the specification fixes the limit and the `busy` error only.) Test: a fixture that starts requests as fast as it can never has more than 32 in flight on T3.
 
 ### Events that arrive faster than the handler
 
@@ -109,8 +109,8 @@ The queue of a plugin side holds 1,024 events by default. Each event kind has on
 
 A batch holds up to 256 events, and the host flushes it after 2 ms or when a latency-critical kind arrives. A handler that takes a long time for one batch delays the next batch, and at a full queue the never-dropped kinds lead to a restart.
 
-- **[PERF-014]** A plugin MUST handle an `events-dropped` event by re-reading the state it depends on, and MUST NOT assume that a count of drop-oldest events is complete. Test: a fixture that receives `events-dropped` with a count of 40 re-reads its state and its final output matches a fixture that received every event.
-- **[PERF-015]** A handler MUST NOT keep work in the event queue by returning late. A plugin that needs more time than the batch deadline MUST start a job, as described in [Moving slow work into a job](/pages/performance/#moving-slow-work-into-a-job). Test: a fixture that does 30 ms of work in `on-events` breaches the 20 ms deadline; the same work started as a job completes and the handler returns within 20 ms.
+- **[PRF-014]** A plugin MUST handle an `events-dropped` event by re-reading the state it depends on, and MUST NOT assume that a count of drop-oldest events is complete. Test: a fixture that receives `events-dropped` with a count of 40 re-reads its state and its final output matches a fixture that received every event.
+- **[PRF-015]** A handler MUST NOT keep work in the event queue by returning late. A plugin that needs more time than the batch deadline MUST start a job, as described in [Moving slow work into a job](/pages/performance/#moving-slow-work-into-a-job). Test: a fixture that does 30 ms of work in `on-events` breaches the 20 ms deadline; the same work started as a job completes and the handler returns within 20 ms.
 
 ### Streams and the credit window
 
@@ -118,7 +118,7 @@ A stream of HTTP data or child output has a credit window of 256 KiB per stream.
 
 Treat `http-stream-data` and `child-output` as a flow. Process each chunk in the handler, or copy it to a bounded buffer and start a job for the slow part. A buffer that grows without limit is the most common cause of a stalled stream.
 
-- **[PERF-016]** A plugin MUST NOT hold more than 256 KiB of unprocessed stream bytes for one stream, and MUST process or release each chunk before the next batch arrives. Test: a fixture with a slow job receives a 10 MiB stream and its buffered bytes never exceed 256 KiB; the stream completes.
+- **[PRF-016]** A plugin MUST NOT hold more than 256 KiB of unprocessed stream bytes for one stream, and MUST process or release each chunk before the next batch arrives. Test: a fixture with a slow job receives a 10 MiB stream and its buffered bytes never exceed 256 KiB; the stream completes.
 
 ### Storage and disk: retry after space, not in a loop
 
@@ -137,8 +137,8 @@ This is the pattern the rate limits expect. A plugin that retries each refused u
 
 ### Limits of this page
 
-- The host does not warn a plugin before it refuses a call. `ilium plugin stats` shows the use and limit of memory, the execution bucket, storage and disk. The pages read for this manual do not describe an author-visible count of pending requests, so PERF-013 relies on the plugin's own count. (Gap: confirm whether a pending-request figure is exposed to plugins.)
-- The retry bounds in PERF-012 and the half-of-limit rule in PERF-013 are author recommendations. They are marked as proposals and need an owner decision before the manual treats them as requirements.
+- The host does not warn a plugin before it refuses a call. `ilium plugin stats` shows the use and limit of memory, the execution bucket, storage and disk. The pages read for this manual do not describe an author-visible count of pending requests, so PRF-013 relies on the plugin's own count. (Gap: confirm whether a pending-request figure is exposed to plugins.)
+- The retry bounds in PRF-012 and the half-of-limit rule in PRF-013 are author recommendations. They are marked as proposals and need an owner decision before the manual treats them as requirements.
 
 ### See also
 

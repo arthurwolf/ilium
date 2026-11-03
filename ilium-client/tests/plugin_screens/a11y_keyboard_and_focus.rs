@@ -1,4 +1,4 @@
-//! Requirements A11Y-001 .. A11Y-011 (keyboard operation and focus) of the plugin manual page
+//! Requirements ACC-001 .. ACC-011 (keyboard operation and focus) of the plugin manual page
 //! `a11y-keyboard-and-focus`. The checks run against the accessible plugin-view harness in
 //! `ilium_plugin_host::a11y`. Each requirement has two tests; several are red until the
 //! harness or the plugin-view path gains the behaviour (see the report of this lane).
@@ -47,7 +47,7 @@ const INSTRUCTION_VIEW: &str = r#"{"widgets":[
   {"id":"instruction","kind":"label","text":"Press Enter to finish the install"},
   {"id":"next","kind":"button","label":"Next"}]}"#;
 
-/// REQ: A11Y-001
+/// REQ: ACC-001
 #[test]
 fn a11y_001_every_click_action_has_a_focusable_widget_a() {
     let screen = open_view(THREE_BUTTONS);
@@ -60,7 +60,7 @@ fn a11y_001_every_click_action_has_a_focusable_widget_a() {
     }
 }
 
-/// REQ: A11Y-001
+/// REQ: ACC-001
 #[test]
 fn a11y_001_tab_reaches_the_last_action_b() {
     let mut screen = open_view(THREE_BUTTONS);
@@ -71,14 +71,14 @@ fn a11y_001_tab_reaches_the_last_action_b() {
     assert_eq!(screen.focused_id(), "close");
 }
 
-/// REQ: A11Y-002
+/// REQ: ACC-002
 #[test]
 fn a11y_002_tree_order_without_tab_index_gives_the_focus_order_a() {
     let screen = open_view(THREE_BUTTONS);
     assert_eq!(screen.focus_order(), vec!["save", "open", "close"]);
 }
 
-/// REQ: A11Y-002
+/// REQ: ACC-002
 #[test]
 fn a11y_002_focus_order_follows_the_rendered_reading_order_b() {
     let screen = open_view(THREE_BUTTONS);
@@ -97,7 +97,7 @@ fn a11y_002_focus_order_follows_the_rendered_reading_order_b() {
     );
 }
 
-/// REQ: A11Y-003
+/// REQ: ACC-003
 #[test]
 fn a11y_003_tab_visits_each_focusable_node_once_in_order_a() {
     let mut screen = open_view(THREE_BUTTONS);
@@ -110,7 +110,7 @@ fn a11y_003_tab_visits_each_focusable_node_once_in_order_a() {
     assert_eq!(visited, order);
 }
 
-/// REQ: A11Y-003
+/// REQ: ACC-003
 #[test]
 fn a11y_003_tab_after_the_last_node_returns_to_the_first_b() {
     let mut screen = open_view(THREE_BUTTONS);
@@ -121,7 +121,7 @@ fn a11y_003_tab_after_the_last_node_returns_to_the_first_b() {
     assert_eq!(screen.focused_id(), order[0]);
 }
 
-/// REQ: A11Y-004
+/// REQ: ACC-004
 #[test]
 fn a11y_004_disabled_node_shows_its_reason_in_the_screen_text_a() {
     let screen = open_view(DISABLED_PUBLISH);
@@ -132,7 +132,7 @@ fn a11y_004_disabled_node_shows_its_reason_in_the_screen_text_a() {
     );
 }
 
-/// REQ: A11Y-004
+/// REQ: ACC-004
 #[test]
 fn a11y_004_disabled_reason_is_visible_in_screen_reader_mode_b() {
     let settings = A11ySettings {
@@ -146,7 +146,7 @@ fn a11y_004_disabled_reason_is_visible_in_screen_reader_mode_b() {
     );
 }
 
-/// REQ: A11Y-005
+/// REQ: ACC-005
 #[test]
 fn a11y_005_unfocused_row_has_no_plugin_written_focus_marker_a() {
     let screen = open_view(TWO_ROWS);
@@ -160,7 +160,7 @@ fn a11y_005_unfocused_row_has_no_plugin_written_focus_marker_a() {
     );
 }
 
-/// REQ: A11Y-005
+/// REQ: ACC-005
 #[test]
 fn a11y_005_focused_row_after_tab_has_no_plugin_written_focus_marker_b() {
     let mut screen = open_view(TWO_ROWS);
@@ -175,7 +175,7 @@ fn a11y_005_focused_row_after_tab_has_no_plugin_written_focus_marker_b() {
     );
 }
 
-/// REQ: A11Y-006
+/// REQ: ACC-006
 #[test]
 fn a11y_006_focused_widget_has_an_attribute_besides_colour_a() {
     let screen = open_view(THREE_BUTTONS);
@@ -186,7 +186,7 @@ fn a11y_006_focused_widget_has_an_attribute_besides_colour_a() {
     );
 }
 
-/// REQ: A11Y-006
+/// REQ: ACC-006
 #[test]
 fn a11y_006_unfocused_widget_has_no_focus_attribute_b() {
     let screen = open_view(THREE_BUTTONS);
@@ -197,7 +197,7 @@ fn a11y_006_unfocused_widget_has_no_focus_attribute_b() {
     );
 }
 
-/// REQ: A11Y-007
+/// REQ: ACC-007
 #[test]
 fn a11y_007_focused_key_removed_by_new_tree_is_not_kept_a() {
     let mut screen = open_view(THREE_BUTTONS);
@@ -211,7 +211,7 @@ fn a11y_007_focused_key_removed_by_new_tree_is_not_kept_a() {
     assert!(!new_screen.focused_id().is_empty());
 }
 
-/// REQ: A11Y-007
+/// REQ: ACC-007
 #[test]
 fn a11y_007_rebuilt_tree_has_no_focus_on_the_removed_key_b() {
     let rebuilt = r#"{"widgets":[
@@ -223,7 +223,7 @@ fn a11y_007_rebuilt_tree_has_no_focus_on_the_removed_key_b() {
     );
 }
 
-/// REQ: A11Y-008
+/// REQ: ACC-008
 #[test]
 fn a11y_008_escape_closes_a_modal_dialog_a() {
     let mut screen = open_view(MODAL_DIALOG);
@@ -231,7 +231,7 @@ fn a11y_008_escape_closes_a_modal_dialog_a() {
     assert!(screen.is_closed(), "Escape did not close the dialog");
 }
 
-/// REQ: A11Y-008
+/// REQ: ACC-008
 #[test]
 fn a11y_008_escape_on_a_plain_view_does_not_close_it_b() {
     let mut screen = open_view(THREE_BUTTONS);
@@ -239,7 +239,7 @@ fn a11y_008_escape_on_a_plain_view_does_not_close_it_b() {
     assert!(!screen.is_closed(), "Escape closed a view that is not a dialog");
 }
 
-/// REQ: A11Y-009
+/// REQ: ACC-009
 #[test]
 fn a11y_009_tab_moves_focus_even_with_an_input_focused_a() {
     let mut screen = open_view(MODAL_WITH_INPUT);
@@ -248,7 +248,7 @@ fn a11y_009_tab_moves_focus_even_with_an_input_focused_a() {
     assert_eq!(screen.focused_id(), "ok", "Tab did not reach the next node");
 }
 
-/// REQ: A11Y-009
+/// REQ: ACC-009
 #[test]
 fn a11y_009_escape_closes_the_modal_while_an_input_is_focused_b() {
     let mut screen = open_view(MODAL_WITH_INPUT);
@@ -256,7 +256,7 @@ fn a11y_009_escape_closes_the_modal_while_an_input_is_focused_b() {
     assert!(screen.is_closed(), "the view kept Escape for itself");
 }
 
-/// REQ: A11Y-010
+/// REQ: ACC-010
 #[test]
 fn a11y_010_drag_row_has_a_focusable_keyboard_move_action_a() {
     let screen = open_view(DRAG_ROW_WITH_MOVE);
@@ -267,7 +267,7 @@ fn a11y_010_drag_row_has_a_focusable_keyboard_move_action_a() {
     );
 }
 
-/// REQ: A11Y-010
+/// REQ: ACC-010
 #[test]
 fn a11y_010_keyboard_move_action_is_reached_by_tab_b() {
     let mut screen = open_view(DRAG_ROW_WITH_MOVE);
@@ -283,7 +283,7 @@ fn a11y_010_keyboard_move_action_is_reached_by_tab_b() {
     assert!(reached, "Tab never reaches the move action");
 }
 
-/// REQ: A11Y-011
+/// REQ: ACC-011
 #[test]
 fn a11y_011_instruction_text_is_on_screen_without_focus_a() {
     let screen = open_view(INSTRUCTION_VIEW);
@@ -293,7 +293,7 @@ fn a11y_011_instruction_text_is_on_screen_without_focus_a() {
     );
 }
 
-/// REQ: A11Y-011
+/// REQ: ACC-011
 #[test]
 fn a11y_011_focus_is_unchanged_when_the_view_was_never_opened_b() {
     let screen = open_view(INSTRUCTION_VIEW);
@@ -303,5 +303,5 @@ fn a11y_011_focus_is_unchanged_when_the_view_was_never_opened_b() {
         "focus moved into a view the user has not opened"
     );
     let manual = repo_file("docs/plugins-manual/pages/a11y-keyboard-and-focus.md");
-    assert!(manual.contains("A11Y-011"), "the manual page lost A11Y-011");
+    assert!(manual.contains("ACC-011"), "the manual page lost ACC-011");
 }

@@ -52,48 +52,48 @@ Each flag has one effect. The effect is the same for every source it applies to.
 
 ### Rules for each flag
 
-- **[INST-001]** `--yes` MUST NOT accept a grant with the risk level `high`, a new `replaces` entry, or a key that is not yet trusted. Only `--grant <grant>` accepts a high-risk grant and only `--trust <key_id>` trusts a key. Test: install a package with one high-risk grant and an unknown signing key using `--yes`, then assert that the install exits 1 with `install.review-required` and that `ilium plugin list` shows no new plugin.
-- **[INST-002]** `--grant <grant>` MUST accept only the grant it names, and every other high-risk grant MUST still block the install. Test: install a package with grants `a` and `b`, both high risk, with `--grant a`, and assert that the install exits 1 and that the grant file is unchanged.
-- **[INST-003]** `--grant` MUST be refused with `usage.invalid-value` and exit 2 when it names a grant that the package does not request. The refusal MUST happen before any file change (proposed, owner to confirm). Test: pass `--grant missing` for a package without that grant and assert exit 2 and an unchanged store.
-- **[INST-004]** `--trust <key_id>` MUST be refused with `usage.invalid-value` and exit 2 when the value is not a key id of the form the trust list uses (proposed, owner to confirm). Test: pass `--trust abc` and assert exit 2.
-- **[INST-005]** `--allow-unsigned` MUST NOT trust any key. A package installed with `--allow-unsigned` MUST show the state of an unsigned package in `ilium plugin list`, and a later update MUST still need its own signature rule (proposed, owner to confirm). Test: install an unsigned package with `--allow-unsigned`, then assert that `ilium plugin info <id>` reports no trusted signer.
-- **[INST-006]** `--dry-run` MUST NOT write any file under the plugin root, the store, the registry cache or the grant file. It MUST exit with the code that the real install would give. Test: run `--dry-run` on a package that would succeed and on one that would fail with `package.hash-mismatch`, and compare the file tree before and after each run.
-- **[INST-007]** `--locked` MUST fail with `dependency.lock-mismatch` and exit 1 when the package named by the lock file has a different hash, and MUST NOT contact a registry for resolution. Test: change one byte of the package in the registry mirror, run `--locked`, and assert exit 1 and no network request.
-- **[INST-008]** `--locked` combined with `--channel` MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). A lock file already fixes the version, so a channel has no effect.
-- **[INST-009]** `--locked` combined with a local file or an HTTPS URL MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). The lock file names plugins by id and version, so it cannot pin a file.
-- **[INST-010]** `--from-bundle` combined with `--registry` MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). A bundle is the only source for that install, so a second source is ambiguous.
-- **[INST-011]** `--from-bundle` MUST read the package and its signed metadata from the bundle directory and MUST NOT open any network connection. Test: block the network, run `install --from-bundle ./bundle com.example.notes`, and assert exit 0 when the bundle is complete.
-- **[INST-012]** `--channel` combined with a local file or an HTTPS URL MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). A file has no channel, so the value would be ignored silently.
-- **[INST-013]** `--reinstall` combined with `--locked` MUST reinstall the locked package and MUST still fail with `dependency.lock-mismatch` when its hash differs (proposed, owner to confirm). The flag rewrites the store only from the same package bytes.
-- **[INST-014]** `--unskip` MUST clear the `skip` mark only for the version being installed. It MUST NOT clear the mark of another version. Test: roll back from 1.3.0 to 1.2.0 so that 1.3.0 is marked `skip`, then install 1.3.0 with `--unskip` and assert that the mark of 1.3.0 is cleared and that no other version changes.
-- **[INST-015]** `--allow-downgrade` MUST NOT clear a `skip` mark, because a downgrade installs a version by name and the mark only controls which version update offers (proposed, owner to confirm).
-- **[INST-016]** `--no-backup` MUST be accepted only by an update that runs a data migration. On a fresh install it MUST be ignored with a `warning` record and the command MUST still exit 0 (proposed, owner to confirm). Test: install a new plugin with `--no-backup` and assert exit 0 and one warning record.
+- **[INS-001]** `--yes` MUST NOT accept a grant with the risk level `high`, a new `replaces` entry, or a key that is not yet trusted. Only `--grant <grant>` accepts a high-risk grant and only `--trust <key_id>` trusts a key. Test: install a package with one high-risk grant and an unknown signing key using `--yes`, then assert that the install exits 1 with `install.review-required` and that `ilium plugin list` shows no new plugin.
+- **[INS-002]** `--grant <grant>` MUST accept only the grant it names, and every other high-risk grant MUST still block the install. Test: install a package with grants `a` and `b`, both high risk, with `--grant a`, and assert that the install exits 1 and that the grant file is unchanged.
+- **[INS-003]** `--grant` MUST be refused with `usage.invalid-value` and exit 2 when it names a grant that the package does not request. The refusal MUST happen before any file change (proposed, owner to confirm). Test: pass `--grant missing` for a package without that grant and assert exit 2 and an unchanged store.
+- **[INS-004]** `--trust <key_id>` MUST be refused with `usage.invalid-value` and exit 2 when the value is not a key id of the form the trust list uses (proposed, owner to confirm). Test: pass `--trust abc` and assert exit 2.
+- **[INS-005]** `--allow-unsigned` MUST NOT trust any key. A package installed with `--allow-unsigned` MUST show the state of an unsigned package in `ilium plugin list`, and a later update MUST still need its own signature rule (proposed, owner to confirm). Test: install an unsigned package with `--allow-unsigned`, then assert that `ilium plugin info <id>` reports no trusted signer.
+- **[INS-006]** `--dry-run` MUST NOT write any file under the plugin root, the store, the registry cache or the grant file. It MUST exit with the code that the real install would give. Test: run `--dry-run` on a package that would succeed and on one that would fail with `package.hash-mismatch`, and compare the file tree before and after each run.
+- **[INS-007]** `--locked` MUST fail with `dependency.lock-mismatch` and exit 1 when the package named by the lock file has a different hash, and MUST NOT contact a registry for resolution. Test: change one byte of the package in the registry mirror, run `--locked`, and assert exit 1 and no network request.
+- **[INS-008]** `--locked` combined with `--channel` MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). A lock file already fixes the version, so a channel has no effect.
+- **[INS-009]** `--locked` combined with a local file or an HTTPS URL MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). The lock file names plugins by id and version, so it cannot pin a file.
+- **[INS-010]** `--from-bundle` combined with `--registry` MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). A bundle is the only source for that install, so a second source is ambiguous.
+- **[INS-011]** `--from-bundle` MUST read the package and its signed metadata from the bundle directory and MUST NOT open any network connection. Test: block the network, run `install --from-bundle ./bundle com.example.notes`, and assert exit 0 when the bundle is complete.
+- **[INS-012]** `--channel` combined with a local file or an HTTPS URL MUST be refused with `usage.conflicting-flags` and exit 2 before any work starts (proposed, owner to confirm). A file has no channel, so the value would be ignored silently.
+- **[INS-013]** `--reinstall` combined with `--locked` MUST reinstall the locked package and MUST still fail with `dependency.lock-mismatch` when its hash differs (proposed, owner to confirm). The flag rewrites the store only from the same package bytes.
+- **[INS-014]** `--unskip` MUST clear the `skip` mark only for the version being installed. It MUST NOT clear the mark of another version. Test: roll back from 1.3.0 to 1.2.0 so that 1.3.0 is marked `skip`, then install 1.3.0 with `--unskip` and assert that the mark of 1.3.0 is cleared and that no other version changes.
+- **[INS-015]** `--allow-downgrade` MUST NOT clear a `skip` mark, because a downgrade installs a version by name and the mark only controls which version update offers (proposed, owner to confirm).
+- **[INS-016]** `--no-backup` MUST be accepted only by an update that runs a data migration. On a fresh install it MUST be ignored with a `warning` record and the command MUST still exit 0 (proposed, owner to confirm). Test: install a new plugin with `--no-backup` and assert exit 0 and one warning record.
 
 ### Combination table
 
-The table lists the most common combinations. A combination that is not in the table is refused by the rule of [INST-017](#rules-for-each-flag).
+The table lists the most common combinations. A combination that is not in the table is refused by the rule of [INS-017](#rules-for-each-flag).
 
 | Combination | Result | Basis |
 |---|---|---|
 | `--yes` alone with a package with normal grants | Installs, no review | [PKG-429](/pages/reference-plugin-distribution-cli/#install) |
-| `--yes` with a high-risk grant | Fails, exit 1 | [INST-001](#rules-for-each-flag) |
+| `--yes` with a high-risk grant | Fails, exit 1 | [INS-001](#rules-for-each-flag) |
 | `--yes --grant <g>` | Installs when `g` is the only confirmation needed | [PKG-282](/pages/reference-install-and-update/) |
 | `--dry-run --yes` | Prints the plan, writes nothing | [PKG-427](/pages/reference-plugin-distribution-cli/#install) |
 | `--locked --dry-run` | Prints the lock check, writes nothing | [PKG-428](/pages/reference-plugin-distribution-cli/#install) |
-| `--locked --channel beta` | Refused, exit 2 | [INST-008](#rules-for-each-flag) |
-| `--from-bundle --registry` | Refused, exit 2 | [INST-010](#rules-for-each-flag) |
-| `--unskip --allow-downgrade` | Installs the named older version and clears its mark | [INST-014](#rules-for-each-flag), [INST-015](#rules-for-each-flag) |
+| `--locked --channel beta` | Refused, exit 2 | [INS-008](#rules-for-each-flag) |
+| `--from-bundle --registry` | Refused, exit 2 | [INS-010](#rules-for-each-flag) |
+| `--unskip --allow-downgrade` | Installs the named older version and clears its mark | [INS-014](#rules-for-each-flag), [INS-015](#rules-for-each-flag) |
 
-- **[INST-017]** A combination of flags that this page does not accept MUST be refused with `usage.conflicting-flags` and exit 2 before any file or network access ([PKG-425](/pages/reference-plugin-distribution-cli/#install)). Test: pass each pair from the refusal rows of this page and assert exit 2 and an unchanged state.
+- **[INS-017]** A combination of flags that this page does not accept MUST be refused with `usage.conflicting-flags` and exit 2 before any file or network access ([PKG-425](/pages/reference-plugin-distribution-cli/#install)). Test: pass each pair from the refusal rows of this page and assert exit 2 and an unchanged state.
 
 ### Worked example: a review that needs a grant
 
 A package `com.example.notes` version 1.3.0 requests the high-risk grant `clipboard.read`. The user runs an unattended install.
 
-1. `ilium plugin install com.example.notes --yes` finds the high-risk grant and stops, because `--yes` does not accept it ([INST-001](#rules-for-each-flag)).
+1. `ilium plugin install com.example.notes --yes` finds the high-risk grant and stops, because `--yes` does not accept it ([INS-001](#rules-for-each-flag)).
 2. The command exits 1 with `install.review-required` ([PKG-430](/pages/reference-plugin-distribution-cli/#install)). Nothing is written.
 3. The administrator adds the grant to the command: `ilium plugin install com.example.notes --yes --grant clipboard.read`.
-4. The grant is accepted by name ([INST-002](#rules-for-each-flag)). The install runs the normal transaction and exits 0.
+4. The grant is accepted by name ([INS-002](#rules-for-each-flag)). The install runs the normal transaction and exits 0.
 
 ### Edge cases
 

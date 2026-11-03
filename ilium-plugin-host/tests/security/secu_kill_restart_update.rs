@@ -1,11 +1,11 @@
-//! SECU-005, SECU-008 and SECU-009: a kill survives a restart, an update and an uninstall
+//! SCU-005, SCU-008 and SCU-009: a kill survives a restart, an update and an uninstall
 //! (with reinstall), and the audit trail of a killed plugin is kept.
 
 use ilium_plugin_host::kill_switch::{KillSwitch, PluginState};
 
 use crate::secu_support::{audit_text, env, plugin, row, PLUGIN};
 
-/// REQ: SECU-005
+/// REQ: SCU-005
 #[test]
 fn secu_005_kill_survives_a_restart_and_activation_stays_refused_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -18,7 +18,7 @@ fn secu_005_kill_survives_a_restart_and_activation_stays_refused_a() {
     assert!(reopened.try_activate(PLUGIN).is_err());
 }
 
-/// REQ: SECU-005
+/// REQ: SCU-005
 #[test]
 fn secu_005_status_row_still_reads_disabled_by_admin_after_restart_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -37,7 +37,7 @@ fn env_with_new_session(root: &std::path::Path) -> ilium_plugin_host::cli::CliEn
     env(root, true)
 }
 
-/// REQ: SECU-008
+/// REQ: SCU-008
 #[test]
 fn secu_008_update_of_a_killed_plugin_keeps_activation_refused_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -50,7 +50,7 @@ fn secu_008_update_of_a_killed_plugin_keeps_activation_refused_a() {
     assert_eq!(switch.plugin_state(PLUGIN), PluginState::DisabledByAdmin);
 }
 
-/// REQ: SECU-008
+/// REQ: SCU-008
 #[test]
 fn secu_008_status_shows_disabled_by_admin_after_update_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -61,7 +61,7 @@ fn secu_008_status_shows_disabled_by_admin_after_update_b() {
     assert!(row(&env, PLUGIN).contains("disabled-by-admin"));
 }
 
-/// REQ: SECU-009
+/// REQ: SCU-009
 #[test]
 fn secu_009_uninstall_of_a_killed_plugin_removes_the_kill_flag_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -76,7 +76,7 @@ fn secu_009_uninstall_of_a_killed_plugin_removes_the_kill_flag_a() {
     );
 }
 
-/// REQ: SECU-009
+/// REQ: SCU-009
 #[test]
 fn secu_009_plugin_killed_audit_records_survive_uninstall_b() {
     let root = tempfile::tempdir().expect("temp dir");

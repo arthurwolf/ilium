@@ -1,4 +1,4 @@
-//! Requirements INST-003, INST-004, INST-008, INST-009, INST-010, INST-012 and INST-017: flag
+//! Requirements INS-003, INS-004, INS-008, INS-009, INS-010, INS-012 and INS-017: flag
 //! values and flag combinations that the install command refuses before any work starts
 //! (manual page reference-plugin-distribution-cli, install section and combination table).
 
@@ -14,7 +14,7 @@ fn package_path(fx: &Fx, spec: &Spec) -> String {
     fx.write_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &spec.build())
 }
 
-/// REQ: INST-003
+/// REQ: INS-003
 #[test]
 fn inst_003_grant_not_requested_refused_a() {
     let fx = Fx::new();
@@ -25,7 +25,7 @@ fn inst_003_grant_not_requested_refused_a() {
     assert!(mentions(&out, "usage.invalid-value"));
 }
 
-/// REQ: INST-003
+/// REQ: INS-003
 #[test]
 fn inst_003_grant_refusal_leaves_store_unchanged_b() {
     let fx = Fx::new();
@@ -37,7 +37,7 @@ fn inst_003_grant_refusal_leaves_store_unchanged_b() {
     assert_eq!(fx.snapshot_tree(&fx.root()), before);
 }
 
-/// REQ: INST-004
+/// REQ: INS-004
 #[test]
 fn inst_004_trust_malformed_key_id_refused_a() {
     let fx = Fx::new();
@@ -48,7 +48,7 @@ fn inst_004_trust_malformed_key_id_refused_a() {
     assert!(mentions(&out, "usage.invalid-value"));
 }
 
-/// REQ: INST-004
+/// REQ: INS-004
 #[test]
 fn inst_004_trust_malformed_key_id_writes_no_trust_b() {
     let fx = Fx::new();
@@ -59,7 +59,7 @@ fn inst_004_trust_malformed_key_id_writes_no_trust_b() {
     assert_eq!(fx.snapshot_tree(&fx.state_dir()), before);
 }
 
-/// REQ: INST-008
+/// REQ: INS-008
 #[test]
 fn inst_008_locked_with_channel_refused_a() {
     let fx = Fx::new();
@@ -68,7 +68,7 @@ fn inst_008_locked_with_channel_refused_a() {
     assert!(mentions(&out, "usage.conflicting-flags"));
 }
 
-/// REQ: INST-008
+/// REQ: INS-008
 #[test]
 fn inst_008_locked_with_channel_no_work_started_b() {
     let fx = Fx::new();
@@ -78,7 +78,7 @@ fn inst_008_locked_with_channel_no_work_started_b() {
     assert_eq!(fx.installed(), serde_json::Value::Null);
 }
 
-/// REQ: INST-009
+/// REQ: INS-009
 #[test]
 fn inst_009_locked_with_local_file_refused_a() {
     let fx = Fx::new();
@@ -89,7 +89,7 @@ fn inst_009_locked_with_local_file_refused_a() {
     assert!(mentions(&out, "usage.conflicting-flags"));
 }
 
-/// REQ: INST-009
+/// REQ: INS-009
 #[test]
 fn inst_009_locked_with_https_url_refused_b() {
     let fx = Fx::new();
@@ -99,7 +99,7 @@ fn inst_009_locked_with_https_url_refused_b() {
     assert!(fx.fetcher.calls().is_empty());
 }
 
-/// REQ: INST-010
+/// REQ: INS-010
 #[test]
 fn inst_010_from_bundle_with_registry_refused_a() {
     let fx = Fx::new();
@@ -108,7 +108,7 @@ fn inst_010_from_bundle_with_registry_refused_a() {
     assert!(mentions(&out, "usage.conflicting-flags"));
 }
 
-/// REQ: INST-010
+/// REQ: INS-010
 #[test]
 fn inst_010_from_bundle_with_registry_no_fetch_b() {
     let fx = Fx::new();
@@ -118,7 +118,7 @@ fn inst_010_from_bundle_with_registry_no_fetch_b() {
     assert_eq!(fx.snapshot_tree(&fx.root()), before);
 }
 
-/// REQ: INST-012
+/// REQ: INS-012
 #[test]
 fn inst_012_channel_with_local_file_refused_a() {
     let fx = Fx::new();
@@ -129,7 +129,7 @@ fn inst_012_channel_with_local_file_refused_a() {
     assert!(mentions(&out, "usage.conflicting-flags"));
 }
 
-/// REQ: INST-012
+/// REQ: INS-012
 #[test]
 fn inst_012_channel_with_https_url_no_install_b() {
     let fx = Fx::new();
@@ -138,7 +138,7 @@ fn inst_012_channel_with_https_url_no_install_b() {
     assert_eq!(fx.installed(), serde_json::Value::Null);
 }
 
-/// REQ: INST-017
+/// REQ: INS-017
 #[test]
 fn inst_017_unaccepted_flag_pair_refused_a() {
     let fx = Fx::new();
@@ -149,7 +149,7 @@ fn inst_017_unaccepted_flag_pair_refused_a() {
     assert!(mentions(&out, "usage.conflicting-flags"));
 }
 
-/// REQ: INST-017
+/// REQ: INS-017
 #[test]
 fn inst_017_refused_pair_no_file_or_network_access_b() {
     let fx = Fx::new();

@@ -1,4 +1,4 @@
-//! SECU-001, SECU-006 and SECU-011: how a user disable, an administrator kill, a policy kill and
+//! SCU-001, SCU-006 and SCU-011: how a user disable, an administrator kill, a policy kill and
 //! a block combine on one plugin, and which reason the row shows.
 
 use ilium_plugin_host::kill_switch::{KillSwitch, PluginState};
@@ -22,7 +22,7 @@ fn revoke_key_compromised(config_dir: &std::path::Path) -> ilium_plugin_host::tr
         .expect("compromised revocation is recorded")
 }
 
-/// REQ: SECU-001
+/// REQ: SCU-001
 #[test]
 fn secu_001_user_disable_is_named_after_kill_and_unkill_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -38,7 +38,7 @@ fn secu_001_user_disable_is_named_after_kill_and_unkill_a() {
     );
 }
 
-/// REQ: SECU-001
+/// REQ: SCU-001
 #[test]
 fn secu_001_unkill_lifts_only_the_kill_and_keeps_the_user_disable_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -55,7 +55,7 @@ fn secu_001_unkill_lifts_only_the_kill_and_keeps_the_user_disable_b() {
     );
 }
 
-/// REQ: SECU-006
+/// REQ: SCU-006
 #[test]
 fn secu_006_unkill_on_a_blocked_plugin_keeps_it_blocked_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -72,7 +72,7 @@ fn secu_006_unkill_on_a_blocked_plugin_keeps_it_blocked_a() {
     );
 }
 
-/// REQ: SECU-006
+/// REQ: SCU-006
 #[test]
 fn secu_006_block_reason_is_shown_before_and_after_kill_and_unkill_b() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -87,7 +87,7 @@ fn secu_006_block_reason_is_shown_before_and_after_kill_and_unkill_b() {
     assert!(after.contains("trust.key-revoked"), "reason after unkill: {after}");
 }
 
-/// REQ: SECU-011
+/// REQ: SCU-011
 #[test]
 fn secu_011_revocation_of_a_killed_plugin_sets_blocked_and_keeps_kill_flag_a() {
     let root = tempfile::tempdir().expect("temp dir");
@@ -107,7 +107,7 @@ fn secu_011_revocation_of_a_killed_plugin_sets_blocked_and_keeps_kill_flag_a() {
     assert!(row(&env, PLUGIN).contains("Blocked"), "row must show Blocked");
 }
 
-/// REQ: SECU-011
+/// REQ: SCU-011
 #[test]
 fn secu_011_unkill_after_block_leaves_disabled_blocked_b() {
     let root = tempfile::tempdir().expect("temp dir");

@@ -25,7 +25,7 @@ A plugin never reads the keyboard directly. Key presses reach the focused widget
 | Up, Down, Left, Right, PageUp, PageDown | Focused widget | Moves inside the widget: a list, a table, a slider, a chart point. |
 | Escape | Host | Cancels a capture, clears a selection, closes the topmost popup or dialog, and returns focus to the session tree from a non-modal panel. |
 
-The table covers the keys a plugin author meets most. The full order of Escape is in [UI model](/pages/ui-model/#escape). A plugin that binds its own command to a key must not bind Tab, Shift+Tab or Escape (A11Y-009).
+The table covers the keys a plugin author meets most. The full order of Escape is in [UI model](/pages/ui-model/#escape). A plugin that binds its own command to a key must not bind Tab, Shift+Tab or Escape (ACC-009).
 
 ## Focus order: make it match the reading order
 
@@ -97,23 +97,23 @@ Proposed, owner to confirm: the host moves focus to the next focusable node in t
 |---|---|
 | A focusable widget has no label | The view is refused with `ui.label-missing`, and the last good tree stays on screen. See [API: ui](/pages/api-ui/#accessibility-baseline). |
 | A focusable node has a negative `tab-index` | Tab skips it. A click or a `set-focus` still reaches it. |
-| The only action is inside a `draggable` row | Keyboard users cannot reach it. See A11Y-010. |
+| The only action is inside a `draggable` row | Keyboard users cannot reach it. See ACC-010. |
 | A plugin request to focus a view the user never opened | The request is ignored, and focus stays where it was. |
 | A focused control is removed by a rebuild | Focus moves by the proposed rule above. |
 
 ## Requirements
 
-- **[A11Y-001]** A plugin view MUST offer every action that a click can start through a focusable widget, so that Tab, Enter, Space or the arrow keys of that widget reach the same action. Test: for each action of the view, drive it with keys only and assert that the `ui-action` event arrives with the same key.
-- **[A11Y-002]** A plugin SHOULD leave `tab-index` unset when the tree order already matches the reading order. A `tab-index` value MUST be set only where a control has to come before the order of the tree. Test: review the tree and list the nodes with a `tab-index`.
-- **[A11Y-003]** A plugin view MUST let Tab visit each focusable node exactly once in focus order, MUST return to the first node after the last, and MUST NOT contain an enabled focusable node that Tab does not reach. Test: send Tab once per focusable node and assert the sequence of keys.
-- **[A11Y-004]** A plugin MUST NOT make a `hidden` node the only way to an action. A `disabled-reason` MUST say why the control cannot be used. Test: focus each disabled node and assert that the reason appears in the screen text.
-- **[A11Y-005]** A plugin MUST NOT draw its own focus marker in the text of a view, such as a `>` or a reverse space in front of a row. Test: search the rendered rows for a focus glyph that the plugin wrote itself.
-- **[A11Y-006]** A plugin view MUST have exactly one focused widget at a time, and the focused widget MUST differ from the unfocused widgets by an attribute besides colour. Test: render the view at 48 columns, focus each widget in turn, and assert that one cell per step carries bold, underline or reverse.
-- **[A11Y-007]** When a new tree removes the focused key, the host MUST place focus by the rule of the proposed decision on this page, which the owner must confirm before the rule is tested. A plugin MUST NOT depend on another node taking focus in that case. Test: rebuild the tree without the focused key and assert the focused key of the new tree.
-- **[A11Y-008]** A plugin that opens a dialog MUST test that Escape closes it and that focus returns to the widget that opened it. Test: open the dialog with a key, send Escape, and assert the focused key of the opener.
-- **[A11Y-009]** A plugin MUST NOT bind Tab, Shift+Tab or Escape to a command, a keybinding or a key capture of its own. The host keeps these keys for focus and for closing. Test: review the `keybindings` of the manifest and the key captures of the view.
-- **[A11Y-010]** A control that needs a drag, such as a `draggable` row or a `drop-target`, MUST have an action that does the same thing from the keyboard. Test: find the drop action of the view and drive it with keys only.
-- **[A11Y-011]** A plugin MUST NOT assume that a focus request moves focus to a view the user has not opened. When the user must act in that view, the plugin MUST also say so in the text of the view. Test: send a focus request to a view that was never focused and assert that focus is unchanged and the text still gives the instruction.
+- **[ACC-001]** A plugin view MUST offer every action that a click can start through a focusable widget, so that Tab, Enter, Space or the arrow keys of that widget reach the same action. Test: for each action of the view, drive it with keys only and assert that the `ui-action` event arrives with the same key.
+- **[ACC-002]** A plugin SHOULD leave `tab-index` unset when the tree order already matches the reading order. A `tab-index` value MUST be set only where a control has to come before the order of the tree. Test: review the tree and list the nodes with a `tab-index`.
+- **[ACC-003]** A plugin view MUST let Tab visit each focusable node exactly once in focus order, MUST return to the first node after the last, and MUST NOT contain an enabled focusable node that Tab does not reach. Test: send Tab once per focusable node and assert the sequence of keys.
+- **[ACC-004]** A plugin MUST NOT make a `hidden` node the only way to an action. A `disabled-reason` MUST say why the control cannot be used. Test: focus each disabled node and assert that the reason appears in the screen text.
+- **[ACC-005]** A plugin MUST NOT draw its own focus marker in the text of a view, such as a `>` or a reverse space in front of a row. Test: search the rendered rows for a focus glyph that the plugin wrote itself.
+- **[ACC-006]** A plugin view MUST have exactly one focused widget at a time, and the focused widget MUST differ from the unfocused widgets by an attribute besides colour. Test: render the view at 48 columns, focus each widget in turn, and assert that one cell per step carries bold, underline or reverse.
+- **[ACC-007]** When a new tree removes the focused key, the host MUST place focus by the rule of the proposed decision on this page, which the owner must confirm before the rule is tested. A plugin MUST NOT depend on another node taking focus in that case. Test: rebuild the tree without the focused key and assert the focused key of the new tree.
+- **[ACC-008]** A plugin that opens a dialog MUST test that Escape closes it and that focus returns to the widget that opened it. Test: open the dialog with a key, send Escape, and assert the focused key of the opener.
+- **[ACC-009]** A plugin MUST NOT bind Tab, Shift+Tab or Escape to a command, a keybinding or a key capture of its own. The host keeps these keys for focus and for closing. Test: review the `keybindings` of the manifest and the key captures of the view.
+- **[ACC-010]** A control that needs a drag, such as a `draggable` row or a `drop-target`, MUST have an action that does the same thing from the keyboard. Test: find the drop action of the view and drive it with keys only.
+- **[ACC-011]** A plugin MUST NOT assume that a focus request moves focus to a view the user has not opened. When the user must act in that view, the plugin MUST also say so in the text of the view. Test: send a focus request to a view that was never focused and assert that focus is unchanged and the text still gives the instruction.
 
 ## Checklist before release
 
