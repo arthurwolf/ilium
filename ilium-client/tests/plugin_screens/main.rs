@@ -2,6 +2,8 @@
 //! managing plugins, driven through the screens rig and read back as screen text. One module
 //! per surface. Red tests derived from docs/plugins-manual; every test carries a requirement tag.
 
+mod a11y_keyboard_and_focus;
+mod a11y_screen_reader_and_text;
 mod accessible_dialogs;
 mod diagnostics_dialog;
 mod extensions_screen;

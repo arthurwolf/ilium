@@ -39,3 +39,9 @@ mod audit_torn_tail_and_crash_retention;
 mod offline_mirror_and_release_proof;
 mod secrets_at_rest_and_keyring_recovery;
 mod support_window_and_advisories;
+
+// SECU containment and kill-switch requirements (SECU-001 .. SECU-011).
+mod secu_containment_precedence;
+mod secu_kill_cli;
+mod secu_kill_restart_update;
+mod secu_support;

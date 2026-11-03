@@ -11,7 +11,8 @@
     "skel-api": {
       "ranges": [
         "ABI-001..051",
-        "ABI-950..951"
+        "ABI-950..951",
+        "COMP-001..021"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -88,7 +89,8 @@
       "ranges": [
         "HST-350..363",
         "DEV-650..744",
-        "DEV-800..830"
+        "DEV-800..830",
+        "OPS-001..208"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -269,7 +271,8 @@
       "ranges": [
         "PKG-260..305",
         "PKG-310..360",
-        "PKG-654"
+        "PKG-654",
+        "INST-001..110"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -287,7 +290,8 @@
         "PKG-652",
         "PKG-653",
         "PKG-655..657",
-        "PKG-680..685"
+        "PKG-680..685",
+        "PUBL-001..041"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -343,7 +347,8 @@
         "SEC-068..099",
         "SEC-125..139",
         "SEC-179..279",
-        "SEC-316..999"
+        "SEC-316..999",
+        "SECU-001..011"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -406,7 +411,8 @@
     "perf-budgets": {
       "ranges": [
         "HST-300..313",
-        "B1..24"
+        "B1..24",
+        "PERF-001..026"
       ],
       "patterns": [
         "HOST-START",
@@ -419,7 +425,8 @@
     },
     "user-admin": {
       "ranges": [
-        "USR-001..999"
+        "USR-001..999",
+        "A11Y-001..022"
       ],
       "patterns": [],
       "port_plugins": [],
@@ -430,7 +437,8 @@
     },
     "authoring": {
       "ranges": [
-        "AUT-001..999"
+        "AUT-001..999",
+        "ONB-001..021"
       ],
       "patterns": [],
       "port_plugins": [],

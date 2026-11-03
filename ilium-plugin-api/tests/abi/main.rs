@@ -7,6 +7,11 @@
 mod batch;
 mod cases;
 mod codes;
+mod comp_adapters;
+mod comp_deprecation;
+mod comp_host_upgrade;
+mod comp_load_decision;
+mod comp_runbook;
 mod compat;
 mod conformance;
 mod dedup;

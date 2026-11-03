@@ -15,3 +15,9 @@ mod reference_registry_p2;
 mod reference_registry_search;
 mod registry_strictness;
 mod user_plugin_store;
+
+mod publ_mirror;
+mod publ_publish_flow;
+mod publ_registry_metadata;
+mod publ_registry_ops;
+mod publ_yank_takedown;
