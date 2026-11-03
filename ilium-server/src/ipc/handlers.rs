@@ -7942,7 +7942,7 @@ async fn submit_terminal_text_with_completion_locked(
     input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
     completion: Option<(u64, u64)>,
 ) -> Result<(), String> {
-    {
+    let pending_notice = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
             return Err(format!("pane {pane_id:?} closed before text insertion"));
@@ -7950,12 +7950,45 @@ async fn submit_terminal_text_with_completion_locked(
         if !std::sync::Arc::ptr_eq(input_gate, &runtime.input_gate) {
             return Err(format!("pane {pane_id:?} changed before text insertion"));
         }
-    }
-    let body = terminal_text_body(state, pane_id, text).await?;
+        if matches!(
+            source,
+            PromptSubmissionSource::ProgressResult
+                | PromptSubmissionSource::QueuedPrompt
+                | PromptSubmissionSource::ScheduledInput
+                | PromptSubmissionSource::AskForUpdate
+        ) && !text.trim_start().starts_with('/')
+        {
+            runtime
+                .pending_resource_notice
+                .map(|notice| (runtime.agent_generation, notice))
+        } else {
+            None
+        }
+    };
+    let combined = pending_notice.map(|(_, (_, kind))| {
+        let notice = match kind {
+            crate::pane::ResourceInstructionNotice::Removed => "Shared resource bindings were removed; existing reservations still require explicit release or cancellation. Check `ilium resource status` before further use.",
+            crate::pane::ResourceInstructionNotice::Changed => "Shared resource instructions changed. Read the managed resource block before using shared hardware; reserve exclusively, wait once if queued, verify ownership and explicitly release after use. Estimates never clear ownership.",
+            crate::pane::ResourceInstructionNotice::Available => "Shared resource instructions apply. Read the managed resource block before using shared hardware; reserve exclusively, wait once if queued, verify ownership and explicitly release after use. Estimates never clear ownership.",
+        };
+        format!("{text}  [{notice} This reminder is from Ilium, not the user; no reply or acknowledgement is needed.]")
+    });
+    let body = terminal_text_body(state, pane_id, combined.as_deref().unwrap_or(text)).await?;
     submit_terminal_body_with_completion_locked(
         state, pane_id, &body, source, input_gate, completion,
     )
-    .await
+    .await?;
+    if let Some((generation, notice)) = pending_notice {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            if runtime.agent_generation == generation
+                && runtime.pending_resource_notice == Some(notice)
+            {
+                runtime.pending_resource_notice = None;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Frames `text` for the pane's current terminal modes, read from the

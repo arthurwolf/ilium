@@ -305,6 +305,13 @@ impl TerminalOrigin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResourceInstructionNotice {
+    Available,
+    Changed,
+    Removed,
+}
+
 /// One live pty-backed terminal pane: the pty session itself, what it was
 /// spawned to run, this pane's adaptive detection schedule, and the
 /// background task that forwards its raw output bytes to attached clients.
@@ -395,6 +402,10 @@ pub struct TerminalPaneRuntime {
     /// owner. Keep across child replacements; detection prunes exact old births.
     pub agent_launcher_ancestors: Vec<AgentProcessKey>,
     pub agent_generation: u64,
+    /// Coalesced resource-instruction change for this invocation. The serial
+    /// fences clearing a delivery against a newer concurrently observed change.
+    pub(crate) pending_resource_notice: Option<(u64, ResourceInstructionNotice)>,
+    pub(crate) resource_notice_serial: u64,
     /// At most one actor and one coalescing mailbox for detection follow-ups.
     detection_effects: Option<crate::detection_effects::DetectionEffects>,
     pub(crate) detection_completion: crate::detection_effects::CompletionEpoch,
@@ -509,6 +520,8 @@ impl TerminalPaneRuntime {
             agent_process_key: None,
             agent_launcher_ancestors: Vec::new(),
             agent_generation: 0,
+            pending_resource_notice: None,
+            resource_notice_serial: 0,
             detection_effects: None,
             detection_completion: crate::detection_effects::CompletionEpoch::default(),
             agent_input_available: false,
@@ -552,6 +565,7 @@ impl TerminalPaneRuntime {
             .ok_or("agent invocation generation exhausted")?;
         let replaced = self.agent_process_key.is_some();
         self.agent_generation = next;
+        self.pending_resource_notice = None;
         self.agent_process_key = Some(key);
         self.agent_input_available = false;
         self.agent_input_cancel
