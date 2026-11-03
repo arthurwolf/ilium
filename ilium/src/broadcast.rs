@@ -73,6 +73,33 @@ pub(crate) struct BroadcastArgs {
 
     #[command(flatten)]
     filter: PaneFilterArgs,
+
+    /// Internal exact project fence for resource notices; ordinary broadcast
+    /// keeps its documented selector behavior.
+    #[arg(skip)]
+    exact_project: Option<PathBuf>,
+}
+
+/// An explicit urgent resource notice uses the existing guarded broadcast
+/// path; busy agents are queued instead of receiving input mid-turn.
+pub(crate) async fn urgent_resource_notice(cwd: &Path) -> Result<(), CliError> {
+    let project = ilium_platform::paths::canonicalize(cwd).map_err(|error| {
+        println!("{}", json!({"type":"error", "command":"resource_notify_urgent", "code":"invalid-project", "message":error.to_string()}));
+        CliError::ExitStatus(2)
+    })?;
+    broadcast(
+        BroadcastArgs {
+            message: vec!["Urgent shared-resource instruction update: read the managed resource block before using shared hardware. Reserve exclusively, wait once if queued, verify ownership and explicitly release after use; estimates never clear ownership. This notice is from Ilium, not the user; no reply or acknowledgement is needed.".to_owned()],
+            file: None,
+            when_idle: true,
+            dry_run: false,
+            include_self: false,
+            timeout_seconds: 15,
+            filter: PaneFilterArgs::default(),
+            exact_project: Some(project),
+        },
+        cwd,
+    ).await
 }
 
 /// What happens, or happened, to one recipient.
@@ -182,7 +209,7 @@ pub(crate) async fn broadcast(args: BroadcastArgs, cwd: &Path) -> Result<(), Cli
         let recipients: Vec<PaneFacts> = attached
             .panes(caller.as_ref())
             .into_iter()
-            .filter(|pane| pane.kind == PaneKind::Agent && filter.accepts(pane))
+            .filter(|pane| recipient_matches(pane, &filter, args.exact_project.as_deref()))
             .collect();
         for pane in recipients {
             let outcome = if pane.is_self && !args.include_self {
@@ -235,6 +262,16 @@ pub(crate) async fn broadcast(args: BroadcastArgs, cwd: &Path) -> Result<(), Cli
     } else {
         Err(CliError::ExitStatus(1))
     }
+}
+
+fn recipient_matches(
+    pane: &PaneFacts,
+    filter: &crate::pane_filter::PaneFilter,
+    exact_project: Option<&Path>,
+) -> bool {
+    pane.kind == PaneKind::Agent
+        && filter.accepts(pane)
+        && exact_project.is_none_or(|project| pane.project.as_deref() == Some(project))
 }
 
 /// The message from the positional words, `-` (standard input) or `--file`,
@@ -424,6 +461,41 @@ mod tests {
         assert_eq!(choose_delivery(&pane, true), Delivery::Queue);
         pane.state = Some(AgentStateName::Done);
         assert_eq!(choose_delivery(&pane, true), Delivery::Now);
+    }
+
+    #[test]
+    fn urgent_resource_selection_never_reaches_a_neighboring_project() {
+        let args = parse(&["notice"]);
+        let filter = args.filter.compile(Path::new("/")).unwrap();
+        let mut pane = PaneFacts {
+            session_name: "default".into(),
+            pane_id: NodeId(1),
+            name: "agent".into(),
+            short_name: None,
+            project: Some(PathBuf::from("/workspace/project")),
+            cwd: None,
+            kind: PaneKind::Agent,
+            agent: Some("Codex".into()),
+            state: Some(AgentStateName::Idle),
+            is_self: false,
+        };
+        assert!(recipient_matches(
+            &pane,
+            &filter,
+            Some(Path::new("/workspace/project"))
+        ));
+        pane.project = Some(PathBuf::from("/workspace/project/nested"));
+        assert!(!recipient_matches(
+            &pane,
+            &filter,
+            Some(Path::new("/workspace/project"))
+        ));
+        pane.project = Some(PathBuf::from("/workspace"));
+        assert!(!recipient_matches(
+            &pane,
+            &filter,
+            Some(Path::new("/workspace/project"))
+        ));
     }
 
     #[test]
