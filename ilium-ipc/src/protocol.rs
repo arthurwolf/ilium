@@ -42,6 +42,25 @@ pub struct AgentDetectionSettings {
     pub custom_signatures: Vec<CustomAgentSignature>,
 }
 
+/// A connection-scoped request to observe one regular expression against the
+/// currently visible terminal grid. IDs are meaningful only with a revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusScreenWatch {
+    pub id: u16,
+    pub pattern: ilium_core::status_rule_expression::ScreenPattern,
+}
+
+/// A pane's observation for one watch revision. Unknown is distinct from a
+/// negative match, so negated conditions cannot fire on unavailable screens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusScreenObservation {
+    pub pane_id: NodeId,
+    pub revision: u64,
+    pub screen_generation: u64,
+    pub matched: Vec<u16>,
+    pub unknown: Vec<u16>,
+}
+
 /// One process-name substring and the agent class assigned when it matches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomAgentSignature {
@@ -1085,6 +1104,11 @@ pub enum ClientRequest {
         spec: WorkspaceCreateSpec,
         initial_input: Option<String>,
     },
+    /// Replace this connection's visible-screen pattern subscription.
+    SetStatusScreenWatches {
+        revision: u64,
+        watches: Vec<StatusScreenWatch>,
+    },
 }
 
 /// Which client path produced a stored recap.
@@ -1102,6 +1126,7 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::SetStatusScreenWatches { .. } => "set_status_screen_watches",
             Self::Resource { .. } => "resource",
             Self::Plugin(_) => "plugin",
             Self::TerminalHistory { .. } => "terminal_history",
@@ -1743,4 +1768,7 @@ pub enum ServerEvent {
         revision: u64,
         age_millis: u64,
     },
+    /// Connection-local screen pattern results; terminal contents never leave
+    /// the server as part of this event.
+    StatusScreenObserved(StatusScreenObservation),
 }

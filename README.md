@@ -53,7 +53,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Find the next agent that needs you</strong></p>
-<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Real Claude and Codex sessions show questions, blocked goals, background-agent waits and unread completed turns in one attention queue; setup and idle gaps are cut, with reading holds" width="100%"></a></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
@@ -97,7 +97,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Queue prompts for an agent</strong></p>
-<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a local Codex-shaped fixture; Ilium sends them in order after each turn. No model; output is synthetic." width="100%"></a></p>
+<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -203,7 +203,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Queue access to a shared resource</strong></p>
-<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two agents reserve a demonstration resource: one waits, takes ownership when it is released, then releases it. The recording is cropped and pauses are shortened." width="100%"></a></p>
+<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two projects share a demonstration resource: one reserves it, the other queues, takes ownership when it is released and then releases it. The agents are local fixtures (no model or provider calls). The recording shows the full interface, with long pauses shortened." width="100%"></a></p>
 </td>
 <td width="50%" valign="top"></td>
 </tr>
@@ -234,7 +234,7 @@ All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md
 ## What Ilium does
 
 - **Arrange**: group panes and split the screen four ways. The project tree stays visible. [Panes and layout](src/docs/panes-and-layout.md)
-- **Track**: identify agent CLIs from process trees and read activity from terminal screens, optionally showing each session's model icon in the tree. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md)
+- **Track**: identify agent CLIs from process trees and read activity from terminal screens, with optional model icons in the tree. Choose Normal or Attention status icons, or configure ordered Custom icon rules. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md)
 - **Separate**: start agents in linked Git worktrees. Unclear file, process, or ownership state blocks cleanup. [Worktrees](src/docs/worktrees.md)
 - **Resume**: detach without stopping panes. Recovery rebuilds the layout and relaunches pane programs. [Session recovery](src/docs/session-recovery.md)
 

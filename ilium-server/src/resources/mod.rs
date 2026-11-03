@@ -1351,7 +1351,9 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
         let mut delivered = std::collections::BTreeSet::new();
         let mut notified: BTreeMap<(NodeId, u64), Vec<(ResourceId, u64)>> = BTreeMap::new();
         let mut active = true;
+        let mut busy_cycles = 0u32;
         loop {
+            let mut projection_failed = false;
             let _metadata_owner = &observer_charge;
             interval.tick().await;
             let has_waits = service(&state)
@@ -1413,7 +1415,7 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
  active=catalog.links.iter().any(|l|paths.contains(&l.project_path));
  let signature:Vec<_>=catalog.links.iter().filter(|l|paths.contains(&l.project_path)).map(|l|(l.project_id.clone(),l.resource_id.clone(),l.desired_instruction_revision)).collect();
  let mut projections_ready = true;
- if projected_paths.as_ref().map(|previous|&previous.value)!=Some(&paths.value)||projected.as_ref()!=Some(&signature)||catalog.links.iter().any(|l|paths.contains(&l.project_path)&&l.sync_debt.is_some()) {match repair_local_projections(&state,&mut catalog,&paths).await{Ok(())=>{projected=Some(signature);projected_paths=Some(paths)},Err(error)=>{projections_ready=false;active=true;state.events.publish(ServerEvent::ResourceObservationFailed{message:error.to_string()})}}if let Ok(now)=clock(){observed_clock=now;}}
+ if projected_paths.as_ref().map(|previous|&previous.value)!=Some(&paths.value)||projected.as_ref()!=Some(&signature)||catalog.links.iter().any(|l|paths.contains(&l.project_path)&&l.sync_debt.is_some()) {match repair_local_projections(&state,&mut catalog,&paths).await{Ok(())=>{projected=Some(signature);projected_paths=Some(paths)},Err(error)=>{projections_ready=false;projection_failed=true;active=true;if error.code!="busy"{state.events.publish(ServerEvent::ResourceObservationFailed{message:error.to_string()})}}}if let Ok(now)=clock(){observed_clock=now;}}
             // Instruction changes are delivered through the existing fenced composer,
             // once per live invocation and binding revision, after readiness.
             let candidates:Vec<_>={let panes=state.panes.read().await;panes.iter().filter_map(|(id,pane)|match pane{PaneResource::Terminal(runtime) if runtime.detected_agent_process_id.is_some()=>Some((*id,runtime.agent_generation)),_=>None}).collect()};
@@ -1447,6 +1449,7 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
             }
             match outcome {
                 Ok(event) => {
+                    busy_cycles = 0;
                     let revision = match &event.value {
                         ServerEvent::ResourceSnapshot { catalog, .. } => catalog.revision,
                         _ => 0,
@@ -1459,6 +1462,10 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
                             }
                         }
                     }
+                    if projection_failed {
+                        // Republish next cycle so clients clear the notice once repair succeeds.
+                        last = None;
+                    }
                     if active {
                         if let Ok(service) = service(&state) {
                             service.changed.send_replace(revision);
@@ -1467,11 +1474,24 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
                 }
                 Err(error) => {
                     tracing::warn!(%error,"Resource catalog observation failed");
-                    state
-                        .events
-                        .publish(ServerEvent::ResourceObservationFailed {
-                            message: error.to_string(),
-                        });
+                    // Forget the published revision so the next successful
+                    // observation republishes the same revision and clients
+                    // clear the failure notice instead of showing it forever.
+                    last = None;
+                    // Another server holding the shared catalog lock for a moment is
+                    // routine; only report it once it has lasted several cycles.
+                    busy_cycles = if error.code == "busy" {
+                        busy_cycles.saturating_add(1)
+                    } else {
+                        u32::MAX
+                    };
+                    if busy_cycles >= 5 {
+                        state
+                            .events
+                            .publish(ServerEvent::ResourceObservationFailed {
+                                message: error.to_string(),
+                            });
+                    }
                 }
             }
             finish_observation_cycle(&mut interval);

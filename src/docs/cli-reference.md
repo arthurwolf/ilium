@@ -258,7 +258,8 @@ ilium chat tail [--limit <n>]
 Details:
 
 - Timestamps are local time with an offset, like `2026-10-04 14:32:10 +02:00`.
-- `send`, `context` and `tail` look for the nearest `CHATROOM.md` in the working directory or any parent, so they work from a subdirectory of the project. If none exists `send` and the read commands fall back to the current directory (where `send` then fails because no room exists).
+- `send`, `context` and `tail` look for the nearest `CHATROOM.md` in the working directory or any parent, so they work from a subdirectory of the project. `CHATROOM.md` is git-ignored and lives only in the main checkout, so from inside a linked Git worktree they use the main checkout's room instead. A shell that left its pane's worktree (for example in a scratch build folder) is mapped through the pane's `ILIUM_WORKTREE` variable the same way.
+- If no room is found, `send` and `tail` fail with `this project does not have a chatroom`. `context` prints nothing, because session hooks run it in every project, including ones without a room.
 - Appends take an advisory lock, so several agents can post at once without interleaving.
 - Fields are sanitised to one line each; control characters in a human-edited file are neutralised before they reach a model.
 - A row for the Chatroom also appears in the project tree when a project has one.

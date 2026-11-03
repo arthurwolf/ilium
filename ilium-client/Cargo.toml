@@ -57,7 +57,7 @@ regex = "1.12.3"
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 ratatui-image = { version = "11.0", default-features = false }
 ratatui-textarea = "0.9.2"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_norway = "0.9.42"
 serde_json = "1.0.149"
 sha2 = "0.10.9"

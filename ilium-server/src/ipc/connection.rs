@@ -318,9 +318,9 @@ where
     // Connection ownership bounds work and aborts queries on disconnect.
     let mut repository_queries = tokio::task::JoinSet::new();
     let mut resource_waits = tokio::task::JoinSet::new();
-    // A slow durable catalog read must not hold the interactive attach barrier.
-    // This task belongs to the connection and is cancelled when it closes.
+    // Connection-owned tasks are cancelled when the connection closes.
     let mut resource_snapshot = tokio::task::JoinSet::new();
+    let mut screen_watches = tokio::task::JoinSet::new();
     loop {
         let decoded = tokio::select! {
             biased;
@@ -353,6 +353,41 @@ where
         };
 
         let request = decoded.view();
+        if let ClientRequest::SetStatusScreenWatches { revision, watches } = request {
+            match crate::status_screen_watch::compile_wire(watches) {
+                Ok(compiled) => {
+                    screen_watches.abort_all();
+                    while screen_watches.try_join_next().is_some() {}
+                    if !compiled.is_empty() {
+                        let watch_state = Arc::clone(&state);
+                        let replies = direct_tx.clone();
+                        let revision = *revision;
+                        screen_watches.spawn(async move {
+                            let pane_ids: Vec<_> = watch_state.panes.read().await.keys().copied().collect();
+                            let watches = Arc::new(compiled);
+                            let (sender, mut receiver) = mpsc::channel(64);
+                            let mut panes = tokio::task::JoinSet::new();
+                            for pane_id in pane_ids {
+                                panes.spawn(crate::status_screen_watch::watch_pane(
+                                    Arc::clone(&watch_state), pane_id, revision,
+                                    Arc::clone(&watches), sender.clone(),
+                                ));
+                            }
+                            drop(sender);
+                            while let Some(observation) = receiver.recv().await {
+                                if replies.send(ServerEvent::StatusScreenObserved(observation)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                }
+                Err(message) => {
+                    let _ = direct_tx.send(ServerEvent::Error { message }).await;
+                }
+            }
+            continue;
+        }
         if let ClientRequest::NewPane { request_id, .. } = request {
             ilium_platform::startup_timing::record("request_received", *request_id, 0, 0, 0);
         }

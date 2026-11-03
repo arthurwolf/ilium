@@ -92,6 +92,7 @@ pub(crate) fn draw_at_with_cursor(
         if app.hovered_status_slot.is_some()
             || app.hovered_progress.is_some()
             || app.hovered_goal_resume.is_some()
+            || app.resources.hovered_action.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
             || app.goal_popover.is_some()
@@ -932,6 +933,10 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
             agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
             attention_progress_reports: app.ui_settings.attention_progress_reports,
+            custom_status_rules: Some(&app.custom_status_rules),
+                screen_observations: Some(&app.custom_status_screen_observations),
+                screen_pane_id: None,
+                icon_motion: app.ui_settings.motion_level,
             attention_running_indicator: app.ui_settings.attention_running_indicator,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             frozen_panes: &app.frozen_panes,

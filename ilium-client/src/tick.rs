@@ -25,6 +25,9 @@ pub fn on_tick(
     was_animating: bool,
     search_workers: &mut SearchWorkers,
 ) -> bool {
+    if app.custom_status_screen_observations.retry_due(now) {
+        app.refresh_custom_status_screen_watches();
+    }
     // Read *before* advancing the animation so the tick that finishes an
     // in-progress transition still reports "was animating" and forces its
     // own final redraw -- `tick_layout_animation` and the animation
@@ -32,7 +35,7 @@ pub fn on_tick(
     // of this tick" contract.
     app.tick_layout_animation(now);
     let before = app.pane_viewports();
-    app.sync_last_prompt_histories();
+    let prompt_history_changed = app.sync_last_prompt_histories();
     let after_prompt_sync = app.pane_viewports();
     let metadata_geometry_changed = before != after_prompt_sync;
     if metadata_geometry_changed {
@@ -79,6 +82,7 @@ pub fn on_tick(
         !setup_prompt_was_open && matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     was_animating
         || metadata_geometry_changed
+        || prompt_history_changed
         || tree_transition_changed
         || terminal_activity_changed
         || tree_activity_changed

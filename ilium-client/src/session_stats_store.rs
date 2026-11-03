@@ -20,6 +20,13 @@ use ilium_core::{AgentClass, NodeId};
 
 use crate::session_stats::{SessionStats, StatsAccumulator};
 
+#[path = "session_stats_persistence.rs"]
+mod persistent_cache;
+
+#[cfg(test)]
+#[path = "session_stats_cache_tests.rs"]
+mod persistent_cache_tests;
+
 /// Minimum spacing between background refreshes of one open popover. The
 /// transcript is append-only and refreshes are incremental, so this only
 /// bounds how quickly new activity shows up.
@@ -742,7 +749,27 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             retained_path_bytes: 1024 * 1024,
         },
     );
-    let path = known_path.or_else(|| {
+    // A validated saved path avoids repeating potentially expensive discovery.
+    // The additional admission covers the bounded decoder and temporary data.
+    let restore_hold = if accumulator.is_none() {
+        storage_quota
+            .reserve_external_storage(128 * 1024 * 1024)
+            .ok()
+    } else {
+        None
+    };
+    let restored = restore_hold
+        .as_ref()
+        .and_then(|_| persistent_cache::load(&request))
+        .filter(|(path, saved)| {
+            saved.retained_bytes() <= 16 * 1024 * 1024
+                && known_path.as_ref().is_none_or(|known| known == path)
+        });
+    let (restored_path, restored_accumulator) = match restored {
+        Some((path, saved)) => (Some(path), Some(saved)),
+        None => (None, None),
+    };
+    let path = known_path.or(restored_path).or_else(|| {
         locator
             .transcript_for_session(&request.class, &request.session_id)
             .map(|transcript| transcript.path)
@@ -769,9 +796,32 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             observed.saturating_sub(limit)
         ));
     }
-    let mut accumulator =
-        accumulator.unwrap_or_else(|| Box::new(StatsAccumulator::new(request.class.clone())));
+    let was_restored = restored_accumulator.is_some();
+    let source_identity = persistent_cache::source_identity(&path).ok();
+    let mut accumulator = accumulator
+        .or(restored_accumulator)
+        .unwrap_or_else(|| Box::new(StatsAccumulator::new(request.class.clone())));
     accumulator.attach_retention(storage);
+    drop(restore_hold);
+    if was_restored && !context.stop_requested() {
+        if let Ok(hold) = storage_quota.reserve_external_storage(16 * 1024 * 1024) {
+            if let Ok(mut slot) = progress.try_lock() {
+                let mut stats = accumulator.snapshot();
+                if stats.retained_bytes() <= 15 * 1024 * 1024 {
+                    stats.retention = crate::session_stats::StatsRetention::new(Arc::new(hold));
+                    *slot = Some(StatsEvent::Progress {
+                        pane_id,
+                        request: request.clone(),
+                        generation,
+                        stats,
+                        done: accumulator.offset(),
+                        total: std::fs::metadata(&path)
+                            .map_or(accumulator.offset(), |metadata| metadata.len()),
+                    });
+                }
+            }
+        }
+    }
     accumulator
         .ingest_file_cancellable(
             &path,
@@ -826,6 +876,13 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
     }
     if context.stop_requested() {
         return Err("Statistics cancelled; totals incomplete".into());
+    }
+    if source_identity.is_some() && source_identity == persistent_cache::source_identity(&path).ok()
+    {
+        if let Ok(_hold) = storage_quota.reserve_external_storage(128 * 1024 * 1024) {
+            let _ =
+                persistent_cache::save(&request, &path, &accumulator, || context.stop_requested());
+        }
     }
     let mut stats = accumulator.snapshot();
     // The admitted peak remains alive across snapshot allocation and every
@@ -1210,6 +1267,13 @@ mod tests {
             "a refresh inside the interval is skipped"
         );
         assert!(store.request_refresh(pane_id, request, started + REFRESH_INTERVAL));
+        let refreshing = store.entry(pane_id).unwrap();
+        assert!(refreshing.in_flight);
+        assert_eq!(
+            refreshing.stats.as_ref().unwrap().prompt_count,
+            1,
+            "the last snapshot remains available while the refresh is pending"
+        );
         wait_for(&mut store, pane_id);
         assert_eq!(store.entry(pane_id).unwrap().state, LoadState::Ready);
         drop(store);

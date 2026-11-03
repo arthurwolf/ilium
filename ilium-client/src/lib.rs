@@ -56,6 +56,7 @@ mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
+pub mod chatroom_root;
 pub mod chatroom_ui;
 pub mod claude_model_statusline;
 pub mod compaction_app;
@@ -120,6 +121,10 @@ pub mod padding;
 pub mod padding_app;
 pub mod padding_dialog;
 pub mod padding_ui;
+pub mod selectable_cards;
+pub mod status_rule_visual;
+pub mod status_rules_editor;
+pub mod status_screen_observations;
 pub mod pane_title;
 pub mod paths;
 pub mod plugin_host;
@@ -1152,6 +1157,13 @@ async fn run_inner(
     app.voice_output_devices = voice_output_devices;
     app.startup_audio_retention = Some(audio_retention);
     app.config_dir = config_dir;
+    if let Some(directory) = app.config_dir.as_deref() {
+        match crate::config::load_status_rules(directory) {
+            Ok(rules) => app.custom_status_rules = rules,
+            Err(error) => app.custom_status_rules_error = Some(error.to_string()),
+        }
+    }
+    app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
     app.onboarding_progress = config.onboarding;
     if should_open_onboarding {
         crate::onboarding::integration::open(&mut app, options.onboarding);

@@ -244,6 +244,15 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         count.string(&identity.profile_id);
     }
     match request {
+        R::SetStatusScreenWatches { watches, .. } => {
+            count.vector(watches);
+            for watch in watches {
+                if !count.visit() {
+                    break;
+                }
+                count.string(&watch.pattern.pattern);
+            }
+        }
         R::Attach { session, .. } | R::AttachInteractive { session, .. } => count.string(session),
         // Plugin envelopes are bounded by the plugin IPC limits (HST-104), not counted here.
         R::Plugin(_) => {}
@@ -1382,6 +1391,29 @@ mod decoded_pressure_tests {
         assert_eq!(storage.nonterminal_bytes.load(Ordering::Acquire), 0);
         assert_eq!(storage.blocked_projections.load(Ordering::Acquire), 0);
         assert_eq!(storage.quota.snapshot().worker_bytes, 0);
+    }
+}
+
+#[cfg(test)]
+mod status_screen_request_tests {
+    use super::request_retained_bytes;
+    use ilium_core::status_rule_expression::{ScreenPattern, ScreenRegion};
+    use ilium_ipc::{ClientRequest, StatusScreenWatch};
+
+    #[test]
+    fn screen_watch_request_charges_pattern_and_vector_capacity() {
+        let empty = ClientRequest::SetStatusScreenWatches { revision: 1, watches: Vec::new() };
+        let mut pattern = String::with_capacity(512);
+        pattern.push_str("error");
+        let pattern_capacity = pattern.capacity();
+        let mut watches = Vec::with_capacity(4);
+        watches.push(StatusScreenWatch {
+            id: 1,
+            pattern: ScreenPattern { pattern, ignore_case: false, region: ScreenRegion::All },
+        });
+        let vector_capacity = watches.capacity() * std::mem::size_of::<StatusScreenWatch>();
+        let populated = ClientRequest::SetStatusScreenWatches { revision: 1, watches };
+        assert_eq!(request_retained_bytes(&populated) - request_retained_bytes(&empty), vector_capacity + pattern_capacity);
     }
 }
 

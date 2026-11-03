@@ -22,6 +22,8 @@ pub enum ResourceRowTarget {
 pub struct ResourceRows {
     pub targets: HashMap<NodeId, ResourceRowTarget>,
     pub projects: HashMap<NodeId, Vec<NodeId>>,
+    /// Resource rows already expanded once; a later user collapse sticks.
+    auto_opened: HashSet<NodeId>,
     next: u64,
 }
 impl ResourceRows {
@@ -95,6 +97,22 @@ impl ResourceRows {
                 }
             }
         }
+    }
+    /// Resource folders start expanded so an agent that moves into one stays
+    /// visible. Each row is reported once; afterwards the user's choice wins.
+    /// Returns `(project, resource_row)` pairs to open.
+    pub fn take_unopened_resource_rows(&mut self) -> Vec<(NodeId, NodeId)> {
+        let targets = &self.targets;
+        self.auto_opened.retain(|id| targets.contains_key(id));
+        let mut fresh = Vec::new();
+        for (project, ids) in &self.projects {
+            for id in ids {
+                if self.auto_opened.insert(*id) {
+                    fresh.push((*project, *id));
+                }
+            }
+        }
+        fresh
     }
     fn allocate(
         &mut self,
@@ -357,6 +375,17 @@ pub(crate) mod tests {
                     .map(|reservation| reservation.agent.clone())
             })
             .collect()
+    }
+    #[test]
+    fn resource_rows_are_reported_for_opening_once_and_again_after_removal() {
+        let (tree, catalog, project, _pane) = fixture();
+        let mut rows = ResourceRows::default();
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        let first = rows.take_unopened_resource_rows();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].0, project);
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        assert!(rows.take_unopened_resource_rows().is_empty());
     }
     #[test]
     fn grouping_is_projection_and_does_not_change_core_tree() {

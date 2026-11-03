@@ -51,6 +51,17 @@ pub fn exists(project_root: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Fails with the shared "no chatroom" message when the project has no room.
+/// Commands a user or agent runs on purpose (`send`, `tail`) use it so a wrong
+/// directory is reported; lifecycle hooks (`context`) stay silent instead.
+pub fn require_room(project_root: &Path) -> anyhow::Result<()> {
+    if exists(project_root) {
+        Ok(())
+    } else {
+        anyhow::bail!(crate::chatroom_root::NO_CHATROOM_MESSAGE)
+    }
+}
+
 /// Creates the room and runtime hooks needed by participating Claude/Codex
 /// agents. Agent instruction files are managed independently by
 /// `agent_feature_setup`, so disabling guidance in Settings cannot be undone
@@ -105,9 +116,7 @@ pub fn ensure_integrations(project_root: &Path) -> anyhow::Result<bool> {
 /// complete append, which avoids interleaving when several agents respond at
 /// once through `ilium chat send` or the TUI composer.
 pub fn append_message(project_root: &Path, author: &str, content: &str) -> anyhow::Result<()> {
-    if !exists(project_root) {
-        anyhow::bail!("this project does not have a chatroom");
-    }
+    require_room(project_root)?;
     let author = sanitize_field(author);
     let content = sanitize_field(content);
     if author.is_empty() || content.is_empty() {

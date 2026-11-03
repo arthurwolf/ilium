@@ -74,9 +74,9 @@ fn create_process_quota() -> QuotaGroup {
             clients: 32,
             jobs: 64,
             service_jobs: 1,
-            // General children collectively512 MiB; independent
+            // General children collectively 528 MiB; independent
             // decoder128 + encoder128 MiB retain dedicated headroom.
-            input_bytes: 768 * MIB,
+            input_bytes: 784 * MIB,
             // General result capacity grew for ambient replacement overlap;
             // retain both codec directions' dedicated 128 MiB headroom too.
             result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB,
@@ -205,7 +205,7 @@ pub(crate) fn general_admission_group() -> Result<ilium_execution::AdmissionGrou
     let limits = ClientLimits {
         jobs: 60,
         service_jobs: 1,
-        input_bytes: 512 * MIB,
+        input_bytes: 528 * MIB,
         result_bytes: GENERAL_RESULT_BYTES,
     };
     #[cfg(test)]
@@ -351,7 +351,7 @@ impl ClientStartupState {
                     ClientLimits {
                         jobs: 60,
                         service_jobs: 1,
-                        input_bytes: 512 * MIB,
+                        input_bytes: 528 * MIB,
                         result_bytes: GENERAL_RESULT_BYTES,
                     },
                 )

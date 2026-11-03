@@ -6,12 +6,11 @@ use crossterm::event::{
 use ilium_core::{resource_queue::*, NodeId};
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::Paragraph,
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
 fn safe(text: &str) -> String {
     super::terminal_text(text)
 }
@@ -26,12 +25,6 @@ fn state_label(app: &App, record: &ResourceRecord) -> String {
         &app.ui_settings.icons,
         app.ui_settings.use_stable_glyphs,
     )
-}
-fn timestamp(millis: i64) -> String {
-    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
-        .map_or("unknown".into(), |time| {
-            time.format("%Y-%m-%d %H:%M:%S UTC").to_string()
-        })
 }
 pub fn handle_event(app: &mut App, event: &Event) -> bool {
     let RightPanelTarget::Resource {
@@ -55,15 +48,72 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                 app.resources.scroll = app.resources.scroll.saturating_add(3)
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                for (key, label, rect) in action_regions(area) {
-                    let _ = label;
-                    if rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row)) {
-                        return handle_event(
-                            app,
-                            &Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)),
-                        );
+                let hit = match app.right_panel_target.clone() {
+                    RightPanelTarget::Resource { resource_id, .. } => {
+                        app.resources.record(&resource_id).and_then(|record| {
+                            super::panel::layout(app, record, area)
+                                .button_at(mouse.column, mouse.row)
+                                .cloned()
+                        })
+                    }
+                    _ => None,
+                };
+                if hit.is_none() {
+                    let clicked = match app.right_panel_target.clone() {
+                        RightPanelTarget::Resource { resource_id, .. } => {
+                            app.resources.record(&resource_id).and_then(|record| {
+                                let panel = super::panel::layout(app, record, area);
+                                ordered(record).into_iter().enumerate().find_map(
+                                    |(index, reservation)| {
+                                        let rect = panel.queue_row(index)?;
+                                        rect.contains(ratatui::layout::Position::new(
+                                            mouse.column,
+                                            mouse.row,
+                                        ))
+                                        .then(|| reservation.id.clone())
+                                    },
+                                )
+                            })
+                        }
+                        _ => None,
+                    };
+                    if clicked.is_some() {
+                        app.resources.selected_reservation = clicked;
                     }
                 }
+                if let Some(button) = hit {
+                    return match button.enabled {
+                        Ok(()) => handle_event(
+                            app,
+                            &Event::Key(KeyEvent::new(
+                                KeyCode::Char(button.action.key()),
+                                KeyModifiers::NONE,
+                            )),
+                        ),
+                        Err(reason) => {
+                            app.status_message = Some(reason);
+                            true
+                        }
+                    };
+                }
+            }
+            MouseEventKind::Moved => {
+                let hovered = match app.right_panel_target.clone() {
+                    RightPanelTarget::Resource { resource_id, .. } => {
+                        app.resources.record(&resource_id).and_then(|record| {
+                            super::panel::layout(app, record, area)
+                                .button_at(mouse.column, mouse.row)
+                                .map(|button| {
+                                    (
+                                        button.action,
+                                        ratatui::layout::Position::new(mouse.column, mouse.row),
+                                    )
+                                })
+                        })
+                    }
+                    _ => None,
+                };
+                app.resources.hovered_action = hovered;
             }
             _ => {}
         }
@@ -79,16 +129,26 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
         return true;
     }
     let resource_id = resource_id.clone();
+    perform_key(app, project_id, resource_id, key.code)
+}
+/// Runs one management action by its key accelerator. Buttons, the context
+/// menu and the keyboard all converge here.
+pub(super) fn perform_key(
+    app: &mut App,
+    project_id: NodeId,
+    resource_id: ResourceId,
+    code: KeyCode,
+) -> bool {
     if app.resources.pending.is_some()
         && matches!(
-            key.code,
+            code,
             KeyCode::Char('e' | 'p' | 'u' | 'r' | 'x' | 'c' | 'a' | 'l' | 'i' | 'd' | 'z' | 'o')
         )
     {
         app.status_message=Some("A resource request is pending; wait for its authoritative result before another management action".into());
         return true;
     }
-    match key.code {
+    match code {
         KeyCode::F(1) | KeyCode::Char('?') => {
             app.resources.help_open = true;
             app.resources.help_scroll = 0;
@@ -110,7 +170,7 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                     .as_ref()
                     .and_then(|id| entries.iter().position(|reservation| &reservation.id == id))
                     .unwrap_or(0);
-                let next = if key.code == KeyCode::Down {
+                let next = if code == KeyCode::Down {
                     (current + 1).min(entries.len().saturating_sub(1))
                 } else {
                     current.saturating_sub(1)
@@ -148,7 +208,7 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                         Some("The local invocation no longer belongs to an open project".into());
                     return true;
                 };
-                match key.code {
+                match code {
     KeyCode::Char('d')=>app.resources.dialog=Some(ResourceDialog::estimate(actor_project,&reservation)),
     KeyCode::Char('z') if matches!(reservation.state,ReservationState::Queued)=>app.resources.dialog=Some(ResourceDialog::own_action(actor_project,&reservation,ResourceCommand::Cancel{reservation_id:reservation.id.clone()})),
     KeyCode::Char('o') if matches!(reservation.state,ReservationState::Owned)=>app.resources.dialog=Some(ResourceDialog::own_action(actor_project,&reservation,ResourceCommand::Release{reservation_id:reservation.id.clone(),ownership_generation:reservation.ownership_generation})),
@@ -230,13 +290,7 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                 reason: "User confirmed hardware is safe for the next reservation".into(),
             },
         ),
-        KeyCode::Char('a') => {
-            app.resources.dialog = Some(ResourceDialog::confirm(
-                project_id,
-                ResourceCommand::Archive { resource_id },
-                None,
-            ))
-        }
+        KeyCode::Char('a') => begin_delete(app, project_id, resource_id),
         KeyCode::Char('l') => {
             if let Some(link) = app.resources.catalog.as_ref().and_then(|catalog| {
                 catalog.links.iter().find(|link| {
@@ -269,413 +323,73 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
     }
     true
 }
-pub fn render(app: &App, frame: &mut Frame, area: Rect) {
-    let RightPanelTarget::Resource {
-        project_id,
-        ref resource_id,
-    } = app.right_panel_target
-    else {
+/// Starts deleting a resource: refuses with a plain reason while it is in use
+/// or shared, otherwise opens the confirmation (unlink here, then archive).
+pub(super) fn begin_delete(app: &mut App, project_id: NodeId, resource_id: ResourceId) {
+    let Some(record) = app.resources.record(&resource_id) else {
         return;
     };
-    let Some(record) = app.resources.record(resource_id) else {
-        frame.render_widget(
-            Paragraph::new("Resource state unavailable; reconnect to refresh")
-                .block(crate::theme::block(true).title("Shared resource")),
-            area,
-        );
-        return;
-    };
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!(
-                "{} · {}",
-                state_label(app, record),
-                safe(&record.definition.title)
-            ),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(format!(
-            "Resource: {} · kind: {} · revision: {}",
-            record.definition.id,
-            safe(&record.definition.kind),
-            app.resources
-                .catalog
-                .as_ref()
-                .map_or(0, |catalog| catalog.revision)
-        )),
-        Line::from(format!(
-            "Physical identity: {}",
-            record
-                .definition
-                .physical_identity
-                .as_deref()
-                .map(safe)
-                .unwrap_or("Unspecified — identity is user managed".into())
-        )),
-        Line::from(safe(&record.definition.description)),
-        Line::from(format!(
-            "Created: {} · updated: {}",
-            timestamp(record.definition.created_at_unix_millis),
-            timestamp(record.definition.updated_at_unix_millis)
-        )),
-        Line::from(format!(
-            "Advisory rules: {}",
-            safe(&record.definition.rules)
-        )),
-        Line::from(
-            "Enforced policy: exclusive, first in first out; estimates never release hardware.",
-        ),
-    ];
-    match &record.gate {
-        ResourceGate::Open => {}
-        ResourceGate::Paused { reason } | ResourceGate::Unavailable { reason } => {
-            lines.push(Line::from(Span::styled(
-                safe(reason),
-                Style::default().fg(Color::Yellow),
-            )))
-        }
-    }
-    if let Some(error) = &app.resources.observation_error {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "⚠ Observation failed; last known queue only: {}",
-                safe(error)
-            ),
-            Style::default().fg(Color::Yellow),
-        )));
-    }
-    let queue = ordered(record);
-    let clock = app.resources.clock_now();
-    let presentation = presentation::project(
-        record,
-        clock.as_ref(),
-        app.resources.observation_error.as_deref(),
-    );
-    let snapshot = presentation.snapshot.as_ref();
-    if !queue.is_empty() {
-        let selected = app
-            .resources
-            .selected_reservation
-            .as_ref()
-            .and_then(|id| queue.iter().position(|reservation| &reservation.id == id));
-        let spans = segment_spans(
-            &queue,
-            &presentation,
-            selected,
-            area.width.saturating_sub(2),
-        );
-        lines.push(Line::from(
-            "Queue estimate segments · ▸ selected · ░ uncertain · +N overflow",
-        ));
-        lines.push(Line::from(spans));
-        lines.push(Line::from(
-            queue
-                .iter()
-                .enumerate()
-                .map(|(index, reservation)| {
-                    Span::styled(
-                        format!(" {} {} ", index + 1, safe(&reservation.agent.label)),
-                        Style::default().fg(participant_color(&reservation.id)),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        ));
-    }
-    if record.clearance_required {
-        lines.push(Line::from(Span::styled(
-            "⚠ Physical clearance is required before another grant",
-            Style::default().fg(Color::Yellow),
-        )));
-    }
-    if queue.is_empty() {
-        lines.push(Line::from("No current owner or waiting reservations."));
-    }
-    for reservation in queue {
-        let label = if reservation.state.occupied() {
-            if matches!(reservation.state, ReservationState::NeedsAttention { .. }) {
-                format!(
-                    "{} Needs attention",
-                    icon(app, crate::icon_settings::IconTarget::ResourceAttention)
-                )
-            } else {
-                format!(
-                    "{} Owner",
-                    icon(app, crate::icon_settings::IconTarget::ResourceOwner)
-                )
-            }
-        } else {
-            let entry = snapshot.as_ref().and_then(|snapshot| {
-                snapshot
-                    .queue
-                    .iter()
-                    .find(|entry| entry.reservation.id == reservation.id)
-            });
-            match entry {
-                Some(entry) => format!(
-                    "{} Queue {} · ETA {}",
-                    icon(app, crate::icon_settings::IconTarget::ResourceQueued),
-                    entry.position,
-                    entry
-                        .estimate
-                        .wait_seconds
-                        .map(|seconds| format!("about {seconds}s"))
-                        .unwrap_or_else(|| format!(
-                            "unknown ({})",
-                            entry
-                                .estimate
-                                .reason
-                                .as_deref()
-                                .unwrap_or("observation unavailable")
-                        ))
-                ),
-                None => format!(
-                    "{} Queued · ETA unknown",
-                    icon(app, crate::icon_settings::IconTarget::ResourceQueued)
-                ),
-            }
-        };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(
-                    "{} {label}",
-                    if app.resources.selected_reservation.as_ref() == Some(&reservation.id) {
-                        "▸"
-                    } else {
-                        " "
-                    }
-                ),
-                Style::default().fg(participant_color(&reservation.id)),
-            ),
-            Span::raw(format!(
-                " · {} · {}s estimate",
-                safe(&reservation.agent.label),
-                reservation.estimate_seconds
-            )),
-        ]));
-        lines.push(Line::from(format!(
-            "  {} · project {} · pane {} · generation {}",
-            reservation.id,
-            reservation.agent.project_id,
-            reservation.agent.pane_id.0,
-            reservation.ownership_generation
-        )));
-        let elapsed = app
-            .resources
-            .clock_now()
-            .zip(reservation.acquired_at.as_ref())
-            .and_then(|(clock, acquired)| {
-                (clock.boot_id == acquired.boot_id)
-                    .then(|| {
-                        clock
-                            .monotonic_millis
-                            .checked_sub(acquired.monotonic_millis)
-                    })
-                    .flatten()
-            })
-            .map(|millis| format!("{}s", millis / 1000))
-            .unwrap_or("unknown".into());
-        let start = snapshot
-            .as_ref()
-            .and_then(|snapshot| {
-                snapshot
-                    .queue
-                    .iter()
-                    .find(|entry| entry.reservation.id == reservation.id)
-            })
-            .and_then(|entry| entry.estimate.estimated_start_unix_millis)
-            .or_else(|| {
-                reservation
-                    .acquired_at
-                    .as_ref()
-                    .map(|clock| clock.unix_millis)
-            });
-        lines.push(Line::from(format!(
-            "  Requested {} · acquired {} · elapsed {elapsed} · estimated start {}",
-            timestamp(reservation.requested_at.unix_millis),
-            reservation
-                .acquired_at
-                .as_ref()
-                .map_or("pending".into(), |clock| timestamp(clock.unix_millis)),
-            start.map_or("unknown".into(), timestamp)
-        )));
-        lines.push(Line::from(format!("  Origin session {} · runtime {} · invocation {} · local attached wait {} · handoff pending {}",safe(&reservation.agent.session_id),safe(&reservation.agent.runtime_generation),reservation.agent.invocation_id,app.resources.waits.values().any(|id|id==&reservation.id),reservation.acquisition_pending)));
-        if let ReservationState::NeedsAttention { reason } = &reservation.state {
-            lines.push(Line::from(format!("  {}", safe(reason))));
-        }
-    }
-    if let Some(catalog) = &app.resources.catalog {
-        let history: Vec<_> = catalog
-            .history
-            .iter()
-            .filter(|event| &event.resource_id == resource_id)
-            .rev()
-            .take(32)
-            .collect();
-        if !history.is_empty() {
-            lines.push(Line::from("Recent durable resource lifecycle events"));
-            for event in history {
-                lines.push(Line::from(format!(
-                    "{} · revision {}.{} · {:?} · {}",
-                    timestamp(event.unix_millis),
-                    event.revision,
-                    event.ordinal,
-                    event.kind,
-                    safe(&event.message)
-                )));
-            }
-        }
-    }
-    let mut history: Vec<_> = record
+    let active = record
         .reservations
         .iter()
-        .filter(|reservation| !reservation.state.active())
-        .collect();
-    history.sort_by_key(|reservation| std::cmp::Reverse(reservation.terminal_at));
-    if !history.is_empty() {
-        lines.push(Line::from("Recent reservation history (bounded)"));
-        for reservation in history.into_iter().take(16) {
-            lines.push(Line::from(format!(
-                "{} · {} · {:?} · terminal {}",
-                reservation.id,
-                safe(&reservation.agent.label),
-                reservation.state,
-                reservation.terminal_at.map_or("unknown".into(), timestamp)
-            )));
-        }
+        .filter(|reservation| reservation.state.active())
+        .count();
+    if active > 0 {
+        app.status_message = Some(format!(
+            "Cannot delete: {active} agent request(s) are still using or waiting for it. Cancel or release them first."
+        ));
+        return;
     }
-    if let Some(catalog) = &app.resources.catalog {
-        for link in catalog
-            .links
-            .iter()
-            .filter(|link| &link.resource_id == resource_id)
-        {
-            lines.push(Line::from(format!(
-                "Linked: {} · slug {} · created {}",
-                safe(&link.project_path),
-                safe(&link.slug),
-                timestamp(link.created_at_unix_millis)
-            )));
-            if let Some(debt) = &link.sync_debt {
-                lines.push(Line::from(Span::styled(
-                    format!("Instruction/settings sync pending: {}", safe(debt)),
-                    Style::default().fg(Color::Yellow),
-                )));
-            }
-        }
-    }
-    lines.push(Line::from(
-        "e edit · p pause/reopen · u unavailable · r revoke · c confirm clear",
-    ));
-    lines.push(Line::from("d own estimate · z own cancel · o own release · i repair instructions · t retry exact request · x cancel selected queued reservation · l unlink · a archive · g grouping · ↑/↓ select · PgUp/PgDown scroll · Esc back"));
-    if let Some(error) = &app.resources.error {
-        lines.push(Line::from(Span::styled(
-            safe(error),
-            Style::default().fg(Color::Red),
-        )));
-    }
-    let _ = project_id;
-    let debt = app.resources.catalog.as_ref().is_some_and(|catalog| {
-        catalog
-            .links
-            .iter()
-            .any(|link| &link.resource_id == resource_id && link.sync_debt.is_some())
+    let project_path = app
+        .tree
+        .get(project_id)
+        .and_then(|node| node.project_path())
+        .map(std::path::Path::to_path_buf);
+    let links: Vec<_> = app
+        .resources
+        .catalog
+        .as_ref()
+        .map(|catalog| {
+            catalog
+                .links
+                .iter()
+                .filter(|link| link.resource_id == resource_id)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let (own, others): (Vec<_>, Vec<_>) = links.into_iter().partition(|link| {
+        project_path
+            .as_deref()
+            .is_some_and(|path| path == std::path::Path::new(&link.project_path))
     });
-    let warning = if let Some(error) = &app.resources.observation_error {
-        Some(format!(
-            "⚠ Observation failed · ETA unknown · {}",
-            safe(error)
-        ))
-    } else if record.clearance_required {
-        Some("⚠ Physical clearance required · c after cleanup; ? help".into())
-    } else if let Some(reason) = presentation.uncertainty.as_ref() {
-        Some(format!("⚠ ETA unknown · {}", safe(reason)))
-    } else if debt {
-        Some("⚠ Instruction sync needs repair · i repairs this project".into())
-    } else {
-        None
-    };
-    let top = if let Some(warning) = warning.filter(|_| area.height > 0) {
-        frame.render_widget(
-            Paragraph::new(warning).style(Style::default().fg(Color::Yellow)),
-            Rect::new(area.x, area.y, area.width, 1),
-        );
-        1
-    } else {
-        0
-    };
-    let body = Rect::new(
-        area.x,
-        area.y.saturating_add(top),
-        area.width,
-        area.height.saturating_sub(action_height(area.width) + top),
+    if !others.is_empty() {
+        let names = others
+            .iter()
+            .map(|link| link.project_path.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        app.status_message = Some(format!(
+            "Cannot delete: also used by {names}. Use \"Remove from this project\" there first."
+        ));
+        return;
+    }
+    let mut dialog = ResourceDialog::delete(
+        project_id,
+        resource_id,
+        own.first().map(|link| link.project_id.clone()),
     );
-    frame.render_widget(
-        Paragraph::new(super::sanitized_lines(lines))
-            .wrap(Wrap { trim: false })
-            .scroll((app.resources.scroll, 0))
-            .block(
-                crate::theme::block(app.focus == FocusTarget::Pane).title("Shared resource queue"),
-            ),
-        body,
-    );
-    for (_, label, rect) in action_regions(area) {
-        frame.render_widget(
-            Paragraph::new(label).style(Style::default().fg(Color::Cyan)),
-            rect,
-        );
-    }
+    dialog.expected_revision = app
+        .resources
+        .catalog
+        .as_ref()
+        .map(|catalog| catalog.revision);
+    app.resources.dialog = Some(dialog);
 }
-fn action_height(width: u16) -> u16 {
-    if width < 60 {
-        6
-    } else if width < 100 {
-        4
-    } else {
-        2
-    }
+pub fn render(app: &App, frame: &mut Frame, area: Rect) {
+    super::panel::render(app, frame, area);
 }
-fn action_regions(area: Rect) -> Vec<(char, &'static str, Rect)> {
-    let actions = [
-        ('?', "[? Help]"),
-        ('e', "[e Edit]"),
-        ('p', "[p Gate]"),
-        ('u', "[u Unavailable]"),
-        ('r', "[r Revoke]"),
-        ('x', "[x Cancel]"),
-        ('c', "[c Clear]"),
-        ('l', "[l Unlink]"),
-        ('a', "[a Archive]"),
-        ('g', "[g Group]"),
-        ('i', "[i Repair]"),
-        ('d', "[d Estimate]"),
-        ('z', "[z Own cancel]"),
-        ('o', "[o Release]"),
-        ('t', "[t Retry]"),
-        ('v', "[v Refresh]"),
-    ];
-    let mut x = area.x;
-    let mut y = area
-        .bottom()
-        .saturating_sub(action_height(area.width))
-        .max(area.y);
-    let mut regions = Vec::new();
-    for (key, label) in actions {
-        let width = u16::try_from(label.width())
-            .unwrap_or(u16::MAX)
-            .min(area.width);
-        if x.saturating_add(width) > area.right() {
-            x = area.x;
-            y = y.saturating_add(1);
-        }
-        if y >= area.bottom() {
-            break;
-        }
-        regions.push((key, label, Rect::new(x, y, width, 1)));
-        x = x.saturating_add(width + 1);
-    }
-    regions
-}
-fn segment_spans(
+pub(super) fn segment_spans(
     queue: &[&Reservation],
     presentation: &presentation::QueuePresentation,
     selected: Option<usize>,
@@ -714,7 +428,7 @@ fn segment_spans(
         })
         .collect()
 }
-fn participant_color(id: &ReservationId) -> Color {
+pub(super) fn participant_color(id: &ReservationId) -> Color {
     const COLORS: [Color; 6] = [
         Color::Cyan,
         Color::Magenta,

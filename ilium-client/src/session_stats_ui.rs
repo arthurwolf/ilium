@@ -2480,6 +2480,54 @@ mod tests {
     }
 
     #[test]
+    fn refreshing_keeps_the_previous_statistics_visible() {
+        let stats = sample_stats();
+        let load = LoadState::Loading {
+            done: 50,
+            total: 100,
+        };
+        let view = StatsView {
+            stats: Some(&stats),
+            load: &load,
+            supported: true,
+            has_session: true,
+            now_ms: 1_790_000_000_000,
+            animation_ms: 0,
+            scheme: ColorScheme::Dark,
+        };
+        let mut popover = StatsPopover::new(NodeId(1), true, Instant::now());
+        let mut terminal = Terminal::new(TestBackend::new(120, 44)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Position::new(5, 0),
+                    &mut popover,
+                    &view,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text = (0..44)
+            .map(|y| {
+                (0..120)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("$12.50"),
+            "retained totals remain visible: {text}"
+        );
+        assert!(
+            text.contains("reading 50%"),
+            "refresh progress remains visible: {text}"
+        );
+    }
+
+    #[test]
     fn hover_popover_has_no_close_control_and_says_how_to_pin() {
         let stats = sample_stats();
         let load = LoadState::Ready;

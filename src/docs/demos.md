@@ -40,9 +40,9 @@ Recorded demonstrations of Ilium, one per feature. Each demo is an animated GIF 
 
 ## Find the next agent that needs you
 
-![Real Claude and Codex sessions demonstrate the attention queue, with setup cuts and reading holds](../../assets/demos/27-attention-queue.gif)
+![Three real Claude sessions demonstrate the attention queue: two wait for an answer or approval and one has unread output; setup is cut](../../assets/demos/27-attention-queue.gif)
 
-The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording uses instant detection and real agent sessions in a fictional museum project. Setup and idle gaps are cut, with frames held for reading. Explained in [Attention queue](attention-queue.md).
+The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording was re-recorded on 2026-10-31 with three real Claude (Haiku) sessions in a fictional museum project and instant detection: one asks which gallery to open, one waits for approval to write a file, and one finished with unread output. Keyboard shortcuts `Ctrl+B i` (jump) and `Ctrl+B O` (overview) drive it. Blocked goals and background-agent waits are not shown, and Codex is absent because its usage limit was reached. The long setup (boot, folder-trust prompts) is cut, three reading holds and three captions were added, and the status bar shows an unrelated naming-worker error. Explained in [Attention queue](attention-queue.md).
 
 ## AI names agents and organizes the project tree
 
@@ -94,9 +94,11 @@ Smart Copy uses local inference to select and paste a code from real Codex outpu
 
 ## Queue prompts for an agent
 
-![Queue two prompts for a local Codex-shaped fixture; Ilium sends them in order after each turn. No model; output is synthetic.](../../assets/demos/13-prompt-queue.gif)
+![Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order.](../../assets/demos/13-prompt-queue.gif)
 
 Prompts queued for an agent are delivered one by one as each of its turns finishes. Explained in [Automation](automation.md).
+
+Disclosure: this is a current-build recording of a real Claude (Haiku) agent in an isolated lane; the agent's file output is real. The idle wait before the first prompt and part of the first turn's idle time are cut, and short reading holds are added, as shown by the loop clock. Names in the tree (`Exam University`, `Exam TA`) are staged. The readback that proves FIFO delivery (server log, Claude transcript and the driver key log: separate turns 2.75 s and 1.82 s after each previous turn ended, no key typed after the second Enqueue) was adjusted for this take to ignore the shell line that launches the agent, which the server log also records as a submitted prompt; the rest of its checks are unchanged. Earlier versions of this GIF used a synthetic Codex-shaped fixture.
 
 ## Get results from background tasks
 
@@ -210,7 +212,7 @@ Panes are restored from a snapshot and the agents continue from their resumed co
 
 ![Ilium creates agent/map-east-side; a local Codex-shaped fixture runs in that worktree, and a terminal shows the branch and file diff](../../assets/demos/25-worktree-agent.gif)
 
-The capture creates a linked Git worktree, then runs a documented local Codex-shaped fixture from its absolute path inside that worktree. It shows the branch and resulting file diff. Typing is shortened, and three editorial captions were added. The built-in provider launch is not intercepted or represented. Explained in [Worktrees](worktrees.md).
+The capture creates a linked Git worktree, then runs a documented local Codex-shaped fixture from its absolute path inside that worktree. It shows the branch and resulting file diff. Re-recorded on 2026-10-31 with the current build; the fixture finishes almost at once, so its working state is only visible for a moment. The worktree is created by typing `git worktree add` in an Ilium terminal, not through the native "In new worktree" dialog, because that dialog would start a real provider agent. Typing is shortened in three places, and three editorial captions were added. The built-in provider launch is not intercepted or represented. Explained in [Worktrees](worktrees.md).
 
 ## Convert a session between Claude and Codex
 
@@ -220,6 +222,6 @@ Real Claude and Codex sessions are converted in both directions and recall a fic
 
 ## Queue access to a shared resource
 
-![Two agents queue for a shared resource and release it in turn](../../assets/demos/28-resource-queue.gif)
+![Two projects queue for a shared resource and release it in turn](../../assets/demos/28-resource-queue.gif)
 
-Two real agents reserve an isolated demonstration resource: one waits, takes ownership after the first releases it, then releases it. The recording is cropped and pauses are shortened. Explained in [Resource queues](resource-queues.md).
+Two projects share an isolated demonstration resource through local fixture agents (no model or provider calls): one reserves it, the other queues, takes ownership after the first releases it, then releases it. The recording shows the full interface; long pauses are shortened and nothing else is edited. Explained in [Resource queues](resource-queues.md).

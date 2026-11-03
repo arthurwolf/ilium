@@ -182,21 +182,26 @@ fn one_row_native_footer_keeps_a_selected_segment_beside_the_queue_label() {
 
 #[test]
 fn action_hit_regions_are_bounded_disjoint_and_open_contextual_help() {
-    for (width, height) in [(40, 12), (80, 24), (120, 40)] {
+    for (width, height) in [(40, 30), (80, 40), (120, 50)] {
         let (mut app, _, _) = fixture();
         let area = Rect::new(3, 2, width, height);
         app.layout.pane_area = area;
-        let regions = action_regions(area);
-        assert_eq!(regions.len(), 16);
-        for (index, (_, label, rect)) in regions.iter().enumerate() {
+        let record = app
+            .resources
+            .record(&ResourceId::from("gpu"))
+            .unwrap()
+            .clone();
+        let panel = super::super::panel::layout(&app, &record, area);
+        assert_eq!(panel.buttons.len(), 16, "{width}x{height}");
+        for (index, button) in panel.buttons.iter().enumerate() {
+            let rect = button.rect;
             assert!(area.contains(ratatui::layout::Position::new(rect.x, rect.y)));
             assert!(rect.right() <= area.right() && rect.bottom() <= area.bottom());
-            assert_eq!(usize::from(rect.width), label.width());
-            for (_, _, other) in &regions[index + 1..] {
-                assert!(rect.intersection(*other).is_empty());
+            for other in &panel.buttons[index + 1..] {
+                assert!(rect.intersection(other.rect).is_empty());
             }
         }
-        let help = regions[0].2;
+        let help = panel.buttons[0].rect;
         assert!(handle_event(
             &mut app,
             &Event::Mouse(crossterm::event::MouseEvent {
@@ -217,6 +222,49 @@ fn action_hit_regions_are_bounded_disjoint_and_open_contextual_help() {
             RightPanelTarget::Resource { .. }
         ));
     }
+}
+
+#[test]
+fn hovering_a_button_records_it_and_disabled_buttons_explain_why() {
+    let (mut app, _, _) = fixture();
+    let area = Rect::new(0, 0, 100, 50);
+    app.layout.pane_area = area;
+    let record = app
+        .resources
+        .record(&ResourceId::from("gpu"))
+        .unwrap()
+        .clone();
+    let panel = super::super::panel::layout(&app, &record, area);
+    let confirm = panel
+        .buttons
+        .iter()
+        .find(|button| button.action == super::super::ResourceAction::ConfirmSafe)
+        .unwrap();
+    assert!(confirm.enabled.is_err());
+    let moved = Event::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: confirm.rect.x,
+        row: confirm.rect.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert!(handle_event(&mut app, &moved));
+    assert_eq!(
+        app.resources.hovered_action.map(|(action, _)| action),
+        Some(super::super::ResourceAction::ConfirmSafe)
+    );
+    let click = Event::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        ..match moved {
+            Event::Mouse(mouse) => mouse,
+            _ => unreachable!(),
+        }
+    });
+    assert!(handle_event(&mut app, &click));
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("No safety check is pending.")
+    );
+    assert!(app.resources.dialog.is_none());
 }
 
 #[test]
@@ -242,6 +290,10 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     let before = app.pane_viewports();
     let tree = serde_json::to_vec(&app.tree).unwrap();
     assert_eq!(before.len(), 2);
+    // A waiting pane deliberately gains a wait footer while the progress monitor
+    // is on; this test pins that the grouping setting itself never moves geometry.
+    app.ui_settings.progress_monitor_enabled = false;
+    let before = app.pane_viewports();
     app.resources
         .waits
         .insert(first, ReservationId::from("reservation"));
@@ -386,4 +438,114 @@ fn untrusted_terminal_text_is_sanitized_without_mutating_authoritative_utf8() {
     );
     let lines = super::super::sanitized_lines(vec![Line::from(hostile.to_owned())]);
     assert!(!lines[0].spans[0].content.chars().any(char::is_control));
+}
+
+#[test]
+fn clicking_a_queue_row_selects_that_request() {
+    let (mut app, _, _) = fixture();
+    let area = Rect::new(3, 2, 120, 50);
+    app.layout.pane_area = area;
+    let record = app
+        .resources
+        .record(&ResourceId::from("gpu"))
+        .unwrap()
+        .clone();
+    let ordered_ids: Vec<_> = super::super::tree::ordered(&record)
+        .into_iter()
+        .map(|claim| claim.id.clone())
+        .collect();
+    assert!(ordered_ids.len() >= 2);
+    let panel = super::super::panel::layout(&app, &record, area);
+    for (index, expected) in ordered_ids.iter().enumerate() {
+        let row = panel.queue_row(index).expect("queue row is visible");
+        assert!(handle_event(
+            &mut app,
+            &Event::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: row.x + 1,
+                row: row.y,
+                modifiers: KeyModifiers::NONE,
+            })
+        ));
+        assert_eq!(app.resources.selected_reservation.as_ref(), Some(expected));
+    }
+}
+
+#[test]
+fn removing_the_resource_closes_its_control_panel() {
+    let (mut app, _, _) = fixture();
+    assert!(matches!(
+        app.right_panel_target,
+        crate::app::RightPanelTarget::Resource { .. }
+    ));
+    let mut catalog = app.resources.catalog.clone().unwrap();
+    catalog.revision += 1;
+    catalog.resources.remove(&ResourceId::from("gpu"));
+    catalog.links.clear();
+    let clock = app.resources.clock.clone().unwrap();
+    assert!(app.receive_resource_catalog(catalog, clock, Vec::new(), Vec::new(), 1));
+    assert!(matches!(
+        app.right_panel_target,
+        crate::app::RightPanelTarget::Empty
+    ));
+}
+
+#[test]
+fn panel_breathing_grows_with_space_and_stays_dense_when_small() {
+    use super::super::panel::{layout, Breathing};
+    use ratatui::{layout::Position, widgets::Block};
+    let (app, _, _) = fixture();
+    let record = app
+        .resources
+        .record(&ResourceId::from("gpu"))
+        .unwrap()
+        .clone();
+    let small = Rect::new(0, 0, 60, 30);
+    let medium = Rect::new(0, 0, 100, 40);
+    let large = Rect::new(0, 0, 140, 56);
+    let inner = |area: Rect| Block::bordered().inner(area);
+    assert_eq!(
+        Breathing::for_inner(inner(small)),
+        Breathing {
+            side: 0,
+            top: 0,
+            gap: 0
+        }
+    );
+    let medium_air = Breathing::for_inner(inner(medium));
+    let large_air = Breathing::for_inner(inner(large));
+    assert!(medium_air.side > 0 && medium_air.side < large_air.side);
+    assert_eq!(large_air.side, 4);
+    assert_eq!((large_air.top, large_air.gap), (1, 1));
+    for area in [small, medium, large] {
+        let panel = layout(&app, &record, area);
+        assert_eq!(panel.breathing, Breathing::for_inner(inner(area)));
+        let sections = [
+            Some(panel.header),
+            panel.warning,
+            Some(panel.cards),
+            Some(panel.queue),
+            panel.trend,
+            Some(panel.detail),
+            panel.message,
+        ]
+        .into_iter()
+        .flatten();
+        for section in sections {
+            assert!(
+                inner(area).contains(Position::new(section.x, section.y)),
+                "{area:?}"
+            );
+            assert!(section.right() <= inner(area).right());
+        }
+        for button in &panel.buttons {
+            assert!(button.rect.x >= inner(area).x + panel.breathing.side);
+            assert!(button.rect.right() <= inner(area).right() - panel.breathing.side);
+        }
+    }
+    let large_panel = layout(&app, &record, large);
+    let small_panel = layout(&app, &record, small);
+    assert!(large_panel.header.x > inner(large).x);
+    assert_eq!(small_panel.header.x, inner(small).x);
+    assert!(large_panel.cards.height > 0 && large_panel.detail.height > 0);
 }

@@ -58,6 +58,7 @@ mod snapshot_state;
 mod sound_settings_storage;
 mod sounds;
 mod startup_progress;
+mod status_screen_watch;
 mod state;
 mod task_guard;
 mod text_trigger_config;

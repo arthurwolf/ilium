@@ -32,7 +32,6 @@ pub fn session_for_process(
     let record: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     if record.get("pid")?.as_u64()? != u64::from(process_id)
         || record.get("procStart")?.as_str()?.parse::<u64>().ok()? != process.birth_start_ticks()?
-        || record.get("version")?.as_str()? != "2.1.312"
         || record.get("kind")?.as_str()? != "interactive"
         || record.get("entrypoint")?.as_str()? != "cli"
     {
@@ -208,6 +207,14 @@ mod tests {
             None
         );
         altered["messagingSocketPath"] = serde_json::json!(socket);
+        // Claude Code updates must not break the binding: the process, start
+        // ticks, project and socket ownership already identify the record.
+        altered["version"] = serde_json::json!("9.9.999");
+        std::fs::write(&record, serde_json::to_vec(&altered).unwrap()).unwrap();
+        assert_eq!(
+            session_for_process(process_id, &process, config.path(), &project).as_deref(),
+            Some(first)
+        );
         altered["sessionId"] = serde_json::json!("not-a-session-id");
         std::fs::write(&record, serde_json::to_vec(&altered).unwrap()).unwrap();
         assert_eq!(
