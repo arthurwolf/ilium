@@ -701,3 +701,43 @@
   url: /pages/reference-widget-input-map/
 - title: "Capability: settings.write-kernel:<kernel-tab-id>"
   url: /pages/capability-settings-write-kernel/
+- title: "Install flag matrix"
+  url: /pages/install-flag-matrix/
+- title: "Worked examples for install, update and rollback"
+  url: /pages/install-worked-examples/
+- title: "Publisher workflow and version states"
+  url: /pages/publish-publisher-workflow/
+- title: "Yank, deprecate and takedown"
+  url: /pages/publish-yank-deprecate-takedown/
+- title: "Mirror runbook"
+  url: /pages/publish-mirror-runbook/
+- title: "Registry operator guide"
+  url: /pages/publish-registry-operator-guide/
+- title: "Containing a malicious plugin"
+  url: /pages/security-containment-states/
+- title: "Load and refusal decisions across host versions"
+  url: /pages/compat-load-decision-table/
+- title: "Deprecation timeline and the window"
+  url: /pages/compat-deprecation-timeline/
+- title: "Host upgrade runbook"
+  url: /pages/compat-host-upgrade-runbook/
+- title: "Diagnostics and logs for operators"
+  url: /pages/ops-diagnostics-and-logs/
+- title: "Telemetry consent for operators"
+  url: /pages/ops-telemetry-consent/
+- title: "Crash isolation, health checks and the kill switch"
+  url: /pages/ops-crash-isolation-health-and-kill-switch/
+- title: "Sizing memory and CPU"
+  url: /pages/perf-sizing-memory-and-cpu/
+- title: "Backpressure and retries"
+  url: /pages/perf-backpressure-and-retries/
+- title: "Benchmark workflow"
+  url: /pages/perf-benchmark-workflow/
+- title: "Keyboard operation and focus in plugin views"
+  url: /pages/a11y-keyboard-and-focus/
+- title: "Screen reader and localized text in plugin views"
+  url: /pages/a11y-screen-reader-and-localized-text/
+- title: "Author onboarding"
+  url: /pages/authoring-onboarding/
+- title: "Requirements for production operation"
+  url: /pages/reference-requirements-production/
