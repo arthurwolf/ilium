@@ -8,7 +8,13 @@
 
 ## Quick start
 
-The commands and download links below require a published release. If release downloads are unavailable, [build from source](src/docs/building-from-source.md).
+Linux x86_64 preview: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1) provides six packages and SHA256SUMS. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+
+**Not yet available for this preview:** hosted installers, Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
+
+Plugin code is present for future integration and is not yet available for use.
+
+**Hosted installers are not yet available for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.1.
 
 Linux and macOS:
 
@@ -22,23 +28,23 @@ Windows PowerShell:
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-For a Windows installer instead, choose the per-user [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) or [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi); the [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) is available for manual setup.
+Windows downloads are **not yet available**: per-user setup `.exe`, `.msi`, and ZIP.
 
-Direct release downloads (one package per system):
+Direct downloads (Linux x86_64 preview; other systems not yet available):
 
-| System | Downloads |
+| System | Downloads / availability |
 | --- | --- |
-| Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.flatpak) |
-| Linux ARM64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak) |
-| macOS Apple Silicon | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.dmg) |
-| macOS Intel | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.dmg) |
-| Windows x86_64 | [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) |
+| Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) |
+| Linux ARM64 | tar.gz, deb, rpm, AppImage, Snap, Flatpak **(coming soon; not yet available)** |
+| macOS Apple Silicon | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| macOS Intel | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| Windows x86_64 | setup `.exe`, MSI, ZIP **(coming soon; not yet available)** |
 
-Verify downloads against [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS). Details: [Installation](src/docs/installation.md).
+Verify packages using the preview checksum file [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS). Details: [Installation](src/docs/installation.md).
 
-After a qualified tag release completes, its [GitHub Packages release bundle](https://github.com/users/arthurwolf/packages/container/package/ilium-release) contains the same published assets in an OCI artifact. With [ORAS](https://oras.land/docs/installation/), run `oras pull ghcr.io/arthurwolf/ilium-release:VERSION --output ilium-release`, replacing `VERSION` with the release tag (for example, `v0.1.1`). The bundle includes the installers and five native archives; use the system installer above to install Ilium. The release's `SHA256SUMS` covers the native archives, while the published release asset digests cover every bundled file.
+The GitHub Packages release bundle is **not yet available**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
 
-Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. Re-run the installer to upgrade.
+Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package; the hosted installer is not available.
 
 No Rust toolchain is needed for releases. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately. Linux is the primary platform; macOS and Windows are implemented with different test coverage.
 
