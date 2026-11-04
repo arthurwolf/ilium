@@ -92,6 +92,8 @@ A trust boundary is a line across which data passes from a more trusted to a les
 
 **[SEC-003]** The kernel and T1 plugins share one address space. The platform therefore treats T1 code as trusted code that the project builds, signs and tests. A flaw in T1 code is a vulnerability in Ilium, not a plugin attack.
 
+- **[SEC-168]** The threat model MUST state, for each boundary B1 to B8, the WIT import and export interfaces whose data crosses it, and a CI check MUST fail when an interface of `ilium:plugin@0.1.0` is assigned to no boundary. (proposed, owner to confirm).
+
 ## Attacker classes
 
 Each class below is a party with a goal and a way in. The mitigation table that follows gives the defence and the residual risk for each.
@@ -255,6 +257,9 @@ Read grants of normal risk expose private data: `terminal.read-screen`, `termina
 **[SEC-005]** The admin policy MAY forbid the combination for chosen plugins with `[grants] deny_combinations`, see [Admin policy](/pages/reference-admin-policy/).
 
 **[SEC-006]** Data-read and egress grant lists are fixed by the contract. A grant that moves between lists is a contract change.
+
+- **[SEC-160]** The data-read list of SEC-004 MUST also contain every normal-risk grant that delivers user content to a plugin: `editor.read`, `terminal.output-filter`, `fs.read:<scope>` for every normal-risk scope other than `package`, `data` and `cache`, and `fs.watch:<scope>` for the same scopes. The review dialog MUST show the toxic combination row for each of them paired with any egress grant. (proposed, owner to confirm).
+- **[SEC-161]** The egress list of SEC-004 MUST also contain `open-external` (a URL query string carries data to a remote server), `location.geocode` (place names leave the machine), `inference.embed` and `http-api.route` (data served to other local processes). The toxic combination row MUST trigger for each of them paired with a data-read grant. (proposed, owner to confirm).
 
 Inter-plugin channels bypass grants too. Plugin B can receive scrollback from plugin A through `messages.peer`, a service or a topic, without holding a read grant. The platform's decisions on this are in [SEC-007] below and in [Extension security](/pages/reference-extension-security/).
 

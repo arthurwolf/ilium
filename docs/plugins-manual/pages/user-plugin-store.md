@@ -51,6 +51,8 @@ Open a row to see the description, the requested grants, the dependencies, the s
 | [PKG-536] | The detail view MUST show the publisher id and key status: `trusted`, `unknown` or `revoked`. |
 | [PKG-537] | A plugin with a revoked key or a blocked id MUST NOT have an Install button. It shows the reason. |
 
+- **[USR-018]** The store detail view and `ilium plugin info <plugin-id>` MUST show the plugin's `[privacy]` declaration (`collects`, `retention_days`, `telemetry_hosts`, `contact`) before the install action, and MUST show 'This plugin does not describe what it collects' when the table is absent and the plugin requests an `http:` grant. (proposed, owner to confirm)
+
 ## Install, update and remove
 
 Press Install, or run `ilium plugin install com.example.git-tools`. The review dialog opens. The store never installs without it. Update with the Update button or `ilium plugin update <id>`. Details: [Install and update](/pages/reference-install-and-update/).
@@ -87,3 +89,4 @@ The store shows cached results with their age ("Updated 3 days ago"). Install of
 
 - [USR-347] Every error code the user can see in a notice or CLI message MUST have a catalogue entry with a one-sentence cause and a one-sentence next step, and `ilium plugin explain <code>` MUST print them and exit 0, or exit 2 for an unknown code. Test: iterate the error code table and assert that every user-visible code has both sentences; run `ilium plugin explain` on one known code and one unknown code and assert exit 0 and exit 2.
 - [USR-349] A plugin's Details page MUST show its `contact` and `security_contact` from the manifest as text only (never opened without the link-consent prompt of USR-083), and `ilium plugin report <id>` MUST print them with the version and key fingerprint and send nothing. Test: open the Details page of a plugin that has both contacts and assert that the text appears with no link opened; run `ilium plugin report <id>` with the network blocked and assert that it prints the contacts, version and fingerprint and makes no request.
+- **[USR-006]** For a plugin installed from a registry, `ilium plugin report <id>` MUST also print the registry URL and the `abuse_contact` of that registry's cached `policy.json` after the manifest contacts of [USR-349], MUST print `registry policy unavailable` when no cached `policy.json` exists, and MUST still send nothing. (proposed, owner to confirm)

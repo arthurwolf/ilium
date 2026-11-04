@@ -38,6 +38,8 @@ A published version is never deleted by its publisher ([PKG-399](/pages/referenc
 **[PUB-012]** `deprecate` MUST NOT change installed copies or block any install. It MUST show the message and the successor id when the successor is in the registry. Test: deprecate a plugin with a successor, install it, and check that the install succeeds and prints the message once.
 **[PUB-013]** `unlist` MUST remove the plugin from `index.json` and from search, and MUST keep `plugins/<id>.json`, every blob and the lock resolution, as [PKG-398](/pages/reference-registry/#publishing) requires. Test: unlist a plugin, then run `ilium plugin update` on an installed copy and check that the update still succeeds.
 
+- **[PUB-047]** The registry MUST refuse a yank reason, a deprecate message or a takedown reason that contains a control character other than line feed, with `registry.reason-invalid`; a client MUST render these texts as plain text, MUST NOT interpret them as links or terminal escapes, and MUST truncate them at 500 Unicode scalar values on screen (proposed, owner to confirm).
+
 ### Takedown
 
 A takedown is the operator's removal. It is not a publisher action. The operator adds the version or the id to `blocked_ids` in `revocations.json`, removes the blob, and records the reason and the time ([PKG-403](/pages/reference-registry/#policy)). Clients apply it at the next metadata refresh.
@@ -45,6 +47,8 @@ A takedown is the operator's removal. It is not a publisher action. The operator
 **[PUB-014]** A takedown MUST record the reason, the time and the rule of [Content policy](/pages/reference-registry/#policy) that applies, in `revocations.json` and in the transparency log. The reason shown to users MUST be the text the operator publishes in `policy.json`, not a private note.
 **[PUB-015]** A takedown MUST NOT delete the signed version entry. It removes the blob and marks the entry as blocked, so the hash remains known and a client can explain why an installed copy is disabled.
 **[PUB-016]** After a takedown, every maintainer of the publisher id MUST receive a notice ([SEC-723](/pages/reference-trust-and-supply-chain/)), and the notice MUST include the appeal address from `policy.json`.
+
+- **[PUB-048]** After a takedown, the registry MUST send a notice to every maintainer of every plugin whose latest release has a non-optional `requires.plugins` range that only the taken-down version satisfies, and MUST record the count of such dependents in the takedown's transparency log entry (proposed, owner to confirm).
 
 ### Worked example: a security yank
 

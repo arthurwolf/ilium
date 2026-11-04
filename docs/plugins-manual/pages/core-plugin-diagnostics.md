@@ -629,6 +629,10 @@ A support request needs several facts at once. The bundle gathers them into one 
 - [USR-225] Writing a bundle MUST NOT change the plugin's state, grants, or health counters. A failed write MUST leave no partial file at `<file>`.
 - [USR-226] In the Diagnostics screen the "Build support bundle" button MUST show the file list and the size before writing, and its default button MUST be Cancel. The write follows the same rules as the command.
 
+- **[USR-023]** Support-bundle staging files MUST be deleted when the bundle is written or the command fails, and a staging folder older than 1 hour, or whose process is gone, MUST be deleted at the next server start, so that no copy of logs or crash records outlives the bundle. (proposed, owner to confirm)
+- **[USR-049]** Support-bundle staging files MUST be written only under `<state>/bundles/staging/<random>/` with folder mode 0700 and file mode 0600, MUST be deleted when the command exits, whether it succeeded, failed or ran with `--dry-run`, and any staging folder left by an earlier run MUST be deleted at the next server start. (proposed, owner to confirm)
+- **[USR-055]** `support-bundle` MUST write the archive to `<file>.partial` with mode 0600, MUST rename it to `<file>` only after the zip is complete and its SHA-256 is computed, MUST delete `<file>.partial` on any failure, and the final file MUST keep mode 0600. (proposed, owner to confirm)
+
 #### Crash records
 
 A helper that dies leaves a record, so that support can tell a crash from a deadline breach or a refusal.
@@ -714,9 +718,14 @@ Log sinks receive redacted records ([SEC-249]); see [Secrets](/pages/reference-s
 
 **[USR-335]** The default bundle name MUST be `ilium-support-<id>-<YYYYMMDD-HHmmss>.zip`, and `summary.txt` MUST list on separate `key: value` lines Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines, and a SHA-256 of the other three files.
 
+- **[USR-057]** The `<YYYYMMDD-HHmmss>` part of a default bundle name ([USR-335]) MUST be the UTC time at which the build started, and `summary.txt` MUST carry the same instant as `built: <RFC 3339 UTC>`. (proposed, owner to confirm)
+
 **[USR-336]** `support-bundle` MUST work for a plugin in state `failed`, `blocked`, `incompatible` or missing helper, MUST build in at most 5 s (proposed, owner to confirm) for a 4 MiB log, and MUST exit with the error `bundle.plugin-unknown` if the id is not installed.
 
 **[USR-337]** `ilium plugin doctor` MUST check, and print one line each with `ok`, `warn` or `fail`, the state folders and their permissions, the policy file, the trust store, `installed.json` readability, free disk space (warn below 100 MiB (proposed, owner to confirm)), host API range, and the chosen language, and MUST exit 0 only when no line is `fail`.
+
+- **[USR-058]** `ilium plugin doctor` ([USR-337]) MUST include one line `audit-chain` that recomputes the chain of the active `audit.jsonl` only, prints `fail` when a complete record has a wrong `seq` or `prev_hash`, `warn` when the only finding is a `torn-tail` line or an `audit-reset` record, and `ok` otherwise, and the check MUST finish within 5 s (proposed, owner to confirm) for a 64 MiB file. (proposed, owner to confirm)
+- **[USR-063]** Every `doctor-check` record with status `warn` or `fail` MUST carry a non-empty `fix` that names the command to run or the file to change, in plain words, and the text form MUST print it on the following line as `fix: <text>`; a `fix` MUST NOT be empty, a code alone, or a link alone. (proposed, owner to confirm)
 
 ## Production additions: support bundle contract
 
@@ -785,6 +794,7 @@ The per-plugin entries `log.txt` and `stats.txt` are not part of the whole-insta
 - The archive MUST NOT contain the trust store, the private or public key files in it, or the lock file contents. `inventory.json` names the signing key id of a plugin and nothing more.
 - The archive MUST NOT contain a manifest, because [USR-105] applies: the grant list appears in `summary.txt` for a per-plugin bundle and in `inventory.json` here, and nowhere else.
 - Environment variables whose names contain `KEY`, `TOKEN` or `SECRET` show their name and `[redacted]` as value ([DEV-941] uses the same rule).
+- **[USR-056]** No entry of a per-plugin or whole-install support bundle MUST contain any line copied from the audit log, the grant store, the consent store, the trust store, the project trust store, the secrets file, the pane journal, a session snapshot under `.ilium/sessions/`, or the settings extras of `installed.json`; a value from any of those MUST appear in a bundle only as a count or as the grant list of `summary.txt` and `inventory.json`. (proposed, owner to confirm)
 
 ### Size cap and trimming
 

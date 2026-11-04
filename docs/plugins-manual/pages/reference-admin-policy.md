@@ -31,6 +31,10 @@ The broker rule in the design is: a plugin may do something only if the tier cei
 
 **[SEC-182]** The system file MUST be owned by root (or by the Administrators group on Windows) and not writable by group or others. If it is not, it is **ignored** and the audit log records `policy-violation` with reason `policy-file-writable`. Because a policy that is silently ignored would be a security loss, the server also shows a persistent notice `Admin policy ignored: file is writable by non-administrators`.
 
+- **[SEC-069]** The server MUST open the system policy file and the system trust store without following a symbolic link or reparse point at the system path, and MUST apply the owner and mode check of [SEC-182] to the system folder as well as to the file; a link, or a folder writable by group or others, MUST make the file ignored with `policy-violation` reason `policy-file-writable` and the persistent notice of [SEC-182] (proposed, owner to confirm).
+
+- **[SEC-088]** No environment variable (`ILIUM_CONFIG_DIR`, `ILIUM_TRUST_STORE`, `XDG_*`, `HOME`) and no command-line flag MUST change the path of the system policy file of [SEC-180], of the system trust store of [PKG-222] or of the system package directory; `ilium plugin policy show` MUST report the platform path of each system file whatever the environment holds (proposed, owner to confirm).
+
 ## Schema
 
 All keys are optional. A missing section means no restriction from that section. Types: `string`, `[string]` (list), `bool`, `int`.
@@ -148,13 +152,19 @@ keep_days = 365
 
 **[SEC-187]** A malformed policy file (TOML error, unknown key, wrong type, `version` not 1) fails **closed** for third parties: T2 and T3 plugins refuse to load with `policy.invalid`, and T1 plugins run normally. The server shows `Admin policy is invalid: <line and message>` and keeps running. A policy file that is missing is not an error (no policy). An unreadable one (permission error) counts as malformed.
 
+- **[SEC-092]** The policy parser MUST accept CRLF line endings and one leading UTF-8 byte-order mark in a policy file, because management tools on Windows write both, and MUST treat any other encoding or a byte-order mark elsewhere as malformed under [SEC-187] (proposed, owner to confirm).
+
 **[SEC-188]** The policy is read at server start only. A change takes effect at the next start. `ilium plugin policy reload` is not part of version 0.1.0.
 
 **[SEC-189]** Forced states. `plugins.manage` and the Plugins screen MUST NOT enable a plugin in `force_disabled` or disable one in `force_enabled`. The call returns `not-permitted` with reason `policy`, and the screen shows a lock mark. A `force_enabled` plugin that is not installed is reported in `policy show` as `missing` and in the audit log; the server does not install it.
 
 **[SEC-190]** Locked settings. A key in `settings.locked` is shown with a lock mark and its policy value. A write by the user, by `ilium config set`, or by a plugin with `settings.write-all` is refused with `settings.locked`. A plugin reads the policy value.
 
+- **[SEC-093]** `settings.locked` MUST accept `plugins.registry.urls`, `plugins.registry.root` and `plugins.registry.offline`; when one is locked, `ilium plugin registry add`, `ilium plugin registry remove` and the store's registry editor MUST be refused with `settings.locked`, and every user's client MUST use the policy's registry list and root keys as [SEC-190] prescribes (proposed, owner to confirm).
+
 **[SEC-191]** `ilium plugin policy show` prints the effective policy as JSONL: one `policy-source` line per file read (path, owner, hash, used or ignored), one `policy` line with the merged values, and one `summary` line.
+
+- **[SEC-091]** `ilium plugin policy show` MUST exit 0 only when every system policy file that exists is `used` and valid; it MUST exit 1 when a system file is ignored ([SEC-182]) or malformed ([SEC-187]), while still printing the JSONL lines, so that a management run can gate on the exit status (proposed, owner to confirm).
 
 **[SEC-192]** `[projects] allow_project_values = false` makes every plugin value in a project folder ignored, regardless of project trust ([SEC-310]).
 

@@ -50,6 +50,7 @@ Y means the state is kept. N means it is lost. R means the plugin gets it back o
 - [LIF-152] Restore bytes over 1 MiB MUST be dropped, and `activation.restored` MUST be absent. Test: return 1 MiB plus 1 byte.
 - [LIF-153] Client restore bytes MUST be stored per plugin id, last writer wins, and MUST be passed to the next client activation of that plugin. Test: detach two clients with different bytes and attach a third.
 - [LIF-154] A failed snapshot write MUST NOT stop the server. The host MUST log `snapshot.write-failed`, keep the previous snapshot file, and retry at the next snapshot. Test: make the snapshot folder read-only.
+- **[LIF-188]** When the connection to the server drops without a shutdown message, the client MUST deactivate every client and scene instance with the reason `shutdown`, every pending request of those instances MUST complete as `cancelled`, and the restore bytes they return MUST be sent to the server of the next successful attach, where they are stored under LIF-153 (proposed, owner to confirm).
 
 ### Node metadata
 
@@ -80,6 +81,8 @@ stop:  deactivate(shutdown) -> drain_session_work
 | The snapshot file is corrupt at start | The file is moved aside as `<name>.broken-<timestamp>`, the session starts with one empty shell pane, and the kernel logs it. Plugin state in storage is not affected. |
 | Two servers share a global bucket | See the lock rule in [Data migration](/pages/guide-data-migration/). |
 | A plugin writes during `deactivate` | The write is kept if it finishes within the deactivate deadline. |
+
+- **[LIF-196]** When the session snapshot is corrupt at start, the host MUST first try the previous snapshot kept under HST-691. If it is readable, the session MUST restore from it and the host MUST log `snapshot.restored-previous` with both file names. Only when no readable previous snapshot exists MUST the session start with one empty shell pane (proposed, owner to confirm).
 
 ### Clock changes, suspend and resume
 

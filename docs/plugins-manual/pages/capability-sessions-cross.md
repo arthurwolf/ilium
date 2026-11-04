@@ -55,6 +55,8 @@ High risk and server-side only. A bundled plugin still needs the explicit grant,
 | `sessions.send` | function | `send(cross-request { session, command, arguments-json }) -> result<request-id, plugin-error>`. |
 | `sessions.take-reply` | function | Returns `option<string>` once the target replied. |
 
+- **[SEC-164]** The `sessions.list-live` function MUST return the `project` path only for sessions in which the calling plugin is installed and enabled; other live sessions MUST be listed with their session id and name but an empty `project` field. (proposed, owner to confirm)
+
 See the host interface list in [Commands](/pages/api-commands/) and [Messages and topics](/pages/api-messages-and-topics/) for same-session messaging.
 
 ### Manifest

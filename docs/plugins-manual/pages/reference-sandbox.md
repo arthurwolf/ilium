@@ -74,6 +74,10 @@ Every row is a MUST. A helper that cannot be started with all of them is not sta
 | [SEC-028] | All file descriptors except the dispatcher channel and stdio on `/dev/null` are closed before the Wasmtime engine starts (close-range with no exceptions). The helper calls `setsid` and has no controlling terminal. Because the helper has no controlling terminal and cannot open the PTY master (it is not inherited), terminal injection through `TIOCSTI` and `TIOCLINUX` is impossible. The seccomp filter also denies those ioctl numbers. | Fixture enumerates `/proc/self/fd`; only fds 0 to 2 and the channel remain. `ioctl(0, TIOCSTI)` fails. |
 | [SEC-029] | A cgroup v2 leaf is created per helper with: `memory.max` = the sum of the hosted instances' `memory_mib` plus 32 MiB overhead; `pids.max` = 64 plus 8 per allowed child; `cpu.weight` = 10 (low priority); `cpu.max` = the manifest `cpu_ms_per_s` quota expressed as a period. A memory kill is reported as a `trap.memory` and counts as a failure. | Fixture allocates past the limit; helper is killed; the log has the code. |
 
+- **[SEC-018]** The helper MUST set its own `oom_score_adj` to 500 before the Wasmtime engine starts and MUST NOT be able to lower it afterwards, and the session server MUST leave its own `oom_score_adj` unchanged, so that the kernel's global out-of-memory killer selects a plugin helper before the session server or the client (proposed, owner to confirm).
+
+- **[SEC-019]** The helper cgroup leaf MUST set `memory.swap.max` to 0 so that the helper's `memory.max` is enforced in RAM and plugin memory never reaches swap; when the swap controller is not delegated the host MUST include `swap` in the controller list of the `sandbox-degraded` audit line and MUST continue with the memory limit alone (proposed, owner to confirm).
+
 ### The seccomp allowlist
 
 **[SEC-067]** The filter is an allowlist of the system calls that Wasmtime, the allocator and the dispatcher channel need. Everything else returns `EPERM`; no call kills the helper. The implementation MUST publish the list as a generated file with the release so tests can compare. These calls are always denied, and the fixture suite calls each of them:
@@ -91,6 +95,14 @@ Every row is a MUST. A helper that cannot be started with all of them is not sta
 ### Limits when cgroup delegation is missing
 
 **[SEC-065]** If cgroup v2 is available but the user has no delegated controller (`memory`, `pids`, `cpu`), the host MUST enforce the same limits inside the helper with `setrlimit` (`RLIMIT_AS`, `RLIMIT_NPROC`, `RLIMIT_CPU`) and a watchdog in the server that samples the helper's RSS once a second. The audit log records `sandbox-degraded` with the controller list once per start. If the controllers needed for `memory.max` and `pids.max` are both missing and `setrlimit` cannot bound them, the helper is not started ([SEC-055]).
+
+- **[SEC-036]** In the `setrlimit` fallback of SEC-065 the server watchdog MUST terminate the helper with SIGKILL when two consecutive one-second RSS samples exceed the helper's `memory.max` equivalent (the instance sum plus 32 MiB), MUST report the kill as `trap.memory`, count one failure, and MUST log one line with the sampled RSS and the limit; a single sample over the limit MUST NOT kill the helper (proposed, owner to confirm).
+
+- **[SEC-037]** The fallback `RLIMIT_AS` value MUST equal the helper's `memory.max` equivalent plus the engine's fixed virtual reservations: the guard region and static reservation of SEC-053 and the platform table for each hosted instance, `max_wasm_stack` and `async_stack_size` of HST-059, and a runtime allowance of 64 MiB; a workspace test MUST instantiate a plugin at the T2 ceiling of 128 MiB and run one `memory.grow` to that ceiling under exactly that limit (proposed, owner to confirm).
+
+- **[SEC-038]** Because `RLIMIT_NPROC` counts every process of the user and not only the helper's children, the fallback of SEC-065 MUST compute it at each helper start as the user's current process count plus the helper's `pids.max` equivalent (64 plus 8 per allowed child), MUST NOT set it below the current count, and MUST log `sandbox-degraded` with `nproc` when the count cannot be read (proposed, owner to confirm).
+
+- **[SEC-047]** Because `RLIMIT_CPU` is cumulative over the life of the process, the fallback of SEC-065 MUST set its soft value to the `ilium-execution` refill of the hosted sides over 24 hours (500 ms per second per side, 43,200 s for one side) and its hard value 10 s above the soft value; the helper MUST handle `SIGXCPU` by exiting with the exit code reserved for `helper.cpu-limit`, and the host MUST treat that exit as one failure of class `trap.deadline` and apply the restart rule (proposed, owner to confirm).
 
 ## Dispatcher protocol trust
 
@@ -218,6 +230,8 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 **[SEC-030]** Every row in this table MUST have the mitigation implemented. A feature added to the contract later MUST add a row before release.
 
+- **[SEC-166]** The mitigation table of SEC-030 MUST contain one row for every high-risk grant in the capability table and one row for every host import interface of `ilium:plugin@0.1.0` (a row may state class `none` with the reason), and a CI check MUST fail when a grant or interface is missing from the table (proposed, owner to confirm).
+
 ### Process execution rules
 
 **[SEC-031]** `process.run` and `process.spawn` need a grant for the exact program. A bare name such as `git` is resolved against the fixed system `PATH` `/usr/bin:/bin` (directories `/usr/bin` and `/bin`). It is never resolved against the plugin's own environment or against any writable scope.
@@ -232,6 +246,10 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 **[SEC-066]** A spawn that leaves the confinement (`panes.create` command, `panes.lifecycle` restart) is written to the audit log with the full argv, with secret values replaced by `<redacted>`.
 
+- **[SEC-039]** A fork or clone refused by the helper's `pids.max` (or by `RLIMIT_NPROC` in the fallback) MUST be returned to the plugin as `busy` with reason `process-limit` and `retry-after-ms` 1,000, MUST be logged at most once per minute per plugin, MUST NOT count as a failure and MUST NOT kill the helper (proposed, owner to confirm).
+
+- **[SEC-048]** Each `process.run` or `process.spawn` child MUST run in its own cgroup leaf below the helper's leaf (below a per-plugin leaf for T1) with `memory.max` equal to `process_memory_mib` (default 256, ceiling 1,024 for T1 and 256 for T2 and T3), `pids.max` 8 and `memory.swap.max` 0, so that an out-of-memory kill of a child ends that child alone with `child-exited` signal 9 and `failed(quota-exceeded)` and MUST NOT kill the helper or count a plugin failure; where no controller is delegated the child MUST get `RLIMIT_AS` of the same size (proposed, owner to confirm).
+
 ### Pane commands
 
 **[SEC-040]** `create-pane` with a `command` from a T2 or T3 plugin needs the H grant `panes.create-command:<program>`. `panes.create` itself stays normal risk and allows only a shell pane in a cwd below a scope the plugin may read. The pane process starts unconfined, with the user's privileges, so the kernel draws a confirmation the first time each program is started: `Notes Panel wants to run git in a new pane.` and the full argv. The answer is remembered per plugin and program as a consent. A command whose program matches no `panes.create-command` grant completes `refused(not-permitted)` with reason `not-granted` (`declined` when the grant was requested but unchecked). A command-less `create-pane` needs only `panes.create`. The install fails with `manifest.grant-dependency` when the manifest lists `panes.create-command:<program>` without `panes.create` in the same side. PATH is resolved as in [SEC-031]. T1 plugins follow the same rule: the grant is H and is asked at first activation.
@@ -239,6 +257,8 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 **[SEC-041]** `panes.lifecycle` restart with a new command uses the same grant and the same confirmation.
 
 **[SEC-042]** `agent.signatures` rules: the `resume` argv program must equal one of the signature's `process_names` or match a `panes.create-command:<program>` grant of the same plugin, otherwise the resume is not offered. `{session}` is substituted as exactly one argv element, never through a shell, and it is validated against `[A-Za-z0-9._:-]{1,128}`; a session id outside it makes the resume unavailable. The resume runs only on an explicit user action, and the confirmation shows the full command the first time. `actions.keys` are delivered only when the user or a plugin that holds `agent.control` triggers them. A plugin cannot mark a pane as an agent when the pane's process name does not match the signature's `process_names`. With these constraints `agent.signatures` stays normal risk.
+
+- **[SEC-158]** Node ids are allocated by a counter and are guessable, so for every submission, intent or call that names a node id, the host MUST refuse with `refused(not-found)` (identical to a nonexistent id, per SEC-373) when that plugin side has not received the id through an event, a granted listing or its own create outcome (proposed, owner to confirm).
 
 ### Other hatches
 

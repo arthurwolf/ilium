@@ -205,6 +205,9 @@ The suite checks the contract. It does not check:
 
 Add `ilium plugin test --conformance --json` to the pipeline. A fail verdict exits 3. See [CI recipes](/pages/guide-ci-recipes/).
 
+- **[DEV-074]** The Ilium release pipeline MUST run `--subject host` against the session server and against the embedded test host of the same release, and MUST NOT create a release tag until every host case passes on both, so the host that `ilium plugin test` stands in for behaves as the host users run. (proposed, owner to confirm)
+- **[DEV-079]** An SDK release MUST NOT be published until `--subject sdk` passes for that SDK version in the Ilium source tree for every host contract minor the release metadata declares, and the SDK release record MUST name the suite version that passed. (proposed, owner to confirm)
+
 ## Retired case ids
 
 None. The first release of the suite is ids as listed.

@@ -584,6 +584,11 @@ A toast, a desktop notice and a sound are momentary. The attention mark survives
 - **Who may read it.** The user, through the panel and the command. A plugin cannot read the log: it holds other plugins' titles and pane names, so no capability exposes it. A plugin that needs its own history keeps it in its own storage.
 - **Failure modes.** If the log cannot be written (storage full or quota reached), the notice is still delivered, the entry is dropped, and the plugin raises one health warning `notice-log-unwritable` instead of one per notice. If the stored log is unreadable at start, it is moved aside as `notice-log.corrupt`, a new empty log starts, and the panel shows "The notice log was unreadable and has been reset." Errors never block a notice.
 
+### How task alerts are merged or skipped
+
+- **[COR-009]** The Notifications plugin MUST merge task alerts of the same kind on the same pane that arrive closer together than `[notifications] task_coalesce_seconds` (default 30, maximum 600, 0 disables merging, Settings steps of 10) into the first alert, and MUST count kinds separately so a success and a failure on one pane never merge. (proposed, owner to confirm)
+- **[COR-012]** While `suppress_redundant_task_outcomes` is on, the Notifications plugin MUST skip task sounds and task notifications for a pane whose agent is idle, finished-unread or parked, and MUST NOT skip them for a pane with no agent. (proposed, owner to confirm)
+
 ### User switches and plugin-submitted notices: one rule
 
 The user's switches win over every plugin. A notice or sound that a third-party plugin submits through `notify` or `play-sound` is treated exactly like the plugin's own, and no plugin can bypass a switch. [CAP-885]

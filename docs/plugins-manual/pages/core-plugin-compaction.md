@@ -13,6 +13,7 @@ An agent's own auto-compact trigger lives in the agent's configuration file (Cla
 ### What it covers
 
 - **Remote compaction.** The summary is built through the inference model in a job, so the agent keeps working while it runs. The user page `src/docs/remote-compaction.md` describes what the user sees.
+- **[COR-025]** With Automatic on, the Compaction plugin MUST compact the active agent pane when its context reaches `[remote_compaction] threshold_percent` (default 65, range 30 to 88), MUST keep that threshold below the agent's own trigger, MUST NOT retry a pane sooner than the cooldown (default 10 minutes), and MUST skip a pane after three consecutive failures until its context drops (proposed, owner to confirm)
 - **Compact button routing.** The compact button of the agent toolbar starts the same job as the palette command. See the section Starting it in `src/docs/remote-compaction.md`.
 - **Compaction optimiser.** The Optimization tab of Settings recommends a threshold, with Apply and Revert. Apply proposes the recommended threshold. Revert proposes the previous value, which the host kept in the history entry of the accepted proposal. Both open the kernel's proposal dialog, and nothing changes until the user accepts. See the Remote compaction section of `src/docs/settings.md`.
 - **Auto-compact trigger reader.** The plugin reads the trigger each agent uses (see the section Techniques in `src/docs/remote-compaction.md`), so the recommendation matches the agent.

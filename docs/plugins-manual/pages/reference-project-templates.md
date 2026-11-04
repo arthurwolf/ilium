@@ -47,6 +47,7 @@ Terms:
 - **[DEV-266]** The entry source of a TypeScript side MUST be `src/<side>.ts`: `src/server.ts`, `src/client.ts` or `src/scene.ts`. The entry source of a single-side Rust project MUST be `src/lib.rs`. This replaces the earlier spellings `src/main.ts`, `src/plugin.ts` and `src/index.ts` on other pages.
 - **[DEV-267]** A Rust project with two sides MUST be a Cargo workspace with one crate per side (`server/`, `client/`) and one shared crate (`shared/`). Each side crate MUST declare its side in `[package.metadata.ilium]` as `side = "server"` or `side = "client"`, which is how `build` finds the crate for a side.
 - **[DEV-268]** Every template MUST write `.gitignore` with the lines `dist/`, `.ilium/`, `target/` and `node_modules/`.
+- **[DEV-060]** Every template MUST write `.gitattributes` with the line `* text=auto eol=lf`, so a checkout on Windows yields the same source bytes, the same `input_hash` and the same component bytes as a checkout on Linux (proposed, owner to confirm).
 - **[DEV-269]** Every template MUST write `README.md` and `CHANGELOG.md` skeletons and a `help/overview.md` topic that `contributes.help` lists, so `lint.readme-missing`, `lint.changelog-missing` and `lint.help-topic-missing` pass on a fresh project.
 
 ## The guarantees about a fresh project
@@ -71,6 +72,8 @@ These files are the same in every template, with the placeholders replaced.
 | `tests/fixtures/sample.expect.json` | The expectation of that fixture. |
 | `tests/golden/overview.txt` | The golden render, in templates with a view. |
 | `.github/workflows/plugin.yml` or `.gitlab-ci.yml` | Only with `--ci github` or `--ci gitlab`. |
+
+- **[DEV-034]** `ilium plugin new` MUST write the manifest `api` equal to the highest host API minor declared by the SDK release it pins, and the generated project MUST build without edits; a template whose `api` placeholder is absent MUST be refused with `template.api-missing` (proposed, owner to confirm).
 
 The README skeleton:
 

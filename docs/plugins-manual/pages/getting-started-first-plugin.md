@@ -209,6 +209,8 @@ Nothing else changes. Build the plugin again with `ilium plugin build`.
 
 Run dev mode from the project folder. Dev mode installs the plugin as an unsigned development package, which the tree shows with a `dev` badge. The plugin reloads each time a file in the project changes.
 
+- **[ONB-000]** The first `ilium plugin dev` run of a fresh project MUST, within 10 s of a successful build, show the tree footer notice `<name> (dev) is running. Press Ctrl+B then : to open Settings > Plugins.` and the author MUST see the `dev` badge on the plugin row. When no session is reachable, the command MUST fail with `session.unreachable` and the hint MUST name the project folder in which to start `ilium` (proposed, owner to confirm).
+
 ```bash
 ilium plugin build
 ilium plugin dev

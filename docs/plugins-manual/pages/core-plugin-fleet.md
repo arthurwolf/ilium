@@ -13,6 +13,7 @@ Spawning a PTY and typing into it are kernel-native. Fleet drives them through t
 ### What it covers
 
 - Agent messaging and Ask for update (see Automation, "Ask for update").
+- **[COR-029]** Ask for update MUST type the status request only into agent panes whose turn state is Idle, MUST skip working, waiting and non-agent panes, and MUST show `No idle agent to ask for an update` when no agent in scope is idle; `ilium broadcast` MUST likewise skip shells, editors, boards and agent panes whose program is not running (proposed, owner to confirm).
 - The local HTTP API `POST /create_agent` (see Automation, "Local HTTP API", and Settings, "API").
 - `ilium new-pane` (see CLI reference, "ilium new-pane").
 - `ilium panes` (see CLI reference, "ilium panes").

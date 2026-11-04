@@ -45,6 +45,7 @@ The host checks free space on the data volume before an install or an update. It
 | `ilium plugin restore <file>` runs out of space | Precheck refuses with `restore.no-space` before any write. A disk-full error during the restore leaves each plugin at its pre-restore data or fully restored, never part-written. |
 
 - [LIF-172] The host MUST check free space before install and update, and MUST leave no partial files when it refuses. Test: a small fake volume.
+- **[HST-000]** The free-space check before an install or update MUST be run on every volume the operation writes: the data volume for `staging/` and `store/` (package size times 3 plus 64 MiB) and the cache volume for `downloads/` and `compile/` (package size plus 64 MiB) when `<cache dir>` is on a different volume; the `install.no-space` message MUST name the volume that is short (proposed, owner to confirm).
 - [LIF-173] A disk-full error MUST NOT count as a plugin failure. Test: fill the disk and write.
 
 - [HST-661] The host MUST apply these steps as free space on the data volume falls: below 512 MiB (proposed, owner to confirm) evict the plugin cache and compile cache oldest-first; below 128 MiB also stop log writes except `error` lines and shrink rotation to 1 MiB x 2; below 64 MiB block installs, updates and migrations (existing rule). Each step MUST log `disk.pressure.<step>` once, MUST re-evaluate every 30 s, and MUST undo itself above its threshold plus 10 percent.

@@ -55,6 +55,9 @@ A version moves through the states in the table. The registry keeps the state in
 **[PUB-002]** A version that reaches `rejected` MUST NOT be stored as a published version, and its version number MUST remain free for a new upload. Proposed, owner to confirm: the rejection record names the stage and the code, and the publisher can read it with `ilium plugin info <id>@<version>`, which exits 5 for a version that never became live.
 **[PUB-003]** A `live` version MUST move to `yanked` only through a signed change to the metadata, and the transition MUST keep the blob, the version entry and its hash ([PKG-443](/pages/reference-plugin-distribution-cli/#publish-yank-deprecate)). Test: yank a version, then compare the blob hash in `snapshot.json` before and after; the hash is unchanged.
 
+- **[PUB-000]** A version in `queued-review` MUST carry `review_queued_at` (UTC, second precision) in its `plugins/<id>.json` entry and `ilium plugin info <id>@<version>` MUST print it; when the time since `review_queued_at` exceeds the review deadline stated in `policy.json` (5 working days, proposed, owner to confirm) the plugin page MUST show `Review overdue` and the version MUST stay at level A (proposed, owner to confirm).
+- **[PUB-042]** A review refusal of a `queued-review` version MUST be handled as a takedown of that version under [PKG-403] and [PKG-821] (blob removed, tombstone kept, `registry.version-exists` for a re-publish of the same `id@version`), MUST record the policy rule and a reason readable through `ilium plugin info <id>@<version>`, and MUST NOT move the version to `rejected` with a free version number, because clients may already have installed it at level A (proposed, owner to confirm).
+
 ### Errors a publish can return
 
 The publish command uses the exit codes of [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes). The table below lists the codes a publisher meets most often and the action each one needs.

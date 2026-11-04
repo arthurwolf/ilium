@@ -88,6 +88,8 @@ The generated files are `manifest.json`, `Cargo.toml` and `src/lib.rs` for Rust,
 
 Illustrative, not generated. Every line is one JSON object in the real output; the lines are shortened for width.
 
+- **[DEV-031]** `ilium plugin build` MUST generate the bindings of the frozen snapshot of the manifest `api` minor, so that the component imports only WIT packages at that version. A source that uses an interface, function, case or grant introduced in a later minor than `api` MUST fail the build with `build.item-newer-than-api`, naming the item and the minor that introduced it (proposed, owner to confirm).
+
 ## Exports and entry points
 
 Every server and client component exports a lifecycle and a handler. The manifest `exports` list names the optional exports the component adds, and the entry must match that list exactly (`manifest.exports-mismatch` otherwise). The four extended optional exports are `catalog-provider`, `menu-provider`, `virtual-rows-provider` and `token-provider`.
@@ -1112,6 +1114,7 @@ Each SDK release declares in its metadata the lowest and highest host API minors
 - The range of a line never narrows in a patch release. A patch release declares the same lowest and highest minors as the minor it patches.
 - A line that needs a new contract version raises the highest minor in a new SDK minor and writes the change in its changelog, as the [SDK versioning policy](/pages/rust-sdk/#sdk-versioning-policy) says. A package built against it for a minor outside the range is refused at build time, and a component with a contract the manifest does not name is refused by `ilium plugin check` with `manifest.api-version`.
 - The compatibility table of each release is published with its release metadata and repeated in [SDK deprecation and removal](/pages/reference-sdk-deprecation/).
+- **[DEV-033]** For every contract minor, the Rust SDK line and the TypeScript SDK line that first target it MUST be released no later than the host release that ships that minor, and both MUST declare the same lowest and highest host API minors in their metadata (proposed, owner to confirm).
 
 ### How long a line receives fixes
 
@@ -1140,6 +1143,8 @@ A patch release of the SDK never changes the behaviour of a generated component:
 - Each release has a changelog entry with the Keep a Changelog headings. Marked items are under `Deprecated` and removed items under `Removed`, each naming the item, its successor and its removal minor ([API-084]).
 - The release notes carry toolchain minimum raises one minor before they take effect ([DEV-897]) and the compatibility table of the release.
 - Both are published with the release of the SDK package, `ilium-plugin-sdk` for Rust and `@ilium/plugin-sdk` for TypeScript. The host writes no deprecation record or log line for them ([API-087]). The same section is in [TypeScript SDK reference](/pages/typescript-sdk/).
+- **[DEV-068]** The SDK release pipeline MUST run an API-compatibility check of the public surface of `ilium-plugin-sdk` and of the exported declarations of `@ilium/plugin-sdk` against the previous release. It MUST fail a minor or patch release that removes or changes the signature of a public item that was not marked deprecated under the SDK deprecation rules (proposed, owner to confirm).
+- **[DEV-069]** Each SDK release MUST publish generated API documentation for that exact version (`cargo doc` for `ilium-plugin-sdk`, TypeDoc or an equivalent generator for `@ilium/plugin-sdk`), built in the release pipeline from the tagged commit. The SDK reference pages of this manual MUST link to the documentation of the version they describe (proposed, owner to confirm).
 
 Requirement ids for this section: [DEV-897], [DEV-962], [DEV-964], [DEV-966], [DEV-996], [API-082], [API-083], [API-084], [API-085], [API-086], [API-087].
 

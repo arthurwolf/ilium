@@ -184,6 +184,8 @@ Store format:
 
 `added_by` is `user`, `admin` or `registry`. `status` is `trusted` or `revoked`. `revoked` is null or an object `{ "reason", "at" }`. An unknown `format` value refuses the whole file with `trust.store-invalid`, and the host then treats the store as empty and shows a warning. It never guesses.
 
+- **[PKG-000]** Every trust-store entry and every `publisher.pub` MUST record the key's `algorithm`, and the host MUST verify a signature object with the algorithm stored for its `key_id`, never with the `algorithm` the object claims: an object whose `algorithm` differs from the stored one MUST be refused with `manifest.signature-invalid`, and `trust add` of a `key_id` that is already stored with another algorithm MUST be refused with `trust.publisher-conflict` (proposed, owner to confirm).
+
 ### Trust commands
 
 | Command | Effect |
@@ -247,6 +249,9 @@ A package update is signed by the same key in nearly every case. The next rules 
 | [PKG-240] | `ilium plugin trust add --additional <publisher.pub>` adds a second key for a publisher id that already has a key. It shows the old and the new fingerprints and requires typing the word `replace` in an interactive session. |
 | [PKG-241] | A rotation statement MUST be signed by a key that is currently trusted for the same publisher id. Otherwise `trust.rotation-invalid`. |
 
+- **[PKG-036]** `trust add --rotation`, `trust add --additional` and `install --trust` MUST refuse a new key whose `key_id` is revoked in either store with `trust.key-revoked`, and a rotation statement whose `new_key.key_id` equals `old_key_id` or is already bound to another publisher id MUST be refused with `trust.rotation-invalid` (proposed, owner to confirm).
+- **[PKG-081]** A rotation statement MUST carry `expires` (`YYYY-MM-DD HH:mm:ss`, UTC, at most 2 years after `created`, proposed, owner to confirm) covered by the signed message after the new `key_id` (one `0x00` byte then the UTF-8 time), and `trust add --rotation` MUST refuse a statement whose `expires` is before the trusted signing time of the package being updated, or before the host clock for a file import, with `trust.rotation-invalid` (proposed, owner to confirm).
+
 ## Revocation and distrust
 
 | Id | Rule |
@@ -257,6 +262,8 @@ A package update is signed by the same key in nearly every case. The next rules 
 | [PKG-245] | Installed plugins signed by a key revoked as `compromised` are stopped at once, enter the package state `disabled-blocked` and show the reason. They leave that state only with `ilium plugin enable <id> --accept-risk`, or with an update signed by another trusted key of the same publisher id. |
 | [PKG-246] | Installed plugins signed by a key revoked as `superseded` or `retired` keep running at T2 with the badge `key retired`. Updates must come from a trusted key of the same publisher id. |
 | [PKG-247] | The host checks the revocation lists whenever the trust stores or the registry metadata change, and at every start. A revocation with an `effective` time in the future applies when that time passes. |
+
+- **[PKG-037]** `ilium plugin trust revoke --statement <file>` MUST import an `ilium-rev/1` revocation statement, verify its signature under PKG-242 against a key trusted for the same publisher id (the revoked key itself or the new key of an imported rotation), write the key as revoked with the statement's `reason` and `effective`, and MUST refuse a statement that does not verify, names another publisher id or has a malformed `effective` with `trust.revocation-invalid` (proposed, owner to confirm).
 
 ### A compromised key: the publisher runbook
 

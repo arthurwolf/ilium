@@ -14,9 +14,15 @@ Requirement ids of this page are in the range `DEV-888` to `DEV-890`. The comple
 
 - **[DEV-888]** A test run MUST be deterministic: with the same component, fixtures, seed and harness version, two runs on any supported host MUST give the same pass and fail set and byte-identical failure output. The harness MUST print its seed in the `summary` record and accept it again with `--seed`.
 
+- **[DEV-063]** `test` MUST ignore the user's configuration directory, the trust store, `ilium-plugin.toml` keys other than `[test]`, and every environment variable that the CLI reference does not list, so a run on a developer machine and a run in CI select the same cases, use the same theme, log threshold and seed, and produce the same records (proposed, owner to confirm).
+
 - **[DEV-889]** The harness MUST give a test only the capabilities that the test grants explicitly through the fake host. A host call that needs a capability the test did not grant MUST fail with `capability.denied` exactly as in a session, and the failing test MUST name the capability. Real network, real file system outside the test directory and the real clock MUST be unreachable and MUST fail with `harness.real-resource`.
 
 - **[DEV-890]** A failed test MUST print the test name, the first differing line of the expected and actual output with at most 40 lines of context, and the host calls made in order with their fake times. The output MUST NOT contain absolute paths, user names or wall-clock times, so that CI logs from different machines compare equal.
+
+- **[DEV-062]** A failed test MUST also print, after the host calls, the lines the plugin wrote with `log` during the case, as `logs()` returns them, at most 200 lines with level and message and without a wall-clock time; in JSONL they MUST be `log` records with `at` in fake milliseconds (proposed, owner to confirm).
+
+- **[DEV-061]** `test` on a project whose `tests/fixtures/` folder holds no `*.json` file, run without `--replay`, `--conformance` or `--coverage`, MUST exit 2 with `test.no-fixtures` before any case runs, so an empty test folder never produces a green CI step (proposed, owner to confirm).
 
 ### Failure behaviour
 

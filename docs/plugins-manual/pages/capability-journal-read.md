@@ -54,6 +54,8 @@ Normal risk. Journal entries record events and delivery results, not screen cont
 | `journal-entry` | record | `{ at, pane?, source, kind, payload-json }`. |
 | `journal.log-event` | function | Always granted: `log-event(pane?, kind, payload-json)`; payload at most 4 KiB. |
 
+- **[SEC-167]** `journal.log-event` MUST refuse with `invalid-argument` any `kind` that equals a host entry kind (`pane-created`, `pane-exited`, `input-sent` and every other kind the host writes) or that starts with `host.`. The host MUST set `source` from the channel identity and MUST ignore any `source` supplied by the plugin (proposed, owner to confirm).
+
 See [Clock and timers](/pages/api-clock-and-timers/) and [Storage](/pages/api-storage/).
 
 ### Manifest

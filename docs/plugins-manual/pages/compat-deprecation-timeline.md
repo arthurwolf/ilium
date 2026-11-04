@@ -20,6 +20,7 @@ A deprecated item keeps working until its removal minor. This page shows how the
 - The removal minor `R` must be at least `M + 2` ([ABI-052], [API-083]). A patch release never removes anything ([API-086]).
 - A marked feature keeps its behaviour until `R` ([ABI-053]).
 - The host window at minor `N` holds the minors `N - 1` and `N`, so a package built for minor `P` loads on hosts `P` and `P + 1` only ([ABI evolution, section 4](/pages/reference-abi-evolution/#4-the-window-and-the-refusal-codes)).
+- **[CMP-000]** The removal minor of a marked item MUST be released at least 90 days after the release date of the marking minor, in addition to the two-minor rule of [ABI-052], and the release gate MUST block a removal whose marking release is younger than that (proposed, owner to confirm).
 
 From these rules follows one fact that matters for planning: a removal at `R = M + 2` breaks only the packages built for `M + 1` that still use the item. A package built for `M` is already refused on host `M + 2`, because its minor has left the window. A package built for `M + 2` cannot use the item, because the removal already happened in its SDK.
 

@@ -44,6 +44,8 @@ record theme-tokens {
 
 Colour tokens are packed `0x00RRGGBB` numbers. `background` is not a role. The host paints the panel background, and a plugin cannot choose it. Read `is-dark` only when a choice cannot be expressed with a role, for example when a scene picks a natural image for the theme.
 
+- **[USR-039]** Every built-in theme MUST give the `foreground` token a contrast ratio of at least 4.5:1 against the `selection` token, and against the `accent` token where a row or frame is drawn reversed, computed on the resolved RGB. A theme file that fails MUST be refused with `theme.low-contrast` naming `selection` or `accent`. (proposed, owner to confirm)
+
 ## Theme extras
 
 `theme-tokens` holds the seven base colours. The contract also defines `theme-extras`, a second record read with `theme-extras()`. It carries the three colours that the roles `info`, `selection` and `border` use, and three settings that change how a view should behave.
@@ -146,6 +148,9 @@ record span { text: string, style: style }
 ```
 
 An empty style inherits the theme. A colour given as `rgb` or `indexed` is painted exactly as given. Use it only where a scene or an editor needs a natural colour. The host guarantees a contrast ratio of at least 4.5:1 between each of the seven text roles (`foreground`, `muted`, `accent`, `success`, `warning`, `danger`, `info`) and the theme background, in every built-in theme; a theme test computes the ratio from the token values. `selection` and `border` are a background and a line, not text; this page states no ratio for them. This guarantee covers roles only. A plugin that picks its own colours is responsible for contrast on both backgrounds.
+
+- **[USR-037]** The host MUST paint text with the `dim` modifier at a contrast ratio no lower than the `muted` role of the active theme. When `[ui] contrast = "high"`, the host MUST ignore `dim` and draw the text in its undimmed colour. (proposed, owner to confirm)
+- **[USR-038]** The host MUST NOT print text with the `hidden` modifier in linear mode, in a tooltip or in a log line. A plugin MUST NOT use the `hidden` modifier for text whose meaning the user needs. (proposed, owner to confirm)
 
 ## The full surface
 

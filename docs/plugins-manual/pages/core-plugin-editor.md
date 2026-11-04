@@ -504,6 +504,8 @@ const overview = (density: number[], first: number, last: number, total: number)
   minimap(density, { key: 'overview', viewport: [first, last], totalLines: total });
 ```
 
+- **[COR-019]** The Editor plugin MUST refuse to load or save a file over 32 MiB of text or over 262,144 lines with a visible reason, and MUST show the Source view instead of the rendered Markdown view when the document exceeds 32,768 lines, 64 KiB on one line or 2 MiB in total. (proposed, owner to confirm)
+
 #### Markdown rendered view
 
 A panel renders the buffer as Markdown with the source beside it. It shows a `code-view` of the source and a `markdown` widget of the same buffer in a `split`. Pages: [text widgets](/pages/widgets-text/), [media and embedded widgets](/pages/widgets-media-and-embedded/) and [layout and containers](/pages/widgets-layout-and-containers/).

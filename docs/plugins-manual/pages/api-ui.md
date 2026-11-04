@@ -415,6 +415,7 @@ plugin. [AUT-601]
   without region, then `en`; a missing message or a placeholder-count mismatch falls back to English for that one
   message only. [USR-312] A tag for which the plugin ships no catalogue at all shows the English text; the host
   does not translate plugin text and logs nothing for this case.
+- **[API-000]** `host::ui` MUST provide `message(id: string, args: list<tuple<string, string>>) -> string` that resolves a message id of the plugin's own `i18n/<tag>.json` for the current `ui.language()` with the lookup order of [USR-312], the plural selection of [USR-313] when `args` carries `count`, and placeholder substitution; a missing id MUST return the English text, or an empty string when no English text exists, and MUST NOT return the id (proposed, owner to confirm).
 - **The `choice` row is optional.** A plugin does not have to offer a language row. A plugin that does offer one
   MUST treat it as an override with a first value `host` ("follow the interface language"), and `host` is
   the default. A stored explicit tag wins over `ui.language()` until the user picks `host` again. [AUT-601]

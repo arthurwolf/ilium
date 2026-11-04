@@ -58,6 +58,8 @@ The installer script downloads the archive and `SHA256SUMS` from the same releas
 
 - [SEC-430] The installer MUST compare the archive hash with `SHA256SUMS` before it decompresses or unpacks the archive, and MUST stop with `Archive SHA-256 mismatch` when the two hashes differ.
 
+- **[SEC-016]** Every host release MUST publish `SHA256SUMS.sig`, a detached Ed25519 signature over the exact bytes of `SHA256SUMS` made with a release-archive key that is distinct from the blocklist release key and the feed key; its public half is printed on the download page and in the release notes, and `release/install.sh` MUST verify it before the hash check when the key is given with `--release-key <key_id>`, stopping with `SHA256SUMS signature mismatch` on failure (proposed, owner to confirm).
+
 ## Check a download by hand
 
 Run these steps in the directory that holds the archive and the `SHA256SUMS` file you downloaded from the same release page.
@@ -139,6 +141,7 @@ The checks above run when you install. A host that is already running learns of 
 - The request is an HTTPS GET of `channels.json` for the selected channel. It carries only a `User-Agent` of the form `ilium/<version>`. It sends no identifier, no cookie, no session name, no plugin list and no path.
 - `--offline` makes no request and the notice shows nothing. On a connection that the operating system marks as metered, the check runs only at start and is skipped when the cached answer is under 24 hours old.
 - The host verifies the signature of `channels.json` before it reads any field. A bad signature, a malformed file or a channel without an entry ends the check silently for the user and writes a log line with the reason. The host never uses a cached value that failed verification.
+- **[SEC-017]** `channels.json` MUST carry an `issued` time and the host MUST refuse a `channels.json` whose `issued` is earlier than the cached one or more than 24 h in the future, keeping the cached copy and writing a log line; it MUST be signed with the release-archive key of the detached `SHA256SUMS.sig` rule and not with the blocklist release key (proposed, owner to confirm).
 
 ### What the operator sees
 

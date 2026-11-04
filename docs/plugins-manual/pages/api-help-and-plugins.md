@@ -211,6 +211,8 @@ Illustrative, not generated: the help pane for the quick start topic, and the Se
 <p>Turning a plugin on clears its <code>failed</code> flag and starts its failure count again. The plugin does not stay in the failed state after a successful enable.</p>
 </div>
 
+- **[LIF-194]** A plugin that calls `set-enabled(id, true)` MUST clear the failure window of a `stopped-by-failure` side at most once per 10 minutes per target plugin. A further call inside that time MUST return `busy` with `retry-after-ms`, MUST NOT clear the window and MUST NOT activate the side. A user action through Settings or the CLI is not limited. (proposed, owner to confirm)
+
 ### Edge cases and errors
 
 | Case | Result |

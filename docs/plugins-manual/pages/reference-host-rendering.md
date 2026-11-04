@@ -127,6 +127,8 @@ A `views.render` that exceeds its deadline is a hard deadline breach. The instan
 - **[HST-257]** The client MUST draw the previous tree until a valid new tree arrives, and MUST swap trees only between frames.
 - **[HST-258]** A tree over a cap MUST trap the instance with the named error, MUST NOT be shown, and the previous tree MUST stay on screen, marked stale.
 - **[HST-259]** Several `ui.invalidate` calls before a render starts MUST produce one render, and a render MUST be at least 16 ms after the previous render of the same view.
+- **[RND-000]** The host MUST NOT call `views.render` for a view that is not visible (closed, in a hidden tab or collapsed panel), MUST mark such a view dirty on `ui.invalidate`, a resize or a theme change, and MUST render it once when it becomes visible, under the 16 ms spacing of HST-259 (proposed, owner to confirm).
+- **[SEC-165]** Cells, retained-mode nodes and glyph-plane output that a plugin emits outside the rectangle the layout allotted to its pane, panel or scene MUST be discarded by the client before compositing, so no plugin can paint over the tree rail, the status bar, another pane or kernel chrome (proposed, owner to confirm).
 
 ### Cell width of view text
 

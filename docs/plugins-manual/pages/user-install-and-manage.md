@@ -62,6 +62,7 @@ The complete list with every error code is in [Install, update and uninstall](/p
 
 - [USR-010] Installing MUST NOT run any code of the package before the user has answered the permission review. Test: install a package whose start function writes a file, decline the review, and assert that the file does not exist.
 - [USR-011] A failed install MUST leave the installed plugins and their settings unchanged and MUST print one error that names the failed check. Test: install a package with a bad file hash, list plugins before and after, and compare.
+- **[USR-067]** An install, update or uninstall that runs longer than 1 s MUST show the current pipeline step in plain words in the Settings dialog (`Checking the file`, `Checking the signature`, `Unpacking`, `Recording`) and in the plugin row, and the CLI MUST print one `progress` record with step `install` per pipeline step, so the screen never looks frozen. (proposed, owner to confirm)
 
 Without a client to show the review, for example in a script with no attached Ilium client, the install fails with `install.review-required` unless you pass `--yes`. With a client attached, `--yes` accepts all normal permissions, and a high-risk permission is accepted only if you name it with `--grant`.
 

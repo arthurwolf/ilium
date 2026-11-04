@@ -32,6 +32,7 @@ The rows follow the format and the observation channels of the [requirements ind
 | [RND-018] | Decoration frames MUST be at most 16, each shown for at least 90 ms. Otherwise invalid-argument. | [requestable limits](/pages/reference-errors-and-limits/#requestable-limits) | (sync-return) 17 frames -> invalid-argument. |
 | [RND-019] | Plugin text MUST be sanitised before drawing: control characters and escape sequences are removed, TAB expands to the next multiple of 4 cells, and single-line fields turn CR, LF and CRLF into one space. The host MUST log at most one ui.text-sanitized warning per view. | [text sanitising](/pages/ui-model/#text-sanitising) | (screen-text) a label with ESC [31m -> shown without the sequence, one warning. |
 | [RND-020] | The depth limit of a ui-tree MUST be 32 levels with the root as level 1. | [limits](/pages/reference-host-rendering/) | (trap) 33 levels -> ui.too-deep. |
+| RND-000 | The host MUST NOT call `views.render` for a view that is not visible (closed, in a hidden tab or collapsed panel), MUST mark such a view dirty on `ui.invalidate`, a resize or a theme change, and MUST render it once when it becomes visible, under the 16 ms spacing of HST-259 (proposed, owner to confirm). | [reference-host-rendering](/pages/reference-host-rendering/) | Open a view, hide its tab, call `ui.invalidate` ten times and resize twice; assert zero `views.render` calls while hidden and exactly one call within 16 ms of the tab being shown. |
 
 ### See also
 

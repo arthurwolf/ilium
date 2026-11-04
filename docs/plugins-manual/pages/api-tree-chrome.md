@@ -69,6 +69,8 @@ A decoration is text and an icon that a plugin attaches to one node, in one of i
 
 The host steps the frames itself. The plugin makes one call, not one per frame. When the user turns on reduced motion, the host shows the first frame only.
 
+- **[ACC-000]** The host MUST draw an `on-hover` decoration on the session-tree row that holds keyboard focus as well as on the row under the pointer, and a plugin MUST NOT carry information only in an `on-hover` decoration. (proposed, owner to confirm)
+
 The samples on this page and in the core plugin pages call `baseDecoration(node, slot, text)`. It is a helper each sample plugin defines for itself, not host API: it returns a `set-decoration` value with the given `node` and `slot`, a `content` of one run of `text` in the default tone, and every other field at its plain default (no icon, `persist` false, no frames, `always` visibility). The caller then spreads it and overrides the fields it needs, such as `sortKey` or `trailing`.
 
 Manifest, declared once per plugin:

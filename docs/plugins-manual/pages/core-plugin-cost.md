@@ -709,6 +709,8 @@ Other plugins change what `ilium.core.cost` does through the points below. The p
 
 **Replaceable:** yes. A replacement lists `"replaces": ["ilium.core.cost"]` and provides the whole surface (see [Extending core plugins](/pages/extending-core-plugins/#replacing-a-core-plugin)).
 
+- **[COR-018]** The Cost plugin MUST match a model to its price by the longest lowercased model-name prefix, MUST let a `[cost.prices]` entry win over a built-in on equal prefix length, and MUST default a missing `cache_write` to 0 (proposed, owner to confirm).
+
 #### Example: Prices a local model at zero
 
 A package adds this entry in its manifest. It needs no code.

@@ -27,6 +27,9 @@ Contract version: `ilium:plugin@0.1.0`.
 | Queues and request counts | items | counters | one plugin side |
 | Session memory | bytes | sum of instance memory limits actually in use | one session server |
 
+- **[HST-047]** The host MUST measure the disk use of `data` and `cache` in allocated blocks (`st_blocks` × 512 on Unix, allocation size on Windows), MUST count each directory entry as 4 KiB, and `ilium plugin stats` MUST report that figure as the `disk` row, so that many small files cannot occupy more disk than `disk_mib` allows (proposed, owner to confirm).
+- **[HST-049]** The host MUST cap the bytes it holds on behalf of one plugin side (undelivered HTTP response bodies, child output, `fs.read-all` results, stream credit windows and queued submissions) at 64 MiB. A request that would pass the cap MUST be refused with `busy`, reason `host-buffer-full` and `retry-after-ms`. Running requests MUST continue. The cap MUST be charged to the session pool the same way as instance memory, and `ilium plugin stats` MUST show a `host-buffers` row (proposed, owner to confirm).
+
 ### Execution quota
 
 The `ilium-execution` quota group is a token bucket. It holds 2,000 ms of CPU time and refills at 500 ms per second. There is one group for each plugin side in each process. A call spends its thread time. A submission also spends 1 ms for every 64 KiB of payload.
@@ -98,6 +101,7 @@ disk         12 MiB   256 MiB  default
 </figure>
 
 - [LIF-146] `ilium plugin stats` MUST print use, effective limit and source for memory, the execution bucket, storage and disk. Test: parse the lines for a fixture plugin.
+- **[LIF-159]** `ilium plugin stats` MUST also print one row each for `descriptors` (the HST-681 budget), `processes` (children against `session_processes`), `timers`, `watches`, `pending-requests`, `event-queue` (depth against `event_queue`) and `output-filters`, each with use, effective limit and source, in both the text and the `--json` form (proposed, owner to confirm).
 
 ### Edge cases
 

@@ -34,9 +34,13 @@ Terms used on this page:
 | `--json` | switch | off | Selects JSONL output for a command whose default output is text. |
 | `--help` | switch | off | Prints usage to standard output and exits with 0. |
 
+- **[DEV-108]** `ilium plugin --help` MUST list every subcommand with a one-line meaning, `ilium plugin <command> --help` MUST list every flag of that command's flag table with its type, default and meaning, and both MUST end with the line `Codes: ilium plugin explain <code>   Environment: ilium plugin doctor` (proposed, owner to confirm).
+
 - **[DEV-004]** A session command MUST find its session this way: the session named by `--session`, in the project that `--cwd` names, defaulting to the session called `default` of the current directory. No session found at that address MUST fail with `session.unreachable` and exit code 6. A command MUST NOT start a session itself.
 - **[DEV-005]** The commands in the offline column of the table below MUST work with no running session, no network and no home-directory configuration beyond the trust store.
 - **[DEV-006]** A session command that cannot reach its session MUST print one `error` record with the code `session.unreachable`, then `summary`, then `result`, and exit with 6. It MUST NOT retry.
+
+- **[DEV-091]** The pipeline commands `new`, `check`, `lint`, `test` (without `install_core(...).real()`), `build`, `pack`, `sign`, `keygen`, `inspect <file>`, `doctor`, `schema` and `--version` MUST run from the `ilium` executable alone, with the embedded test host, the WIT package, the schemas and the templates compiled in, and MUST NOT read any other file of the host installation, so a single downloaded file is enough on a CI runner; only `real()` MAY need the bundled core plugin set of DEV-483 (proposed, owner to confirm).
 
 | Command | Needs a session | Notes |
 |---|---|---|
@@ -79,9 +83,13 @@ Codes 7 (policy) and 8 (network) are added by [Distribution commands](/pages/ref
 - **[DEV-008]** Exit code 0 MUST be returned only when `result.ok` is `true`.
 - **[DEV-009]** Exit code 1 MUST be returned for any failure that is not covered by a more specific code.
 - **[DEV-010]** Exit code 2 MUST be returned for a usage error before any work starts. The command MUST NOT write files before it returns 2.
+
+- **[DEV-093]** `ilium plugin <word>` where `<word>` is not a subcommand, and `ilium plugin` with no subcommand, MUST fail with `usage.unknown-command` and exit 2 before any work starts; the `error` message MUST name `<word>` and, when a subcommand is within Damerau-Levenshtein distance 2 (proposed, owner to confirm) of it, the `hint` MUST read `Did you mean <subcommand>?`, otherwise `Run ilium plugin --help for the list of commands.` (proposed, owner to confirm).
 - **[DEV-011]** Exit code 3 MUST be returned when a `check` finding of severity `error` exists, when `lint --deny warnings` has any finding, when a lint rule of severity `error` fires, or when at least one test case does not pass. A finding of severity `warn` under `check` or plain `lint` returns 0.
 - **[DEV-012]** Exit code 4 MUST be returned when a `toolchain.*` code stops the command, and when `doctor` reports any item with status `fail`.
 - **[DEV-013]** Exit code 5 MUST be returned for `plugin.not-found`, `trust.not-found` and `inspect.id-unknown`.
+
+- **[DEV-094]** An `error` record with code `plugin.not-found` for an id argument MUST carry a `hint`: when an installed id is within Damerau-Levenshtein distance 3 (proposed, owner to confirm) of the argument the hint MUST read `Did you mean <id>?`, otherwise `Run ilium plugin list for the installed ids.` (proposed, owner to confirm).
 - **[DEV-014]** Exit code 6 MUST be returned for `session.unreachable` and `session.not-found`.
 - **[DEV-015]** Exit code 130 MUST be returned after an interrupt. The command MUST print `summary` and `result` with `ok` set to `false` before it exits, and MUST leave no half-written output file (see the atomic write rule below).
 
@@ -225,6 +233,8 @@ Compiles the project into one component per declared side. The stages are in [Th
 - **[DEV-054]** `--offline` MUST fail with `build.offline-missing` when a dependency is not in the local cache.
 - **[DEV-055]** `build` MUST exit with 4 when the toolchain is missing, and with 1 for a compile, bundle or component failure.
 
+- **[DEV-066]** `build` of a TypeScript side MUST type-check the project with its `tsconfig.json` before the `bundle` stage and MUST fail with `build.type-error` (exit 1) on any type error, printing one `error` record per error with `file`, `line` and `column`; `bun build` alone, which does not report type errors, MUST NOT be the only check (proposed, owner to confirm).
+
 There is no separate `watch` command. `ilium plugin watch` is not defined. Use `build --watch` to build without installing, and `dev` to build and run.
 
 ## check
@@ -241,6 +251,8 @@ The second form takes no directory or archive. It writes the manifest JSON Schem
 - **[DEV-071]** `check` on a project directory MUST validate the source manifest and the built components in `dist/`. A missing `dist/` for a declared side MUST be reported as `component.missing`, not as an error of the command.
 - **[DEV-072]** `check` on a `.iliumpkg` file MUST validate the archive as the install path does, without checking trust.
 - **[DEV-073]** `check` MUST exit with 3 when any finding has severity `error`.
+
+- **[DEV-035]** The project MUST publish, for every host minor inside the current window and every minor still inside its support period, a headless host archive listed in that release's `SHA256SUMS`, and `ilium plugin check --against <host-version>` and `ilium plugin preflight --target <host-version>` MUST fetch and verify it from there or fail with `usage.host-unavailable` naming the version (proposed, owner to confirm).
 
 ## lint
 
@@ -436,6 +448,10 @@ These commands print text by default and JSONL with `--json`. Their output conte
 
 - **[DEV-830]** `profile` MUST default to `--duration 10`, MUST accept 1 to 600, and MUST print one `timing` record per export that ran, then a summary.
 
+- **[DEV-048]** Each record of `ilium plugin profile <id> --duration <seconds>` MUST be a `timing` record with `export`, `started_at`, `queue_us`, `run_us`, `imports`, `outcome` and `synthetic: false`, using the same field meanings as the spans of HST-609, and the command MUST end with one `summary` record giving the call count and the p99 of `run_us` per export (proposed, owner to confirm).
+
+- **[DEV-047]** Each `timing` record of `ilium plugin bench` MUST carry `peak_memory_bytes`, the highest linear memory plus table size reached during the measured iterations of that export, and bench MUST exit 3 when any export's `peak_memory_bytes` exceeds the effective `memory_mib` of the manifest (proposed, owner to confirm).
+
 `ilium plugin inspect (<file.iliumpkg> | <dist-component.wasm> | <id>) [--verify] [--view <target>] [--memory] [--json]`
 
 - **[DEV-800]** `inspect <file>` MUST work offline. `inspect <id>` needs a session.
@@ -448,6 +464,8 @@ These commands print text by default and JSONL with `--json`. Their output conte
 - **[DEV-831]** `support-bundle` MUST write the archive that [USR-221] defines to `<file>` and MUST print one `support-bundle` record with the path and the size. It needs a session.
 - **[DEV-832]** A `<file>` that already exists MUST NOT be overwritten. The command MUST fail with `support-bundle.exists` and exit with 2.
 - **[DEV-833]** An archive over 8 MiB MUST be trimmed as [USR-224] says, and the `support-bundle` record MUST say so.
+
+- **[DEV-046]** The `support-bundle` record of [DEV-831] MUST also carry `sha256` (the hash of the whole zip file), `scope` and `dropped`, and the command MUST print the hash on a line of its own after the record, for the per-plugin bundle exactly as for `--all` (proposed, owner to confirm).
 
 `ilium plugin doctor [--json]`
 
@@ -562,6 +580,8 @@ These codes are in addition to the `manifest.*` codes of [Packages](/pages/packa
 | `inspect.id-unknown` | The installed id is unknown | Check `list` | 5 |
 
 [Errors and limits](/pages/reference-errors-and-limits/) lists the runtime codes. The codes on this page are command codes, printed by the command line and never returned by a host import.
+
+- **[DEV-107]** Every `error` record whose code has a catalogue entry ([USR-347]) MUST carry a non-empty `hint` equal to the next-step sentence of that entry, and in text mode the command MUST print `error: <message>` on one line and `fix: <hint>` on the next line (proposed, owner to confirm).
 
 ## What the user sees
 

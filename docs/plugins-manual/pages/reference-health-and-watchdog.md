@@ -91,6 +91,7 @@ Third-party plugins run in a helper process. Each T2 or T3 plugin side runs in i
 - [LIF-132] A hung helper MUST be killed after 3 missed heartbeats or 500 ms past a deadline, whichever is first. Test: a helper that stops answering.
 - [LIF-133] After a helper dies, the host MUST count one failure for the plugin side that was running and MUST restart that side in a new helper on the schedule of LIF-028 and LIF-029 (1 s after the first counted failure in a window, 5 s after the second). Test: crash a helper and read the failure window of its plugin side.
 - [LIF-134] The host MUST restart a helper after a crash at most 5 times in 10 minutes. After that, the T2 and T3 plugins of the session MUST move to the instance state `stopped-by-failure` on the server side with the reason `helper.unstable`. Test: kill the helper six times.
+- **[LIF-179]** A side stopped with the reason `helper.unstable` under LIF-134 MUST NOT be written to `failure_stopped` in `installed.json`. At the next server start the host MUST activate those sides again with an empty failure window, because the fault was the helper and not the plugin (proposed, owner to confirm).
 
 ### Metrics
 
@@ -110,6 +111,7 @@ Retention: counters are kept in memory for the life of the session server, in ho
 
 - [LIF-135] The host MUST keep the metrics above for each plugin and side, and MUST discard buckets older than 24 hours. Test: read the metrics after 25 simulated hours.
 - [LIF-136] A server restart MUST reset the metrics. Test: restart and read.
+- **[HST-090]** The quota-hit counter MUST be kept per limit key (the key of the requestable-limits table or the fixed cap name), and `ilium plugin status <id>` and the Plugins screen Resources tab MUST list each key hit in the last 5 minutes with its count and the effective limit, so the user can tell which limit a plugin keeps hitting without reading the plugin's own logs (proposed, owner to confirm).
 
 ### Surfaces
 
@@ -237,6 +239,7 @@ Target behaviour of the production plugin system.
 
 - [ABI-079] Every ABI trap and every ABI refusal code MUST produce a log record with the stable fields `plugin`, `code` and `phase`.
 - [ABI-080] The host MUST expose a counter per ABI code, labelled by plugin id, so an operator can alert on ABI-class failures without parsing messages.
+- **[ABI-085]** Every `deprecated` log record written under ABI-053, ABI-057 or ABI-083 MUST carry the stable fields `plugin`, `kind` (one of `feature`, `unstable`, `api-minor`), `name`, `removal` (the minor or major in which the item stops working) and `successor` (empty when there is none), and the host MUST NOT write two such records for the same plugin, kind and name in one load (proposed, owner to confirm).
 
 ## Production additions: T8-observability-perf
 
@@ -249,4 +252,7 @@ Target behaviour of the production plugin system.
 ## Production additions: T10-operations
 
 - [HST-679] At server start the host MUST finish or discard every interrupted multi-file operation recorded in `<data>/plugins/journal/` (proposed path, owner to confirm) (install rename, update swap, purge): committed steps MUST be completed and uncommitted ones MUST be rolled back, the result MUST be logged as `recovery.completed` with a count, and no plugin MUST run before this finishes. Test: kill the host between the steps of an update swap and of a purge, restart, and assert the final state, one `recovery.completed` line with the count, and that no plugin ran before recovery ended.
+- **[HST-092]** A journal entry under `<data>/plugins/journal/` that cannot be parsed during the recovery of HST-679 MUST be treated as an uncommitted operation: its staging files MUST be rolled back, the entry MUST be moved to `journal/corrupt/`, the host MUST log `recovery.journal-corrupt` with the file name, and the entry MUST be included in the count of `recovery.completed` (proposed, owner to confirm).
+- **[HST-096]** The host MUST keep a running marker (pid, boot id, start time) in the server state folder for the whole life of the server and MUST remove it in a clean shutdown after the final snapshot. A start that finds a marker whose process is gone MUST log `host.unclean-shutdown` with the old pid and start time, MUST write one `unclean-shutdown` audit record, and MUST run the recovery of HST-679 before any plugin starts (proposed, owner to confirm).
 - [HST-680] For SIGKILL, power loss and OOM kill at each of these points the host MUST leave a consistent state on next start: during install staging, during the rename into store, during update swap, during migrate, during a storage batch, during snapshot write, during grants.json write. Every write of grants.json, installed.json, consents.json and trust.json MUST be done by writing a temp file in the same folder, fsync, rename, then fsync the folder. Test: run a kill-point matrix with one case per listed point, restart after each kill and assert a consistent state, and check with the fault-injection writer that each state file is written in the temp, fsync, rename, fsync order.
+- **[HST-098]** The kill-point matrix of HST-680 MUST also include a kill during the write of a crash mark, of `bisect.json`, of the admin kill flag, of `purged.json` and of a settings file, and each of those files MUST be written with the same temp file, fsync, rename, fsync-folder order. A torn copy of any of them MUST never be read as valid (proposed, owner to confirm).

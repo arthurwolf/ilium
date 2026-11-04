@@ -31,6 +31,8 @@ A third-party owner cannot choose `standard` for a point that meets these criter
 
 **[SEC-283]** An entry that drives a privileged action of a T1 owner (a post-create step, an instruction block, a target file, a rule pack that sends text, a provider profile that redirects inference) MUST be validated by the owner with an explicit allowlist of what an entry can make it do. The review dialog shows a line `Can make <owner> <action>` per such entry type. The owner rejects any entry outside the allowlist with `extension.entry-rejected`.
 
+- **[SEC-138]** A command of a T1 plugin whose handler exercises a T1-only grant (`plugins.manage`, `settings.write-kernel`, `settings.read-all`, `process.run:sh`) MUST refuse a `command-invoked` event with origin `plugin` by returning `not-permitted` with reason `tier`, and the conformance suite MUST invoke every such core command from a T3 fixture holding `commands.invoke:*` and assert the refusal. (proposed, owner to confirm)
+
 ## Fail-open and veto points
 
 **[SEC-287]** Policy for failure. A handler that times out, traps or errors normally counts as a pass (fail open), so a slow handler cannot block the user. This is a deliberate trade between availability and safety. Hooks are **not a security boundary** on standard points; an administrator who needs enforcement uses the admin policy (`extensions.deny_points`), which the kernel enforces without handler code.

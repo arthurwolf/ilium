@@ -54,6 +54,8 @@ The Plugins tab is the one place where a user manages plugins. It belongs to thi
 
 **What it shows.** One row per plugin: the id, the tier badge (`T1`, `T2`, `T3`, with `dev` for a development install) and the state. Below the list: Install from file. Selecting a row opens the plugin page with the tabs Overview, Capabilities, Extensions, Log, Details and Settings.
 
+- **[USR-065]** When no tier T2 or T3 plugin is installed, the Plugins tab MUST show, below the core and bundled rows, one line `No plugins from outside Ilium are installed.` followed by the Install from file action with its key and the command `ilium plugin install <file>`, and MUST NOT leave that area blank (proposed, owner to confirm).
+
 <figure>
 <pre class="term"><span class="t-hi">╭─ Plugins ──────────────────────────────────────────────╮</span>
 │ ilium.core.tree        T1  <span class="t-ok">On</span>                          │
@@ -91,6 +93,8 @@ In safe mode, a third-party row reads `Off, safe mode`. A dimmed row of a plugin
 - [USR-162] The Plugins tab MUST list every installed plugin including core plugins, with its tier badge and state. Test: install two plugins, count the rows, and compare with `ilium plugin list`.
 - [USR-163] The tab MUST offer **Forget settings** on a plugin's Details page. It MUST delete that plugin's saved settings values for the user and the open project, MUST ask for confirmation, and MUST NOT touch permissions or data. Test: set a value, forget, assert the value is the default and the grant file is unchanged.
 - [USR-164] The state words MUST be the same in the footer notice N14, which is defined in [Lifecycle](/pages/lifecycle/#failure-counting-and-restart). Test: stop a plugin and compare.
+
+- **[USR-066]** When Install from file fails, the dialog MUST keep the entered path in its field, MUST show the refusal text (`Cannot install <name> <version>.` and the check in plain words, [USR-171]) followed by the next-step sentence of the code ([USR-347]) and the line `Code: <code>`, and MUST offer **Retry** and **Close** with their keys (proposed, owner to confirm).
 
 ### The 26 tabs and who owns them
 
@@ -660,6 +664,8 @@ The guided setup is the first-run flow that `ilium --onboarding` starts. Its ste
 
 The User Interface tab has three rows for the options that decide whether the screen is usable at all: **Screen reader mode** (`[ui] screen_reader`, default false, [USR-305]), **High contrast** (`[ui] contrast`, `normal` or `high`, [USR-302]) and **Language** (`[ui] language`, a language tag, [USR-311]). Like the other rows they save at once.
 
+- **[SET-000]** The Settings language row MUST offer a first value that leaves `[ui] language` unset, so the environment order of [USR-311] applies, then `en` and each launch language of [AUT-624], each shown by its own name in that language (`Deutsch`, `Français`) and never translated into the current language. The row MUST NOT offer `en-XA`, which is accepted only from `--language`, `ILIUM_LANG` or a hand-written config value (proposed, owner to confirm).
+
 A user who cannot read the screen cannot open Settings, so each option can also be set before any screen is drawn:
 
 | Option | CLI flag | Environment variable | Config key |
@@ -669,6 +675,8 @@ A user who cannot read the screen cannot open Settings, so each option can also 
 | UI language | `--language <tag>` | `ILIUM_LANG` | `[ui] language` |
 
 The flags act on attach. The precedence is the flag, then the environment variable, then the config value. For the language, the full order of [USR-311] still applies below the config value (`LC_ALL`, `LC_MESSAGES`, `LANG`, then `en`). A flag or variable applies to that run only and is not written to `config.toml`. The guided setup honours all three from its first step. The same three rows are added to the tab list of [The 26 tabs and who owns them](#the-26-tabs-and-who-owns-them) under `user-interface`.
+
+- **[SET-006]** A `[ui] language` value that is not a well-formed BCP 47 tag MUST be rejected when the config loads, with a message that names the key and the bad value. The host MUST then continue with the next source of [USR-311] as if the setting were unset, and `ilium plugin doctor` MUST print the rejected value next to the chosen tag (proposed, owner to confirm).
 
 ### Consistency fixes: tab count and the failure window
 

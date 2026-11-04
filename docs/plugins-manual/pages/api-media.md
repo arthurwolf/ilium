@@ -58,6 +58,7 @@ close-video: func(video: u64);
 - **Buffer.** The host decodes frames ahead, as many as fit in `video_buffer_mib` (64 MiB by default, 256 MiB at most for tier 1, 64 MiB for tiers 2 and 3) for each open video, and always at least one. A call that finds a buffered frame returns at once.
 - **Open videos.** A plugin may hold 2 open videos at once, and the ceiling is 8 for tier 1 and 2 for tiers 2 and 3. A third `open-video` returns `quota-exceeded` until one is closed.
 - **Closing.** Call `close-video` as soon as the plugin no longer needs the video. Each open video holds its decoder and its frame buffer until then.
+- **[SEC-139]** The native video decoder MUST run in a separate decoder process confined like a helper (no network, read access to the one opened file only, memory and pids limits) and never in the server or client process; a decoder crash MUST fail only the affected `open-video` or `next-frame` call with `failed(decoder)`, and the decoder MUST be a listed fuzz target. (proposed, owner to confirm)
 
 <div class="warn">
 <p>Call `next-frame` once for each timer event. A handler that runs longer than the 20 ms `on-events` deadline for a third-party plugin traps the instance. Decoding runs in the host ahead of the request, so one call per event normally stays well inside the deadline.</p>

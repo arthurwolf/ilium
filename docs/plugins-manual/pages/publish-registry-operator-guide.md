@@ -77,6 +77,9 @@ The limits below come from the client and upload rules. The operator enforces th
 **[PUB-037]** A takedown MUST be approved by a second operator when the registry has more than one operator. Proposed, owner to confirm: the second approval is recorded in the transparency log with the first.
 **[PUB-038]** The operator MUST answer an appeal within 14 days ([PKG-404](/pages/reference-registry/#policy)) and MUST record the decision and the reason in the transparency log. A reinstated version gets a new version number.
 
+- **[PUB-043]** An appeal MUST NOT suspend the takedown. The `blocked_ids` entry MUST stay in `revocations.json`, and installed copies MUST stay `disabled-blocked`, until the decision is published. After a successful appeal the registry MUST remove an id-level `blocked_ids` entry so that the publisher can publish a new version under the rules of [PKG-404](/pages/reference-registry/#policy), and it MUST keep every version tombstone of [PKG-821](/pages/reference-registry/) (proposed, owner to confirm).
+- **[PUB-044]** The operator MUST accept an appeal only from a maintainer of the publisher id, authenticated by the registry account with its second factor or by a signature of a trusted key of that publisher id. An appeal from anyone else MUST be refused and MUST NOT use up the single appeal allowed by [PKG-404](/pages/reference-registry/#policy). When the registry has more than one operator, the decision MUST be made by an operator who did not approve the takedown (proposed, owner to confirm).
+
 The procedure for a takedown, in order:
 
 1. Record the reason, the rule of the content policy and the time.
@@ -90,6 +93,10 @@ The procedure for a takedown, in order:
 
 **[PUB-039]** When a signing key or a publish token leaks, the operator MUST follow [Registry key compromise](/pages/reference-registry-key-compromise/) and MUST NOT wait for the publisher to act first. The first action is to revoke the key or the token, within the time of [PUB-034](#accounts-and-access).
 **[PUB-040]** When a published version is found to carry malware, the operator MUST take it down under [PKG-403](/pages/reference-registry/#policy) within 24 hours of the report. Proposed, owner to confirm: 24 hours is the target for a confirmed malware report.
+
+- **[PUB-045]** The registry MUST NOT include the identity, address or report text of an abuse reporter in `revocations.json`, `quarantine.json`, `policy.json`, any transparency log entry, any plugin page, or any notice to the maintainers of the reported plugin. Only the operator's private record may hold them (proposed, owner to confirm).
+- **[PUB-046]** The abuse intake of PKG-705 MUST accept a report that names a plugin id, a version or a package `sha256`, and one rule id of `policy.json`. It MUST return a report id in the acknowledgement, and it MUST send the reporter the recorded decision (yank, takedown, quarantine, or none with a stated reason) with the index of its transparency log entry (proposed, owner to confirm).
+- **[PUB-049]** During the 24-hour decision window of PKG-705 the operator MAY quarantine the reported range through `quarantine.json`. When the decision is `none`, the quarantine MUST be withdrawn (EXT-059) within 24 hours of that decision (proposed, owner to confirm). When the decision is a takedown, the quarantine entry MUST be withdrawn in the same metadata change that adds the `blocked_ids` entry (proposed, owner to confirm).
 
 ### Backups and retention
 

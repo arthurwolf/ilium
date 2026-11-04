@@ -58,6 +58,8 @@ The rule below is for the maintainers of the command line, so that the promises 
 
 - **[DEV-891]** The command line project MUST keep a recorded snapshot of every `--json` record shape, `type` value and exit code of its previous release, and its own CI MUST fail when a build changes any of them without a matching deprecation or breaking entry under [DEV-863].
 
+- **[DEV-064]** Every record `type` that any manual page names MUST be defined in the record catalogue of the CLI reference, and `_tools/check.py` MUST report each record `type` named on a page that the catalogue does not define. (proposed, owner to confirm)
+
 ### Inputs and outputs
 
 - Input: a release of the command line, its release notes, and the pages of the command reference.

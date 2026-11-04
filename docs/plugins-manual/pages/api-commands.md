@@ -96,6 +96,8 @@ The async `invoke` resolves when the command has run. Use `invoke_request` only 
 
 The event is never dropped. It is delivered to the client handler of the plugin that owns the command, and it needs no grant. The types are in `ilium:types/events`, so Rust code imports them from `ilium_plugin_sdk::types::events`.
 
+- **[SEC-137]** `command-origin` MUST include the case `plugin`, and a `command-invoked` event produced by another plugin's `commands.invoke` MUST carry that origin together with the invoking plugin id in `command-context.invoker`; user origins MUST never be reported for a plugin-started invocation. (proposed, owner to confirm)
+
 <figure>
 <svg viewBox="0 0 400 232" role="img" aria-label="Command routing from origins to the plugin and back">
 <title>Command routing</title>

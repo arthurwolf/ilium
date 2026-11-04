@@ -103,6 +103,7 @@ A grab ends with no event to the plugin when its pane closes, when its plugin st
 - A T2 or T3 plugin shows the review dialog at install. The grant is listed with the H mark and is unchecked by default.
 - A grant is a standing permission. Nothing asks the user again on each call.
 - Revoke it in Settings > Plugins > <plugin> > Capabilities, or with `ilium plugin grants <id> --revoke keys.intercept`.
+- **[SEC-135]** While the focused pane's PTY has echo turned off (for example at a password prompt), the host MUST NOT deliver any `key-pressed` event to a `keys.intercept` grab, whether the grab names that pane or has `pane: none`. The keys go to the PTY only, and delivery resumes when echo is turned on again (proposed, owner to confirm).
 
 ## What the user sees
 

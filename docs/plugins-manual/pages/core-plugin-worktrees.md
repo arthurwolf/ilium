@@ -373,6 +373,8 @@ export async function copyIncludes(worktreeDir: string): Promise<void> {
 
 The copy has three defined failure cases. When the project has no `.worktreeinclude`, the plugin copies nothing and reports no error. When a listed file does not exist, the plugin skips that entry and copies the others. When an entry points outside the project scope (an absolute path or a `..` segment), `fs.read` refuses it with `invalid-argument` or `not-permitted`, and the plugin skips it too. Any other error, such as `io` or `quota-exceeded`, stops the copy and is returned to the caller.
 
+- **[COR-016]** During the Preparing files stage the Worktrees plugin MUST copy into the new worktree exactly the untracked files matched by `.worktreeinclude` at the root of the source checkout, MUST NOT carry uncommitted changes of tracked files, and MUST warn in the dialog when the repository has submodules (proposed, owner to confirm).
+
 #### Status and branch line
 
 The client renders one `leader-row` per worktree. An `icon` marks the branch and the state is the value, joined to the label by the dotted leader. See [text widgets](/pages/widgets-text/) and [status and feedback widgets](/pages/widgets-status-and-feedback/).
@@ -427,6 +429,9 @@ export const gitRows = [
   { type: 'notice', id: 'removal_blocker', tone: 'warning', dismissible: false, text: 'A worktree with uncommitted changes or a running process cannot be removed.' },
 ];
 ```
+
+- **[COR-015]** The Worktrees plugin MUST run `[git] setup_command` once in the new worktree with a 120 second limit, MUST refuse a non-empty command on platforms other than Linux and a command over 8192 bytes or containing NUL, MUST drain its output without keeping, logging or showing it, and on failure or timeout MUST keep the checkout and copied files and report the failure with the path (proposed, owner to confirm).
+- **[COR-017]** The Worktrees plugin MUST refuse to remove a worktree that has uncommitted or untracked content or a running process, naming the blocker, MUST disable removal with a reason for a worktree Ilium did not create, and MUST remove such content only through the explicit Discard files action (proposed, owner to confirm).
 
 ### Extension points
 

@@ -28,6 +28,8 @@ The version appears in three places, and the host requires that they agree:
 The bytes of the custom section for `0.1.0` are `00 00 00 01 00 00`: major 0, minor 1, patch 0 [ABI-004]. A component with no section, with a section of another length, or with values that differ from the manifest is refused with `manifest.api-version`.
 
 - [DEV-968] Each host release MUST publish the SHA-256 of every WIT package it ships in the release notes and in `ilium version --json` under `wit_hashes`, and `ilium plugin inspect` MUST report the same hashes for the component's embedded world.
+- **[ABI-084]** At install stage 3 the host MUST compare the SHA-256 of every WIT package embedded in the component with the `wit_hashes` it publishes for the package's `api` minor, and a difference MUST be refused with `manifest.wit-mismatch` naming the package and both hashes before any code of the component loads. (proposed, owner to confirm)
+- **[ABI-088]** A component whose WIT imports name a package version that differs from the manifest `api` in any part MUST be refused at install stage 3 with `manifest.api-version`, naming the import and both versions, and the host MUST NOT defer that check to link time. (proposed, owner to confirm)
 
 ## 2. What may change
 
@@ -48,6 +50,7 @@ Why records are fixed: a record is flattened into a sequence of fields. A host t
 **What counts as "shape" in 0.1.0.** Several records carry optional fields in 0.1.0 itself, for example `ui-node`, `popup-anchor`, `send-input-spec`, `set-decoration-spec`, `rename-node-spec`, `notify-spec`, `set-virtual-rows-spec`, `choice-option` and `menu-entry`. They are part of the first freeze. They are listed as "shape" items in [Versioning](/pages/versioning/) and they are not open to later change.
 
 - [DEV-967] Two host patch releases of the same minor MUST export byte-identical WIT packages; the release pipeline MUST fail when the WIT text hash of a patch release differs from that of its minor's first release.
+- **[ABI-087]** The frozen copy `wit/since_v0_N/` of every released minor MUST hash-equal the `wit_hashes` published for that minor's first release, and the release pipeline MUST fail when any frozen copy's hash differs from its published value. (proposed, owner to confirm)
 
 ## 3. Markers and unstable features
 
@@ -59,6 +62,8 @@ Every item of the contract has one of two markers:
 | `@unstable(feature = <name>)` | The item may change or disappear inside 0.x. Only a plugin whose manifest `unstable` key lists the name may use it. |
 
 Version 0.1.0 has **four** unstable features: `ui-calendar`, `plugin-services`, `gpu-kernels` and `websocket` [ABI-022]. In the WIT listing an unstable item has a `// @unstable(feature = <name>)` comment on the line before it. A comment is used because a gate on a single variant case is not part of the WIT text format.
+
+- **[ABI-086]** Every item added to the contract after 0.1.0 MUST carry `@since(version = 0.N.0)` in the WIT reference, where `0.N.0` is the first minor that ships it, and the release notes of that minor MUST list the item under a heading `Added to the contract`; the doc check MUST fail when a `@since` version has no matching release-notes entry or an item in the frozen snapshot of `0.N` carries a later version. (proposed, owner to confirm)
 
 | Feature | Items it gates |
 |---|---|
@@ -122,6 +127,7 @@ A host of minor N+1 runs plugins built for N. To keep them correct, the host ada
 - **Reasons.** A newer `deactivation-reason` is delivered as `shutdown`.
 
 [ABI-029] A host MUST NOT deliver an event, outcome or reason case to a plugin whose API version predates the case. It maps the case as described above, or it does not deliver it.
+- **[ABI-000]** The host MUST NOT deliver to a plugin a `ui-action` whose `action-kind` or `action-value` case, or a `plugin-error` whose `error-code` case, is newer than the plugin's `api` minor: the action MUST be dropped without an `events-dropped` entry and the error MUST be mapped to the `internal` code with the original code name in the message. (proposed, owner to confirm)
 
 An SDK enum is non-exhaustive, so a plugin compiled for N still compiles when N+1 bindings add a case.
 

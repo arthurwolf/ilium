@@ -208,6 +208,8 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 
 **[SEC-113]** The server re-reads a store file only at start. External edits made while the server runs are ignored until the next start. At start, entries that appear in a store but were not written by the server (the file hash differs from the hash the server recorded in the audit log at its last write) are audited as `store-external-edit`. External edits MUST NOT add a high-risk grant: an H grant found in a store without an audit record of a user decision is dropped. An administrator uses the policy file `preapproved` list instead ([Admin policy](/pages/reference-admin-policy/)).
 
+- **[SEC-049]** The `telemetry` entry of a plugin in `consents.json` MUST be an object with `state` (`not-asked`, `granted` or `declined`), `changed_at` (UTC, ISO 8601), `plugin_version` (the installed version when the state was set) and `actor`, and `ilium plugin grants <plugin-id>` MUST print the state with its `changed_at` time (proposed, owner to confirm).
+
 ## Who may approve
 
 **[SEC-116]** A decision that adds a grant, trusts a key, installs a package with `--allow-unsigned` or marks a project trusted MUST be confirmed in a dialog in an attached TUI client of the same session, or by the exact-item flags of [SEC-117]. When `ilium plugin install` runs in a shell pane (the `ILIUM_PANE_ID` variable is set), the CLI asks the server to open the dialog in the client, and the dialog names the requesting pane: `Requested from pane "shell 3"`. With `--yes` the dialog is skipped for normal grants (see [PKG-429]). If no client is attached and `--yes` is not given, the CLI waits up to 60 s, prints `waiting for a client to approve`, and then fails with `install.review-required` (exit 1).

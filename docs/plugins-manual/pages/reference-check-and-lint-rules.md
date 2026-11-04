@@ -28,6 +28,8 @@ Terms:
 - **[DEV-201]** `check` MUST add the component rules below, which report `component.*` and `signature.*` codes and two further `manifest.*` codes. They need built components and are skipped, with one `component.missing` finding per absent side, when `dist/` has no component for a declared side.
 - **[DEV-202]** Every `check` finding is an `error`, except `signature.absent`, `check.stale-build` and `component.size-warning` from 8 to 32 MiB, which are `warn` (`component.size-warning` is an `error` above 32 MiB, DEV-206), and `signature.fingerprint`, which is `info`. The severity column of the rule tables is normative.
 - **[DEV-203]** `check` MUST NOT check trust. Whether a signing key is trusted depends on the user's machine. `check` verifies that a signature is valid for the manifest bytes and states the fingerprint in an `info` finding named `signature.fingerprint`.
+- **[DEV-032]** `ilium plugin check` MUST report `lint.host-range-below-api` (warn) when the lower bound of `requires.host` is older than the first host release that ships the manifest `api` minor, and `lint.host-range-above-api` (warn) when the lower bound is a release whose window no longer contains that minor, naming the bound and the release range that matches `api` (proposed, owner to confirm).
+- **[DEV-000]** When a project holds `provenance.json` or `sbom.spdx.json`, `ilium plugin check` MUST verify that `provenance.json` is an in-toto Statement whose `subject` digests include each packed component with its manifest SHA-256, and that `sbom.spdx.json` parses as SPDX 2.3 JSON; a mismatch or parse failure MUST be reported as `lint.provenance-mismatch` or `lint.sbom-invalid` at severity error, and `pack` MUST refuse to pack them in that state (proposed, owner to confirm).
 
 ### Component rules
 
@@ -60,6 +62,7 @@ A finding record:
 - **[DEV-210]** `lint` MUST run only `lint.*` rules. It reads the manifest, the files listed by the manifest, `dist/` when present, and the fixtures in `tests/fixtures/` when present.
 - **[DEV-211]** A rule that needs an input that is absent MUST be skipped without a finding. `lint` MUST print one `info` finding named `lint.skipped` for each rule it skipped, with the missing input in the message.
 - **[DEV-212]** Rules that render a view or replay a fixture MUST do so in the embedded test host and MUST NOT contact a session.
+- **[DEV-090]** `lint` MUST print its findings sorted by `rule`, then `file`, then `line`, then `key_path`, so two runs on the same inputs print byte-identical `lint` records, and `summary.duration_ms` is the only field that may differ between the runs (proposed, owner to confirm).
 
 ### Lint rule catalogue
 

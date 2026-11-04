@@ -322,6 +322,8 @@ const shell = terminalView(shellPane, {
 
 A `video` is decoded natively, and the shared look and dithering apply to its frames. The source is a package asset, a file under a granted scope, or a range of a file given as a start and an optional end in milliseconds. Video bytes up to 16 MiB can also be opened from memory with `media.open-video-bytes`. Playback is always muted unless the plugin holds `audio.playback`. With `controls` the widget draws a progress line of `━` and `─`.
 
+- **[USR-044]** When `reduced-motion` is true, the host MUST NOT start a `video` whose `autoplay` is true. It MUST show the first frame with `controls` drawn, and playback MUST start only when the user activates the play control in that view. (proposed, owner to confirm)
+
 <figure>
 <pre class="term">╭─ Shore ────────────────────────────────────╮
 │ <span class="t-dim">▒▒▒▒▓▓▓▓████▓▓▒▒░░░░▒▒▓▓████▓▓▒▒░░░░▒▒▒▒</span>   │

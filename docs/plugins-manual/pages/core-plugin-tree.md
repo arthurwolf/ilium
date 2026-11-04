@@ -388,6 +388,8 @@ function onCompleted(result: RequestResult): void {
 
 Bookmark and lock flags survive restarts and protect nodes from closing. The plugin keeps its own bookmark flag with `tree.set-metadata`, mirrors it with `set-bookmarked` and locks with `set-node-locked`, so a later `close-node` is refused with `refused(conflict)`. Pages: [tree.metadata](/pages/capability-tree-metadata/), [api-tree](/pages/api-tree/), [tree structure intents](/pages/api-intent-tree-structure/) and [intents](/pages/api-intents/).
 
+- **[COR-027]** A row that the Tree plugin locks closed MUST ignore ordinary clicks that would expand it, MUST still open the rename editor on double-click, and MUST keep Unlock available in the context menu even when `[ui] lock_closed_enabled` is off. (proposed, owner to confirm)
+
 **Rust**
 
 ```rust
@@ -426,6 +428,8 @@ function protect(node: bigint): Submission[] {
 #### Remove empty groups
 
 A group that loses its last child disappears unless it is locked or bookmarked. On `node-removed` the plugin looks up the former parent from its own map, and if it has no children and no flag it submits `close-node`. Pages: [api-tree](/pages/api-tree/), [lifecycle](/pages/lifecycle/), [events](/pages/api-events/) and [intents](/pages/api-intents/).
+
+- **[COR-026]** With `[ui] auto_remove_empty_groups` on, the Tree plugin MUST close a group or folder when its last item closes and repeat up through ancestors that become empty, and MUST never remove a project or a split view this way. (proposed, owner to confirm)
 
 **Rust**
 

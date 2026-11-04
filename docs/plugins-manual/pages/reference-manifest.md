@@ -796,6 +796,8 @@ Requirement ids for this page: [API-080]. See the [requirements index](/pages/re
 
 Security keys: `data_use` ([SEC-267]), `security_contact` ([SEC-268]) and the display name rule ([SEC-381], error `manifest.display-name`). See [User security and privacy](/pages/user-plugin-security-and-privacy/).
 
+- **[PKG-094]** The manifest `[privacy]` table of [USR-329](/pages/user-privacy/) MUST hold `telemetry_hosts`, a list of host names or patterns that the plugin sends telemetry to. A plugin that declares telemetry is one whose `telemetry_hosts` is not empty. Every entry MUST be covered by an `http:` grant that the manifest requests, and the installer MUST refuse a manifest whose entry is not covered with `manifest.telemetry-host-ungranted` (proposed, owner to confirm).
+
 ## Production additions: T4-package-registry
 
 - [PKG-805] `requires.plugins` and `requires.services` MUST each hold at most 64 entries (proposed limit, owner to confirm). A longer list MUST be refused with `manifest.limit` naming the key. Test: a manifest with 65 entries under each key is refused with `manifest.limit` naming that key, and a manifest with 64 entries installs.

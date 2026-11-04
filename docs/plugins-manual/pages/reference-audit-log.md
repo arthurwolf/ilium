@@ -20,6 +20,8 @@ A **hash chain** links each record to the one before it by including the previou
 
 **[SEC-220]** The log is written only by the kernel to `audit.jsonl` in the audit directory: Linux `$XDG_STATE_HOME/ilium/audit/`, macOS `~/Library/Application Support/Ilium/state/audit/`, Windows `%LOCALAPPDATA%\Ilium\state\audit\`. The file has mode 0600 in a 0700 directory. It is in the deny set ([SEC-060]): no plugin scope reaches it, and `journal.read` does not expose it.
 
+- **[SEC-095]** The server MUST open `audit.jsonl`, the audit directory and `<state>/crashes/` without following symbolic links or reparse points; when any of them is a link, the server MUST write nothing through it, MUST queue records as under [SEC-225], and MUST show a notice naming the path (proposed, owner to confirm).
+
 ## Record schema
 
 **[SEC-221]** Each line is one JSON object:
@@ -37,6 +39,8 @@ A **hash chain** links each record to the one before it by including the previou
 | `grant`, `target` | string | Grant string or consent target |
 | `result` | string | `ok`, `refused`, `cancelled`, `failed` |
 | `reason` | string | Short code |
+
+- **[SEC-134]** Every audit record MUST carry an integer field `schema` whose value is 1 for the schema of [SEC-221]; a change that adds, removes or renames a field or changes a field's meaning MUST increase the value, `ilium plugin audit` and `--verify` MUST read every value they know, and MUST report a record with an unknown value as `unknown-schema <seq>` with exit code 3 instead of misparsing it (proposed, owner to confirm).
 
 **[SEC-222]** Event catalogue. Each of these events MUST be written exactly once per occurrence, except the rate-limited ones.
 
@@ -62,21 +66,40 @@ A **hash chain** links each record to the one before it by including the previou
 | `audit-reset` | The server recreated a deleted log file, with `prev_hash` of zeros |
 | `audit-dropped` | Records were dropped while the disk was full ([SEC-225]); written when space returns, with the count |
 
+- **[SEC-096]** The kernel MUST write only `event` values listed in the catalogue of [SEC-222] or in a section of this page that extends it, and the catalogue MUST list every event the kernel can write, including `plugin-state-changed`, `crash-report`, `audit-torn`, `audit-retention-deleted`, the reasoned kill of [SEC-458] and the data-movement events, each with its trigger (proposed, owner to confirm).
+- **[SEC-131]** The kernel MUST write one `server-start` record at each server start, with `detail` holding the host version, the host API range and `prev=clean` or `prev=unclean` according to whether the previous run wrote `server-stop`, and one `server-stop` record at each orderly shutdown with `reason` set to `shutdown` or `kill-session`; both are added to the catalogue of [SEC-222] (proposed, owner to confirm).
+- **[SEC-132]** Each run of `ilium plugin support-bundle <id>` or `support-bundle --all` that writes an archive, and each attach of a diagnostics log through the attach flow, MUST write one `support-bundle` audit record with `target` set to the absolute output path and `detail` of the form `scope=<id|all> bytes=<n> sha256=<hex> redactions=<n> dropped=<n>`; a `--dry-run` writes none, and the record MUST NOT contain any bundle content (proposed, owner to confirm).
+- **[SEC-133]** Turning diagnostics file logging on or off ([OPS-002]), starting the server with `ILIUM_PLUGIN_TRACE=1` ([HST-360]) and raising a plugin's log threshold to `debug` or `trace` ([OPS-010]) MUST each write one `diagnostics-capture` audit record with `target` set to `file-log`, `trace` or `log-level:<plugin id>` and `reason` set to `on` or `off`; the record is added to the catalogue of [SEC-222] (proposed, owner to confirm).
+- **[SEC-136]** The audit catalogue (SEC-222) MUST include `key-grab-start` and `key-grab-end`, written once per grab whose `pane` is `none`, with the plugin id, the client id and the chord list, and never the keys delivered (proposed, owner to confirm).
+- **[SEC-089]** A `policy-loaded` record MUST carry one `sources` entry per file read, each with `path`, `sha256`, `owner` and `used` (true or false, with `reason` when false), plus the `effective_sha256` of the merged policy, so that a collector can confirm which policy a machine ran without `ilium plugin policy show` (proposed, owner to confirm).
+- **[SEC-090]** Each `install`, `update` and `downgrade` record MUST carry `source` (`registry:<url>`, `bundle:<sha256 of the bundle>`, `file` or `url`) and, when a lockfile drove it, `lockfile_sha256`; a `sync --locked` run MUST also write one `sync` record with actor `cli`, the lockfile SHA-256 and the counts installed, removed and unchanged (proposed, owner to confirm).
+- **[SEC-129]** An `update` or `downgrade` record MUST carry the version that was active before the change in its `detail` string as `from=<version>`, with `version` holding the version installed by the change, including for refused, cancelled and rolled-back attempts (proposed, owner to confirm).
+- **[SEC-130]** A `policy-loaded` record MUST carry in `detail` the absolute path and the SHA-256 of every policy file read and whether it was `used` or `ignored`, in the form `path=<abs> sha256=<hex> source=used`, so that the audit trail proves which policy text was in effect; the record MUST NOT contain policy values (proposed, owner to confirm).
+
 **[SEC-223]** Redaction. A record never contains terminal text, prompts, transcripts, file contents or request bodies. Argument values equal to a current plugin secret (and its base64 and percent-encoded forms) are replaced with `<redacted>` ([SEC-243]). Process arguments are logged in full otherwise.
 
 ## Retention and failure
 
 **[SEC-224]** Rotation. The log rotates at `audit.max_mib` (default 64 MiB) or when the oldest record is older than `audit.keep_days` (default 365). The new file starts with a record whose `prev_hash` is the hash of the last line of the rotated file, and the old file is renamed `audit-<first seq>.jsonl` and kept until its age exceeds `keep_days`. Policy may change both values.
 
+- **[SEC-128]** A rotated audit file `audit-<first seq>.jsonl` MUST be set to mode 0400 (read-only for the owner on Windows) at rotation, and the server MUST never append to, rewrite or rename a rotated file; the only later operation on it is deletion by retention ([SEC-224], [SEC-954]) (proposed, owner to confirm).
+
 **[SEC-225]** Disk full. If a record cannot be written, the server keeps running, keeps the record in memory (up to 1,000 records), retries every 10 s, and shows a notice. When the in-memory queue is full, the oldest `h-grant-refused` and `egress-host-first-use` records are dropped first, no other record type is dropped while one of those two remains, the `audit-dropped` record is never dropped, and a `audit-dropped` record with the count is written when space returns.
 
+- **[SEC-094]** For every event of the catalogue of [SEC-222], the kernel MUST append the audit record, or queue it under [SEC-225], before the result of the action is reported to the user interface or the CLI exits, so that no action is visible as done while its record is still unwritten (proposed, owner to confirm).
+- **[SEC-127]** An append to `audit.jsonl` MUST NOT block the server's main loop for more than 100 ms (proposed, owner to confirm) while waiting for the writer file lock of another server; when the lock is not obtained in that time the record MUST be queued and retried as under [SEC-225], and the audited action MUST proceed (proposed, owner to confirm).
+
 **[SEC-226]** Verification. `ilium plugin audit --verify` re-computes the chain and prints `ok` or the first broken `seq`. The chain detects edits by someone who cannot also rewrite the whole file; an attacker with write access to the file can rebuild it. For stronger assurance the policy can set `[audit] sink` to `syslog` or `journald` ([SEC-228]).
+
+- **[SEC-125]** `ilium plugin audit --verify` MUST verify every `audit-<first seq>.jsonl` file in the audit directory in `seq` order and then `audit.jsonl`, MUST check that the first record of each file carries the hash of the last record of the file before it, MUST report a `seq` gap between two files as `missing-file <expected first seq>` with exit code 3, and MUST report every record whose `prev_hash` is 64 zeros other than `seq` 1 as `reset-at <seq>` and never as plain `ok` (proposed, owner to confirm).
 
 ## Viewing and export
 
 **[SEC-227]** `ilium plugin audit [--plugin <id>] [--since <time>] [--event <name>] [--limit <n>]` prints matching records as JSONL (one `audit` object per line, then one `summary`). `--since` accepts an ISO 8601 time or a duration such as `24h`. Settings > Plugins > Activity shows the same records in a list.
 
 **[SEC-228]** With `[audit] sink = "syslog"` or `"journald"` the server also sends each record to the system log with the identifier `ilium-audit`, one JSON object per message. The local file is still written.
+
+- **[SEC-126]** When `[audit] sink` is `syslog` or `journald` and the system log cannot be reached, the server MUST still append the record to the local file, MUST NOT delay or refuse the audited action, MUST count the failed forwards, and MUST write one host log line `host.audit.sink-failed` with the count at most once per minute until forwarding succeeds (proposed, owner to confirm).
 
 ## Example
 

@@ -54,11 +54,15 @@ The 99th percentile of `duration` is read from the histogram (the upper bound of
 - **[HST-355]** `near_misses` MUST count a call that ends in time and took at least 80 % of its deadline.
 - **[HST-356]** A counter MUST NOT be readable by another plugin. Only the kernel, the CLI and the user interface read them.
 
+- **[HST-173]** The host MUST keep a counter `import_us` keyed by class holding the sum of wall time spent inside synchronous imports during calls of that class, `host.slow-calls` MUST include the share of the reported call's time spent in imports, and when a call breaches its hard deadline with at least 50 % of its wall time inside imports the host MUST also write `host.slow-import` naming the slowest import (proposed, owner to confirm).
+
 ## Retention
 
 Counters are kept in memory in hourly buckets for the last 24 hours, and reset when the hosting process restarts. They are not written to disk. When an instance ends, one summary line is written to the plugin log (see below). This matches [Health and watchdog](/pages/reference-health-and-watchdog/).
 
 - **[HST-357]** The host MUST keep hourly buckets for 24 hours and MUST discard older buckets. The summary line at the end of an instance MUST be written once.
+
+- **[HST-142]** Uninstalling a plugin MUST discard its hourly buckets, custom counters of [HST-638], failure counters and failure window, together with the daily summaries of [HST-525], and a later install of the same id MUST start every counter and window at zero (proposed, owner to confirm).
 
 ## What is logged
 
@@ -130,6 +134,8 @@ Hourly buckets answer questions about the last day. A plugin that degrades over 
 - **[HST-524]** The host MUST fold each hourly bucket that leaves the 24-hour window into a daily summary per plugin side holding call count, failure count, near misses and the 50th, 95th and 99th percentile of call time, and MUST keep 30 daily summaries and discard older ones. A daily summary MUST add at most 4 KiB per plugin side, MUST stay on the local disk with the session data, and MUST obey the same content rules as the hourly buckets.
 - **[HST-525]** `ilium plugin status <plugin-id> --days <n>` MUST print the daily summaries for up to 30 days, MUST mark a day with a restart or an upgrade, and MUST end its output with the trend of the 95th percentile call time as rising, flat or falling over the period. The summaries MUST be removed when the plugin is uninstalled.
 
+- **[HST-099]** `ilium plugin erase-data <plugin-id>` MUST delete the daily summaries of [HST-524] of that plugin and report the count under the kind `summaries`, and `ilium plugin export-data` MUST write them as one JSON-lines file `summaries.jsonl` with the fields of [HST-524] in the plugin's export folder (proposed, owner to confirm).
+
 API version checked: `ilium:plugin@0.1.0`.
 
 ## Operator observability of traps
@@ -193,6 +199,10 @@ The registry below lists every code the host writes to a log line, with its leve
 - **[HST-979]** Spans in `<state>/plugin-trace.jsonl` MUST be deleted once they are more than 7 days old (proposed, owner to confirm). The host MUST run this deletion at server start. The size cap of [HST-609] still applies.
 - **[HST-980]** `ilium plugin erase-data <plugin-id>` MUST remove every span of that plugin from `<state>/plugin-trace.jsonl`, by writing a new file and renaming it over the old one, and MUST report the removed count as the kind `trace` ([USR-325]). Spans of other plugins MUST stay in place.
 - **[HST-981]** `ilium plugin export-data` MUST write the spans of the plugin as one JSON-lines file, using the fields of [HST-609], in the export folder ([USR-245]). Trace recordings MUST NOT be included in a support bundle ([USR-223]).
+
+- **[HST-136]** The diagnostics bundle of [HST-636] and the support bundle of [USR-335] MUST NOT contain inference privacy log records, trace spans, consent records or daily summaries, and `summary.txt` MUST name each of these kinds as excluded (proposed, owner to confirm).
+
+- **[HST-141]** `<state>/plugin-trace.jsonl` and the daily summary files of [HST-524] MUST be created with mode 0600 in a 0700 folder, MUST be in the deny set of [SEC-060] so that no plugin scope reaches them, and the trace file MUST be created only while `ILIUM_PLUGIN_TRACE=1` is set (proposed, owner to confirm).
 
 
 ## Host-level counters (session-wide, not per plugin)

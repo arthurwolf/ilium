@@ -26,6 +26,7 @@ Safe mode changes nothing on disk. Installed packages, grants, settings and data
 - [LIF-180] `--safe-mode=third-party` MUST load no T2 or T3 plugin and ignore `replaces`, and `--safe-mode=all-optional` MUST load only the essential set. Neither MUST change files on disk. Test: start both and compare the profile before and after.
 - [LIF-181] The environment variable MUST behave like the flag, and the flag MUST win. Test: set both to different values.
 - [LIF-182] Safe mode MUST show an indicator in the footer. Test: capture the footer.
+- **[USR-069]** The safe-mode banner MUST end with how to leave safe mode (`Press r on the recovery page, or restart ilium without --safe-mode`), and when safe mode was entered automatically after crashes ([USR-345]) the banner MUST also name the command that clears the crash marks (proposed, owner to confirm).
 
 ### The essential set
 
@@ -58,6 +59,7 @@ State lives in `<data>/plugins/bisect.json`. Each command prints JSONL records o
 - [LIF-184] Bisect MUST change only the session-level enabled state and MUST restore the saved set on `reset`. Test: run to the end and compare `installed.json`.
 - [LIF-185] Bisect MUST finish in at most `ceil(log2(n))` steps for `n` plugins. Test: 16 plugins, 4 steps.
 - [LIF-187] A bisect that ends without a `found` plugin MUST say so and MUST NOT name a plugin. When `bad` is answered with only the empty set enabled (the problem persists with no third-party plugin), or when `good` is answered for every half so that no plugin reproduces the problem, the final record has `found` set to `null` and `reason` set to `not-a-plugin`, and the text says the fault is not caused by a third-party plugin. The saved set is restored by `reset` as usual. Test: run `start`, answer `bad` at every step on a profile where the fault is in the kernel, then read the final record.
+- **[LIF-189]** When `<data>/plugins/bisect.json` does not parse, every `ilium plugin bisect` command MUST refuse with `bisect.state-corrupt`, MUST rename the file to `bisect.json.corrupt-<YYYYMMDD-HHmmss>`, and MUST NOT change `installed.json`. A start that finds no readable bisect state MUST run with the saved enabled set (proposed, owner to confirm).
 
 ### The crash-loop guard
 
@@ -65,6 +67,11 @@ If the server stops with a crash 3 times within 5 minutes during start, the next
 
 A **crash mark** is one timestamped record that the host writes to the server's own state folder (not into any plugin's data) as soon as a start begins. The host removes the record when startup completes, so a mark left behind by the next start means that start ended without finishing: a panic, a kill or a power loss before startup completed. A normal exit is not a crash. The 5 minutes are measured on the monotonic clock from the moment startup completes, and a stop before then (crash or normal exit) does not count as staying up.
 
+- **[LIF-167]** When the crash mark of a start cannot be written (state folder missing, read-only or full), the start MUST proceed, MUST log `crash-guard.unavailable` with the OS error, and that start MUST NOT count toward any crash-loop level. The footer MUST show that the crash-loop guard is off for this start (proposed, owner to confirm).
+- **[LIF-168]** A crash mark MUST record the monotonic uptime and the boot id at the time it was written. The 5-minute window of LIF-186 MUST be measured with the monotonic clock while the boot id is unchanged, and MUST fall back to wall time only for marks whose boot id differs from the current one. A backward wall-clock jump MUST NOT make three old marks count as recent (proposed, owner to confirm).
+- **[LIF-169]** A crash mark MUST carry the Ilium build digest of the server that wrote it. Marks written by another build MUST NOT count toward a level change of LIF-186, LIF-978, LIF-979 or LIF-980, and MUST still be cleared by LIF-294 (proposed, owner to confirm).
+- **[LIF-177]** A start that ends because of a caught termination signal (SIGINT, SIGTERM or the Windows console close event) before startup completes MUST remove its crash mark before exiting, and MUST NOT count as a crash. Only a stop the host cannot handle leaves the mark (proposed, owner to confirm).
+- **[LIF-178]** A crash mark file that cannot be parsed MUST count as one crash at the file's modification time, MUST be logged as `crash-guard.mark-unreadable`, and MUST be cleared with the other marks under LIF-294. The host MUST NOT delete or rewrite it before then (proposed, owner to confirm).
 - [LIF-186] Three crashes during start within 5 minutes MUST cause the next start to use `third-party` safe mode. Test: write three crash marks.
 - [LIF-294] The crash-loop guard MUST clear all crash marks once a start has stayed up for 5 minutes after startup completed. A stop before that point MUST leave the marks in place. Test: write three crash marks, start, advance 4 minutes 59 seconds and stop (marks remain), start again, advance 5 minutes and stop, then assert the next start is not in safe mode.
 
@@ -76,6 +83,7 @@ The guard has two more levels. They use the same crash marks as LIF-186, and a c
 - [LIF-979] Three crashes during start within 5 minutes while the start runs in `all-optional` safe mode MUST cause the next start to use `--no-plugins` (proposed, owner to confirm: the count of 3). The start MUST open the recovery page as its first screen. Test: write three crash marks in `all-optional` and assert the next start runs with no plugin host.
 - [LIF-980] Three crashes during start within 5 minutes while the start runs with `--no-plugins` MUST stop automatic restarts. Ilium MUST exit with a non-zero status and print one line with the code `crash-loop.exhausted` that names the state folder holding the crash marks and says that the fault is not caused by a plugin. Until the marks clear under LIF-294, every later start, with or without a flag, MUST use `--no-plugins`. Test: write three crash marks in `--no-plugins`, assert the exit status and the code, then start without flags and assert the start still runs with no plugin host.
 - [LIF-981] Every start MUST show the level it runs in on the footer banner (`third-party`, `all-optional` or `--no-plugins`), and a level change MUST NOT clear the crash marks; only LIF-294 clears them. Test: switch levels by writing crash marks, and assert the banner text and that the marks remain after each change.
+- **[USR-004]** When a start runs in automatic safe mode, the recovery page MUST list the plugin id and export named by each host crash record behind the crash marks that caused it (the running plugin call of HST-618 or the crash record's plugin id), and MUST say `no plugin call was running` for a record that names none. The host MUST NOT disable that plugin on its own (proposed, owner to confirm).
 
 If you reach `crash-loop.exhausted`, keep the state folder unchanged and report the crash to the Ilium project through the contact in [Security response](/pages/reference-security-response/). Do not delete the crash marks by hand.
 

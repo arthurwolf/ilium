@@ -32,10 +32,12 @@ Terms:
 | 5. Pack | `ilium plugin pack --json` | A package in `dist/` |
 
 - **[DEV-760]** A CI pipeline SHOULD run the five steps in this order and stop at the first step that fails. The order puts the cheap steps first.
+- **[DEV-056]** The generated CI file MUST order its steps so that a `build` step has written `dist/<side>.wasm` for every declared side before the first `check` or `test` step of the same job, and a run of the generated file on a fresh checkout MUST NOT report `component.missing` or `test.component-missing` (proposed, owner to confirm).
 - **[DEV-761]** Every command MUST work with no terminal and no session. The commands in this table are all offline commands, so a runner needs no running Ilium.
 - **[DEV-762]** With `--json` every command MUST print JSONL on standard output only. Progress text goes to standard error.
 - **[DEV-763]** `NO_COLOR=1` MUST be set in CI. Commands MUST also disable colour when standard output is not a terminal.
 - **[DEV-764]** The exit codes MUST be those of [Plugin command-line reference](/pages/reference-plugin-cli/). A CI step fails on any non-zero code. Code 3 (findings) from `lint` fails the pipeline when `--deny warnings` is set.
+- **[DEV-049]** The generated CI file MUST run the project's native unit tests (`cargo test --locked` for a Rust project, `bun test` for a TypeScript project) as a step of its own before the `ilium plugin test` step, whether or not `ilium plugin test` is run with `--coverage`, and a non-zero exit of that step MUST fail the job (proposed, owner to confirm).
 
 ## GitHub Actions
 
@@ -83,6 +85,8 @@ jobs:
 
 - **[DEV-765]** The generated file MUST pin each third-party action to a major version tag and MUST read the `ilium` download URL and hash from repository variables, so no URL is hard coded.
 - **[DEV-766]** The `Install ilium` step MUST verify the SHA-256 hash of the download before it runs the file.
+- **[DEV-057]** The generated CI file MUST run `ilium plugin --version --json` as the first command after the `Install ilium` step, so every CI log names the CLI version, the contract version and the embedded test host version before any other command runs (proposed, owner to confirm).
+- **[DEV-058]** The generated GitHub workflow MUST set `permissions: contents: read` at the workflow level and MUST raise it to `contents: write` only in the release job that uploads the package; the pull-request job MUST NOT hold a write permission or any secret (proposed, owner to confirm).
 
 ## GitLab CI
 
@@ -117,6 +121,8 @@ package:
 ```
 
 A TypeScript project uses an image that has Bun 1.2 or later in place of `rust:1.90`.
+
+- **[DEV-059]** The `.github/workflows/plugin.yml` and `.gitlab-ci.yml` files written by `new --ci` MUST run the same `ilium plugin` commands with the same flags in the same order, and the CLI's own test suite MUST compare the command lines extracted from both generated files (proposed, owner to confirm).
 
 ## Reproducible builds
 
@@ -250,6 +256,7 @@ API checked against `ilium:plugin@0.1.0`.
 **[DEV-933]** A CI recipe MUST show running `test` and `conformance` against the oldest and the newest host contract version the manifest `requires` range admits, using `ilium plugin test --host-contract <version>` (proposed, owner to confirm). An unsupported version MUST fail with `usage.host-contract-unavailable` and exit 2.
 
 **[DEV-934]** The CI recipe MUST upload on every run, success or failure, these files: the JSONL log of each step, `dist/build.json`, `dist/coverage.json` when produced, the conformance report, and on release the package, its SHA-256 file and `publisher.pub`. It MUST NOT upload `publisher.key`, `dist/*.tmp` or the signing environment.
+- **[DEV-092]** The generated CI file MUST pass `--report <file>` to `ilium plugin test` and `ilium plugin test --conformance`, and MUST upload both report files with the artifacts of DEV-934 on every run, so a failed run can be rerun with the recorded `seed`, `harness_version` and `component_sha256` (proposed, owner to confirm).
 
 ## Several plugins in one repository
 

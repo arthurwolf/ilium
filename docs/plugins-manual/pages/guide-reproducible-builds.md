@@ -14,6 +14,8 @@ Requirement ids of this page are in the range `DEV-892` to `DEV-893`. The comple
 
 - **[DEV-892]** `ilium plugin verify-reproducible <dir>` MUST build the project twice in clean, separate build directories and compare the resulting component and package byte for byte. It MUST exit 0 when they are identical and exit 1 with `build.not-reproducible` when they differ, printing the first differing artifact and the offset.
 
+- **[DEV-065]** `verify-reproducible` MUST accept `--compare <build.json>` and, after its own two builds, MUST fail with `build.not-reproducible` when the `sha256` of any side differs from the value recorded in that file, naming the side and both hashes, so two machines can compare a build without exchanging components (proposed, owner to confirm).
+
 - **[DEV-893]** A build is reproducible only with pinned inputs: a lockfile (`Cargo.lock` or `bun.lock`), the toolchain versions recorded in `dist/build.json`, and no network access during the build. `verify-reproducible` MUST fail with `build.unpinned-input` before building when a lockfile is missing or the recorded toolchain differs from the installed one.
 
 ### Failure behaviour

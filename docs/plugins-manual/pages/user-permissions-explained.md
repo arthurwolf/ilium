@@ -293,6 +293,7 @@ Even with permissions, Ilium limits what a plugin can do to your screen and sess
 
 - [USR-087] Ilium MUST show a footer indicator for 3 s after a plugin reads or writes the clipboard. Test: read the clipboard from a test plugin and watch the footer.
 - [USR-088] Ilium MUST drop toasts beyond 3 per 10 s per plugin and MUST end an input lock after 2 s. Test: send ten toasts at once, count the visible ones; lock input and time the release.
+- **[USR-074]** When the host drops a plugin's toasts because of the 3 per 10 s limit ([USR-088]), the footer MUST show once per 10 s the line `<name>: <n> more messages hidden. Press L to open its log.`, and the dropped toasts MUST be written to the plugin log at level `info` with their text (proposed, owner to confirm).
 
 ### Errors and edge cases
 

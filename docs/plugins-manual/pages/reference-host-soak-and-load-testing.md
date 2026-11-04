@@ -57,6 +57,7 @@ A call in a cycle may fail without failing the run. A plugin that is refused by 
 A run passes only when every check of [HST-506] holds and no check of [HST-507] fails.
 
 - **[HST-507]** The soak run MUST fail when a live instance, a helper process or an open handle remains after its owning plugin is deactivated, disabled or uninstalled, when a helper that was restarted is not replaced by a new process, or when the server records a restart of itself during the run. The failure MUST name the resource and the cycle in which it first appeared.
+- **[HST-172]** A soak run MUST record `memory_bytes_current` for every plugin side after each forced idle period. It MUST fail when any side's value grows beyond its value after the first full cycle by more than the larger of 10 % or 4 MiB, and the run record MUST name the plugin id and the side. (proposed, owner to confirm)
 
 Decision needed: the interval between samples. The default I would use is one sample per cycle, with a cycle length of at most one minute, so that a 24-hour run yields at least 1,440 samples. The sample interval does not change the pass criteria.
 

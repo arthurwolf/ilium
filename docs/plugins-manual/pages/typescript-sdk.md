@@ -56,6 +56,8 @@ ilium-plugin-sdk = { version = "0.1", features = ["testing"] }
 
 The generated files are `manifest.json`, `Cargo.toml` and `src/lib.rs` for Rust, and `manifest.json`, `package.json` and `src/<side>.ts` for TypeScript (`src/server.ts`, `src/client.ts` or `src/scene.ts`). `ilium plugin new` does not run `bun install`; run it yourself. A folder that holds both `Cargo.toml` and `package.json` stops the build with `toolchain.language-ambiguous`.
 
+- **[DEV-067]** `@ilium/plugin-sdk` MUST ship TypeScript declaration files for every subpath in its `exports` map, including `testing` and `testing/setup`, and the template `tsconfig.json` MUST type-check a fresh project against them with `strict` and without `skipLibCheck` (proposed, owner to confirm).
+
 ## How a plugin is built
 
 `ilium plugin build` compiles the plugin for WASI Preview 2, wraps the result as a component and writes one file per declared side to `dist/`, named after the manifest `entry` (for example `dist/server.wasm`). `ilium plugin pack` writes the `.iliumpkg` package to the same folder. The build runs on the author's machine. The host checks the file inventory and the signature at install time, so an SDK build never skips those checks. A component links only the imports its manifest requests, so the build needs no extra flag for the optional host services.

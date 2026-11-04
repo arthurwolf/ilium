@@ -117,6 +117,8 @@ The resolver chooses one version per plugin id for the whole installation. Two v
 
 The cycle rule covers hard plugin requirements and non-optional service requirements, as PKG-335 and PKG-654 say. A cycle through an optional edge is not an error.
 
+- **[PKG-082]** The resolver, `ilium plugin update`, `--from-registry` adoption and auto-update MUST exclude, before any download, every registry version whose index `api` is outside the host's supported window or whose `host` range does not match the running release. They MUST report `package.api-unsupported` only when no candidate remains, naming the newest excluded version and its `api` (proposed, owner to confirm).
+
 ### Resolution test table
 
 | Id | Installed | Install | Result |

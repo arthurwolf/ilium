@@ -307,6 +307,8 @@ export function recordSend(pane: bigint, key: string): void {
 
 Log lines are redacted of secrets ([SEC-243]). See [Secrets](/pages/reference-secrets/).
 
+- **[HST-140]** Before a plugin-supplied or file-derived string is written to a terminal or a text file by `ilium plugin logs`, `ilium plugin audit`, `ilium plugin stats`, `ilium plugin crashes`, the Settings Activity list or a support-bundle entry, the host MUST replace every C0 control character other than tab, every C1 control character and every escape sequence starting with U+001B with U+FFFD, and MUST count such replacements under `log_sanitized` for the plugin side; `--json` output MUST escape them as JSON requires instead. (proposed, owner to confirm)
+
 ## Production additions: T8-observability-perf
 
 - **[HST-600]** The host MUST store each plugin's log as one file per plugin id and MUST rotate it when it reaches 4 MiB (4,194,304 bytes) (proposed, owner to confirm), keeping at most 3 rotated files (proposed, owner to confirm) per plugin, so total log disk use per plugin is at most 16 MiB (proposed, owner to confirm).

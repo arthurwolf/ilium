@@ -213,6 +213,9 @@ export const rulesRow = {
 
 Each rule becomes one output filter on every agent pane. A match raises `output-matched`, and the plugin answers with `send-input`. See [terminal.output-filter](/pages/capability-terminal-output-filter/), [events](/pages/api-events/) and [send-input](/pages/api-intent-send-input/). The dedup key stops a repeated line from answering twice.
 
+- **[COR-013]** A text-trigger rule MUST fire once per new instance of matching visible text, MUST NOT fire again while the same text stays visible, MUST treat an instance as new again only after it has been missing from the screen for 1.5 seconds, and MUST adopt newly visible text silently for 2 seconds after a pane resize. (proposed, owner to confirm)
+- **[COR-014]** At send time the Text triggers plugin MUST re-check that the pane is still the same terminal and that the rule still exists, is enabled, has an unchanged message and still targets the pane's current classification, MUST cancel the pending send otherwise, and MUST hold at most 64 delayed deliveries per pane. (proposed, owner to confirm)
+
 **Rust**
 
 ```rust

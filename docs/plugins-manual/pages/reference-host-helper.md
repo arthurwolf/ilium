@@ -119,6 +119,7 @@ The host evaluates the grant check, the quota and the limits for a forwarded imp
 
 - **[HST-159]** Only the pure-compute imports MAY run in the helper without a round trip. Every other import MUST be forwarded and checked by the host.
 - **[HST-160]** A forwarded import round trip MUST take at most 0.2 ms median and 0.5 ms at the 99th percentile on an idle reference machine (benchmark B18).
+- **[SEC-157]** The `fonts` import MUST be classified as pure compute: a package font asset (at most 4 MiB) MUST be parsed and rasterised inside the plugin's own helper, never forwarded to the server or client process, and the font parser MUST be a fuzz target with the invariants of SEC-340 (proposed, owner to confirm).
 
 ## Deadlines include the round trip
 
@@ -182,6 +183,7 @@ On termination the host sends SIGTERM and then SIGKILL after 2 s. On shutdown of
 - **[HST-169]** After a helper dies, every request pending on it MUST complete as `cancelled`, and no retained state in the helper MUST be assumed.
 - **[HST-170]** The host MUST allow at most 5 helper restarts in 10 minutes for a session, and MUST then disable the T2 and T3 plugins of that session with `helper.unstable`.
 - **[HST-171]** Termination MUST be SIGTERM followed by SIGKILL after 2 s.
+- **[HST-046]** When a helper exits by SIGKILL, the host MUST read the `oom_kill` counter of the helper cgroup's `memory.events` (or, in the `setrlimit` fallback, the verdict of its own RSS watchdog) and MUST report the death as `trap.memory` only when that counter increased since spawn; a SIGKILL without an out-of-memory record MUST be reported as `helper.killed` with the signal number, MUST count one failure, and MUST be written to the audit log with the exit record of HST-518 (proposed, owner to confirm).
 
 ## Errors
 

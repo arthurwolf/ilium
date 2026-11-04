@@ -19,6 +19,7 @@ This page is the normative list of performance budgets of the plugin host and th
 - **[HST-301]** Each result MUST record the median and the 99th percentile, the Wasmtime version, the Wasmtime `Config` (as the output of `runtime_config()`), the CPU model, the core count, the operating system and the commit.
 - **[HST-302]** A benchmark MUST fail the run when the budget is missed, except where the table says "record" (a result without a target).
 - **[HST-303]** Benchmarks MUST run on a release build with the target features of the shipped binary, and MUST NOT use a debug build.
+- **[HST-145]** The release gate MUST run each gated benchmark three times (proposed, owner to confirm) and use the median of the three medians as the result; when the spread of the three medians (largest minus smallest, over the smallest) exceeds 10 % (proposed, owner to confirm), the result MUST be reported as `noisy`, MUST NOT count as a pass and MUST NOT be stored as a baseline (proposed, owner to confirm).
 
 The reference machine is the one named in the results file. A budget is checked on that machine. The numbers on a slower machine scale; the release gate (see [Roadmap](/pages/roadmap/)) uses the reference machine only.
 
@@ -61,6 +62,7 @@ The B1 to B9 rows are the phase-0 benchmarks of the platform plan, kept with the
 
 - **[HST-305]** `ilium-plugin-bench` MUST contain one program for each of B1 to B24, with the id in its name.
 - **[HST-306]** The release gate MUST include B1 to B9, B16 to B20 and B23 on the reference machine, and MUST fail when any budget is missed.
+- **[HST-143]** `ilium-plugin-bench` MUST contain one program for each of B25 (input-to-echo latency of key and mouse hooks, HST-622) and B26 (warm start from the compiled-component cache against a cold compile, HST-625), with the id in its name, and the release gate MUST include B25 and B26 and MUST fail when either budget is missed (proposed, owner to confirm).
 
 ## Named budgets
 
@@ -74,6 +76,8 @@ The B1 to B9 rows are the phase-0 benchmarks of the platform plan, kept with the
 - **[HST-307]** HOST-START MUST be at most 150 ms on the reference machine for the 40 bundled plugins, measured by B6.
 - **[HST-308]** CLI-COLD MUST be at most 60 ms, measured by B23, and MUST NOT start the server or any plugin that does not contribute the subcommand.
 - **[HST-309]** The resident memory that the host adds with the bundled plugins registered MUST be under 120 MiB.
+- **[HST-146]** The resident memory that the client process adds with the bundled client sides registered MUST be under 64 MiB (proposed, owner to confirm), the time from client start to the first painted frame with those sides registered MUST be at most 150 ms (proposed, owner to confirm), and the plugin host in the client MUST add at most 0.2 ms (proposed, owner to confirm) to a client frame when no plugin is active, each measured on the reference machine by a benchmark B27 (proposed, owner to confirm).
+- **[HST-147]** Registering one installed non-bundled plugin at server start MUST read only its manifest and its signature record, MUST NOT open its component bytes, and MUST cost at most 1 ms (proposed, owner to confirm) on the reference machine; B6 MUST include a variant with 256 installed T2 and T3 plugins registered, whose HOST-START MUST be at most 150 ms plus 1 ms per installed plugin (proposed, owner to confirm).
 
 ## Ratios against native code
 
@@ -120,3 +124,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[HST-626]** The compiled-component cache MUST be bounded to 512 MiB (proposed, owner to confirm) by default (configurable), MUST evict least-recently-used entries when over the bound, and MUST report size and hit rate in `ilium plugin stats --cache`.
 - **[HST-627]** The release gate MUST compare each benchmark median with the stored baseline of the previous release and MUST fail the run when any median regresses by more than 10 percent (proposed, owner to confirm), even when the absolute budget is met.
 - **[HST-646]** The benchmark harness MUST emit results as JSON lines with the fields `id`, `median_ns`, `p99_ns`, `budget_ns`, `pass` and `commit`, and `ilium-plugin-bench --compare <file>` MUST exit with code 1 when any `pass` is false.
+- **[HST-144]** The release gate MUST write the JSON-lines results of HST-646 to `bench/results/<version>.jsonl` in the repository in the release commit, the file MUST name the reference machine (CPU model, core count, memory, operating system) and MUST list the ids of the bundled plugins that B6, B22 and B24 loaded, that list MUST equal the bundled inventory of the release, and the stored baseline of HST-627 MUST be the file of the previous release (proposed, owner to confirm).
+- **[HST-148]** A loaded plugin side that holds no timer, no subscription and no helper process MUST cause no wake-ups attributable to it (timer expiries, queue polls, helper polls) over a 10 minute idle run, and B24 MUST report the attributable wake-ups per plugin side so that the 100 wake-ups per second aggregate can be traced to its sources (proposed, owner to confirm).
+- **[HST-149]** While a sandbox helper compiles a component of the maximum size of SEC-707, the 99th percentile `on-events` latency of 30 other plugins MUST stay within 1.2x of idle, measured by a benchmark B28 in the pattern of B9 and B12 (proposed, owner to confirm).
+- **[HST-174]** `ilium plugin install <package>` MUST complete verification, unpacking and registration of a 2 MiB package within 2 s (proposed, owner to confirm) on the reference machine with the file cache warm and no download, measured by a benchmark B29 whose results are recorded in the results file of HST-646 (proposed, owner to confirm).

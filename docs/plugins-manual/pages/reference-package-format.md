@@ -123,6 +123,8 @@ The character set is deliberately ASCII. It removes Unicode normalisation (NFC a
 | [PKG-124] | `help/` MUST hold only files whose names end in `.md`. `sounds/` MUST hold only `.wav` and `.ogg` files. `screenshots/` MUST hold only `.png` files. These folders are flat: a nested folder is refused with `package.entry-unexpected`. |
 | [PKG-125] | A component MUST be named after its side. A file named `server.wasm` that is declared as the `client` entry is refused with `manifest.entry-invalid`. |
 
+- **[PKG-095]** `i18n/` MUST be an allowed top-level folder. It MUST hold only files named `<tag>.json`, where `<tag>` is a canonical BCP 47 tag. Any other entry, a nested folder, or a file whose name is not a well-formed tag MUST be refused at install with `package.entry-unexpected` naming the path. Every `i18n/<tag>.json` MUST be listed in `files` like every other package file. (proposed, owner to confirm)
+
 ## Size caps
 
 | Id | Cap | Value | Code |

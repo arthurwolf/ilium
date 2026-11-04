@@ -381,6 +381,7 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 
 - [LIF-036] Enabling the plugin, the command `ilium plugin reset-failures <id>`, the Enable action of the recovery page and installing an update MUST clear the failure window of the affected sides. Test: two traps, then each action. After `reset-failures` the side is `inactive` and does not start; after Enable, the recovery page Enable action or an update, one trap restarts after 1 s.
 - [LIF-037] The instance state `stopped-by-failure` of the server side MUST be written to `failure_stopped` in `installed.json` and MUST survive a server restart. The failure window itself MUST NOT; it starts empty. The state of a client or scene side MUST be dropped when its client detaches. Test: stop the server after a stop-by-failure and assert the state after the restart; detach and reattach a client and assert the client side runs again.
+- **[LIF-195]** When the write of `failure_stopped` to `installed.json` fails at the third counted failure (disk full, permission), the side MUST still move to `stopped-by-failure` for the running session, the host MUST log `registry.write-failed` once, and MUST retry the write at the next successful registry write. The side MUST NOT restart because the write failed. (proposed, owner to confirm)
 
 ### Restart timer and other events
 
@@ -389,6 +390,7 @@ Failures older than 10 minutes drop out of the count on their own, so a plugin t
 - [LIF-040] When an update arrives while a restart is pending, the host MUST cancel the timer, clear the window and activate the new version by its normal triggers. Test: schedule, update, assert the new version activates.
 - [LIF-041] A revocation or grant while a restart is pending MUST keep the timer. The new instance MUST receive the current `granted` list. Test: schedule, revoke a grant, assert the restarted instance sees the shorter list.
 - [LIF-042] An essential core plugin (see [Core plugins](/pages/core-plugins/)) MUST never be stopped by failure. Its third and later failures in a window MUST restart after 5 s and MUST raise the essential-failure banner. Test: trap `ilium.core.tree` three times and assert it restarts and the banner shows.
+- **[LIF-197]** When an essential core plugin has 10 or more counted failures in one failure window, the host MUST log `host.essential-unstable` once per window, MUST open the recovery page, and MUST keep the essential-failure banner until the window empties. The host MUST keep restarting the plugin under LIF-042 and MUST NOT stop it. (proposed, owner to confirm)
 
 When the host stops a side, the tree footer shows one notice, called N14 in this manual, and Settings > Plugins lists the same text. This is the only place where the notice is defined. Other pages link here.
 

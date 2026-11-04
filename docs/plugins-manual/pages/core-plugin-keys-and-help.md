@@ -721,6 +721,8 @@ The help viewer is the pane the user opens with `F1` (preset binding `show-keys`
 
 **`help::topics()`.** A plugin with `help.read` can list topics to build its own menu: `help::topics() -> Vec<HelpTopicInfo>` (TypeScript `topics(): HelpTopicInfo[]`). Each entry has `id` (global `<plugin-id>/<local-id>`), `plugin` (plugin id), `title`, and `plugin_enabled` (false when the owning plugin is off). The list is read-only, holds titles and ids but no body (read the body with `help::topic(id)`), is ordered like the index, and is empty with a `warn` log line when `help.read` is declined or revoked. [COR-011]
 
+- **[USR-075]** The Settings core plugin MUST ship the help topics `ilium.core.settings/plugins-install`, `ilium.core.settings/plugins-permissions` and `ilium.core.settings/plugins-troubleshooting`, whose text MUST contain the symptom table of [Troubleshooting plugins](/pages/user-troubleshooting/) and the state words of [USR-161], so that the help viewer answers these questions offline. (proposed, owner to confirm)
+
 ### Keybinding conflicts: what Settings > Keys shows and how the user resolves them
 
 Precedence is fixed: the user's remap wins, then kernel built-ins, then T1, then T2 and T3 plugins; within a rank the first installed plugin wins (see [Contributes keys](/pages/reference-manifest/)). The losing binding is inactive and is never deleted.

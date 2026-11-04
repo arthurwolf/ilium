@@ -90,6 +90,8 @@ Treat this outcome as final for that node until the user clears the title. Do no
 
 The lock flag has one effect on `tree.write`: a locked node cannot be closed. `close-node` on it returns `refused(conflict)`. A rename or a move of a locked node is applied. A plugin can also clear the flag, so set it only on nodes the plugin owns.
 
+- **[SEC-159]** A `close-node` on a pane whose process is still running MUST be refused with `refused(conflict)` and the message `process running`, unless the plugin also holds `panes.signal`. A close made with `panes.signal` MUST be audited like a `kill` signal. (proposed, owner to confirm)
+
 ## Examples
 
 ### Lock new terminal panes (Rust)

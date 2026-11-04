@@ -145,6 +145,8 @@ An update is an install of a higher version of an installed id.
 | [PKG-304] | A notice lists the plugin, the old and new version, the new grants and the link to the changelog. The user can **Update**, **Later** (which hides the notice for that version for 7 days) or **Skip this version**. |
 | [PKG-305] | Auto-update is a policy item. An administrator can set `off` and lock it. |
 
+- **[PKG-099]** For an id listed in `packages.pinned_versions` ([SEC-952]), an auto-update check MUST NOT show a notice for, download or install any version other than the pinned one, and the plugin's row on the Plugins screen MUST read `Pinned by your administrator` with the pinned version (proposed, owner to confirm).
+
 ## Update of plugins installed from a file or a URL
 
 Ilium ships with no registry, so many plugins arrive as a file or a URL. Their update path is defined here. The record field `source` (see [PKG-265]) decides it, not the channel.

@@ -73,6 +73,7 @@ The two last settings-adjacent tables, `[plugins.extensions]` and `[plugins.repl
 - [USR-201] The host MUST keep each item at the location in the table, and MUST create the parent folders on first use. Test: on a clean profile, run install, grant, trust add, enable, disable and uninstall, then list the folders and match each file against the table.
 - [USR-202] The host MUST write `installed.json`, the grant files and the trust store atomically: it writes a temporary sibling file, flushes it and renames it over the target. Test: kill the process during a grant change and assert that the file holds either the old or the new content, never a mix.
 - [USR-203] Grants MUST be stored per user and per plugin, and MUST NOT be stored in a project folder. Test: grant `fs.read:project` while a project is open, open a second project and assert that the grant applies there and that `<project>/.ilium/` holds no grant.
+- **[HST-094]** At start the host MUST delete every temporary sibling left by an interrupted atomic write of `installed.json`, `grants.json`, `consents.json`, `trust.json` and the other host state files (the `<name>.tmp-<token>` files in the same folder), MUST log `state.temp-removed` with the count, and MUST NOT read a temporary sibling as the state file. (proposed, owner to confirm)
 
 ### Contents of the user-facing files
 
@@ -167,6 +168,8 @@ Target behaviour (specified here before the code is written).
 | A package folder is missing but the registry lists it | The plugin is refused at load with the code `package.corrupt` |
 | The disk is full during a write | The action stops, the old file stays, and the error is `install.io` or `io` |
 | Two Ilium servers share one profile | Each write takes `installed.lock`. The second writer polls every 100 ms for up to 30 s, then fails the action with `install.locked` (exit code 4, [LIF-066]) |
+
+- **[HST-095]** Files the host moves aside as `<name>.corrupt-<timestamp>` or `<name>.broken-<timestamp>` MUST be kept for 30 days and at most 10 per original name, oldest removed first, MUST be listed by `ilium plugin doctor` with the code `state.quarantined`, and MUST be included in `ilium plugin backup`. (proposed, owner to confirm)
 
 ### See also
 

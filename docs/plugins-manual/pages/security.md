@@ -688,6 +688,8 @@ An unsigned package installs only with `--allow-unsigned`, as a T3 package with 
 
 The review dialog grants capabilities, Settings > Plugins > Capabilities shows and revokes them, and `ilium plugin logs <id>` shows every refusal, trap and process run. A first-start prompt appears for a bundled plugin with high-risk grants, and a small confirmation appears the first time a plugin opens a site, uses a new host from a setting, or geocodes a place.
 
+- **[SEC-068]** The host text catalogue of [AUT-623] MUST be embedded in the Ilium binaries or read only from the install location of those binaries, MUST NOT be loaded from a config, data, cache or plugin path, and the host MUST ignore and log once any file in those paths that claims to be a host catalogue, so no plugin and no user-writable file can change permission wording, risk labels or consent prompts (proposed, owner to confirm).
+
 #### Lifecycle and trust
 
 A package that policy blocks, or that is refused at load, never runs plugin code. Safe mode ([Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)) turns third-party plugins off without changing grants. Install scope is global in 0.1.0 so that opening a repository cannot run code ([Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)). An uninstall removes grants; see [Install, update and uninstall](/pages/reference-install-update-uninstall/). [LIF-281]

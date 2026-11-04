@@ -70,6 +70,9 @@ The reasons you can see are:
 - **Waiting for memory.** Ilium has too many plugins running at once. Turn off one you do not use.
 - **Restarted.** The plugin failed once and started again. The word changes to failed only after three failures within ten minutes.
 
+- **[USR-064]** The detail view of a plugin in state `failed` or `refused` MUST show the sentence of its last failure (the export, the code or trap, and the time as `YYYY-MM-DD HH:mm:ss`) followed by the cause sentence and the next-step sentence of that code from the catalogue ([USR-347]), and MUST NOT show a WebAssembly offset, a backtrace, a host frame or a raw engine message; those go only to the plugin log (proposed, owner to confirm).
+- **[USR-076]** The detail view of a plugin in state `refused` or `blocked` MUST show the code, its cause sentence and its next-step sentence ([USR-347]), and when the cause is a policy it MUST append the administrator's `notice.contact` text ([USR-343]); the state word in the row MUST NOT be the only explanation (proposed, owner to confirm).
+
 ## What happens to what the plugin showed
 
 When a plugin stops, the badges and rows that it added stay on screen for up to 60 seconds, dimmed as stale (HST-254, see [Rendering pipeline for plugins](/pages/reference-host-rendering/)). This lets you keep working. If the plugin comes back, the items refresh. If it does not, they disappear. A dimmed item that you select shows "plugin is restarting".

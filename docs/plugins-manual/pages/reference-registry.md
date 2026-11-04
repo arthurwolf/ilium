@@ -140,6 +140,8 @@ One entry per plugin, with only what search and listing need.
 
 `yanked` is null or `{ "reason", "at" }`. `deprecated` is null or `{ "message", "successor" }`. `platforms` lists `linux`, `windows`, `macos`, matching the platform gate.
 
+- **[PKG-038]** `plugins/<id>.json` MUST carry, in `signed.rotations`, every `ilium-rot/1` rotation statement published for the plugin's publisher id, and a client MUST apply each statement that passes PKG-241 as `trust add --rotation` does before the key-change check of PKG-236, so that an update signed by the rotated-to key installs without `package.publisher-key-changed`; a statement that fails PKG-241 MUST be ignored and written to the audit log as `signature-failure` (proposed, owner to confirm).
+
 ### revocations.json
 
 The document has the wrapper of every metadata document and is signed with the `timestamp` role keys of `root.json`:
@@ -175,6 +177,10 @@ A `revocations.json` without a valid signature of the threshold of those keys is
 | [PKG-974] | The `signed` object of every metadata document MUST carry `spec`, the registry protocol version it follows, with the same value that `root.json` carries (proposed, owner to confirm: the examples of this page are updated to show it). The integer `version` stays a rollback counter under [PKG-366] and is not a format version. |
 | [PKG-975] | A client MUST check `spec` before it reads any other field of a document. A `spec` it does not support is refused with `registry.format-unsupported`. The client keeps its cached metadata as [PKG-417] requires and reports the document's `spec` and the values it supports. |
 | [PKG-976] | After a successor `spec` is first published, the registry MUST keep serving the previous `spec` for at least 12 months (proposed, owner to confirm). During that window the previous `spec` keeps the signature rules that applied to it when the successor was published. |
+
+- **[PKG-049]** A `root.json` in which one `key_id` appears in more than one role, or in which the `root` role threshold is 0 or larger than the number of its keys, MUST be refused by the client with `registry.root-invalid`, keeping the last good metadata; a public registry MUST list at least 3 root keys with a threshold of at least 2 (proposed, owner to confirm), and `registry add` MUST print a warning when the pinned root has a threshold of 1.
+
+- **[PKG-080]** The registry operator MUST keep root keys offline: a root private key MUST NOT be stored on, or reachable from, the host that serves or signs `timestamp.json`, `snapshot.json` or `targets` documents, and `root.json` MUST be signed on an offline machine; the operator record of each root signing (time, `root.json` version, signer) MUST be kept and published with the announcement of PKG-692 at every root rotation (proposed, owner to confirm).
 
 ## Transport
 
@@ -221,6 +227,8 @@ Search runs on `index.json`. A client that has downloaded it can search with no 
 
 The same list is used by `ilium plugin search --category` and by the store view. A client may fall back to a built-in copy when `categories.json` is absent.
 
+- **[PKG-096]** The `name` sort order of [PKG-382] MUST order entries by the folded form of the name defined in [PKG-379] (Unicode NFKD, combining marks removed, case folded), comparing code points of the folded form, so `éclair` sorts between `apple` and `Zebra`; the host's own sorted lists of plugin titles, command titles and option titles MUST use the same folding (proposed, owner to confirm).
+
 ## Namespaces
 
 A **namespace** is the set of plugin ids that start with a publisher id and a dot. The publisher id `com.example` owns every id that starts with `com.example.`.
@@ -238,6 +246,14 @@ A **namespace** is the set of plugin ids that start with a publisher id and a do
 | [PKG-656] | **Reclaim.** The registry MUST NOT reassign a dormant namespace to another publisher unless all of these hold: the namespace is dormant as defined in PKG-655 (no publish for 730 days and no download of any version from the registry for 365 days, read from the registry's own server logs; [PKG-376] keeps clients anonymous, so this counts requests, not users); the registry sent a notice to the contact address in the last signed metadata and published it on the namespace page; 90 days passed after that notice with no reply or publish from the owner; and no version of the namespace was downloaded in those 365 days. Otherwise the namespace stays with its owner. A reclaim MUST be recorded in the plugin metadata as `reclaimed_from`, and the new owner MUST publish under a new key. Refusal code: `registry.namespace-not-dormant`. |
 | [PKG-657] | **User notice.** When a plugin's namespace becomes dormant, the client MUST show the notice `dormant namespace` in the plugin detail page and in `ilium plugin list` output, with the date of the last publish. The notice MUST NOT block use, update or removal. A client MUST warn the user before an update that follows a reclaim, naming the old and the new publisher id. |
 
+- **[PKG-087]** When a domain publisher id loses new-publish rights under [PKG-386], the registry MUST set `publisher_verified: false` on every `index.json` entry of that namespace within 24 hours (proposed, owner to confirm), a client MUST show `Publisher domain not verified` in the detail view and in `ilium plugin info`, and the flag MUST NOT block install, update or removal.
+
+- **[PKG-088]** The confusable check of [PKG-389] MUST also apply to the `publisher` display name: a claim or publish whose display name skeleton equals the skeleton of another publisher id, of another publisher's display name, or of `ilium` MUST be refused with `registry.confusable` unless both belong to the same publisher id (proposed, owner to confirm).
+
+- **[PKG-089]** The registry MUST accept a transfer statement ([PKG-390]) only when it is also countersigned by a trusted key of the receiving publisher id ([LIF-309]), MUST refuse a receiving publisher id that does not exist or has no trusted key with `registry.transfer-unaccepted`, and MUST record the transfer as an `owner-change` transparency log entry naming both publisher ids (proposed, owner to confirm).
+
+- **[PKG-090]** `owner add` and `owner remove` ([PKG-819]) MUST send a notice to every maintainer of every owner publisher id, including the removed one, naming the actor's key fingerprint and the log entry index; within 1 hour of a removal a publish, yank or deprecate of that plugin id with a token of the removed publisher id MUST be refused with `registry.not-owner` (proposed, owner to confirm).
+
 ## Publishing
 
 Publishing is the only part of the protocol that needs a server. The upload API is specified here so that one client works with any registry that follows it.
@@ -254,6 +270,16 @@ Publishing is the only part of the protocol that needs a server. The upload API 
 | [PKG-399] | A publisher MUST NOT delete a published blob. Removal happens only through takedown (below). |
 | [PKG-400] | Upload limits: 300 MiB per package (the package format cap), 20 publishes per hour per publisher id. A larger upload is refused with `registry.size`. |
 
+- **[PKG-066]** A publish of a package whose `signature` document already holds a registry countersignature object MUST be refused with `registry.countersigned`, and the registry MUST countersign only a document holding publisher objects, so that a package carries at most the countersignature of the registry it is installed from (proposed, owner to confirm).
+
+- **[PKG-067]** Every version entry of `plugins/<id>.json` MUST carry `publisher_sha256`, the SHA-256 of the exact bytes the publisher uploaded before countersigning, beside `sha256` of the stored blob; the publish answer and the `publish` log entry MUST carry both digests, and `ilium plugin info --json` MUST print both so a publisher can confirm that the served blob derives from the package they signed (proposed, owner to confirm).
+
+- **[PKG-047]** A registry countersignature object MUST carry the same `publisher_id` as the publisher object and a `key_id` listed in the `targets` role of the registry's current `root.json`; the client MUST verify it with that role's key and MUST treat an object signed by a root or `timestamp` key, by a key of an earlier `root.json`, or by a key of another registry as no countersignature, applying the file-install row of the trusted-signing-time table (proposed, owner to confirm).
+
+- **[PKG-048]** The `published_at` written into the countersignature object MUST equal the `published` field of that version in `plugins/<id>.json` and the `time` of the `publish` log entry whose `sha256` is the blob digest; a client that finds any difference MUST refuse the install with `trust.log-inconsistent` and keep the evidence for the audit log (proposed, owner to confirm).
+
+- **[PKG-092]** Yank, unyank, deprecate, unlist and owner-change requests MUST count toward the per-publisher quota of [PKG-400] and [PKG-704], and a request over the quota MUST be refused with `registry.rate-limited` and a `Retry-After` header without changing any metadata (proposed, owner to confirm).
+
 ### Publish tokens
 
 The token of [PKG-392] is a secret that authorises publishes. Its issue, expiry, rotation and revocation follow the rules below. Leak response for a publisher key is in [Registry key compromise](/pages/reference-registry-key-compromise/).
@@ -264,6 +290,8 @@ The token of [PKG-392] is a secret that authorises publishes. Its issue, expiry,
 | [PKG-969] | A publisher MUST be able to issue a new token and revoke an old one without a gap in publishing. The new token works as soon as it is issued, and the old one keeps working until it is revoked or expires. A CI token MUST be rotated at least every 90 days (proposed, owner to confirm). |
 | [PKG-970] | A revocation MUST take effect within 1 hour of the publisher's request or of the operator's report of a leak (proposed, owner to confirm). From that moment a publish with the revoked token is refused with `registry.auth`. The revocation is appended to the transparency log ([PKG-802]), and the token value MUST NOT appear in that log or in any registry response. |
 | [PKG-971] | Every publish made with a token between the leak and its revocation MUST be listed in the transparency log and sent to every maintainer of the publisher id ([SEC-723]). The registry MUST NOT remove or yank such a publish by itself. The publisher or the operator decides under [PKG-396] and [PKG-403]. |
+
+- **[PKG-093]** A registry account MUST hold a verified contact address before it can claim a publisher id or be added as a maintainer, and the address of each maintainer MUST be the one that receives the notices of [SEC-723] and [PKG-656]; the address MUST NOT appear in any served metadata document or transparency log entry (proposed, owner to confirm).
 
 ## Policy
 
@@ -281,9 +309,21 @@ The token of [PKG-392] is a secret that authorises publishes. Its issue, expiry,
 | [PKG-405] | **Emergency revocation** of a publisher key follows [PKG-242] to [PKG-247]. The registry adds the key to `revocations.json`. |
 | [PKG-406] | **Ratings and reviews.** User ratings and reviews are **out of scope for 0.1**. A registry compliant with this page MUST NOT show a rating, and a client MUST NOT send one. A later version of this page may add them. The policy for any future rating: only users of a version may rate it, a rating needs moderation, and paid ratings are forbidden. |
 
+- **[PKG-069]** A registry that requires review level B MUST parse `sbom.json` as CycloneDX 1.5 JSON and MUST refuse the publish with `registry.policy` and the detail `sbom-invalid` when the document does not parse, when `metadata.component.name` is not the plugin id or `metadata.component.version` is not the manifest version, or when a listed component has no version (proposed, owner to confirm).
+
+- **[PKG-083]** The review record of PKG-680 MUST be stored in the version entry of `plugins/<id>.json` as `review` (null, or `{ "reviewer_id", "time", "sha256" }`), covered by the document signature; a client MUST treat a record whose `sha256` differs from the entry's `sha256` as absent (level A) and MUST log `registry.review-hash-mismatch` (proposed, owner to confirm).
+
+- **[PKG-084]** The registry MUST refuse to attach a review record whose `reviewer_id` is a maintainer of the plugin's publisher id or the signer of the package, with `registry.review-self`; a level B review MUST be made by a registry operator account that holds no maintainer role on that publisher id (proposed, owner to confirm).
+
+- **[PKG-086]** When served as `policy.json`, the content policy MUST be listed in `snapshot.json`, MUST carry the wrapper of every metadata document signed with the `timestamp` role keys, and MUST contain `operator`, `jurisdiction`, `abuse_contact`, `appeal_contact`, `review_deadline_days` and `rules` (a list of `{ "id", "text" }` with ids that never change meaning); a client MUST refuse an unsigned or unlisted `policy.json` with `registry.signature-invalid` and keep its cached copy (proposed, owner to confirm).
+
+- **[PKG-091]** A publisher id under a temporary or permanent ban ([Governance](/pages/governance/)) MUST be marked `suspended` in the signed metadata, every token of its maintainers MUST be revoked ([PKG-970]), and a publish, yank, unyank, deprecate, unlist, owner change or transfer under that id MUST be refused with `registry.publisher-suspended`; a suspension alone MUST NOT take down, yank or unlist any published version, and removal of a namespace is a whole-id takedown under [PKG-403] (proposed, owner to confirm).
+
 ## Revocation
 
 Revocations travel in `revocations.json`. [PKG-407] A client MUST fetch it on every metadata refresh, and MUST apply `keys` to its trust store (status `revoked`, `added_by: registry` is not used for revocations) and `blocked_ids` to its installed plugins. The effects are those of [PKG-244] to [PKG-247] for keys and [PKG-403] for ids.
+
+- **[PKG-039]** When a key is added to `revocations.json` with reason `compromised`, the registry MUST yank with a `security:` reason every version signed by that key whose countersignature `published_at` is at or after `effective`, MUST list those versions in the transparency-log entry of the revocation, MUST notify every maintainer of the publisher id (SEC-723), and MUST NOT remove the versions (PKG-399) (proposed, owner to confirm).
 
 ## Mirrors
 
@@ -309,6 +349,10 @@ A machine with no network can install from a **bundle**: a directory with the sa
 | [PKG-977] | A bundle given as a `.tar` file MUST have its outer listing checked before any entry is extracted. The client refuses the bundle with `registry.bundle-invalid` when an entry has an absolute path or a `..` component, is a symbolic link, a hard link, a device, a FIFO or a socket, or lies outside the layout of [PKG-412]. The package entry rules of [PKG-107] and [PKG-172] apply to each package inside the bundle. |
 | [PKG-978] | A bundle `.tar` MUST NOT expand beyond 2 GiB or contain more than 10,000 entries (proposed, owner to confirm). A bundle over either limit is refused with `registry.size` before any file is written. |
 | [PKG-979] | The client MUST extract a `.tar` bundle into a new temporary folder under the cache folder, verify its metadata with the pinned root keys ([PKG-413]) and move only verified packages into the install path. Nothing is written under the data directory before the install stages of [PKG-413] begin. A refused bundle leaves no extracted file behind. |
+
+- **[PKG-097]** `ilium plugin export-bundle` MUST include the registry's current `revocations.json`, `quarantine.json` and transparency log head, and `ilium plugin install --from-bundle` MUST verify and apply them before the install stages, updating the cached revocation data and the last-success time of the stale rule ([EXT-072], [HST-694]) exactly as a security metadata refresh would (proposed, owner to confirm).
+
+- **[PKG-098]** `ilium plugin export-bundle` MUST write a deterministic bundle (entries sorted by path, fixed modification times, no owner names, identical bytes for two exports of the same set from the same snapshot) and MUST print the SHA-256 of a `.tar` bundle in its `result` line, so the receiving side of an air gap can check the transfer before any install (proposed, owner to confirm).
 
 ## Client error codes
 
@@ -418,6 +462,12 @@ The log of [PKG-700] is part of the file tree. It is an append-only Merkle tree 
 | A mirror copies `log/` byte for byte ([PKG-408]); a partial mirror ([PKG-409]) copies the head, the entries and proofs of its blobs, and the consistency proofs. A bundle ([PKG-412]) carries the head and the proof of each blob; the client checks them with the rules above, and `--offline` skips only the head expiry check. | PKG-408, PKG-412 |
 | Absence: a registry whose `root.json` has no `log` key (`"log": { "required": true }` declares one) has no log. The client then skips the check, shows `This registry has no transparency log` in the plugin detail view, and does not treat that as an error. When the root declares a log and the head or a proof is missing, the install is refused with `registry.not-found`. | PKG-700 |
 | The client keeps the log head per registry, so a registry that later drops its declared log is detected only by a new root that the client accepts under [PKG-364]. | PKG-364 |
+
+- **[PKG-046]** The transparency log entry types MUST include `key-revocation`, and the registry MUST append one such entry (with `key_id`, `reason` and `effective`, `plugin_id` null) for every key it adds to `revocations.json` before it publishes the new `revocations.json`; a client that finds a revoked key in `revocations.json` with no matching `key-revocation` entry in the log MUST write an audit line and still apply the revocation (proposed, owner to confirm).
+
+- **[PKG-085]** The transparency log entry `type` MUST also admit `review`, `review-withdrawn`, `appeal` and `abuse-decision`; attaching or withdrawing a review record, publishing an appeal decision and recording a decision on an abuse report ([PKG-705]) MUST each append one such entry carrying `plugin_id`, `version` and `sha256` where they apply, and a client MUST accept these types when it verifies the head and proofs (proposed, owner to confirm).
+
+- **[PKG-068]** `ilium plugin registry log-head <url> [--json]` MUST print the stored transparency-log head of that registry (`tree_size`, `root_hash`, `version`, the time it was accepted), and `--compare <root_hash> --tree-size <n>` MUST exit 0 when the stored head of that size has that root hash and exit 1 with `trust.log-inconsistent` otherwise, so two machines can detect a split view without any network (proposed, owner to confirm).
 
 ## The emergency-disable feed document
 

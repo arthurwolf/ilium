@@ -494,6 +494,8 @@ function onTitle(event: Event): Submission | undefined {
 
 The visible screen and the history of one pane are pasted into another. The server reads rows with `terminal.read-screen` and asks for the history, trims trailing blank rows, then submits `send-input` with `delivery: pasted` to the target. `history-text` answers later through `take-history`. Pages: [terminal reads](/pages/primitives-terminal-reads/), [read-screen](/pages/capability-terminal-read-screen/), [history](/pages/capability-terminal-history/), [terminal input](/pages/primitives-terminal-input/), [terminal.write](/pages/capability-terminal-write/), [events](/pages/api-events/) and [send-input](/pages/api-intent-send-input/).
 
+- **[COR-004]** Screen transfer MUST paste the plain text of the source pane's current visible screen into the destination as one paste without appending Enter, MUST be offered only between two live terminal panes that share an edge in the split, and MUST NOT be offered next to an editor or board pane (proposed, owner to confirm).
+
 **Rust**
 
 ```rust
@@ -755,6 +757,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions: T6-core-plugins
 
 - [COR-218] The PTY and vt100 state MUST be owned by the kernel; disabling or crashing `ilium.core.terminal` MUST NOT kill, resize or detach any PTY, and input typed by the user MUST still reach the focused pane. Test: disable the terminal plugin, and separately crash it in a test, then assert that each PTY keeps running at its size, and type into the focused pane and assert that the input arrives.
+- **[COR-000]** The plugin build MUST keep each terminal pane's scrollback up to `[terminal] scrollback_budget_mib` (default 8 MiB, range 4 to 512 in steps of 4), applied to panes created after the change, and output beyond the budget MUST no longer be retained, oldest first (proposed, owner to confirm).
 
 ### Emulation contract: what the kernel vt100 supports and what the plugin sees
 

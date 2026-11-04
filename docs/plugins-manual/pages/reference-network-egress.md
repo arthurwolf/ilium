@@ -102,6 +102,8 @@ The HTTP API lets programs on the machine drive Ilium. Plugins can add routes wi
 
 **[SEC-099]** The token is created with mode 0600 when the server starts and replaced at each start. Any process of the same user can read it, so the HTTP API is shell-equivalent for same-user processes. This is an accepted risk (non-goal [SEC-008]).
 
+- **[SEC-163]** The loopback HTTP API listener MUST limit unauthenticated requests to 20 per second and 8 concurrent connections per source port owner, MUST close a connection whose headers do not arrive within 5 s, and MUST answer `429 Too Many Requests` beyond the limit without touching any plugin route handler. (proposed, owner to confirm)
+
 ## Examples
 
 A plugin granted `http:api.example.com` calls `GET https://api.example.com/v1`. The name resolves to `10.1.2.3`. The host refuses with `not-permitted`, reason `private-address`. The same plugin granted `http:10.1.2.3` as a literal gets through, and the review dialog showed `Connect to 10.1.2.3 (a private address)` as high risk.
