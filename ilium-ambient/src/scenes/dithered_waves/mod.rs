@@ -131,10 +131,11 @@ impl DitheredWavesScene {
                 let bottom = bottom_left + (bottom_right - bottom_left) * column_fraction;
                 let field_value = top + (bottom - top) * row_fraction;
                 let luminance = ((field_value - FIELD_FLOOR) * contrast).clamp(0.0, 1.0);
-                // Threshold is centred (minus 0.5) so quantising does not brighten.
+                // Select low threshold ranks first, like the shared ordered dither,
+                // so the two aligned lattices do not cancel each other.
                 let threshold = self.tile.at(x / pixel, y / pixel);
                 let level =
-                    ((luminance + (threshold - 0.5) / steps + bias) * steps + 0.5).floor() / steps;
+                    ((luminance + (0.5 - threshold) / steps + bias) * steps + 0.5).floor() / steps;
                 frame.raster.dots[y * width + x] = level.clamp(0.0, 1.0) * peak;
             }
         }

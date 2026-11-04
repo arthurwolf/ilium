@@ -70,6 +70,8 @@ fn composite_pixels(
     frame.cell_colors.fill([0; 3]);
     // Also clear an unmatched tail when a diagnostic supplies a short input.
     frame.raster.dots.fill(0.0);
+    frame.raster.image_coverage.clear();
+    frame.raster.image_coverage.resize(width * height, 0);
     let dot_width = frame.raster.width;
     let dot_height = frame.raster.height;
     if width == 0 || height == 0 || dot_width == 0 || dot_height == 0 {
@@ -93,6 +95,7 @@ fn composite_pixels(
         let intensity = dot_coverage(luminance(raw));
         *dot = intensity;
         let cell_index = cell_y * width + cell_x;
+        frame.raster.image_coverage[cell_index] += 1;
         let adjusted = if pastel {
             adjust(raw, settings)
         } else {
@@ -224,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_alpha_mask_prevents_stale_or_transparent_texel_colors() {
+    fn image_background_selected_alpha_mask_prevents_stale_or_transparent_texel_colors() {
         let mut raster = Raster::default();
         raster.resize(2, 4);
         let mut cell_colors = vec![[255; 3]];
@@ -246,6 +249,7 @@ mod tests {
         );
         assert_eq!(frame.cell_colors.as_slice(), &[[0; 3]]);
         assert!(frame.raster.dots.iter().all(|&value| value == 0.));
+        assert_eq!(frame.raster.image_coverage, [0]);
         composite_selected(
             &[[200, 40, 20]; 8],
             &[true; 8],
@@ -253,6 +257,7 @@ mod tests {
             &VoxelLandscapeSettings::default(),
             &ScenePalette::default(),
         );
+        assert_eq!(frame.raster.image_coverage, [8]);
         assert!((199..=200).contains(&frame.cell_colors[0][0]));
         assert!((39..=40).contains(&frame.cell_colors[0][1]));
         assert!((19..=20).contains(&frame.cell_colors[0][2]));
