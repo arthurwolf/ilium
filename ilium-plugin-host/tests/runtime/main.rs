@@ -10,4 +10,5 @@ mod api_retry_and_codes;
 mod reference_errors_and_limits;
 mod reference_host_runtime;
 mod reference_requirements_api_host;
+mod req_gap_host_runtime;
 mod support;

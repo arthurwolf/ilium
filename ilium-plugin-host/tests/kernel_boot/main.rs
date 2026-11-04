@@ -13,4 +13,5 @@ mod ipc_traffic_visibility;
 mod kernel_and_boot;
 mod kill_switch_plugin;
 mod platform_support;
+mod req_gap_kernel_boot;
 mod telemetry_daily_history;

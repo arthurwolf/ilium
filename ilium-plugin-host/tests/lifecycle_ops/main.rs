@@ -25,6 +25,7 @@ mod reference_offline_and_low_disk;
 mod reference_persistence_and_restart;
 mod reference_plugin_lifecycle_states;
 mod reference_plugin_scope_and_sessions;
+mod req_gap_lifecycle_ops;
 mod security;
 mod services;
 mod settings_screens;

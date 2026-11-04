@@ -158,6 +158,8 @@ pub fn sample_grant(family: &str) -> String {
         "http-api.route" => "/notes/{id}",
         "settings.contribute" | "settings.read-kernel" | "settings.write-kernel" => "api",
         "extensions.provide" | "extensions.contribute" => "com.example.notes/status",
+        // CAP-886: the bare name is refused with manifest.grant-argument-missing; a sample must name one agent.
+        "agent-config.propose" => "claude",
         _ => return family.to_owned(),
     };
     format!("{family}:{argument}")

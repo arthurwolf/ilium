@@ -11,3 +11,5 @@ mod reference_signing_and_trust;
 mod reference_signing_and_trust_p2;
 mod reference_signing_and_trust_p2_trust;
 mod reference_trust_and_supply_chain;
+
+mod req_gap_package_signing;

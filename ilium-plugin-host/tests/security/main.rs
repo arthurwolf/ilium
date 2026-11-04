@@ -45,3 +45,6 @@ mod secu_containment_precedence;
 mod secu_kill_cli;
 mod secu_kill_restart_update;
 mod secu_support;
+
+// Part 5: gap-review requirements for lane security (SEC-000, SEC-015 .. SEC-139).
+mod req_gap_security;

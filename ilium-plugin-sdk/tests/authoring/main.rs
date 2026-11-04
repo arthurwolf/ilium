@@ -28,4 +28,5 @@ mod onb_test_loop;
 mod onb_toolchain_checks;
 mod performance;
 mod performance_recipes;
+mod req_gap_authoring;
 mod ui_model;

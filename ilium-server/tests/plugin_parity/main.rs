@@ -12,5 +12,6 @@ mod inference_and_privacy;
 mod panes_and_layout;
 mod port_handlers;
 mod reference_feature_traceability;
+mod req_gap_port_compat;
 mod session_recovery;
 mod settings;

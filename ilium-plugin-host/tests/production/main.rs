@@ -16,3 +16,4 @@ mod reference_minimum_system_requirements;
 mod reference_offline_and_low_disk;
 mod reference_plugin_files;
 mod reference_platform_support;
+mod req_gap_host_production;

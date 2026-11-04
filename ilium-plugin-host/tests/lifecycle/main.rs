@@ -8,5 +8,6 @@ mod lifecycle;
 mod reference_health_and_watchdog;
 mod reference_plugin_lifecycle_states;
 mod reference_resource_accounting;
+mod req_gap_lifecycle;
 mod user_safe_mode_and_troubleshooting;
 mod user_safe_mode_and_troubleshooting_p2;

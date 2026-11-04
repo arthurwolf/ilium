@@ -2,3 +2,4 @@
 
 mod common;
 mod reference_host_ipc;
+mod req_gap_host_ipc;

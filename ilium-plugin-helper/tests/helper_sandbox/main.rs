@@ -17,4 +17,6 @@ mod reference_sandbox_hatches;
 #[cfg(unix)]
 mod reference_sandbox_trust;
 #[cfg(unix)]
+mod req_gap_helper_sandbox;
+#[cfg(unix)]
 mod support;

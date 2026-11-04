@@ -25,4 +25,5 @@ mod api_tree;
 mod capability_agent_config_propose;
 mod reference_requirements_settings;
 mod reference_settings_schema;
+mod req_gap_imports_core;
 mod support;

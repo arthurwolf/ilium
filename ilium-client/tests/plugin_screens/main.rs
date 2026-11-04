@@ -11,5 +11,6 @@ mod footer_and_notices;
 mod install_dialogs;
 mod plugins_tab;
 mod recovery_page;
+mod req_gap_user_admin;
 mod support;
 mod usr_release_screen_reader;

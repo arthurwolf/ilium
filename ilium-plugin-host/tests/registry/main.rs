@@ -21,3 +21,4 @@ mod publ_publish_flow;
 mod publ_registry_metadata;
 mod publ_registry_ops;
 mod publ_yank_takedown;
+mod req_gap_registry_publish;

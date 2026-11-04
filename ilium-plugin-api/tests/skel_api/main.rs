@@ -2,3 +2,4 @@
 //! `skel_api` test target from tests/skel_api/main.rs.
 
 mod reference_abi_major_versions;
+mod req_gap_skel_api;

@@ -15,7 +15,7 @@ ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit", op
 [dev-dependencies]
 ilium-plugin-sdk = { path = ".", features = ["testing"] }
 # The authoring tests read host texts of the internationalisation guide.
-ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
 
 [features]
 # Re-exports the testkit as `ilium_plugin_sdk::testing`.

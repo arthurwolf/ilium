@@ -6,3 +6,4 @@ mod reference_host_telemetry;
 mod ops_diagnostics_logs;
 mod ops_kill_switch;
 mod ops_telemetry_consent;
+mod req_gap_observability;
