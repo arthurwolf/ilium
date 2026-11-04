@@ -187,4 +187,3 @@ Illustrative, not generated: glyphs come from the client icon inventory; the two
 
 ### Security
 
-**[SEC-041]** Pane lifecycle intents from a plugin are checked against its grants like host calls. See [Sandbox reference](/pages/reference-sandbox/).

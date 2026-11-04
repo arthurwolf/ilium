@@ -328,4 +328,4 @@ Contract: `ilium:host/clipboard`. The server side reaches it through client requ
 
 ### Security
 
-**[SEC-044]** Clipboard reads need the high-risk `clipboard.read` grant. See [Secrets](/pages/reference-secrets/).
+**[SEC-175]** Clipboard reads need the high-risk `clipboard.read` grant. See [Secrets](/pages/reference-secrets/).

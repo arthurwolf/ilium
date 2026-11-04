@@ -751,9 +751,7 @@ Every command here follows the output model above. Synopses are in the table; sh
 
 - **[LIF-293]** Exit codes: 0 on success; 1 on a failed operation; 2 on a usage error; 3 when `restore --dry-run` finds a difference it would apply; 6 when a session command cannot reach its session; 130 on interrupt. An interrupted `export`, `backup` or `data export` MUST leave no partial output, as in [DEV-916].
 - **[LIF-199]** Each command MUST print `progress` records while it runs, one `artifact` record per file it writes (kind `export`, `backup` or `data`), then `summary` and `result`. `restore` MUST print one `plan` record per plugin before it changes anything. `du` MUST print one `usage` record per plugin with integer byte fields for store, data, storage, cache, logs and backups.
-- **[LIF-290]** `export` MUST NOT include a secret, with or without any option.
-- **[HST-652]** `backup` leaves out secrets, cache, logs, staging and the compile cache. `--include-grants` adds `grants.json` and `consents.json`. `--include-secrets` adds the secret values in plaintext, and the command MUST print a `warning` record saying the archive is not encrypted. `--force` replaces an existing target file.
-- **[HST-653]** `restore --merge` keeps plugins not in the archive; `--replace` removes them. `--dry-run` changes nothing. A failure leaves the state as it was before the command.
+- **[HST-176]** `backup` leaves out secrets, cache, logs, staging and the compile cache. `--include-grants` adds `grants.json` and `consents.json`. `--include-secrets` adds the secret values in plaintext, and the command MUST print a `warning` record saying the archive is not encrypted. `--force` replaces an existing target file.
 
 | Code | Command | Exit | Meaning |
 |---|---|---|---|

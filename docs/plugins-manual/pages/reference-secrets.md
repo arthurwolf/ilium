@@ -104,11 +104,11 @@ export async function callApi(): Promise<Uint8Array> {
 
 [SEC-247] gives only plugin guidance. This section states what the host itself does with a secret while it holds it. The rules are host requirements and carry the IDs of the rules they extend; where no ID exists yet the row says so.
 
-**[SEC-247]** (host side) The kernel reads a secret from the keyring just in time, that is when `settings.get-json` or an internal consumer such as a provider call needs it, and holds the plaintext in a buffer whose type zeroises on drop (Rust `zeroize`). The buffer is zeroised when the request ends, on success and on error. The kernel keeps no long-lived plaintext cache of a secret. The only other plaintext copy is the redaction list of [SEC-243], and a rotated value stays there for no longer than the 60 s window of [SEC-246].
+**[SEC-201]** (host side) The kernel reads a secret from the keyring just in time, that is when `settings.get-json` or an internal consumer such as a provider call needs it, and holds the plaintext in a buffer whose type zeroises on drop (Rust `zeroize`). The buffer is zeroised when the request ends, on success and on error. The kernel keeps no long-lived plaintext cache of a secret. The only other plaintext copy is the redaction list of [SEC-243], and a rotated value stays there for no longer than the 60 s window of [SEC-246].
 
-**[SEC-033]** (host side) The host never places a secret value in the argv or the environment of a `process.run` child or of a pane command. `/proc/<pid>/cmdline` and `/proc/<pid>/environ` can be read by other processes of the same user, and redaction ([SEC-243], [SEC-066]) only hides a value in text the host writes afterwards. A plugin that needs a secret in a child sends it on stdin or in a request header. A call that carries a stored secret value in `args` or `env` is not detected by value; a plugin that does this by its own code is the plugin's defect, as for [SEC-245]. The host side of the rule is that no host feature (a `{secret:key}` style substitution, a provider helper, a pane launcher) writes a secret into argv or environment.
+**[SEC-183]** (host side) The host never places a secret value in the argv or the environment of a `process.run` child or of a pane command. `/proc/<pid>/cmdline` and `/proc/<pid>/environ` can be read by other processes of the same user, and redaction ([SEC-243], [SEC-066]) only hides a value in text the host writes afterwards. A plugin that needs a secret in a child sends it on stdin or in a request header. A call that carries a stored secret value in `args` or `env` is not detected by value; a plugin that does this by its own code is the plugin's defect, as for [SEC-245]. The host side of the rule is that no host feature (a `{secret:key}` style substitution, a provider helper, a pane launcher) writes a secret into argv or environment.
 
-**[SEC-244]** (host side) The server never includes a secret value in an IPC frame to the client, except to the side that owns the row: the settings editor of the owning plugin or of the kernel tab receives the value only when the user opens that row with reveal, and then only up to `reveal_last` characters ([SEC-248]). All other frames, including the render cache and `settings-changed`, carry the key name only.
+**[SEC-200]** (host side) The server never includes a secret value in an IPC frame to the client, except to the side that owns the row: the settings editor of the owning plugin or of the kernel tab receives the value only when the user opens that row with reveal, and then only up to `reveal_last` characters ([SEC-248]). All other frames, including the render cache and `settings-changed`, carry the key name only.
 
 **[SEC-445]** (scope) Core dumps and crash reports are covered by [SEC-445] and [SEC-446] in the [Audit log](/pages/reference-audit-log/).
 
@@ -124,9 +124,9 @@ Accepted limit: the host cannot control the swap area or the hibernation image o
 
 Two pages answer how secrets survive a restore: the [Backup and restore](/pages/guide-backup-and-restore/) guide describes `ilium plugin backup --include-secrets` ([HST-652], [HST-960]), and [SEC-964] says a lost secret is re-entered one row at a time. The exact rule is this.
 
-**[HST-652]** (secrets) `ilium plugin backup` leaves secrets out unless `--include-secrets` is given. With the flag, the archive holds the secret values in the plaintext form of [SEC-958]; the archive is not encrypted, so the user protects it like the keyring itself (mode 0600, encrypted disk or storage).
+**[HST-175]** (secrets) `ilium plugin backup` leaves secrets out unless `--include-secrets` is given. With the flag, the archive holds the secret values in the plaintext form of [SEC-958]; the archive is not encrypted, so the user protects it like the keyring itself (mode 0600, encrypted disk or storage).
 
-**[SEC-250]** (restore rules) A restore of an archive made with `--include-secrets`:
+**[SEC-202]** (restore rules) A restore of an archive made with `--include-secrets`:
 
 | Restore target | Result |
 |---|---|

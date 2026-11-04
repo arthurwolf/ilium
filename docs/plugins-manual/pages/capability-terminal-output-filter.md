@@ -294,7 +294,6 @@ Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-**[SEC-046]** Filter patterns are compiled with size limits; a catastrophic pattern is refused with `invalid-argument`. See [Security testing](/pages/reference-security-testing/).
 
 ## Requirement statements
 

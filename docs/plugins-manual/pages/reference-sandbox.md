@@ -236,7 +236,6 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 **[SEC-031]** `process.run` and `process.spawn` need a grant for the exact program. A bare name such as `git` is resolved against the fixed system `PATH` `/usr/bin:/bin` (directories `/usr/bin` and `/bin`). It is never resolved against the plugin's own environment or against any writable scope.
 
-**[SEC-032]** Children of T2 and T3 plugins run in the same confinement as the helper and have no network. A program that needs the network, such as `git fetch`, therefore fails by design. A plugin that needs a remote operation uses `http`.
 
 **[SEC-033]** Environment keys are validated. These are refused with `invalid-argument`: `LD_*`, `DYLD_*`, `PATH`, `IFS`, `BASH_ENV`, `ENV`, `PYTHON*`, `NODE_OPTIONS`, `PERL5*`, `RUBY*`, `GIT_CONFIG*`, `GIT_SSH*`, `GIT_EXEC_PATH`, `GIT_ASKPASS`, plus any key that the admin policy adds under `[processes] deny_env`.
 
@@ -254,7 +253,6 @@ An escape hatch is a feature whose effect leaves the sandbox by design. Each one
 
 **[SEC-040]** `create-pane` with a `command` from a T2 or T3 plugin needs the H grant `panes.create-command:<program>`. `panes.create` itself stays normal risk and allows only a shell pane in a cwd below a scope the plugin may read. The pane process starts unconfined, with the user's privileges, so the kernel draws a confirmation the first time each program is started: `Notes Panel wants to run git in a new pane.` and the full argv. The answer is remembered per plugin and program as a consent. A command whose program matches no `panes.create-command` grant completes `refused(not-permitted)` with reason `not-granted` (`declined` when the grant was requested but unchecked). A command-less `create-pane` needs only `panes.create`. The install fails with `manifest.grant-dependency` when the manifest lists `panes.create-command:<program>` without `panes.create` in the same side. PATH is resolved as in [SEC-031]. T1 plugins follow the same rule: the grant is H and is asked at first activation.
 
-**[SEC-041]** `panes.lifecycle` restart with a new command uses the same grant and the same confirmation.
 
 **[SEC-042]** `agent.signatures` rules: the `resume` argv program must equal one of the signature's `process_names` or match a `panes.create-command:<program>` grant of the same plugin, otherwise the resume is not offered. `{session}` is substituted as exactly one argv element, never through a shell, and it is validated against `[A-Za-z0-9._:-]{1,128}`; a session id outside it makes the resume unavailable. The resume runs only on an explicit user action, and the confirmation shows the full command the first time. `actions.keys` are delivered only when the user or a plugin that holds `agent.control` triggers them. A plugin cannot mark a pane as an agent when the pane's process name does not match the signature's `process_names`. With these constraints `agent.signatures` stays normal risk.
 

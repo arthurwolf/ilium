@@ -101,7 +101,6 @@ The results of the conformance suite MUST be identical on every shipped platform
 
 A user moves to another operating system by taking a whole-host archive with `ilium plugin backup` and restoring it on the new machine ([Backup and restore](/pages/guide-backup-and-restore/), [Plugin files](/pages/reference-plugin-files/)). Copying the data directory by hand is not a supported route, because only the restore procedure applies the rules below. The restore decides everything; no plugin runs during it.
 
-- **[HST-655]** A restore on a different operating system MUST rewrite no plugin data bytes, MUST normalise path separators in `installed.json` and settings, MUST mark every T2/T3 plugin whose package targets an unavailable platform `refused-at-load` with `package.platform-unsupported` while keeping its data, and MUST list those plugins in the restore result.
 
 What the restore does, in order:
 
@@ -123,7 +122,6 @@ The host does not translate plugin data, so the plugin must write data that mean
 
 ### The trust store does not move
 
-- **[HST-959]** A restored `trust.json` MUST NOT be trusted on its own. The keyed MAC of SEC-721 lives in the OS secret store of the machine that wrote it and does not travel. On a machine where the MAC cannot be verified, the host keeps the file as `trust.json.tampered-<YYYYMMDD-HHmmss>`, refuses T2 and T3 plugins with `trust.store-tampered`, and tells the user to run `ilium plugin trust add <publisher.pub>` for each publisher.
 
 A cross-OS restore therefore always needs the user to re-establish trust, even for plugins whose platform is supported; their data is intact but T2 and T3 plugins stay refused until then.
 

@@ -307,7 +307,7 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 
 ### Security
 
-**[SEC-045]** Desktop notification text is sanitised ([SEC-380]) and rate limited. See [Extension security](/pages/reference-extension-security/).
+**[SEC-179]** Desktop notification text is sanitised ([SEC-380]) and rate limited. See [Extension security](/pages/reference-extension-security/).
 
 ## Requirement statements
 

@@ -33,6 +33,7 @@ The rows follow the format and the observation channels of the [requirements ind
 | [PAN-030] | create-pane with a cwd whose scope is not granted MUST be refused(not-permitted). With a cwd folder that does not exist it MUST be refused(not-found). With a program that cannot start it MUST complete failed(io). | [errors and edge cases](/pages/capability-panes-create/#edge-cases-and-errors) | (completion) cwd project/missing -> refused(not-found). command ["nope"] -> failed(io). |
 | [PAN-031] | create-pane with command none and content-kind ilium.terminal MUST run the login shell from SHELL, or /bin/sh when SHELL is unset. | [errors and edge cases](/pages/capability-panes-create/#edge-cases-and-errors) | (screen-text) create with SHELL unset -> /bin/sh prompt. |
 | [PAN-032] | panes.lifecycle MUST be a high-risk grant and every use MUST be written to the plugin log. | [errors and limits](/pages/api-pane-lifecycle/#errors-and-limits) | (log-line) freeze a pane -> a log line names the intent and the pane. |
+| [PAN-009] | accepts only `https`, `http` and `mailto` URLs. Each origin needs consent. See [Network egress](/pages/reference-network-egress/). | [capability-open-external](/pages/capability-open-external/) | (completion) open an https, http and mailto URL; each origin shows a consent prompt before it opens. |
 
 ### See also
 

@@ -36,7 +36,7 @@ An asset is something an attacker wants to read, change or abuse. Ilium has more
 | Keyboard focus and clipboard | Client | Typing into the wrong pane, or pasting a command, runs code |
 | Integrity of what the user sees | Tree, dialogs, terminal output | A spoofed dialog or a hidden pane tricks the user into approving something |
 
-**[SEC-001]** The host MUST treat every asset in this table as protected: no plugin of any tier may read, change or delete one except through a grant that names it, or through an interface the owning kernel component exposes.
+**[SEC-001]** The host MUST treat every asset in this table as protected: no plugin of any tier may read, change or delete one except through a grant that names it, or through an interface the owning kernel component exposes. This includes the client log head and the pinned keys, which live in the trust store.
 
 ## Trust boundaries
 
@@ -159,7 +159,6 @@ These rows extend the Assets table.
 | Review records | Registry store, one per version and package hash ([PKG-680]) | Drive the level B badge users rely on when they decide to install |
 | Client log head and pinned keys | The user's trust store | Let a client detect a registry that rewrites history ([PKG-701]) |
 
-**[SEC-001]** applies to these rows too: no plugin of any tier may read the client log head or the pinned keys, because they live in the trust store.
 
 ### Distribution attacker classes
 
@@ -196,7 +195,6 @@ These rows extend the Assets table.
 
 The user-visible effect of a failed check is always a refusal with the stated error code and an audit entry; there is no "install anyway" button for `registry.rollback`, `trust.log-inconsistent` or `registry.auth`. A user can still install the same package from a file with `--allow-unsigned`, which is the T3 path and is confirmed in an attached client ([SEC-116]).
 
-**[SEC-702]** gives the rule for reporting: a confirmed High or Critical failure of any row above receives a CVE id before its advisory is published.
 
 ## Prompt injection through plugin-supplied text
 

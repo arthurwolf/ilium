@@ -310,7 +310,6 @@ Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-**[SEC-040]** A plugin MAY create a pane that runs a program only with `panes.create-command:<program>` (high risk). The grant is defined in the [Capability table](/pages/reference-capabilities/) (it requires `panes.create` in the same side, else the install fails with `manifest.grant-dependency`). A `command` whose program matches no such grant completes `refused(not-permitted)` with reason `not-granted`, or `declined` when the grant was requested but unchecked. The program is not confined ([Sandbox reference](/pages/reference-sandbox/)).
 
 - **[SEC-162]** The host MUST cap the panes a plugin can hold open through `create-pane` at `limits.panes_per_plugin` (default 16 for T2 and T3, 64 for T1); a `create-pane` beyond the cap MUST be refused with `quota-exceeded` and `retry-after-ms`, and panes the user closes free the quota. (proposed, owner to confirm)
 

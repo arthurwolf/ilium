@@ -183,4 +183,4 @@ The user can change the grant at any time in Settings > Plugins > com.example.li
 
 ### Security
 
-**[SEC-043]** `open-external` file targets must be in scopes the plugin can read, must not carry an executable mode bit, and must not use a refused extension. **[PAN-026]** accepts only `https`, `http` and `mailto` URLs. Each origin needs consent. See [Network egress](/pages/reference-network-egress/).
+**[PAN-009]** accepts only `https`, `http` and `mailto` URLs. Each origin needs consent. See [Network egress](/pages/reference-network-egress/).

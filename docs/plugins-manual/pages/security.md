@@ -91,12 +91,10 @@ The first row is decision D12 and the second is D24. The `sessions.cross` row is
 
 Third-party code runs in a helper process that the operating system confines. The full requirements are in [Sandbox reference](/pages/reference-sandbox/); this section is the summary.
 
-- **[SEC-020]** One helper per plugin and side. Plugins never share a helper.
 - **[SEC-021]** The helper has its own user, mount, PID, IPC, UTS and network namespaces, no network, no controlling terminal, a rebuilt environment and only the dispatcher channel as an open file ([SEC-022] to [SEC-028]).
 - **[SEC-029]** Memory, process count and CPU are limited by a cgroup per helper.
 - **[SEC-024]** A seccomp allowlist and `no_new_privs` apply before the first plugin byte is read.
-- **[SEC-032]** A child started with `process.run` or `process.spawn` runs in the same confinement with no network, at low priority, under the plugin's CPU quota. Dropping the child handle or stopping the plugin ends the child with SIGTERM, and SIGKILL after 2 s.
-- **[SEC-055]** When the sandbox cannot be built, T2 and T3 packages refuse to load with `sandbox.unavailable`. There is no unconfined fallback.
+- **[SEC-032]** A child started with `process.run` or `process.spawn` runs in the same confinement with no network, at low priority, under the plugin's CPU quota. Dropping the child handle or stopping the plugin ends the child with SIGTERM, and SIGKILL after 2 s. A program that needs the network, such as `git fetch`, therefore fails by design. A plugin that needs a remote operation uses `http`.
 
 On Windows and macOS a T2 or T3 package is refused at install, and only T1 bundled plugins run (decision D5). The lines below are wrapped to fit the page. macOS shows the same text with its own name.
 

@@ -395,7 +395,6 @@ Requirement ids for this page: [PRI-010], [PRI-011], [PRI-012], [PRI-013], [PRI-
 
 ### Security
 
-**[SEC-042]** Signature registration needs the normal-risk `agent.signatures` grant. See [Sandbox reference](/pages/reference-sandbox/).
 
 ## Requirement statements
 

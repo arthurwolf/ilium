@@ -293,4 +293,4 @@ No first-party plugin requests `clipboard.read`.
 
 ### Security
 
-**[SEC-044]** Clipboard reads are high risk and are logged to the privacy log; a write never reads. See [Secrets](/pages/reference-secrets/).
+**[SEC-169]** Clipboard reads are high risk and are logged to the privacy log; a write never reads. See [Secrets](/pages/reference-secrets/).

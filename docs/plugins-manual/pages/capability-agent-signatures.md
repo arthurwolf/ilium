@@ -325,4 +325,3 @@ Checked against the API version `ilium:plugin@0.1.0`.
 
 ### Security
 
-**[SEC-042]** `agent.signatures` changes how agents are detected, so a wrong signature can hide an agent's state. The grant is normal risk (the constraints of [SEC-042] in the sandbox reference keep it so) and signatures are validated against the regex limits of [SEC-046]. See [Sandbox reference](/pages/reference-sandbox/).
