@@ -222,3 +222,7 @@ Requirement ids for this page: [API-073]. See the [requirements index](/pages/re
 - [TypeScript SDK](/pages/typescript-sdk/)
 - [Glossary](/pages/glossary/)
 - [Documentation lifecycle](/pages/reference-documentation-lifecycle/)
+
+## Requirement statements
+
+- **[API-073]** Pending requests MUST be limited to 64 per plugin by default. A request MUST count from the return of its id to the enqueue of its completion; refused submissions and synchronous calls MUST NOT count. A further call MUST return busy.

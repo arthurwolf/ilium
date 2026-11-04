@@ -786,3 +786,8 @@ Two searches exist. Workspace search (F-009, owned by the search plugin) searche
 - **Limits.** The searched text is cut to the newest lines at a line boundary when it exceeds 4 MiB, so older matches are not found. At most 10,000 matches are kept; the bar shows `10000+` when there are more. A search that times out shows `timed-out` and can be repeated.
 - **Plugin off.** When the Terminal plugin is disabled, crashed or without the grant, the user keeps the kernel scrolling and scrollback only. There is no in-pane search bar. Workspace search of the search plugin still finds text in the pane. Running programs and their input are unaffected ([COR-022], [COR-213]).
 - **Fallback table.** The Terminal row of the fallback table in [Kernel and boot](/pages/reference-kernel-and-boot/) says only that history transfer is lost. This behaviour differs from plain scrolling, so that row needs the words "and no in-pane history search".
+
+## Requirement statements
+
+- **[COR-218]** The PTY and vt100 state MUST be owned by the kernel; disabling or crashing `ilium.core.terminal` MUST NOT kill, resize or detach any PTY, and input typed by the user MUST still reach the focused pane.
+- **[EXT-055]** The chain on ilium.core.terminal/before-send-input MUST NOT run for keystrokes typed into a pane. It MUST run once per write that Ilium makes on someone's behalf (paste, dialog, broadcast, voice, plugin write-input).

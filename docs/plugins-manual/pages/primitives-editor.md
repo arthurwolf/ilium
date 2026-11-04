@@ -366,3 +366,11 @@ Requirement ids for this page: [PRI-020], [PRI-021], [PRI-022], [PRI-023], [PRI-
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the import paths.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[PRI-020]** read-lines MUST accept at most 10,000 lines per call. Over that MUST return invalid-argument.
+- **[PRI-021]** A plugin MUST hold at most 64 buffers. The 65th create-buffer MUST return quota-exceeded. create-buffer text MUST be at most 16 MiB.
+- **[PRI-022]** editor-apply-edits MUST accept at most 10,000 edits and refuse more with refused(invalid-argument).
+- **[PRI-023]** An annotator MUST be called at most once per 100 ms per buffer. Extra calls MUST NOT be made.
+- **[PRI-024]** Decorations or gutter marks MUST be at most 10,000 per layer; the session total MUST be at most 65,536.

@@ -112,3 +112,29 @@ Automatic updates are off. A user can set `[plugins] auto_update` to `notify` or
 - [Registry reference](/pages/reference-registry/)
 - [Signing and trust](/pages/reference-signing-and-trust/)
 - [Plugin store](/pages/user-plugin-store/)
+
+## Requirement statements
+
+- **[PKG-460]** To allow only plugins from your company, an administrator MUST set `publishers.allow` with the company key fingerprint and `packages.allowed_sources` with the company registry.
+- **[PKG-461]** To allow only bundled plugins, an administrator MUST set `packages.allow_third_party = false`.
+- **[PKG-462]** To block one plugin, an administrator MUST set `plugins.deny_ids = ["com.example.bad"]`.
+- **[PKG-463]** To block a risky grant everywhere, an administrator MUST set `grants.deny = ["process.run:*"]`.
+- **[PKG-464]** To stop beta builds, an administrator MUST set `packages.allowed_channels = ["stable"]`.
+- **[PKG-465]** An administrator MAY add a key with `ilium plugin trust add <file> --tier T2 --system`. A key added this way has `added_by: admin` and the user cannot remove it.
+- **[PKG-466]** A key in the trust store never overrides a revocation. A revoked key stays revoked.
+- **[PKG-467]** A registry MUST be served over HTTPS. The client refuses plain `http:` except `localhost` in development (PKG-371).
+- **[PKG-468]** The timestamp document expires after one day. The operator MUST re-sign it at least daily, or clients report `registry.metadata-expired`.
+- **[PKG-469]** To rotate the root key, the operator MUST publish a rotation document signed by the old and the new key. See Registry reference.
+- **[PKG-470]** `packages.allowed_sources` is defined in Plugin policy. A source that is not in the list is refused with `policy.blocked` (detail `policy.source-denied`).
+- **[PKG-471]** `packages.allow_url_installs` is defined in Plugin policy. When it is `false`, a URL install is refused with `policy.blocked` (detail `policy.source-denied`).
+- **[PKG-472]** `packages.allowed_channels` is defined in Plugin policy. A package on a channel outside the list is refused with `policy.blocked`.
+- **[PKG-473]** A full mirror MUST NOT be signed by the mirror operator. Clients check the signatures of the original registry. The one exception is a partial mirror ([PKG-409]), which signs with its own keys and its own `root.json`; clients verify that mirror against its own root, set in `[plugins.registry]`.
+- **[PKG-474]** Authors SHOULD follow this advice. With `packages.allowed_sources` set to the mirror, a client that cannot reach the mirror reports `registry.unreachable` and never falls back to another registry.
+- **[PKG-475]** Authors SHOULD follow this advice. `packages.allowed_sources` compares the scheme, host and path prefix of the configured URL. A trailing slash does not matter.
+- **[PKG-476]** Authors SHOULD follow this advice. A package installed before the policy changed is not removed. It follows the existing `disabled-by-policy` rule of the policy page.
+- **[PKG-477]** An automatic update MUST run all install checks, and MUST NOT install when new grants or a new signing key would need a prompt. It then notifies only.
+- **[PKG-950]** On an isolated network, the administrator MUST re-run `ilium plugin mirror sync` (or re-export the bundle with `export-bundle`) on a connected machine at least once a day (proposed, owner to confirm).
+- **[PKG-951]** An administrator MAY set `[plugins.registry] offline = true` in the system policy file (proposed: key not yet in the policy keys table). The setting is combined by logical OR, so a user cannot clear it; a cached index past its `expires` time is then used with the stale-data warning and does not fail with `registry.metadata-expired`.
+- **[PKG-952]** After every sync, the administrator MUST read the `signed.expires` field of `timestamp.json` in each mirror folder or unpacked bundle and MUST raise an alert when less than 12 hours remain (proposed, owner to confirm).
+- **[USR-252]** On a machine with several OS users, the host MUST keep grants, trusted keys and plugin data per OS user, so that a grant or trust decision by one user never applies to another.
+- **[USR-253]** Machine policy MUST apply to every OS user, and a per-user trust or grant MUST NOT widen it; when a user's trust conflicts with policy, the policy wins and the user sees `Blocked by your administrator`.

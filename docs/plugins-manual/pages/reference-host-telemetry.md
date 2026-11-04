@@ -266,3 +266,7 @@ Scripted incident test, `host_telemetry_series`. On a fixture session with one h
 4. Kill one helper, force one engine recycle and attach a second client. Assert the helper, recycle and client series.
 5. Read every series with `ilium plugin metrics` and with `ilium plugin stats --host --json`, and assert that all 11 names are present with the correct types, and that the values of both outputs agree.
 6. Restart the plugin and assert that no host series changed except by the steps above; restart the server and assert that every counter is 0.
+
+## Requirement statements
+
+- **[API-092]** The host MUST keep a per-plugin, per-side counter for each trap code of [API-081] and for each restart, MUST collapse identical consecutive log lines of one trap code within 10 seconds into one line with a repeat count, and MUST retain a crash record (trap code, time, side and the last 20 log lines) for each plugin disabled by the restart rule until the plugin is enabled again or removed. `ilium plugin logs` MUST show the crash record.

@@ -333,3 +333,7 @@ Target behaviour. [API-046] refuses a new instance when the host is at capacity.
 - [Performance](/pages/performance/) for the plugin author's view.
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[API-095]** A side refused for memory MUST be queued in the order of refusal and admitted first-in first-out when capacity frees, one admission per plugin at a time. The host MUST retry admission whenever an instance ends and at least every 30 seconds, MUST NOT let one plugin take two slots while another waits, and MUST show a notice to the user that names the plugin and says the side is inactive for lack of memory, until it is admitted or removed.

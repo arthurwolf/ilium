@@ -397,3 +397,7 @@ Requirement ids for this page: [RND-001]. See the [requirements index](/pages/re
 - [Jobs](/pages/api-jobs/) for `job-runner`.
 - [Catalogs](/pages/api-catalogs/), [menu provider](/pages/api-menu-provider/), [virtual rows provider](/pages/api-virtual-rows-provider/) and [token provider](/pages/api-token-provider/) for the provider exports.
 - [Inference](/pages/api-inference/) for `inference-provider`.
+
+## Requirement statements
+
+- **[RND-001]** The frame budget MUST be 1,000 ms divided by the effective frame rate, rounded down: 33 ms at 30 fps. frame_deadline_ms MAY raise it to at most 50 ms.

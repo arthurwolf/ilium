@@ -330,3 +330,6 @@ The other functions of the `terminal` primitive are on the pages for its capabil
 - [Terminal view widget](/pages/widgets-media-and-embedded/) for showing a pane's screen inside a plugin's own UI.
 - [Errors and limits](/pages/reference-errors-and-limits/) for the codes used above.
 
+## Requirement statements
+
+- **[PRI-001]** A screen read MUST need terminal.read-screen. read-cells is a separate grant, terminal.read-cells, and MUST accept at most 1,000 rows per call and above that return none and log quota-exceeded.

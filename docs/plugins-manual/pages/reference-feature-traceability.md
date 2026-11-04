@@ -199,3 +199,10 @@ Five features were claimed by two core-plugin pages. Each now has one owner. The
 - Feature 58 (HTTP API) stays in the kernel as the listener. The fleet plugin registers `POST /create_agent` through `http-api.route`.
 - Feature 102 (packaged JavaScript animations) is plugin-js in the inventory. The roadmap retires the V8 runtime at the end of wave 4c. Scenes become wasm packages.
 - Features 72, 77 and 88 have no source path in the inventory; their owners follow the user documentation.
+
+## Requirement statements
+
+- **[COR-001]** Every feature F-001 to F-116 MUST behave as in the baseline when its owner is enabled.
+- **[COR-002]** Every feature MUST have one primary owner, the first one named in its Owner cell.
+- **[COR-003]** A row of the traceability table with Kind `native-kernel` MUST name `kernel` first in its Owner cell, and every config table named in its Config keys column MUST appear in the key-by-key table of the migration page.
+- **[COR-011]** Every plugin-owned feature MUST keep its settings, keys, CLI output, data files and defaults.

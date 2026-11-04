@@ -489,3 +489,29 @@ Requirement ids for this page: [EVT-001], [EVT-002], [EVT-004], [EVT-006], [EVT-
 - [Messages and topics](/pages/api-messages-and-topics/)
 - [Lifecycle](/pages/lifecycle/) and [Debugging](/pages/debugging/)
 - [Performance](/pages/performance/)
+
+## Requirement statements
+
+- **[EVT-001]** The host MUST deliver events to on-events in batches, in the order they happened, one call at a time per plugin side.
+- **[EVT-002]** A plugin MUST receive only events for which it holds the grant and has subscribed.
+- **[EVT-004]** A full event queue MUST admit a drop-oldest event by evicting the oldest queued drop-oldest event of any kind, count it, and put an events-dropped event at the start of the next batch. When the queue is full, no drop-oldest event is pending and a never-dropped event arrives, the host MUST restart the instance as a failure, and the new instance MUST receive tree-changed for every node.
+- **[EVT-006]** ui-action events MUST carry the widget key and an action value of the kind documented for that widget.
+- **[EVT-010]** Every intent MUST be submitted as a submission in a return list of on-events. Intents MUST NOT be callable as functions.
+- **[EVT-011]** An intent whose shape is malformed MUST be the batch-level offender (the lowest index) and complete as refused(invalid-argument); every other submission of the batch MUST complete as refused(cancelled). An intent with a well-formed but invalid value MUST complete as refused(invalid-argument) alone.
+- **[EVT-012]** An intent that needs a grant the plugin lacks MUST be a batch-level offender when no shape offender has a lower index, and MUST complete as refused(not-permitted); every other submission of the batch MUST complete as refused(cancelled).
+- **[EVT-013]** An intent for a node that no longer exists MUST complete as failed(not-found) or refused(not-found) as the table states.
+- **[EVT-014]** The WIT outcome variant MUST contain ok, ok-node, duplicate, refused, failed, cancelled and ok-epoch.
+- **[EVT-031]** cli-cancelled MUST be a distinct event from a cli exit with a signal.
+- **[EVT-040]** A prompt sent by a plugin, a schedule or voice MUST fire input-submitted only, and not a user-typed prompt event.
+- **[EVT-041]** A plugin MUST NOT see tree-changed for a node after its node-removed. The host MUST remove the node from pending tree-changed lists and discard pending coalesced events keyed by that node when node-removed is queued.
+- **[EVT-042]** Events about the plugin own actions MUST be delivered unless the table marks them as suppressed.
+- **[EVT-043]** A coalesced event MUST always merge with the pending event of the same kind and key, whatever the queue fill, and keep the newest payload at the position of the newest occurrence.
+- **[EVT-044]** agent-activity-changed MUST be a never-dropped event.
+- **[EVT-045]** events-dropped MUST be coalesced by (event, source), MUST never be dropped, and MUST sit at the head of the next batch.
+- **[EVT-046]** The event_queue ceiling MUST be 4,096 for T1 and 1,024 for T2 and T3; a larger request MUST be clamped and logged.
+- **[EVT-047]** After every activation of a plugin that holds tree.read, the first batch MUST start with exactly one tree-changed event listing every node in pre-order. Without tree.read nothing MUST be sent.
+- **[EVT-048]** Events produced while a plugin activates MUST be queued and delivered after activate returns ok, and MUST be discarded without an events-dropped report if activate fails or breaches its deadline.
+- **[EVT-049]** Pending tree-changed events MUST merge into one event whose list is the union of the node ids, in first-seen order without duplicates.
+- **[ABI-039]** A coalesced event MUST NOT be reported in events-dropped when its queued event is merged.
+- **[ABI-046]** Events produced while a plugin activates MUST be queued and delivered in the first batch after activate returns ok, and MUST be discarded without events-dropped if activate fails.
+- **[ABI-047]** After every activation of a plugin that holds tree.read, the first batch MUST start with one tree-changed event listing every node in pre-order.

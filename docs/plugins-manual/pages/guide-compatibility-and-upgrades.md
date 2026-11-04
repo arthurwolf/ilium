@@ -318,3 +318,20 @@ API version checked: `ilium:plugin@0.1.0`.
 ### Minimum toolchain support window
 
 - [DEV-897] Each SDK release MUST declare its minimum supported Rust and Bun versions in its package metadata and in the support matrix, MUST keep the previous minimum building for at least two minor releases after a raise, and MUST announce each raise in the release notes one minor version in advance.
+
+## Requirement statements
+
+- **[AUT-201]** A plugin MUST raise `version` for every package that it publishes, because the host refuses a second package with the same version and different content.
+- **[AUT-202]** A plugin MUST NOT rename or remove any name of this table in a release that keeps the same `id`. To change a name, add the new name, keep the old one working, and document both.
+- **[AUT-203]** The old name SHOULD keep working for at least two minor releases of the plugin before it is removed, and a removal MUST be announced in the changelog of the release that removes it.
+- **[AUT-204]** The old command SHOULD be hidden from the command list and from the palette once the new one exists, but it MUST still run when a key or a script calls it.
+- **[AUT-205]** Code that needs the new grant MUST check the call result and fall back when the call returns `not-permitted`.
+- **[AUT-206]** A plugin MUST write the restore bytes in a layout whose first byte identifies the format, and MUST fall back to defaults when the first byte is not a format it knows, because the host delivers restore bytes only when the `data_version` equals that of the build that wrote them.
+- **[AUT-207]** Data that must survive a layout change MUST live in storage and be converted by a `migrator`, because restore bytes are delivered only when the `data_version` matches, and across versions only a `migrator` carries data.
+- **[AUT-208]** A plugin SHOULD keep its data readable by the previous release for one release, by adding keys instead of changing the meaning of old ones. A user who rolls back then loses nothing.
+- **[AUT-209]** A plugin SHOULD rebuild and publish against each new minor contract version before the host drops the minor it was built for (the host loads the current minor and the previous one), so that users never hold a plugin outside the window.
+- **[AUT-210]** A published plugin MUST NOT list an unstable feature unless the plugin is for development use, because a T2 or T3 package that lists one is installable only in development mode.
+- **[AUT-211]** A package that is meant for testers MUST carry a prerelease part in its version, so that it cannot be taken for a release.
+- **[AUT-212]** A plugin MUST declare a `requires` range no wider than the versions it was tested with.
+- **[AUT-213]** A plugin that provides a service or an extension point MUST raise the major version of the point when it changes the payload incompatibly, and MUST keep the old major working for as long as it lists the old major as supported.
+- **[DEV-897]** Each SDK release MUST declare its minimum supported Rust and Bun versions in its package metadata and in the support matrix, MUST keep the previous minimum building for at least two minor releases after a raise, and MUST announce each raise in the release notes one minor version in advance.

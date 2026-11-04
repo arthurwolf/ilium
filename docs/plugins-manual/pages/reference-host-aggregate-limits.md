@@ -186,3 +186,7 @@ Target behaviour. Ceilings and rates can change when the host is upgraded, and a
 - [Health and watchdog](/pages/reference-health-and-watchdog/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[API-094]** A host release MUST NOT lower a tier ceiling, a rate rule or a session-wide limit of [API-043], [API-070] or [API-071] below the value a plugin was admitted with within the same contract minor. A change MUST be listed in the release notes, and a plugin MUST be able to read its effective limits at runtime from the `limits` record of the host info, which names each limit, its value and its source (default, manifest or user).

@@ -328,3 +328,9 @@ A point release that bumps Wasmtime changes the code that runs every plugin. The
 - [Capabilities and grants](/pages/capabilities/) and [Security](/pages/security/).
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[ABI-070]** The host MUST pin the exact Wasmtime version and the Component Model canonical ABI revision it ships with, and MUST report both in `ilium plugin doctor` output.
+- **[ABI-071]** A runtime upgrade that changes canonical-ABI behaviour, trap behaviour or fuel accounting MUST NOT ship until the full ABI conformance corpus of ABI-073 passes on the new runtime.
+- **[ABI-072]** A runtime upgrade MUST list in the release notes every observable change in traps or refusal codes, and a change that alters a code MUST follow the removal rules of ABI-052.

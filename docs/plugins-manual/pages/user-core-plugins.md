@@ -194,3 +194,10 @@ Open items, stated so they can be tested: the Kanban card-move keys, a text cue 
 - [Core extension points](/pages/reference-core-extension-points/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-040]** The Plugins tab and `ilium plugin list` MUST list all 30 core plugins with the tier T1, and MUST NOT offer to install or uninstall one.
+- **[USR-041]** The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why.
+- **[USR-042]** A request to replace `ilium.core.settings` or `ilium.core.sessions` MUST fail at install with `manifest.replaces-not-replaceable`.
+- **[USR-043]** Ilium MUST ask the user to confirm every `replaces` entry at install, MUST allow at most 4 entries, and MUST NOT replace without a yes.

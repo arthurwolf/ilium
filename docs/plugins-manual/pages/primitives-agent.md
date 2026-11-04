@@ -396,3 +396,11 @@ Requirement ids for this page: [PRI-010], [PRI-011], [PRI-012], [PRI-013], [PRI-
 ### Security
 
 **[SEC-042]** Signature registration needs the normal-risk `agent.signatures` grant. See [Sandbox reference](/pages/reference-sandbox/).
+
+## Requirement statements
+
+- **[PRI-010]** register-signature MUST return invalid-argument for a rule with a bad id, process names, aliases, icon, action count or key size, and conflict for an id the manifest already contributes.
+- **[PRI-011]** A signature of the user MUST win over a plugin signature, which MUST win over a built-in one. An overlap MUST be logged as a warning.
+- **[PRI-012]** set-toolbar-state MUST return not-found for a button that is not the plugin own or a pane that does not exist, and not-permitted without the grant.
+- **[PRI-013]** agents() MUST return an empty list when agent.read is declined. view, session and last_prompt MUST return none.
+- **[PRI-015]** A pane MUST have no activity before its agent-identified event. A restored pane MUST report none.

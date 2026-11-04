@@ -416,3 +416,23 @@ Requirement ids for this page: [EVT-005], [PAN-001], [PAN-002], [PAN-003], [PAN-
 ## Production additions: T3-abi-api
 
 - [API-216] An import that targets a pane closed before the host applied it MUST complete as `refused(not-found)` and MUST NOT affect the pane that reuses the screen position.
+
+## Requirement statements
+
+- **[API-216]** An import that targets a pane closed before the host applied it MUST complete as `refused(not-found)` and MUST NOT affect the pane that reuses the screen position.
+- **[EVT-005]** pane-lifecycle-changed MUST carry pane, state and by, and MUST never be dropped.
+- **[PAN-001]** A pane process MUST be in exactly one of running, frozen, restarting, exited. Every change MUST be reported by pane-lifecycle-changed with pane, state and by.
+- **[PAN-002]** freeze-pane MUST move running to frozen. unfreeze-pane MUST move frozen to running. unfreeze-pane on a pane that is not frozen MUST be refused(conflict).
+- **[PAN-003]** freeze-pane on Windows MUST be refused(unsupported).
+- **[PAN-004]** replace-pane-command MUST put the pane in restarting, keep node id, title, place and size, and end in running once the new process started. A cwd of none MUST keep the pane directory.
+- **[PAN-005]** terminate-pane-process MUST ask the process to end, wait grace-ms, then kill. The outcome MUST be ok when the process has exited. The pane MUST stay open and show the exit status.
+- **[PAN-006]** terminate-pane-process with grace-ms above 10,000 MUST be refused(invalid-argument).
+- **[PAN-007]** A pane that exited MUST move to restarting with replace-pane-command.
+- **[PAN-020]** resize-pane MUST be refused(conflict) when the layout cannot give the size, and the message MUST name the neighbour.
+- **[PAN-021]** restructure MUST accept at most 256 operations. More MUST be refused(invalid-argument).
+- **[PAN-022]** restructure with a failing operation MUST be refused(conflict) with the operation index in the message, and nothing MUST change.
+- **[PAN-023]** revert-restructure after a later change touched the nodes MUST be refused(conflict).
+- **[PAN-024]** rename-node with a stale expected-revision MUST be refused(conflict).
+- **[PAN-025]** set-inferred-icon over a manual icon MUST be refused(conflict).
+- **[PAN-026]** open-external with a scheme other than http, https or mailto MUST be refused(not-permitted).
+- **[PAN-032]** panes.lifecycle MUST be a high-risk grant and every use MUST be written to the plugin log.

@@ -318,3 +318,10 @@ API version checked: `ilium:plugin@0.1.0`.
 ### Security
 
 The install pipeline is defined in [Grant review and consent](/pages/reference-grant-review-and-consent/) ([SEC-100]). Inspect a package with `ilium plugin inspect` and `ilium plugin verify` ([SEC-155]); archive rules are in [Trust and supply chain](/pages/reference-trust-and-supply-chain/) ([SEC-150]).
+
+## Requirement statements
+
+- **[USR-126]** An update MUST keep the plugin id and MUST have a higher version. The signature MUST come from the key that signed the installed version, or from a key that the old key endorsed with a rotation statement (SEC-142). Any other key MUST be refused with `package.publisher-key-changed`.
+- **[USR-127]** Trust MUST be per key, MUST be stored in the user's trust list, and MUST NOT be created by installing a package without a prompt.
+- **[USR-128]** A T2 package whose key was removed from the trust list MUST stop loading at the next activation and show `Publisher no longer trusted` (SEC-144); it is not uninstalled and its data stays. Trusting the key again reactivates it. A later update MUST ask for trust again.
+- **[USR-129]** A publisher MUST keep the private key offline and MUST NOT put it in a package. A lost key means new packages need a new key and a new trust prompt.

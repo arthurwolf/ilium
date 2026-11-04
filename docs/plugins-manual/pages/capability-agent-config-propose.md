@@ -270,3 +270,12 @@ Requirement ids for this page: [CAP-886] to [CAP-891]. See the [requirements ind
 ### Security
 
 The authoritative scope table is in [Sandbox reference](/pages/reference-sandbox/). Credential files stay excluded from every proposal ([SEC-063]), and nothing reaches the deny set ([SEC-060]).
+
+## Requirement statements
+
+- **[CAP-886]** `agent-config.propose:<agent>` MUST name one agent: the bare form MUST fail with manifest.grant-argument-missing, `*` with manifest.grant-wildcard and an unknown agent with manifest.grant-scope. It MUST be high risk at every tier and MUST fail with manifest.grant-dependency without `fs.read:agent-config:<agent>` on the same side.
+- **[CAP-887]** A proposal MUST NOT change any file before the user answers. The host MUST show the full diff of every change in a kernel dialog with every row unchecked, MUST write only the checked files, and MUST apply them all or none: when one replacement fails, every replaced file MUST be restored and the proposal MUST complete with failed(io).
+- **[CAP-888]** A change whose path leaves the agent's configuration folder, names a credential file ([SEC-063]), resolves into the deny set ([SEC-060]) or replaces or removes an existing file in the agent's transcript folder MUST refuse the whole proposal with not-permitted and reason `scope` and MUST NOT open a dialog. An empty list, two changes to one path or a proposal over the size limits MUST return invalid-argument.
+- **[CAP-889]** When a change's revision no longer matches the file, checked before the dialog opens and again just before the apply, the proposal MUST complete with failed(conflict) and MUST NOT change any file.
+- **[CAP-890]** A proposal MUST count as a consent prompt of [SEC-105]: no answer within the deadline MUST complete as timed-out, a second proposal while one is pending MUST return busy with retry-after-ms, and the prompt cap MUST return rate-limited. Reject all, Enter with nothing checked or closing the dialog MUST complete with failed(not-permitted) whose message starts with `declined: `. The answer MUST NOT be stored in consents.json.
+- **[CAP-891]** Before it replaces a file the host MUST write the previous content into the history entry `agent-config-history/<agent>/<request-id>.json` in the plugin's `data` scope, MUST write one audit `write-outside-data` record per applied file, and `take-proposal` MUST list the applied and the rejected paths.

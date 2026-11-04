@@ -265,3 +265,7 @@ Notice from <plugin>: <title>. <body>
 - [ui.chrome](/pages/capability-ui-chrome/).
 - [Notifications](/pages/api-notifications/).
 - [Widgets: data display](/pages/widgets-data-display/).
+
+## Requirement statements
+
+- **[CAP-883]** A toast for an error or an action-needed event MUST be paired with a persistent text signal that remains after the toast duration; a toast without one MUST be rejected by the plugin check with `a11y.toast-only`.

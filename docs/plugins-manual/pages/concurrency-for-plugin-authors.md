@@ -121,3 +121,12 @@ How the defaults are tested until the items close:
 - [Patterns cookbook](/pages/guide-patterns-cookbook/) for worked patterns
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[DEV-834]** A plugin MUST NOT assume that its `on-events`, `views.render` or `annotate` calls run on the client UI thread. A frame never waits for a plugin, so the plugin MUST accept that a frame shows the last result it holds until a newer one arrives.
+- **[DEV-835]** A plugin MUST NOT let one export of its instance wait for another export of the same instance, because the host never runs two exports of one instance at the same time.
+- **[DEV-836]** A plugin MUST keep each `on-events` batch under its deadline of 20 ms, or 50 ms for a batch with a `command-invoked` event, and each `views.render` and `annotate` call under 10 ms. A plugin that needs more MUST raise the deadline only in the manifest `limits` block and only up to the ceiling of its tier.
+- **[DEV-837]** A plugin MUST NOT wait inside a handler, render or annotate call for work that can take longer than that call's deadline. Such work MUST run as a slow call or a job, and its result MUST be read from a later `request-completed` event or from the job output.
+- **[DEV-838]** A job MUST NOT keep state from one run to the next, and MUST NOT rely on memory of the handler that started it. Its results MUST leave only as output bytes or progress values.
+- **[DEV-839]** A plugin MUST NOT expect a call to its own instance to run while its `activate` is still running, and MUST count every yield of `activate` against the 2,000 ms default deadline, because that deadline is wall time.

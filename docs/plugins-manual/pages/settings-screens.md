@@ -428,3 +428,8 @@ The page is opened from the `[ Open Plugins page ]` link that a dimmed plugin ro
 - [Security model](/pages/security/)
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[LIF-272]** Enable from the recovery page MUST clear the failure window, and Reset failures MUST clear it without activating.
+- **[USR-160]** The recovery page MUST offer the actions enable, disable, reset failures, uninstall, forget settings, safe mode and open config file, each with the key in the render, and MUST open from `Ctrl+B` then `:` when `ilium.core.settings` is off.

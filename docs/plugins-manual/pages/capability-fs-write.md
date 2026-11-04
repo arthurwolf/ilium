@@ -340,3 +340,7 @@ Requirement ids for this page: [CAP-008]. See the [requirements index](/pages/re
 ### Security
 
 The authoritative file scope table is in [Sandbox reference](/pages/reference-sandbox/) ([SEC-058] to [SEC-062]). Writes outside `data` and `cache` are high risk. Agent configuration is never written directly; see [agent-config.propose](/pages/capability-agent-config-propose/).
+
+## Requirement statements
+
+- **[CAP-008]** An fs scope that is unknown, or that does not accept the access, MUST fail with manifest.grant-scope: fs.write:package, fs.write:agent-sessions:<agent>, fs.write:agent-config:<agent>, fs.watch:agent-config:<agent>, and an absolute path without a path template.

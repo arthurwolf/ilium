@@ -154,3 +154,20 @@ Plugins
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[LIF-180]** `--safe-mode=third-party` MUST load no T2 or T3 plugin and ignore `replaces`, and `--safe-mode=all-optional` MUST load only the essential set. Neither MUST change files on disk.
+- **[LIF-181]** The environment variable MUST behave like the flag, and the flag MUST win.
+- **[LIF-182]** Safe mode MUST show an indicator in the footer.
+- **[LIF-183]** The essential set MUST be exactly the four plugins `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions` in 0.1.0, and MUST load in `all-optional` mode.
+- **[LIF-184]** Bisect MUST change only the session-level enabled state and MUST restore the saved set on `reset`.
+- **[LIF-185]** Bisect MUST finish in at most `ceil(log2(n))` steps for `n` plugins.
+- **[LIF-186]** Three crashes during start within 5 minutes MUST cause the next start to use `third-party` safe mode.
+- **[LIF-187]** A bisect that ends without a `found` plugin MUST say so (`found` null, `reason` `not-a-plugin`) and MUST NOT name a plugin.
+- **[LIF-276]** The Plugins screen MUST not offer a disable switch for the four essential plugins (`ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings`, `ilium.core.sessions`), and MUST offer one for every other core plugin, including `ilium.core.editor`; see [Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/#the-essential-set)).
+- **[LIF-294]** The crash-loop guard MUST clear all crash marks once a start has stayed up for 5 minutes after startup completed. A stop before that point MUST leave the marks in place.
+- **[LIF-978]** Three crashes during start within 5 minutes while the start runs in `third-party` safe mode MUST cause the next start to use `all-optional` safe mode (proposed, owner to confirm: the count of 3 and the 5-minute window).
+- **[LIF-979]** Three crashes during start within 5 minutes while the start runs in `all-optional` safe mode MUST cause the next start to use `--no-plugins` (proposed, owner to confirm: the count of 3), and the start MUST open the recovery page as its first screen.
+- **[LIF-980]** Three crashes during start within 5 minutes while the start runs with `--no-plugins` MUST stop automatic restarts: Ilium MUST exit with a non-zero status and print one line with the code `crash-loop.exhausted`, and until the marks clear under LIF-294 every later start MUST use `--no-plugins`.
+- **[LIF-981]** Every start MUST show the safe-mode level it runs in on the footer banner (`third-party`, `all-optional` or `--no-plugins`), and a level change MUST NOT clear the crash marks; only LIF-294 clears them.

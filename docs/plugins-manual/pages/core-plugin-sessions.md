@@ -438,3 +438,7 @@ Side basis: `ilium.core.sessions/before-restore` is server, granted in the serve
 - **[COR-006]** The kernel MUST thin rolling backups keeping the newest copy per slot: one per half hour up to 48 under 1 day, one per day up to 7 under 7 days, one per week up to 4 under 35 days, one per month up to 12 within 12 months, and one per year beyond, and MUST NOT delete the newest copy (proposed, owner to confirm).
 - **[COR-007]** The Sessions plugin MUST store a provider resume command (`claude --resume <id>`, `codex resume <id>`, `agy --conversation <id>`) in a pane's snapshot section only after the kernel agent-session primitive has verified that the session belongs to that pane's agent, project and launch directory, and a pane without a verified session MUST be relaunched with its original command (proposed, owner to confirm).
 - **[COR-008]** When the user submits exactly `/clear` to a Claude Code or Codex pane, the plugin build MUST discard that pane's detected session so no resume command is stored until a replacement session is verified, while manual names, short titles and icons stay unchanged (proposed, owner to confirm).
+
+## Requirement statements
+
+- **[EXT-056]** A snapshot reply over max_bytes MUST be dropped, logged snapshot.section-too-large and not stored. restore MUST be called after before-restore completes and before panes respawn, with 2 s per call.

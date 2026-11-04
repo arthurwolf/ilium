@@ -121,3 +121,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 - [Administration guide](/pages/guide-administration/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-110]** The documentation MUST answer, in this FAQ, whether a store exists, which systems run third-party plugins, what declining a permission does, and how to leave a bad plugin behind.

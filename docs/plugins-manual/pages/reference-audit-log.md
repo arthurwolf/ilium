@@ -197,3 +197,8 @@ The catalogue of [SEC-222] covers installs, grants, consent, trust and block eve
 - If the audit file cannot be written, the command still completes and the record is queued and retried under [SEC-225]; `data-export` and `erase-data` records are not among the types dropped first.
 - If the process is killed after moving data and before the record is written, the next server start finds no record. The command prints the same facts on its standard output before it exits, so the operator has them; this gap is why the record is written before the command prints its final line where possible.
 - `--dry-run` and read-only listings (`data-report`) write `data-report` once but no record for a dry-run restore.
+
+## Requirement statements
+
+- **[SEC-446]** Crash reports MUST contain only plugin id, error code, host version and host frames, and MUST pass a redaction test.
+- **[SEC-447]** Crash reports MUST be mode 0600, expire after 14 days, never be sent unprompted, and add a `crash-report` audit record.

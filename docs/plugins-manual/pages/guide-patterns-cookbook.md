@@ -743,3 +743,31 @@ Nothing of these patterns directly. They see the effects: a panel that settles a
 - [Requests and outcomes](/pages/requests-and-outcomes/) for outcomes and error codes
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-001]** A core MUST NOT call the clock itself, and a handler SHOULD read the clock once per batch and pass the value in.
+- **[AUT-002]** A debounce MUST cancel the pending timer before it arms a new one. Otherwise each change leaves a timer behind, and a busy editor reaches the limit of 64 held timers.
+- **[AUT-003]** The handler MUST compare the id of each `timer-fired` event with the id it stored, and ignore every other id.
+- **[AUT-004]** A debounce delay MUST sit inside the range of its field (widget `debounce-ms` 0 to 2,000 ms, settings row `debounce_ms` 300 to 2,000 ms). A value outside the range is clamped to the nearest bound, not refused.
+- **[AUT-005]** A plugin SHOULD keep its own send rate under the host rate, and SHOULD NOT depend on `rate-limited` as flow control.
+- **[AUT-006]** After `rate-limited`, the plugin MUST wait at least `retry-after-ms` before it sends the same kind of call again.
+- **[AUT-007]** *Traps.** A throttle MUST take its time from `monotonic-millis`, because wall time can jump backwards and then `now - last` underflows in unsigned arithmetic. The code above uses `saturating_sub` for this reason.
+- **[AUT-008]** Data that the plugin can rebuild MUST go to the `shared` bucket or to `/cache`, never to a durable bucket, so that it does not fill the 16 MiB bucket.
+- **[AUT-009]** A cached value MUST carry its fetch time as `now-unix-millis` inside the stored bytes, and the reader MUST compare it with the current time. The host does not expire entries by age.
+- **[AUT-010]** When several sessions can refresh the same entry, only the caller whose `lease` returned true MAY refresh it.
+- **[AUT-011]** A view MUST render only the rows in the visible window plus a small margin, and MUST NOT put all rows into the tree. The default ceiling is 4,096 nodes and 1,024 KiB for the whole tree; a T1 plugin may raise it to 16,384 nodes and 4,096 KiB.
+- **[AUT-012]** A view that hides rows behind a window MUST show how many rows exist and where the window is, for example `41 to 60 of 3,212`, so that the user knows more exist.
+- **[AUT-013]** A plugin MUST NOT retry `not-permitted`, `revoked`, `invalid-argument` or `unsupported`.
+- **[AUT-014]** A retry loop MUST have a maximum attempt count and a growing delay. A suggested schedule is 1 s, 2 s, 4 s, up to 60 s, with at most 5 attempts.
+- **[AUT-015]** A submission whose repeat would harm the user (a notice, a sent line) MUST carry a `dedup-key` built from what makes the action unique, such as an id and a revision.
+- **[AUT-016]** A `dedup-key` MUST NOT be reused for different content within 10 minutes. The second submission is dropped as `duplicate` even though its content differs.
+- **[AUT-017]** A mismatch MUST fall back to defaults.
+- **[AUT-018]** State that must outlive a trap MUST be written to storage when it changes, not only in `deactivate`.
+- **[AUT-019]** A plugin that starts work for a changing input MUST keep a generation number, store it with the request, and discard a completion whose generation is not the current one.
+- **[AUT-020]** The handler MUST process every event of the batch in order, and MUST return before the event deadline (20 ms, 50 ms for tier 1).
+- **[AUT-021]** After an `events-dropped` entry, the handler MUST rebuild its picture from a read call instead of trusting its incremental state.
+- **[AUT-022]** Work that can take longer than 10 ms MUST run as a job or a request. A handler that spends its 20 ms deadline on work traps the instance.
+- **[AUT-023]** A server side that needs data from the client MUST use a client request with an explicit timeout, and MUST handle `timed-out` and `not-found` (the client is gone).
+- **[AUT-024]** A plugin that changes how it stores data MUST raise `data_version` and MUST provide a `migrator` export that converts the old layout, instead of reading both layouts inside `activate`.
+- **[AUT-025]** A `migrate` function MUST be idempotent and MUST write the new value of a key before it removes the old one, so that an interrupted run can start again from the same arguments.

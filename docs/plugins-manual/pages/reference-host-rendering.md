@@ -306,3 +306,8 @@ The user turns on reduce motion in Settings (the `[ui]` key `motion_level`, see 
 - [Requirements: kernel and host](/pages/reference-requirements-kernel-host/).
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[RND-020]** The depth limit of a ui-tree MUST be 32 levels with the root as level 1.
+- **[WID-030]** A theme change MUST repaint the last tree of every open view, deliver theme-changed and trigger exactly one views.render per open view.

@@ -73,3 +73,9 @@ The policy can also block exact versions, force safe mode, or pin a version. The
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[LIF-190]** The Plugins screen MUST show state and health for each installed plugin, and a detail view with the five tabs.
+- **[LIF-191]** Enable on a failed plugin MUST clear the failure window.
+- **[LIF-192]** A replacement disabled by failure MUST re-enable the built-in plugin with a notice.

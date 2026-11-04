@@ -283,3 +283,30 @@ Detection does not depend on the language that Ilium shows.
 - Remove one message id from a catalogue and check that the English text is shown and the id is not.
 - Break a catalogue and check that the recovery page is in English.
 - Once a language choice exists, run the English detection fixtures with that language selected and check that the classification does not change. This confirms that detection reads the agent's output and not the display language.
+
+## Requirement statements
+
+- **[CAP-885]** The `notifications` core plugin MUST always deliver the in-app text for an event, and a `refused` or `failed` result on the sound or desktop channel MUST NOT remove the other channels.
+- **[COR-043]** Every manifest and sample on a core-plugin page MUST pass `ilium plugin check` with the `ilium:plugin@0.1.0` rules.
+- **[COR-050]** Each of the 30 core-plugin pages MUST hold a Complete manifest section whose sides, worlds, grants and contributions match its tables; the core-plugins index MUST state 30.
+- **[COR-097]** A plugin that replaces a core plugin's owned feature MUST declare every CLI command, Settings key and data section of the replaced plugin, and the host MUST reject the replacement at enable time, with the missing items listed, when any is absent.
+- **[COR-098]** A replacement MUST read the existing stored data of the replaced plugin without loss, and the host MUST run the parity test of the replaced plugin against the replacement before it becomes the owner.
+- **[COR-099]** Disabling or removing a replacement MUST return ownership to the core plugin with the data written during the replacement still readable by it, or the host MUST refuse the replacement at enable time because it cannot guarantee that.
+- **[COR-203]** Every core plugin page MUST contain a Contract section listing exactly: owned services, owned topics, owned extension points, owned commands, owned CLI names, owned stored sections, and the essential/disableable/replaceable flags, and these MUST equal the manifest and the replacement matrix row.
+- **[COR-204]** Each of the 30 core plugins MUST ship a conformance test suite named ilium-core-<name>-parity that runs against the plugin or its replacement and covers every Contract entry, and the host MUST fail the build with exit code 1 when a core plugin has no suite.
+- **[COR-205]** The command ilium plugin conformance <id> MUST run the parity suite of the named core plugin against the currently active owner, print one line per test as pass or fail, and exit 0 only when all pass.
+- **[COR-208]** Disabling a core plugin that other enabled plugins require MUST be refused with core.has-dependents listing every dependent, unless the request carries cascade=true, in which case dependents MUST be disabled in reverse dependency order and be re-enabled together on enable.
+- **[COR-209]** Disabling or enabling a disableable core plugin MUST take effect within 2 seconds without restarting the server, MUST drop the plugin's UI contributions in the same frame as deactivation, and MUST emit one plugin.state-changed event.
+- **[COR-210]** Every stored section of a core plugin MUST carry an integer schema_version, and a plugin MUST refuse to load a section whose version is greater than its own with error core.data-newer, leaving the section unmodified.
+- **[COR-213]** For each row of the fallback table, an automated test MUST disable the plugin with a client attached and assert that the named fallback behaviour is visible in the next rendered frame and that no pane input is lost.
+- **[COR-220]** A core plugin MUST NOT use a kernel-private API: every host call it makes MUST be available to a T1 third-party plugin holding the same capability, and a build-time test MUST fail on any import not in the public WIT.
+- **[COR-221]** Core plugins MUST hold only the capabilities in their manifest; ilium plugin permissions <id> for a core plugin MUST list exactly those and the user MUST NOT be able to grant extra capabilities to a core plugin.
+- **[COR-222]** The bundled core plugins MUST be verified against a hash table compiled into the server at startup, and a mismatch MUST abort loading that plugin with core.integrity-failed and, for an essential plugin, fall back to the kernel fallback.
+- **[COR-223]** With no client attached the server MUST keep all startup core plugins running and MUST NOT activate client-side UI contributions; attaching a client MUST activate them within 1 second.
+- **[COR-224]** A non-startup core plugin MUST activate on its first trigger within 300 ms plus its own activation time, and the trigger event MUST be delivered to it exactly once after activation.
+- **[COR-225]** Each core plugin instance MUST run under the same memory and fuel limits as T2 plugins unless its manifest declares a larger limit, and the declared limits MUST be listed in ilium plugin info <id>.
+- **[COR-226]** A degraded core plugin MUST NOT have its stored sections modified or deleted by the kernel, and its last committed values MUST remain readable by other plugins through the read-only service snapshot.
+- **[COR-228]** If a replacement of a core plugin fails 3 times within 60 seconds after becoming owner, the kernel MUST return ownership to the original core plugin, mark the replacement failed with core.replacement-rolled-back, and post a notice.
+- **[COR-229]** At most one enabled plugin MAY replace a given core plugin id; enabling a second MUST be refused with core.replacement-conflict naming the current owner.
+- **[COR-230]** Core plugins MUST be versioned with the server build; at boot the server MUST refuse an installed override of a core plugin whose declared host ABI is incompatible, falling back to the bundled copy and logging core.abi-mismatch.
+- **[LIF-042]** An essential core plugin (see [Core plugins](/pages/core-plugins/)) MUST never be stopped by failure. Its third and later failures in a window MUST restart after 5 s and MUST raise the essential-failure banner.

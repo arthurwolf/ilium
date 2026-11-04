@@ -314,3 +314,15 @@ Contract: `ilium:plugin@0.1.0`.
 **[SEC-712]** On kernels that support it (Linux 5.13 or later (proposed, owner to confirm)) the helper MUST additionally apply a Landlock ruleset equal to its mount view, and a Landlock failure MUST be audited as `sandbox-degraded` but MUST NOT by itself prevent loading when namespaces and seccomp succeeded.
 
 **[SEC-732]** A guest-supplied string shown in the UI or written to the log MUST have control characters, escape sequences and bidirectional override characters (U+202A to U+202E, U+2066 to U+2069) removed or escaped before display.
+
+## Requirement statements
+
+- **[SEC-022]** The network namespace has no interface except a downed loopback.
+- **[SEC-023]** The mount namespace holds only:
+- **[SEC-025]** The sandbox is defence in depth.
+- **[SEC-026]** The helper's `/proc` shows only its own PID namespace.
+- **[SEC-027]** The helper's environment is rebuilt from an allowlist:
+- **[SEC-028]** All file descriptors except the dispatcher channel and stdio on `/dev/null` are closed before the Wasmtime engine starts (close-range with no exceptions).
+- **[SEC-442]** Ilium MUST document a minimum kernel and check each sandbox prerequisite separately at server start.
+- **[SEC-443]** `ilium plugin doctor --sandbox` MUST print one check line per prerequisite with remediation and MUST NOT change system settings.
+- **[SEC-444]** A missing `openat2` MUST be degraded, not `sandbox.unavailable`; other missing prerequisites MUST name the one missing.

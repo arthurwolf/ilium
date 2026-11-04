@@ -313,3 +313,8 @@ Checked against the API version `ilium:plugin@0.1.0`.
 **[SEC-040]** A plugin MAY create a pane that runs a program only with `panes.create-command:<program>` (high risk). The grant is defined in the [Capability table](/pages/reference-capabilities/) (it requires `panes.create` in the same side, else the install fails with `manifest.grant-dependency`). A `command` whose program matches no such grant completes `refused(not-permitted)` with reason `not-granted`, or `declined` when the grant was requested but unchecked. The program is not confined ([Sandbox reference](/pages/reference-sandbox/)).
 
 - **[SEC-162]** The host MUST cap the panes a plugin can hold open through `create-pane` at `limits.panes_per_plugin` (default 16 for T2 and T3, 64 for T1); a `create-pane` beyond the cap MUST be refused with `quota-exceeded` and `retry-after-ms`, and panes the user closes free the quota. (proposed, owner to confirm)
+
+## Requirement statements
+
+- **[PAN-030]** create-pane with a cwd whose scope is not granted MUST be refused(not-permitted). With a cwd folder that does not exist it MUST be refused(not-found). With a program that cannot start it MUST complete failed(io).
+- **[PAN-031]** create-pane with command none and content-kind ilium.terminal MUST run the login shell from SHELL, or /bin/sh when SHELL is unset.

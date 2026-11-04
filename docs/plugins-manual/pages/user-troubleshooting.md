@@ -232,3 +232,16 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions: T7-users-privacy-a11y
 
 **[USR-346]** `ilium plugin bisect` MUST disable half of the enabled T2 and T3 plugins for the next start, ask 'Is the problem gone?', and narrow in at most ceil(log2 N)+1 rounds (proposed, owner to confirm) to one plugin, and MUST restore the original enabled set when finished or cancelled.
+
+## Requirement statements
+
+- **[USR-030]** Safe mode MUST switch off every T2 and T3 plugin for the run, MUST leave core and bundled plugins on, and MUST NOT write the state to the registry.
+- **[USR-031]** Safe mode MUST show a banner on every screen and MUST label every third-party row as off with the reason `safe-mode`.
+- **[USR-032]** The recovery page MUST stay reachable when the Settings plugin is off or failed, and MUST NOT be replaceable by a plugin.
+- **[USR-033]** Forget settings MUST delete only that plugin's settings values and MUST NOT delete permissions or data.
+- **[USR-100]** The plugin MUST restart after 1 s, then after 5 s, and MUST stay off at the third failure within 10 minutes, except an essential core plugin (LIF-042), which restarts after 5 s.
+- **[USR-101]** Turning a plugin on MUST clear its failure count.
+- **[USR-176]** The troubleshooting table MUST tell a user whose plugin shows `Blocked` that the block is not a failure and how to leave it.
+- **[USR-254]** When an Ilium upgrade makes an installed plugin API-incompatible, the host MUST keep the plugin installed, set its state to `Incompatible`, and not load it.
+- **[USR-255]** The host MUST show a notice naming the plugin, its API version and the host's supported range, with actions **Check for update**, **Keep disabled** and **Uninstall**, and MUST show the same state word in the list, the CLI and the recovery page.
+- **[USR-256]** When a compatible update appears, a plugin in `Incompatible` state MUST be offered it first, and settings and grants MUST be kept through the update.

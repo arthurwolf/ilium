@@ -755,3 +755,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ### Security
 
 Security tests and fuzz targets are listed in [Security testing](/pages/reference-security-testing/).
+
+## Requirement statements
+
+- **[LIF-279]** The fake host MUST offer the methods in the table, and its results MUST match the real host for the lines above.

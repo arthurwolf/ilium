@@ -230,3 +230,27 @@ Target behaviour of the production plugin system.
 ### Graduating unstable features
 
 - [ABI-083] A release that removes or graduates an unstable feature MUST name it in its release notes one minor version in advance; the host MUST write one `deprecated` record per plugin that still lists the feature, and after graduation a manifest that still lists it under `unstable` MUST load with that `deprecated` record instead of being refused with `manifest.unstable-unknown`.
+
+## Requirement statements
+
+- **[DEV-967]** Two host patch releases of the same minor MUST export byte-identical WIT packages; the release pipeline MUST fail when the WIT text hash of a patch release differs from that of its minor's first release.
+- **[DEV-968]** Each host release MUST publish the SHA-256 of every WIT package it ships in the release notes and in `ilium version --json` under `wit_hashes`, and `ilium plugin inspect` MUST report the same hashes for the component's embedded world.
+- **[DEV-975]** An unstable feature MUST either graduate or be removed within 6 minor releases (proposed, owner to confirm) of its introduction; the release notes of the sixth minor MUST name the decision, and a feature past the bound MUST be flagged by the release checklist as blocking.
+- **[DEV-977]** `ilium plugin list --json` MUST include for each plugin the array `unstable_used` of feature names it lists, so an operator can find every plugin affected by a planned graduation or removal.
+- **[DEV-978]** The host MUST refuse, with `manifest.unstable-tier`, a plugin that lists an unstable feature when installed from a registry flagged `production`, regardless of tier.
+- **[LIF-970]** A correction to a documented number or rule MUST NOT change the contract version, the `api` string or the `ilium:api-version` section. Only the rules in [Reference, ABI evolution](/pages/reference-abi-evolution/) decide whether the contract changes. If a correction reveals a real change of behaviour, the host release that contains the change is the one whose snapshot is corrected.
+- **[ABI-003]** All seven WIT packages MUST carry the one version 0.1.0 and change together.
+- **[ABI-004]** Each component MUST carry the custom section ilium:api-version with bytes 00 00 00 01 00 00.
+- **[ABI-019]** Cases of a variant, enum or flags MUST only be appended after the freeze. Records MUST NOT gain fields.
+- **[ABI-021]** The host MUST compare api versions by minor window and MUST report one refusal code per package, the first failing check.
+- **[ABI-022]** Version 0.1.0 MUST have exactly four unstable features: ui-calendar, plugin-services, gpu-kernels and websocket.
+- **[ABI-028]** The deactivation reason crash-restart is reserved. The host MUST NOT deliver it.
+- **[ABI-029]** The host MUST NOT deliver an event, outcome or reason case to a plugin whose API predates the case.
+- **[ABI-052]** A feature marked for removal MUST be listed in the release notes with the minor in which it stops working, at least two minors after the marking release.
+- **[ABI-053]** A marked feature MUST keep working until its removal minor, and the host MUST log one `deprecated` record per plugin and feature at load time, naming the feature and that minor.
+- **[ABI-054]** Removing a feature MUST move the affected refusals to the codes of section 4 and MUST NOT change any other code.
+- **[ABI-064]** The project MUST publish and run a matrix of host minor against SDK minor, covering at least the old plugin on the new host and the new SDK on the old host, for every minor inside the window.
+- **[ABI-065]** Each matrix cell MUST state its expected result: loads, loads with a `deprecated` record, or refused with the code of section 4.
+- **[ABI-066]** A release MUST NOT ship while any matrix cell inside the window differs from its stated result.
+- **[ABI-083]** A release that removes or graduates an unstable feature MUST name it in its release notes one minor version in advance; the host MUST write one `deprecated` record per plugin that still lists the feature, and after graduation a manifest that still lists it under `unstable` MUST load with that `deprecated` record instead of being refused with `manifest.unstable-unknown`.
+- **[ABI-119]** The host MUST provide the import `host-info` returning the exact `api-version`, host build id, enabled unstable features and every limit in effect, and its result MUST NOT change during one activation.

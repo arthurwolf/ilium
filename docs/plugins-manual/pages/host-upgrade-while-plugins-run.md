@@ -143,3 +143,8 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions: T9-compat-deprecation
 
 - **[DEV-993]** The host MUST support upgrading directly from any supported minor to the next major and from the last minor of a major to any later minor of the next major, and MUST refuse starting on state written by a host more than one major older with `state.too-old` (proposed, owner to confirm), naming the intermediate version to install.
+
+## Requirement statements
+
+- **[LIF-304]** Every on-disk format of the plugin system MUST carry a format number. A host MUST read a file whose format number is at most its own and MUST NOT rewrite a file with a lower number than the one it found.
+- **[LIF-305]** A host that finds `installed.json`, a bucket or a stamp with a newer format number than it knows MUST start with the affected plugins disabled, MUST log `host.format-newer` naming the file, and MUST NOT delete or truncate it, so the operator can run the newer host again without data loss.

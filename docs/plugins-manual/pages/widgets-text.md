@@ -562,3 +562,8 @@ Requirement ids for this page: [WID-025]. See the [requirements index](/pages/re
 - [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-617]** A plugin MUST measure text with `display-width` and MUST NOT size a column by character count.
+- **[WID-025]** Text widgets MUST wrap at the area width. paragraph spans that carry an action MUST send it when clicked.

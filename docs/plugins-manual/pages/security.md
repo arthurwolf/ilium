@@ -715,3 +715,11 @@ A signed package carries the trust of its publisher key. The author is responsib
 - [Roadmap](/pages/roadmap/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-322]** An author MUST keep the secret key out of the package and out of version control, and MUST announce a leaked key with the fingerprint of its replacement.
+- **[LIF-281]** Uninstall MUST remove the plugin grants, and a project folder MUST NOT be able to install or enable a plugin.
+- **[USR-170]** Install, update and the Plugins screen MUST run the checks in the order of the table above, and MUST name the failing step's code in the error.
+- **[USR-171]** The error text for a refused install MUST begin `Cannot install <name> <version>.` and MUST name the check in plain words after it.
+- **[ABI-024]** The host MUST NOT link wasi:sockets or wasi:http.

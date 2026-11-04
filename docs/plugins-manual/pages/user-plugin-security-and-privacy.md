@@ -113,3 +113,7 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions: T7-users-privacy-a11y
 
 - [USR-339] Every window or dialog drawn by a T2 or T3 plugin MUST carry a host-drawn title line containing the plugin name and a tier badge that the plugin cannot change or cover, and a plugin MUST NOT draw into the row holding it.
+
+## Requirement statements
+
+- **[USR-339]** Every window or dialog drawn by a T2 or T3 plugin MUST carry a host-drawn title line containing the plugin name and a tier badge that the plugin cannot change or cover, and a plugin MUST NOT draw into the row holding it.

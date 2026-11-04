@@ -452,3 +452,11 @@ A theme is a kernel-native object. It is the one domain feature that is not rebu
 - **Alternative.** A plugin may offer a `catalog` of swatches, as in [api-catalogs](/pages/api-catalogs/). It belongs to the plugin and never changes the Ilium theme. The user changes the theme in Settings, in `[ui] color_scheme`, or by adding a file to the theme folder.
 
 Failure modes: an unreadable file is skipped with one warning in the host log. A theme that fails validation is never applied, even partially. With `--no-plugins` the same themes load, because no plugin takes part.
+
+## Requirement statements
+
+- **[AUT-501]** A plugin MUST NOT use colour as the only carrier of meaning, and MUST give every status a word or a glyph beside its colour role.
+- **[AUT-502]** A plugin MUST read `reduced-motion` and stop its own animating timers when it is true.
+- **[AUT-503]** A plugin MUST work in `compact` density at 40 columns and in both icon modes, and MUST end every icon-only control with a text label that stays when icons are not drawn.
+- **[AUT-504]** A plugin MUST use the nine colour roles and avoid `rgb` and `indexed` colours, because only a role follows the theme.
+- **[CAP-884]** Turning off sound, desktop notices or toasts, or a failure of one channel, MUST leave the text signal of the same event unchanged; colour or sound alone MUST NOT carry a state.

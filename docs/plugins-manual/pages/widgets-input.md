@@ -942,3 +942,8 @@ Requirement ids for this page: [WID-026], [WID-027]. See the [requirements index
 - [ui.panels](/pages/capability-ui-panels/)
 - [Settings screens](/pages/settings-screens/)
 - [Events and intents](/pages/events-and-intents/)
+
+## Requirement statements
+
+- **[WID-026]** Input widgets MUST send their change per the debounce rule: toggles, choices and confirmations at once, typed text after the debounce. A text-area with debounce-ms unset MUST wait 600 ms up to 10,000 bytes of text and 1,000 ms above, re-evaluated at each keystroke. An explicit debounce-ms MUST win. This rule covers the `changed` event of a text-area widget in a plugin view only; a text-area row of a settings tab is written 600 ms after the last keystroke while its text is at most 10,000 bytes, and 1 s above that (SET-023).
+- **[WID-027]** The ui-action event MUST carry five fields, and action-id MUST be a copy of key in 0.1.0.

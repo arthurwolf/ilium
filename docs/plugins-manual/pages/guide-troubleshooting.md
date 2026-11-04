@@ -143,3 +143,9 @@ Requirement ids of the commands are in [Plugin privacy](/pages/user-privacy/) an
 - [FAQ](/pages/guide-faq/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-801]** An author SHOULD turn every fixed run-time bug into a test before the next release.
+- **[AUT-802]** An author MUST read the code in an install error before changing anything, because each code names one cause.
+- **[AUT-803]** A report to the host project SHOULD contain the Ilium version, the plugin id and version, the manifest, the last 100 log lines and a test that reproduces it.

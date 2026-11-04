@@ -375,3 +375,20 @@ A core plugin can crash on every start. Without a limit the kernel would restart
 - [Config and data migration](/pages/reference-config-and-data-migration/)
 - [CLI compatibility](/pages/reference-cli-compatibility/)
 - [Roadmap](/pages/roadmap/)
+
+## Requirement statements
+
+- **[COR-010]** Kernel parts MUST stay in the kernel and MUST work with `--no-plugins`: PTY and vt100, tree model, IPC, snapshot writer, config store, keymap, layout, look painter, scene host, plugin host, recovery page, HTTP listener, kernel CLI.
+- **[COR-020]** The server MUST restore the snapshot before any plugin is instantiated, activate `startup` plugins in dependency order and bind the client socket last.
+- **[COR-021]** Exactly the core plugins marked `startup` MUST be active at boot; the others MUST stay inactive until their trigger fires.
+- **[COR-022]** Disabling a core plugin MUST have the stated effect, MUST NOT delete its data and MUST leave the recovery page working.
+- **[COR-023]** The scene world MUST NOT import `extensions`, and `capabilities.scene` MUST NOT hold extension grants.
+- **[COR-024]** Each change in the live reload and restart table MUST apply as stated.
+- **[COR-091]** The kernel MUST enforce a per-plugin activation deadline on `startup` plugins (default 10 seconds, range 1 to 60 seconds). A plugin that exceeds it MUST be marked `failed` with `activation-timeout`, and the boot MUST continue with the remaining plugins.
+- **[COR-092]** When a startup plugin times out, the client socket MUST still bind at the end of boot, the plugins that depend on it MUST be marked `blocked` and not activated, and the failure MUST be shown in the recovery page and in the plugin list.
+- **[COR-107]** The kernel MUST count the failures of each core plugin in a sliding window of 60 seconds and MUST stop restarting a core plugin after 3 failures in that window, marking it `degraded`.
+- **[COR-108]** While a core plugin is `degraded`, the kernel MUST keep the other core plugins running, MUST show the degraded state on the status surface and in diagnostics, and MUST refuse its commands with `core.degraded` instead of serving stale state.
+- **[COR-109]** The user MUST be able to restart a degraded core plugin from the status surface or with `ilium plugin restart <id>`, and a successful restart MUST reset its failure window.
+- **[COR-110]** Each failure of a core plugin MUST be written to the audit log with its time, exit reason and restart count, so repeated crashes can be diagnosed without a core dump.
+- **[COR-200]** The core-plugin failure window MUST be one value across the manual: 3 failures within 60 seconds (proposed, owner to confirm) mark the plugin degraded (COR-107), and the text of 'What the user keeps when a plugin is off' MUST cite that rule instead of 'three failures within 10 minutes'.
+- **[COR-207]** The core plugin dependency graph MUST be acyclic; the kernel MUST refuse to boot a build whose bundled core manifests form a cycle, naming the cycle path in the error `core.dependency-cycle`.

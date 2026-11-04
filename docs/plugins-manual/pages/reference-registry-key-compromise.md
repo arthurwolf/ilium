@@ -104,3 +104,14 @@ ilium plugin registry add https://plugins.example.org/ilium/v1/ --root-key <new_
 - [Signing and trust](/pages/reference-signing-and-trust/)
 - [Plugin distribution command line](/pages/reference-plugin-distribution-cli/)
 - [Administrator guide](/pages/guide-plugin-administration/)
+
+## Requirement statements
+
+- **[PKG-690]** A registry operator whose threshold of root keys is compromised MUST NOT rely on the rotation chain to recover, and each client MUST re-pin the registry.
+- **[PKG-691]** When an online role key is compromised, the operator MUST publish a new `root.json` with a higher version and re-sign the affected documents, and a client MUST refuse a document signed by a key id that the current root no longer lists.
+- **[PKG-692]** The registry operator MUST announce a root key change outside the registry files, naming the new root `key_id`, and a client MUST NOT learn a new root key from the mirror or the response that carries the change.
+- **[PKG-693]** A user MUST re-pin with `ilium plugin registry remove` and `registry add --root-key` when a root key changed, and a client MUST NOT accept a changed root key without that explicit re-pin.
+- **[PKG-696]** A client MUST keep its last good metadata when it refuses a registry document, and MUST NOT install or resolve a package from a refused document.
+- **[PKG-697]** After a root rotation, a client MUST verify the new `root.json` with the threshold of the previous root keys and of its own `roles.root` keys before it uses any key id from it.
+- **[PKG-698]** The registry operator MUST NOT reuse a retired key id for a new key.
+- **[PKG-699]** A client that stops with `registry.changed` MUST name the registry URL, MUST tell the user to re-pin, and MUST NOT re-pin by itself.

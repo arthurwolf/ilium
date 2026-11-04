@@ -374,3 +374,15 @@ A build can read a snapshot or a config file written by a newer build of Ilium, 
 ## Production additions: T9-compat-deprecation
 
 - [DEV-986] A manifest MAY declare `renamed_from` on a setting; the host MUST read a stored value under the old key when no value exists under the new key, write only the new key, and drop the alias after the plugin version in `remove_in`.
+
+## Requirement statements
+
+- **[COR-032]** Plugin state in a snapshot MUST use `snapshot-sections` with a `schema_version`; a section over its `max_bytes` (at most 256 KiB) MUST be dropped without losing the previous value; a failed plugin MUST NOT block the snapshot.
+- **[COR-033]** The plugin build MUST NOT rename or move any key in `config.toml` or `.ilium/config.yaml` and MUST keep unknown keys.
+- **[COR-090]** A `config.toml` or `.ilium/config.yaml` that cannot be parsed MUST be left unchanged on disk and MUST NOT be rewritten while it stays unparseable. The host MUST use the built-in defaults for that file for the run, MUST print one `warning` with the code `config.parse-error` that names the file, and MUST still boot.
+- **[COR-093]** A build that reads a snapshot or a `config_version` newer than it supports MUST NOT overwrite or truncate that file, MUST start in read-only persistence mode (no snapshot or config writes), MUST show a notice that names both versions, and MUST preserve unknown sections byte for byte if the user chooses to continue and save.
+- **[COR-094]** A snapshot or config file with an unreadable version field MUST be treated as corrupt under the existing corrupt-file rule and MUST NOT be interpreted as the newest or the oldest version.
+- **[COR-095]** A stored plugin section whose `schema_version` is newer than, or unknown to, the installed plugin MUST be kept unmodified in the snapshot, MUST NOT be passed to `restore` of that plugin, and MUST be reported once at boot with the plugin id, the stored version and the supported versions.
+- **[COR-096]** When a stored section's `schema_version` is older than the plugin's current one, the host MUST call the plugin migration with the stored bytes and MUST keep the old bytes until the migration returns successfully.
+- **[DEV-986]** A manifest MAY declare `renamed_from` on a setting; the host MUST read a stored value under the old key when no value exists under the new key, write only the new key, and drop the alias after the plugin version in `remove_in`.
+- **[USR-353]** The `[onboarding]` state (which steps are done or skipped, and the version of the flow) MUST survive a host update unchanged. A step that is new in the updated host MUST be offered once; a step already done MUST NOT be offered again. The state MUST hold no credentials.

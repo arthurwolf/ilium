@@ -298,3 +298,32 @@ Before install, the review dialog lists the publisher, the tier, the signature s
 - [Plugin documentation guide](/pages/guide-plugin-documentation/) for help topics and README
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-301]** An author MUST offer the package file as the base route that needs no registry, and MAY add a registry as a second route through `ilium plugin publish`.
+- **[AUT-302]** A release MUST pass `check` without errors and SHOULD pass `lint --deny warnings`.
+- **[AUT-303]** A release package MUST be built with `--release`, because a package that carries debug information or source maps is larger and fails `lint.debug-info-in-release`.
+- **[AUT-304]** A package MUST NOT contain a secret, a key or a token. The package is a file that anyone can open.
+- **[AUT-305]** A signed package has one more rule: its id MUST start with the publisher id of the signing key and a dot, and an id that does not is refused with `manifest.id-publisher`.
+- **[AUT-306]** The secret key MUST NOT be committed, packaged or printed.
+- **[AUT-307]** A release MUST be signed after the last `pack`, and the signed file MUST be the file that users receive. Signing twice with the same key gives the same bytes.
+- **[AUT-308]** The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two.
+- **[AUT-309]** A leaked key MUST be announced to users on the same channel as the releases, with the fingerprint of the key that replaces it.
+- **[AUT-310]** Release notes MUST name every new grant and every raised `data_version`.
+- **[AUT-311]** A project SHOULD ship `README.md` and `CHANGELOG.md`, because `lint.readme-missing` and `lint.changelog-missing` report their absence.
+- **[AUT-312]** Wherever the file goes, the author SHOULD name the file `<id>-<version>.iliumpkg` and SHOULD NOT rename it.
+- **[AUT-313]** A release page MUST state that signed and unsigned third-party packages need Linux.
+- **[AUT-314]** `--unredacted` works only for a plugin installed with `ilium plugin dev`, so an author MUST NOT ask a user for unredacted output from a normal install.
+- **[AUT-315]** A plugin that logs MUST NOT write secrets, tokens, file contents or whole payloads to the plugin log. A log line is 16 KiB at most, so write a count or an id.
+- **[AUT-316]** A report that cannot be reproduced SHOULD be turned into a fixture once you understand it, so that it never returns.
+- **[AUT-317]** A plugin that cannot be fixed SHOULD be deprecated with a successor named, when a registry is in use.
+- **[AUT-318]** An author MUST publish a way to reach them, in the README and in the package description, before the first release.
+- **[AUT-319]** A version number, once published, MUST NOT be reused for different content. The registry refuses a duplicate on publish with `registry.version-exists`, and the host refuses it on install with `package.version-reused`.
+- **[AUT-955]** An author whose plugin requests an `http:` grant MUST state in the README which data the plugin sends to each granted host, and MUST name a contact for privacy and erasure requests there, before the first release. The publisher is responsible for that data, not Ilium.
+- **[AUT-950]** A release MUST run the conformance suite on the release build, after `build --release` and before `pack`, and the run MUST have no `fail` verdict (proposed, owner to confirm: zero fail verdicts). The conformance report MUST be kept with the release.
+- **[AUT-951]** A retirement of a registry URL, a mirror or an API version MUST be announced at least 90 days before it takes effect (proposed, owner to confirm).
+- **[AUT-952]** The registry operator MUST name a status page, and MUST update it within 1 hour (proposed, owner to confirm) of the start of an incident that affects installs or updates.
+- **[AUT-953]** Planned registry maintenance MUST be announced at least 48 hours before it starts (proposed, owner to confirm), and the announcement MUST say which operations stop during it.
+- **[AUT-954]** When the log or a trace shows that Ilium itself, and not the plugin, caused a failure, the author MUST tell the user to report it to the Ilium project, and the README MUST name that route (owner to confirm: the host project does not publish a general support channel yet).
+- **[LIF-975]** A plugin author who publishes documentation for a plugin MUST state the minimum host minor version the plugin needs and the `api` string it was built for. The statement MUST be kept in the same place as the release notes that name the plugin version (see [Publishing and support](/pages/guide-publishing-and-support/)).

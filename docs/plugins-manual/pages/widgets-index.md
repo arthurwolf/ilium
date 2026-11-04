@@ -416,3 +416,7 @@ API version: `ilium:plugin@0.1.0`.
 Kernel security dialogs are not widgets plugins can draw ([SEC-377]).
 
 Requirements for this page: [Widgets requirements](/pages/reference-requirements-widgets/).
+
+## Requirement statements
+
+- **[WID-001]** The widget catalogue MUST hold 51 widgets in 7 families. A plugin MUST describe a view only with these widgets.

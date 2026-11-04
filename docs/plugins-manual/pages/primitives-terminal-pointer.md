@@ -160,3 +160,7 @@ Requirement ids for this page: [PRI-007]. See the [requirements index](/pages/re
 - [Terminal reads](/pages/primitives-terminal-reads/)
 - [Terminal input](/pages/primitives-terminal-input/)
 - [Editor viewport and pointer](/pages/primitives-editor-viewport/)
+
+## Requirement statements
+
+- **[PRI-007]** A pointer claim MUST belong to one plugin at a time. A whole-pane claim belongs to one pane, so a second whole claim on the same pane MUST return conflict.

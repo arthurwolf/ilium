@@ -460,3 +460,12 @@ Related requirement ids: [AUT-503], [USR-261], [USR-951], [SEC-346], [USR-338].
 - [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-505]** A plugin SHOULD test every view at 40 columns by 12 rows, which is the size `lint.widget-missing-key` renders at, and SHOULD give a `min` constraint to a segment that must stay readable.
+- **[AUT-506]** A plugin SHOULD prefer `fill` and `percentage` for text segments.
+- **[WID-004]** A tree MUST NOT hold more nodes than the effective ui_tree_nodes limit, 4,096 by default.
+- **[WID-005]** A layout MUST have as many constraints as children. A mismatch MUST trap.
+- **[WID-006]** A layout percentage above 100 MUST be clamped to 100.
+- **[WID-007]** Fixed, min, max, percentage, ratio and fill constraints MUST be solved in the order given on the layout page, and the cells MUST sum to the area width.

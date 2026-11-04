@@ -378,3 +378,30 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[USR-317]** A plugin catalogue MUST only be consulted for the plugin's own message ids; a plugin MUST NOT override host permission wording, risk labels or consent prompts, and every user-visible text in a host dialog MUST come from the host catalogue.
 - **[DEV-038]** `ilium plugin lint` MUST run the catalogue loader of [USR-310] over every `i18n/<tag>.json` and report `i18n.catalogue-invalid` as an error, and MUST compare the placeholder names of every translated message with `i18n/en.json` and report each difference as the error `i18n.placeholder-mismatch` naming file, id and the differing names, so a message that would fall back at run time fails before publish (proposed, owner to confirm).
 - **[DEV-039]** `ilium plugin lint` MUST report `i18n.untranslated` as a warning for each shipped tag, naming the tag, the number of ids of `i18n/en.json` it lacks and up to 20 of those ids, and MUST NOT fail the plugin for it; `ilium plugin lint --json` MUST carry the full id list per tag (proposed, owner to confirm).
+
+## Requirement statements
+
+- **[AUT-601]** A plugin MUST NOT assume that it can learn the user's locale or time zone from the host.
+- **[AUT-602]** A plugin MUST measure width with `display-width` and MUST NOT use `len()`, `chars().count()` or `String.length` for layout.
+- **[AUT-603]** A plugin that cuts text to fit MUST cut at a grapheme boundary, and SHOULD end a cut with `…`, which takes one cell.
+- **[AUT-604]** A plugin SHOULD NOT call `display-width` once per character for a long text. Measure once, and cut only when the text is too wide.
+- **[AUT-605]** A plugin SHOULD leave room for a longer label and SHOULD NOT depend on a fixed width.
+- **[AUT-606]** A plugin MUST treat text from outside as data: it MAY contain wide characters, combining marks, text in any direction and any length.
+- **[AUT-607]** A plugin SHOULD NOT promise correct display of right-to-left scripts, and SHOULD state this in its README if its users need them.
+- **[AUT-608]** A plugin that ships several languages MUST fall back to one default language for any missing message, and MUST NOT show a message id to the user.
+- **[AUT-609]** A plugin that wants a translated settings page SHOULD keep the manifest titles in one language and put the translated text in views it draws itself.
+- **[AUT-610]** A plugin MUST NOT translate command ids, setting keys, error codes and event names.
+- **[AUT-611]** A plugin that shows a time MUST write the zone or say that it is relative, and MUST store times as UTC milliseconds, never as local text.
+- **[AUT-612]** A plugin SHOULD use `YYYY-MM-DD HH:mm:ss` for absolute times unless the user chooses another form.
+- **[AUT-613]** A plugin that formats time MUST be tested with the fake clock, which starts at 2030-01-01 00:00:00 UTC.
+- **[AUT-614]** A plugin SHOULD use a dot and no group separator in machine-readable output, and SHOULD use metric units for sizes it shows.
+- **[AUT-615]** A plugin that sorts names for people SHOULD fold case and accents before comparing, and SHOULD NOT claim a language-correct order.
+- **[AUT-618]** A plugin MUST pass a toast or notice body already in the language it chose, and the host MUST show it unchanged apart from escape removal and the width cut.
+- **[AUT-619]** The host's fixed words around a plugin's text are not in the plugin's language and a plugin MUST NOT rely on them matching its own.
+- **[AUT-620]** The grant reason has one value; the review dialog shows it verbatim as data, cut at the dialog width with `…`, never mixed into a host sentence.
+- **[AUT-621]** A plugin SHOULD write the grant reason in a language its users read and SHOULD keep it short enough to fit 60 cells after a translation.
+- **[AUT-622]** Grant ids, the plugin id and capability names in the dialog are identifiers and are never translated.
+- **[AUT-624]** The host MUST ship its catalogue in these launch languages: English, German and French (proposed, owner to confirm). A language tag outside this set MUST show English for every host text.
+- **[AUT-625]** The release candidate MUST pass the `en-XA` pseudo-locale check of USR-316 over every host dialog and every view of a bundled core plugin, and an `i18n.layout-overflow` finding MUST block the release. The check runs in CI on each release candidate (proposed, owner to confirm).
+- **[USR-239]** A replacement MUST keep every command id and every settings tab id of the core plugin it replaces, with the same spelling, and MUST NOT translate them.
+- **[USR-240]** A replacement that takes over a settings tab, a command or a notice MUST supply the title and notice text of that item itself, and the built-in English text returns only when the replacement is turned off.

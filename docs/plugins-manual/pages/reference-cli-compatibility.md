@@ -103,3 +103,9 @@ See also: [Shell completion and man pages](/pages/reference-cli-completion/) for
 ### Requirements
 
 [COR-040] and [COR-041] and [COR-042] above are collected, with their tests, in [core parity requirements](/pages/reference-requirements-core-parity/).
+
+## Requirement statements
+
+- **[COR-040]** A plugin MUST declare every `ilium` subcommand it owns; no built-in command without a declared owner MUST NOT remain.
+- **[COR-041]** Arguments, options, defaults, output records and exit codes of every command MUST equal the baseline CLI reference.
+- **[COR-042]** A disabled or failed owner MUST give exit code 1 and a record with `cli.owner-disabled` or `cli.owner-failed` that names the plugin.

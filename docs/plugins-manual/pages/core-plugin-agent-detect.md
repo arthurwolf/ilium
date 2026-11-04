@@ -845,3 +845,7 @@ A package adds this entry in its manifest. It needs no code.
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+## Requirement statements
+
+- **[COR-219]** When `ilium.core.agent-detect` is off, every pane MUST report agent class `none` and activity `unknown` within one detection interval, and on re-enable all panes MUST be reclassified within 2 seconds (proposed, owner to confirm).

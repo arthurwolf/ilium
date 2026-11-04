@@ -206,3 +206,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.st
 - [Terminal primitives](/pages/primitives-terminal/).
 
 Requirement ids for this page: [PRI-004]. See the [requirements index](/pages/reference-requirements/).
+
+## Requirement statements
+
+- **[PRI-004]** Check order for send-input MUST be: capability, stage and size rules, if-current precondition, then the lock. A failed precondition MUST refuse the intent before any lock is taken.

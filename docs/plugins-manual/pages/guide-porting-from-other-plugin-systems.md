@@ -221,3 +221,12 @@ A port SHOULD be written as a new plugin with a new id, and SHOULD NOT reuse the
 - [FAQ](/pages/guide-faq/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-701]** A port SHOULD put logic about panes and agents on S and drawing on C, and SHOULD send messages between them rather than share state.
+- **[AUT-702]** A port MUST declare every grant its calls need, and `ilium plugin check` reports an import without a grant as `component.import-ungranted`.
+- **[AUT-703]** A port that waits in a loop MUST be rewritten as events: start the work, return, and handle the result when `request-completed` arrives.
+- **[AUT-704]** A port SHOULD prefer the typed primitive (`terminal.read-screen`) over a program, because the primitive needs a weaker grant.
+- **[AUT-705]** A port MUST NOT ask for a write grant wider than the folder it writes to.
+- **[AUT-706]** A port SHOULD be written as a new plugin with a new id, and SHOULD NOT reuse the name of the original in a way that suggests it is the same product.

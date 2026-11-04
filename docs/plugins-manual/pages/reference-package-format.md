@@ -403,3 +403,92 @@ The user sees a package only through the install dialog and the CLI. A refused p
 ## Production additions: T4-package-registry
 
 - **[PKG-825]** `ilium plugin pack` run twice on the same source tree with the same `--signed-at` MUST produce byte-identical archives, using fixed ZIP timestamps (1980-01-01 00:00:00), mode 0644 and no extra fields.
+
+## Requirement statements
+
+- **[PKG-100]** Every entry MUST use compression method 0 (stored). Any other method is refused with `package.zip-compressed`.
+- **[PKG-101]** General-purpose flag bit 11 (UTF-8 names) MUST be set on every entry. Bit 0 (encryption) and bit 3 (data descriptor) MUST NOT be set. They are refused with `package.zip-encrypted` and `package.zip-descriptor`. All other flag bits MUST be zero.
+- **[PKG-102]** The archive MUST NOT use ZIP64. A ZIP64 end record, a ZIP64 locator or a size field of `0xFFFFFFFF` is refused with `package.zip64`.
+- **[PKG-103]** Local headers and central directory headers MUST NOT carry extra fields. The extra field length MUST be 0. Refused with `package.zip-extra`.
+- **[PKG-104]** The end-of-central-directory record MUST have a comment length of 0. No per-entry comment is allowed. Refused with `package.zip-comment`.
+- **[PKG-105]** The archive MUST NOT contain directory entries (names ending in `/`). Refused with `package.entry-directory`.
+- **[PKG-106]** The DOS modification time of every entry MUST be 1980-01-01 00:00:00 (time field `0x0000`, date field `0x0021`).
+- **[PKG-107]** The external attributes of every entry MUST be `0x81A40000` (Unix mode `0100644`, a regular file with mode 0644). A symbolic link, a device or any other mode is refused with `package.entry-symlink`.
+- **[PKG-108]** The "version made by" field MUST be `0x0314` (Unix, specification 2.0) and "version needed to extract" MUST be 20. The disk number fields MUST be 0 and the internal attributes MUST be 0.
+- **[PKG-109]** For every entry the local header and the central directory header MUST agree on the name, the CRC-32, the compressed size and the uncompressed size. For a stored entry the two sizes are equal. A mismatch is refused with `package.header-mismatch`.
+- **[PKG-110]** The CRC-32 of every entry MUST be correct. A wrong CRC is refused with `package.crc-mismatch`. The host checks it while it reads the entry, before it parses the content.
+- **[PKG-111]** The archive MUST consist of the local entries, then the central directory, then the end record, with no other bytes. Bytes before the first local header, between records or after the end record are refused with `package.zip-trailing`.
+- **[PKG-112]** The local entries MUST be adjacent and in the same order as the central directory, and their byte ranges MUST NOT overlap. A central directory entry whose local header offset does not point to the next unread byte is refused with `package.header-mismatch`.
+- **[PKG-113]** The count of entries in the end record MUST equal the count of central directory headers, and the central directory size and offset MUST match the real positions. A truncated or inconsistent central directory is refused with `package.zip-invalid`.
+- **[PKG-114]** The reader MUST locate the end record by reading the last 22 bytes of the file. Because the comment length is 0, the end record always starts exactly 22 bytes before the end. A file in which that position does not hold the signature `PK\x05\x06` is refused with `package.zip-invalid`.
+- **[PKG-115]** A path MUST use `/` as its separator and be made of components of the characters `A-Z`, `a-z`, `0-9`, `.`, `_` and `-` only. Any other byte, including backslash, NUL, a space, a control character or a non-ASCII character, is refused with `package.path-invalid`.
+- **[PKG-116]** A path MUST NOT start with `/`, MUST NOT contain an empty component, and MUST NOT contain a component equal to `.` or `..`.
+- **[PKG-117]** The following MUST hold. No component may start with `.` or end with `.`. This keeps hidden files and Windows trailing-dot names out of the package.
+- **[PKG-118]** A component MUST NOT be a name that Windows reserves (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`), with or without an extension, in any letter case.
+- **[PKG-119]** The following MUST hold. A path is at most 255 bytes long and has at most 16 components.
+- **[PKG-120]** The following MUST hold. No two paths may be equal, and no two paths may be equal after ASCII case folding. A duplicate is refused with `package.path-duplicate`. A case-only collision is refused with `package.path-case-collision`, so that the package unpacks the same way on a case-insensitive file system.
+- **[PKG-121]** The following MUST hold. A path that is a prefix of another path followed by `/` (a file that is also a folder) is refused with `package.path-invalid`.
+- **[PKG-122]** Entries MUST be ordered by the bytewise comparison of their UTF-8 paths, which for this character set is ASCII order. `Z` sorts before `a`, and `/` (0x2F) sorts before digits. Out-of-order entries are refused with `package.entry-order`.
+- **[PKG-123]** The following MUST hold. Any top-level entry that is not in the table, and any entry under a top-level folder that the table does not list, is refused with `package.entry-unexpected`.
+- **[PKG-124]** `help/` MUST hold only files whose names end in `.md`. `sounds/` MUST hold only `.wav` and `.ogg` files. `screenshots/` MUST hold only `.png` files. These folders are flat: a nested folder is refused with `package.entry-unexpected`.
+- **[PKG-125]** A component MUST be named after its side. A file named `server.wasm` that is declared as the `client` entry is refused with `manifest.entry-invalid`.
+- **[PKG-126]** Entries in the archive MUST NOT exceed 4,096. A larger value is refused with `package.entry-limit`.
+- **[PKG-127]** `manifest.json` MUST NOT exceed 1 MiB (1,048,576 bytes). A larger value is refused with `package.manifest-size`.
+- **[PKG-128]** One component MUST NOT exceed 64 MiB. A larger value is refused with `package.size-limit`.
+- **[PKG-129]** One non-component entry that is not an asset MUST NOT exceed 64 MiB. A larger value is refused with `package.size-limit`.
+- **[PKG-130]** The package file MUST NOT exceed 300 MiB. A larger value is refused with `package.size-limit`.
+- **[PKG-131]** `signature` MUST NOT exceed 16 KiB. A larger value is refused with `package.size-limit`.
+- **[PKG-132]** Asset bytes (`assets/**`, `help/*.md`, `sounds/*`, fonts) MUST NOT exceed 64 MiB, or 256 MiB for T1 (decision D24). A larger value is refused with `manifest.asset-size`.
+- **[PKG-133]** The following MUST hold. Each `files` item has exactly the keys `path`, `length` and `sha256`. `path` is an archive path. `length` is the size in bytes of the uncompressed data and is an integer from 0 to 67,108,864 for a non-component entry that is not an asset (PKG-129, refused with `package.size-limit`), and from 0 to 268,435,456 for an asset entry of a T1 package (PKG-132, refused with `manifest.asset-size`). `sha256` is 64 characters of lowercase hexadecimal.
+- **[PKG-134]** `files` MUST list the paths in the same order as the archive (the bytewise order of [PKG-122]), and MUST NOT contain a path twice. A packed manifest whose list is unsorted is refused with `manifest.files-order`.
+- **[PKG-135]** Every archive entry except `manifest.json` and `signature` MUST be in `files` (`manifest.file-unlisted`). Every `files` item MUST name an archive entry (`manifest.file-missing`). `files` MUST NOT list `manifest.json` or `signature` (`manifest.file-self`).
+- **[PKG-136]** The length of each entry MUST equal `length` (`manifest.file-length`), and its SHA-256 MUST equal `sha256` (`manifest.file-hash`).
+- **[PKG-137]** A packed manifest MUST contain `files`. A source manifest MAY omit it, and `ilium plugin pack` then writes it. The installer refuses a manifest without `files` with `manifest.key-missing` (pointer `/files`).
+- **[PKG-138]** A component MUST contain exactly one custom section named `ilium:api-version`. None gives `package.api-section-missing`. A second one gives `package.api-section-repeated`.
+- **[PKG-139]** The following MUST hold. The payload (after the section name) is exactly 6 bytes: three unsigned 16-bit integers in big-endian order, for major, minor and patch. For `ilium:plugin@0.1.0` the bytes are `00 00 00 01 00 00`. Another length gives `package.api-section-invalid`.
+- **[PKG-140]** The three integers MUST equal the version in the manifest `api` key, or the install is refused with `manifest.api-version`.
+- **[PKG-141]** The following MUST hold. A file named `*.wasm` that is a WebAssembly core module, and not a component, is refused with `package.component-invalid`. The check reads the 8-byte preamble: the magic `00 61 73 6D`, then the layer field. Layer 0 is a core module. Layer 1 is a component.
+- **[PKG-142]** The component MUST validate as a component against the world named in the manifest. A component that fails validation is refused with `package.component-invalid`. A component that exports something that the manifest does not list, or the reverse, is refused with `manifest.exports-mismatch`.
+- **[PKG-143]** The following MUST hold. Input set. `pack` includes: the source `manifest.json`; the built components `server.wasm`, `client.wasm` and `scene.wasm` for each declared side, taken from the build output folder; every file under `assets/`, `help/`, `sounds/`, `screenshots/` and `src/`; and `README.md`, `CHANGELOG.md`, `LICENSE`
+- **[PKG-144]** The following MUST hold. Ignore rules. Inside the included folders `pack` skips files whose name starts with `.`, `*~`, `*.swp`, `*.tmp`, and the folders `.git`, `target`, `node_modules` and `dist`. A skipped file is reported as a `warning` line. A file that remains and breaks a path rule of this page stops `pack` with the
+- **[PKG-145]** The following MUST hold. Manifest serialisation: UTF-8, 2-space indent, LF and one final LF; top-level keys in table order and `files` last; nested keys in schema order and unknown maps in byte order; `[]` and `{}` on the key line; only `"`, `\` and U+0000 to U+001F escaped; integers only.
+- **[PKG-146]** The following MUST hold. Archive order and fields. Entries are written in the order of [PKG-122] with the header values of [PKG-100] to [PKG-108].
+- **[PKG-147]** Determinism. Two runs of `pack` over identical inputs MUST give byte-identical files. The test is to compare the SHA-256 of two outputs.
+- **[PKG-148]** The following MUST hold. Signing. `ilium plugin sign` adds the `signature` entry by writing a new archive: it reads the package, adds the entry in its sorted position (it sorts between `server.wasm` and `sounds/`, as byte order requires) and rewrites the central directory. Unsigned entries keep their bytes. The result is ag
+- **[PKG-149]** The installer MUST run the stages in the order of the table. A stage MUST NOT run when an earlier stage reported an error.
+- **[PKG-150]** Within a stage that collects errors, the installer MUST report every error it finds, up to 100 per stage. The 101st is replaced by one `warning` line that says how many more exist.
+- **[PKG-151]** No plugin code MUST run before stage 11 has finished. Components are not instantiated, and no import is called.
+- **[PKG-152]** Tier-dependent rules (T1-only grants, `limits_tier`) run in stage 9, after the tier is known from stages 7 and 8. A source of tier that the user cannot influence MUST NOT be read from the manifest.
+- **[PKG-153]** The following MUST hold. `ilium plugin check` runs stages 2 to 4 on a source manifest (it needs no archive) and, with `--package <file>`, all stages up to 6. It never contacts the network and never writes state.
+- **[PKG-154]** The following MUST hold. `verify` prints one `progress` line per stage with `stage` (1 to 7) and `name`, then one `error` line per error, then one `result` line.
+- **[PKG-155]** The following MUST hold. The `result` line has `ok` (boolean), `id`, `version`, `sha256` (of the package file), `manifest_sha256`, `tier` (`T2`, `T3` or `untrusted`), `signer_key_id` (or null) and `publisher_id` (or null).
+- **[PKG-156]** The following MUST hold. `verify` runs stages 1 to 7 (the gating stages; stage 8, trust, is non-gating and only supplies the reported tier) and exits 0 when stages 1 to 7 pass and 1 when any fails. An unknown key prints `trust.key-unknown` as a warning and reports tier `untrusted` (exit 0). A revoked key prints `trust.key-revoked` as an error and exits 1. During install, an unknown key without a prompt answer is an error and exits 1.
+- **[PKG-157]** The installer MUST refuse this input with `package.path-invalid`: an entry named `../evil.wasm` (zip slip).
+- **[PKG-158]** The installer MUST refuse this input with `package.path-invalid`: an entry named `/etc/passwd`.
+- **[PKG-159]** The installer MUST refuse this input with `package.path-invalid`: an entry named `assets\x.png` (backslash).
+- **[PKG-160]** The installer MUST refuse this input with `package.path-invalid`: an entry name that holds a NUL byte.
+- **[PKG-161]** The installer MUST refuse this input with `package.entry-unexpected` (for `Server.wasm`) and then `package.path-case-collision` (for `server.wasm`): two entries `Server.wasm` and `server.wasm`.
+- **[PKG-162]** The installer MUST refuse this input with `package.path-duplicate`: two entries with the same name.
+- **[PKG-163]** The installer MUST refuse this input with `package.header-mismatch`: a central header whose local offset points into another entry (overlap).
+- **[PKG-164]** The installer MUST refuse this input with `package.crc-mismatch`: one data byte changed, CRC unchanged.
+- **[PKG-165]** The installer MUST refuse this input with `package.zip-invalid`: the central directory cut in half.
+- **[PKG-166]** The installer MUST refuse this input with `manifest.json-invalid`: `manifest.json` with 0 bytes.
+- **[PKG-167]** The installer MUST refuse this input with `package.manifest-missing`: an archive with no `manifest.json`.
+- **[PKG-168]** The installer MUST refuse this input with `package.zip-compressed`: one entry stored with method 8 (deflate).
+- **[PKG-169]** The installer MUST refuse this input with `package.zip-encrypted`: bit 0 set on one entry.
+- **[PKG-170]** The installer MUST refuse this input with `package.zip-comment`: an archive comment of 4 bytes.
+- **[PKG-171]** The installer MUST refuse this input with `package.zip-trailing`: 16 bytes appended after the end record.
+- **[PKG-172]** The installer MUST refuse this input with `package.entry-symlink`: a symbolic link entry (mode `0120777`).
+- **[PKG-173]** The installer MUST refuse this input with `package.entry-directory`: a directory entry `assets/`.
+- **[PKG-174]** The installer MUST refuse this input with `package.entry-unexpected`: an unlisted file `extra.txt` at the top level.
+- **[PKG-175]** The installer MUST refuse this input with `package.entry-order`: the entries `manifest.json` and `server.wasm` swapped.
+- **[PKG-176]** The installer MUST refuse this input with `package.entry-limit`: an archive with 4,097 entries.
+- **[PKG-177]** The installer MUST refuse this input with `package.component-invalid`: `server.wasm` replaced by a core module (layer 0). Rebuild with `pack` after the change, so `files` lists the new length and SHA-256 and the CRC-32 is correct.
+- **[PKG-178]** The installer MUST refuse this input with `package.api-section-repeated`: the api-version section duplicated. Rebuild with `pack` after the change, so `files` lists the new length and SHA-256 and the CRC-32 is correct.
+- **[PKG-179]** The installer MUST refuse this input with `package.api-section-invalid`: the api-version payload 5 bytes long. Rebuild with `pack` after the change, so `files` lists the new length and SHA-256 and the CRC-32 is correct.
+- **[PKG-180]** The installer MUST refuse this input with `manifest.api-version`: the api-version payload `00 00 00 02 00 00`. Rebuild with `pack` after the change, so `files` lists the new length and SHA-256 and the CRC-32 is correct.
+- **[PKG-181]** The installer MUST refuse this input with `manifest.file-hash`: one byte of `server.wasm` changed, with a matching CRC.
+- **[PKG-182]** The installer MUST refuse this input with `manifest.signature-invalid`: a signed package with the letter `M` of the manifest name changed to `N`, and the correct CRC-32 written to both headers, so that only stage 7 fails.
+- **[PKG-275]** The following MUST hold. `--dry-run` runs stages 1 to 10 of the [validation order](/pages/reference-package-format/#the-validation-order) without writing anything; stage 11 (the review) is printed as records and never asked, as [PKG-427] says. It prints the plan and exits with the code the real install would give (0 if all stages pass).
+- **[PKG-714]** A package MAY include a `build-attestation` entry naming the source repository, the commit digest, the toolchain versions and the build command. A package that includes it MUST be buildable from that input to a package whose content digest, with the signature entry left out, is identical.
+- **[PKG-715]** The `ilium plugin verify-build` command MUST rebuild a package from its attestation in a clean environment and compare the digest. It MUST report `package.build-mismatch` with the differing entries on a difference. The registry MUST show the verified state of each release and MUST NOT make a package non-installable only because it has no attestation.

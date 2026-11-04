@@ -318,3 +318,40 @@ This section is target behaviour for the public plugin system. A package that no
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[LIF-001]** The host MUST give every installed plugin exactly one package state at any time.
+- **[LIF-002]** A stop by failure belongs to one side, not to the package. It is the instance state `stopped-by-failure` of that side, and the package state stays `installed-enabled`. A stop of the client side MUST NOT stop the server side.
+- **[LIF-003]** A package with state `refused-at-load` MUST NOT be instantiated, and the refusal code MUST be shown in `disabled-reason`.
+- **[LIF-004]** `disabled-by-policy` and safe mode MUST NOT be written to `installed.json`.
+- **[LIF-005]** An instance MUST be in exactly one instance state, and only the transitions in the tables below MAY occur.
+- **[LIF-006]** The host MUST NOT call `handler`, `views`, `renderer` or provider exports on an instance that is not `active`.
+- **[LIF-007]** Enabling a plugin that is `refused-at-load` or `disabled-by-policy` MUST return `not-permitted` with the refusal code in the message, and MUST NOT change any state.
+- **[LIF-008]** A failure that moves the server side to `stopped-by-failure` MUST be written to `failure_stopped` in `installed.json`, so it survives a server restart. A client or scene side is not stored.
+- **[LIF-009]** Enabling, resetting failures or installing an update MUST clear the failure window of the sides it affects.
+- **[LIF-010]** A candidate whose first `activate` fails MUST roll back to the previous version, as P10 says, and MUST NOT leave the plugin in `update-staged`. A failure after a successful first activation MUST NOT roll back.
+- **[LIF-011]** The host MUST apply row I2 when the session memory pool cannot admit the instance, and MUST NOT count that refusal as a failure.
+- **[LIF-012]** A trap, an error from `activate` or a deadline breach in `activating` or `active` MUST follow rows I4 or I5 and MUST drop the instance without calling `deactivate`.
+- **[LIF-013]** The host MUST apply row I14 when a plugin is disabled, updated or uninstalled while a restart is scheduled.
+- **[LIF-014]** Rows I9 to I13 MUST send exactly one `deactivate` call per live instance, with the reason in the table.
+- **[LIF-015]** A client or scene instance MUST receive `deactivate(shutdown)` when its client disconnects cleanly, and MUST receive no other reason. After a crash or a kill of the client process no call is possible: the server uses the last restore bytes it stored.
+- **[LIF-016]** The host MUST emit `plugin-state-changed` once per state change, in the order the changes happened, to every subscriber with `plugins.manage`.
+- **[LIF-017]** `plugins.list` MUST return one record per installed plugin with every field of the `plugin-info` table, in table order.
+- **[LIF-018]** `enabled` MUST equal the rule above in every state.
+- **[LIF-019]** `set-enabled(id, true)` on an enabled plugin and `set-enabled(id, false)` on a disabled plugin MUST return `ok` and change nothing, and no event MUST be emitted.
+- **[LIF-020]** The host MUST serialise all transitions of one plugin id. Transitions of different plugin ids MAY run in parallel.
+- **[LIF-091]** A change MUST be applied to a server under the per-plugin serialisation of [lifecycle states](/pages/reference-plugin-lifecycle-states/).
+- **[LIF-283]** The package states `disabled-untrusted` and `disabled-blocked` MUST follow rows P13 to P16, MUST be stored in `installed.json` and MUST survive a restart. A plugin in either state MUST NOT run, and MUST keep its grants, settings and data.
+- **[LIF-284]** A side whose required plugin or service provider is not `active` MUST be in the instance state `waiting-dependency`, MUST NOT count a failure, and MUST follow rows I16 to I18.
+- **[LIF-700]** The package-state table MUST contain a state `retired` (stored in `installed.json` `state`, with `retired_at` and `retired_reason` of `end-of-life` or `abandoned`) and `ilium plugin list --json` MUST report it; the host MUST NOT represent a retired plugin as `installed-disabled-by-user`.
+- **[LIF-701]** The package-state transition table MUST have a row P17: `installed-enabled` -> `retired` when the end-of-life date (LIF-319) or the end of the 30 day abandonment warning (PKG-711) passes. It MUST send `deactivate` to each live instance once, emit `plugin-state-changed` with reason `retired`, log `plugin.retired`, and MUST NOT delete data.
+- **[LIF-703]** Enabling a `retired` plugin MUST need `ilium plugin enable <id> --accept-risk` (CLI) or one confirmation dialog naming the end-of-life date, and MUST return `not-permitted` with `plugin.retired` for `plugins.set-enabled` from a plugin. An update to a version that is not itself deprecated MUST clear `retired`; an update to another deprecated version MUST NOT.
+- **[LIF-705]** For transitions P6, P13, P15 and P17 (policy, untrusted, blocked, retired) the host MUST send `deactivate(disabled)` to each live instance and MUST record the distinct cause in `plugin-state-changed.reason` and the log, never as a new `deactivation-reason` value.
+- **[LIF-706]** A registry takedown or key revocation that arrives while a plugin is mid-call MUST move it to `disabled-blocked` at the next safe point and MUST NOT wait longer than the deactivate deadline; a call still running then MUST be cancelled with `cancelled` to its caller.
+- **[LIF-718]** While a plugin is `uninstall-pending`, `enable`, `disable`, `update`, `rollback` and `install` of the same id MUST return `install.uninstalling` (exit 4) and MUST NOT change any state; `plugins.set-enabled` MUST return `not-permitted`.
+- **[LIF-719]** On disable the host MUST stop accepting new calls at once, MUST let in-flight calls finish for at most the deactivate deadline, MUST cancel jobs with `cancelled`, MUST NOT run durable timers while disabled and MUST resume timers whose `due` is in the past with one catch-up firing on enable.
+- **[LIF-720]** `set-enabled` with scope `project` or `session` MUST only change the overlay for that scope, MUST leave the package state of the global record unchanged, and the effective enabled value MUST resolve narrowest-first (session, project, global). `plugin-info.enabled` MUST report the value for the caller's scope.
+- **[LIF-724]** A subscriber of `plugin-state-changed` MUST have a queue of at most 256 events (proposed, owner to confirm); on overflow the host MUST drop the oldest, MUST deliver one `plugin-state-resync` event, and the subscriber MUST then call `plugins.list`. Ordering per plugin id MUST be preserved.
+- **[PKG-710]** A publisher MAY declare end of life for a plugin with a signed metadata entry that names the date and an optional successor id. From the declaration, the host MUST show the plugin as `end-of-life` in its state and in the store, and MUST warn the user at install, then at most once every 30 days while it stays installed.
+- **[PKG-711]** The registry MAY declare a plugin abandoned when its namespace is abandoned or the publisher has not answered a security report for 90 days. The host MUST then disable that plugin after a 30 day warning period, unless an administrator pins it, and MUST keep its data. Re-enabling it MUST need an explicit user action.

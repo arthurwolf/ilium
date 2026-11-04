@@ -172,3 +172,7 @@ Requirement ids for this page: [PRI-003]. See the [requirements index](/pages/re
 - [Terminal primitive](/pages/primitives-terminal/)
 - [Agent transcript and signals](/pages/primitives-agent-transcript/)
 - [Requests and outcomes](/pages/requests-and-outcomes/)
+
+## Requirement statements
+
+- **[PRI-003]** send-input MUST accept at most 16 stages, a total stage delay of 10 s and 64 KiB of raw bytes. Above any of them it MUST refuse with invalid-argument.

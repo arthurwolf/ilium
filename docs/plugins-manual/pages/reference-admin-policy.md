@@ -344,3 +344,7 @@ allowed_sources = ["/srv/ilium-plugins/"]
 - [Capability: plugins.manage](/pages/capability-plugins-manage/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[PKG-987]** A mirror with a certificate from an internal CA works when the administrator sets `[network] ca_bundle` ([Administrator policy](/pages/reference-admin-policy/)). A certificate failure MUST NOT be handled by skipping verification or by falling back to `http:` ([PKG-371]). The client reports it as `network` with reason `tls`, as [SEC-077] requires.

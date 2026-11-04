@@ -898,3 +898,58 @@ The SDKs expose `storage::keys_page` in Rust and `storage.keysPage` in TypeScrip
 
 - **[HST-682]** The manual MUST contain one table listing every host limit with its name, unit, default, minimum, ceiling, config key, error code on breach and owning requirement id, and a conformance test MUST fail when any limit named in a requirement is absent from the table or when a default differs from the host's compiled value.
 - **[HST-683]** `ilium plugin limits [<id>] [--json]` MUST print each effective limit, its source (default, manifest, user config, admin policy) and its current usage, and MUST show a clamped limit with both the requested and applied values.
+
+## Requirement statements
+
+- **[API-001]** A fallible host function MUST return result<T, plugin-error>. The record MUST carry code, message and an optional retry-after-ms.
+- **[API-002]** The error code MUST be one of the 15 codes: not-permitted, not-found, invalid-argument, conflict, quota-exceeded, rate-limited, busy, timed-out, cancelled, unsupported, pane-not-ready, revoked, io, network, internal.
+- **[API-003]** retry-after-ms MUST be set for rate-limited and for quota-exceeded caused by the CPU budget. A plugin MUST NOT match on message text.
+- **[API-004]** Every function that returns a result MAY return not-permitted, revoked and internal. A function that returns a request-id MAY also return busy.
+- **[API-005]** For a call that returns a request-id, grant, scope, syntax and per-call cap checks MUST fail in the call. Disk, network, process and user failures MUST arrive in the completion as failed(code).
+- **[API-010]** Calling an import whose capability the manifest never requested MUST trap.
+- **[API-011]** An invalid ui-tree MUST trap: an index out of range, a graph that is not a tree, a duplicate key in one tree, more nodes than the effective ui_tree_nodes limit, or a layout whose child count differs from its constraint count.
+- **[API-012]** A hard deadline breach in `activate`, `on-events` or `views.render` MUST trap. A breach in `deactivate` MUST drop the instance without a trap and keep no restore bytes.
+- **[API-013]** Exceeding the linear memory or table limit MUST trap.
+- **[API-014]** A Rust panic or an uncaught TypeScript exception in an export MUST trap.
+- **[API-015]** A trap MUST end the instance. The plugin MUST be restarted under the restart rule. A plugin MUST NOT be able to catch a trap.
+- **[API-016]** Every not-permitted result and every trap MUST be logged with the plugin id, the interface and the function.
+- **[API-040]** The restart rule MUST apply per plugin and per side. The first failure in a 10-minute window restarts after 1 s. The second restarts after 5 s. The third disables the plugin on that side. No 30 s step exists. A failure older than 10 minutes MUST NOT count.
+- **[API-041]** A disabled side MUST stay disabled until a manual enable. A manual enable MUST reset the failure count to zero. A successful run MUST NOT clear a failure sooner.
+- **[API-042]** A trap, a deadline breach and an activate call that returns an error MUST count as failures. A revoked re-activation, a disable, an upgrade, a shutdown and a failed job MUST NOT count.
+- **[API-043]** A manifest limit above the tier ceiling MUST be clamped and logged. The install MUST NOT fail for it.
+- **[API-044]** A failing view MUST count against the plugin and not against the view alone.
+- **[API-046]** When the memory budget of the session is reached, a new instance MUST be refused and logged. The refusal MUST NOT count as a failure. The side MUST stay inactive with the reason host-capacity.
+- **[API-060]** Truncations and clamps MUST be only those in the exception table. Every other over-limit call MUST return an error and MUST NOT cut silently.
+- **[API-061]** A cap that depends on held or cumulative state MUST return quota-exceeded. A cap the plugin can check in advance MUST return invalid-argument.
+- **[API-062]** A call over a fixed cap such as 1 MiB for a synchronous fs.read, 8 MiB per HTTP request, or a timer interval under 50 ms MUST return invalid-argument.
+- **[API-070]** Session-wide limits MUST count across all plugins of the session: 64 HTTP streams, 16 children, 4,096 pending requests, 65,536 decorations, 32 key grabs.
+- **[API-071]** Rate rules MUST be enforced per plugin as listed: toast 3 per 10 s, geocode 1 per second, notify 6 per minute, open-external 10 per minute, play-sound 4 per second, topics.publish 100 per second, journal.log-event 20 per second, send-input 20 per second per pane. Each rate MUST be a sliding window; a refused operation MUST NOT enter the window; and the refusal MUST carry `retry-after-ms` until the oldest counted operation leaves the window.
+- **[API-072]** The execution quota group MUST be a token bucket of 2,000 ms of CPU time refilling at 500 ms per second. The bucket is empty at a balance of 0 or less, and the balance MAY go negative. An empty bucket MUST make submissions and request-id calls return quota-exceeded with retry-after-ms = max(100, ceil_10(-balance_ms * 2)).
+- **[API-088]** A plugin MUST treat an error code it does not know as a failed call of unspecified cause and MUST NOT trap or match on `message`. The SDKs MUST expose such a code as an `Unknown` variant that carries the code string, and a code added in a later contract version MUST be a minor change of the contract that does not break a plugin built for an earlier minor.
+- **[API-089]** A plugin that gets `retry-after-ms` MUST NOT repeat the same call before that many milliseconds have passed and SHOULD add random jitter of up to 20 percent. The host MUST NOT trap or penalise an early retry, MUST answer it with the same error and MUST NOT shorten or extend the original hint because of it. Refused attempts MUST NOT enter the rate window or charge CPU time to the quota group beyond the cost of the call itself.
+- **[API-097]** For every host function that returns a request id, the reference MUST state whether a retry after a timeout or failure is idempotent and whether its effect is `none` or `unknown`; the host MUST NOT apply a retried call twice when it carries the same dedup key within its 128-character key scope.
+- **[AUT-110]** When two pages differ, the defining page decides, and a page that cites an install code MUST use the cause that the defining page gives.
+- **[AUT-111]** An author MUST treat a limit as a trap and not as a warning.
+- **[CAP-018]** An import whose capability the manifest never requested MUST trap. An import whose grant the user declined or revoked MUST return not-permitted.
+- **[EVT-003]** An on-events call MUST finish within its deadline. A breach MUST trap and count as one failure.
+- **[EXT-001]** A plugin MUST declare at most 16 extension points and at most 64 extensions. More MUST fail the install with manifest.extension-limit.
+- **[EXT-023]** A payload, a reply and a chain result MUST each be at most 64 KiB, and an entry at most 16 KiB. A collect point MUST hold at most max_entries (at most 256) and a hook point at most max_handlers (at most 8).
+- **[EXT-063]** A plugin write that fails because the plugin quota or the disk is full MUST return `storage.full` to that plugin only. Other plugins and the host MUST keep working, and the plugin MUST stay enabled.
+- **[EXT-064]** The host MUST keep a reserve of 16 MiB for its own journal, audit log and snapshots. When free space falls under the reserve, plugin writes MUST fail with `storage.full` while host writes continue, and the host MUST show one warning `Disk space low` per hour.
+- **[EXT-065]** An install or upgrade that cannot finish for lack of disk space MUST fail with `install.no-space`, MUST remove its partial files, and MUST leave the previous version installed and enabled.
+- **[PRI-002]** history-text over 4 MiB MUST keep the newest 4 MiB.
+- **[PRI-005]** An input lock MUST last at most 2 s. There MUST be one lock per pane. A second lock MUST return conflict.
+- **[PRI-008]** screen-changed MUST be delivered at most 10 times per second per pane.
+- **[PRI-014]** A transcript per call MUST hold at most 512 turns or 4 MiB. The oldest turns MUST be dropped.
+- **[RND-015]** views.render MUST finish within its deadline (10 ms by default, ceiling 20 ms). A breach MUST trap with ui.render-timeout, and the previous tree MUST stay on screen marked stale.
+- **[RND-016]** write-glyphs MUST accept at most 131,072 cells per frame. Over that MUST return quota-exceeded.
+- **[RND-017]** A pre-rendered scene loop MUST be at most 30 fps, 3,600 frames and 128 MiB. Over that the install MUST fail with manifest.scene-prerender.
+- **[RND-018]** Decoration frames MUST be at most 16, each shown for at least 90 ms. Otherwise invalid-argument.
+- **[WID-020]** check-list MUST accept at most 256 items and list-editor at most 64 (1,024 with limits_tier first-party).
+- **[WID-021]** meter MUST have at most 8 segments, minimap at most 4,096 marks per layer, and spinner at most 16 custom frames.
+- **[ABI-013]** The host MUST allow 64 pending requests by default per plugin (ceiling 256 for T1) and 4,096 per session. Over the limit MUST return busy.
+- **[ABI-041]** A request MUST count toward pending_requests from the return of its id to the enqueue of its completion; refused submissions and synchronous calls MUST NOT count.
+- **[ABI-061]** The host MUST bound the nesting depth of every decoded WIT value, including nested JSON strings and recursive widget trees, at 32 levels, and MUST NOT let decoding recurse on the native stack beyond that bound.
+- **[ABI-062]** A value nested deeper than the bound MUST be refused with the stable code `abi.depth-exceeded` and MUST NOT trap the plugin or the host.
+- **[ABI-063]** The host MUST bound decoding work per call by the same limits whether the value comes from a plugin return or from a host-built event, and MUST count a refusal in the ABI refusal metric of ABI-079.
+- **[ABI-082]** Within one ABI major, only the error code and the documented reason-word prefix of a message MUST stay stable; a host MAY reword the rest of a message in a minor release, the conformance corpus MUST NOT assert on that rest, and the SDKs MUST NOT branch on message text.

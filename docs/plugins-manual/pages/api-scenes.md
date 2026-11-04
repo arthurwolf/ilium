@@ -358,3 +358,20 @@ resource frame-surface {
 - [Background jobs](/pages/api-jobs/), [HTTP](/pages/api-http/), [Location](/pages/api-location/), [Audio](/pages/api-audio/) and [Media](/pages/api-media/) for the other imports.
 - [Errors and limits](/pages/reference-errors-and-limits/) for the full error codes.
 - [Tutorial 7: ambient scene](/pages/tutorial-07-ambient-scene/) for a step-by-step scene plugin.
+
+## Requirement statements
+
+- **[API-045]** A scene failure MUST count as a failure of the whole plugin on that side.
+- **[RND-002]** A frame that passes the budget MUST be skipped. Thirty breaches in a row MUST trap.
+- **[RND-003]** A render call that returns without present MUST drop that frame, and a warn line MUST be written once per second.
+- **[RND-004]** write_rows MUST accept whole rows only: width bytes in gray8, 3 x width in rgb8, 4 x width in rgba8. A remainder MUST be dropped and a warn line written once per second.
+- **[RND-005]** Rows at or past height MUST be ignored.
+- **[RND-006]** write_cell_colors MUST be ignored unless uses-cell-colors is true. occupancy() MUST return none unless wants-occupancy is true. pointer() MUST return none outside the scene area or when wants-pointer is false.
+- **[RND-007]** readiness that returns Failed, or stays Preparing for more than 10 s, MUST count as one failure. The host MUST stop calling render until the restart.
+- **[RND-008]** reconfigure returning false MUST restart the renderer with the new spec and MUST NOT count as a failure.
+- **[RND-009]** Settings that fail settings_schema MUST be refused before the scene sees them and the previous values MUST stay.
+- **[RND-010]** Revoking a grant MUST restart the renderer with the reduced grants and MUST NOT count as a failure.
+- **[RND-011]** A scene MUST follow the shared look: the host applies colour, palette, brightness, contrast, dithering and display controls per cell, and a scene MUST NOT add its own.
+- **[RND-012]** A scene MUST receive the current palette as palette_rgb (empty in greyscale and monotone modes) and MUST get set-palette when it changes.
+- **[RND-013]** A scene failure MUST count as a failure of the whole plugin on that side.
+- **[RND-014]** A scene memory limit of 32 MiB MUST be the default, with ceilings 256 MiB (T1) and 128 MiB (other tiers). A breach MUST trap.

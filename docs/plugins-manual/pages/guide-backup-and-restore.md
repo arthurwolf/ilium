@@ -91,3 +91,15 @@ These are targets for planning. They are not guarantees the host makes.
 - [Administrator failure runbook](/pages/guide-admin-failure-runbook/) for the steps when a plugin has damaged its own data.
 - [Data migration](/pages/guide-data-migration/) for the copies the host makes before a migration.
 - [Plugin files](/pages/reference-plugin-files/) for where each copy lives.
+
+## Requirement statements
+
+- **[HST-970]** An administrator who keeps plugin data MUST run `ilium plugin backup` at least once every 24 hours (proposed, owner to confirm) from a scheduled job, and the job MUST fail loudly when the command exits non-zero.
+- **[HST-971]** The administrator MUST keep at least the 7 newest archives (proposed, owner to confirm) and MUST keep them on a different disk from the live `<data>/plugins` folder. `ilium plugin backup` MUST NOT delete any archive, including an older one at the same path, unless `--force` is given.
+- **[HST-972]** An archive MUST be treated as data: it holds plugin data and, with `--include-secrets`, credentials. The administrator MUST store it with the same access limit as the plugin data folder.
+- **[HST-973]** The administrator MUST run the restore drill at least once a month (proposed, owner to confirm) and after every change of host version. A dry run that exits non-zero, or lists a hash mismatch, MUST count as a failed drill.
+- **[HST-974]** A drill MUST restore into a scratch data root. A restore into a live data root while a session server runs MUST be refused with `restore.server-running` (HST-653).
+- **[HST-975]** For plugin data, the recovery point objective MUST be no more than 24 hours (proposed, owner to confirm), which is the backup cadence of HST-970. Data written after the newest archive is lost on restore.
+- **[HST-976]** For a single plugin's data in an archive up to 1 GiB (proposed, owner to confirm), the restore MUST complete within 15 minutes (proposed, owner to confirm) on the reference machine, timed from the first `restore` command to the final result line.
+- **[HST-977]** Deleting plugin data, with `ilium plugin uninstall <id> --purge` or the Delete data choice in the uninstall dialog, MUST NOT delete a whole-host archive or a single-plugin export that the administrator wrote elsewhere. The administrator MUST delete those copies separately when the data must be gone everywhere.
+- **[HST-978]** Before the administrator purges a plugin for a privacy request, the administrator MUST take an export or an archive of that plugin, so that the data can be restored if the request is withdrawn or wrongly scoped.

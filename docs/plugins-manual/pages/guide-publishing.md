@@ -187,3 +187,27 @@ The server repeats the checks and, at review level B, a person looks at it. Your
 - [Package format](/pages/reference-package-format/)
 - [Registry reference](/pages/reference-registry/)
 - [Publishing and support](/pages/guide-publishing-and-support/)
+
+## Requirement statements
+
+- **[PKG-490]** The plugin id MUST start with `<publisher_id>.` of the signing key (PKG-218). Otherwise signing fails with `manifest.id-publisher`.
+- **[PKG-491]** Authors SHOULD follow this advice. Use SemVer. Raise the major number when you remove a command, a service function or a setting. See Versions and dependencies.
+- **[PKG-492]** Authors SHOULD follow this advice. A version is immutable once published. A fix needs a new version (PKG-394).
+- **[PKG-493]** The private key MUST NOT be stored in the plugin repository. For CI, put it in a secret store and pass it through `ILIUM_PUBLISHER_KEY` (PEM text) or `ILIUM_PLUGIN_SIGNING_KEY` (path of a key file).
+- **[PKG-494]** Authors SHOULD follow this advice. Encrypt a key kept on disk. Pass the passphrase through `ILIUM_KEY_PASSPHRASE`, never on the command line.
+- **[PKG-495]** Authors SHOULD pin the toolchain version in the repository (`rust-toolchain.toml` or `package-lock.json`).
+- **[PKG-496]** Authors SHOULD build with the lock file frozen (`cargo build --locked`, `npm ci`).
+- **[PKG-497]** Authors SHOULD NOT embed the build time, the user name or an absolute path. In Rust set `--remap-path-prefix`.
+- **[PKG-498]** Authors SHOULD write `build-info.json` with the toolchain name and version and the source commit. `pack` includes it and the registry shows it.
+- **[PKG-499]** Verify: build twice in clean folders and compare `sha256sum` of the two `.iliumpkg` files. They MUST be equal.
+- **[PKG-500]** Authors SHOULD put `sbom.json` in the project root. `pack` includes it as `sbom.json`.
+- **[PKG-501]** The file SHOULD be CycloneDX 1.5 JSON or SPDX 2.3 JSON. The host reads it as opaque data and does not validate its content.
+- **[PKG-502]** The file MUST be at most 4 MiB. A larger file fails with `package.size-limit`.
+- **[PKG-503]** Authors SHOULD generate it from the lock file, for example `cargo cyclonedx` or `npx @cyclonedx/cyclonedx-npm`.
+- **[PKG-504]** A registry at review level B MAY require an SBOM (PKG-401).
+- **[PKG-505]** Authors SHOULD sign only after the final `pack`. Changing any file after signing makes `manifest.file-hash` or `manifest.signature-invalid`.
+- **[PKG-506]** Authors SHOULD run `verify` and install the file on a clean machine before you upload.
+- **[PKG-507]** Authors SHOULD follow this advice. A publish limit of 20 per hour per publisher applies (PKG-400).
+- **[PKG-508]** Authors SHOULD start new plugins on the `beta` channel with `--channel beta`, then publish a later version to `stable` once beta users report no problems.
+- **[PKG-685]** The publishing guide SHOULD list `sbom.json`, an SPDX `license` and a `LICENSE` or `NOTICE` file as the inputs for level B.
+- **[USR-177]** A publisher guide MUST state that key revocation or takedown blocks installed copies and how users leave the block.

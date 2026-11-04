@@ -431,3 +431,8 @@ Requirement ids for this page: [PRI-030], [PRI-031]. See the [requirements index
 - [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and limits used here.
 
 This page follows `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[PRI-030]** A basic pane MUST draw its body from views.render and MUST receive on-events like any plugin side.
+- **[PRI-031]** set-dirty with true MUST mark the pane as holding unsaved work, and closing it MUST ask before discarding.

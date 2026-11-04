@@ -1339,3 +1339,28 @@ Older pages use the spellings below. They are not printed. A host that reads old
 - [Versions and dependencies](/pages/reference-dependency-resolution/)
 - [Install and update](/pages/reference-install-and-update/)
 - [Error codes and limits](/pages/reference-errors-and-limits/)
+
+## Requirement statements
+
+- **[PKG-560]** The schema document MUST declare `$schema` as `https://json-schema.org/draft/2020-12/schema` and `$id` as `urn:ilium:schema:plugin-manifest:0.1.0`. It MUST NOT use a keyword outside the 2020-12 core and validation vocabularies.
+- **[PKG-561]** `ilium plugin check` and the installer MUST accept exactly the manifests that this schema accepts at stage 3, and MUST apply the extra rules of the list below at stages 3 and 4. A manifest that the schema refuses MUST be refused with the code of the failing key (see the mapping in PKG-562).
+- **[PKG-562]** The following MUST hold. A schema failure maps to a code in this order: a property outside `properties` gives `manifest.unknown-key`; a missing `required` property gives `manifest.key-missing`; a failing `pattern` on `id` gives `manifest.id-invalid`; a failing `pattern` on `version` gives `manifest.version-invalid`; a faili
+- **[PKG-563]** The schema MUST NOT be fetched from the network. A copy ships with the host and with `ilium plugin check`, and `ilium plugin check --print-schema` writes it to standard output.
+- **[PKG-564]** The installer MUST refuse with `manifest.id-reserved` an `id` that starts with `ilium.` or that equals a reserved publisher id of PKG-220..
+- **[PKG-565]** The installer MUST refuse this input with `manifest.exports-mismatch`: the `exports` list of a component matches the exports of the real component..
+- **[PKG-566]** When each grant exists in this API version, its argument follows the grammar and it is available on its side., the client MUST do this: `manifest.grant-unknown` and the grant codes
+- **[PKG-567]** The installer MUST refuse this input with `manifest.when-syntax`, `manifest.settings-key-clash`: `when` and `visible_when` expressions parse, and settings keys are unique..
+- **[PKG-568]** When ids are unique inside each contribution list, and commands, topics and services follow the prefix rules of their pages (a services or commands name may also use the id of a core plugin named in this package's replaces list, for items in that core plugin's surface)., the client MUST do this: the code of the contribution
+- **[PKG-569]** The installer MUST refuse this input with `manifest.requires-invalid`, `manifest.requires-self`: `requires` ranges parse, and `requires.plugins` holds no duplicate and not the plugin itself..
+- **[PKG-570]** The installer MUST refuse this input with `manifest.file-missing`: the side of each declared component has its file in the archive, and each file in `help/` and `sounds/` named by a contribution exists..
+- **[PKG-571]** The following MUST hold. Every error is one JSONL line with `type` `error`, a `code` from this page, a `message` built from the template, a `stage` (number or letter as above) and, when a place exists, a `pointer` (RFC 6901) or a `path`.
+- **[PKG-572]** A template placeholder in braces MUST be replaced with the value. A template MUST NOT contain a secret, a token or the content of a file outside the package.
+- **[PKG-573]** The following MUST hold. The `message` is English text. The `code` is the stable interface: tools and tests match the code and never the message.
+- **[PKG-574]** The following MUST hold. When several errors occur, the exit code is that of the first error printed.
+- **[PKG-578]** The following MUST hold. Within a stage, errors are printed in the order of the central directory entry they concern (errors without an entry first), and for one entry in the order of the check list of the stage. Manifest errors sort by JSON pointer in byte order. A conformance row that names an expected result lists every code it expects, in print order, not only the first.
+- **[PKG-575]** A host MUST NOT print a code that is not in this catalogue. A new code needs an entry here first.
+- **[PKG-576]** Every code of this catalogue MUST appear in at least one test of the conformance suite with the stage and the exit code shown.
+- **[PKG-577]** A host MUST NOT print a retired code. A test that expects a retired code is wrong and MUST be updated to the replacement.
+- **[PKG-581]** The host MUST refuse an install whose package source (registry URL, mirror or local file) is not in the administrator `allowed_sources` list with `policy.blocked` (detail `policy.source-denied`).
+- **[PKG-582]** A `cli` contribution that names a name owned by the kernel itself (plugin, session, kill-session, help, version) MUST be refused with `manifest.cli-name-reserved`. The names `recap`, `progress`, `wait`, `chat`, `panes`, `broadcast`, `new-pane` and `voice` are owned by bundled core plugins: only that core plugin may declare its own, and any other plugin is refused with `manifest.cli-name-taken`, which is used for a name that another installed plugin owns.
+- **[PKG-583]** An extension point that declares a risk level lower than the grant its handlers receive, or an unknown risk, MUST be refused with `manifest.point-risk`.

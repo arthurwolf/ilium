@@ -227,3 +227,15 @@ After writing a policy, check it with a throwaway user:
 - [Administrator failure runbook](/pages/guide-admin-failure-runbook/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-070]** A policy MUST only restrict. No key of the policy MAY enable a plugin, grant or tier that Ilium refuses without a policy.
+- **[USR-071]** A non-interactive install without `--yes` MUST fail with `install.review-required`, and `--yes` MUST NOT grant a HIGH permission that is not named.
+- **[USR-072]** An administrator MUST be able to block a running plugin by id, and the host MUST disable it at the next server start.
+- **[USR-073]** The documentation MUST state that the policy only restricts, where the file lives per system, and how to respond to a bad plugin.
+- **[USR-107]** An administrator MUST keep the previous policy file until the change has passed every rollout ring, and MUST be able to restore it by renaming it back and restarting the sessions.
+- **[USR-108]** Before a policy change leaves its first ring, an administrator MUST run `ilium plugin policy show` on that ring and MUST see the intended effective values, because a syntactically valid policy can still forbid a grant or plugin that is needed.
+- **[USR-109]** A policy change MUST roll out in rings. The first ring MUST be at most five machines (proposed, owner to confirm), and each later ring MUST be at most twice the size of the one before (proposed, owner to confirm). The next ring MUST NOT start until the previous ring has run the policy for one working day (proposed, owner to confirm) with no `policy-violation` or `policy.invalid` event and no wrongly blocked plugin.
+- **[USR-111]** Version 0.1.0 has no policy key and no command that makes a user purge a plugin's data. An administrator MUST treat the removal of a plugin for a security or contract reason as incomplete until each user has run `ilium plugin uninstall <id> --purge`, and MUST NOT report it as done on the strength of the policy file alone.
+- **[USR-954]** When an administrator removes a plugin for a security or contract reason, the administrator MUST ask each user to run `ilium plugin erase-data` for that plugin, because the purge may leave crash records in place.

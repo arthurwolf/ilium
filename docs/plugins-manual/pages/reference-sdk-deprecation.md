@@ -104,3 +104,12 @@ The entry of 0.6.0 repeats the item under `### Removed`. The names here are illu
 - [Versioning](/pages/versioning/)
 
 Requirement ids for this page: [API-082], [API-083], [API-084], [API-085], [API-086], [API-087]. See the [requirements index](/pages/reference-requirements/).
+
+## Requirement statements
+
+- **[API-082]** An SDK item that a release marks for removal MUST carry the Rust `#[deprecated(since = "<sdk version>", note = "...")]` attribute or the TypeScript `@deprecated` JSDoc tag in that same release, on the item itself. The note MUST name the successor and the removal minor. A changelog entry alone MUST NOT mark an item.
+- **[API-083]** A deprecated SDK item MUST keep its signature and its behaviour until the removal minor named in its mark. A patch release MUST NOT remove it, and a minor release MUST NOT remove it before two minors after the release that marked it.
+- **[API-084]** Each SDK release MUST list every item it marks under a `Deprecated` heading of its changelog entry, and every item it removes under a `Removed` heading, each entry naming the item, its successor and its removal minor.
+- **[API-085]** A release that marks an SDK item MUST already ship its successor, so that an author can move in the same release. An item with no successor MUST say so in its note instead.
+- **[API-086]** The release that removes an SDK item MUST be the minor named in its mark, MUST NOT be a patch release, and MUST NOT change the signature or behaviour of any other item.
+- **[API-087]** The host MUST NOT write a `deprecated` record, a log line or a refusal for an SDK deprecation.

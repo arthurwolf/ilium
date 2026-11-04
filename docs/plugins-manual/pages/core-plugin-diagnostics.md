@@ -828,3 +828,19 @@ The user starts the command, or the Diagnostics screen button "Build support bun
 | A build takes long | It stops at 30 s (proposed, owner to confirm) for 64 plugins and exits with `bundle.timeout`, leaving no file. |
 
 Writing the archive MUST NOT change any plugin state, grant, health counter, failure window or guard mark ([USR-225]).
+
+## Requirement statements
+
+- **[EXT-054]** Records written by a log-sinks handler during its call, and the host's extension.* records about log-sinks handlers, MUST NOT be delivered to log-sinks. Records MUST be batched: one chain per 250 ms with up to 64 records.
+- **[LIF-312]** `ilium plugin bundle` MUST write one archive that holds the report, the last 1000 log records of each plugin, the manifest and the state names of each installed plugin, and the host version. It MUST NOT include plugin storage buckets, secrets, grant tokens or file contents.
+- **[LIF-313]** Log text and paths in a bundle MUST pass through the same redaction as log sinks, and the home directory MUST be replaced by `~`. The bundle MUST be capped at 5 MiB, and when the cap is reached the oldest log records MUST be dropped first and the bundle MUST name the cut in its index.
+- **[LIF-314]** The host MUST offer a bundle after a plugin enters `failed`, MUST write it only after the user agrees, and MUST delete bundles older than 14 days at the next start. It MUST NOT send a bundle anywhere.
+- **[USR-221]** `support-bundle <id> --out <file>` MUST write one zip with exactly `summary.txt`, `log.txt`, `stats.txt` and `crashes.txt`.
+- **[USR-222]** The bundle MUST redact credential headers, URL parameters and home-directory paths, show `~` for home paths, and show payloads as a byte count only.
+- **[USR-223]** The bundle MUST NOT contain the plugin data folder, trace recordings, grant secrets or file contents.
+- **[USR-224]** The bundle MUST be 8 MiB or smaller, dropping the oldest log lines first and recording the drop count in `summary.txt`.
+- **[USR-225]** Writing a bundle MUST NOT change plugin state, grants or health counters, and a failed write MUST leave no file at the target.
+- **[USR-226]** The Diagnostics "Build support bundle" dialog MUST list the files and size before writing, and its default button MUST be Cancel.
+- **[USR-227]** Each helper crash, kill or out-of-memory kill MUST append one crash record with UTC time, plugin id and version, side, reason, exit status and export name, and no payloads.
+- **[USR-228]** Crash records MUST be kept for 30 days and at most 200, removing the oldest first.
+- **[USR-229]** Crash records MUST live in the server state folder, never in a plugin data folder, and MUST appear in the support bundle.

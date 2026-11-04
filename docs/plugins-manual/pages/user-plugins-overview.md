@@ -153,3 +153,9 @@ What works offline: the help viewer, its search, the F1 tooltip, `ilium plugin e
 - [Plugin files on disk](/pages/reference-plugin-files/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-001]** The user documentation MUST state that all 30 core plugins ship with Ilium and need no install.
+- **[USR-002]** Ilium MUST NOT fetch, list, recommend or update plugins from the network on its own.
+- **[USR-003]** Ilium MUST show every grant a plugin requests before the plugin runs, and a grant the user does not give MUST stay locked.

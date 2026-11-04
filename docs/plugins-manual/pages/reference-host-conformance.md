@@ -337,3 +337,14 @@ Target behaviour of the production plugin system.
 - [Event and intent tables](/pages/reference-events-and-intents/)
 - [Worlds and sides](/pages/worlds-and-sides/)
 - [Requirements: WIT and ABI](/pages/reference-requirements-wit-abi/)
+
+## Requirement statements
+
+- **[ABI-007]** The manifest exports list MUST NOT differ from the component. A difference MUST refuse install with manifest.exports-mismatch.
+- **[ABI-015]** Each event case MUST follow its delivery policy: coalesced, drop-oldest-counted or never-dropped. Loss of a drop-oldest event MUST be reported in events-dropped.
+- **[ABI-023]** A requested grant not in the API MUST refuse with manifest.grant-unknown. An unrequested import MUST refuse with manifest.import-not-requested. A call of an unrequested capability MUST trap host.capability-not-requested.
+- **[ABI-030]** A host test suite MUST have a test for every row of the import, export, event, intent and widget matrices.
+- **[ABI-073]** The project MUST publish a versioned ABI conformance corpus, with a stable identifier per case, that an alternative host or embedder can run without Ilium source.
+- **[ABI-074]** Each corpus case MUST state its input, the expected result or refusal code, and the matrix row of ABI-030 it covers.
+- **[ABI-075]** A host MAY claim ABI conformance for a version only when every case of that version's corpus passes, and the corpus version MUST equal the API version it checks.
+- **[ABI-120]** The conformance corpus MUST include, for every import, one case for each documented error code, one case for each limit at limit and at limit plus one, and one case for a revoked grant, and a coverage report MUST list uncovered import-code pairs and fail the release when it is non-empty.

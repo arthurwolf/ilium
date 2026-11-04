@@ -254,3 +254,20 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions: T9-compat-deprecation
 
 - **[DEV-992]** `ilium plugin preflight --target <host-version>` (command name proposed, owner to confirm) MUST list, for every installed plugin, whether it would load, load with a `deprecated` record or be refused with a code, using the matrix data shipped in the target binary or a manifest file, without starting any plugin.
+
+## Requirement statements
+
+- **[EXT-074]** The runbook MUST cover a crash loop: detection by the plugin state `stopped-by-failure` with a restart count shown by `ilium plugin list --json`; mitigation by `ilium plugin disable <id>`; recovery by reading `ilium plugin logs <id>` and re-enabling. The host MUST stop restarting a plugin at the third failure within 10 minutes (HST-400).
+- **[EXT-075]** The runbook MUST cover a quarantined or blocked plugin that users still depend on: detection by `Quarantined` or `Blocked` in the list; mitigation by naming the replacement or the fixed version; recovery by upgrade, with the data kept as stated in [SEC-327].
+- **[EXT-076]** The runbook MUST cover an upgrade that fails part way: detection by the error code and the audit line; mitigation by the guarantee that the previous version stays installed ([EXT-062]); recovery by `ilium plugin rollback <id>` and a retry after the cause is fixed.
+- **[LIF-295]** When the Ilium binary on disk is replaced, the running server MUST keep its loaded instances unchanged, and the new binary MUST take effect only at the next server start.
+- **[LIF-296]** An operator MUST end the running server with a clean stop, not with a kill signal, when the new binary is to take effect. A kill skips `deactivate`, so the server side loses its restore bytes and every plugin loses its in-memory state.
+- **[LIF-297]** `ilium plugin rollback <id>` MUST NOT change the Ilium binary or the host version, so an operator who needs to undo a host release MUST NOT use it for that.
+- **[LIF-298]** After a host upgrade or a host rollback, the operator MUST run `ilium plugin list --json` and MUST read `ilium plugin logs <id> --tail 100` for each plugin that does not behave as expected. A plugin in `stopped-by-failure` MUST be enabled again only after its cause is fixed, because enabling clears its failure window.
+- **[LIF-299]** Before replacing the Ilium binary, the operator MUST run `ilium plugin list --json` and MUST keep its output as the record to compare against after the restart.
+- **[LIF-300]** A clean server stop MUST give the whole shutdown 5 s. A plugin that is still running at that point MUST be dropped without `deactivate`, with `host.shutdown-timeout` logged, so an operator MUST NOT treat a quiet plugin log after a stop as proof that `deactivate` ran.
+- **[LIF-306]** A policy MUST be able to assign an update to a rollout stage of a named share of sessions or machines, and a host outside the current stage MUST NOT apply that update, and MUST report it as `held` in `ilium plugin list --json`.
+- **[LIF-307]** A rollout MUST halt on its own when the plugin fails inside the failure window on a host of the current stage. A halted rollout MUST stop widening, MUST log `rollout.halt` with the plugin id and version, and MUST NOT roll back hosts that already updated.
+- **[LIF-308]** An operator MUST be able to resume a halted rollout or cancel it with `ilium plugin rollout resume <id>` and `ilium plugin rollout cancel <id>`, and each command MUST write an audit event.
+- **[LIF-950]** Before replacing the Ilium binary, the operator MUST keep a copy of the previous Ilium binary and of the plugin state files (`installed.json`, the plugin buckets and the stamps), and MUST keep both until the checks after the upgrade pass. Keeping one previous binary is the minimum this page relies on (proposed, owner to confirm).
+- **[LIF-951]** After a host rollback, an operator MUST NOT enable a plugin whose log shows `host.format-newer` until either the newer host has been started again or the file named in that log line has been restored from the copy kept under LIF-950, because the earlier host cannot read that file.

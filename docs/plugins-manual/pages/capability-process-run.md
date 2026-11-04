@@ -298,3 +298,7 @@ Targets `ilium:plugin@0.1.0`.
 ### Security
 
 Children get a rebuilt environment: `LD_PRELOAD`, `LD_LIBRARY_PATH` and `PATH` cannot be set (`invalid-argument`, [SEC-033]), `PATH` is fixed to `/usr/bin:/bin` ([SEC-027]), the data folder is mounted `noexec`, the child has no network on T2 and T3 (T1 bundled plugins run unconfined), and secrets are redacted from captured output ([SEC-243]). A refused program returns `not-permitted`. See [Sandbox reference](/pages/reference-sandbox/).
+
+## Requirement statements
+
+- **[CAP-009]** A process.run grant with arguments, a wildcard or a relative path with a separator MUST fail with manifest.grant-program.

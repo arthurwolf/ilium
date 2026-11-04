@@ -399,3 +399,7 @@ API version checked: `ilium:plugin@0.1.0`.
 Logs are redacted of secrets ([SEC-243]). If a plugin breaks the client, start with `ilium --safe-mode` ([Security response](/pages/reference-security-response/)).
 
 Requirements for this page: [Developer tooling requirements](/pages/reference-requirements-dev-tooling/).
+
+## Requirement statements
+
+- **[AUT-804]** A plugin MUST NOT depend on `--unredacted` traces to diagnose a user's problem, because that flag works only for a plugin installed with `dev`.

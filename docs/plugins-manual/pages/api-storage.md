@@ -418,3 +418,10 @@ Enabling, disabling and uninstalling a plugin reach every running session within
 ## Production additions: T10-operations
 
 - [HST-656] The host MUST provide `ilium plugin data export <id> <dir>` and `ilium plugin data import <id> <dir>` that write and read every bucket as JSON lines of base64 key and value plus the data version, so a user can move one plugin's data without moving the plugin. Import MUST refuse a data version higher than the installed plugin's with `migration.data-newer`, and MUST be all-or-nothing per bucket.
+
+## Requirement statements
+
+- **[HST-656]** The host MUST provide `ilium plugin data export <id> <dir>` and `ilium plugin data import <id> <dir>` that write and read every bucket as JSON lines of base64 key and value plus the data version, so a user can move one plugin's data without moving the plugin. Import MUST refuse a data version higher than the installed plugin's with `migration.data-newer`, and MUST be all-or-nothing per bucket.
+- **[LIF-117]** `write-batch` MUST apply all its entries or none of them. A batch holds at most 256 entries and at most 4 MiB of key and value bytes together; more is `invalid-argument`. A refused batch keeps every previous value.
+- **[LIF-118]** `put`, `remove` and `write-batch` MUST return only after the change is flushed to stable storage, so that a crash or power loss after the return cannot lose it. A crash before the return leaves the previous value.
+- **[LIF-120]** Several session servers can write the same `global` or `project` bucket. The host MUST serialise writers with a lock per bucket, so that each `put` and each batch is atomic across processes, and the last writer of a key wins. There is no compare-and-set; use a version key and `write-batch` if you need one.

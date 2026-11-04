@@ -779,3 +779,9 @@ The manual gives no separate code for an authorization failure at the provider. 
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+## Requirement statements
+
+- **[COR-950]** The Inference plugin MUST NOT write prompt text, reply text or screen text to its plugin log, the audit log or the privacy log.
+- **[COR-951]** Settings MUST show, for the selected provider, the data retention statement configured in its provider entry, or the text "retention unknown" when the entry has none, and MUST NOT imply that Ilium enforces that statement.
+- **[COR-952]** Before the first request to a remote provider, the user MUST confirm that provider's retention statement once, as COR-106 requires for the voice provider; a local provider needs no confirmation.

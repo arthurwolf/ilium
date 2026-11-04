@@ -411,3 +411,35 @@ Requirements for this page: [Requests and outcomes requirements](/pages/referenc
 ### Cancelling a pending request
 
 - [API-096] The host MUST offer a generic `cancel(request-id)` import that, for a pending request of the calling plugin, stops the underlying work, frees the pending slot at once and completes the request with outcome `cancelled`; for an unknown, foreign or already completed id it MUST return `not-found` without effect, and repeated calls MUST be idempotent.
+
+## Requirement statements
+
+- **[API-090]** When a plugin instance traps, restarts or is replaced by an upgrade, the host MUST cancel every pending request of the old instance, MUST reclaim its pending slots and held results, and MUST drop a late completion of such a request instead of delivering it to the new instance. The new instance MUST NOT see a `request-completed` event for an id it did not issue, and `take-*` of an old id MUST return `none`.
+- **[API-091]** A pending request MUST have a host-side lifetime limit of 120 seconds by default from the return of its id. On expiry the host MUST complete it with the outcome `cancelled`, free the pending slot and remove any held result. The same limit MUST apply if the completing worker is lost.
+- **[API-096]** The host MUST offer a generic `cancel(request-id)` import that, for a pending request of the calling plugin, stops the underlying work, frees the pending slot at once and completes the request with outcome `cancelled`; for an unknown, foreign or already completed id it MUST return `not-found` without effect, and repeated calls MUST be idempotent.
+- **[EVT-021]** send-input and agent-action MUST carry a dedup key. A submission of either kind with no key MUST be a shape offender: it completes as refused(invalid-argument) and the other submissions complete as refused(cancelled).
+- **[EVT-022]** send-input with journal true MUST write the journal entry before the keys reach the pane.
+- **[RQO-001]** Every submission MUST complete exactly once.
+- **[RQO-002]** A call that returns a request-id MUST complete once with a request-result and the matching request-id.
+- **[RQO-003]** Submissions of one batch MUST be applied in order. A later submission for a node an earlier one removed MUST complete as failed(not-found).
+- **[RQO-004]** duplicate(request-ref) MUST be returned while now_wall_ms - accepted_wall_ms < 600,000 for the dedup key, naming the ref of the first submission. Nothing MUST be applied.
+- **[RQO-005]** ok-epoch(u64) MUST be the outcome of a send-input applied to an agent pane and carry the new prompt epoch.
+- **[RQO-006]** cancelled MUST be used when the request stopped because the plugin stopped, the user cancelled or the host shut down.
+- **[RQO-007]** A sibling of a refused submission MUST complete as refused(cancelled) and not as cancelled.
+- **[RQO-008]** A completed result MUST be held for 30 seconds or until the first take. After that take MUST return none and the SDK wrapper MUST return not-found.
+- **[RQO-009]** When a malformed submission and a missing grant exist in one batch, the host MUST run the shape check for the whole list before the grant check and report the lowest-index malformed submission.
+- **[RQO-010]** More than 256 submissions from one on-events call MUST trap. It MUST count as one failure, apply no submission and complete none.
+- **[RQO-011]** A refused batch MUST apply nothing, MUST reserve no dedup key and MUST log 'batch refused: submission <index>' with a 0-based index.
+- **[RQO-020]** A dedup key MUST be 1 to 128 characters from A-Z a-z 0-9 . _ : / -.
+- **[RQO-021]** A dedup key MUST be scoped to the pair (plugin id, client id) for forwarded submissions (HST-113) and reserved for 10 minutes from acceptance.
+- **[RQO-022]** A retry of an accepted submission that failed MUST use a new dedup key. The old key stays reserved for 600,000 ms.
+- **[RQO-030]** The kernel MUST journal the keys of send-input and agent-action before it writes to the terminal, so a duplicate is caught after a server restart. A key never stays unusable for more than 10 minutes and input is never replayed.
+- **[RQO-031]** After a restart that interrupted a send-input the plugin MUST receive input-uncertain once and MUST NOT receive a replay.
+- **[RQO-040]** A hook run MUST complete with the outcome of the chain: a veto becomes refused(conflict) with extension.vetoed in the message.
+- **[ABI-009]** The lowest-index offender of a batch-level check MUST complete as refused(invalid-argument) (shape) or refused(not-permitted) (grant), and every other submission MUST complete as refused(cancelled) with the message 'batch refused: submission <index>', where index is 0-based.
+- **[ABI-012]** The host MUST hold a finished slow-call result for 30 seconds.
+- **[ABI-014]** A take before completion, a second take, or a take of an unknown id MUST return none. The SDK wrapper returns not-found.
+- **[ABI-034]** A dedup key MUST be reserved while now_wall_ms - accepted_wall_ms < 600,000, measured on the wall clock. The table is in memory and a server restart clears it, except that from Phase 5 the keys of `send-input` and `agent-action` are persisted in the journal and survive.
+- **[ABI-035]** A repeated dedup key MUST complete as duplicate naming the ref of the first submission. The host MUST NOT check correlation uniqueness.
+- **[ABI-037]** The hold of a slow-call result MUST start when on-events returns for the batch that delivered the request-completed event.
+- **[ABI-040]** A request-id MUST be unique per plugin side for the whole server run, start at 1 at each server start, and never be reused across plugin-instance restarts within a server run. A server restart begins a new run.

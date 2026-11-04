@@ -548,3 +548,11 @@ A breach and each restart appear in the plugin log with the export name and the 
 - [File access](/pages/api-fs/)
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-101]** A plugin MUST be designed to run within the default of its tier, not within the ceiling.
+- **[AUT-102]** A plugin SHOULD stay under half of each default budget in normal use, so that a bad input does not trap it.
+- **[AUT-103]** Rebuildable data MUST NOT go into a durable bucket, as rule AUT-008 of the cookbook also requires, because it uses up the 16 MiB that user data needs.
+- **[AUT-104]** A plugin that reports its own timing SHOULD read it with `monotonic-millis` and SHOULD NOT depend on a host tool being installed in the user's setup.
+- **[AUT-105]** Timings for comparison with the targets MUST come from a release build.

@@ -201,3 +201,11 @@ Requirement ids for this page: [EXT-040], [EXT-041], [EXT-042]. See the [require
 ### Security
 
 Corrected risk marks: see the table in [Extension security](/pages/reference-extension-security/) ([SEC-280], [SEC-293]).
+
+## Requirement statements
+
+- **[EXT-040]** The core set MUST hold 66 points across 30 core plugins. Hook modes MUST number observe 5, transform 11, veto 10, first 1.
+- **[EXT-041]** A point id MUST be <plugin-id>/<point>, where plugin-id is the id of this plugin or the id of a core plugin named in this package's replaces list; such names are accepted only for items listed in that core plugin's surface.
+- **[EXT-042]** Every core plugin MUST state whether another plugin may replace it, and its points, services and topics MUST be listed on the core points page.
+- **[EXT-050]** A command field in an entry MUST name a command declared by the contributor or one for which it holds commands.invoke, otherwise the install MUST fail with manifest.extension-entry-invalid. An entry that runs a program (worktrees/post-create-steps.command, progress/probe-kinds.command_template) MUST need a matching process.run grant of the contributor (manifest.grant-dependency otherwise).
+- **[EXT-052]** Every core point MUST have a Side (server, client or scene), Version, Deadline, Max and Dynamic value in the core points table. A handler declared on the other side MUST fail the install with manifest.extension-side, a handler MUST get the table's deadline, and register on a point whose Dynamic value is no MUST fail with extension.not-dynamic.

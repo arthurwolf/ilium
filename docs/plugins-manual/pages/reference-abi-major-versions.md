@@ -140,3 +140,17 @@ Example row (illustrative only):
 | Host minor | Released | Security fixes until | Support |
 |---|---|---|---|
 | `0.3.0` | 2026-01-15 | 2027-01-15 | `supported` until that date |
+
+## Requirement statements
+
+- **[ABI-055]** A host that ships `ilium:plugin@1.0.0` MUST load a package whose `api` is the final `0.x` minor through that minor's frozen copy and adapter, and MUST NOT load a package whose `api` is any other `0.x` minor.
+- **[ABI-056]** A package whose `api` major differs from the host's major and is not the retained 0.x minor MUST be refused with `package.api-unsupported`, and the message MUST name the package's `api` and the supported versions.
+- **[ABI-057]** The host MUST log one `deprecated` record per plugin when it loads the final `0.x` minor, naming the major version in which that minor stops loading.
+- **[ABI-058]** A major release MUST NOT lower a limit or remove a feature unless the change was marked in an earlier release under ABI-052 and ABI-053, and the change MUST take effect in that major release only.
+- **[ABI-059]** A component built for `ilium:plugin@1.0.0` MUST carry the custom section `ilium:api-version` with bytes `00 01 00 00 00 00`, and a section that differs from the manifest `api` MUST be refused with `manifest.api-version`.
+- **[ABI-060]** Inside the 1.x line a host MUST apply the window rule of ABI evolution (current minor and previous one), and a package whose `api` major differs from the host's major MUST NOT be loaded through that window.
+- **[ABI-076]** The page MUST give a runbook for an operator whose host upgrade makes installed plugins refuse with `package.api-unsupported` or a section mismatch, covering triage, pin, roll back and bulk report in that order.
+- **[ABI-077]** The host MUST provide a command that lists every installed plugin refused for an ABI reason, with the refusal code and the plugin's declared `api`, in one output.
+- **[ABI-078]** Rolling the host back MUST NOT change installed plugin files, grants or stored settings, and a plugin refused after the upgrade MUST load again unchanged after the rollback.
+- **[ABI-950]** The final `0.x` minor MUST stay loadable until 12 months (proposed, owner to confirm) after the release of `2.0.0`, and after that date a package whose `api` is that minor MUST be refused with `package.api-unsupported`.
+- **[ABI-951]** For each major line `N` from `1` onward, the host MUST keep the final minor of major `N` loadable through its frozen copy and adapter until 12 months (proposed, owner to confirm) after the release of major `N+1`, then MUST refuse packages of major `N` with `package.api-unsupported`, and the release notes of major `N+1` MUST state that date.

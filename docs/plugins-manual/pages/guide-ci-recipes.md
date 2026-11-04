@@ -564,3 +564,7 @@ A reviewer rebuilds from the named commit with the named toolchain versions and 
 | Statement lists a different commit | Package built from a dirty checkout | Build from a clean checkout of the tag |
 | Records appear unsigned | Added after `sign` | Run `pack` with the flags, then `sign` |
 | SBOM lacks a dependency | Lock file not committed | Commit it ([DEV-772]) |
+
+## Requirement statements
+
+- **[DEV-896]** `ilium plugin check` and `ilium plugin publish` MUST scan the locked dependency set against an advisory database, MUST report each match as a `lint.dependency-vulnerable` diagnostic with the advisory id and fixed version, MUST fail `publish` at or above a configurable severity unless `--allow-advisory <id>` is given, and MUST run against a cached database without network access when `--offline` is set.

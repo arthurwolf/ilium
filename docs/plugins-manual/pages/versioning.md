@@ -271,3 +271,7 @@ The manual has its own versions. Each host release has one manual snapshot that 
 - [Worlds and sides](/pages/worlds-and-sides/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-214]** The plugin MUST keep every name of the stable public list across its own releases.

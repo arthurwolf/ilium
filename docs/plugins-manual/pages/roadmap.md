@@ -273,3 +273,10 @@ A wave gate can pass at release and regress later. The project keeps a documente
 - [Glossary](/pages/glossary/)
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[COR-060]** The roadmap MUST give each wave a gate test.
+- **[COR-061]** The roadmap MUST state what stays native in each wave.
+- **[COR-103]** Each wave MUST ship with a kill switch that switches the features of that wave back to their native kernel path without a data migration, and the switch MUST be documented in the release notes of the wave.
+- **[COR-104]** When the gate test of a released wave fails, the release MUST be blocked or rolled back to the last passing wave, and the regression MUST be recorded with the failing gate, the wave and the commit.

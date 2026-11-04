@@ -267,3 +267,7 @@ Illustrative, not generated: the tree row uses glyphs from the client icon inven
 - [Events](/pages/api-events/) for `input-uncertain` and `request-completed`.
 - [Terminal primitives](/pages/primitives-terminal/) and [agent primitives](/pages/primitives-agent/) for `modes`, `read-cells`, `lock-input` and the activity states.
 - [terminal.write](/pages/capability-terminal-write/) and [agent.control](/pages/capability-agent-control/).
+
+## Requirement statements
+
+- **[EVT-050]** A refused send-input attempt MUST NOT take a rate token.

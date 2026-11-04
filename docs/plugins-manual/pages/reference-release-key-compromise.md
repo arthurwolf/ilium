@@ -114,3 +114,13 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions: T2-security
 
 - [SEC-728] The release signing key MUST be generated and held in hardware (HSM or hardware token) with at least 2 of 3 custodians required to sign (proposed threshold, owner to confirm), and the key ceremony MUST be recorded and the transcript published with its hash. Test: check the ceremony record for a key generated in hardware, the 2-of-3 signing rule, and a published transcript whose hash matches the transcript file.
+
+## Requirement statements
+
+- **[SEC-424]** When the release key is lost or may be exposed, the Ilium project MUST treat it as compromised, stop signing release blocklists with it, and MUST NOT use it to endorse a replacement key.
+- **[SEC-425]** A binary MUST verify the release blocklist only with the release key compiled into it, and MUST refuse a blocklist signed by any other key, keeping its last good copy.
+- **[SEC-426]** A replacement release key MUST reach users only inside a new Ilium release binary, and an installed binary MUST NOT learn a new release key from a blocklist, policy file or plugin package.
+- **[SEC-427]** After a release key compromise the Ilium project MUST publish an advisory with the compromised key fingerprint, and it MUST state that plugin trust does not change.
+- **[SEC-431]** A release key compromise MUST NOT change the trust store, any publisher pin, or any installed plugin's trust state.
+- **[SEC-432]** No command, setting, environment variable or policy key MAY accept a release key, fingerprint or retirement statement.
+- **[SEC-728]** The release signing key MUST be generated and held in hardware (HSM or hardware token) with at least 2 of 3 custodians required to sign (proposed threshold, owner to confirm), and the key ceremony MUST be recorded and the transcript published with its hash.

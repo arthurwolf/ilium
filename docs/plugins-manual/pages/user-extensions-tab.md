@@ -147,3 +147,11 @@ Instead of adding to a core plugin, a plugin may replace it. This is separate fr
 - [Troubleshooting plugins](/pages/user-troubleshooting/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-050]** The Extensions tab MUST list contributors of each point in run order, MUST let the user move a contributor up or down, and the user's order MUST win over priority.
+- **[USR-051]** The host, not the plugin, MUST store the user's order and the toggles, and MUST keep them across restarts.
+- **[USR-052]** A hook that times out, traps or errors MUST count as "no change", and a timeout MUST NOT block or veto, except at a high-risk veto point whose `on_failure` is `"refuse"`, the default when the owner declares nothing (SEC-287), where it refuses a plugin-initiated action.
+- **[USR-053]** Three breaches in a row MUST stop the extension, MUST show a notice and a Reset button, and the stop MUST NOT be written to disk.
+- **[USR-054]** An extension whose owner is missing or off MUST show "waiting for <owner>" and MUST become active when the owner returns.

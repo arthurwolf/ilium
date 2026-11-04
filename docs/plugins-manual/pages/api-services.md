@@ -425,3 +425,12 @@ Checked against `ilium:plugin@0.1.0`.
 ## Production additions: T3-abi-api
 
 - **[API-209]** A service call chain deeper than 4 hops, or a cycle where a plugin is already on the chain, MUST be refused with `reentrant` before any callee runs.
+
+## Requirement statements
+
+- **[SVC-001]** A service call MUST need services.use:<name> and a provider MUST need services.provide:<name>. Without it MUST return not-permitted.
+- **[SVC-005]** A caller MUST be limited to its `pending_requests` (64 by default; a T1 plugin may raise it to 256 in its manifest). The call past the limit MUST return busy.
+- **[SVC-007]** No reply within 30 seconds MUST complete the call as failed(timed-out).
+- **[SVC-008]** A provider that stops, restarts or is disabled before answering MUST make its pending callers complete as failed(cancelled).
+- **[SVC-010]** take-reply MUST return the JSON once. A second take MUST return none.
+- **[SVC-011]** A reply after 30 seconds MUST return not-found.

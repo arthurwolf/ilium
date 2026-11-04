@@ -493,3 +493,15 @@ Requirement ids for this page: [SVC-002], [SVC-003], [SVC-004], [SVC-006], [SVC-
 API version checked: `ilium:plugin@0.1.0`.
 
 Requirements for this page: [Services and topics requirements](/pages/reference-requirements-services-topics/).
+
+## Requirement statements
+
+- **[LIF-280]** A provider failure MUST NOT count as a failure of its consumers.
+- **[SVC-002]** A call with no installed and enabled provider MUST return not-found at once.
+- **[SVC-003]** A call payload or a reply over 1 MiB, or one that fails its schema, MUST return invalid-argument. The provider MUST NOT be called for a bad payload.
+- **[SVC-004]** A method not in the provider schema MUST return unsupported.
+- **[SVC-006]** A provider is compatible when the major version equals the required one and the minor is at least the required one. For major 0 the minor MUST be equal and the patch MUST be ignored.
+- **[SVC-009]** A reply that fails the result schema MUST complete the caller as failed(invalid-argument) and the provider MUST log an error.
+- **[SVC-012]** Activation of a consumer MUST wait for a compatible provider.
+- **[SVC-013]** Plugin-defined services are unstable in 0.1. A consumer MUST be updated together with its provider when the service API changes.
+- **[SVC-014]** A provider MUST have at most 64 calls in flight. The 65th MUST return busy at the call.

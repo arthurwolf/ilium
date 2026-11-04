@@ -590,3 +590,27 @@ Regex `pattern` values are limited per [SEC-046]; `secret` rows follow [SEC-242]
 ### Settings values after a schema change
 
 - [LIF-321] When an updated plugin version activates, the host MUST validate each saved setting value against the new schema before the first activation; it MUST keep valid values, replace an invalid or out-of-range value with the new default and write a `settings.value-reset` record with the key and the old value, MUST keep values for keys the new schema no longer declares until `uninstall --purge`, and MUST NOT count a reset as a failure or block the update.
+
+## Requirement statements
+
+- **[LIF-321]** When an updated plugin version activates, the host MUST validate each saved setting value against the new schema before the first activation; it MUST keep valid values, replace an invalid or out-of-range value with the new default and write a `settings.value-reset` record with the key and the old value, MUST keep values for keys the new schema no longer declares until `uninstall --purge`, and MUST NOT count a reset as a failure or block the update.
+- **[SET-001]** A plugin MUST have at most 2 settings tabs, 8 sections per tab, 24 rows per section (a group counts as one row plus its children) and 12 children per group.
+- **[SET-002]** A plugin MUST have at most 128 value keys. A value key MUST be unique inside the plugin.
+- **[SET-003]** Tab, section and row titles MUST be at most 32, 40 and 48 characters. A description MUST be at most 200, info text 120, a button label 20.
+- **[SET-004]** A first-party plugin (limits_tier first-party) MAY raise the settings caps. Others MUST NOT.
+- **[SET-005]** Plugin sections beyond 6 in one built-in tab MUST be dropped with settings.section-dropped. Plugin tabs beyond 16 in the rail MUST be dropped with settings.tab-dropped.
+- **[SET-010]** Every default and option MUST be checked at install.
+- **[SET-011]** A stored value that no longer matches its row MUST be ignored and the default MUST apply.
+- **[SET-020]** The host MUST NOT clamp a stored value. A number typed outside min and max MUST be refused with the row note and the stored value MUST stay. The stepper MUST stop at the bounds.
+- **[SET-021]** Saving MUST run in this order: schema check, settings-validate, the write, settings-changed.
+- **[SET-022]** A settings-validate answer MUST arrive within 100 ms. On timeout the save MUST be refused.
+- **[SET-023]** Toggle, choice and dialog confirm MUST be written at once. Number steps and typed numbers or text MUST be written 600 ms after the last change or after debounce_ms. A text-area MUST be written 600 ms after the last keystroke, or 1 s when its text is above 10,000 bytes; debounce_ms overrides both.
+- **[SET-024]** A text value MUST be at most 4,096 characters, a text-area value 65,536, and all values of one plugin 256 KiB. Above that save MUST fail with invalid-argument.
+- **[SET-031]** set-json MUST write at once.
+- **[SET-050]** The calls set-info, set-choices, set-row-note, set-row-state, set-item-states, set-choice-items, set-info-rich and set-meter MUST be limited to 10 per second per plugin together. A call over the rate MUST return rate-limited and the previous state MUST stay.
+- **[SET-051]** set-info and set-row-note text MUST be at most 120 characters. Longer MUST return invalid-argument.
+- **[SET-060]** A choice or list MUST have at most 64 options or items; a map at most 64 entries; a meter at most 8 segments; a notice text at most 200 characters.
+- **[SET-061]** A row whose depends_on names a missing key MUST fail with manifest.settings-depends.
+- **[SET-062]** A row key that is not a valid key MUST fail with manifest.settings-key.
+- **[SET-063]** A button command, glyph, help id or tab anchor that does not exist MUST fail with manifest.settings-command, settings-glyph, settings-help or settings-tab-anchor.
+- **[SET-064]** A settings schema that uses a keyword outside the supported subset MUST fail with manifest.schema-keyword.

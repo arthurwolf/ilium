@@ -308,3 +308,7 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 ### Security
 
 **[SEC-045]** Desktop notification text is sanitised ([SEC-380]) and rate limited. See [Extension security](/pages/reference-extension-security/).
+
+## Requirement statements
+
+- **[CAP-882]** Every `notify` intent MUST be accompanied by an in-app text signal of the same event that stays until the user dismisses it or the event ends. Dismissal is the user closing or clearing the row, and the event ends when the condition the notice reports stops being true, after which the row is removed within 1 second.

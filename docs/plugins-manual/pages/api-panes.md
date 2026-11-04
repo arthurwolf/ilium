@@ -407,3 +407,11 @@ focused: func() -> option<node-id>;
 - [panes.read](/pages/capability-panes-read/), [panes.create](/pages/capability-panes-create/) and [panes.signal](/pages/capability-panes-signal/) for the grants.
 
 Requirements for this page: [Panes requirements](/pages/reference-requirements-panes/).
+
+## Requirement statements
+
+- **[EVT-020]** send-input MUST be refused with pane-not-ready for a restored pane whose process has not started.
+- **[PAN-008]** For one node the event order MUST be pane-created, other events of that pane, pane-exited, then node-removed. A plugin MUST NOT see tree-changed for the node after node-removed.
+- **[PAN-010]** A restored pane MUST exist in the tree with its saved title and size before its process starts. It MUST NEVER report a size of zero.
+- **[PAN-011]** An intent that needs a running process (send-input, signal-pane) sent to a restored pane MUST be refused(pane-not-ready). signal-pane to an exited pane MUST be refused(not-found).
+- **[PAN-012]** is-restored MUST be false after the process starts.

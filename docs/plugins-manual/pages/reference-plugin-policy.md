@@ -138,3 +138,20 @@ The audit log is always on. It is defined only in the [Audit log reference](/pag
 - [Permissions explained](/pages/user-permissions-explained/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[LIF-193]** A plugin blocked by policy MUST show "Blocked by policy" with the policy code of the rule that blocked it (for example `policy.id-denied`, `policy.third-party-denied`; codes in [Plugin policy](/pages/reference-plugin-policy/)) and MUST keep its data.
+- **[USR-210]** The host MUST read the policy file before it loads any third-party plugin, and MUST NOT load a third-party plugin when the file exists but cannot be read or parsed.
+- **[USR-211]** The host MUST ignore a system policy file that a non-administrator can write, MUST show a persistent notice, and MUST record the audit event `policy-violation` with the reason `policy-file-writable` ([SEC-182]).
+- **[USR-212]** The host MUST treat a policy with an unknown key or a wrong type as malformed and MUST name the line of the first error in the notice.
+- **[USR-213]** The host MUST read the policy at server start only.
+- **[USR-214]** A grant that matches `grants.deny` MUST NOT be granted, MUST be shown as locked in the review dialog and in the Capabilities tab with the text "Blocked by your administrator", and MUST make calls return `not-permitted`.
+- **[USR-215]** A plugin whose manifest requests a denied grant MUST still install and run, with that grant refused.
+- **[USR-216]** `plugins.deny_ids` MUST win over `plugins.allow_ids`.
+- **[USR-217]** The host MUST check the policy keys in the order above and report the first failing key as the detail code.
+- **[USR-218]** The policy MUST NOT stop a core plugin or a bundled T1 plugin from running.
+- **[USR-219]** The host MUST write a `policy-loaded` audit record at start when a policy file exists, and a `policy-violation` record when a plugin or file violates it, and MUST NOT write plugin data into either.
+- **[USR-220]** The host MUST delete rotated audit files older than `audit.keep_days` at server start ([SEC-224]).
+- **[USR-257]** The host MUST chain each audit record to the previous one with a hash, and `ilium plugin audit verify` MUST report the first record where the chain is broken, or confirm the file is intact.
+- **[USR-258]** The host MUST cap the total storage of audit and crash records at a configurable ceiling (default 256 MiB), delete the oldest rotated files first when it is reached, and write a record that says how many were deleted.

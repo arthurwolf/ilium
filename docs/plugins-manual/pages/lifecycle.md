@@ -607,3 +607,61 @@ API version checked: `ilium:plugin@0.1.0`.
 - [LIF-723] In `third-party` safe mode, `ilium plugin enable <id>` MUST be accepted into the registry but MUST NOT activate until safe mode is left, and the list MUST show `safe-mode` as the disabled reason. The host MUST log the plugin that was starting at each crash mark as `crash.suspect <id>`. Test: stage a plugin whose start aborts the process, restart three times, assert the suspect log.
 
 - [LIF-729] An essential core plugin's third and later failures MUST restart after 5 s on every failure, MUST log `failure.core-restart` with a running count, and the host MUST show a persistent notice after 10 failures (proposed, owner to confirm) in one window. Test: 12 failures and count restarts and notices.
+
+## Requirement statements
+
+- **[AUT-215]** A plugin MUST NOT rely on a deactivate reason or a restore value to detect that an update happened, because `upgrade` is also the reason used by `ilium plugin dev`.
+- **[LIF-025]** The host MUST keep one failure window for each combination of plugin id, side and scope. The scope is the session server for the `server` side, and one attached client connection for the `client` and `scene` sides.
+- **[LIF-026]** Two clients MUST NOT share a window. Disabling the plugin by failure on client A MUST NOT stop it on client B or on the server.
+- **[LIF-027]** A window MUST be a sliding window of 10 minutes on a monotonic clock. A failure counts while its age is less than 600 s.
+- **[LIF-028]** The first counted failure in a window MUST schedule a restart after 1 s.
+- **[LIF-029]** The second counted failure in a window MUST schedule a restart after 5 s.
+- **[LIF-030]** The third counted failure in a window MUST stop that side with the instance state `stopped-by-failure` and MUST NOT schedule a restart, except for an essential core plugin (LIF-042). The package state stays `installed-enabled`.
+- **[LIF-031]** Except for essential core plugins (LIF-042), the host MUST NOT use any other restart delay. There is no step after the second, because the third failure stops the side.
+- **[LIF-032]** The host MUST NOT add random jitter. The delay timer starts when the instance is dropped. The next activation MUST NOT begin earlier than the delay, and SHOULD begin within 250 ms after it.
+- **[LIF-033]** The host MUST count each kind in the table as the table says.
+- **[LIF-034]** A refusal caused by host capacity MUST NOT count against the plugin. The instance stays `inactive` with the reason `host-capacity`. The host MUST retry the activation when pool memory is released, and in any case 1 s, 5 s and 30 s after the refusal, then every 60 s without end while the plugin is enabled.
+- **[LIF-035]** A failed job MUST NOT count.
+- **[LIF-036]** Enabling the plugin, the command `ilium plugin reset-failures <id>`, the Enable action of the recovery page and installing an update MUST clear the failure window of the affected sides.
+- **[LIF-037]** The instance state `stopped-by-failure` of the server side MUST be written to `failure_stopped` in `installed.json` and MUST survive a server restart. The failure window itself MUST NOT; it starts empty. The state of a client or scene side MUST be dropped when its client detaches.
+- **[LIF-038]** When a server stop begins, the host MUST cancel all pending restart timers and MUST NOT schedule a new one. A failure during shutdown is logged and not counted.
+- **[LIF-039]** When the user disables the plugin while a restart is pending, the host MUST cancel the timer and move the side to `installed-disabled-by-user`.
+- **[LIF-040]** When an update arrives while a restart is pending, the host MUST cancel the timer, clear the window and activate the new version by its normal triggers.
+- **[LIF-041]** A revocation or grant while a restart is pending MUST keep the timer. The new instance MUST receive the current `granted` list.
+- **[LIF-043]** The enum `deactivation-reason` MUST have the six values above, and the host MUST send `crash-restart` never.
+- **[LIF-044]** A production update MUST send `upgrade` to every live instance of the old version at the next safe point (PKG-278); the swap waits for each instance's `deactivate(upgrade)` to return its restore bytes.
+- **[LIF-045]** The host MUST compute the start order of `startup` plugins with Kahn's algorithm over the edges of the non-optional `requires.plugins` entries and of the `requires.services` entries to their providers. A provider's `activate` MUST return before any consumer that requires it begins `activate`.
+- **[LIF-046]** At each step of that algorithm the host MUST take the ready node with the smallest key: the tier number (T1 first), then the plugin id in ascending byte order.
+- **[LIF-047]** Independent plugins MAY activate in parallel. The host MUST run at most 4 concurrent activations per side, and MUST start them in the order of LIF-046.
+- **[LIF-049]** Dependencies are `requires.plugins` and `requires.services`. The host version is checked only through `requires.host`, which is refused with `dependency.host-version` at stage 10. A key named `engines` is refused with `manifest.unknown-key`.
+- **[LIF-050]** On server stop the host MUST call `deactivate(shutdown)` in the exact reverse of the start order, one at a time, so that a consumer stops before the providers it requires. The order of completion of the starts does not matter.
+- **[LIF-051]** A consumer MUST stay active when its provider fails, is disabled or is uninstalled.
+- **[LIF-052]** The host MUST return the code in the table for a service call.
+- **[LIF-053]** The host MUST send the event `service-availability-changed` (`interface`, `available`, `provider`) to every active consumer when the availability of a required interface changes.
+- **[LIF-054]** When the user disables a plugin that is a provider for other plugins, the disable dialog MUST list the dependants, and the CLI MUST print a `warning` line for each dependant. The disable is not blocked.
+- **[LIF-055]** The host MUST activate the owner of an extension point before its contributors. After the owner's `activate` returns, the host MUST activate in the background the lazy contributors of its points, so that a contribution needs no trigger of its own.
+- **[LIF-056]** A hook call MUST NOT wait for a contributor that is not yet `active`. The host skips it, treats it as `pass` and logs `extension.contributor-not-ready`.
+- **[LIF-057]** If the server and a client run different versions of one plugin, each side MUST keep running the version it has until it receives the change notice for the update. The host MUST NOT block messages between the sides.
+- **[LIF-058]** A client whose API version differs from the server's MUST be refused at the handshake with the message `api-version mismatch` naming both versions.
+- **[LIF-059]** The client SHOULD render its first frame when the essential client plugins are active, or after 1,000 ms, whichever comes first. Plugins that are not active by then continue to activate in the background, and the first frame shows a `starting plugins` mark.
+- **[LIF-220]** `ilium plugin dev` MUST attach to the session of `--cwd` (the current directory by default), or to the session named by `--session <name>`. When no server runs for it, the command MUST fail with `session.unreachable` and exit code 6, and MUST NOT start a session itself [DEV-180].
+- **[LIF-221]** A development package MUST shadow an installed package with the same id for that session only. When `ilium plugin dev` ends, the installed version MUST become active again.
+- **[LIF-222]** A rebuild MUST start 300 ms after the last change in the directory.
+- **[LIF-223]** The reload steps MUST run in this order: build, validate the manifest, compare grants, deactivate the server side with `upgrade`, deactivate each attached client side with `upgrade` in attach order, swap, activate the server side, then each client side, each with `restored`.
+- **[LIF-224]** New grants MUST produce a review prompt in the dev terminal, and grants that are no longer in the manifest MUST be revoked without a prompt. With `--grant <name>` the named grants are accepted without a prompt. A new high-risk grant that is not accepted MUST NOT be granted, and the reload MUST continue with the smaller set.
+- **[LIF-225]** A change to contributions or activation triggers MUST be re-registered at the swap and MUST be followed by `ilium.extensions/changed` for the affected points.
+- **[LIF-226]** In dev mode, failures MUST be counted and shown but MUST NOT stop the plugin. The third and later failures restart after 5 s. A successful reload MUST clear the window.
+- **[LIF-227]** A failed build or a manifest error MUST keep the running instance and print one `build-error` line. No `deactivate` MUST be sent.
+- **[LIF-228]** Restore bytes MUST be passed to the new build only when its `data_version` equals the one of the build that produced them. Otherwise they are dropped and the host logs `restore.dropped-data-version`.
+- **[LIF-229]** The dev instance MUST be held by a lease. The `ilium plugin dev` process renews it every 2 s over its connection. The server MUST remove the dev package and restore the installed version when the lease is not renewed for 10 s, or when the connection closes.
+- **[LIF-271]** On a trap or stop the host MUST release every effect listed in the stop-effects sentence of [Durable timers and further triggers](/pages/lifecycle/#durable-timers-and-further-triggers), for the dead instance as well.
+- **[LIF-275]** An update MUST reset the "Not now" counter of a bundled plugin.
+- **[LIF-285]** The failure window is per plugin, per side, per scope and per version. It MUST be emptied when the active version changes, on `ilium plugin dev` reload and on a manual enable. The first activation failure of an update candidate is not counted (LIF-075), and a manual `ilium plugin restart <id>` neither counts nor empties the window.
+- **[LIF-702]** The end-of-life and abandonment dates MUST be evaluated on the wall clock, at server start and then every 1 h (proposed, owner to confirm), and a backward wall-clock jump MUST NOT re-enable a retired plugin. The 30 day warning period of PKG-711 MUST be counted from the first time the host saw the abandonment notice, stored in `installed.json` as `abandon_notice_at`.
+- **[LIF-704]** When an administrator pins a plugin (PKG-711) the host MUST skip the abandonment disable, MUST keep showing the `abandoned` badge, and MUST log `plugin.abandon-pinned` once per start. Removing the pin MUST start a fresh 30 day warning period.
+- **[LIF-721]** Failure windows MUST be held in memory only; a clean or unclean server start MUST begin with empty windows, except that `failure_stopped` sides MUST stay stopped (LIF-037). A host-crash start MUST NOT count the crash against the plugin that was active.
+- **[LIF-723]** In `third-party` safe mode, `ilium plugin enable <id>` MUST be accepted into the registry but MUST NOT activate until safe mode is left, and the list MUST show `safe-mode` as the disabled reason. The host MUST log the plugin that was starting at each crash mark as `crash.suspect <id>`.
+- **[LIF-729]** An essential core plugin's third and later failures MUST restart after 5 s on every failure, MUST log `failure.core-restart` with a running count, and the host MUST show a persistent notice after 10 failures (proposed, owner to confirm) in one window.
+- **[USR-130]** The notice N14 MUST read `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap>. Turn it on again in Settings > Plugins.` The `<export>` is the failing export. It names the view, as in `views.render trap (sidebar)`, only when the failing export was `views.render`. The tree footer and the row in Settings > Plugins MUST show the same text.
+- **[USR-164]** The state words MUST be the same in the footer notice N14, which is defined in [Lifecycle](/pages/lifecycle/#failure-counting-and-restart).
+- **[USR-172]** An uninstall MUST apply the effects of the table above in the same host step that removes the plugin from the registry.

@@ -311,3 +311,25 @@ Each plugin can have its own settings pages inside Settings. Their values are sa
 - [Plugin files on disk](/pages/reference-plugin-files/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-010]** Installing MUST NOT run any code of the package before the user has answered the permission review.
+- **[USR-011]** A failed install MUST leave the installed plugins and their settings unchanged and MUST print one error that names the failed check.
+- **[USR-012]** The review dialog MUST list every requested permission, MUST start HIGH rows unchecked, and MUST record exactly the checked rows.
+- **[USR-013]** The plugin MUST be on after a successful install, unless the user chose to leave it off.
+- **[USR-014]** The first-start prompt MUST appear at most once per start, MUST NOT block other plugins, and after Not now MUST stop appearing after the third Not now answer (three in total, counted per plugin, as in SEC-111).
+- **[USR-120]** Ilium MUST show the full key fingerprint (64 lowercase hexadecimal characters in groups of 4) in the prompt, and the short form (the first 8 characters) only beside a full form or in the trust list (SEC-177), and MUST NOT trust a key without an explicit user answer.
+- **[USR-121]** Removing a trusted key MUST NOT uninstall any plugin or change its files, grants or data. The plugins it signed stop loading at the next activation (SEC-144) and MUST be marked plugins that it signed as `untrusted` in `ilium plugin list`.
+- **[USR-122]** An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced by a different key unless the old key endorsed it with a rotation statement (SEC-142); otherwise the update is refused with `package.publisher-key-changed`.
+- **[USR-123]** An update MUST show only permissions that the installed version did not request, and MUST keep the answers already given.
+- **[USR-124]** A failed update MUST restore the previous version and its data and MUST show "Update failed, rolled back".
+- **[USR-125]** Ilium MUST NOT check for, download or install updates by itself unless the user has set `[plugins] auto_update` to `notify` or `install`; the default is `off`.
+- **[USR-140]** Uninstall MUST first mark the plugin as being removed, then stop it, then delete files, and after a crash the next start MUST finish the removal.
+- **[USR-141]** Uninstall MUST NOT delete the data of any other plugin and MUST NOT remove trusted keys.
+- **[USR-142]** A pane whose plugin is gone MUST stay in the tree with a placeholder and MUST come back to life when the plugin is installed again.
+- **[USR-174]** A plugin whose key was revoked as `compromised`, or whose installed version a registry takedown names, MUST stop at once, MUST show `Blocked` with the reason `trust.key-revoked` or `registry.takedown`, and MUST keep its grants, settings and data.
+- **[USR-175]** `ilium plugin enable <id>` on a blocked plugin MUST fail with `plugin.blocked` and leave it blocked. `ilium plugin enable <id> --accept-risk` MUST turn it on and clear the block.
+- **[USR-143]** Plugins that depend on the removed plugin MUST become dormant, not failed, and MUST wake up when it returns.
+- **[USR-173]** An update MUST keep the grants the user already answered and MUST ask only for new ones. A failed update MUST roll back to the previous version. The user-facing rules are USR-123 and USR-124 in [Install and manage plugins](/pages/user-install-and-manage/#update-a-plugin).
+- **[USR-261]** The key trust prompt, the replaces confirmation and the erase-data confirmation MUST be operable with the keyboard alone, MUST show risk and checked state as text as well as colour, MUST wrap the full fingerprint and grant strings so they stay readable at 80 columns, and MUST place keyboard focus on the Cancel action by default.

@@ -369,3 +369,8 @@ Times are `epoch-ms` (`u64`, milliseconds since the Unix epoch, UTC) and duratio
 - [Rust SDK reference](/pages/rust-sdk/) and [TypeScript SDK reference](/pages/typescript-sdk/) for the binding rules.
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[API-074]** A timer MUST NOT fire inside the call that set it; the first timer-fired MUST be queued after the delay counted from the return of timers.set; timers.cancel MUST remove a queued, undelivered timer-fired of that timer; cancelling an unknown id MUST be a silent no-op.
+- **[AUT-616]** A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time.

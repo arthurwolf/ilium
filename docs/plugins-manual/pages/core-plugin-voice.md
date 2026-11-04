@@ -620,3 +620,13 @@ The rules in the data and privacy section cover disk and log files. They also ap
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+## Requirement statements
+
+- **[COR-080]** Captured microphone audio MUST stay in memory and MUST NOT be written to disk, a log or a crash report; the buffer MUST be released when the transcription job ends, fails or is cancelled.
+- **[COR-081]** Audio MUST be sent off the machine only when the configured transcription provider is remote, and the voice strip MUST show a "remote" marker while it is. With a local provider the plugin MUST open no network connection.
+- **[COR-082]** The plugin SHOULD name the provider and whether it is local or remote in Settings before the first capture, and MUST NOT switch from a local to a remote provider without the user's change.
+- **[COR-083]** A transcript MUST be kept only in memory for the current voice session, MUST NOT be written to the log at Info level or above, and MUST be dropped when the session ends.
+- **[COR-084]** Audio and transcripts MUST NOT be published on a topic, sent in an event payload or exposed to another plugin; only the command id the transcript maps to MAY leave the plugin.
+- **[COR-105]** While a capture or a transcript is held, the plugin MUST keep the audio and transcript buffers out of core dumps and swap (locked, non-dumpable memory where the platform allows), and where it cannot, MUST say so in the diagnostics page.
+- **[COR-106]** Before the first capture with a remote provider, Settings MUST show the provider's data retention statement as configured in the provider entry, or the text "retention unknown", and the user MUST confirm it once per provider.

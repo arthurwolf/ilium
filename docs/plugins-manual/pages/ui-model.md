@@ -877,3 +877,23 @@ API version: `ilium:plugin@0.1.0`.
 Kernel security UI is always on top and never imitated ([SEC-377]); plugin text is sanitised ([SEC-380]). See [Extension security](/pages/reference-extension-security/).
 
 Requirements for this page: [Rendering requirements](/pages/reference-requirements-rendering/).
+
+## Requirement statements
+
+- **[AUT-507]** A view MUST show state in text as well as in colour.
+- **[RND-019]** Plugin text MUST be sanitised before drawing: control characters and escape sequences are removed, TAB expands to the next multiple of 4 cells, and single-line fields turn CR, LF and CRLF into one space. The host MUST log at most one ui.text-sanitized warning per view.
+- **[WID-002]** A ui-tree MUST be a flat list of nodes whose root is node 0. Every child index MUST be in range and greater than its parent index, and a node MUST have at most one parent. Any violation, including a cycle, MUST trap with ui.invalid-tree.
+- **[WID-003]** A key MUST be unique across the whole view, not only among siblings. A duplicate key, or two items in one widget with the same item id, MUST trap with ui.duplicate-key.
+- **[WID-008]** A widget action MUST reach the plugin as a ui-action event carrying the node key and the action value.
+- **[WID-009]** Host-owned state (scroll offset, text cursor, selected tab) MUST survive a re-render when the key is unchanged.
+- **[WID-010]** A node with pointer-events and without focusable MUST send no pointer actions.
+- **[WID-011]** Escape MUST be reserved by the host and resolved in this order: a capturing key-capture, a text selection, the topmost popup, then a modal panel. A modal popup MUST send closed.
+- **[WID-012]** More than 4 open popups in one view MUST make open-popup fail with quota-exceeded.
+- **[WID-013]** A code-view on a buffer the plugin did not create MUST need editor.read, and a terminal-view MUST need terminal.read-screen. Without the grant the widget MUST draw an empty frame with the text "not permitted".
+- **[WID-014]** views.render has no result type. A render that breaks a limit (ui.too-large, ui.too-deep, ui.widget-not-allowed, ui.invalid-tree, ui.duplicate-key) MUST trap the render call with trap.invalid-ui-tree and the matching ui.* code as its detail reason, an item-count overflow trapping with ui.invalid-tree (WID-020). The host MUST log one error with the widget path, keep the last good tree on screen marked stale and count one failure.
+- **[WID-015]** A tooltip longer than 200 Unicode scalar values MUST be cut at 199 and end with the ellipsis. It MUST NOT be an error.
+- **[WID-016]** In a settings view, a widget outside the allowed subset MUST trap the render call with ui.widget-not-allowed: the host logs one error with the widget path, keeps the last good tree and counts one failure.
+- **[WID-017]** A tree deeper than 32 levels, counting the root as level 1, MUST trap with ui.too-deep.
+- **[WID-018]** Tab MUST visit focusable nodes with tab-index 1 or more in ascending order, then nodes with none or 0 in tree pre-order, and MUST skip negative values and nodes with disabled-reason.
+- **[WID-019]** Cell width MUST follow one rule for every widget: the host width of a string in cells, with wide glyphs as 2 and combining marks as 0.
+- **[WID-029]** A popup or dialog node MUST take no space in its parent layout. A popup id MUST be the node key and unique across a plugin's open views, and close-popup on an unopened id MUST be a no-op that returns ok.

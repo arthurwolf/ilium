@@ -404,3 +404,7 @@ Each install check that fails writes one JSONL `error` line with its code and, w
 - [Help topics](/pages/capability-help-read/) and [Notifications](/pages/api-notifications/) cover the help and sound files.
 
 API checked against `ilium:plugin@0.1.0` including contribution keys and grants.
+
+## Requirement statements
+
+- **[AUT-320]** Before every release you MUST run `ilium plugin check`, `lint` and `test`.

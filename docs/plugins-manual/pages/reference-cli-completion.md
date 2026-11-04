@@ -117,3 +117,16 @@ A plugin that declares `name: "notes"` with `aliases: ["nt"]` and `summary: "Sea
 ## Production additions: T5-devtools
 
 - **[DEV-907]** `ilium plugin completions <shell>` for `bash`, `zsh`, `fish` and `powershell` MUST print the script to standard output, exit 0 offline, and an unknown shell MUST exit 2 `usage.invalid-value`. Completion of `<id>` arguments MUST call `ilium plugin list --json` and MUST time out after 500 ms (proposed, owner to confirm) with no candidates and no error output.
+
+## Requirement statements
+
+- **[DEV-855]** Completion scripts MUST be provided for bash, zsh, fish and PowerShell. Each script MUST complete every subcommand that `ilium --help` lists, and it MUST be generated from the same command table that `ilium --help` reads.
+- **[DEV-856]** A subcommand that an installed and enabled plugin declares under `contributes.cli` MUST appear in every completion script and every man page, with its `name`, each entry of its `aliases` list and its `summary`. A name refused with `manifest.cli-name-reserved` or `manifest.cli-name-taken` MUST NOT appear.
+- **[DEV-857]** Man pages MUST be generated offline. The generation MUST NOT contact a registry, a mirror or a running server, and it MUST write one page for each kernel command, each core plugin command and each contributed subcommand.
+- **[DEV-869]** A completion script MUST complete the flags of each command that the command table lists, and MUST NOT complete a flag that the table does not list. For a contributed subcommand that declares `argument_groups: ["pane-selector"]`, the script MUST complete `--pane` and `--all-panes`.
+- **[DEV-870]** A completion script and a man page MUST be generated from the installed set without starting a plugin, without a running server and without network access. When no session is running, generation MUST still succeed and MUST use the manifests on disk.
+- **[DEV-871]** Generation MUST be deterministic. The same installed set and the same release MUST give byte-identical script and page text, with commands sorted by name.
+- **[DEV-872]** Each man page MUST give the command name, each alias, the `summary`, the arguments, the output form and the exit codes of the CLI reference. A contributed subcommand that declares an `arguments_schema` MUST have its arguments described from that schema.
+- **[DEV-873]** Generation MUST return exit code 2 for a shell other than bash, zsh, fish or PowerShell, and MUST write nothing. It MUST return exit code 1 and name the path when the output directory cannot be written, and it MUST NOT leave a half-written page.
+- **[DEV-874]** A plugin whose manifest cannot be read when a script or page is generated MUST be skipped with one warning that names the plugin id. The skip MUST NOT stop the generation, and the plugin MUST NOT appear in the output.
+- **[DEV-875]** A script and a page MUST NOT contain a command name or alias that fails the name rule, and MUST NOT contain text from a plugin other than the `name`, `aliases`, `summary` and the argument description from `arguments_schema`.

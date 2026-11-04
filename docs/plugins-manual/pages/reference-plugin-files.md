@@ -287,3 +287,19 @@ Five kinds of copy exist. They answer different questions and are not interchang
 - The pre-migration copy is for the host. Do not copy it by hand, because the next committed update keeps only the newest ([LIF-107]).
 
 **Stable interchange format.** [LIF-304] gives every on-disk format a number, but only the whole-host archive has a defined refusal for an unknown major number ([HST-654](#production-additions-t10-operations)). Third-party tools may therefore depend on `ilium-backup/1` and on `backup.json` fields (format, host version, creation time, OS, per-entry SHA-256), and on nothing else. The bucket JSON-lines layout, the privacy-folder file names and the single-plugin archive layout may change between host versions. Tools that need them must read the format number first and stop on a number they do not know.
+
+## Requirement statements
+
+- **[SEC-451]** `ilium plugin secret rotate` MUST replace a secret without reinstall, overwrite the old value and audit without the value.
+- **[SEC-452]** The HTTP API token and lock tokens MUST be rotatable, the old token failing at once.
+- **[SEC-453]** A secret with an `expires` time MUST warn 14 days ahead and give `secret.expired` after expiry.
+- **[USR-200]** The host MUST resolve `<config>`, `<data>`, `<cache>` and `<state>` with the `directories` crate for the project name `ilium` (`<state>` is the per-OS state folder of SEC-112), and MUST NOT write plugin files anywhere else.
+- **[USR-201]** The host MUST keep each item at the location in the table, and MUST create the parent folders on first use.
+- **[USR-202]** The host MUST write `installed.json`, the grant files and the trust store atomically: it writes a temporary sibling file, flushes it and renames it over the target.
+- **[USR-203]** Grants MUST be stored per user and per plugin, and MUST NOT be stored in a project folder.
+- **[USR-204]** The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start.
+- **[USR-205]** Each log line MUST have the five columns timestamp, level, side, plugin id and message, with the timestamp in the form `YYYY-MM-DD HH:mm:ss`.
+- **[USR-206]** The host MUST create plugin folders with owner-only access and plugin files with owner-only read and write access.
+- **[USR-207]** The host MUST refuse to read a grant file or the trust store when another user can write to it, and MUST treat every third-party plugin as not allowed to run until the file is fixed.
+- **[USR-208]** A default uninstall MUST remove the package, the grants, the cache and the Extensions order entries, and MUST keep settings.
+- **[USR-209]** `--purge` MUST also remove settings, data, storage buckets and the log, and `--keep-data` MUST keep data and storage without asking. The two flags exclude each other.

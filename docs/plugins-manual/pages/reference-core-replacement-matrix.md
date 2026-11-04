@@ -99,3 +99,10 @@ Every replacement is checked with the same codes, whichever row it replaces. The
 - [CLI compatibility](/pages/reference-cli-compatibility/) for the CLI names of each owner.
 - [Kernel and boot](/pages/reference-kernel-and-boot/) for what the user keeps when a core plugin is off.
 - [Core extension points](/pages/reference-core-extension-points/) for the points, services and topics of every core plugin.
+
+## Requirement statements
+
+- **[DEV-846]** A replacement of a core plugin in the matrix MUST provide every surface item of its row, with the same names, and each point and service MUST keep the same kind and the same major version as the plugin it replaces. A replacement that misses an item MUST fail at install with `manifest.replaces-surface-incomplete`, and the error MUST list each missing item.
+- **[DEV-847]** A replacement MUST NOT read, write or delete the config tables, snapshot sections and storage keys named in its row. Its stored data MUST stay on disk unchanged when the built-in plugin comes back.
+- **[DEV-848]** A replacement MUST keep every CLI name listed in its row. Each name MUST give the arguments, output and exit codes of the CLI reference, so that `ilium chat context --since-last-read` and the other names used by scripts and agent hooks keep working.
+- **[DEV-849]** The matrix MUST have one row for each core plugin whose page says `**Replaceable:** yes`, and for no other plugin. Each row MUST match the points, services, topics, commands and pane kinds of that page.

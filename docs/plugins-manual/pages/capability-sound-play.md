@@ -249,3 +249,8 @@ catalog: func() -> list<string>;
 - [Errors and limits](/pages/reference-errors-and-limits/) lists the error codes and the rate budgets.
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[CAP-880]** Every `play-sound` for an event MUST be accompanied, in the same batch, by a visible text signal for that event; a batch with a `play-sound` and no visible signal for the event MUST be rejected by the plugin check with `a11y.sound-only`.
+- **[CAP-881]** `failed(io)`, `refused(rate-limited)` and a muted sound setting MUST NOT suppress or delay the paired visible signal.

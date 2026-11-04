@@ -442,3 +442,17 @@ Requirement ids for this page: [SVC-020], [SVC-021], [SVC-022], [SVC-023], [SVC-
 - [Log](/pages/api-log/) for the `log` import used in the examples.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[SVC-020]** A plugin MUST publish only topics that start with its own plugin id and a slash. Another prefix MUST return not-permitted.
+- **[SVC-021]** A topic not declared in contributes.topics.publishes MUST return invalid-argument.
+- **[SVC-022]** A topic name over 128 characters, or a payload that is not JSON or is over 64 KiB, MUST return invalid-argument.
+- **[SVC-023]** More than 100 publishes per second per plugin MUST return rate-limited with retry-after-ms.
+- **[SVC-024]** A subscription pattern MUST be an exact topic, a prefix with /*, or a bare *. A star in any other position MUST be invalid.
+- **[SVC-025]** A subscriber without the grant MUST receive no events and no error.
+- **[SVC-026]** A full queue for topic-published MUST drop the oldest event and count it. A full queue for message MUST NOT drop and MUST complete the intent as refused(busy) without restarting the plugin (see SVC-030).
+- **[SVC-027]** A message to a peer without messages.peer:<plugin-id> MUST complete as refused(not-permitted). To a plugin not installed or disabled MUST complete as refused(not-found).
+- **[SVC-028]** A message channel MUST match [a-z0-9.-] and be at most 64 characters. A payload MUST be at most 1 MiB. Otherwise refused(invalid-argument).
+- **[SVC-029]** A message to an installed plugin that is not active MUST activate it and deliver after activate.
+- **[SVC-030]** When the receiver queue of a message is full and holds no drop-oldest event to evict, the message intent MUST complete refused(busy) and queue nothing, and the receiver MUST NOT be restarted. An accepted message MUST NOT be dropped.

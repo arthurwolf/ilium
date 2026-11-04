@@ -601,3 +601,7 @@ Checked against `ilium:plugin@0.1.0`.
 ## Production additions: T3-abi-api
 
 - **[API-201]** A subscribe import MUST be idempotent per (plugin, topic, filter): a second identical subscribe MUST return the same subscription id and MUST NOT duplicate delivery, and unsubscribe of a stale id MUST return ok.
+
+## Requirement statements
+
+- **[EVT-030]** The settings-changed event MUST carry the changed keys and their new values, delivered once per debounce window.

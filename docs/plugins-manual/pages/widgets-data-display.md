@@ -771,3 +771,9 @@ Requirement ids for this page: [WID-022], [WID-023], [WID-024]. See the [require
 - [Errors and limits](/pages/reference-errors-and-limits/)
 
 API version: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[WID-022]** The calendar widget (unstable) MUST show one month with Monday first, and MUST need the unstable list to include it.
+- **[WID-023]** A ratio below 0 or above 1 MUST be clamped to the range and NaN MUST draw as 0. A progress-row percent above 100 MUST be clamped to 100.
+- **[WID-024]** chart MUST draw Braille where the terminal supports it and a text-line fallback otherwise.

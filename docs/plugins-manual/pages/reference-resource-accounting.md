@@ -139,3 +139,23 @@ API version checked: `ilium:plugin@0.1.0`.
 - [HST-633] The host MUST charge a plugin side for event queue memory at 1 byte per queued payload byte plus 64 bytes per queued event, and MUST apply the drop-oldest policy when the charge reaches the queue limit.
 - [HST-634] The host MUST aggregate resource use across all plugins and `ilium plugin top` MUST show the 10 largest plugin sides by CPU, memory and storage, refreshed at most once per second, with columns plugin, side, cpu_pct, memory_bytes, handles, calls_per_second.
 - [HST-644] The host MUST bound the server-wide memory used by all plugin telemetry, logs buffers and traces to 16 MiB plus 64 KiB per plugin side, and `ilium plugin stats --host` MUST print the current value.
+
+## Requirement statements
+
+- **[HST-628]** The host MUST sample each plugin side's resident memory (linear memory plus table plus host-side buffers) at least once per second and expose `memory_bytes_current` and `memory_bytes_peak`, where peak MUST be reset only on instance restart.
+- **[HST-629]** A plugin side whose memory use reaches 90 percent (proposed, owner to confirm) of its effective limit MUST cause the log line `host.memory.high` once per 60 seconds, and an allocation failure at 100 percent MUST trap the instance with the trap code `out-of-memory` and MUST NOT affect other plugins.
+- **[HST-630]** CPU accounting MUST report `cpu_ms_total` and `cpu_ms_last_minute` per plugin side measured as thread CPU time, with a resolution of 1 ms, and MUST include time spent in synchronous host calls made on the plugin's behalf only when the call is charged to the plugin by LIF-139.
+- **[HST-631]** The host MUST count open handles per plugin side (files, sockets, subscriptions, timers, child processes) in `handles_open` with a label per kind, MUST refuse an open over the limit with `quota-exceeded` and the offending kind, and MUST release all handles of a stopped instance within 1 second.
+- **[HST-633]** The host MUST charge a plugin side for event queue memory at 1 byte per queued payload byte plus 64 bytes per queued event, and MUST apply the drop-oldest policy when the charge reaches the queue limit.
+- **[HST-634]** The host MUST aggregate resource use across all plugins and `ilium plugin top` MUST show the 10 largest plugin sides by CPU, memory and storage, refreshed at most once per second, with columns plugin, side, cpu_pct, memory_bytes, handles, calls_per_second.
+- **[HST-644]** The host MUST bound the server-wide memory used by all plugin telemetry, logs buffers and traces to 16 MiB plus 64 KiB per plugin side, and `ilium plugin stats --host` MUST print the current value.
+- **[LIF-139]** The host MUST charge thread CPU time of each call to the `ilium-execution` group of the plugin side, and MUST refuse a submission with `quota-exceeded` and a `retry-after-ms` when the bucket is empty.
+- **[LIF-140]** A refusal for quota MUST NOT count as a failure.
+- **[LIF-141]** An instance whose reservation does not fit MUST stay `inactive` with the reason `host-capacity`, MUST NOT be counted as a failure, and MUST start when memory is freed.
+- **[LIF-142]** A core T1 plugin MUST be admitted before any third-party plugin at server start.
+- **[LIF-143]** The effective limit MUST be `min(ceiling, v)`, where `v` is the first set of the `[plugins."<id>".limits]` value, the `[plugins.limits]` value, the manifest value and the default, in that order; 0 or a missing value means not set, so the next source applies. The user can raise a value up to the ceiling and can lower it. Session keys have no manifest value and the user may only lower them; a value above the current session value is clamped to it and the host logs a warning.
+- **[LIF-144]** A per-plugin user value MUST win over a user value for all plugins.
+- **[LIF-145]** The helper cgroup `memory.max` MUST equal the sum of the hosted instances' `memory_mib` plus 32 MiB, the same amount charged to `session_memory_mib` by HST-164.
+- **[LIF-146]** `ilium plugin stats` MUST print use, effective limit and source for memory, the execution bucket, storage and disk.
+- **[LIF-315]** On the reference machine, the host MUST activate a plugin within 200 ms at the 95th percentile and 1 s at the 99th percentile, and MUST support at least 64 active plugins per session without breaking those targets.
+- **[LIF-316]** When many plugins fail together, the host MUST start no more than 4 restarts at a time and MUST space the rest by the existing backoff, so that a restart storm MUST NOT hold more than one core for longer than 10 s. The host MUST publish the measured numbers in `ilium plugin top`.

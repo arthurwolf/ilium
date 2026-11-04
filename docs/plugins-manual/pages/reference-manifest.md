@@ -801,3 +801,80 @@ Security keys: `data_use` ([SEC-267]), `security_contact` ([SEC-268]) and the di
 ## Production additions: T4-package-registry
 
 - [PKG-805] `requires.plugins` and `requires.services` MUST each hold at most 64 entries (proposed limit, owner to confirm). A longer list MUST be refused with `manifest.limit` naming the key. Test: a manifest with 65 entries under each key is refused with `manifest.limit` naming that key, and a manifest with 64 entries installs.
+
+## Requirement statements
+
+- **[API-080]** The install MUST stop at the first failing step and MUST report every failure found inside that step, in the documented order. The exit code MUST be 1 when any error line was printed.
+- **[AUT-321]** An author MUST put the changelog in `README.md` and in the `description` (the home page, repository and security contact have manifest keys), and MUST NOT add other metadata keys, because an unknown key is refused with `manifest.unknown-key`.
+- **[LIF-277]** `data_version` MUST be an integer from 1 to 4,294,967,295 (0, negative, fractional and larger values are refused with `manifest.data-version`, as in LIF-100), and a stored version above the manifest value MUST follow the downgrade rule of the migration guide.
+- **[LIF-278]** A manifest with `data_version` above 1 MUST list `migrator` in `exports` for each of its `server` and `client` components, and each of those components MUST export it. Checked at stage 6 with `manifest.exports-mismatch`.
+- **[PKG-001]** The manifest MUST be the entry `manifest.json` at the root of the package, at most 1 MiB, encoded as UTF-8 without a byte order mark and valid under RFC 8259. A source manifest in a project folder has the same form.
+- **[PKG-002]** The top-level value MUST be an object. A JSON array, string, number, `true`, `false` or `null` is refused.
+- **[PKG-003]** The installer MUST refuse this input with `manifest.duplicate-key`: no object may hold the same member name twice. The check applies at every depth and before any key is interpreted. It stops the validation..
+- **[PKG-004]** Comments, trailing commas, single-quoted strings and unquoted keys are not JSON and MUST be refused.
+- **[PKG-006]** `null` is not a value. A key that is not needed MUST be omitted.
+- **[PKG-007]** A number that must be an integer MUST be written without a fraction or an exponent (`10`, not `10.0` or `1e1`) and MUST be inside the range of its key. Numbers that are not integers are used only where a key says `number`.
+- **[PKG-008]** Nesting MUST NOT be deeper than 32 levels.
+- **[PKG-009]** Display text (`name`, `publisher`, `description`, titles, labels) MUST NOT contain control characters, line or paragraph separators (U+2028, U+2029) or bidirectional override and isolate characters (U+202A to U+202E, U+2066 to U+2069).
+- **[PKG-010]** The order of keys does not change the meaning. `ilium plugin pack` writes them in the order of the table below and `files` last. The signature covers the exact bytes of the packed file, so the order after packing MUST NOT be changed.
+- **[PKG-011]** A source manifest MAY omit `files`. A packed manifest MUST contain it.
+- **[PKG-012]** A manifest MUST declare at least one of `server`, `client` and `scene`.
+- **[PKG-013]** `api` MUST be the string `ilium:plugin@0.1.0`. A well-formed `ilium:plugin@X.Y.Z` outside the window of the host is refused at stage 3 as unsupported. Any other string is a schema error.
+- **[PKG-014]** `id` MUST have 2 to 8 segments joined by `.`. A segment has 1 to 32 characters from `a-z`, `0-9` and `-`, and does not start or end with `-`. The whole id has at most 128 characters. The prefix `ilium.` is reserved for the release, and `core`, `local` and `test` are reserved as first segments (PKG-2
+- **[PKG-015]** `name` is the title that the review dialog, the store and the Plugins screen show. It MUST follow PKG-009.
+- **[PKG-016]** `version` MUST be a SemVer 2.0.0 string with three numeric parts and an optional prerelease and build part. A leading `v` is refused. Details: Versions and dependencies.
+- **[PKG-017]** `publisher` is a display name. It MUST equal the display name stored with the signing key (PKG-219) for a signed package. It is not an identity.
+- **[PKG-018]** The installer MUST refuse this input with `manifest.display-name`: `description` is one paragraph shown in the review dialog and the store..
+- **[PKG-019]** The installer MUST refuse with `manifest.schema` a `license` longer than 128 characters or empty (reference-manifest-schema). `license` is shown and stored; the host checks only the length. A registry publish may require a known SPDX expression..
+- **[PKG-020]** The client SHOULD draw an icon name that it does not know as the default plugin icon. `check` reports a warning and the installer never refuses the package for it..
+- **[PKG-021]** The installer MUST refuse this input with `manifest.schema`, `registry.category-unknown`: `categories` is required to publish to a registry. A value outside the list is refused at publish..
+- **[PKG-022]** The installer MUST refuse with `manifest.schema` a `keywords` list of more than 8 items, or an item shorter than 1 or longer than 24 characters. `keywords` feed search only..
+- **[PKG-023]** The installer MUST refuse this input with `manifest.schema`: `homepage` and `repository` are shown as text and as a link that the user opens on purpose. The host never fetches them..
+- **[PKG-024]** A side that is declared MUST have its component in the package (PKG-125).
+- **[PKG-025]** `capabilities` MAY have the keys `server`, `client` and `scene` only. A list for a side without a component is refused. Each list holds at most 256 distinct grants.
+- **[PKG-026]** The installer MUST refuse this input with `manifest.schema`: `activation` entries follow [Activation triggers](#activation-triggers)..
+- **[PKG-028]** Each entry of `replaces` MUST be a core plugin id. The rules are under Replacement.
+- **[PKG-029]** The installer MUST refuse this input with `manifest.limits-tier`, `manifest.schema`: `replaceable` and `surface` are for core plugins. A third-party package that sets `replaceable` is refused. `surface` entries are `kind:name` with `kind` one of `services`, `points`, `commands`, `pane-kinds`, `topics` and `cli`..
+- **[PKG-030]** The installer MUST refuse this input with `manifest.unknown-key`: `contributes` accepts only the keys of the tables below..
+- **[PKG-031]** The installer MUST refuse this input with `manifest.unknown-key`: `limits` accepts only the keys of the [Limits object](#limits-object). A request above the ceiling is clamped, never refused..
+- **[PKG-033]** The installer MUST refuse this input with `manifest.limits-tier`: `limits_tier: "first-party"` raises the settings caps for bundled T1 plugins with an `ilium.` id. Any other package that sets it is refused at stage 9..
+- **[PKG-034]** An `unstable` name MUST be a feature of this host. A T2 or T3 package can list one only in development mode. A component that imports an unstable item not named here is refused.
+- **[PKG-035]** The installer MUST refuse this input with `manifest.files-order`, `manifest.file-*`: `files` lists every entry except `manifest.json` and `signature`, sorted in archive order, with no path twice..
+- **[PKG-040]** `entry` MUST be `server.wasm` for `server`, `client.wasm` for `client` and `scene.wasm` for `scene`.
+- **[PKG-041]** `world` MUST be `ilium:server/base@0.1.0` for `server`, `ilium:client/base@0.1.0` for `client` and `ilium:anim/base@0.1.0` for `scene`.
+- **[PKG-042]** The installer MUST refuse this input with `manifest.schema`: [ABI-018] `exports` lists only the optional exports of that side, once each, from the table below. The required exports (`lifecycle` and `handler`, and `renderer` for a scene) are never listed. Default: the empty list..
+- **[PKG-043]** The list MUST equal the optional exports that the component really has. Both a missing and an extra name are refused.
+- **[PKG-044]** A side that lists `hook-handler` MUST have at least one extension with a `handler` on that side. A side with such extensions MUST list it.
+- **[PKG-045]** The following MUST hold. A manifest with `data_version` above 1 MUST list `migrator` in `exports` for each of its `server` and `client` components (a `scene` component has no `migrator`), and each of those components MUST export it. A component with nothing to migrate exports a `migrator` that returns `ok`. Checked at stage 6 with `manifest.exports-mismatch` (rule LIF-278).
+- **[PKG-050]** The installer MUST refuse this input with `manifest.grant-unknown`, `manifest.grant-argument`: a grant is a string of 3 to 256 characters: a name of lower-case words joined by `.` or `-`, optionally followed by `:` and an argument. The first colon separates them..
+- **[PKG-051]** A grant MUST be a grant of this API version, in the Capability table.
+- **[PKG-052]** The installer MUST refuse this input with `manifest.grant-argument-missing`, `manifest.grant-argument`: a grant that needs an argument and has none is refused. A grant that takes no argument and has one is refused..
+- **[PKG-053]** The installer MUST refuse this input with `manifest.grant-wildcard`: a wildcard is allowed only where the grant's grammar says so..
+- **[PKG-054]** A grant MUST be available on the side that lists it.
+- **[PKG-055]** A grant that needs another grant (`fs.pick` needs `fs.read:picked` or `fs.write:picked`) MUST find it in the same side list.
+- **[PKG-056]** An `fs.*` scope MUST be known and accept the access. A `process.run` argument MUST be a program name or an absolute path, without arguments.
+- **[PKG-057]** The installer MUST refuse this input with `manifest.grant-tier`: a grant for bundled plugins only (high-risk `settings.read-all`, `sessions.cross` for T3) is refused for any other tier. The tier is known only after the signature, so this check runs at stage 9..
+- **[PKG-058]** When declining a grant at install never fails the install. Each import that needs a declined grant returns `not-permitted`., the client MUST do this: none
+- **[PKG-059]** The installer MUST refuse this input with `manifest.schema`: `activation` is a list of at most 32 distinct triggers. Each is `startup`, `durable-timer`, or a kind from the table followed by `:` and a name without spaces. An unknown kind is refused. Without `activation`, the plugin is lazy..
+- **[PKG-060]** A trigger that names an own contribution (`command:`, `view:`, `pane-kind:`, `scene:`, `cli:`, `settings:`, `catalog:`, `menu:`, `virtual-rows:`) MUST name one that exists in `contributes`.
+- **[PKG-061]** The installer MUST refuse this input with `manifest.contribution-limit`, `manifest.schema`: each list under `contributes` is an array with at most the number of entries in its cap (32 where the table gives none). An entry `id` is 1 to 64 characters of `a-z`, `0-9` and `-`, unique inside its list..
+- **[PKG-062]** A reference to another contribution (`command`, `popup_view`, `slot`, `parent`, `help`) MUST name an entry of this plugin that exists, unless the field says that another plugin's id is allowed.
+- **[PKG-063]** A file named by `help` or `sounds` MUST exist in the package under `help/` or `sounds/` and be listed in `files`.
+- **[PKG-064]** `contributes.scenes` MUST NOT be present unless the manifest declares a `scene` component.
+- **[PKG-065]** A `cli` name, a `sound` id and a `commands` global id MUST NOT collide with another entry of the same plugin. A collision with another installed plugin is found when the second one is installed.
+- **[PKG-070]** The installer MUST refuse this input with `manifest.schema`: every `limits` value is an integer from 0 to 4,294,967,295 in the unit of its key..
+- **[PKG-071]** When a value above the ceiling of the tier is clamped to the ceiling and logged. It is never refused. A value of 0 means the default., the client MUST do this: none
+- **[PKG-072]** The installer MUST refuse this input with `manifest.unknown-key`: a key outside the table is refused..
+- **[PKG-073]** When the ceiling comes from the tier, which is known only after the signature check. The manifest cannot raise it., the client MUST do this: none
+- **[PKG-074]** The user MAY set the same keys under `[plugins.limits]` or `[plugins."<id>".limits]`. The effective value MUST be `min(ceiling, v)`, where `v` is the first set of the `[plugins."<id>".limits]` value, the `[plugins.limits]` value, the manifest value and the default, in that order; 0 or a missing value means not set. The user can raise a value up to the ceiling and can lower it (LIF-143).
+- **[PKG-075]** A stage that collects errors MUST report every error it finds in byte order of the JSON pointer of the manifest location it concerns (PKG-578), up to 100. A test with two defects in one stage expects both codes. A test with defects in two stages expects only the earlier one.
+- **[PKG-076]** The following MUST hold. Every error carries a `code`, a `message` from the template of the catalogue, and, when the error has a place in the document, a pointer (RFC 6901) or a path to it.
+- **[PKG-077]** The following MUST hold. `ilium plugin check` on a source manifest runs stages 2 to 4. It reports the same codes and pointers as the installer.
+- **[PKG-078]** The following MUST hold. The code of every error is in the error catalogue. The older spellings are in the table of retired codes.
+- **[PKG-079]** The installer MUST refuse this input with `manifest.service-name`, `manifest.file-missing`: a provider name whose prefix is neither this plugin's id nor the id of a core plugin in this package's `replaces` list (accepted only for items in that core plugin's surface), a duplicate name or a missing schema file is refused.
+- **[PKG-579]** `accepts_messages_from` MUST be a list of at most 32 distinct plugin ids. A plugin MUST receive peer messages only from listed ids ([SVC-030]). Other keys of the extension and service tables follow [reference-manifest](/pages/reference-manifest/): `on_failure`, `final_check` and `guard` are allowed only as described there, else `manifest.extension-point-invalid`; `requires.services` entries MUST be `<name>@<major>.<minor>.<patch>`, else `manifest.service-version`.
+- **[PKG-805]** `requires.plugins` and `requires.services` MUST each hold at most 64 entries (proposed limit, owner to confirm). A longer list MUST be refused with `manifest.limit` naming the key.
+- **[PKG-706]** A manifest MAY provide `name`, `description` and `screenshots` text in a `[locale.<tag>]` table keyed by a BCP 47 language tag. The host MUST choose the entry for the user's language, fall back to the base language and then to the unlocalized value, and MUST require an alt text for every screenshot in every locale.
+- **[PKG-707]** The host MUST validate localized fields with the limits of the unlocalized ones (name at most 64 characters, description at most 500, alt text at most 200, counted in Unicode scalar values), MUST refuse control characters and bidirectional override characters, and MUST reject a violation with `manifest.listing-invalid` naming the locale and the field.
+- **[ABI-006]** The optional exports a component has MUST equal the optional exports its manifest lists.
+- **[ABI-018]** Required exports (lifecycle, handler, renderer) MUST NOT be listed in the manifest exports.

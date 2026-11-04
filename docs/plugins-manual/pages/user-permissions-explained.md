@@ -320,3 +320,20 @@ Even with permissions, Ilium limits what a plugin can do to your screen and sess
 - [Security](/pages/security/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[USR-020]** A permission MUST apply to one plugin and one side, MUST be stored per user, and MUST NOT be shared through a project folder.
+- **[USR-021]** A plugin MUST NOT obtain a permission that its manifest does not list.
+- **[USR-022]** The review dialog MUST start every HIGH row unchecked and every normal row checked.
+- **[USR-080]** The Capabilities tab MUST show the plain wording, the grant string, the risk and the state (granted, declined, revoked) of every permission the plugin requests.
+- **[USR-081]** A package that requests a bundled-only grant MUST fail to install with `manifest.grant-tier`.
+- **[USR-082]** A grant string MUST be shown exactly as it will be matched, including its argument, so that the user can see the host, program or place.
+- **[USR-083]** Ilium MUST ask the user before it opens a link from a plugin, for each target website and plugin, and MUST remember the answer.
+- **[USR-084]** Ilium MUST NOT contact a host from a `http:setting` grant until the user has confirmed that host.
+- **[USR-085]** A revoke MUST take effect for calls started after it, MUST make calls in flight return `revoked`, and MUST restart the plugin with the smaller set.
+- **[USR-086]** A HIGH grant MUST ask for confirmation in the attached client.
+- **[USR-087]** Ilium MUST show a footer indicator for 3 s after a plugin reads or writes the clipboard.
+- **[USR-088]** Ilium MUST drop toasts beyond 3 per 10 s per plugin and MUST end an input lock after 2 s.
+- **[USR-259]** Permission wording, notices and error text shown to users MUST come from message catalogues keyed by message id, so a translation can replace them without changing the id.
+- **[USR-260]** When a message has no text in the user's language, the host MUST fall back to English for that message, and the recovery page MUST always be shown in English if its catalogue fails to load.

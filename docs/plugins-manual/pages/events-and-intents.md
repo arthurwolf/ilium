@@ -430,3 +430,9 @@ Rust `FakeHost` (feature `testing`) and TypeScript `createFakeHost()` from `@ili
 API version checked: `ilium:plugin@0.1.0`.
 
 Requirements for this page: [Events and intents requirements](/pages/reference-requirements-events-intents/).
+
+## Requirement statements
+
+- **[ABI-010]** A dedup key MUST be 1 to 128 characters from [A-Za-z0-9._:/-] and is mandatory for send-input and agent-action.
+- **[ABI-031]** The kernel MUST run two batch-level checks over the whole submission list in index order before any effect: shape first, then grant. Inside one submission shape wins over grant.
+- **[ABI-032]** Every check other than shape and grant (target, readiness, value validity, rate, quota, conflict, if-current) MUST be per submission and MUST affect only that submission.

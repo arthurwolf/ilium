@@ -130,3 +130,13 @@ The file name `known-projects.json`, the 365-day ageing, the codes `backup.proje
 - [Requirements, lifecycle and operations](/pages/reference-requirements-lifecycle-ops/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[LIF-160]** The host MUST accept installs only into the user scope in 0.1.0, and MUST refuse `--scope project` for install with `install.scope-unsupported`.
+- **[LIF-161]** The effective enabled value MUST follow the order session, project, global.
+- **[LIF-162]** `plugins.toml` MUST be read as a request only. It MUST NOT install, grant or raise a tier.
+- **[LIF-163]** A global enable, disable or uninstall MUST reach every running session of the user within 2 seconds.
+- **[LIF-164]** The CLI MUST print one `session-result` line per session and exit 0 only when all succeeded.
+- **[LIF-165]** A failure disable MUST apply to the session where it happened and MUST NOT disable the plugin in other sessions.
+- **[LIF-166]** A grant change MUST apply to every session and the "Not now" counter MUST be shared.

@@ -331,3 +331,9 @@ Target behaviour (specified here before the code is written).
 - [Security and policy requirements](/pages/reference-requirements-security-policy/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[SEC-454]** Each OS user MUST have separate 0700 runtime, socket, cache, trust and state paths; the server MUST refuse foreign or open ones.
+- **[SEC-455]** No compiled module, cache or secret MAY be shared between OS users; a writable-by-others policy file MUST be refused.
+- **[SEC-456]** A helper MUST NOT see another OS user's processes, sockets or files, and `peer` messaging MUST stay inside one user's server.

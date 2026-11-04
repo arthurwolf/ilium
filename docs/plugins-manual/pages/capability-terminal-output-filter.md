@@ -295,3 +295,7 @@ Checked against the API version `ilium:plugin@0.1.0`.
 ### Security
 
 **[SEC-046]** Filter patterns are compiled with size limits; a catastrophic pattern is refused with `invalid-argument`. See [Security testing](/pages/reference-security-testing/).
+
+## Requirement statements
+
+- **[PRI-006]** A terminal output filter MUST accept at most rate_per_second matches per filter instance and pane. A match above the limit MUST be dropped and counted, not delivered.

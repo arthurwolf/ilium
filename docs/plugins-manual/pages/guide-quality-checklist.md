@@ -163,3 +163,16 @@ A suppression lives in `lint.toml` with a rule, an optional `key_path` and a rea
 - [Troubleshooting](/pages/guide-troubleshooting/)
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Requirement statements
+
+- **[AUT-401]** A release MUST have no `check` error and no unsuppressed `lint` error.
+- **[AUT-402]** A release SHOULD pass `ilium plugin lint --deny warnings`, and every suppression SHOULD carry a reason that a reviewer can read.
+- **[AUT-403]** A plugin MUST NOT list an `unstable` feature in a release unless the plugin is for development use, because the shape of that feature can change without a major version.
+- **[AUT-404]** A plugin MUST request the smallest grant set that works, and every grant MUST be explained in the README with the feature that needs it.
+- **[AUT-405]** A plugin MUST handle `not-permitted` for every call of an optional grant and MUST keep working with a reduced feature set.
+- **[AUT-406]** A plugin SHOULD keep every measured use below 80 percent of its limit on the largest realistic data set, because the limit is a trap, not a warning. See Performance.
+- **[AUT-407]** A plugin MUST give every interactive widget a stable `key`.
+- **[AUT-408]** A plugin MUST have at least one test for activation, one for deactivation and one for each error code that its code handles.
+- **[AUT-409]** A plugin that changes the layout of stored data MUST test the upgrade from the previous release with a storage snapshot of that release.
+- **[AUT-410]** A plugin MUST NOT use colour as the only carrier of meaning.

@@ -399,3 +399,21 @@ Requirement ids for this page: [CAP-001], [CAP-002], [CAP-003], [CAP-004], [CAP-
 Checked against the API version `ilium:plugin@0.1.0`.
 
 Requirements for this page: [Capabilities requirements](/pages/reference-requirements-capabilities/).
+
+## Requirement statements
+
+- **[CAP-001]** A grant string MUST be name or name:argument. The first colon MUST split name and argument. Later colons MUST belong to the argument.
+- **[CAP-002]** An unknown grant name MUST fail the install with manifest.grant-unknown.
+- **[CAP-003]** A wildcard in a forbidden place MUST fail with manifest.grant-wildcard. commands.invoke:com.example.notes/* MUST be valid and commands.invoke:*/notes MUST be refused.
+- **[CAP-004]** A grant that takes no argument MUST fail with manifest.grant-argument when given one. A grant that needs an argument MUST fail with manifest.grant-argument-missing when it has none.
+- **[CAP-005]** A grant limited to bundled T1 plugins MUST fail with manifest.grant-tier in any other tier.
+- **[CAP-006]** A grant MUST be refused with manifest.grant-side when listed on a side where it is not available.
+- **[CAP-007]** fs.pick MUST need fs.read:picked or fs.write:picked, and settings.write-all MUST need settings.read-all. A missing dependency MUST fail with manifest.grant-dependency.
+- **[CAP-010]** Grants MUST have a risk tier of always, normal or high. The install dialog MUST list them by tier. A high grant MUST be listed and MUST be unchecked by default.
+- **[CAP-011]** The always-granted capabilities (log, clock, timers, storage, settings, codec, fs.read:package, fs.read:data, fs.write:data, fs.read:cache, fs.write:cache, fs.watch:data, fs.watch:cache, own-side messages, ui.invalidate for own views) MUST need no manifest entry and no user grant.
+- **[CAP-012]** Grants MUST be recorded per plugin and per side. A server grant MUST NOT authorize a client call.
+- **[CAP-013]** When the user declines a grant the plugin MUST still load. Calls that need it MUST return not-permitted. The granted list MUST omit it.
+- **[CAP-014]** A refused call MUST be logged as: refused <grant> by <function> (<reason>).
+- **[CAP-015]** Revoking a grant at run time MUST re-activate the plugin with the reduced set. In-flight calls that depended on it MUST end with revoked. Contributions that depended on it MUST be withdrawn.
+- **[CAP-016]** An upgrade that asks for new grants MUST show the user only the new grants.
+- **[CAP-017]** The table of grant forms MUST list 71 forms. A grant used in a capability page MUST exist in the table.

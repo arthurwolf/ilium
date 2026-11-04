@@ -630,3 +630,7 @@ Requirement ids for this page: [WID-028]. See the [requirements index](/pages/re
 - [Terminal primitive](/pages/primitives-terminal/)
 - [Accessibility and theming](/pages/accessibility-and-theming/)
 - [Errors and limits](/pages/reference-errors-and-limits/)
+
+## Requirement statements
+
+- **[WID-028]** An image whose asset is missing, corrupt, unsupported or over 16 MiB MUST draw an empty frame with the text "image not available". A code-view or terminal-view that names a missing buffer or pane MUST draw an empty frame with the text "not found".
