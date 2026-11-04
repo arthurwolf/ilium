@@ -212,6 +212,18 @@ pub struct ProgressMonitorRuntimeState {
     pub result_delivery: ProgressDeliveryState,
 }
 
+/// Process-bound inputs for an off-lock cache-wait observation. Possession
+/// of this snapshot alone does not authorize a provider request: its caller
+/// must recheck the process and the pane binding immediately before use.
+pub(crate) struct CacheWaitSource {
+    pub generation: u64,
+    pub process: AgentProcessKey,
+    pub process_identity: Arc<ilium_platform::process_control::PtyProcessIdentity>,
+    pub session_id: String,
+    pub transcript_path: PathBuf,
+    pub monitor_running: bool,
+}
+
 impl ProgressMonitorRuntimeState {
     /// The task reported done/error, or the monitor itself failed.
     pub fn is_settled(&self) -> bool {
@@ -799,6 +811,42 @@ impl TerminalPaneRuntime {
     /// Every monitor registered on this pane, in registration order.
     pub fn progress_monitors(&self) -> impl Iterator<Item = &ProgressMonitorRuntimeState> {
         self.progress_monitors.iter().map(|slot| &slot.state)
+    }
+
+    /// Read only facts already established by agent detection. A monitor may
+    /// run independently of an agent wait, so its state stays a separate fact.
+    pub(crate) fn cache_wait_source(&self) -> Option<CacheWaitSource> {
+        let process = self.agent_process_key.as_ref()?;
+        if self.is_session_identity_invalidated
+            || self.verified_agent_exit.is_some()
+            || self.session_agent_class.as_ref() != Some(&process.class)
+            || self.session_process_id != Some(process.process_id)
+            || self.session_process_started_at_unix_seconds != Some(process.started_at_unix_seconds)
+            || !matches!(process.class, AgentClass::Claude | AgentClass::Codex)
+        {
+            return None;
+        }
+        Some(CacheWaitSource {
+            generation: self.agent_generation,
+            process: process.clone(),
+            process_identity: self.session_process_identity.clone()?,
+            session_id: self.session_id.clone()?,
+            transcript_path: self.session_transcript_path.clone()?,
+            monitor_running: self.progress_monitors().any(|monitor| !monitor.is_settled()),
+        })
+    }
+
+    /// Recheck after I/O; a resumed session or replaced process cannot reuse
+    /// evidence collected for its predecessor. Monitor liveness is returned
+    /// afresh by `cache_wait_source`, never trusted from an earlier snapshot.
+    pub(crate) fn cache_wait_source_is_current(&self, source: &CacheWaitSource) -> bool {
+        self.cache_wait_source().is_some_and(|current| {
+            current.generation == source.generation
+                && current.process == source.process
+                && Arc::ptr_eq(&current.process_identity, &source.process_identity)
+                && current.session_id == source.session_id
+                && current.transcript_path == source.transcript_path
+        })
     }
 
     pub fn progress_monitor(&self, monitor_id: u64) -> Option<&ProgressMonitorRuntimeState> {
@@ -1677,6 +1725,7 @@ mod tests {
             None,
             Duration::from_secs(1),
         );
+        assert!(runtime.cache_wait_source().is_none());
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 123,
@@ -1686,6 +1735,9 @@ mod tests {
             process_tree_depth: 1,
         };
         runtime.agent_process_key = Some(agent_process_key(&identity));
+        // Process classification without a verified session and transcript is
+        // insufficient to authorize cache-wait evidence.
+        assert!(runtime.cache_wait_source().is_none());
         runtime.detection_schedule.cached_identity = Some(identity);
         runtime.agent_input_available = true;
         let status =

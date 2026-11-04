@@ -684,9 +684,15 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &crate::app::App, state: &
             let (first, visible) = condition_window(state, regions.editor, terms.len());
             for (index, term) in terms.iter().enumerate().skip(first).take(visible) {
                 let prefix = if index == 0 { "IF" } else if connectors[index - 1] == Connector::And { "AND" } else { "OR" };
-                let text = format!("{prefix} {}{}", if term.negated { "NOT " } else { "" }, condition_label(&term.condition));
-                let style = if state.column == EditorColumn::ConditionAndVisual && state.selected_condition == index { crate::theme::selected_style() } else { Style::new() };
-                details.push(Line::from(Span::styled(text, style)));
+                let selected = state.column == EditorColumn::ConditionAndVisual && state.selected_condition == index;
+                let background = if selected { crate::theme::selected_style() } else { Style::new() };
+                let keyword = background.fg(Color::White).add_modifier(Modifier::BOLD);
+                let mut spans = vec![Span::styled(format!("{prefix} "), keyword)];
+                if term.negated {
+                    spans.push(Span::styled("NOT ", background.fg(Color::LightRed).add_modifier(Modifier::BOLD)));
+                }
+                spans.push(Span::styled(condition_label(&term.condition), background.fg(Color::Cyan)));
+                details.push(Line::from(spans));
             }
         }
         details.push(Line::from(vec![Span::styled("THEN ", Style::new().fg(Color::White).add_modifier(Modifier::BOLD)),

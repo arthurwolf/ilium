@@ -281,6 +281,8 @@ pub struct ServerState {
     pub agent_detection_settings_transaction: Mutex<()>,
     /// Live `[notifications]` settings; the config watcher refreshes them.
     pub notifications_config: RwLock<NotificationsConfig>,
+    /// Live cache policy; subscribers are notified when the shared file changes.
+    pub(crate) cache_keepalive: watch::Sender<ilium_core::cache_keepalive::CacheKeepaliveSettings>,
     /// Bounds repeated task-outcome alerts per pane. Held only briefly and
     /// never across an await.
     pub task_outcome_coalescer: std::sync::Mutex<crate::notifications::TaskOutcomeCoalescer>,
@@ -562,6 +564,7 @@ impl ServerState {
             }),
             agent_detection_settings_transaction: Mutex::new(()),
             notifications_config: RwLock::new(options.notifications_config),
+            cache_keepalive: watch::channel(Default::default()).0,
             task_outcome_coalescer: std::sync::Mutex::default(),
             sound_settings: RwLock::new(options.sound_settings),
             text_trigger_settings: RwLock::new(VersionedTextTriggerSettings::default()),

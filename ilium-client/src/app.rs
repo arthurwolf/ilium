@@ -947,6 +947,12 @@ pub enum AgentMonitoringRow {
     ProgressFillStyle,
     WorkingPollSeconds,
     IdlePollSeconds,
+    CacheKeepaliveEnabled,
+    CacheKeepaliveClaudeInterval,
+    CacheKeepaliveCodexInterval,
+    CacheKeepaliveMonitor,
+    CacheKeepaliveCommand,
+    CacheKeepaliveSubagent,
     CustomSignaturesHeading,
     CustomSignature(usize),
     AddCustomSignature,
@@ -966,6 +972,12 @@ impl AgentMonitoringRow {
             Self::ProgressFillStyle,
             Self::WorkingPollSeconds,
             Self::IdlePollSeconds,
+            Self::CacheKeepaliveEnabled,
+            Self::CacheKeepaliveClaudeInterval,
+            Self::CacheKeepaliveCodexInterval,
+            Self::CacheKeepaliveMonitor,
+            Self::CacheKeepaliveCommand,
+            Self::CacheKeepaliveSubagent,
             Self::CustomSignaturesHeading,
         ];
         rows.extend((0..custom_signature_count).map(Self::CustomSignature));
@@ -7333,6 +7345,31 @@ impl App {
             }
             AgentMonitoringRow::ProgressFillStyle => {
                 self.settings_adjust_progress_fill_style(direction)
+            }
+            AgentMonitoringRow::CacheKeepaliveEnabled
+            | AgentMonitoringRow::CacheKeepaliveClaudeInterval
+            | AgentMonitoringRow::CacheKeepaliveCodexInterval
+            | AgentMonitoringRow::CacheKeepaliveMonitor
+            | AgentMonitoringRow::CacheKeepaliveCommand
+            | AgentMonitoringRow::CacheKeepaliveSubagent => {
+                let mut ui = self.ui_settings.clone();
+                let policy = &mut ui.cache_keepalive;
+                match row {
+                    AgentMonitoringRow::CacheKeepaliveEnabled => policy.enabled = !policy.enabled,
+                    AgentMonitoringRow::CacheKeepaliveMonitor => policy.on_monitor = !policy.on_monitor,
+                    AgentMonitoringRow::CacheKeepaliveCommand => policy.on_command = !policy.on_command,
+                    AgentMonitoringRow::CacheKeepaliveSubagent => policy.on_subagent = !policy.on_subagent,
+                    AgentMonitoringRow::CacheKeepaliveClaudeInterval | AgentMonitoringRow::CacheKeepaliveCodexInterval => {
+                        let interval = if row == AgentMonitoringRow::CacheKeepaliveClaudeInterval {
+                            &mut policy.claude_interval_minutes
+                        } else {
+                            &mut policy.codex_interval_minutes
+                        };
+                        *interval = if direction < 0 { interval.saturating_sub(1).max(1) } else { interval.saturating_add(1).min(1440) };
+                    }
+                    _ => unreachable!(),
+                }
+                self.apply_and_persist_ui_settings(ui);
             }
             AgentMonitoringRow::WorkingPollSeconds | AgentMonitoringRow::IdlePollSeconds => {
                 let Some(mut settings) = self.agent_detection_settings.clone() else {
@@ -21855,6 +21892,26 @@ mod tests {
                 .ui
                 .agent_tree_model_icons
         );
+    }
+
+    #[test]
+    fn cache_keepalive_settings_adjust_and_persist_independently() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        assert!(!app.ui_settings.cache_keepalive.enabled);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveEnabled, 1);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveClaudeInterval, -1);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveCodexInterval, 1);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveMonitor, 1);
+        app.settle_filesystem_for_test();
+        let policy = crate::config::load(config_dir.path()).unwrap().ui.cache_keepalive;
+        assert!(policy.enabled);
+        assert_eq!(policy.claude_interval_minutes, 54);
+        assert_eq!(policy.codex_interval_minutes, 26);
+        assert!(!policy.on_monitor);
+        assert!(policy.on_command);
+        assert!(policy.on_subagent);
     }
 
     #[test]

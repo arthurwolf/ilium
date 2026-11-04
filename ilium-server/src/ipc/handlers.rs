@@ -12875,6 +12875,38 @@ mod tests {
         teardown_state_panes(&state);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn held_progress_wait_survives_many_yield_boundaries_without_delivery() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("progress-long-wait").await;
+        install_wait_test_monitor(&state, pane_id, 71).await;
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 710, pane_id, 71, &reply).await;
+
+        // Transport yield intervals do not own the logical wait lifetime.
+        // Cross 1,440 former 60-second boundaries without a terminal event.
+        for _ in 0..1_440 {
+            tokio::time::advance(Duration::from_secs(60)).await;
+            assert!(matches!(
+                receiver.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ));
+        }
+
+        let done = settle_wait_test_monitor(&state, pane_id, 71).await;
+        assert!(hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
+        let outcome = next_wait_reply(&mut receiver).await.expect("actual outcome");
+        assert_eq!(outcome.monitor_id, 71);
+        assert_eq!(outcome.progress, Some(done.clone()));
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);
+        assert!(outcome.composer_notice_suppressed);
+        assert!(!hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        teardown_state_panes(&state);
+    }
+
     fn persisted_running_progress_monitor(
         pane_id: NodeId,
         command: String,

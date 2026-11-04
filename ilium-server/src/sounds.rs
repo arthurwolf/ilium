@@ -563,6 +563,14 @@ fn spawn_config_watcher_with_interval(
                         *state.sound_settings.write().await = settings;
                         *state.notifications_config.write().await = refresh.notifications;
                         state.set_session_backups_enabled(refresh.backups_enabled);
+                        state.cache_keepalive.send_if_modified(|current| {
+                            if *current == refresh.cache_keepalive {
+                                false
+                            } else {
+                                *current = refresh.cache_keepalive;
+                                true
+                            }
+                        });
                         // Refusals never consume the observed revision.
                         observed_fingerprint = Some(refresh.fingerprint);
                     }
@@ -877,13 +885,15 @@ mod tests {
 
         std::fs::write(
             &config_path,
-            "[sound.events]\napproval_required = true\n[session]\nbackups_enabled = false\n",
+            "[sound.events]\napproval_required = true\n[session]\nbackups_enabled = false\n[ui.cache_keepalive]\nenabled = true\ncodex_interval_minutes = 7\n",
         )
         .unwrap();
         let updated = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if state.sound_settings.read().await.events.approval_required
                     && !state.session_backups_enabled()
+                    && state.cache_keepalive.borrow().enabled
+                    && state.cache_keepalive.borrow().codex_interval_minutes == 7
                 {
                     break;
                 }
