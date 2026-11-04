@@ -135,6 +135,34 @@ Rules for the caller when it is upgraded or the provider is missing:
 
 Test the upgrade before release: run the caller against the provider at each version in its range and once with no provider. Install the new provider over the old one, run the same command again, and check that the caller's output does not change for the fallback case. The step-by-step version of this test is in [tutorial 22](/pages/tutorial-22-versioned-service-with-fallbacks/).
 
+### Two majors during a transition
+
+A provider cannot serve two majors of one service name at once. The provider lists one `provides` entry per name with one version, and a caller's `requires` entry picks a major against that version. So a provider that must change the major of a name while callers on the old major still run keeps both majors alive, each under its own name.
+
+- **[COR-956]** A provider that must change the major of a service name while callers on the old major still run MUST keep the old major under its old name as a second `provides` entry, MUST give the new major its own name, and MUST NOT carry two majors under one name.
+
+The steps for a provider are these.
+
+1. Add the new major as a second entry in `contributes.services.provides`, under a new name such as `com.example.titles/suggest-v2` at `1.0.0`. Leave the old entry, `com.example.titles/suggest` at its old version, as it was.
+2. Give the new name its own implementation and its own `services.provide:` grant. The old name keeps its implementation.
+3. Keep the old entry working for the window. The window ends no earlier than 90 days after the release that added the new name, and the release that removes the old entry names the removal date in its release notes ([COR-957]).
+
+A caller moves one name at a time. The steps for a caller are these.
+
+- **[COR-958]** A caller that can use either major MUST list both names in `requires.services`, MUST hold a `services.use:` grant for each, MUST call the new name first, and MUST call the old name only when the new name returns `not-found` or `unsupported`; a `not-permitted` or `invalid-argument` result MUST NOT start the fallback.
+
+The rules above keep the window of each name separate. Callers of the old name are not affected by a new major until the old entry is removed.
+
+- **[COR-957]** The old entry of a service name MUST keep its implementation and its declared version unchanged until the window ends, the window MUST end no earlier than 90 days after the release that added the new name (proposed, owner to confirm), and the release that removes the old entry MUST state the removal date in its release notes.
+
+### Edge cases for two majors
+
+| Case | Result |
+|---|---|
+| The provider of the new name is not installed | The new call returns `not-found`, and a caller that falls back calls the old name. |
+| The old name is removed before its window ends | Callers of the old name get `not-found`. This is the rule that [COR-957] forbids. |
+| The caller lists only the old name | It keeps working for as long as the old entry is provided. It is not told about the new name. |
+
 ### Example: Rust provider and caller
 
 The provider offers `com.example.titles/suggest`. It answers at once for short notes and defers longer ones to a task that calls `reply` later. The caller is a second plugin that submits a note when a command runs.
@@ -434,3 +462,6 @@ Checked against `ilium:plugin@0.1.0`.
 - **[SVC-008]** A provider that stops, restarts or is disabled before answering MUST make its pending callers complete as failed(cancelled).
 - **[SVC-010]** take-reply MUST return the JSON once. A second take MUST return none.
 - **[SVC-011]** A reply after 30 seconds MUST return not-found.
+- **[COR-956]** A provider that must change the major of a service name while callers on the old major still run MUST keep the old major under its old name as a second `provides` entry, MUST give the new major its own name, and MUST NOT carry two majors under one name.
+- **[COR-957]** The old entry of a service name MUST keep its implementation and its declared version unchanged until the window ends, the window MUST end no earlier than 90 days after the release that added the new name (proposed, owner to confirm), and the release that removes the old entry MUST state the removal date in its release notes.
+- **[COR-958]** A caller that can use either major MUST list both names in `requires.services`, MUST hold a `services.use:` grant for each, MUST call the new name first, and MUST call the old name only when the new name returns `not-found` or `unsupported`; a `not-permitted` or `invalid-argument` result MUST NOT start the fallback.

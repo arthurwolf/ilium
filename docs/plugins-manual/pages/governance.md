@@ -32,6 +32,8 @@ Every release archive contains `LICENSE` and `THIRD-PARTY-NOTICES` next to the b
 
 **Failure modes.** A release whose archive lacks `LICENSE` or `THIRD-PARTY-NOTICES` fails the release check and is not published. A user who finds an installed copy without the notices file sees `notices: missing` and should reinstall from a verified archive ([Host release verification](/pages/reference-host-release-verification/)).
 
+A plugin may change its licence in a later version. The rules for that change, including the consent of contributors and what installed copies do, are on [Changing the licence of a plugin](/pages/guide-publishing-and-support/#changing-the-licence-of-a-plugin).
+
 ## Maintainers, roles and decision records
 
 The manual uses four roles. A person can hold several.
@@ -61,9 +63,73 @@ One code of conduct applies to the repository, the issue tracker, pull requests,
 
 **Actions.** In increasing order: a private warning, a public warning, a temporary ban of 1 to 12 months, a permanent ban, and, for abuse through a plugin or a namespace, removal of the namespace from the registry. Removal is signed into the registry metadata and announced in the transparency log, and the host then disables the plugin the way [PKG-711] describes, keeping its data. A reclaimed or removed id follows [PKG-703].
 
-**Registry moderation.** Abusive plugin content (hateful text, harassment, doxxing) is reported to the same address, handled by the same people, and recorded in the same moderation record. Malware and security abuse go to the security team instead.
+**Registry moderation.** Abusive plugin content (hateful text, harassment, doxxing) is reported to the same address, handled by the same people, and recorded in the same moderation record. Malware and security abuse go to the security team instead. Copyright, trademark and patent claims by a rights holder follow [Rights-holder claims](/pages/publish-rights-claims/).
 
 **Appeal.** A person who is warned or banned may appeal within 30 days to a maintainer who took no part in the decision. The appeal result is final and is recorded. The record is kept privately, and a public log lists only the action type and date, never the reporter.
+
+## Export control and sanctions
+
+The registry accepts uploads from anyone who can create an account, and the Ilium host carries TLS and cryptographic code. Both facts bring legal obligations that depend on where the operator and the users are. This section states what the registry screens, how a refusal reads to the person refused, what the operator records, and what the project says about the encryption in its software. It is a statement of the project's rules, not legal advice. Counsel reviews it before the registry opens to publishers in a new jurisdiction.
+
+### You will need
+
+The sanctions lists the operator is bound by, written into `policy.json`, and the current export classification statement of the project. Read the account rules of [Registry operator guide](/pages/publish-registry-operator-guide/) before you change how accounts are created.
+
+### Screening accounts
+
+The operator screens each new publisher account when it is created. The operator screens it again before issuing a new token to an existing account, because a list can change between two uses. A match stops the account or the token. The requester gets a refusal with the code `registry.account-refused` and no token.
+
+<div class="note">
+<p>Proposed, owner to confirm: the screen uses the account holder's name and the declared address. It does not read the content of a plugin, and it does not run on downloads by users who never publish.</p>
+</div>
+
+**[PUB-061]** The registry operator MUST screen every new publisher account against the sanctions lists that bind the operator, at account creation and before the operator issues a new token to an existing account. The operator MUST refuse a match with `registry.account-refused` and MUST NOT issue a token to it (proposed, owner to confirm: the lists are named in `policy.json`).
+
+**[PUB-062]** A refusal on sanctions grounds MUST NOT name the list, the matched entry or the country to the requester. The requester MUST see only `registry.account-refused` and the claims contact of `policy.json`, so that the operator can answer a mistaken match (proposed, owner to confirm).
+
+**[PUB-063]** The operator MUST keep the screening result and the date of each screen in the operator's private record. The registry MUST NOT publish the result in `revocations.json`, `policy.json`, the transparency log or any plugin page (proposed, owner to confirm).
+
+### Encryption classification
+
+The Ilium host uses TLS for its registry and mirror connections, and it ships cryptographic code in its sandbox and its client. Export rules for such code depend on the algorithms and the libraries that carry them, so the project states them in writing.
+
+**[PUB-064]** The project MUST keep a written export classification statement for every encryption function of the host, the WASM sandbox and the TLS client. The statement MUST name each library and each algorithm, MUST be updated in the same release as any change of a cryptographic dependency, and MUST be reviewed by counsel before a release that adds a cryptographic function (proposed, owner to confirm).
+
+### Edge cases
+
+- **A match on a common name.** The requester is refused, and the operator checks the match through the claims contact. A confirmed mistake is cleared in the operator's private record, and the account may then be created again.
+- **A list changes after an account exists.** The account keeps its token until the operator's next screen, which runs before the next token is issued. A match then suspends the account under [Governance](/pages/governance/) with the same refusal text.
+- **A user who downloads a plugin from a mirror.** The mirror carries no screening result. Mirror rules are in [Mirror runbook](/pages/publish-mirror-runbook/).
+
+## Commercial plugins
+
+An author may sell a plugin, or ask for a licence key before the plugin runs. The Ilium licence of the host does not forbid either, and the registry carries no payment or entitlement data. This section states who answers the buyer, what the package and the registry must not contain, and what the buyer sees. The rules of the registry for licence-key plugins are in [Registry reference](/pages/reference-registry/).
+
+### You will need
+
+The end-user terms you want buyers to accept, the refund address, and the licence key check if the plugin has one. Read [Publishing and support](/pages/guide-publishing-and-support/) for the support rules that apply to every plugin, paid or not.
+
+### Who answers the buyer
+
+The seller answers refunds, disputes and support for a paid plugin. The registry operator is not a party to the sale. It does not take payment, hold entitlements or mediate a refund ([PUB-071](#commercial-plugins)).
+
+**[PUB-069]** A plugin MAY be sold, or licensed with a licence key, under any licence its author chooses. The registry MUST NOT refuse a publish because the plugin charges for use (proposed, owner to confirm).
+
+**[PUB-070]** A plugin that charges for use MUST carry its end-user terms in its `LICENSE` file or in a terms file named in its README, and MUST state in its README the price model and the refund address (proposed, owner to confirm).
+
+**[PUB-071]** The registry operator MUST NOT take payment, hold entitlement data or mediate a refund for a plugin. The plugin page of a paid plugin MUST show the seller's contact address, and that address is the place where refund and support requests go (proposed, owner to confirm).
+
+**[PUB-072]** A licence key MUST NOT appear in the package, in a test fixture or in the release notes. The seller issues the key outside Ilium, and a plugin that checks a key MUST declare that check in its manifest, as the registry rules for licence-key plugins require (proposed, owner to confirm).
+
+### What the buyer sees
+
+The plugin page shows `Requires a licence key` when the manifest declares a key check, and it shows the seller's contact. The install dialog is not yet specified for end-user terms: the project has not decided whether it shows the terms text or only a link to it. Until it decides, the buyer reads the terms file named in the README before installing.
+
+### Edge cases
+
+- **A plugin that changes from free to paid.** The new version is published with the terms file and the README statement. Installed copies keep working, and the buyer's refund address is the one of the newest version.
+- **A key that leaks.** The seller revokes it outside Ilium and issues a new one. The registry holds no key, so there is nothing to revoke there.
+- **A buyer who asks the registry for a refund.** The registry answers that it does not hold payment data and gives the seller's contact from the plugin page.
 
 ## Use of the Ilium name and logo
 

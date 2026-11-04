@@ -272,6 +272,18 @@ A plugin's support can last no longer than the host still accepts its contract v
 
 A registry operator may reclaim an id that has no release for 24 months and no answer from its owner to two notices sent 30 days apart. Such an id is marked abandoned in the signed metadata ([PKG-703]). An author who wants to keep an id must therefore publish a release, or answer a notice, before that point. A reclaimed id never reuses the version numbers or keys of the earlier owner.
 
+## Erasure requests for data on your servers
+
+A plugin that sends user data to a server you run keeps that data after the user uninstalls the plugin. Ilium cannot erase it, because the copy is not on the user's machine ([USR-963], [USR-965]). The erasure is yours to carry out.
+
+Your procedure for a request is this.
+
+1. Confirm the identity of the user who asks, with the same means that you use for your other accounts.
+2. Erase every record that your server holds for that user, including logs that name the user, and the backups that you keep for the plugin.
+3. Write to the user when the erasure is complete. If a legal duty stops you from erasing a record, name that duty and the period it lasts.
+
+- **[USR-964]** A publisher whose plugin sends user data to its own server MUST erase that user's data on the user's written request within 30 days (proposed, owner to confirm), MUST name the contact for such requests in the README and in the `[privacy]` table ([AUT-955], [USR-329]), and MUST tell the user in writing when the erasure is complete or state why it cannot be done.
+
 ## Edge cases and errors
 
 | Situation | Result | Fix |
@@ -283,6 +295,8 @@ A registry operator may reclaim an id that has no release for 24 months and no a
 | Package built with `--debug` | `lint.debug-info-in-release` | Rebuild with `--release` |
 | User on Windows or macOS | `package.platform-unsupported` | Say so on the release page |
 | Same version, new content | `package.version-reused` | Raise the version |
+
+If you sell the plugin, read [Commercial plugins](/pages/governance/#commercial-plugins) first. It states who answers refunds and what the manifest and package may not contain.
 
 ## What the user sees
 
@@ -298,6 +312,47 @@ Before install, the review dialog lists the publisher, the tier, the signature s
 - [Plugin documentation guide](/pages/guide-plugin-documentation/) for help topics and README
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Changing the licence of a plugin
+
+The licence of a plugin is the SPDX identifier in its manifest `license` field. A later version may name a different identifier, and users need to know what that means before they accept the update. This section covers the release steps, what an installed copy does, what happens to older versions and forks, and whose consent the change needs.
+
+### You will need
+
+The old and the new SPDX identifier, the list of contributors whose code is still in the tree, and the release notes for the version that changes the licence. Read the rules for older versions before you change the licence of a plugin that already has forks.
+
+### Release steps
+
+1. Change `license` in the manifest of the new version only. Do not edit an older version.
+2. Collect written consent from every contributor whose code is still in the tree, or remove or rewrite that code first ([PUB-060](#changing-the-licence-of-a-plugin)).
+3. Write the release notes. Name the old identifier, the new identifier, and the consent or removal, as [PUB-057](#changing-the-licence-of-a-plugin) requires.
+4. Publish the version with `ilium plugin publish` and check it with `ilium plugin info <id>@<version>`.
+
+### What an installed copy does
+
+A licence change is a change that users must see. An installed copy that follows `auto_update = install` does not take the new version silently. It shows a notice and waits for the user to run `ilium plugin update <id>` ([PUB-058](#changing-the-licence-of-a-plugin)). A copy with `auto_update = notify` shows the same notice, as it does for any other update.
+
+<div class="warn">
+<p>A plugin with an installed copy under the old licence keeps that licence for that copy until the user updates it. The licence of the copy is the licence the version was published with, not the one of the newest release.</p>
+</div>
+
+### Older versions and forks
+
+The registry signs each version entry, including its `license`. It does not change that field after publish ([PUB-059](#changing-the-licence-of-a-plugin)). A licence change is therefore always a new version. Older versions keep the licence they shipped with, and anyone who forks an older version keeps that licence for the fork.
+
+**[PUB-057]** A release whose manifest `license` differs from the `license` of the previous version MUST name the old and the new SPDX identifier in its release notes, and `ilium plugin info <id>@<version>` MUST print both identifiers (proposed, owner to confirm).
+
+**[PUB-058]** With `auto_update = install`, the host MUST NOT install a version whose `license` differs from the `license` of the installed version. It MUST show the change as a notice, and it MUST install the version only after the user runs `ilium plugin update <id>` (proposed, owner to confirm).
+
+**[PUB-059]** The registry MUST NOT change the `license` of a version entry after publish. A fork of an older version MUST keep the `license` that the forked version shipped with, and the registry MUST NOT treat a later licence change as a change to that version.
+
+**[PUB-060]** Before a release changes the licence of a plugin, the publisher MUST hold written consent from every contributor whose code is still in the tree of that release, or MUST remove or rewrite that code first. The release notes MUST say which of the two was done (proposed, owner to confirm).
+
+### Edge cases
+
+- **A licence change with no new version.** There is none: the registry does not accept a change to an existing version entry.
+- **A contributor who does not answer.** The publisher removes or rewrites that contributor's code, or keeps the old licence. The release is not published with the new licence until one of the two is done.
+- **A change from a licence with a notice file to a licence without one.** The rules of [Licence and notices](/pages/guide-publishing/) still apply to the new version at level B.
 
 ## Requirement statements
 
@@ -327,3 +382,4 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[AUT-953]** Planned registry maintenance MUST be announced at least 48 hours before it starts (proposed, owner to confirm), and the announcement MUST say which operations stop during it.
 - **[AUT-954]** When the log or a trace shows that Ilium itself, and not the plugin, caused a failure, the author MUST tell the user to report it to the Ilium project, and the README MUST name that route (owner to confirm: the host project does not publish a general support channel yet).
 - **[LIF-975]** A plugin author who publishes documentation for a plugin MUST state the minimum host minor version the plugin needs and the `api` string it was built for. The statement MUST be kept in the same place as the release notes that name the plugin version (see [Publishing and support](/pages/guide-publishing-and-support/)).
+- **[USR-964]** A publisher whose plugin sends user data to its own server MUST erase that user's data on the user's written request within 30 days (proposed, owner to confirm), MUST name the contact for such requests in the README and in the `[privacy]` table ([AUT-955], [USR-329]), and MUST tell the user in writing when the erasure is complete or state why it cannot be done.

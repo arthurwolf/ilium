@@ -81,3 +81,4 @@ Ana does not run `unyank` for 0.3.0. The reason stays until the issue is closed 
 - [Publisher workflow and version states](/pages/publish-publisher-workflow/): the publish steps and error codes.
 - [Mirror runbook](/pages/publish-mirror-runbook/): how mirrors carry a yank or a takedown to their users.
 - [Registry operator guide](/pages/publish-registry-operator-guide/): who may run a takedown and how it is logged.
+- [Rights-holder claims](/pages/publish-rights-claims/): copyright, trademark and patent claims that can lead to a quarantine or a takedown.

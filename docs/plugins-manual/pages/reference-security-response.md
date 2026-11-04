@@ -80,6 +80,15 @@ Safe mode starts Ilium with all third-party code off, for the case where a plugi
 
 **[SEC-331]** An advisory in Wasmtime or a codec that applies to the pinned version is handled as in [SEC-171]: a patched release within 14 days of the upstream fix (48 hours when exploited in the wild), a release-blocklist entry for the vulnerable runtime, and a warning in Ilium until the user updates.
 
+### Advisories for bundled guest dependencies
+
+Most of a plugin's code is in the guest dependencies its publisher bundles. [SEC-331] covers only Wasmtime and the codecs. The registry therefore scans the dependency list of every published package and acts on a match in the same way it acts on other advisories.
+
+- **[SEC-973]** (proposed, owner to confirm) The registry MUST scan the SBOM of every published package, the CycloneDX file of [DEV-940] or the `sbom.spdx.json` that the package lists, against an advisory database for every guest dependency that it names. The scan MUST run at publish and again every 24 hours. A match MUST be recorded against the package version and the publisher MUST be told privately, as in [SEC-703]. A scan MUST NOT block a publish on its own.
+- **[SEC-974]** (proposed, owner to confirm) A match of severity High or Critical that the publisher has not answered within 14 days MUST be shown on the package registry page as `Vulnerable dependency: <advisory id>`. When the advisory is marked as exploited in the wild, the registry MAY yank the affected version with the reason `dependency-advisory`, and MUST record the yank in the transparency log ([PKG-700]).
+- **[SEC-975]** (proposed, owner to confirm) An installed plugin whose version has an open match of severity High or Critical MUST show `Vulnerable dependency: <advisory id>` in Plugins and in `ilium plugin inspect`. The host MUST NOT disable the plugin for that match alone. It MUST disable the plugin only when the version is yanked with `dependency-advisory` or quarantined ([EXT-058]), and it MUST log `plugin.dependency-advisory` once per installed version in the audit log.
+
+---
 ## Publish rate limits and abuse reports
 
 This section is target behaviour for the public plugin system. The registry protects itself and its users from floods of publications and downloads and from malicious packages. This section sets the limits and the abuse intake.
@@ -178,6 +187,15 @@ This section says which host minors receive security fixes, and how a running ho
 
 **[SEC-968]** Advisory badge. While an advisory of severity High or Critical applies to the running host, the status bar MUST show `Update: <advisory id>` (proposed, owner to confirm) next to the `SAFE` badge of [SEC-329]. The badge MUST disappear only when the host reaches the `fixed` version of every such advisory. Test: ship a test advisory of severity High whose range includes the test host, render the status bar and assert the text; start a host at the `fixed` version and assert the badge is absent.
 
+## Regulatory reporting duties
+
+The project sets its own disclosure clocks in this page ([SEC-321], [SEC-729]). Some regions also set legal clocks for product security, and those apply to a commercial publisher and to the registry operator. This section names the duties that the project must map. The exact reporting deadlines of each law are for counsel to confirm, and this page does not state them.
+
+- **[SEC-983]** (proposed, owner to confirm) The project MUST keep a written list of the vulnerability-reporting duties that apply to it in each region where the registry serves packages, separately for the manufacturer of the host, the operator of the registry and the contact for third-party publishers. Each duty MUST name an owner and a review date, and the list MUST be reviewed at each host minor release.
+- **[SEC-984]** (proposed, owner to confirm) A publisher that distributes a plugin in a region with product-security reporting law MUST report an actively exploited vulnerability in that plugin to the authority that the law names, within the time the law sets, and MUST send the same report to the security contact of [SEC-325] at the same time so that the registry can act. The registry operator MUST NOT pass a publisher report to an authority without the publisher's consent, unless the law requires it.
+- **[SEC-985]** (proposed, owner to confirm) The registry operator MUST name a contact for market surveillance authorities and MUST answer a lawful information or takedown request from such an authority within the time the law sets. Each request and each answer MUST be kept in the operator case file and MUST NOT be written to the public transparency log ([PKG-700]).
+
+---
 ## Requirement statements
 
 - **[EXT-057]** The host MUST poll the signed emergency-disable feed of each configured registry at least every 6 hours and MUST verify it with the registry key before use. An entry that fails verification MUST be ignored and logged as `quarantine.feed-invalid`.

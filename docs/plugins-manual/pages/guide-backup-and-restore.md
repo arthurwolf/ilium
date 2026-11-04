@@ -86,6 +86,25 @@ These are targets for planning. They are not guarantees the host makes.
 | `restore.server-running` | A session server is running on the data root (HST-653) | Stop the server, or restore into a scratch root |
 | `package.platform-unsupported` after a restore on another system | The plugin does not run on this operating system (HST-655) | The data is kept. Install a build for this platform, or leave the plugin refused at load |
 
+### After a restore: verify and roll back
+
+A restore that finished without an error message is not yet a good restore. A plugin can restore cleanly and still fail when it starts, because its code does not accept the restored data or because the data came from another version. Check each restored plugin before you let users work with it.
+
+1. Run `ilium plugin list --json` and read the state of each restored plugin. A plugin in `failed` or `stopped-by-failure` has a problem.
+2. Run `ilium plugin health` and read the exit code with the table in [Crash isolation, health checks and the kill switch](/pages/ops-crash-isolation-health-and-kill-switch/).
+3. Run `ilium plugin logs <id> --tail 100` for each restored plugin. Look for `restart.scheduled`, `deactivate.deadline` and any trap line.
+4. Read the crash record of each plugin that failed (`ilium plugin status <id>`), and keep a copy before you change anything.
+
+The restore is complete only when every restored plugin is in its state from before the backup, or in a state you accept and have written down.
+
+Before you restore over live data, keep the state you have now. Take a new archive with `ilium plugin backup` immediately before the restore, and keep the pre-restore copy that the host writes for each session snapshot (`<name>.pre-restore.json`). Do not write these copies by hand.
+
+- **[OPS-212]** After every restore the administrator MUST run the four checks above for each restored plugin, in that order, and MUST NOT give users access to a plugin whose check shows `failed`, `stopped-by-failure` or a crash record written after the restore. Test: restore an archive of a fixture plugin whose `activate` traps, run the four checks, and assert that the plugin is listed as failed with a crash record and that the procedure stops there. (proposed, owner to confirm)
+- **[OPS-213]** Before a restore into a live data root, the administrator MUST create a new archive with `ilium plugin backup` and MUST keep that archive until the restored data has passed the checks of OPS-212. Test: run a restore into a live root and assert that a new archive exists, dated before the restore, and that the restore is refused while no archive exists. (proposed, owner to confirm)
+- **[OPS-214]** When a restored plugin fails the checks of OPS-212, the administrator MUST return the data to its pre-restore state by restoring the archive of OPS-213 with `ilium plugin restore <file> --dry-run` first and then `--replace` or `--merge`. `--replace` removes the plugins that the archive does not hold, so the administrator MUST use it only when no plugin was installed after the archive was made, and `--merge` keeps those plugins. The administrator MUST NOT run either command until the dry run shows the list of changes and the administrator has read it. A restore MUST run with the session server stopped, as HST-653 requires. Test: restore a broken archive, roll back with the pre-restore archive, and assert that the plugin's data matches the data before the first restore. (proposed, owner to confirm)
+- **[OPS-215]** During a rollback the administrator MUST NOT use `--discard-data` on any plugin, because it deletes data that a later check might need. Data is deleted only by a purge under [HST-978](#deletion-and-export), after an export. Test: run a rollback with a plugin whose data is newer than the archive and assert that no data was deleted and that the export step was required before any purge. (proposed, owner to confirm)
+- **[OPS-216]** The administrator MUST write the result of the checks of OPS-212 in the restore drill log with the archive name, the date, and one line for each restored plugin with its state and its exit code. Test: read the drill log after a restore of two plugins and count one line for each plugin. (proposed, owner to confirm)
+
 ### Where the other rules are
 
 - [Administrator failure runbook](/pages/guide-admin-failure-runbook/) for the steps when a plugin has damaged its own data.

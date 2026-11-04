@@ -86,6 +86,29 @@ Choose the job budgets with the same procedure as the memory value. Measure the 
 
 - **[PRF-006]** A plugin MUST NOT run a loop over its whole data set inside `on-events` or `views.render`. Work over a data set MUST run in a job. Test: a fixture with 100,000 items makes `on-events` return within 20 ms, and the same work appears as a running job in `ilium plugin stats`.
 
+### Job pool sizing
+
+Each plugin side runs its jobs in a second instance of its component, and at most `concurrent_jobs` of them are live at once ([Background jobs](/pages/api-jobs/)). Size the pool of one side with two numbers: the jobs it can run at once, and the memory each one may use. The worst case is `concurrent_jobs` times `memory_mib`.
+
+| Tier | Default `concurrent_jobs` | Ceiling `concurrent_jobs` | Ceiling job `memory_mib` | Worst case at the ceilings |
+|---|---|---|---|---|
+| T1 | 2 | 8 | 512 MiB | 4,096 MiB |
+| T2 and T3 | 2 | 2 | 256 MiB | 512 MiB |
+
+The aggregate page leaves one question open: whether the memory of a job is counted apart from its plugin side's instance reservation ([Host aggregate limits](/pages/reference-host-aggregate-limits/)). Its default is that it is counted within that reservation. This page uses that default for the session memory pool, which sees the instance reservation only. The machine-wide ceiling counts the reservation of each running job. If the open question is decided the other way, the worst case in the table is the charge per plugin side.
+
+A job start is refused in a fixed order. The job pages list the codes but not their order, so this order is proposed for sizing:
+
+1. The input is over the input cap: `invalid-argument`, at the call.
+2. The side already has `concurrent_jobs` live jobs: the job waits in the queue.
+3. The queue already holds `queued jobs` entries: `busy`.
+4. A slot is free but the machine-wide ceiling for memory or threads has no room: `host-capacity`. This is not a failure ([HST-504](/pages/reference-host-aggregate-limits/)).
+5. The running job goes over its `memory_mib`: `failed(quota-exceeded)`. It goes over its CPU `deadline_ms`: `failed(timed-out)`.
+
+- **[PRF-041]** A plugin author MUST size the job pool of each side as the worst case of `concurrent_jobs` times `memory_mib`, and MUST state that worst case in MiB in the commit or review that changes either value. Test: a review checklist item for a change of `concurrent_jobs` or `memory_mib` requires the worst-case figure in MiB to appear in the commit message.
+- **[PRF-042]** A job start MUST be refused in the order of the five steps of this section: an oversized input first, then queueing, then `busy` when the queue is full, then `host-capacity` when the machine-wide ceiling has no room, and a runtime quota or timeout only once the job runs. (proposed, owner to confirm: the order of steps 2 to 4 is a default.) Test: with two live jobs and a full queue of 16 entries, a 17th start returns `busy`, and a start with an oversized input returns `invalid-argument` even while the queue is full.
+- **[PRF-043]** A job start refused with `host-capacity` MUST NOT count as a failure, and the same start MUST succeed once memory or threads are released. Test: fill the machine-wide ceiling with running jobs, start one more and assert `host-capacity` with no failure counted; release one job and assert the same start succeeds.
+
 ### Check the limits with lint
 
 `ilium plugin lint` reports static weak spots, including `lint.limit-above-ceiling` (a manifest value over the ceiling of its tier) and `lint.activation-startup` (an activation that does too much at startup). Run it after every change to the `limits` block. A value over the ceiling is clamped by the host and never refused, so a lint finding is the only early sign of a value that does not do what you wrote.
@@ -102,13 +125,32 @@ The plugin `com.example.index` keeps an in-memory index of about 40,000 notes. I
 
 The plugin now takes 56 MiB of the pool instead of 32 MiB. With the default pool, that still leaves room for about 17 more plugins of the default size before the pool is full.
 
+### Tree scale
+
+A plugin with `tree.read` can see every node of the project tree, so a large tree makes its reads and its change events larger. The manual states no ceiling on the number of nodes in a session. The numbers below are proposed defaults that a plugin can plan for.
+
+| Item | Proposed default | What happens at the default |
+|---|---|---|
+| Nodes in one session tree | 10,000 tested | No node is refused. The benchmark B25 is recorded at this size. The budgets on this page are not promised above it. |
+| Result of `find` | 4,096 ids | The first 4,096 ids in tree order are returned, with no error. |
+| Ids in one `tree-changed` event | 4,096 ids | Further ids go into more events, in first-seen order. |
+
+- **[PRF-037]** A `find` that matches more than 4,096 nodes MUST return the first 4,096 node ids in tree order and MUST NOT return an error. (proposed, owner to confirm: whether `find` truncates or refuses is an open decision; this is the default.) Test: a tree of 5,000 nodes and a `find` with every field unset returns 4,096 ids, and the first of them is the first node in tree order.
+- **[PRF-038]** When the pending `tree-changed` ids of one plugin side would exceed 4,096 entries, the host MUST deliver them in more than one `tree-changed` event, each holding at most 4,096 ids in first-seen order, and MUST NOT drop an id. (proposed, owner to confirm: the 4,096 figure is a default, and the rule replaces the single merged event for a larger burst.) Test: a burst that changes 10,000 nodes delivers ids in three events that cover each of the 10,000 ids exactly once.
+- **[PRF-039]** A plugin MUST NOT call `find` with every field unset, or walk `children` over the whole tree, inside `on-events` or `views.render`. It MUST build its index once, in an activation or a job, and update it from `tree-changed` and `node-removed`. Test: a fixture that walks a 5,000 node tree inside `on-events` is trapped at the 20 ms deadline, and the same fixture with an index built in a job is not.
+- **[PRF-040]** The benchmark for a 10,000 node tree MUST record, without a pass or fail threshold, the median and the 99th percentile of one `children` call on the root and of the delivery of one `tree-changed` event with 1,000 ids. Test: the benchmark result holds both numbers for the run, and the run does not fail on their values.
+
 ### Limits of this page
 
+- Whether the memory of a job is counted apart from its plugin side's reservation is open in [Host aggregate limits](/pages/reference-host-aggregate-limits/). This page uses the default. The worst case in the job pool table is the figure to use if the answer changes.
+- The thresholds of the tree scale section (4,096 ids and 10,000 nodes) are proposed defaults, not measured limits.
+- The battery and thermal rules are on [Power, battery and thermal behaviour](/pages/reference-power-and-battery/). They are proposed, not shipped.
 - The session pool and the tier ceilings are fixed by the host. Changing a user's pool size is a user action under `[plugins.limits]`, not a plugin decision.
 - The pool figure for T2 and T3 helper processes is not stated the same way in every page. [Performance](/pages/performance/#costs-by-tier-and-language) says that a helper charges the sum of its hosted instances' `memory_mib` plus 32 MiB against the session pool. [Resource accounting](/pages/reference-resource-accounting/#session-memory-pool) says that each instance reserves its configured limit at activation. This page follows the second. (proposed, owner to confirm: which statement is the rule for T2 and T3 helpers.)
 
 ### See also
 
+- [Power, battery and thermal behaviour](/pages/reference-power-and-battery/) for the budgets that apply on battery.
 - [Backpressure and retries](/pages/perf-backpressure-and-retries/) for what a plugin does when a budget refuses a call.
 - [Benchmark workflow](/pages/perf-benchmark-workflow/) for timing a handler against its deadline.
 - [Performance](/pages/performance/) for the deadlines and the single table of budgets.

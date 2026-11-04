@@ -309,6 +309,7 @@ The plugin log records what happened around a restart:
 | Situation | Result |
 |---|---|
 | The server was off at the due time | The timer fires once after the next activation. `late-by-millis` is the lateness. |
+| More overdue timers than one batch holds | Delivered in due-time order over several batches. No timer is dropped. See [Overdue bursts and sizing](#overdue-bursts-and-sizing). |
 | `at` with a name that is in use | The earlier timer is replaced. |
 | `at` with a time up to 1 s in the past | Accepted. A longer past time is `invalid-argument`. |
 | Crash after the PTY write, before the outcome | `input-uncertain` after restart. The input is not replayed. |
@@ -316,6 +317,20 @@ The plugin log records what happened around a restart:
 <div class="warn">
 <p>Do not treat <code>input-uncertain</code> as a failure to retry blindly. The text may already be in the prompt. Read the screen first (see <a href="/pages/primitives-terminal/">terminal</a>), then decide.</p>
 </div>
+
+### Overdue bursts and sizing
+
+A burst of overdue timers happens when many timers came due while Ilium was not running, for example after a long outage or a restart. Each one still fires once, as [Wall-clock jumps and durable timers](/pages/lifecycle/#wall-clock-jumps-and-durable-timers) describes. This section says how many fire at once, what waits, and what the host records.
+
+One plugin cannot hold more than its `durable_timers` limit, which is 64 by default and 256 at the tier 1 ceiling, so a burst from one plugin is bounded by that number. Each plugin side has its own `ilium-execution` bucket, so a burst in one plugin does not spend the bucket of another plugin.
+
+Decision needed: whether the host should cap the overdue fires of all plugins together in one session server. Default: no session-wide cap, because each plugin side has its own pending list and its own bucket.
+
+- **[PRF-027]** After a start or a resume, the host MUST deliver the overdue durable timers of one plugin side in due-time order, in batches of at most 32 `durable-timer-fired` events, and MUST keep the rest pending for a later batch. A pending timer MUST NOT be dropped or merged with another timer. (proposed, owner to confirm: the batch size of 32 is a default, not a value any specification line states today.) Test: a plugin with 100 overdue timers receives all 100 exactly once, in due-time order, in batches of at most 32.
+- **[PRF-028]** The host MUST hold pending overdue fires outside the plugin event queue and MUST admit them into the queue only while the queue has room, so that one burst cannot overflow the never-dropped event queue and restart the plugin. Test: with an event queue of 64 entries and 256 overdue timers, the plugin is not restarted and all 256 fires arrive.
+- **[PRF-029]** Each overdue fire MUST be charged to the `ilium-execution` bucket of its plugin side like any other event call. A fire MUST NOT be refused with `quota-exceeded` or `busy`; it waits in the pending list until the bucket is no longer empty. Test: with an empty bucket and 10 overdue fires, no fire is lost, and the first fire is delivered only after the balance is above 0 ms.
+- **[PRF-030]** A plugin that re-arms a repeating schedule SHOULD compute the next due time from the current time, not from the due time of the timer that fired, so that a long backlog does not produce a second burst of catch-up timers. Test: a plugin that re-arms an hourly schedule after a 10-hour outage arms one timer due within one hour of now, not ten.
+- **[PRF-031]** When more than 32 overdue fires are pending after a start, the host MUST write one entry to the host log for that start, with the number of pending fires and the largest `late-by-millis`, and MUST NOT write one entry per fire. Test: 100 overdue timers produce one log entry that states 100 pending fires and the largest lateness delivered.
 
 ### See also
 

@@ -709,6 +709,8 @@
   url: /pages/publish-publisher-workflow/
 - title: "Yank, deprecate and takedown"
   url: /pages/publish-yank-deprecate-takedown/
+- title: "Rights-holder claims"
+  url: /pages/publish-rights-claims/
 - title: "Mirror runbook"
   url: /pages/publish-mirror-runbook/
 - title: "Registry operator guide"
@@ -719,6 +721,8 @@
   url: /pages/compat-load-decision-table/
 - title: "Deprecation timeline and the window"
   url: /pages/compat-deprecation-timeline/
+- title: "Peer message and topic payload versions"
+  url: /pages/compat-peer-message-versioning/
 - title: "Host upgrade runbook"
   url: /pages/compat-host-upgrade-runbook/
 - title: "Diagnostics and logs for operators"
@@ -729,6 +733,8 @@
   url: /pages/ops-crash-isolation-health-and-kill-switch/
 - title: "Sizing memory and CPU"
   url: /pages/perf-sizing-memory-and-cpu/
+- title: "Power, battery and thermal behaviour"
+  url: /pages/reference-power-and-battery/
 - title: "Backpressure and retries"
   url: /pages/perf-backpressure-and-retries/
 - title: "Benchmark workflow"

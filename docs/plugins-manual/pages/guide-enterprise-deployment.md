@@ -364,6 +364,23 @@ Plugin uninstall and data erasure are covered elsewhere ([Plugin privacy](/pages
 
 If a machine is wiped or retired as an image, run step 2 for every user first ([USR-955]); deleting the disk later removes the data, but only the commands above produce the audit entry and the report.
 
+## Running the server under a service manager
+
+A managed machine often runs the Ilium server under a service manager such as systemd or launchd, so that it starts at boot. The host has its own safety net for a plugin that crashes at start: the crash-loop guard of [Crash isolation, health checks and the kill switch](/pages/ops-crash-isolation-health-and-kill-switch/) and [User safe mode and troubleshooting](/pages/user-safe-mode-and-troubleshooting/). A service manager that restarts the server on every exit works against that guard. It can start the server again faster than the guard counts, or it can hide the state the guard has set.
+
+The rules below keep the two apart. The examples name the systemd and launchd keys; the same rules apply to any other supervisor.
+
+| Event | What the service manager does | Why |
+|---|---|---|
+| Server exits with status 0 after a stop you asked for | Does not restart it | A clean stop is an operator action, not a crash |
+| Server exits with another status | Restarts it after at least 5 s, and no more than 3 times in 5 minutes | The guard of [User safe mode and troubleshooting](/pages/user-safe-mode-and-troubleshooting/) counts three crashes in 5 minutes |
+| Server stays in a restart loop | Stops restarting and leaves the unit failed | The operator reads the state first, as in [Crash isolation](/pages/ops-crash-isolation-health-and-kill-switch/) |
+
+- **[OPS-217]** A unit that restarts the server on exit MUST NOT restart it after a clean stop with status 0. In systemd this is `Restart=on-failure`. In launchd it is `KeepAlive` with `SuccessfulExit` set to `false`. Test: stop the server with its own stop command, and assert that the service manager does not start it again within 30 s. (proposed, owner to confirm)
+- **[OPS-218]** A unit MUST wait at least 5 s before each restart after a failure, and MUST stop restarting when it has started the server 3 times within 300 s. In systemd this is `RestartSec=5`, `StartLimitIntervalSec=300` and `StartLimitBurst=3`. In launchd the throttle interval MUST be at least 5 s. Test: make the server exit at start, and count the starts in 300 s: at most 3 in the window, then the unit stays failed. (proposed, owner to confirm)
+- **[OPS-219]** A unit MUST NOT pass a safe-mode flag, such as `--safe-mode`, by default. The host chooses safe mode itself, by the guard of [LIF-978](/pages/user-safe-mode-and-troubleshooting/) and [LIF-979](/pages/user-safe-mode-and-troubleshooting/), and a unit that always starts in safe mode hides every plugin problem from the health checks. Test: read the unit file and assert that no safe-mode flag and no `ILIUM_SAFE_MODE` variable are set in it. (proposed, owner to confirm)
+- **[OPS-220]** The host does not send readiness or watchdog notifications to a service manager, so a unit MUST use the simple start type (`Type=simple` in systemd) and MUST NOT wait for a readiness signal. Readiness and health are read with `ilium plugin health`, whose exit codes are in [Crash isolation, health checks and the kill switch](/pages/ops-crash-isolation-health-and-kill-switch/) (OPS-201). Test: read the unit file and assert the start type is `simple`, and that a monitoring check runs `ilium plugin health` and treats exit codes other than 0, 1 and 2 as a failure. (proposed, owner to confirm)
+
 ## Requirement statements
 
 - **[EXT-066]** Plugins MUST be installed either per user, under that user's data directory, or system-wide, in a directory only an administrator can write. A per-user install MUST NOT be visible to or writable by another user.

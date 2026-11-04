@@ -142,6 +142,7 @@ This is the pattern the rate limits expect. A plugin that retries each refused u
 
 ### See also
 
+- [Durable timers](/pages/api-durable-timers/#overdue-bursts-and-sizing) for how a burst of overdue timers is paced.
 - [Sizing memory and CPU](/pages/perf-sizing-memory-and-cpu/) for the budgets behind the refusals.
 - [Benchmark workflow](/pages/perf-benchmark-workflow/) for measuring a handler that must return within its deadline.
 - [Errors and limits](/pages/errors-and-limits/) for the error codes and their meaning.

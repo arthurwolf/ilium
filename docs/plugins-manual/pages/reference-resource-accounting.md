@@ -121,6 +121,7 @@ These are the production targets an operator can size a machine against.
 
 ### See also
 
+- [Sizing memory and CPU](/pages/perf-sizing-memory-and-cpu/) for the job pool worked example and the admission order of jobs.
 - [Errors and limits](/pages/reference-errors-and-limits/)
 - [Reference, errors and limits](/pages/reference-errors-and-limits/)
 - [Performance](/pages/performance/)

@@ -277,6 +277,17 @@ Error codes arrive as kebab-case strings in TypeScript. A `PluginError` carries 
 and `retryAfterMs` (present only for rate and quota errors). Any other thrown value is a bug, so
 the example rethrows it.
 
+## Sensitive writes: tokens and passwords
+
+A plugin sometimes copies a secret, such as an API token or a one-time password, so that the user can paste it into another program. The clipboard is shared with every program on the desktop, and the host cannot control what the desktop keeps. The rules below limit how long the secret stays and where it is recorded. They do not make the secret private.
+
+The host has no option that keeps a write out of the desktop clipboard history. `write-text` takes only the text, so a plugin cannot ask for that. The operating system or a clipboard manager may keep the text in its history, and the host does not clear that history.
+
+- **[CAP-892]** A plugin MUST write a secret to the clipboard only in reply to a command or a button that the user chose, and MUST NOT write a secret when it activates, from a timer, or from a background call. Test: activate a fixture plugin that holds a token and assert that no `write-text` call is made before the user runs its command. (proposed, owner to confirm)
+- **[CAP-893]** A plugin that writes a secret MUST clear it by writing an empty text after 30 s (proposed, owner to confirm), or earlier when the user runs the command again, using the timer of [Clock and timers](/pages/api-clock-and-timers/). The plugin MUST NOT read the clipboard to check whether the secret is still there, because that needs `clipboard.read`, a high-risk grant that a secret-writing plugin should not hold. The plugin's documentation MUST say that a clear can also erase text that the user copied after the secret, within those 30 s. Test: write a fixture secret, wait 30 s, and assert that the plugin makes one `write-text` call with an empty string at that time. (proposed, owner to confirm)
+- **[CAP-894]** The host MUST NOT write the text of a clipboard write to the plugin log, the audit log or the privacy log. A successful write MUST log one info line that gives only the length of the text, the same as a read ([What the user sees](#what-the-user-sees)). Test: write a fixture token, then read the plugin log, the audit log and the privacy log, and assert that the token does not appear in any of them and that the length does. (proposed, owner to confirm)
+- **[CAP-895]** A plugin that writes a secret MUST name the kind of secret in its `description`, so that the review dialog shows the purpose of `clipboard.write` before the user accepts it, and its user documentation MUST say that the desktop clipboard history may keep the secret. Test: read the review dialog of a fixture plugin that copies a token and assert that the description names the token. (proposed, owner to confirm)
+
 ## Who requests it
 
 Among the first-party plugins in the feature map, three request `clipboard.write`: the text

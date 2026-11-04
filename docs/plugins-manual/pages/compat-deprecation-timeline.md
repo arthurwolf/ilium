@@ -98,6 +98,7 @@ A release note for the marking minor is short. It names the item, the successor,
 - [Compatibility and upgrades](/pages/guide-compatibility-and-upgrades/) for the rules the author follows when raising a version
 - [Backwards-compatibility test matrix](/pages/guide-backwards-compatibility-test-matrix/) for the cell that runs a package for `M + 1` on host `R`
 - [Host upgrade runbook](/pages/compat-host-upgrade-runbook/) for the operator side when a removal refuses a package
+- [Two majors during a transition](/pages/api-services/#two-majors-during-a-transition) for a service name that keeps an old major for its window
 
 ## Open decisions
 

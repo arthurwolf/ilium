@@ -232,6 +232,16 @@ The review dialog lists plugins that will be installed or updated because of a d
 - [Lifecycle](/pages/lifecycle/)
 - [Services](/pages/capability-services/)
 
+## Revoked, quarantined and taken-down dependencies
+
+[PKG-348] and [PKG-349] cover an update and an uninstall of a required plugin. This section covers a required plugin that a security action takes out of use: a quarantine ([EXT-058]), a takedown ([PKG-403]) or a yank for security. The dependants of such a plugin keep their data and grants, and they do not run until the block is lifted.
+
+- **[SEC-976]** (proposed, owner to confirm) When a required plugin B is quarantined, taken down or yanked with the reason `security`, every installed dependant A whose non-optional `requires` range is satisfied only by the blocked version MUST move to state `waiting-dependency` with the reason `requires B (blocked)`. A MUST keep its data and its grants unchanged.
+- **[SEC-977]** (proposed, owner to confirm) A dependant in `waiting-dependency` for a blocked B MUST NOT be instantiated. Plugins MUST show `Blocked: requires B, which is <reason>` for A, and any call that would start A MUST return `dependency.revoked` with the id of B. The host MUST NOT offer `--accept-risk` for A while B is blocked, because A cannot run without B.
+- **[SEC-978]** (proposed, owner to confirm) When a version of B that satisfies the range of A, and that is neither quarantined nor taken down, is installed, the host MUST return A to its previous state at the next load without any user action, and MUST log `dependency.restored` in the audit log. Test: block B, install a fixed B, and assert that A runs again with its data intact.
+- **[SEC-979]** (proposed, owner to confirm) Uninstalling A while B is blocked MUST succeed without `--force`, and it MUST clear the `waiting-dependency` reason of A. Uninstalling B while a dependant A is blocked MUST keep the `dependency.in-use` refusal of [PKG-349].
+
+---
 ## Requirement statements
 
 - **[LIF-048]** A cycle in the non-optional `requires.services` entries MUST be refused at install, at stage 10, with `manifest.service-cycle`. A cycle in `requires.plugins` is refused with `dependency.cycle`. The rules for both are in [Versions and dependencies](/pages/reference-dependency-resolution/).

@@ -254,6 +254,18 @@ To ask for a copy or the erasure of your data, use `ilium plugin export-data` an
 
 - [USR-958] The Ilium project MUST answer a written request for access to or erasure of data it holds within 30 days (proposed, owner to confirm), and MUST name the party that holds any data it does not hold. Test: pending: test to be written.
 
+### Data held on a plugin's own servers
+
+Some plugins send data to a server that their publisher runs, through an `http:` grant ([USR-102]). Erasing the data on your machine does not erase those copies. The host cannot reach the publisher's server, and it sends no erase request to a plugin or a registry ([USR-247]). The erasure of a copy on a plugin's server is the publisher's duty ([AUT-955]) and the publisher's procedure is in [Erasure requests for data on your servers](/pages/guide-publishing-and-support/#erasure-requests-for-data-on-your-servers).
+
+Before an uninstall or an erase, Ilium names the contact that erases the remote copy, so that you can ask for it. The report of the command repeats that line.
+
+- **[USR-963]** Before `ilium plugin uninstall <id>` or `ilium plugin erase-data <id>` deletes any file, the host MUST print, for a plugin that has been granted an `http:` grant, the line `This plugin may hold your data on its own servers. Ask <contact> to erase it.`, where `<contact>` is the `contact` of its `[privacy]` table ([USR-329]) or `no contact declared` when the table has none, and MUST repeat that line in the report of the command.
+
+Ilium gives you no host-driven erasure of a remote copy in version 0.1.0. The copy stays until the publisher erases it, and the report says so:
+
+- **[USR-965]** The host MUST NOT send an erase request to a plugin's server, MUST NOT queue one for later, and MUST print `remote copy not erased: ask <contact>` in the report of `erase-data` for each erased plugin that has been granted an `http:` grant, so that the user knows the copy on the server stays until its holder erases it.
+
 ## Personal data export and erasure requirements
 
 - [USR-245] The host MUST let a user export all plugin data held about them with `ilium plugin export-data`, covering plugin settings, project storage references, grants, plugin logs, audit records and crash records, as readable files in one folder. Test: Run the export for a profile with each data kind and assert one folder with a file per kind.
@@ -328,3 +340,5 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[USR-956]** A registry operator MUST publish a privacy notice that states how long its access logs keep the IP address and `User-Agent` of each request, and that period MUST NOT exceed 30 days (proposed, owner to confirm).
 - **[USR-957]** The host MUST send to the geocode provider only the query text of a search or the coordinates of a reverse lookup, and MUST NOT keep a cached result longer than 24 hours.
 - **[USR-958]** The Ilium project MUST answer a written request for access to or erasure of data it holds within 30 days (proposed, owner to confirm), and MUST name the party that holds any data it does not hold.
+- **[USR-963]** Before `ilium plugin uninstall <id>` or `ilium plugin erase-data <id>` deletes any file, the host MUST print, for a plugin that has been granted an `http:` grant, the line `This plugin may hold your data on its own servers. Ask <contact> to erase it.`, where `<contact>` is the `contact` of its `[privacy]` table ([USR-329]) or `no contact declared` when the table has none, and MUST repeat that line in the report of the command.
+- **[USR-965]** The host MUST NOT send an erase request to a plugin's server, MUST NOT queue one for later, and MUST print `remote copy not erased: ask <contact>` in the report of `erase-data` for each erased plugin that has been granted an `http:` grant, so that the user knows the copy on the server stays until its holder erases it.

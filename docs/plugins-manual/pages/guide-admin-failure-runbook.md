@@ -191,6 +191,32 @@ A policy file that is malformed, or that a normal user can write, is ignored or 
 
 The names are those used by the pages that define them. The audit log lists the first group; see [Audit log](/pages/reference-audit-log/) for the full list and each record's fields.
 
+### Audit chain verification
+
+The audit log is a chain: each record carries the hash of the record before it, so an edit in the middle of the file breaks the chain. `ilium plugin audit --verify` re-computes the chain and reports what it finds. Run it on a schedule, because a broken chain is only visible when someone checks it. See [Audit log](/pages/reference-audit-log/) for the record format and each finding.
+
+| Result | Exit code | Meaning | What the administrator does |
+|---|---|---|---|
+| `ok` | 0 | The chain is intact | Record the date and the result. No further step |
+| `torn-tail` only | 0 | The last line is incomplete, usually after a power loss or a crash during a write | Record the byte offset. Check that the file `audit-torn-<seq>` exists after the next server start. No security step |
+| `broken` at a `seq` | 3 | A record was changed, or the chain was started again | Treat it as an incident. Follow the steps below |
+| `missing-file` | 3 | A file between two `seq` values is not in the folder | Treat it as an incident. Follow the steps below |
+| `reset-at` | Not `ok`. The source page does not give an exit code yet | A record starts a new chain with a zero hash, which is not the first record | Treat it as an incident. Follow the steps below. Do not read the result as `ok` |
+| `unknown-schema` | 3 | A record uses a schema value that this verifier does not know | Upgrade the verifying host to the same version as the server, then run it again. Do not treat it as tampering |
+
+For an incident finding, do these steps in order:
+
+1. Stop changing the audit folder, and do not start a server on it until step 2 is done, because a server start moves a torn tail out of the file ([SEC-956](/pages/reference-audit-log/)).
+2. Copy the whole audit folder to a separate location, and keep the copy read-only. Keep the original where it is.
+3. Write down the first finding with its `seq` and the exit code.
+4. Follow [Data-exposure incident](#data-exposure-incident) or [Compromised signing key](#compromised-signing-key), depending on what the records show, and use the escalation path below.
+
+- **[OPS-221]** The administrator MUST run `ilium plugin audit --verify` at least once a week (proposed, owner to confirm) from a scheduled job, and MUST also run it after each incident and before an audit export is sent outside the organisation. Test: schedule the job, let it run, and assert that its result is stored with the date of the run.
+- **[OPS-222]** The administrator MUST record each verification result with the date, the exit code and the first finding, and MUST NOT close an incident while its last verification result is not `ok`, unless the only finding is `torn-tail` that the rule of OPS-223 explains. Test: run the verification on a clean log and on a log with one changed record, and assert that the records show exit 0 with `ok` and exit 3 with the first broken `seq`.
+- **[OPS-223]** When the only finding is `torn-tail` (exit 0, as [SEC-957](/pages/reference-audit-log/) states), the administrator MUST record the byte offset, MUST check after the next server start that the partial bytes were moved to `audit-torn-<seq>` as [SEC-956](/pages/reference-audit-log/) requires, and MUST NOT treat the finding as a broken chain. Test: append half a JSON line to a copy of the log, run the verification, and assert exit 0 with the `torn-tail` line and its byte offset.
+- **[OPS-224]** When the verification reports `broken`, `missing-file` or `reset-at`, the administrator MUST follow the four incident steps above before any other action, MUST keep the copy of the folder unchanged, and MUST name the first finding in the incident record. Test: change one record in a copy of the audit folder, run the verification, and assert exit 3 with the first broken `seq`, and that the incident steps keep the copy unchanged.
+- **[OPS-225]** When the verification reports `unknown-schema` with exit code 3, the administrator MUST upgrade the verifying host and run the check again before drawing any conclusion, because [SEC-134](/pages/reference-audit-log/) requires a newer schema to be read only by a verifier that knows it. Test: write a record with a schema value one higher than the verifier knows, run the verification, and assert exit 3 with `unknown-schema` and the `seq` of that record, and no finding of tampering.
+
 ### Escalation path
 
 1. **The publisher.** The plugin's manifest may name a `security_contact` (SEC-325). `ilium plugin inspect <file>` shows it. Report a flaw in a plugin to that contact, not to the Ilium project, unless the flaw is in the host.

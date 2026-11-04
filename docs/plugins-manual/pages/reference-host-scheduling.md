@@ -326,6 +326,7 @@ Target behaviour. [API-046] refuses a new instance when the host is at capacity.
 
 ## See also
 
+- [Durable timers](/pages/api-durable-timers/#overdue-bursts-and-sizing) for how a burst of overdue timers is paced.
 - [Host runtime](/pages/reference-host-runtime/) for how deadlines are enforced.
 - [Errors and limits](/pages/reference-errors-and-limits/) for the limit keys and the restart rule.
 - [Events](/pages/api-events/), [Intents](/pages/api-intents/) and [Requests and outcomes](/pages/requests-and-outcomes/).

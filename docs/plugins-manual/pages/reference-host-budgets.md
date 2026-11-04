@@ -57,8 +57,9 @@ A miss of more than 2x on B1, B3 or B4 stops the platform plan. The design assum
 | B22 | Session memory: 40 bundled plugins plus 8 T2 helpers, steady state | Added RSS under 120 MiB for the bundled set; each helper under the sum of its hosted instances' `memory_mib` plus 32 MiB |
 | B23 | `ilium` CLI cold run (CLI-COLD) | Under 60 ms with a warm file cache |
 | B24 | Idle cost: 40 loaded plugins, no events, 10 minutes | Under 0.5 % of one core; at most 100 wake-ups per second |
+| B25 | Tree of 10,000 nodes: one `children` call on the root, and delivery of one `tree-changed` event with 1,000 ids (proposed) | Record only (no pass or fail threshold) |
 
-The B1 to B9 rows are the phase-0 benchmarks of the platform plan, kept with their targets. B10 to B24 are added by this reference.
+The B1 to B9 rows are the phase-0 benchmarks of the platform plan, kept with their targets. B10 to B25 are added by this reference.
 
 - **[HST-305]** `ilium-plugin-bench` MUST contain one program for each of B1 to B24, with the id in its name.
 - **[HST-306]** The release gate MUST include B1 to B9, B16 to B20 and B23 on the reference machine, and MUST fail when any budget is missed.
@@ -110,6 +111,7 @@ The host keeps the counters that these budgets need: call durations per class, q
 
 ## See also
 
+- [Power, battery and thermal behaviour](/pages/reference-power-and-battery/) for the budgets that apply on battery, on top of B24.
 - [Performance](/pages/performance/) for the guidance to plugin authors.
 - [Resource accounting](/pages/reference-resource-accounting/) and [Platform support](/pages/reference-platform-support/).
 - [Soak and endurance testing](/pages/reference-host-soak-and-load-testing/) for the long-run tests of memory, handles and helper processes.
